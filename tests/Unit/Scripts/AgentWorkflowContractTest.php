@@ -101,8 +101,9 @@ class AgentWorkflowContractTest extends TestCase
             'official_release_binary_sha256_platform_and_version',
             $contract['authority']['reviewer']['codex_identity_check'] ?? null,
         );
+        self::assertSame('0.145.0', $contract['authority']['reviewer']['codex_version'] ?? null);
         self::assertSame(
-            'exact_0_145_0_with_bounded_build_metadata',
+            'exact_machine_pinned_version_with_bounded_build_metadata',
             $contract['authority']['reviewer']['codex_version_policy'] ?? null,
         );
         self::assertSame(
@@ -151,7 +152,15 @@ class AgentWorkflowContractTest extends TestCase
             $contract['authority']['reviewer']['review_bundle_manifest_policy'] ?? null,
         );
         self::assertSame(
-            'bounded_deterministic_json_serialization_over_stdin',
+            'trusted_base_policy_as_developer_instructions_untrusted_bundle_as_user_input',
+            $contract['authority']['reviewer']['review_instruction_policy'] ?? null,
+        );
+        self::assertSame(
+            'pinned_cli_requires_developer_policy_and_user_bundle_channels',
+            $contract['authority']['reviewer']['prompt_role_preflight'] ?? null,
+        );
+        self::assertSame(
+            'bounded_deterministic_json_serialization_as_untrusted_user_stdin',
             $contract['authority']['reviewer']['review_input_policy'] ?? null,
         );
         self::assertSame(
@@ -178,6 +187,11 @@ class AgentWorkflowContractTest extends TestCase
         self::assertFalse($contract['authority']['reviewer']['allows_external_connectors'] ?? null);
         self::assertFalse($contract['authority']['reviewer']['allows_delegation'] ?? null);
         self::assertSame('review_base_commit', $contract['authority']['reviewer']['trust_anchor'] ?? null);
+        self::assertSame('refs/remotes/origin/main', $contract['authority']['reviewer']['review_base_ref'] ?? null);
+        self::assertSame(
+            'exact_merge_base_with_canonical_remote_tracking_ref',
+            $contract['authority']['reviewer']['review_base_policy'] ?? null,
+        );
         self::assertSame(
             [
                 '.codex/contracts/agent-workflow.json',
@@ -239,7 +253,7 @@ class AgentWorkflowContractTest extends TestCase
             self::assertContains($feature, $contract['authority']['reviewer']['disabled_features'] ?? [], $feature);
         }
         self::assertSame(
-            'bounded_deterministic_json_serialization_over_stdin',
+            'bounded_deterministic_json_serialization_as_untrusted_user_stdin',
             $contract['authority']['reviewer']['review_input_policy'] ?? null,
         );
         self::assertSame(
@@ -270,6 +284,11 @@ class AgentWorkflowContractTest extends TestCase
         self::assertSame('pass', $contract['parallel_work']['clean_integration_status'] ?? null);
         self::assertSame('ignore_ambient_ini', $contract['parallel_work']['php_runtime_configuration'] ?? null);
         self::assertSame('docs/maps/component_ownership_map.json', $contract['parallel_work']['ownership_map'] ?? null);
+        self::assertSame(3, $contract['parallel_work']['ownership_map_schema_version'] ?? null);
+        self::assertSame(
+            'explicit_path_and_match_objects',
+            $contract['parallel_work']['ownership_rule_format'] ?? null,
+        );
         self::assertSame(
             [
                 '.codex/agents/reviewer-correctness.toml',

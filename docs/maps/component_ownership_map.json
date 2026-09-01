@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "source": "docs/maps/component_ownership_map.json",
   "components": [
     {
@@ -13,20 +13,59 @@
       "agent_policy": "conservative",
       "manual_approval_required": true,
       "ownership_notes": "Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.",
-      "folder_prefixes": [
-        "application/controllers/Login.php",
-        "application/controllers/Logout.php",
-        "application/controllers/Recovery.php",
-        "application/controllers/Account.php",
-        "application/controllers/Localization.php",
-        "application/libraries/Auth_request_dto_factory.php",
-        "application/views/pages/login.php",
-        "application/views/pages/logout.php",
-        "application/views/pages/recovery.php",
-        "application/views/pages/account.php",
-        "assets/js/pages/login.js",
-        "assets/js/pages/recovery.js",
-        "assets/js/pages/account.js"
+      "path_rules": [
+        {
+          "path": "application/controllers/Login.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/controllers/Logout.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/controllers/Recovery.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/controllers/Account.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/controllers/Localization.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/libraries/Auth_request_dto_factory.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/pages/login.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/pages/logout.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/pages/recovery.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/pages/account.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "assets/js/pages/login.js",
+          "match": "exact_file"
+        },
+        {
+          "path": "assets/js/pages/recovery.js",
+          "match": "exact_file"
+        },
+        {
+          "path": "assets/js/pages/account.js",
+          "match": "exact_file"
+        }
       ],
       "key_files": [
         "application/controllers/Login.php",
@@ -51,11 +90,23 @@
       "agent_policy": "conservative",
       "manual_approval_required": true,
       "ownership_notes": "Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.",
-      "folder_prefixes": [
-        "application/controllers/Installation.php",
-        "application/libraries/Instance.php",
-        "application/views/pages/installation.php",
-        "assets/js/pages/installation.js"
+      "path_rules": [
+        {
+          "path": "application/controllers/Installation.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/libraries/Instance.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/pages/installation.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "assets/js/pages/installation.js",
+          "match": "exact_file"
+        }
       ],
       "key_files": [
         "application/controllers/Installation.php",
@@ -79,23 +130,71 @@
       "agent_policy": "conservative",
       "manual_approval_required": true,
       "ownership_notes": "Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.",
-      "folder_prefixes": [
-        "application/controllers/Booking.php",
-        "application/views/pages/booking.php",
-        "application/views/components/booking_cancellation_frame.php",
-        "application/views/components/booking_final_step.php",
-        "application/views/components/booking_footer.php",
-        "application/views/components/booking_header.php",
-        "application/views/components/booking_info_step.php",
-        "application/views/components/booking_time_step.php",
-        "application/views/components/booking_type_step.php",
-        "assets/js/http/booking_http_client.js",
-        "assets/js/pages/booking.js",
-        "assets/js/pages/booking_webmcp.js",
-        "application/libraries/Availability.php",
-        "application/libraries/Email_messages.php",
-        "application/libraries/Booking_request_dto_factory.php",
-        "application/libraries/Reschedule_authority.php"
+      "path_rules": [
+        {
+          "path": "application/controllers/Booking.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/pages/booking.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/components/booking_cancellation_frame.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/components/booking_final_step.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/components/booking_footer.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/components/booking_header.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/components/booking_info_step.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/components/booking_time_step.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/components/booking_type_step.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "assets/js/http/booking_http_client.js",
+          "match": "exact_file"
+        },
+        {
+          "path": "assets/js/pages/booking.js",
+          "match": "exact_file"
+        },
+        {
+          "path": "assets/js/pages/booking_webmcp.js",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/libraries/Availability.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/libraries/Email_messages.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/libraries/Booking_request_dto_factory.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/libraries/Reschedule_authority.php",
+          "match": "exact_file"
+        }
       ],
       "key_files": [
         "application/controllers/Booking.php",
@@ -125,12 +224,27 @@
       "agent_policy": "conservative",
       "manual_approval_required": true,
       "ownership_notes": "Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.",
-      "folder_prefixes": [
-        "application/controllers/Booking_confirmation.php",
-        "application/controllers/Booking_cancellation.php",
-        "application/views/pages/booking_confirmation.php",
-        "application/views/pages/booking_cancellation.php",
-        "application/views/pages/booking_message.php"
+      "path_rules": [
+        {
+          "path": "application/controllers/Booking_confirmation.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/controllers/Booking_cancellation.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/pages/booking_confirmation.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/pages/booking_cancellation.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/pages/booking_message.php",
+          "match": "exact_file"
+        }
       ],
       "key_files": [
         "application/controllers/Booking_confirmation.php",
@@ -156,25 +270,79 @@
       "agent_policy": "conservative",
       "manual_approval_required": true,
       "ownership_notes": "Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.",
-      "folder_prefixes": [
-        "application/controllers/Calendar.php",
-        "application/controllers/Appointments.php",
-        "application/controllers/Blocked_periods.php",
-        "application/controllers/Unavailabilities.php",
-        "application/controllers/Backend.php",
-        "application/controllers/Backend_api.php",
-        "application/libraries/Booking_slot_analytics.php",
-        "application/libraries/Backoffice_request_dto_factory.php",
-        "application/libraries/Calendar_request_dto_factory.php",
-        "application/models/Appointments_model.php",
-        "application/models/Blocked_periods_model.php",
-        "application/models/Unavailabilities_model.php",
-        "application/views/pages/calendar.php",
-        "application/views/pages/blocked_periods.php",
-        "assets/js/pages/calendar.js",
-        "assets/js/pages/blocked_periods.js",
-        "assets/js/components/appointments_modal.js",
-        "assets/js/components/unavailabilities_modal.js"
+      "path_rules": [
+        {
+          "path": "application/controllers/Calendar.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/controllers/Appointments.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/controllers/Blocked_periods.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/controllers/Unavailabilities.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/controllers/Backend.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/controllers/Backend_api.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/libraries/Booking_slot_analytics.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/libraries/Backoffice_request_dto_factory.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/libraries/Calendar_request_dto_factory.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/models/Appointments_model.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/models/Blocked_periods_model.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/models/Unavailabilities_model.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/pages/calendar.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/pages/blocked_periods.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "assets/js/pages/calendar.js",
+          "match": "exact_file"
+        },
+        {
+          "path": "assets/js/pages/blocked_periods.js",
+          "match": "exact_file"
+        },
+        {
+          "path": "assets/js/components/appointments_modal.js",
+          "match": "exact_file"
+        },
+        {
+          "path": "assets/js/components/unavailabilities_modal.js",
+          "match": "exact_file"
+        }
       ],
       "key_files": [
         "application/controllers/Calendar.php",
@@ -199,18 +367,51 @@
       "agent_policy": "conservative",
       "manual_approval_required": true,
       "ownership_notes": "Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.",
-      "folder_prefixes": [
-        "application/controllers/Dashboard.php",
-        "application/controllers/Dashboard_export.php",
-        "application/controllers/Healthz.php",
-        "application/libraries/Dashboard_metrics.php",
-        "application/libraries/Dashboard_heatmap.php",
-        "application/libraries/Provider_utilization.php",
-        "application/libraries/Dashboard_request_dto_factory.php",
-        "application/views/pages/dashboard.php",
-        "application/views/pages/dashboard_teacher.php",
-        "assets/js/pages/dashboard.js",
-        "assets/js/pages/dashboard_teacher.js"
+      "path_rules": [
+        {
+          "path": "application/controllers/Dashboard.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/controllers/Dashboard_export.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/controllers/Healthz.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/libraries/Dashboard_metrics.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/libraries/Dashboard_heatmap.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/libraries/Provider_utilization.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/libraries/Dashboard_request_dto_factory.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/pages/dashboard.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/pages/dashboard_teacher.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "assets/js/pages/dashboard.js",
+          "match": "exact_file"
+        },
+        {
+          "path": "assets/js/pages/dashboard_teacher.js",
+          "match": "exact_file"
+        }
       ],
       "key_files": [
         "application/controllers/Dashboard.php",
@@ -234,31 +435,103 @@
       "agent_policy": "conservative",
       "manual_approval_required": true,
       "ownership_notes": "Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.",
-      "folder_prefixes": [
-        "application/controllers/Providers.php",
-        "application/controllers/Customers.php",
-        "application/controllers/Admins.php",
-        "application/controllers/Secretaries.php",
-        "application/controllers/Services.php",
-        "application/controllers/Service_categories.php",
-        "application/models/Providers_model.php",
-        "application/models/Customers_model.php",
-        "application/models/Admins_model.php",
-        "application/models/Secretaries_model.php",
-        "application/models/Services_model.php",
-        "application/models/Service_categories_model.php",
-        "application/views/pages/providers.php",
-        "application/views/pages/customers.php",
-        "application/views/pages/admins.php",
-        "application/views/pages/secretaries.php",
-        "application/views/pages/services.php",
-        "application/views/pages/service_categories.php",
-        "assets/js/pages/providers.js",
-        "assets/js/pages/customers.js",
-        "assets/js/pages/admins.js",
-        "assets/js/pages/secretaries.js",
-        "assets/js/pages/services.js",
-        "assets/js/pages/service_categories.js"
+      "path_rules": [
+        {
+          "path": "application/controllers/Providers.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/controllers/Customers.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/controllers/Admins.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/controllers/Secretaries.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/controllers/Services.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/controllers/Service_categories.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/models/Providers_model.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/models/Customers_model.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/models/Admins_model.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/models/Secretaries_model.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/models/Services_model.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/models/Service_categories_model.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/pages/providers.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/pages/customers.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/pages/admins.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/pages/secretaries.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/pages/services.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/pages/service_categories.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "assets/js/pages/providers.js",
+          "match": "exact_file"
+        },
+        {
+          "path": "assets/js/pages/customers.js",
+          "match": "exact_file"
+        },
+        {
+          "path": "assets/js/pages/admins.js",
+          "match": "exact_file"
+        },
+        {
+          "path": "assets/js/pages/secretaries.js",
+          "match": "exact_file"
+        },
+        {
+          "path": "assets/js/pages/services.js",
+          "match": "exact_file"
+        },
+        {
+          "path": "assets/js/pages/service_categories.js",
+          "match": "exact_file"
+        }
       ],
       "key_files": [
         "application/controllers/Providers.php",
@@ -283,32 +556,107 @@
       "agent_policy": "conservative",
       "manual_approval_required": true,
       "ownership_notes": "Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.",
-      "folder_prefixes": [
-        "application/controllers/Api_settings.php",
-        "application/controllers/Booking_settings.php",
-        "application/controllers/Business_settings.php",
-        "application/controllers/General_settings.php",
-        "application/controllers/Google_analytics_settings.php",
-        "application/controllers/Matomo_analytics_settings.php",
-        "application/controllers/Legal_settings.php",
-        "application/controllers/Consents.php",
-        "application/controllers/Privacy.php",
-        "application/models/Settings_model.php",
-        "application/models/Consents_model.php",
-        "application/views/pages/api_settings.php",
-        "application/views/pages/booking_settings.php",
-        "application/views/pages/business_settings.php",
-        "application/views/pages/general_settings.php",
-        "application/views/pages/google_analytics_settings.php",
-        "application/views/pages/matomo_analytics_settings.php",
-        "application/views/pages/legal_settings.php",
-        "assets/js/pages/api_settings.js",
-        "assets/js/pages/booking_settings.js",
-        "assets/js/pages/business_settings.js",
-        "assets/js/pages/general_settings.js",
-        "assets/js/pages/google_analytics_settings.js",
-        "assets/js/pages/matomo_analytics_settings.js",
-        "assets/js/pages/legal_settings.js"
+      "path_rules": [
+        {
+          "path": "application/controllers/Api_settings.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/controllers/Booking_settings.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/controllers/Business_settings.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/controllers/General_settings.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/controllers/Google_analytics_settings.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/controllers/Matomo_analytics_settings.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/controllers/Legal_settings.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/controllers/Consents.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/controllers/Privacy.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/models/Settings_model.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/models/Consents_model.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/pages/api_settings.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/pages/booking_settings.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/pages/business_settings.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/pages/general_settings.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/pages/google_analytics_settings.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/pages/matomo_analytics_settings.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/pages/legal_settings.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "assets/js/pages/api_settings.js",
+          "match": "exact_file"
+        },
+        {
+          "path": "assets/js/pages/booking_settings.js",
+          "match": "exact_file"
+        },
+        {
+          "path": "assets/js/pages/business_settings.js",
+          "match": "exact_file"
+        },
+        {
+          "path": "assets/js/pages/general_settings.js",
+          "match": "exact_file"
+        },
+        {
+          "path": "assets/js/pages/google_analytics_settings.js",
+          "match": "exact_file"
+        },
+        {
+          "path": "assets/js/pages/matomo_analytics_settings.js",
+          "match": "exact_file"
+        },
+        {
+          "path": "assets/js/pages/legal_settings.js",
+          "match": "exact_file"
+        }
       ],
       "key_files": [
         "application/controllers/Business_settings.php",
@@ -333,24 +681,75 @@
       "agent_policy": "conservative",
       "manual_approval_required": true,
       "ownership_notes": "Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.",
-      "folder_prefixes": [
-        "application/controllers/Google.php",
-        "application/controllers/Caldav.php",
-        "application/controllers/Webhooks.php",
-        "application/controllers/Integrations.php",
-        "application/controllers/Ldap_settings.php",
-        "application/libraries/Google_sync.php",
-        "application/libraries/Caldav_sync.php",
-        "application/libraries/Synchronization.php",
-        "application/libraries/Webhooks_client.php",
-        "application/libraries/Ldap_client.php",
-        "application/libraries/Integrations_request_dto_factory.php",
-        "application/models/Webhooks_model.php",
-        "application/views/pages/integrations.php",
-        "application/views/pages/webhooks.php",
-        "application/views/pages/ldap_settings.php",
-        "assets/js/pages/webhooks.js",
-        "assets/js/pages/ldap_settings.js"
+      "path_rules": [
+        {
+          "path": "application/controllers/Google.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/controllers/Caldav.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/controllers/Webhooks.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/controllers/Integrations.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/controllers/Ldap_settings.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/libraries/Google_sync.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/libraries/Caldav_sync.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/libraries/Synchronization.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/libraries/Webhooks_client.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/libraries/Ldap_client.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/libraries/Integrations_request_dto_factory.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/models/Webhooks_model.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/pages/integrations.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/pages/webhooks.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/pages/ldap_settings.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "assets/js/pages/webhooks.js",
+          "match": "exact_file"
+        },
+        {
+          "path": "assets/js/pages/ldap_settings.js",
+          "match": "exact_file"
+        }
       ],
       "key_files": [
         "application/controllers/Integrations.php",
@@ -376,12 +775,27 @@
       "agent_policy": "conservative",
       "manual_approval_required": true,
       "ownership_notes": "Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.",
-      "folder_prefixes": [
-        "application/controllers/api/v1/",
-        "application/libraries/Api.php",
-        "application/libraries/Api_request_dto_factory.php",
-        "openapi.yml",
-        "docs/rest-api.md"
+      "path_rules": [
+        {
+          "path": "application/controllers/api/v1",
+          "match": "directory"
+        },
+        {
+          "path": "application/libraries/Api.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/libraries/Api_request_dto_factory.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "openapi.yml",
+          "match": "exact_file"
+        },
+        {
+          "path": "docs/rest-api.md",
+          "match": "exact_file"
+        }
       ],
       "key_files": [
         "application/controllers/api/v1/Appointments_api_v1.php",
@@ -408,14 +822,35 @@
       "agent_policy": "conservative",
       "manual_approval_required": true,
       "ownership_notes": "Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.",
-      "folder_prefixes": [
-        "application/views/components/jquery_compat_inline.php",
-        "application/libraries/Accounts.php",
-        "application/libraries/Notifications.php",
-        "application/libraries/Pdf_renderer.php",
-        "application/libraries/Request_normalizer.php",
-        "application/libraries/Timezones.php",
-        "application/models/Roles_model.php"
+      "path_rules": [
+        {
+          "path": "application/views/components/jquery_compat_inline.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/libraries/Accounts.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/libraries/Notifications.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/libraries/Pdf_renderer.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/libraries/Request_normalizer.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/libraries/Timezones.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/models/Roles_model.php",
+          "match": "exact_file"
+        }
       ],
       "key_files": [
         "application/libraries/Request_normalizer.php",
@@ -435,34 +870,115 @@
       "agent_policy": "conservative",
       "manual_approval_required": true,
       "ownership_notes": "Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.",
-      "folder_prefixes": [
-        "application/controllers/Console.php",
-        "application/core/Customers_ui_smoke_access_policy.php",
-        "application/core/Provider_ui_smoke_access_policy.php",
-        "application/libraries/Customers_ui_smoke_fixture.php",
-        "application/libraries/Provider_ui_smoke_fixture.php",
-        "deploy_ea.sh",
-        "scripts/ci/",
-        "scripts/ops/customers_ui_smoke_principals.sh",
-        "scripts/ops/config/traffic_gate_catalog.v1.json",
-        "scripts/ops/lib/DeployResultV1.php",
-        "scripts/ops/lib/DeploymentContractV1.php",
-        "scripts/ops/lib/DeploymentHostRunnerContractV1.php",
-        "scripts/ops/lib/TrafficGateV1.php",
-        "scripts/ops/prod_customers_ui_smoke.sh",
-        "scripts/ops/libexec/zero_surprise_image_cleanup_v1.py",
-        "scripts/ops/prod_traffic_gate.sh",
-        "scripts/ops/prod_provider_ui_smoke.sh",
-        "scripts/ops/prod_zero_surprise_image_cleanup.sh",
-        "scripts/ops/provider_ui_smoke_principal.sh",
-        "scripts/ops/traffic_gate_v1.php",
-        "scripts/ops/validate_deployment_contract_v1.php",
-        "scripts/release-gate/",
-        ".github/workflows/ci.yml",
-        "docs/release-gate-dashboard.md",
-        "docs/release-gate-booking-confirmation-pdf.md",
-        "docs/release-gate-customers-ui-smoke.md",
-        "docs/release-gate-provider-ui-smoke.md"
+      "path_rules": [
+        {
+          "path": "application/controllers/Console.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/core/Customers_ui_smoke_access_policy.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/core/Provider_ui_smoke_access_policy.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/libraries/Customers_ui_smoke_fixture.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/libraries/Provider_ui_smoke_fixture.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "deploy_ea.sh",
+          "match": "exact_file"
+        },
+        {
+          "path": "scripts/ci",
+          "match": "directory"
+        },
+        {
+          "path": "scripts/ops/customers_ui_smoke_principals.sh",
+          "match": "exact_file"
+        },
+        {
+          "path": "scripts/ops/config/traffic_gate_catalog.v1.json",
+          "match": "exact_file"
+        },
+        {
+          "path": "scripts/ops/lib/DeployResultV1.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "scripts/ops/lib/DeploymentContractV1.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "scripts/ops/lib/DeploymentHostRunnerContractV1.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "scripts/ops/lib/TrafficGateV1.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "scripts/ops/prod_customers_ui_smoke.sh",
+          "match": "exact_file"
+        },
+        {
+          "path": "scripts/ops/libexec/zero_surprise_image_cleanup_v1.py",
+          "match": "exact_file"
+        },
+        {
+          "path": "scripts/ops/prod_traffic_gate.sh",
+          "match": "exact_file"
+        },
+        {
+          "path": "scripts/ops/prod_provider_ui_smoke.sh",
+          "match": "exact_file"
+        },
+        {
+          "path": "scripts/ops/prod_zero_surprise_image_cleanup.sh",
+          "match": "exact_file"
+        },
+        {
+          "path": "scripts/ops/provider_ui_smoke_principal.sh",
+          "match": "exact_file"
+        },
+        {
+          "path": "scripts/ops/traffic_gate_v1.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "scripts/ops/validate_deployment_contract_v1.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "scripts/release-gate",
+          "match": "directory"
+        },
+        {
+          "path": ".github/workflows/ci.yml",
+          "match": "exact_file"
+        },
+        {
+          "path": "docs/release-gate-dashboard.md",
+          "match": "exact_file"
+        },
+        {
+          "path": "docs/release-gate-booking-confirmation-pdf.md",
+          "match": "exact_file"
+        },
+        {
+          "path": "docs/release-gate-customers-ui-smoke.md",
+          "match": "exact_file"
+        },
+        {
+          "path": "docs/release-gate-provider-ui-smoke.md",
+          "match": "exact_file"
+        }
       ],
       "key_files": [
         "application/controllers/Console.php",

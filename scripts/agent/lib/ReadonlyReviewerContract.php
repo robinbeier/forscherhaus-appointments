@@ -10,8 +10,6 @@ require_once __DIR__ . '/RepoPath.php';
 
 final class ReadonlyReviewerContract
 {
-    private const CODEX_VERSION = '0.145.0';
-
     /** @var array<string, int> */
     private const FINDING_TEXT_MAX_BYTES = [
         'title' => 160,
@@ -34,7 +32,7 @@ final class ReadonlyReviewerContract
     ];
 
     /** @var list<string> */
-    private const REQUIRED_DISABLED_FEATURES = [
+    private const MINIMUM_DISABLED_FEATURES = [
         'apps',
         'plugins',
         'browser_use',
@@ -116,10 +114,7 @@ final class ReadonlyReviewerContract
         if (!is_string($reasoning) || !in_array($reasoning, ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'], true)) {
             throw new \RuntimeException('Reviewer profile reasoning effort is invalid.');
         }
-        $disabledFeatures = $reviewerPolicy['disabled_features'] ?? null;
-        if ($disabledFeatures !== self::REQUIRED_DISABLED_FEATURES) {
-            throw new \RuntimeException('Reviewer disabled-feature policy is invalid.');
-        }
+        $disabledFeatures = self::disabledFeatures($reviewerPolicy);
 
         return [
             'role_file' => $roleFile,
@@ -191,6 +186,8 @@ final class ReadonlyReviewerContract
     {
         self::assertRuntimeBoundary($reviewerPolicy);
 
+        $version = $reviewerPolicy['codex_version'];
+        assert(is_string($version));
         $binaryDigests = $reviewerPolicy['codex_binary_sha256_by_platform'];
         $archiveDigests = $reviewerPolicy['codex_release_archive_sha256_by_platform'];
         $binarySha256 = is_array($binaryDigests) ? $binaryDigests[$platform] ?? null : null;
@@ -205,14 +202,17 @@ final class ReadonlyReviewerContract
         }
 
         return [
-            'version' => self::CODEX_VERSION,
+            'version' => $version,
             'binary_sha256' => $binarySha256,
             'release_archive_sha256' => $archiveSha256,
         ];
     }
 
-    public static function assertCodexVersion(string $versionOutput): void
+    public static function assertCodexVersion(string $versionOutput, string $expectedVersion): void
     {
+        if (preg_match('/^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$/D', $expectedVersion) !== 1) {
+            throw new \InvalidArgumentException('Reviewer Codex version policy is invalid.');
+        }
         if (
             preg_match(
                 '/^codex-cli[[:space:]]+([0-9]+)\.([0-9]+)\.([0-9]+)([+-][A-Za-z0-9._-]+)?(?:[[:space:]]+\([A-Za-z0-9._\/+\:\ -]{1,80}\))?$/D',
@@ -223,9 +223,9 @@ final class ReadonlyReviewerContract
             throw new \InvalidArgumentException('Reviewer Codex binary does not identify as Codex CLI.');
         }
         $actualVersion = sprintf('%d.%d.%d', (int) $matches[1], (int) $matches[2], (int) $matches[3]);
-        if ($actualVersion !== self::CODEX_VERSION) {
+        if ($actualVersion !== $expectedVersion) {
             throw new \InvalidArgumentException(
-                'Reviewer Codex CLI must match the isolated runtime contract exactly (' . self::CODEX_VERSION . ').',
+                'Reviewer Codex CLI must match the isolated runtime contract exactly (' . $expectedVersion . ').',
             );
         }
     }
@@ -274,6 +274,8 @@ final class ReadonlyReviewerContract
             'invocation_source' => 'hardened_system_git_materialized_base_blob_outside_worktree',
             'bootstrap_materialization_policy' => 'absolute_system_git_clean_environment_no_replace_objects',
             'trust_anchor' => 'review_base_commit',
+            'review_base_ref' => 'refs/remotes/origin/main',
+            'review_base_policy' => 'exact_merge_base_with_canonical_remote_tracking_ref',
             'requires_base_runner' => true,
             'runtime_configuration_change_policy' => 'external_bootstrap_review',
             'shell_runtime_configuration' => 'clean_bootstrap_environment',
@@ -285,16 +287,8 @@ final class ReadonlyReviewerContract
             'tool_path_policy' => 'explicit_primary_codex_with_verified_private_copy',
             'repository_root_policy' => 'canonical_physical_root',
             'codex_identity_check' => 'official_release_binary_sha256_platform_and_version',
-            'codex_version_policy' => 'exact_0_145_0_with_bounded_build_metadata',
+            'codex_version_policy' => 'exact_machine_pinned_version_with_bounded_build_metadata',
             'codex_binary_materialization_policy' => 'private_copy_rehashed_before_first_execution',
-            'codex_binary_sha256_by_platform' => [
-                'Darwin-arm64' => '1da3f4e0e96028b8a771814293c3033dafd1971f943f6c7e79b0897fe705f590',
-                'Darwin-x86_64' => '6db9193ce2c9a8cef2b5482612cde24202a4329dfc34f4687a036d5d7da619af',
-            ],
-            'codex_release_archive_sha256_by_platform' => [
-                'Darwin-arm64' => '072a30a65f05666735889ef0f60b56db186adbdde9d5c5cc1a64be0b598530fe',
-                'Darwin-x86_64' => '4216d7a40aa49d74b65fab93d2a86d2e25a902482b827dbdb3f357777b09fadf',
-            ],
             'codex_authentication_source' => 'host_codex_login_without_connector_authority',
             'codex_authentication_home_policy' => 'isolated_runtime_home_read_only_link_to_canonical_auth_file',
             'codex_api_key_override_policy' => 'reject_ambient_api_keys',
@@ -306,7 +300,10 @@ final class ReadonlyReviewerContract
             'review_bundle_parent_policy' => 'private_system_temp_random_directory',
             'review_bundle_contents' => 'committed_patch_manifest_changed_base_head_and_trusted_policy',
             'review_bundle_manifest_policy' => 'deterministic_sha256_base_head_binding',
-            'review_input_policy' => 'bounded_deterministic_json_serialization_over_stdin',
+            'review_instruction_policy' =>
+                'trusted_base_policy_as_developer_instructions_untrusted_bundle_as_user_input',
+            'prompt_role_preflight' => 'pinned_cli_requires_developer_policy_and_user_bundle_channels',
+            'review_input_policy' => 'bounded_deterministic_json_serialization_as_untrusted_user_stdin',
             'review_original_worktree_access' => 'not_model_visible',
             'isolation_platform' => 'darwin_seatbelt_fail_closed_elsewhere',
             'isolation_profile' => 'default_deny_runtime_allowlist_exact_bundle_and_auth_read_only',
@@ -320,13 +317,56 @@ final class ReadonlyReviewerContract
             'output_binds_base_sha' => true,
             'allows_external_connectors' => false,
             'allows_delegation' => false,
-            'disabled_features' => self::REQUIRED_DISABLED_FEATURES,
         ];
         foreach ($expected as $key => $value) {
             if (($reviewerPolicy[$key] ?? null) !== $value) {
                 throw new \RuntimeException('Reviewer runtime boundary is invalid.');
             }
         }
+        $version = $reviewerPolicy['codex_version'] ?? null;
+        if (
+            !is_string($version) ||
+            preg_match('/^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$/D', $version) !== 1
+        ) {
+            throw new \RuntimeException('Reviewer runtime version boundary is invalid.');
+        }
+        $platforms = ['Darwin-arm64', 'Darwin-x86_64'];
+        foreach (['codex_binary_sha256_by_platform', 'codex_release_archive_sha256_by_platform'] as $digestMapKey) {
+            $digestMap = $reviewerPolicy[$digestMapKey] ?? null;
+            if (!is_array($digestMap) || array_keys($digestMap) !== $platforms) {
+                throw new \RuntimeException('Reviewer runtime digest boundary is invalid.');
+            }
+            foreach ($digestMap as $digest) {
+                if (!is_string($digest) || preg_match('/^[a-f0-9]{64}$/D', $digest) !== 1) {
+                    throw new \RuntimeException('Reviewer runtime digest boundary is invalid.');
+                }
+            }
+        }
+        self::disabledFeatures($reviewerPolicy);
+    }
+
+    /** @param array<string, mixed> $reviewerPolicy
+     *  @return list<string>
+     */
+    private static function disabledFeatures(array $reviewerPolicy): array
+    {
+        $features = $reviewerPolicy['disabled_features'] ?? null;
+        if (!is_array($features) || !array_is_list($features)) {
+            throw new \RuntimeException('Reviewer disabled-feature policy is invalid.');
+        }
+        foreach ($features as $feature) {
+            if (!is_string($feature) || preg_match('/^[a-z0-9_]+$/D', $feature) !== 1) {
+                throw new \RuntimeException('Reviewer disabled-feature policy is invalid.');
+            }
+        }
+        if (count($features) !== count(array_unique($features))) {
+            throw new \RuntimeException('Reviewer disabled-feature policy is invalid.');
+        }
+        if (array_diff(self::MINIMUM_DISABLED_FEATURES, $features) !== []) {
+            throw new \RuntimeException('Reviewer runtime boundary is invalid.');
+        }
+
+        return $features;
     }
 
     /**

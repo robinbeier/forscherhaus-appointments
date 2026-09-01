@@ -106,7 +106,7 @@ final class ArchitectureOwnershipMapCheckTest extends TestCase
                 'agent_policy' => 'conservative',
                 'manual_approval_required' => true,
                 'ownership_notes' => 'Single owner only.',
-                'folder_prefixes' => ['scripts/ci/'],
+                'path_rules' => [['path' => 'scripts/ci', 'match' => 'directory']],
                 'key_files' => ['scripts/ci/check_architecture_ownership_map.py'],
                 'depends_on' => [],
             ],
@@ -114,7 +114,7 @@ final class ArchitectureOwnershipMapCheckTest extends TestCase
         );
 
         return [
-            'schema_version' => 2,
+            'schema_version' => 3,
             'source' => 'docs/maps/component_ownership_map.json',
             'components' => [$component],
         ];

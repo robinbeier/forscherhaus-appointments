@@ -28,16 +28,13 @@ def normalize_prefix(prefix: str) -> str:
     return normalized.lstrip("/")
 
 
-def codeowners_pattern(prefix: str) -> str:
-    normalized = normalize_prefix(prefix)
-
-    if normalized.endswith("/"):
-        return f"/{normalized}**"
-
-    if normalized.endswith("_"):
-        return f"/{normalized}*"
-
-    return f"/{normalized}"
+def codeowners_pattern(path: str, match: str) -> str:
+    normalized = normalize_prefix(path).rstrip("/")
+    if match == "directory":
+        return f"/{normalized}/**"
+    if match == "exact_file":
+        return f"/{normalized}"
+    raise ValueError(f"Unsupported ownership path match: {match}")
 
 
 def load_map(path: Path) -> dict[str, Any]:
@@ -46,6 +43,8 @@ def load_map(path: Path) -> dict[str, Any]:
 
     if not isinstance(payload, dict):
         raise ValueError("Component map must be a JSON object")
+    if payload.get("schema_version") != 3:
+        raise ValueError('"schema_version" must be 3')
 
     components = payload.get("components")
     if not isinstance(components, list) or not components:
@@ -77,17 +76,21 @@ def render_codeowners(payload: dict[str, Any]) -> str:
         if not isinstance(component, dict):
             raise ValueError("Each component must be an object")
 
-        folder_prefixes = component.get("folder_prefixes")
-        if not isinstance(folder_prefixes, list):
+        path_rules = component.get("path_rules")
+        if not isinstance(path_rules, list):
             component_id = component.get("component_id", "<unknown>")
-            raise ValueError(f"Component {component_id} has invalid folder_prefixes")
+            raise ValueError(f"Component {component_id} has invalid path_rules")
 
         owners = unique_handles(component)
 
-        for prefix in folder_prefixes:
-            if not isinstance(prefix, str) or not prefix.strip():
-                continue
-            pattern = codeowners_pattern(prefix)
+        for rule in path_rules:
+            if not isinstance(rule, dict) or set(rule) != {"path", "match"}:
+                raise ValueError(f"Component {component_id} has an invalid path rule")
+            path = rule.get("path")
+            match = rule.get("match")
+            if not isinstance(path, str) or not path.strip() or not isinstance(match, str):
+                raise ValueError(f"Component {component_id} has an invalid path rule")
+            pattern = codeowners_pattern(path, match)
             entries[pattern].update(owners)
 
     lines: list[str] = [

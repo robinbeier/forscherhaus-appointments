@@ -20,6 +20,8 @@ def load_map(path: Path) -> dict[str, Any]:
 
     if not isinstance(data, dict):
         raise ValueError("Top-level JSON payload must be an object.")
+    if data.get("schema_version") != 3:
+        raise ValueError('"schema_version" must be 3.')
 
     components = data.get("components")
     if not isinstance(components, list) or not components:
@@ -35,11 +37,13 @@ def render_architecture(data: dict[str, Any]) -> str:
     lines.append("")
     lines.append("Canonical source: `docs/maps/component_ownership_map.json`")
     lines.append("")
+    lines.append("Every path rule declares `match: directory` or `match: exact_file`; path spelling has no implicit match semantics.")
+    lines.append("")
     lines.append("This map defines component boundaries, path ownership scope, and dependency edges.")
     lines.append("")
     lines.append("## Component Overview")
     lines.append("")
-    lines.append("| Component | Role | Depends On | Path Prefixes | Key Files |")
+    lines.append("| Component | Role | Depends On | Path Rules | Key Files |")
     lines.append("|---|---|---|---:|---:|")
 
     for component in components:
@@ -50,7 +54,7 @@ def render_architecture(data: dict[str, Any]) -> str:
                 component_id=component["component_id"],
                 role=component["role"],
                 depends_on=depends_display,
-                prefix_count=len(component.get("folder_prefixes", [])),
+                prefix_count=len(component.get("path_rules", [])),
                 key_count=len(component.get("key_files", [])),
             )
         )
@@ -75,9 +79,9 @@ def render_architecture(data: dict[str, Any]) -> str:
             lines.append("- None")
 
         lines.append("")
-        lines.append("Path prefixes:")
-        for prefix in component["folder_prefixes"]:
-            lines.append(f"- `{prefix}`")
+        lines.append("Path rules:")
+        for rule in component["path_rules"]:
+            lines.append(f"- `{rule['path']}` ({rule['match']})")
 
         lines.append("")
         lines.append("Key files:")
@@ -95,6 +99,8 @@ def render_ownership(data: dict[str, Any]) -> str:
     lines.append("# Ownership Map")
     lines.append("")
     lines.append("Canonical source: `docs/maps/component_ownership_map.json`")
+    lines.append("")
+    lines.append("Every path rule declares `match: directory` or `match: exact_file`; path spelling has no implicit match semantics.")
     lines.append("")
     lines.append("Ownership model: Role + Handles plus explicit single-owner risk metadata.")
     lines.append("")
@@ -146,9 +152,9 @@ def render_ownership(data: dict[str, Any]) -> str:
         lines.append("- Key files:")
         for key_file in component["key_files"]:
             lines.append(f"  - `{key_file}`")
-        lines.append("- Path prefixes:")
-        for prefix in component["folder_prefixes"]:
-            lines.append(f"  - `{prefix}`")
+        lines.append("- Path rules:")
+        for rule in component["path_rules"]:
+            lines.append(f"  - `{rule['path']}` ({rule['match']})")
         lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"

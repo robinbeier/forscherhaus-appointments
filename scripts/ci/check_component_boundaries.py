@@ -116,20 +116,17 @@ def load_scope_config(path: Path) -> dict[str, Any]:
     return config
 
 
-def prefix_matches(prefix: str, repo_path: str) -> bool:
-    normalized_prefix = normalize_path(prefix)
+def path_rule_matches(rule: dict[str, str], repo_path: str) -> bool:
+    normalized_rule_path = normalize_path(rule["path"]).rstrip("/")
     normalized_path = normalize_path(repo_path)
-
-    if normalized_path == normalized_prefix:
-        return True
-
-    if normalized_prefix.endswith("/") or normalized_prefix.endswith("_"):
-        return normalized_path.startswith(normalized_prefix)
-
-    return False
+    if rule["match"] == "exact_file":
+        return normalized_path == normalized_rule_path
+    return normalized_path == normalized_rule_path or normalized_path.startswith(normalized_rule_path + "/")
 
 
 def build_component_index(map_payload: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, set[str]]]:
+    if map_payload.get("schema_version") != 3:
+        raise ValueError('"schema_version" must be 3')
     components = map_payload.get("components")
     if not isinstance(components, list) or not components:
         raise ValueError('"components" must be a non-empty array')
@@ -145,9 +142,18 @@ def build_component_index(map_payload: dict[str, Any]) -> tuple[list[dict[str, A
         if not isinstance(component_id, str) or not component_id:
             raise ValueError("Each component must include a non-empty component_id")
 
-        folder_prefixes = component.get("folder_prefixes")
-        if not isinstance(folder_prefixes, list):
-            raise ValueError(f"{component_id}.folder_prefixes must be a list")
+        path_rules = component.get("path_rules")
+        if not isinstance(path_rules, list):
+            raise ValueError(f"{component_id}.path_rules must be a list")
+        normalized_path_rules: list[dict[str, str]] = []
+        for rule in path_rules:
+            if not isinstance(rule, dict) or set(rule) != {"path", "match"}:
+                raise ValueError(f"{component_id}.path_rules contains an invalid rule")
+            path = rule.get("path")
+            match = rule.get("match")
+            if not isinstance(path, str) or not path or match not in {"directory", "exact_file"}:
+                raise ValueError(f"{component_id}.path_rules contains an invalid rule")
+            normalized_path_rules.append({"path": normalize_path(path).rstrip("/"), "match": match})
 
         depends_on = component.get("depends_on", [])
         if not isinstance(depends_on, list):
@@ -156,7 +162,7 @@ def build_component_index(map_payload: dict[str, Any]) -> tuple[list[dict[str, A
         normalized_components.append(
             {
                 "component_id": component_id,
-                "folder_prefixes": [normalize_path(str(prefix)) for prefix in folder_prefixes],
+                "path_rules": normalized_path_rules,
             }
         )
         dependency_map[component_id] = {str(dep) for dep in depends_on if isinstance(dep, str)}
@@ -169,8 +175,8 @@ def match_components(repo_path: str, components: list[dict[str, Any]]) -> list[s
 
     for component in components:
         component_id = str(component["component_id"])
-        for prefix in component["folder_prefixes"]:
-            if prefix_matches(prefix, repo_path):
+        for rule in component["path_rules"]:
+            if path_rule_matches(rule, repo_path):
                 matches.append(component_id)
                 break
 

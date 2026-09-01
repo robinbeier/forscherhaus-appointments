@@ -190,6 +190,19 @@ trusted_git cat-file -e "${base_sha}^{commit}" 2>/dev/null || {
     echo "Reviewer base commit is unavailable." >&2
     exit 1
 }
+review_base_ref="refs/remotes/origin/main"
+trusted_git rev-parse --verify "${review_base_ref}^{commit}" >/dev/null 2>&1 || {
+    echo "Reviewer canonical base ref is unavailable; fetch origin/main before review." >&2
+    exit 1
+}
+expected_base_sha="$(trusted_git merge-base "$review_base_ref" "$head_sha")" || {
+    echo "Reviewer canonical merge base could not be resolved." >&2
+    exit 1
+}
+if [[ "$base_sha" != "$expected_base_sha" ]]; then
+    echo "Reviewer base does not match the canonical origin/main merge base." >&2
+    exit 1
+fi
 
 runner_source="$(canonical_path "$runner_source_input")" || {
     echo "Reviewer trusted source path could not be resolved." >&2
@@ -369,7 +382,7 @@ done
 runtime_config="$(trusted_php "$control_root/scripts/agent/readonly_reviewer_contract.php" runtime --platform="$reviewer_platform")" || exit $?
 IFS=$'\t' read -r expected_codex_version expected_codex_sha256 expected_codex_archive_sha256 <<< "$runtime_config"
 if (
-    [[ "$expected_codex_version" != "0.145.0" ]] ||
+    [[ ! "$expected_codex_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
     [[ ! "$expected_codex_sha256" =~ ^[a-f0-9]{64}$ ]] ||
     [[ ! "$expected_codex_archive_sha256" =~ ^[a-f0-9]{64}$ ]]
 ); then
@@ -398,7 +411,8 @@ codex_version="$("$codex_bin" --version 2>/dev/null)" || {
     exit 2
 }
 trusted_php "$control_root/scripts/agent/readonly_reviewer_contract.php" validate-version \
-    --version-output="$codex_version" || exit $?
+    --version-output="$codex_version" \
+    --expected-version="$expected_codex_version" || exit $?
 
 reviewer_os_home="$(canonical_path "${REVIEWER_OS_HOME:-}")" || {
     echo "Reviewer canonical OS home is unavailable." >&2
@@ -574,16 +588,20 @@ if ! trusted_php "$control_root/scripts/agent/readonly_review_bundle.php" serial
     exit 1
 fi
 
-prompt_file="$control_root/review-prompt.txt"
-if ! trusted_php "$control_root/scripts/agent/readonly_review_bundle.php" prompt \
+developer_instructions_file="$control_root/developer-instructions.txt"
+if ! trusted_php "$control_root/scripts/agent/readonly_review_bundle.php" developer-instructions \
     --role="$control_root/$role_file" \
-    --input="$review_input" \
     --lens="$lens" \
     --base-sha="$base_sha" \
-    --head-sha="$head_sha" > "$prompt_file"; then
-    echo "Reviewer prompt could not be materialized." >&2
+    --head-sha="$head_sha" > "$developer_instructions_file"; then
+    echo "Reviewer developer instructions could not be materialized." >&2
     exit 1
 fi
+developer_instructions_toml="$(trusted_php "$control_root/scripts/agent/readonly_review_bundle.php" toml-string \
+    --input="$developer_instructions_file")" || {
+    echo "Reviewer developer instructions could not be encoded." >&2
+    exit 1
+}
 
 runtime_home="$control_root/codex-home"
 runtime_tmp="$control_root/runtime-tmp"
@@ -634,6 +652,21 @@ if ! seatbelt_run "${reviewer_environment[@]}" "$codex_bin" debug models --bundl
     exit 1
 fi
 
+prompt_role_probe='UNTRUSTED-REVIEW-BUNDLE-PROBE'
+if ! seatbelt_run "${reviewer_environment[@]}" "$codex_bin" \
+        "${disable_arguments[@]}" \
+        -c "developer_instructions=$developer_instructions_toml" \
+        -c 'mcp_servers={}' \
+        -c 'agents.max_threads=1' \
+        -c 'agents.max_depth=0' \
+        debug prompt-input "$prompt_role_probe" 2>/dev/null \
+    | trusted_php "$control_root/scripts/agent/readonly_review_bundle.php" validate-prompt-roles \
+        --developer="$developer_instructions_file" \
+        --user-probe="$prompt_role_probe"; then
+    echo "Reviewer pinned CLI did not preserve developer/user prompt priority." >&2
+    exit 1
+fi
+
 allowed_canary="$review_root/.review-bundle-readable-canary"
 : > "$allowed_canary"
 outside_canary_root="$(mktemp -d /private/tmp/forscherhaus-readonly-review-denied.XXXXXX)" || {
@@ -647,7 +680,7 @@ home_canary="$(mktemp "$reviewer_os_home/.forscherhaus-readonly-review-denied.XX
     exit 2
 }
 chmod -R a-w "$review_root"
-chmod a-w "$outside_canary" "$home_canary" "$review_input" "$prompt_file" "$model_catalog"
+chmod a-w "$outside_canary" "$home_canary" "$developer_instructions_file" "$review_input" "$model_catalog"
 
 if ! seatbelt_run /bin/cat "$allowed_canary" >/dev/null 2>&1; then
     echo "Reviewer Seatbelt profile did not admit the exact bundle." >&2
@@ -683,6 +716,7 @@ seatbelt_run "${reviewer_environment[@]}" "$codex_bin" --ask-for-approval never 
         -c "model_catalog_json=\"$model_catalog\"" \
         -c "model_reasoning_effort=\"$reasoning\"" \
         -c "log_dir=\"$log_root\"" \
+        -c "developer_instructions=$developer_instructions_toml" \
         -c 'project_root_markers=[]' \
         -c 'web_search="disabled"' \
         -c 'shell_environment_policy.inherit="none"' \
@@ -690,7 +724,7 @@ seatbelt_run "${reviewer_environment[@]}" "$codex_bin" --ask-for-approval never 
         -c 'agents.max_threads=1' \
         -c 'agents.max_depth=0' \
         -C "$sealed_root" \
-        - < "$prompt_file" 2> "$codex_stderr" \
+        - < "$review_input" 2> "$codex_stderr" \
     | trusted_php "$control_root/scripts/agent/readonly_reviewer_contract.php" validate \
         --lens="$lens" \
         --base-sha="$base_sha" \

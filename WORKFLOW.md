@@ -181,8 +181,9 @@ manifest all use `scripts/agent/lib/RepoPath.php` as their single normalized
 repository-path grammar. Every ownership rule is an object with `path` and an
 explicit `match` value: `directory` or `exact_file`. `directory` covers
 descendants only and `exact_file` covers one file. Canonical ownership maps
-list each file explicitly when a component spans sibling files; filename
-spelling never creates implicit ownership. Each lane uses its own worktree and branch
+use the same explicit object grammar; trailing slashes, underscores, and other
+filename spelling never create implicit ownership. Maps list each file
+explicitly when a component spans sibling files. Each lane uses its own worktree and branch
 from the already verified common base.
 
 Exactly one primary remains the external single writer for commits, pushes,
@@ -419,6 +420,13 @@ chmod 700 "$trusted_runner"
 rm -f "$trusted_runner"
 ```
 
+Before materialization, fetch `origin/main`. The supplied base SHA must equal
+the merge base of the exact head and the canonical local
+`refs/remotes/origin/main` tracking ref; an arbitrary older or newer ancestor
+is rejected. This preserves the complete branch diff even when `origin/main`
+has advanced and prevents a caller from narrowing review scope to a later
+branch commit.
+
 The runner first enters through a PHP `-n` bootstrap and passes only an explicit
 allowlist of runtime variables into its Bash body, so `BASH_ENV`, exported shell
 functions, shell options, and unrelated ambient variables cannot execute before
@@ -458,9 +466,16 @@ base SHA, head SHA, and lens. It exposes neither a `.git` directory nor the
 original worktree to the model. Changes to the source worktree after preflight
 cannot alter reviewed content.
 
-The runner serializes that bounded bundle into deterministic JSON and supplies
-it over standard input; the model receives no filesystem path as its source of
-review context. On macOS the Codex process itself runs inside a repository-owned
+The runner places the trusted base role, exact Base/Head binding, and review
+rules in Codex developer instructions. It serializes the bounded bundle into
+deterministic JSON and supplies that serialization alone as the untrusted user
+message over standard input. Committed patch, path, text, JSON, and binary data
+therefore cannot share instruction priority with the reviewer policy. The model
+call starts only after the pinned CLI's prompt renderer proves that the trusted
+policy appears in a `developer` message and a synthetic bundle probe appears in
+a separate `user` message. The model receives no filesystem path as its source
+of review context. On macOS the Codex
+process itself runs inside a repository-owned
 Seatbelt profile that starts with `deny default`. It permits only the system
 runtime, read-only Codex system policy, the exact private review root, and the
 canonical host `auth.json` file. The actual `CODEX_HOME` is never exposed: a
@@ -497,6 +512,10 @@ contact-, user-home-, URL-, and long hash-like values are rejected. Reviewer
 output returns to the primary; reviewers do not write
 files, Git, GitHub, Linear, checks, reviews, comments, or workpads and do not
 delegate. The primary alone decides how findings are integrated or published.
+Model, reasoning, feature-disable, runtime-pin, and trusted-path changes start in
+`.codex/contracts/agent-workflow.json`. The trusted helper enforces the
+fail-closed safety invariants and the focused contract tests intentionally fail
+on drift; update those validation expectations in the same reviewed change.
 
 The first introduction of this trust root cannot bootstrap itself. Likewise,
 a change to `.codex/config.toml` or any `AGENTS.md` can affect reviewer runtime

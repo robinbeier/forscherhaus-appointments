@@ -36,7 +36,7 @@ final class ArchitectureOwnershipDocsGeneratorTest extends TestCase
             $mapPath,
             json_encode(
                 [
-                    'schema_version' => 2,
+                    'schema_version' => 3,
                     'source' => 'docs/maps/component_ownership_map.json',
                     'components' => [
                         [
@@ -50,7 +50,7 @@ final class ArchitectureOwnershipDocsGeneratorTest extends TestCase
                             'agent_policy' => 'conservative',
                             'manual_approval_required' => true,
                             'ownership_notes' => 'Single owner only.',
-                            'folder_prefixes' => ['scripts/ci/'],
+                            'path_rules' => [['path' => 'scripts/ci', 'match' => 'directory']],
                             'key_files' => ['scripts/ci/check_architecture_ownership_map.py'],
                             'depends_on' => [],
                         ],
@@ -90,7 +90,7 @@ final class ArchitectureOwnershipDocsGeneratorTest extends TestCase
             $mapPath,
             json_encode(
                 [
-                    'schema_version' => 2,
+                    'schema_version' => 3,
                     'source' => 'docs/maps/component_ownership_map.json',
                     'components' => [
                         [
@@ -104,7 +104,7 @@ final class ArchitectureOwnershipDocsGeneratorTest extends TestCase
                             'agent_policy' => 'conservative',
                             'manual_approval_required' => true,
                             'ownership_notes' => 'Single owner only.',
-                            'folder_prefixes' => ['application/libraries/Accounts.php'],
+                            'path_rules' => [['path' => 'application/libraries/Accounts.php', 'match' => 'exact_file']],
                             'key_files' => ['application/libraries/Accounts.php'],
                             'depends_on' => [],
                         ],

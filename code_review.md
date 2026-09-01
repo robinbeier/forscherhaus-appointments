@@ -106,6 +106,9 @@ Invoke each final lens with the exact
 `scripts/agent/run_readonly_reviewer.sh` blob from the already trusted review
 base, materialized outside the worktree as described in `WORKFLOW.md`; never
 execute the checked-out copy or use the head copy as its own trust anchor. The
+base must be the exact merge base of the reviewed head and the freshly fetched
+canonical `refs/remotes/origin/main` ref; the runner rejects a caller-selected
+narrower ancestor. The
 initial extraction itself uses the absolute system Git binary in an empty
 environment with replacement objects, lazy fetching, global/system config,
 hooks, fsmonitor, helpers, and external diffs disabled; an ambient `git show`
@@ -116,7 +119,8 @@ validator, derives and validates the complete trust-path set from that single
 contract, and then extracts the selected role, output schema, and review
 instructions from the same base commit.
 The entrypoint retains only bootstrap, Git-object materialization, and process
-orchestration. Deterministic path, manifest, serialization, prompt, and model-
+orchestration. Deterministic path, manifest, serialization, developer-
+instruction construction, and model-
 catalog behavior lives in the separately unit-tested
 `scripts/agent/lib/ReadonlyReviewBundle.php`; the Seatbelt rules live in
 `scripts/agent/readonly-reviewer.sb`. Both are exact base blobs in the same
@@ -148,8 +152,13 @@ external diff drivers, and text conversion. The runner rejects every tracked
 symlink in the exact base and head trees, then materializes a deterministic
 bundle containing the full-index patch, sorted changed paths, committed base and
 head blobs, trusted base policy, and a SHA-256 manifest. It serializes that
-bounded bundle into deterministic JSON over standard input; the model receives
-no `.git` directory, original-worktree path, or filesystem review tool.
+bounded bundle into deterministic JSON. The trusted role and exact Base/Head
+binding are supplied as developer instructions; only the serialized bundle is
+sent as the untrusted user message over standard input. Patch content can
+therefore never occupy the reviewer policy's instruction priority. Before the
+model call, the pinned CLI's own prompt renderer must prove the developer/user
+role split with a synthetic non-sensitive probe. The model
+receives no `.git` directory, original-worktree path, or filesystem review tool.
 
 On macOS the outer Codex process runs in a repository-owned Seatbelt profile
 with `deny default`. Only the system runtime, read-only Codex system policy, the

@@ -31,18 +31,19 @@ class ParallelWorkContractTest extends TestCase
         self::assertIsArray($contract['parallel_work'] ?? null);
         $this->policy = $contract['parallel_work'];
         $this->ownershipMap = [
+            'schema_version' => 3,
             'components' => [
                 [
                     'component_id' => 'platform-quality-tooling',
                     'ownership_mode' => 'single-owner',
                     'manual_approval_required' => true,
-                    'folder_prefixes' => ['scripts/ci/'],
+                    'path_rules' => [$this->pathRule('scripts/ci')],
                 ],
                 [
                     'component_id' => 'booking-public',
                     'ownership_mode' => 'single-owner',
                     'manual_approval_required' => true,
-                    'folder_prefixes' => ['application/views/components/booking_sidebar.php'],
+                    'path_rules' => [$this->pathRule('application/views/components/booking_sidebar.php', 'exact_file')],
                 ],
             ],
         ];
@@ -139,6 +140,23 @@ class ParallelWorkContractTest extends TestCase
         self::assertContains(
             'too_many_writer_lanes',
             ParallelWorkContract::validate($manifest, $this->policy, $this->ownershipMap),
+        );
+    }
+
+    public function testRejectsImplicitOrStaleCanonicalOwnershipSemantics(): void
+    {
+        $policy = $this->policy;
+        $policy['ownership_rule_format'] = 'trailing_slash_inference';
+        self::assertContains(
+            'invalid_policy_ownership_rule_format',
+            ParallelWorkContract::validate($this->validManifest(), $policy, $this->ownershipMap),
+        );
+
+        $ownershipMap = $this->ownershipMap;
+        $ownershipMap['schema_version'] = 2;
+        self::assertContains(
+            'invalid_canonical_ownership_schema_version',
+            ParallelWorkContract::validate($this->validManifest(), $this->policy, $ownershipMap),
         );
     }
 
@@ -307,10 +325,10 @@ class ParallelWorkContractTest extends TestCase
     public function testRejectsEmptyCanonicalComponentCoverage(): void
     {
         $ownershipMap = $this->ownershipMap;
-        $ownershipMap['components'][0]['folder_prefixes'] = [];
+        $ownershipMap['components'][0]['path_rules'] = [];
 
         self::assertContains(
-            'invalid_canonical_folder_prefixes:platform-quality-tooling',
+            'invalid_canonical_path_rules:platform-quality-tooling',
             ParallelWorkContract::validate($this->validManifest(), $this->policy, $ownershipMap),
         );
 
@@ -319,6 +337,26 @@ class ParallelWorkContractTest extends TestCase
             'invalid_canonical_ownership_map',
             ParallelWorkContract::validate($this->validManifest(), $this->policy, $ownershipMap),
         );
+    }
+
+    public function testCanonicalOwnershipRequiresExplicitPathAndMatch(): void
+    {
+        foreach (
+            [
+                ['path' => 'scripts/ci'],
+                ['path' => 'scripts/ci', 'match' => 'prefix'],
+                ['path' => 'scripts/ci/', 'match' => 'directory'],
+            ]
+            as $invalidRule
+        ) {
+            $ownershipMap = $this->ownershipMap;
+            $ownershipMap['components'][0]['path_rules'] = [$invalidRule];
+
+            self::assertContains(
+                'invalid_canonical_ownership_path_rule:platform-quality-tooling',
+                ParallelWorkContract::validate($this->validManifest(), $this->policy, $ownershipMap),
+            );
+        }
     }
 
     public function testRejectsSingleOwnerWithoutManualApproval(): void

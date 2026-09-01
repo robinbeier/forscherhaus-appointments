@@ -18,6 +18,13 @@ final class ParallelWorkContract
     {
         $errors = [];
 
+        if (($policy['ownership_map_schema_version'] ?? null) !== 3) {
+            $errors[] = 'invalid_policy_ownership_map_schema_version';
+        }
+        if (($policy['ownership_rule_format'] ?? null) !== 'explicit_path_and_match_objects') {
+            $errors[] = 'invalid_policy_ownership_rule_format';
+        }
+
         foreach (
             [
                 'local_implementation_only',
@@ -275,6 +282,10 @@ final class ParallelWorkContract
      */
     private static function readCanonicalComponents(array $ownershipMap, array &$errors): array
     {
+        if (($ownershipMap['schema_version'] ?? null) !== 3) {
+            $errors[] = 'invalid_canonical_ownership_schema_version';
+            return [];
+        }
         $components = $ownershipMap['components'] ?? null;
         if (!is_array($components) || !array_is_list($components) || $components === []) {
             $errors[] = 'invalid_canonical_ownership_map';
@@ -288,15 +299,15 @@ final class ParallelWorkContract
                 continue;
             }
             $componentId = $component['component_id'] ?? null;
-            $folderPrefixes = $component['folder_prefixes'] ?? null;
+            $canonicalPathRules = $component['path_rules'] ?? null;
             $ownershipMode = $component['ownership_mode'] ?? null;
             $manualApprovalRequired = $component['manual_approval_required'] ?? null;
-            if (!is_string($componentId) || !is_array($folderPrefixes) || !array_is_list($folderPrefixes)) {
+            if (!is_string($componentId) || !is_array($canonicalPathRules) || !array_is_list($canonicalPathRules)) {
                 $errors[] = 'invalid_canonical_ownership_component';
                 continue;
             }
-            if ($folderPrefixes === []) {
-                $errors[] = 'invalid_canonical_folder_prefixes:' . $componentId;
+            if ($canonicalPathRules === []) {
+                $errors[] = 'invalid_canonical_path_rules:' . $componentId;
                 continue;
             }
             if (!is_string($ownershipMode) || !in_array($ownershipMode, ['single-owner', 'multi-owner'], true)) {
@@ -320,14 +331,16 @@ final class ParallelWorkContract
                 continue;
             }
             $pathRules = [];
-            foreach ($folderPrefixes as $folderPrefix) {
-                $normalizedPrefix = is_string($folderPrefix) ? rtrim($folderPrefix, '/') : '';
-                if (!RepoPath::isNormalized($normalizedPrefix)) {
-                    $errors[] = 'invalid_canonical_ownership_prefix:' . $componentId;
+            foreach ($canonicalPathRules as $canonicalPathRule) {
+                $pathRule = self::readPathRule(
+                    $canonicalPathRule,
+                    $errors,
+                    'invalid_canonical_ownership_path_rule:' . $componentId,
+                );
+                if ($pathRule === null) {
                     continue 2;
                 }
-                $match = str_ends_with((string) $folderPrefix, '/') ? 'directory' : 'exact_file';
-                $pathRules[] = ['path' => $normalizedPrefix, 'match' => $match];
+                $pathRules[] = $pathRule;
             }
             $canonical[$componentId] = ['path_rules' => $pathRules];
         }

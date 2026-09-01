@@ -65,6 +65,11 @@ class ReviewerAuthorityContractTest extends TestCase
             $contract['authority']['reviewer']['profiles'] ?? null,
         );
         self::assertSame('review_base_commit', $contract['authority']['reviewer']['trust_anchor'] ?? null);
+        self::assertSame('refs/remotes/origin/main', $contract['authority']['reviewer']['review_base_ref'] ?? null);
+        self::assertSame(
+            'exact_merge_base_with_canonical_remote_tracking_ref',
+            $contract['authority']['reviewer']['review_base_policy'] ?? null,
+        );
         self::assertSame(
             'hardened_system_git_materialized_base_blob_outside_worktree',
             $contract['authority']['reviewer']['invocation_source'] ?? null,
@@ -108,8 +113,9 @@ class ReviewerAuthorityContractTest extends TestCase
             'official_release_binary_sha256_platform_and_version',
             $contract['authority']['reviewer']['codex_identity_check'] ?? null,
         );
+        self::assertSame('0.145.0', $contract['authority']['reviewer']['codex_version'] ?? null);
         self::assertSame(
-            'exact_0_145_0_with_bounded_build_metadata',
+            'exact_machine_pinned_version_with_bounded_build_metadata',
             $contract['authority']['reviewer']['codex_version_policy'] ?? null,
         );
         self::assertSame(
@@ -149,7 +155,15 @@ class ReviewerAuthorityContractTest extends TestCase
             $contract['authority']['reviewer']['review_bundle_manifest_policy'] ?? null,
         );
         self::assertSame(
-            'bounded_deterministic_json_serialization_over_stdin',
+            'trusted_base_policy_as_developer_instructions_untrusted_bundle_as_user_input',
+            $contract['authority']['reviewer']['review_instruction_policy'] ?? null,
+        );
+        self::assertSame(
+            'pinned_cli_requires_developer_policy_and_user_bundle_channels',
+            $contract['authority']['reviewer']['prompt_role_preflight'] ?? null,
+        );
+        self::assertSame(
+            'bounded_deterministic_json_serialization_as_untrusted_user_stdin',
             $contract['authority']['reviewer']['review_input_policy'] ?? null,
         );
         self::assertSame(
@@ -268,6 +282,10 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertStringContainsString('--ignore-user-config', $runner);
         self::assertStringContainsString('mcp_servers={}', $runner);
         self::assertStringContainsString('agents.max_depth=0', $runner);
+        self::assertStringContainsString('-c "developer_instructions=$developer_instructions_toml"', $runner);
+        self::assertStringContainsString('- < "$review_input"', $runner);
+        self::assertStringContainsString('validate-prompt-roles', $runner);
+        self::assertStringNotContainsString('review-prompt.txt', $runner);
 
         self::assertStringStartsWith("(version 1)\n(deny default)\n", $seatbelt);
         self::assertStringContainsString(
@@ -324,7 +342,7 @@ class ReviewerAuthorityContractTest extends TestCase
 
             self::assertSame(2, proc_close($process));
             self::assertSame('', (string) $stdout);
-            self::assertNotSame('', trim((string) $stderr));
+            self::assertStringContainsString('Reviewer SHAs must be full lowercase commit IDs.', (string) $stderr);
             self::assertFileDoesNotExist($bashMarker);
             self::assertFileDoesNotExist($phpMarker);
         } finally {
@@ -379,12 +397,76 @@ class ReviewerAuthorityContractTest extends TestCase
         }
     }
 
+    public function testRuntimeValidatorsRejectSymlinkedCodexFiles(): void
+    {
+        $directory = sys_get_temp_dir() . '/reviewer-codex-symlink-' . bin2hex(random_bytes(8));
+        self::assertTrue(mkdir($directory, 0700));
+        $target = $directory . '/codex-target';
+        $link = $directory . '/codex';
+        self::assertNotFalse(file_put_contents($target, "#!/bin/sh\nexit 0\n"));
+        self::assertTrue(chmod($target, 0500));
+        self::assertTrue(symlink($target, $link));
+
+        try {
+            foreach (['source', 'materialized'] as $validator) {
+                try {
+                    if ($validator === 'source') {
+                        ReadonlyReviewerContract::assertCodexSource($link, (int) fileowner($target));
+                    } else {
+                        ReadonlyReviewerContract::assertMaterializedCodex(
+                            $link,
+                            (int) fileowner($target),
+                            (string) hash_file('sha256', $target),
+                        );
+                    }
+                    self::fail('A symlinked Codex file was accepted by the ' . $validator . ' validator.');
+                } catch (\InvalidArgumentException $exception) {
+                    self::assertStringContainsString('Codex binary target is invalid', $exception->getMessage());
+                }
+            }
+        } finally {
+            if (is_link($link)) {
+                unlink($link);
+            }
+            if (is_file($target)) {
+                unlink($target);
+            }
+            if (is_dir($directory)) {
+                rmdir($directory);
+            }
+        }
+    }
+
+    public function testRunnerRejectsCallerSelectedNarrowAncestorBase(): void
+    {
+        $fixture = $this->runnerFixture('reviewer-wrong-base', "#!/bin/sh\nexit 0\n", 'codex');
+
+        try {
+            self::assertNotFalse(file_put_contents($fixture['root'] . '/intermediate.txt', "one\n"));
+            $this->runGitCommand(['add', '--all'], $fixture['root']);
+            $this->commitRunnerFixture($fixture['root'], 'Add intermediate change');
+            $narrowBase = $this->runGitCommand(['rev-parse', 'HEAD'], $fixture['root']);
+            self::assertNotFalse(file_put_contents($fixture['root'] . '/head.txt', "two\n"));
+            $this->runGitCommand(['add', '--all'], $fixture['root']);
+            $this->commitRunnerFixture($fixture['root'], 'Add head change');
+            $head = $this->runGitCommand(['rev-parse', 'HEAD'], $fixture['root']);
+
+            [$exitCode, $stdout, $stderr] = $this->runRunnerFixture($fixture, $narrowBase, $head);
+
+            self::assertSame(1, $exitCode);
+            self::assertSame('', $stdout);
+            self::assertStringContainsString('does not match the canonical origin/main merge base', $stderr);
+        } finally {
+            $this->removeRunnerFixture($fixture);
+        }
+    }
+
     public function testRuntimeValidatorRejectsUnsupportedCodexVersion(): void
     {
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage('must match the isolated runtime contract exactly');
 
-        ReadonlyReviewerContract::assertCodexVersion('codex-cli 0.144.0');
+        ReadonlyReviewerContract::assertCodexVersion('codex-cli 0.144.0', '0.145.0');
     }
 
     public function testOutputValidationRejectsCodexEventStreamAndWrongExactHead(): void
@@ -764,127 +846,34 @@ class ReviewerAuthorityContractTest extends TestCase
     /** @return array<string, mixed> */
     private function reviewerPolicyForProfile(string $profile): array
     {
-        return [
-            'invocation_source' => 'hardened_system_git_materialized_base_blob_outside_worktree',
-            'bootstrap_materialization_policy' => 'absolute_system_git_clean_environment_no_replace_objects',
-            'trust_anchor' => 'review_base_commit',
-            'requires_base_runner' => true,
-            'runtime_configuration_change_policy' => 'external_bootstrap_review',
-            'shell_runtime_configuration' => 'clean_bootstrap_environment',
-            'transport_environment_policy' => 'fixed_direct_no_ambient_proxy_or_endpoint_override',
-            'temporary_directory_policy' => 'private_system_temp_bundle_and_internal_runtime_only',
-            'php_runtime_configuration' => 'ignore_ambient_ini',
-            'git_runtime_configuration' => 'ignore_ambient_and_disable_helpers',
-            'git_lazy_fetch' => 'disabled',
-            'tool_path_policy' => 'explicit_primary_codex_with_verified_private_copy',
-            'repository_root_policy' => 'canonical_physical_root',
-            'codex_identity_check' => 'official_release_binary_sha256_platform_and_version',
-            'codex_version_policy' => 'exact_0_145_0_with_bounded_build_metadata',
-            'codex_binary_materialization_policy' => 'private_copy_rehashed_before_first_execution',
-            'codex_binary_sha256_by_platform' => [
-                'Darwin-arm64' => '1da3f4e0e96028b8a771814293c3033dafd1971f943f6c7e79b0897fe705f590',
-                'Darwin-x86_64' => '6db9193ce2c9a8cef2b5482612cde24202a4329dfc34f4687a036d5d7da619af',
-            ],
-            'codex_release_archive_sha256_by_platform' => [
-                'Darwin-arm64' => '072a30a65f05666735889ef0f60b56db186adbdde9d5c5cc1a64be0b598530fe',
-                'Darwin-x86_64' => '4216d7a40aa49d74b65fab93d2a86d2e25a902482b827dbdb3f357777b09fadf',
-            ],
-            'codex_authentication_source' => 'host_codex_login_without_connector_authority',
-            'codex_authentication_home_policy' => 'isolated_runtime_home_read_only_link_to_canonical_auth_file',
-            'codex_api_key_override_policy' => 'reject_ambient_api_keys',
-            'finding_path_policy' => 'normalized_exact_diff_paths',
-            'finding_text_policy' => 'bounded_privacy_safe_prose',
-            'web_search' => 'disabled',
-            'review_checkout' => 'deterministic_exact_commit_bundle',
-            'review_checkout_symlink_policy' => 'reject_all_tracked_symlinks',
-            'review_bundle_parent_policy' => 'private_system_temp_random_directory',
-            'review_bundle_contents' => 'committed_patch_manifest_changed_base_head_and_trusted_policy',
-            'review_bundle_manifest_policy' => 'deterministic_sha256_base_head_binding',
-            'review_input_policy' => 'bounded_deterministic_json_serialization_over_stdin',
-            'review_original_worktree_access' => 'not_model_visible',
-            'isolation_platform' => 'darwin_seatbelt_fail_closed_elsewhere',
-            'isolation_profile' => 'default_deny_runtime_allowlist_exact_bundle_and_auth_read_only',
-            'isolation_preflight' => 'bundle_readable_temp_home_and_original_worktree_denied',
-            'model_tool_surface' => 'derived_exact_release_catalog_without_shell_patch_image_search_or_external_tools',
-            'trusted_base_paths' => [
-                '.codex/contracts/agent-workflow.json',
-                $profile,
-                'scripts/agent/readonly-review-output.schema.json',
-                'scripts/agent/readonly-reviewer.sb',
-                'scripts/agent/readonly_review_bundle.php',
-                'scripts/agent/readonly_reviewer_contract.php',
-                'scripts/agent/lib/RepoPath.php',
-                'scripts/agent/lib/ReadonlyReviewBundle.php',
-                'scripts/agent/lib/ReadonlyReviewerContract.php',
-                'AGENTS.md',
-                'code_review.md',
-            ],
-            'profiles' => [
-                'correctness_security' => [
-                    'instructions' => $profile,
-                    'model' => 'gpt-5.4',
-                    'reasoning' => 'high',
-                ],
-                'design_maintainability' => [
-                    'instructions' => $profile,
-                    'model' => 'gpt-5.4-mini',
-                    'reasoning' => 'medium',
-                ],
-                'tests_regression_flake' => [
-                    'instructions' => $profile,
-                    'model' => 'gpt-5.4-mini',
-                    'reasoning' => 'medium',
-                ],
-            ],
-            'disabled_features' => $this->requiredDisabledFeatures(),
-            'filesystem' => 'outer_seatbelt_default_deny_exact_bundle_read_only_runtime_scratch_only',
-            'network' => 'outer_codex_transport_no_model_network_tool_or_external_credentials',
-            'approval_policy' => 'outer_sandbox_no_model_tools',
-            'inherits_user_config' => false,
-            'inherits_execpolicy_rules' => false,
-            'output_binds_base_sha' => true,
-            'allows_external_connectors' => false,
-            'allows_delegation' => false,
+        $contract = json_decode(
+            (string) file_get_contents($this->repoRoot . '/.codex/contracts/agent-workflow.json'),
+            true,
+            512,
+            JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($contract);
+        $policy = $contract['authority']['reviewer'] ?? null;
+        self::assertIsArray($policy);
+        self::assertIsArray($policy['profiles'] ?? null);
+        foreach (array_keys($policy['profiles']) as $lens) {
+            $policy['profiles'][$lens]['instructions'] = $profile;
+        }
+        $policy['trusted_base_paths'] = [
+            '.codex/contracts/agent-workflow.json',
+            $profile,
+            'scripts/agent/readonly-review-output.schema.json',
+            'scripts/agent/readonly-reviewer.sb',
+            'scripts/agent/readonly_review_bundle.php',
+            'scripts/agent/readonly_reviewer_contract.php',
+            'scripts/agent/lib/RepoPath.php',
+            'scripts/agent/lib/ReadonlyReviewBundle.php',
+            'scripts/agent/lib/ReadonlyReviewerContract.php',
+            'AGENTS.md',
+            'code_review.md',
         ];
-    }
 
-    /** @return list<string> */
-    private function requiredDisabledFeatures(): array
-    {
-        return [
-            'apps',
-            'plugins',
-            'browser_use',
-            'browser_use_external',
-            'browser_use_full_cdp_access',
-            'computer_use',
-            'image_generation',
-            'in_app_browser',
-            'memories',
-            'skill_search',
-            'skill_mcp_dependency_install',
-            'auth_elicitation',
-            'tool_call_mcp_elicitation',
-            'multi_agent',
-            'multi_agent_v2',
-            'hooks',
-            'shell_tool',
-            'unified_exec',
-            'code_mode',
-            'code_mode_only',
-            'code_mode_host',
-            'shell_snapshot',
-            'workspace_dependencies',
-            'goals',
-            'chronicle',
-            'tool_suggest',
-            'remote_plugin',
-            'plugin_sharing',
-            'deferred_executor',
-            'executor_capability_discovery',
-            'request_permissions_tool',
-            'default_mode_request_user_input',
-        ];
+        return $policy;
     }
 
     /** @return array{root: string, runner: string, binary: string, base: string} */
@@ -915,6 +904,7 @@ class ReviewerAuthorityContractTest extends TestCase
             $root,
         );
         $base = $this->runGitCommand(['rev-parse', 'HEAD'], $root);
+        $this->runGitCommand(['update-ref', 'refs/remotes/origin/main', $base], $root);
         $runner = sys_get_temp_dir() . '/reviewer-runner-' . bin2hex(random_bytes(8));
         self::assertNotFalse(
             file_put_contents($runner, (string) file_get_contents($root . '/scripts/agent/run_readonly_reviewer.sh')),
@@ -932,7 +922,7 @@ class ReviewerAuthorityContractTest extends TestCase
     /** @param array{root: string, runner: string, binary: string, base: string} $fixture
      *  @return array{int, string, string}
      */
-    private function runRunnerFixture(array $fixture): array
+    private function runRunnerFixture(array $fixture, ?string $base = null, ?string $head = null): array
     {
         $process = proc_open(
             [
@@ -940,8 +930,8 @@ class ReviewerAuthorityContractTest extends TestCase
                 '--repo-root=' . $fixture['root'],
                 '--codex-bin=' . $fixture['binary'],
                 '--lens=correctness_security',
-                '--base-sha=' . $fixture['base'],
-                '--head-sha=' . $fixture['base'],
+                '--base-sha=' . ($base ?? $fixture['base']),
+                '--head-sha=' . ($head ?? $fixture['base']),
             ],
             [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
             $pipes,
@@ -954,6 +944,27 @@ class ReviewerAuthorityContractTest extends TestCase
         fclose($pipes[2]);
 
         return [proc_close($process), $stdout, $stderr];
+    }
+
+    private function commitRunnerFixture(string $root, string $message): void
+    {
+        $this->runGitCommand(
+            [
+                '-c',
+                'user.name=Reviewer Fixture',
+                '-c',
+                'user.email=reviewer-fixture.invalid',
+                '-c',
+                'commit.gpgsign=false',
+                '-c',
+                'core.hooksPath=/dev/null',
+                'commit',
+                '-q',
+                '-m',
+                $message,
+            ],
+            $root,
+        );
     }
 
     /** @param array{root: string, runner: string, binary: string, base: string} $fixture */

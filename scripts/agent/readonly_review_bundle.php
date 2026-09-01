@@ -75,21 +75,39 @@ try {
             );
             break;
 
-        case 'prompt':
+        case 'developer-instructions':
             $role = file_get_contents($required('role'));
-            $input = file_get_contents($required('input'));
-            if (!is_string($role) || !is_string($input)) {
-                throw new RuntimeException('Reviewer prompt input is unavailable.');
+            if (!is_string($role)) {
+                throw new RuntimeException('Reviewer developer-instruction input is unavailable.');
             }
             fwrite(
                 STDOUT,
-                ReadonlyReviewBundle::buildPrompt(
+                ReadonlyReviewBundle::buildDeveloperInstructions(
                     $role,
-                    $input,
                     $required('lens'),
                     $required('base-sha'),
                     $required('head-sha'),
                 ),
+            );
+            break;
+
+        case 'toml-string':
+            $value = file_get_contents($required('input'));
+            if (!is_string($value)) {
+                throw new RuntimeException('Reviewer TOML string input is unavailable.');
+            }
+            fwrite(STDOUT, ReadonlyReviewBundle::tomlString($value));
+            break;
+
+        case 'validate-prompt-roles':
+            $developerInstructions = file_get_contents($required('developer'));
+            if (!is_string($developerInstructions)) {
+                throw new RuntimeException('Reviewer prompt-role developer input is unavailable.');
+            }
+            ReadonlyReviewBundle::assertPromptRoles(
+                (string) stream_get_contents(STDIN),
+                $developerInstructions,
+                $required('user-probe'),
             );
             break;
 

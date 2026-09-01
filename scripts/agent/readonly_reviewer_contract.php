@@ -14,6 +14,7 @@ $headSha = null;
 $changedPathsJsonPath = null;
 $platform = null;
 $versionOutput = null;
+$expectedVersion = null;
 $runtimePath = null;
 $expectedOwner = null;
 $expectedSha256 = null;
@@ -40,6 +41,10 @@ foreach (array_slice($argv, 2) as $argument) {
     }
     if (str_starts_with($argument, '--version-output=')) {
         $versionOutput = substr($argument, strlen('--version-output='));
+        continue;
+    }
+    if (str_starts_with($argument, '--expected-version=')) {
+        $expectedVersion = substr($argument, strlen('--expected-version='));
         continue;
     }
     if (str_starts_with($argument, '--path=')) {
@@ -86,10 +91,10 @@ try {
     }
 
     if ($command === 'validate-version') {
-        if (!is_string($versionOutput) || $versionOutput === '') {
-            throw new InvalidArgumentException('Missing --version-output.');
+        if (!is_string($versionOutput) || $versionOutput === '' || !is_string($expectedVersion)) {
+            throw new InvalidArgumentException('Missing --version-output or --expected-version.');
         }
-        ReadonlyReviewerContract::assertCodexVersion($versionOutput);
+        ReadonlyReviewerContract::assertCodexVersion($versionOutput, $expectedVersion);
         exit(0);
     }
 
@@ -182,7 +187,7 @@ try {
 
     fwrite(
         STDERR,
-        "Usage: readonly_reviewer_contract.php <resolve|instructions|trusted-paths|runtime|validate-version|validate-codex-source|validate-codex-copy|validate> [--lens=<lens>] [--platform=<platform>] [--version-output=<value>] [--path=<absolute-path>] [--expected-owner=<uid>] [--expected-sha256=<sha256>] [--base-sha=<sha>] [--head-sha=<sha>] [--changed-paths-json=<absolute-path>]\n",
+        "Usage: readonly_reviewer_contract.php <resolve|instructions|trusted-paths|runtime|validate-version|validate-codex-source|validate-codex-copy|validate> [--lens=<lens>] [--platform=<platform>] [--version-output=<value>] [--expected-version=<version>] [--path=<absolute-path>] [--expected-owner=<uid>] [--expected-sha256=<sha256>] [--base-sha=<sha>] [--head-sha=<sha>] [--changed-paths-json=<absolute-path>]\n",
     );
     exit(2);
 } catch (Throwable $throwable) {
