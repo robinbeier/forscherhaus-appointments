@@ -5,12 +5,12 @@ declare(strict_types=1);
 namespace Forscherhaus\AgentHarness;
 
 require_once __DIR__ . '/RepoPath.php';
+require_once __DIR__ . '/OwnershipPathRuleEngineClient.php';
 
 /**
- * Fail-closed JSON transport adapter for the one canonical Python ownership
+ * Domain-facing ownership policy contract backed by the canonical Python
  * engine. This class intentionally implements no path normalization, matching,
- * or overlap semantics; every such decision is returned by the exact-base
- * `scripts/ci/ownership_path_rules.py` process and schema-checked here.
+ * overlap, process, or wire semantics.
  */
 final class ParallelWorkOwnershipContract
 {
@@ -23,7 +23,10 @@ final class ParallelWorkOwnershipContract
      */
     public static function validateSemanticsContract(array $contract): array
     {
-        $output = self::runCanonicalEngine(['operation' => 'validate_contract', 'contract' => $contract]);
+        $output = OwnershipPathRuleEngineClient::execute([
+            'operation' => 'validate_contract',
+            'contract' => $contract,
+        ]);
         $result = $output['result'];
         return is_array($result['errors'] ?? null)
             ? array_values(array_unique($result['errors']))
@@ -138,7 +141,7 @@ final class ParallelWorkOwnershipContract
     public static function readPathRule(mixed $value, array &$errors, string $error): ?array
     {
         try {
-            $output = self::runCanonicalEngine(['operation' => 'parse', 'rule' => $value]);
+            $output = OwnershipPathRuleEngineClient::execute(['operation' => 'parse', 'rule' => $value]);
         } catch (\RuntimeException) {
             $errors[] = $error;
             return null;
@@ -165,7 +168,7 @@ final class ParallelWorkOwnershipContract
         string $rightPath,
         string $rightMatch,
     ): bool {
-        $output = self::runCanonicalEngine([
+        $output = OwnershipPathRuleEngineClient::execute([
             'operation' => 'overlap',
             'left' => ['path' => $leftPath, 'match' => $leftMatch],
             'right' => ['path' => $rightPath, 'match' => $rightMatch],
@@ -179,7 +182,7 @@ final class ParallelWorkOwnershipContract
     /** @param array{path: string, match: string} $pathRule */
     public static function pathRuleCoversChangedPath(array $pathRule, string $changedPath): bool
     {
-        $output = self::runCanonicalEngine([
+        $output = OwnershipPathRuleEngineClient::execute([
             'operation' => 'covers',
             'rule' => $pathRule,
             'candidate' => $changedPath,
@@ -188,115 +191,5 @@ final class ParallelWorkOwnershipContract
             throw new \RuntimeException('Ownership path-rule engine output invalid');
         }
         return $output['result']['matches'];
-    }
-
-    /** @param array<string, mixed> $request @return array<string, mixed> */
-    private static function runCanonicalEngine(array $request): array
-    {
-        $engine = getenv('PARALLEL_WORK_OWNERSHIP_ENGINE');
-        if (
-            !is_string($engine) ||
-            !str_starts_with($engine, '/') ||
-            is_link($engine) ||
-            !is_file($engine) ||
-            realpath($engine) !== $engine
-        ) {
-            throw new \RuntimeException('Ownership path-rule engine unavailable');
-        }
-        $root = dirname(__DIR__, 3);
-        $process = proc_open(
-            ['/usr/bin/python3', '-I', '-B', $engine],
-            [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']],
-            $pipes,
-            $root,
-            [
-                'PATH' => '/usr/bin:/bin:/usr/sbin:/sbin',
-                'LANG' => 'C',
-                'LC_ALL' => 'C',
-                'TMPDIR' => '/tmp',
-                'PYTHONPATH' => '',
-            ],
-        );
-        if (!is_resource($process)) {
-            throw new \RuntimeException('Ownership path-rule engine unavailable');
-        }
-        $encodedRequest = json_encode($request, JSON_THROW_ON_ERROR);
-        if (fwrite($pipes[0], $encodedRequest) !== strlen($encodedRequest)) {
-            fclose($pipes[0]);
-            stream_get_contents($pipes[1]);
-            stream_get_contents($pipes[2]);
-            fclose($pipes[1]);
-            fclose($pipes[2]);
-            proc_close($process);
-            throw new \RuntimeException('Ownership path-rule engine input incomplete');
-        }
-        fclose($pipes[0]);
-        $stdout = stream_get_contents($pipes[1]);
-        $stderr = stream_get_contents($pipes[2]);
-        fclose($pipes[1]);
-        fclose($pipes[2]);
-        $exitCode = proc_close($process);
-        if ($exitCode !== 0 || !is_string($stdout) || $stderr !== '') {
-            throw new \RuntimeException('Ownership path-rule engine failed');
-        }
-        $output = json_decode($stdout, true);
-        $operation = $request['operation'] ?? null;
-        if (
-            !is_array($output) ||
-            array_diff(array_keys($output), ['protocol_version', 'operation', 'result', 'extensions']) !== [] ||
-            ($output['protocol_version'] ?? null) !== 1 ||
-            ($output['operation'] ?? null) !== $operation ||
-            !is_array($output['result'] ?? null) ||
-            (array_key_exists('extensions', $output) &&
-                (!is_array($output['extensions']) ||
-                    (array_is_list($output['extensions']) && $output['extensions'] !== [])))
-        ) {
-            throw new \RuntimeException('Ownership path-rule engine output invalid');
-        }
-        $result = $output['result'];
-        self::validateEngineResult($operation, $result);
-        return $output;
-    }
-
-    /** @param array<string, mixed> $result */
-    private static function validateEngineResult(mixed $operation, array $result): void
-    {
-        $requiredKeys = match ($operation) {
-            'parse' => ['valid', 'rule'],
-            'covers' => ['matches'],
-            'overlap' => ['overlaps'],
-            'validate_contract' => ['errors'],
-            default => [],
-        };
-        if ($requiredKeys === []) {
-            throw new \RuntimeException('Ownership path-rule engine output invalid');
-        }
-        foreach ($requiredKeys as $requiredKey) {
-            if (!array_key_exists($requiredKey, $result)) {
-                throw new \RuntimeException('Ownership path-rule engine output invalid');
-            }
-        }
-        if ($operation === 'covers' && !is_bool($result['matches'])) {
-            throw new \RuntimeException('Ownership path-rule engine output invalid');
-        }
-        if ($operation === 'overlap' && !is_bool($result['overlaps'])) {
-            throw new \RuntimeException('Ownership path-rule engine output invalid');
-        }
-        if (
-            $operation === 'validate_contract' &&
-            (!is_array($result['errors']) ||
-                !array_is_list($result['errors']) ||
-                array_filter($result['errors'], 'is_string') !== $result['errors'])
-        ) {
-            throw new \RuntimeException('Ownership path-rule engine output invalid');
-        }
-        if (
-            $operation === 'parse' &&
-            (!is_bool($result['valid']) ||
-                ($result['valid'] && (!is_array($result['rule']) || array_is_list($result['rule']))) ||
-                (!$result['valid'] && $result['rule'] !== null))
-        ) {
-            throw new \RuntimeException('Ownership path-rule engine output invalid');
-        }
     }
 }

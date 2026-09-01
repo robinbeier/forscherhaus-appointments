@@ -78,6 +78,7 @@ class ParallelWorkContractCliTest extends TestCase
             [
                 'RepoPath.php',
                 'ParallelWorkContract.php',
+                'OwnershipPathRuleEngineClient.php',
                 'ParallelWorkOwnershipContract.php',
                 'ParallelWorkPolicyContract.php',
             ]

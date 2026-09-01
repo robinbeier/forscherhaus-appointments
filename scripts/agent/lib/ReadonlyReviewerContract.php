@@ -10,11 +10,11 @@ require_once __DIR__ . '/ReadonlyReviewOutput.php';
 final class ReadonlyReviewerContract
 {
     /**
-     * Every independently attested reviewer-policy field. The generator owns
-     * this delimited block so policy evolution keeps the code-side pin exact
-     * without hand-editing a key projection or digest. Runtime enforcement
-     * remains independent from the JSON authority and any update still changes
-     * a bootstrap-reviewed PHP source file.
+     * Every independently attested reviewer-policy field. The dedicated runtime
+     * attestation generator owns this delimited block so policy evolution keeps
+     * the code-side pin exact without hand-editing a key projection or digest.
+     * Runtime enforcement remains independent from the JSON authority and any
+     * update still changes a bootstrap-reviewed PHP source file.
      *
      * @var list<string>
      */
@@ -90,7 +90,7 @@ final class ReadonlyReviewerContract
         'web_search',
     ];
 
-    private const RUNTIME_BOUNDARY_ATTESTATION_SHA256 = '0232aa1e8ff07e1ae777722f1efc770f9b2016fee33115a846dbe562bd66f695';
+    private const RUNTIME_BOUNDARY_ATTESTATION_SHA256 = '528f24636a91507bc1cd890a292a408e2274fdd96ff90d20b4c5f8d33cb7f8d9';
     // END GENERATED REVIEWER RUNTIME BOUNDARY ATTESTATION
 
     /** @var list<string> */

@@ -122,9 +122,11 @@ the official 0.145.0 release digest.
 The machine contract owns runtime pins, disabled reviewer tools, output schema,
 and trusted paths; its deterministic committed reviewer-policy snapshot must
 pass `php scripts/agent/generate_reviewer_policy_snapshot.php --check`. That
-same generator maintains a delimited code-side attestation over every reviewer
-policy field, while explicit security floors remain independently enforced;
-generator changes are themselves bootstrap-reviewed. Bundle
+snapshot generator never mutates runtime code. The separate
+`php scripts/agent/generate_reviewer_runtime_attestation.php --check` command
+guards the delimited code-side attestation over every reviewer policy field,
+while explicit security floors remain independently enforced; changes to
+either generator are themselves bootstrap-reviewed. Bundle
 construction, model/prompt policy, and output
 validation are separate modules. Structural output rules come from the
 exact-base schema; exact Base/Head/lens/path and privacy are additional semantic

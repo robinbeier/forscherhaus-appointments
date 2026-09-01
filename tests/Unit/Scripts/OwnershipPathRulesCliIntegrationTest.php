@@ -185,6 +185,34 @@ final class OwnershipPathRulesCliIntegrationTest extends TestCase
         }
     }
 
+    public function testPhpRejectsSymlinkedEnginePath(): void
+    {
+        $root = sys_get_temp_dir() . '/ownership-engine-link-' . bin2hex(random_bytes(8));
+        self::assertTrue(mkdir($root, 0700, true));
+        $target = $root . '/engine.py';
+        $link = $root . '/engine-link.py';
+        self::assertNotFalse(file_put_contents($target, "print('{}')\n"));
+        self::assertTrue(symlink($target, $link));
+        $previous = getenv('PARALLEL_WORK_OWNERSHIP_ENGINE');
+        putenv('PARALLEL_WORK_OWNERSHIP_ENGINE=' . $link);
+        try {
+            $this->expectException(\RuntimeException::class);
+            ParallelWorkOwnershipContract::pathRuleCoversChangedPath(
+                ['path' => 'tests/Unit/Scripts', 'match' => 'directory'],
+                'tests/Unit/Scripts/example.php',
+            );
+        } finally {
+            if ($previous === false) {
+                putenv('PARALLEL_WORK_OWNERSHIP_ENGINE');
+            } else {
+                putenv('PARALLEL_WORK_OWNERSHIP_ENGINE=' . $previous);
+            }
+            unlink($link);
+            unlink($target);
+            rmdir($root);
+        }
+    }
+
     public function testPhpFailsClosedOnMalformedCanonicalEngineOutput(): void
     {
         $root = sys_get_temp_dir() . '/ownership-engine-' . bin2hex(random_bytes(8));
@@ -322,7 +350,9 @@ final class OwnershipPathRulesCliIntegrationTest extends TestCase
         $source = (string) file_get_contents(
             dirname(__DIR__, 3) . '/scripts/agent/lib/ParallelWorkOwnershipContract.php',
         );
-        self::assertStringContainsString('runCanonicalEngine', $source);
+        self::assertStringContainsString('OwnershipPathRuleEngineClient::execute', $source);
+        self::assertStringNotContainsString('proc_open', $source);
+        self::assertStringNotContainsString('runCanonicalEngine', $source);
         self::assertStringNotContainsString('private static function pathRuleCovers', $source);
         self::assertStringNotContainsString('private static function pathRulesOverlap', $source);
     }

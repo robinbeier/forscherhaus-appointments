@@ -166,7 +166,11 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         if args.runtime == "codex":
-            if args.materialize_root is not None or args.path is None:
+            if (
+                args.materialize_root is not None
+                or args.path is None
+                or args.expected_closure_sha256 is None
+            ):
                 raise AttestationError("Codex attestation arguments are invalid")
             print(
                 attest_codex(

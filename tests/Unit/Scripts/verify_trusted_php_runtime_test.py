@@ -695,6 +695,79 @@ class TrustedPhpRuntimeTest(unittest.TestCase):
             expected_closure_sha256="a" * 64,
         )
 
+    def test_cli_codex_rejects_missing_expected_closure(self):
+        os.chmod(self.php, 0o500)
+        binary_sha256 = hashlib.sha256(b"php-fixture").hexdigest()
+        closure_sha256 = verifier.closure_attestation(
+            "codex",
+            [os.path.realpath(self.php)],
+            [],
+            path_labels={os.path.realpath(self.php): "codex"},
+        )
+        self.write_reviewer_contract(
+            codex_binary_sha256_by_platform={"Darwin-arm64": binary_sha256},
+            codex_closure_sha256_by_platform={"Darwin-arm64": closure_sha256},
+            codex_dynamic_dependency_policy="system_sealed_only_non_system_dependency_rejected",
+        )
+
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with mock.patch.object(verifier, "dependency_closure", return_value=([os.path.realpath(self.php)], [])):
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                result = verifier.main(
+                    [
+                        "--runtime",
+                        "codex",
+                        "--contract",
+                        self.contract,
+                        "--platform",
+                        "Darwin-arm64",
+                        "--path",
+                        self.php,
+                    ]
+                )
+
+        self.assertEqual(2, result)
+        self.assertEqual("", stdout.getvalue())
+        self.assertIn("trusted codex runtime rejected:", stderr.getvalue())
+
+    def test_cli_codex_rejects_wrong_expected_closure(self):
+        os.chmod(self.php, 0o500)
+        binary_sha256 = hashlib.sha256(b"php-fixture").hexdigest()
+        closure_sha256 = verifier.closure_attestation(
+            "codex",
+            [os.path.realpath(self.php)],
+            [],
+            path_labels={os.path.realpath(self.php): "codex"},
+        )
+        self.write_reviewer_contract(
+            codex_binary_sha256_by_platform={"Darwin-arm64": binary_sha256},
+            codex_closure_sha256_by_platform={"Darwin-arm64": closure_sha256},
+            codex_dynamic_dependency_policy="system_sealed_only_non_system_dependency_rejected",
+        )
+
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            result = verifier.main(
+                [
+                    "--runtime",
+                    "codex",
+                    "--contract",
+                    self.contract,
+                    "--platform",
+                    "Darwin-arm64",
+                    "--path",
+                    self.php,
+                    "--expected-closure-sha256",
+                    "f" * 64,
+                ]
+            )
+
+        self.assertEqual(2, result)
+        self.assertEqual("", stdout.getvalue())
+        self.assertIn("Codex closure policy binding mismatch", stderr.getvalue())
+
     def test_cli_rejects_php_path_before_attestation(self):
         stderr = io.StringIO()
         with mock.patch.object(verifier, "attest") as attest:

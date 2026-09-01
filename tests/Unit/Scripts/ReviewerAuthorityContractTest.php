@@ -70,6 +70,34 @@ class ReviewerAuthorityContractTest extends TestCase
         );
     }
 
+    public function testReviewerPolicySnapshotGeneratorDoesNotMutateRuntimeSource(): void
+    {
+        $fixtureRoot = sys_get_temp_dir() . '/reviewer-snapshot-purity-' . bin2hex(random_bytes(8));
+        self::assertTrue(mkdir($fixtureRoot . '/scripts/agent/lib', 0700, true));
+        self::assertTrue(mkdir($fixtureRoot . '/.codex/contracts', 0700, true));
+        foreach (
+            [
+                'scripts/agent/generate_reviewer_policy_snapshot.php',
+                'scripts/agent/lib/ReadonlyReviewerContract.php',
+                '.codex/contracts/agent-workflow.json',
+            ]
+            as $path
+        ) {
+            self::assertTrue(copy($this->repoRoot . '/' . $path, $fixtureRoot . '/' . $path));
+        }
+        $runtimePath = $fixtureRoot . '/scripts/agent/lib/ReadonlyReviewerContract.php';
+        $runtimeSource = (string) file_get_contents($runtimePath);
+
+        try {
+            [$status, $stdout, $stderr] = $this->runPolicyGenerator([], $fixtureRoot);
+            self::assertSame(0, $status, $stdout . $stderr);
+            self::assertSame($runtimeSource, file_get_contents($runtimePath));
+            self::assertFileExists($fixtureRoot . '/scripts/agent/lib/GeneratedReviewerPolicy.php');
+        } finally {
+            $this->removeFixtureTree($fixtureRoot);
+        }
+    }
+
     public function testReviewerPolicySnapshotCheckFailsClosedForAnIsolatedStaleSnapshot(): void
     {
         $fixtureRoot = sys_get_temp_dir() . '/reviewer-policy-fixture-' . bin2hex(random_bytes(8));
@@ -112,6 +140,74 @@ class ReviewerAuthorityContractTest extends TestCase
         }
     }
 
+    public function testReviewerRuntimeRejectsAnIsolatedStaleGeneratedSnapshot(): void
+    {
+        $fixtureRoot = sys_get_temp_dir() . '/reviewer-runtime-stale-snapshot-' . bin2hex(random_bytes(8));
+        self::assertTrue(mkdir($fixtureRoot . '/scripts/agent/lib', 0700, true));
+        self::assertTrue(mkdir($fixtureRoot . '/.codex/contracts', 0700, true));
+        foreach (
+            [
+                'scripts/agent/lib/ReadonlyReviewerContract.php',
+                'scripts/agent/lib/ReadonlyReviewOutput.php',
+                'scripts/agent/lib/RepoPath.php',
+                '.codex/contracts/agent-workflow.json',
+            ]
+            as $path
+        ) {
+            self::assertTrue(copy($this->repoRoot . '/' . $path, $fixtureRoot . '/' . $path));
+        }
+        self::assertNotFalse(
+            file_put_contents(
+                $fixtureRoot . '/scripts/agent/lib/GeneratedReviewerPolicy.php',
+                "<?php\n\ndeclare(strict_types=1);\n\nreturn [];\n",
+            ),
+        );
+        $invoker = <<<'PHP'
+        <?php
+
+        declare(strict_types=1);
+
+        require_once __DIR__ . '/scripts/agent/lib/ReadonlyReviewerContract.php';
+
+        $contract = json_decode(
+            (string) file_get_contents(__DIR__ . '/.codex/contracts/agent-workflow.json'),
+            true,
+            512,
+            JSON_THROW_ON_ERROR,
+        );
+
+        try {
+            Forscherhaus\AgentHarness\ReadonlyReviewerContract::trustedBasePaths($contract['authority']['reviewer']);
+            fwrite(STDERR, "Stale reviewer snapshot was accepted.\n");
+            exit(0);
+        } catch (RuntimeException $exception) {
+            fwrite(STDERR, $exception->getMessage() . "\n");
+            exit(1);
+        }
+        PHP;
+        self::assertNotFalse(file_put_contents($fixtureRoot . '/invoke.php', $invoker));
+
+        try {
+            $process = proc_open(
+                [PHP_BINARY, $fixtureRoot . '/invoke.php'],
+                [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+                $pipes,
+                $fixtureRoot,
+            );
+            self::assertIsResource($process);
+            $stdout = (string) stream_get_contents($pipes[1]);
+            $stderr = (string) stream_get_contents($pipes[2]);
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+
+            self::assertSame(1, proc_close($process), $stdout . $stderr);
+            self::assertSame('', $stdout);
+            self::assertStringContainsString('Reviewer policy must match the generated exact-base snapshot.', $stderr);
+        } finally {
+            $this->removeFixtureTree($fixtureRoot);
+        }
+    }
+
     public function testReviewerPolicySnapshotRejectsTamperedPolicyBeforeInvocation(): void
     {
         $policy = $this->canonicalReviewerPolicy();
@@ -126,18 +222,14 @@ class ReviewerAuthorityContractTest extends TestCase
      * @param list<string> $arguments
      * @return array{int, string, string}
      */
-    private function runPolicyGenerator(array $arguments): array
+    private function runPolicyGenerator(array $arguments, ?string $root = null): array
     {
+        $root ??= $this->repoRoot;
         $command = array_merge(
-            [PHP_BINARY, $this->repoRoot . '/scripts/agent/generate_reviewer_policy_snapshot.php'],
+            [PHP_BINARY, $root . '/scripts/agent/generate_reviewer_policy_snapshot.php'],
             $arguments,
         );
-        $process = proc_open(
-            $command,
-            [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
-            $pipes,
-            $this->repoRoot,
-        );
+        $process = proc_open($command, [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']], $pipes, $root);
         self::assertIsResource($process);
         $stdout = (string) stream_get_contents($pipes[1]);
         $stderr = (string) stream_get_contents($pipes[2]);
@@ -408,6 +500,7 @@ class ReviewerAuthorityContractTest extends TestCase
                 'scripts/agent/lib/trusted_base_payload_runtime.sh',
                 'scripts/agent/lib/trusted_base_bootstrap_contract.py',
                 'scripts/agent/generate_reviewer_policy_snapshot.php',
+                'scripts/agent/generate_reviewer_runtime_attestation.php',
                 'scripts/agent/readonly-review-output.schema.json',
                 'scripts/agent/lib/trusted_runtime_primitives.py',
                 'scripts/agent/lib/ReadonlyReviewerModelPolicy.php',

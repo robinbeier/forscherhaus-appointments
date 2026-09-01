@@ -354,6 +354,8 @@ class AgentWorkflowContractTest extends TestCase
                 'scripts/agent/trusted_base_launcher.sh',
                 'scripts/agent/run_readonly_reviewer.sh',
                 'scripts/agent/lib/trusted_base_payload_runtime.sh',
+                'scripts/agent/generate_reviewer_policy_snapshot.php',
+                'scripts/agent/generate_reviewer_runtime_attestation.php',
                 'scripts/agent/verify_trusted_php_runtime.py',
                 'scripts/agent/lib/trusted_runtime_primitives.py',
                 'scripts/agent/lib/ReadonlyReviewerModelPolicy.php',
@@ -441,6 +443,7 @@ class AgentWorkflowContractTest extends TestCase
                 'scripts/agent/lib/trusted_base_bootstrap_contract.py',
                 'scripts/agent/verify_trusted_php_runtime.py',
                 'scripts/agent/lib/trusted_runtime_primitives.py',
+                'scripts/agent/lib/OwnershipPathRuleEngineClient.php',
                 'scripts/ci/ownership_path_rules.py',
             ]
             as $validatorBootstrapPath

@@ -203,14 +203,14 @@ contains no second normalization, match, or overlap implementation.
 The exact-base JSON contract is the sole declarative configuration authority
 for reviewer profiles, runtime pins, disabled features, and trusted paths. PHP
 requires both the deterministic committed snapshot and the complete code-side
-policy attestation produced by
-`php scripts/agent/generate_reviewer_policy_snapshot.php` to match that policy
-exactly. The generator owns a delimited PHP source block containing every
-top-level reviewer-policy key and its independent digest; `--check` detects a
-stale snapshot or source attestation without changing either file. Explicit
-disabled-feature floors remain hand-enforced. The generator itself is a trusted
-bootstrap path, so changing generation semantics also requires the external
-bootstrap-review path.
+policy attestation to match that policy exactly. Run
+`php scripts/agent/generate_reviewer_policy_snapshot.php` only for the snapshot
+and `php scripts/agent/generate_reviewer_runtime_attestation.php` only for the
+delimited PHP source block containing every top-level reviewer-policy key and
+its independent digest. Each generator has a side-effect-free `--check` mode;
+neither silently owns the other's artifact. Explicit disabled-feature floors
+remain hand-enforced. Both generators are trusted bootstrap paths, so changing
+either generation contract also requires the external bootstrap-review path.
 
 External review input is deliberately narrower than a checkout. It contains a
 zero-context UTF-8 patch (changed lines only), the normalized changed-path

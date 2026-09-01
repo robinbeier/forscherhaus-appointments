@@ -38,7 +38,7 @@ final class ReviewerPolicyAttestationGeneratorTest extends TestCase
             $reflection->getReflectionConstant('RUNTIME_BOUNDARY_ATTESTATION_SHA256')?->getValue(),
         );
 
-        [$status, $stdout, $stderr] = $this->runGenerator($this->repoRoot, ['--check']);
+        [$status, $stdout, $stderr] = $this->runRuntimeAttestationGenerator($this->repoRoot, ['--check']);
         self::assertSame(0, $status, $stdout . $stderr);
     }
 
@@ -49,9 +49,8 @@ final class ReviewerPolicyAttestationGeneratorTest extends TestCase
         self::assertTrue(mkdir($fixtureRoot . '/.codex/contracts', 0700, true));
         foreach (
             [
-                'scripts/agent/generate_reviewer_policy_snapshot.php',
+                'scripts/agent/generate_reviewer_runtime_attestation.php',
                 'scripts/agent/lib/ReadonlyReviewerContract.php',
-                'scripts/agent/lib/GeneratedReviewerPolicy.php',
                 '.codex/contracts/agent-workflow.json',
             ]
             as $path
@@ -70,16 +69,13 @@ final class ReviewerPolicyAttestationGeneratorTest extends TestCase
                 ),
             );
 
-            [$snapshotStatus, $snapshot, $snapshotError] = $this->runGenerator($fixtureRoot, ['--stdout']);
-            self::assertSame(0, $snapshotStatus, $snapshotError);
-            self::assertNotFalse(
-                file_put_contents($fixtureRoot . '/scripts/agent/lib/GeneratedReviewerPolicy.php', $snapshot),
-            );
             $staleRuntimeSource = (string) file_get_contents(
                 $fixtureRoot . '/scripts/agent/lib/ReadonlyReviewerContract.php',
             );
 
-            [$staleStatus, $staleOutput, $staleError] = $this->runGenerator($fixtureRoot, ['--check']);
+            [$staleStatus, $staleOutput, $staleError] = $this->runRuntimeAttestationGenerator($fixtureRoot, [
+                '--check',
+            ]);
             self::assertSame(1, $staleStatus, $staleOutput . $staleError);
             self::assertStringContainsString('runtime boundary attestation is stale', $staleError);
             self::assertSame(
@@ -87,13 +83,15 @@ final class ReviewerPolicyAttestationGeneratorTest extends TestCase
                 file_get_contents($fixtureRoot . '/scripts/agent/lib/ReadonlyReviewerContract.php'),
             );
 
-            [$updateStatus, $updateOutput, $updateError] = $this->runGenerator($fixtureRoot);
+            [$updateStatus, $updateOutput, $updateError] = $this->runRuntimeAttestationGenerator($fixtureRoot);
             self::assertSame(0, $updateStatus, $updateOutput . $updateError);
             self::assertStringContainsString(
                 "        'future_security_boundary',",
                 (string) file_get_contents($fixtureRoot . '/scripts/agent/lib/ReadonlyReviewerContract.php'),
             );
-            [$checkStatus, $checkOutput, $checkError] = $this->runGenerator($fixtureRoot, ['--check']);
+            [$checkStatus, $checkOutput, $checkError] = $this->runRuntimeAttestationGenerator($fixtureRoot, [
+                '--check',
+            ]);
             self::assertSame(0, $checkStatus, $checkOutput . $checkError);
         } finally {
             $this->removeFixtureTree($fixtureRoot);
@@ -118,10 +116,10 @@ final class ReviewerPolicyAttestationGeneratorTest extends TestCase
      * @param list<string> $arguments
      * @return array{int, string, string}
      */
-    private function runGenerator(string $root, array $arguments = []): array
+    private function runRuntimeAttestationGenerator(string $root, array $arguments = []): array
     {
         $process = proc_open(
-            array_merge([PHP_BINARY, $root . '/scripts/agent/generate_reviewer_policy_snapshot.php'], $arguments),
+            array_merge([PHP_BINARY, $root . '/scripts/agent/generate_reviewer_runtime_attestation.php'], $arguments),
             [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
             $pipes,
             $root,

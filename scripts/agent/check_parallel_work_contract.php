@@ -350,6 +350,7 @@ function verifyValidatorSource(string $gitBinary, string $validatorRoot, string 
             'scripts/agent/check_parallel_work_contract.php',
             'scripts/agent/verify_trusted_php_runtime.py',
             'scripts/agent/lib/ParallelWorkContract.php',
+            'scripts/agent/lib/OwnershipPathRuleEngineClient.php',
             'scripts/agent/lib/ParallelWorkOwnershipContract.php',
             'scripts/agent/lib/ParallelWorkPolicyContract.php',
             'scripts/agent/lib/RepoPath.php',
