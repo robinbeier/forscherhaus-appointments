@@ -287,6 +287,15 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertStringContainsString('validate-prompt-roles', $runner);
         self::assertStringNotContainsString('review-prompt.txt', $runner);
 
+        $sealedRootPosition = strpos($runner, 'cd "$sealed_root"');
+        $modelCatalogPosition = strpos($runner, 'model_catalog="$control_root/models.json"');
+        $promptRoleProbePosition = strpos($runner, "prompt_role_probe='UNTRUSTED-REVIEW-BUNDLE-PROBE'");
+        self::assertNotFalse($sealedRootPosition);
+        self::assertNotFalse($modelCatalogPosition);
+        self::assertNotFalse($promptRoleProbePosition);
+        self::assertTrue($sealedRootPosition < $modelCatalogPosition);
+        self::assertTrue($sealedRootPosition < $promptRoleProbePosition);
+
         self::assertStringStartsWith("(version 1)\n(deny default)\n", $seatbelt);
         self::assertStringContainsString(
             '(allow file-read* file-test-existence (subpath (param "SEALED_ROOT")))',

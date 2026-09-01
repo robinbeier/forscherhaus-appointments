@@ -644,6 +644,8 @@ reviewer_environment=(
     LANG="C.UTF-8"
 )
 
+cd "$sealed_root"
+
 model_catalog="$control_root/models.json"
 if ! seatbelt_run "${reviewer_environment[@]}" "$codex_bin" debug models --bundled 2>/dev/null \
     | trusted_php "$control_root/scripts/agent/readonly_review_bundle.php" model-catalog \
@@ -699,7 +701,6 @@ if seatbelt_run /bin/cat "$repo_root/AGENTS.md" >/dev/null 2>&1; then
     exit 1
 fi
 
-cd "$sealed_root"
 codex_stderr="$runtime_tmp/codex.stderr"
 set +e
 seatbelt_run "${reviewer_environment[@]}" "$codex_bin" --ask-for-approval never exec \
