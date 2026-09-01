@@ -51,7 +51,7 @@ return json_decode(
         "finding_text_policy": "bounded_privacy_safe_prose",
         "web_search": "disabled",
         "review_checkout": "deterministic_exact_commit_bundle",
-        "review_checkout_symlink_policy": "reject_all_tracked_symlinks",
+        "review_checkout_tree_entry_policy": "reject_tracked_symlinks_gitlinks_and_non_blob_leaf_entries",
         "review_bundle_parent_policy": "private_system_temp_random_directory",
         "review_bundle_contents": "zero_context_text_patch_manifest_changed_paths_and_trusted_policy",
         "review_bundle_manifest_policy": "deterministic_sha256_base_head_binding",
@@ -92,6 +92,7 @@ return json_decode(
         ],
         "policy_context_paths": [
             "AGENTS.md",
+            "WORKFLOW.md",
             "code_review.md"
         ],
         "profiles": {

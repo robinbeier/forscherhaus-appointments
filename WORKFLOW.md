@@ -189,17 +189,21 @@ before extraction, and never executed from the archive. Platforms absent from
 both runtime-source maps and the closure-pin map are deliberately unsupported.
 Ambient `PATH` never grants interpreter authority. The centralized ownership
 matcher is also Primary-owned because it defines shared lane and CI semantics.
+Worker ownership and Primary reservations both use the same explicit
+`path`/`match` objects; exact files are never inferred to be directories. PHP is
+only the fail-closed process adapter for the one exact-base Python matcher and
+contains no second normalization, match, or overlap implementation.
 
 The exact-base JSON contract is the sole declarative configuration authority
 for reviewer profiles, runtime pins, disabled features, and trusted paths. PHP
 requires the deterministic committed snapshot produced by
 `php scripts/agent/generate_reviewer_policy_snapshot.php` to match that policy
 exactly; `--check` detects a stale snapshot without changing it. Shell, PHP, and
-focused behavior tests independently enforce only the small set of
-security-critical runtime boundaries needed to fail closed. Descriptive policy
-prose is not mirrored in code or tests. Name the exact drifted boundary in
-diagnostics so coordinated contract updates remain reviewable instead of
-opaque.
+focused behavior tests also enforce an independent digest over the complete
+runtime-boundary projection plus explicit disabled-feature floors. Descriptive
+policy values are therefore not copied into PHP. A missing field is named and a
+changed projection reports its actual digest so an externally reviewed contract
+update remains reproducible.
 
 External review input is deliberately narrower than a checkout. It contains a
 zero-context UTF-8 patch (changed lines only), the normalized changed-path
@@ -208,7 +212,11 @@ Full base/head file blobs and unchanged hunk context are never materialized or
 serialized; unchanged hunk-section headings are stripped as well. Binary diffs
 stop before any model request because they cannot be reviewed without
 transmitting broader blob content. The serializer rejects every file outside
-its exact manifest-derived allowlist.
+its exact manifest-derived allowlist. Tracked symbolic links and gitlinks are
+rejected before bundle materialization because their target content is not part
+of that exact text-only evidence boundary. `AGENTS.md`, `WORKFLOW.md`, and
+`code_review.md` are trusted policy context, so changing any of them requires
+the external bootstrap-review path.
 
 Exactly one primary remains the external single writer for commits, pushes,
 PRs, checks, Linear, workpads, attestations, merges, and production actions.

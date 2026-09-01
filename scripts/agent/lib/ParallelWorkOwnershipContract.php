@@ -6,6 +6,12 @@ namespace Forscherhaus\AgentHarness;
 
 require_once __DIR__ . '/RepoPath.php';
 
+/**
+ * Fail-closed JSON transport adapter for the one canonical Python ownership
+ * engine. This class intentionally implements no path normalization, matching,
+ * or overlap semantics; every such decision is returned by the exact-base
+ * `scripts/ci/ownership_path_rules.py` process and schema-checked here.
+ */
 final class ParallelWorkOwnershipContract
 {
     /**

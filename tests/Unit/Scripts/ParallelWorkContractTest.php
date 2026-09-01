@@ -310,6 +310,28 @@ class ParallelWorkContractTest extends TestCase
         );
     }
 
+    public function testRejectsPrimaryOwnedExactFile(): void
+    {
+        $manifest = $this->validManifest();
+        $manifest['lanes'][0]['ownership'] = [$this->pathRule('AGENTS.md', 'exact_file')];
+
+        self::assertContains(
+            'primary_owned_path:0:AGENTS.md',
+            ParallelWorkContract::validate($manifest, $this->policy, $this->ownershipMap),
+        );
+    }
+
+    public function testPrimaryOwnedExactFileDoesNotReserveTextualDescendants(): void
+    {
+        $manifest = $this->validManifest();
+        $manifest['lanes'][0]['ownership'] = [$this->pathRule('AGENTS.md/examples')];
+
+        self::assertNotContains(
+            'primary_owned_path:0:AGENTS.md',
+            ParallelWorkContract::validate($manifest, $this->policy, $this->ownershipMap),
+        );
+    }
+
     public function testRequiresExplicitPrimaryApprovalForCanonicalSingleOwnerComponent(): void
     {
         $manifest = $this->validManifest();

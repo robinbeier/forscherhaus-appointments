@@ -4,15 +4,13 @@ declare(strict_types=1);
 
 namespace Forscherhaus\AgentHarness;
 
-require_once __DIR__ . '/RepoPath.php';
-
 final class ParallelWorkPolicyContract
 {
     /**
      * @param array<string, mixed> $policy
      * @return array{
      *     errors: list<string>,
-     *     primary_owned_path_prefixes: list<string>,
+     *     primary_owned_path_rules: list<mixed>,
      *     max_local_writer_lanes: int|null,
      *     writer_role: string|null
      * }
@@ -46,18 +44,14 @@ final class ParallelWorkPolicyContract
             }
         }
 
-        $primaryOwnedPrefixes = $policy['primary_owned_path_prefixes'] ?? null;
-        if (!is_array($primaryOwnedPrefixes) || !array_is_list($primaryOwnedPrefixes)) {
-            $errors[] = 'invalid_policy_primary_owned_path_prefixes';
-            $primaryOwnedPrefixes = [];
-        }
-        $normalizedPrefixes = [];
-        foreach ($primaryOwnedPrefixes as $primaryOwnedPrefix) {
-            if (!is_string($primaryOwnedPrefix) || !RepoPath::isNormalized($primaryOwnedPrefix)) {
-                $errors[] = 'invalid_policy_primary_owned_path_prefix';
-                continue;
-            }
-            $normalizedPrefixes[] = $primaryOwnedPrefix;
+        $primaryOwnedPathRules = $policy['primary_owned_path_rules'] ?? null;
+        if (
+            !is_array($primaryOwnedPathRules) ||
+            !array_is_list($primaryOwnedPathRules) ||
+            $primaryOwnedPathRules === []
+        ) {
+            $errors[] = 'invalid_policy_primary_owned_path_rules';
+            $primaryOwnedPathRules = [];
         }
 
         $maximumWriterLanes = $policy['max_local_writer_lanes'] ?? null;
@@ -74,7 +68,7 @@ final class ParallelWorkPolicyContract
 
         return [
             'errors' => array_values(array_unique($errors)),
-            'primary_owned_path_prefixes' => $normalizedPrefixes,
+            'primary_owned_path_rules' => $primaryOwnedPathRules,
             'max_local_writer_lanes' => $maximumWriterLanes,
             'writer_role' => $writerRole,
         ];

@@ -60,7 +60,17 @@ final class ParallelWorkContract
         $approvedComponentIds = ParallelWorkOwnershipContract::readApprovedComponentIds($manifest, $errors);
         $canonicalComponents = ParallelWorkOwnershipContract::readCanonicalComponents($ownershipMap, $errors);
         $requiredComponentIds = [];
-        $primaryOwnedPrefixes = $policyInspection['primary_owned_path_prefixes'];
+        $primaryOwnedPathRules = [];
+        foreach ($policyInspection['primary_owned_path_rules'] as $ruleIndex => $primaryOwnedPathRule) {
+            $pathRule = ParallelWorkOwnershipContract::readPathRule(
+                $primaryOwnedPathRule,
+                $errors,
+                'invalid_policy_primary_owned_path_rule:' . $ruleIndex,
+            );
+            if ($pathRule !== null) {
+                $primaryOwnedPathRules[] = $pathRule;
+            }
+        }
 
         $lanes = $manifest['lanes'] ?? null;
         if (!is_array($lanes) || !array_is_list($lanes)) {
@@ -119,11 +129,16 @@ final class ParallelWorkContract
                 $path = $pathRule['path'];
                 $match = $pathRule['match'];
 
-                foreach ($primaryOwnedPrefixes as $primaryOwnedPrefix) {
+                foreach ($primaryOwnedPathRules as $primaryOwnedPathRule) {
                     if (
-                        ParallelWorkOwnershipContract::pathRulesOverlap($path, $match, $primaryOwnedPrefix, 'directory')
+                        ParallelWorkOwnershipContract::pathRulesOverlap(
+                            $path,
+                            $match,
+                            $primaryOwnedPathRule['path'],
+                            $primaryOwnedPathRule['match'],
+                        )
                     ) {
-                        $errors[] = 'primary_owned_path:' . $index . ':' . $primaryOwnedPrefix;
+                        $errors[] = 'primary_owned_path:' . $index . ':' . $primaryOwnedPathRule['path'];
                     }
                 }
 

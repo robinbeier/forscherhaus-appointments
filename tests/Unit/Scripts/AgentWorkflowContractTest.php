@@ -255,8 +255,8 @@ class AgentWorkflowContractTest extends TestCase
             $contract['authority']['reviewer']['review_checkout'] ?? null,
         );
         self::assertSame(
-            'reject_all_tracked_symlinks',
-            $contract['authority']['reviewer']['review_checkout_symlink_policy'] ?? null,
+            'reject_tracked_symlinks_gitlinks_and_non_blob_leaf_entries',
+            $contract['authority']['reviewer']['review_checkout_tree_entry_policy'] ?? null,
         );
         self::assertSame(
             'private_system_temp_random_directory',
@@ -361,7 +361,7 @@ class AgentWorkflowContractTest extends TestCase
             self::assertContains($bootstrapPath, $bootstrapPaths);
         }
         self::assertSame($bootstrapPaths, array_values(array_unique($bootstrapPaths)));
-        self::assertSame(['AGENTS.md', 'code_review.md'], $policyContextPaths);
+        self::assertSame(['AGENTS.md', 'WORKFLOW.md', 'code_review.md'], $policyContextPaths);
         self::assertArrayNotHasKey('trusted_base_paths', $contract['authority']['reviewer']);
         $profiles = $contract['authority']['reviewer']['profiles'] ?? null;
         self::assertIsArray($profiles);
@@ -488,25 +488,25 @@ class AgentWorkflowContractTest extends TestCase
         );
         self::assertSame(
             [
-                '.codex/agents/reviewer-correctness.toml',
-                '.codex/agents/reviewer-design.toml',
-                '.codex/agents/reviewer-tests.toml',
-                '.codex/agents/implementation-worker.toml',
-                '.codex/config.toml',
-                '.codex/contracts',
-                '.codex/skills/land',
-                '.codex/skills/push',
-                '.github/workflows',
-                'AGENTS.md',
-                'WORKFLOW.md',
-                'code_review.md',
-                'docs/maps/component_ownership_map.json',
-                'scripts/agent',
-                'scripts/ci/ownership_path_rules.py',
-                'scripts/ci/exact_head_mergegate.php',
-                'scripts/ci/lib/ExactHeadMergegate.php',
+                ['path' => '.codex/agents/reviewer-correctness.toml', 'match' => 'exact_file'],
+                ['path' => '.codex/agents/reviewer-design.toml', 'match' => 'exact_file'],
+                ['path' => '.codex/agents/reviewer-tests.toml', 'match' => 'exact_file'],
+                ['path' => '.codex/agents/implementation-worker.toml', 'match' => 'exact_file'],
+                ['path' => '.codex/config.toml', 'match' => 'exact_file'],
+                ['path' => '.codex/contracts', 'match' => 'directory'],
+                ['path' => '.codex/skills/land', 'match' => 'directory'],
+                ['path' => '.codex/skills/push', 'match' => 'directory'],
+                ['path' => '.github/workflows', 'match' => 'directory'],
+                ['path' => 'AGENTS.md', 'match' => 'exact_file'],
+                ['path' => 'WORKFLOW.md', 'match' => 'exact_file'],
+                ['path' => 'code_review.md', 'match' => 'exact_file'],
+                ['path' => 'docs/maps/component_ownership_map.json', 'match' => 'exact_file'],
+                ['path' => 'scripts/agent', 'match' => 'directory'],
+                ['path' => 'scripts/ci/ownership_path_rules.py', 'match' => 'exact_file'],
+                ['path' => 'scripts/ci/exact_head_mergegate.php', 'match' => 'exact_file'],
+                ['path' => 'scripts/ci/lib/ExactHeadMergegate.php', 'match' => 'exact_file'],
             ],
-            $contract['parallel_work']['primary_owned_path_prefixes'] ?? null,
+            $contract['parallel_work']['primary_owned_path_rules'] ?? null,
         );
         self::assertTrue($contract['land']['requires_exact_head'] ?? null);
         self::assertSame(

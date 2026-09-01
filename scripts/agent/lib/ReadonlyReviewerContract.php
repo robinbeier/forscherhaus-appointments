@@ -9,6 +9,78 @@ require_once __DIR__ . '/ReadonlyReviewOutput.php';
 
 final class ReadonlyReviewerContract
 {
+    /**
+     * Every independently attested boundary field. Values remain human-edited
+     * only in the JSON authority; this key projection plus the digest keeps an
+     * independent fail-closed code attestation without duplicating the policy.
+     * Updating the digest requires the external bootstrap-review path.
+     *
+     * @var list<string>
+     */
+    private const RUNTIME_BOUNDARY_ATTESTATION_KEYS = [
+        'invocation',
+        'payload_path',
+        'invocation_source',
+        'bootstrap_materialization_policy',
+        'launcher_materialization_guard',
+        'trust_anchor',
+        'review_base_ref',
+        'review_base_remote_url',
+        'review_base_policy',
+        'review_base_remote_transport',
+        'requires_base_runner',
+        'direct_checkout_execution',
+        'runtime_configuration_change_policy',
+        'shell_runtime_configuration',
+        'transport_environment_policy',
+        'temporary_directory_policy',
+        'php_runtime_configuration',
+        'git_runtime_configuration',
+        'git_lazy_fetch',
+        'tool_path_policy',
+        'repository_root_policy',
+        'codex_identity_check',
+        'codex_version_policy',
+        'codex_binary_materialization_policy',
+        'codex_dynamic_dependency_policy',
+        'codex_authentication_source',
+        'codex_authentication_home_policy',
+        'codex_api_key_override_policy',
+        'finding_path_policy',
+        'finding_text_policy',
+        'web_search',
+        'review_checkout',
+        'review_checkout_tree_entry_policy',
+        'review_bundle_parent_policy',
+        'review_bundle_contents',
+        'review_bundle_manifest_policy',
+        'review_bundle_context_policy',
+        'review_bundle_hunk_header_policy',
+        'review_bundle_binary_policy',
+        'review_bundle_file_allowlist',
+        'review_instruction_policy',
+        'prompt_role_preflight',
+        'review_input_policy',
+        'review_original_worktree_access',
+        'isolation_platform',
+        'isolation_profile',
+        'isolation_preflight',
+        'model_tool_surface',
+        'codex_sandbox_mode',
+        'codex_approval_policy',
+        'output_schema_path',
+        'filesystem',
+        'network',
+        'approval_policy',
+        'inherits_user_config',
+        'inherits_execpolicy_rules',
+        'output_binds_base_sha',
+        'allows_external_connectors',
+        'allows_delegation',
+    ];
+
+    private const RUNTIME_BOUNDARY_ATTESTATION_SHA256 = '63c27baa5472e4bb4663030f8ac2c442307a4e5ddb53f4dfe7f67f4fda4a86d5';
+
     /** @var list<string> */
     private const MINIMUM_DISABLED_FEATURES = [
         'apps',
@@ -264,76 +336,20 @@ final class ReadonlyReviewerContract
     /** @param array<string, mixed> $reviewerPolicy */
     private static function assertRuntimeBoundary(array $reviewerPolicy): void
     {
-        $expected = [
-            'invocation' => 'scripts/agent/trusted_base_launcher.sh',
-            'payload_path' => 'scripts/agent/run_readonly_reviewer.sh',
-            'invocation_source' =>
-                'external_system_git_materialized_exact_base_launcher_then_private_exact_base_payload',
-            'bootstrap_materialization_policy' =>
-                'absolute_system_git_clean_environment_private_blob_verification_before_any_repository_code_execution',
-            'launcher_materialization_guard' => 'required_external_exact_blob_path_and_marker',
-            'trust_anchor' => 'review_base_commit',
-            'review_base_ref' => 'refs/remotes/origin/main',
-            'review_base_remote_url' => 'https://github.com/robinbeier/forscherhaus-appointments.git',
-            'review_base_policy' => 'exact_merge_base_with_live_pinned_public_remote_main_and_matching_tracking_ref',
-            'review_base_remote_transport' => 'unauthenticated_read_only_ls_remote_clean_environment',
-            'requires_base_runner' => true,
-            'direct_checkout_execution' => 'forbidden_fail_closed',
-            'runtime_configuration_change_policy' => 'external_bootstrap_review',
-            'shell_runtime_configuration' => 'root_owned_system_git_then_clean_bash_environment',
-            'transport_environment_policy' => 'fixed_direct_no_ambient_proxy_or_endpoint_override',
-            'temporary_directory_policy' => 'private_system_temp_bundle_and_internal_runtime_only',
-            'php_runtime_configuration' => 'exact_base_attested_binary_and_dynamic_closure_ignore_ambient_ini',
-            'git_runtime_configuration' => 'ignore_ambient_and_disable_helpers',
-            'git_lazy_fetch' => 'disabled',
-            'tool_path_policy' => 'explicit_primary_codex_with_verified_private_copy',
-            'repository_root_policy' => 'canonical_physical_root',
-            'codex_identity_check' => 'official_release_binary_sha256_platform_version_and_dynamic_closure',
-            'codex_version_policy' => 'exact_machine_pinned_version_with_bounded_build_metadata',
-            'codex_binary_materialization_policy' =>
-                'private_copy_rehashed_and_closure_attested_before_first_execution',
-            'codex_dynamic_dependency_policy' => 'system_sealed_only_non_system_dependency_rejected',
-            'codex_authentication_source' => 'host_codex_login_without_connector_authority',
-            'codex_authentication_home_policy' => 'isolated_runtime_home_read_only_link_to_canonical_auth_file',
-            'codex_api_key_override_policy' => 'reject_ambient_api_keys',
-            'finding_path_policy' => 'normalized_exact_diff_paths',
-            'finding_text_policy' => 'bounded_privacy_safe_prose',
-            'web_search' => 'disabled',
-            'review_checkout' => 'deterministic_exact_commit_bundle',
-            'review_checkout_symlink_policy' => 'reject_all_tracked_symlinks',
-            'review_bundle_parent_policy' => 'private_system_temp_random_directory',
-            'review_bundle_contents' => 'zero_context_text_patch_manifest_changed_paths_and_trusted_policy',
-            'review_bundle_manifest_policy' => 'deterministic_sha256_base_head_binding',
-            'review_bundle_context_policy' => 'zero_context_changed_lines_only_no_full_base_or_head_blobs',
-            'review_bundle_hunk_header_policy' => 'strip_unchanged_section_text_before_model_input',
-            'review_bundle_binary_policy' => 'reject_before_model_input',
-            'review_bundle_file_allowlist' => 'manifest_patch_changed_paths_and_trusted_policy_only',
-            'review_instruction_policy' =>
-                'trusted_base_policy_as_developer_instructions_untrusted_bundle_as_user_input',
-            'prompt_role_preflight' => 'pinned_cli_requires_developer_policy_and_user_bundle_channels',
-            'review_input_policy' => 'bounded_deterministic_json_serialization_as_untrusted_user_stdin',
-            'review_original_worktree_access' => 'not_model_visible',
-            'isolation_platform' => 'darwin_seatbelt_fail_closed_elsewhere',
-            'isolation_profile' => 'default_deny_runtime_allowlist_exact_bundle_and_auth_read_only',
-            'isolation_preflight' =>
-                'bundle_readable_foreign_temp_and_original_worktree_denied_exact_auth_file_only_no_home_write',
-            'model_tool_surface' => 'derived_exact_release_catalog_without_shell_patch_image_search_or_external_tools',
-            'codex_sandbox_mode' => 'read-only',
-            'codex_approval_policy' => 'never',
-            'output_schema_path' => 'scripts/agent/readonly-review-output.schema.json',
-            'filesystem' => 'outer_seatbelt_default_deny_exact_bundle_read_only_runtime_scratch_only',
-            'network' => 'outer_codex_transport_no_model_network_tool_or_external_credentials',
-            'approval_policy' => 'outer_seatbelt_plus_codex_read_only_no_model_tools',
-            'inherits_user_config' => false,
-            'inherits_execpolicy_rules' => false,
-            'output_binds_base_sha' => true,
-            'allows_external_connectors' => false,
-            'allows_delegation' => false,
-        ];
-        foreach ($expected as $key => $value) {
-            if (($reviewerPolicy[$key] ?? null) !== $value) {
-                throw new \RuntimeException('Reviewer runtime boundary is invalid: ' . $key . '.');
+        $attestedBoundary = [];
+        foreach (self::RUNTIME_BOUNDARY_ATTESTATION_KEYS as $key) {
+            if (!array_key_exists($key, $reviewerPolicy)) {
+                throw new \RuntimeException('Reviewer runtime boundary is missing: ' . $key . '.');
             }
+            $attestedBoundary[$key] = $reviewerPolicy[$key];
+        }
+        ksort($attestedBoundary, SORT_STRING);
+        $encodedBoundary = json_encode($attestedBoundary, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+        $actualBoundarySha256 = hash('sha256', $encodedBoundary);
+        if (!hash_equals(self::RUNTIME_BOUNDARY_ATTESTATION_SHA256, $actualBoundarySha256)) {
+            throw new \RuntimeException(
+                'Reviewer runtime boundary attestation is invalid: actual sha256 ' . $actualBoundarySha256 . '.',
+            );
         }
         $version = $reviewerPolicy['codex_version'] ?? null;
         if (

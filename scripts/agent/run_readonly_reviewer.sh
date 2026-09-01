@@ -176,7 +176,7 @@ if ! trusted_git diff --quiet --no-ext-diff --no-textconv "$base_sha" "$head_sha
     exit 1
 fi
 
-assert_tree_has_no_symlinks() {
+assert_tree_has_only_regular_blobs() {
     local tree_sha="$1"
     trusted_git ls-tree -r -z "$tree_sha" | trusted_python -c '
 import re
@@ -186,13 +186,13 @@ raw = sys.stdin.buffer.read()
 if raw and not raw.endswith(b"\0"):
     raise SystemExit(1)
 for entry in ([] if not raw else raw[:-1].split(b"\0")):
-    match = re.match(rb"^([0-7]{6}) (?:blob|commit) [0-9a-f]{40,64}\t", entry, re.DOTALL)
+    match = re.match(rb"^([0-7]{6}) blob [0-9a-f]{40,64}\t", entry, re.DOTALL)
     if match is None or match.group(1) == b"120000":
         raise SystemExit(1)
 '
 }
-if ! assert_tree_has_no_symlinks "$base_sha" || ! assert_tree_has_no_symlinks "$head_sha"; then
-    echo "Reviewer exact commit tree contains a tracked symlink or invalid entry." >&2
+if ! assert_tree_has_only_regular_blobs "$base_sha" || ! assert_tree_has_only_regular_blobs "$head_sha"; then
+    echo "Reviewer exact commit tree contains a tracked symlink, gitlink, or invalid entry." >&2
     exit 1
 fi
 

@@ -125,7 +125,7 @@
             "finding_text_policy": "bounded_privacy_safe_prose",
             "web_search": "disabled",
             "review_checkout": "deterministic_exact_commit_bundle",
-            "review_checkout_symlink_policy": "reject_all_tracked_symlinks",
+            "review_checkout_tree_entry_policy": "reject_tracked_symlinks_gitlinks_and_non_blob_leaf_entries",
             "review_bundle_parent_policy": "private_system_temp_random_directory",
             "review_bundle_contents": "zero_context_text_patch_manifest_changed_paths_and_trusted_policy",
             "review_bundle_manifest_policy": "deterministic_sha256_base_head_binding",
@@ -164,7 +164,7 @@
                 "scripts/agent/lib/readonly_reviewer_bundle_runtime.sh",
                 "scripts/agent/lib/readonly_reviewer_isolated_runtime.sh"
             ],
-            "policy_context_paths": ["AGENTS.md", "code_review.md"],
+            "policy_context_paths": ["AGENTS.md", "WORKFLOW.md", "code_review.md"],
             "profiles": {
                 "correctness_security": {
                     "instructions": ".codex/agents/reviewer-correctness.toml",
@@ -283,24 +283,24 @@
         "ownership_map_schema_version": 3,
         "ownership_rule_format": "explicit_path_and_match_objects",
         "ownership_rule_contract": ".codex/contracts/ownership-path-rules.json",
-        "primary_owned_path_prefixes": [
-            ".codex/agents/reviewer-correctness.toml",
-            ".codex/agents/reviewer-design.toml",
-            ".codex/agents/reviewer-tests.toml",
-            ".codex/agents/implementation-worker.toml",
-            ".codex/config.toml",
-            ".codex/contracts",
-            ".codex/skills/land",
-            ".codex/skills/push",
-            ".github/workflows",
-            "AGENTS.md",
-            "WORKFLOW.md",
-            "code_review.md",
-            "docs/maps/component_ownership_map.json",
-            "scripts/agent",
-            "scripts/ci/ownership_path_rules.py",
-            "scripts/ci/exact_head_mergegate.php",
-            "scripts/ci/lib/ExactHeadMergegate.php"
+        "primary_owned_path_rules": [
+            {"path": ".codex/agents/reviewer-correctness.toml", "match": "exact_file"},
+            {"path": ".codex/agents/reviewer-design.toml", "match": "exact_file"},
+            {"path": ".codex/agents/reviewer-tests.toml", "match": "exact_file"},
+            {"path": ".codex/agents/implementation-worker.toml", "match": "exact_file"},
+            {"path": ".codex/config.toml", "match": "exact_file"},
+            {"path": ".codex/contracts", "match": "directory"},
+            {"path": ".codex/skills/land", "match": "directory"},
+            {"path": ".codex/skills/push", "match": "directory"},
+            {"path": ".github/workflows", "match": "directory"},
+            {"path": "AGENTS.md", "match": "exact_file"},
+            {"path": "WORKFLOW.md", "match": "exact_file"},
+            {"path": "code_review.md", "match": "exact_file"},
+            {"path": "docs/maps/component_ownership_map.json", "match": "exact_file"},
+            {"path": "scripts/agent", "match": "directory"},
+            {"path": "scripts/ci/ownership_path_rules.py", "match": "exact_file"},
+            {"path": "scripts/ci/exact_head_mergegate.php", "match": "exact_file"},
+            {"path": "scripts/ci/lib/ExactHeadMergegate.php", "match": "exact_file"}
         ]
     },
     "land": {

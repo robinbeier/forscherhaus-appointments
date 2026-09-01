@@ -70,6 +70,48 @@ class ReviewerAuthorityContractTest extends TestCase
         );
     }
 
+    public function testReviewerPolicySnapshotCheckFailsClosedForAnIsolatedStaleSnapshot(): void
+    {
+        $fixtureRoot = sys_get_temp_dir() . '/reviewer-policy-fixture-' . bin2hex(random_bytes(8));
+        self::assertTrue(mkdir($fixtureRoot . '/scripts/agent', 0700, true));
+        self::assertTrue(mkdir($fixtureRoot . '/.codex/contracts', 0700, true));
+
+        $generator = $this->repoRoot . '/scripts/agent/generate_reviewer_policy_snapshot.php';
+        $fixtureGenerator = $fixtureRoot . '/scripts/agent/generate_reviewer_policy_snapshot.php';
+        self::assertTrue(copy($generator, $fixtureGenerator));
+        self::assertTrue(
+            file_put_contents(
+                $fixtureRoot . '/.codex/contracts/agent-workflow.json',
+                json_encode(['authority' => ['reviewer' => ['profiles' => []]]], JSON_THROW_ON_ERROR),
+            ) !== false,
+        );
+        $snapshot = $fixtureRoot . '/scripts/agent/lib/GeneratedReviewerPolicy.php';
+        self::assertTrue(mkdir(dirname($snapshot), 0700, true));
+        $staleContent = "<?php\nreturn [];\n";
+        self::assertSame(strlen($staleContent), file_put_contents($snapshot, $staleContent));
+
+        try {
+            $process = proc_open(
+                [PHP_BINARY, $fixtureGenerator, '--check'],
+                [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+                $pipes,
+                $fixtureRoot,
+            );
+            self::assertIsResource($process);
+            $stdout = (string) stream_get_contents($pipes[1]);
+            $stderr = (string) stream_get_contents($pipes[2]);
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+
+            self::assertSame(1, proc_close($process), $stdout . $stderr);
+            self::assertSame('', $stdout);
+            self::assertStringContainsString('Generated reviewer policy snapshot is stale.', $stderr);
+            self::assertSame($staleContent, file_get_contents($snapshot));
+        } finally {
+            $this->removeFixtureTree($fixtureRoot);
+        }
+    }
+
     public function testReviewerPolicySnapshotRejectsTamperedPolicyBeforeInvocation(): void
     {
         $policy = $this->canonicalReviewerPolicy();
@@ -102,6 +144,27 @@ class ReviewerAuthorityContractTest extends TestCase
         fclose($pipes[1]);
         fclose($pipes[2]);
         return [proc_close($process), $stdout, $stderr];
+    }
+
+    private function removeFixtureTree(string $path): void
+    {
+        if (!is_dir($path)) {
+            return;
+        }
+        $entries = scandir($path);
+        self::assertIsArray($entries);
+        foreach ($entries as $entry) {
+            if ($entry === '.' || $entry === '..') {
+                continue;
+            }
+            $entryPath = $path . '/' . $entry;
+            if (is_dir($entryPath) && !is_link($entryPath)) {
+                $this->removeFixtureTree($entryPath);
+            } else {
+                self::assertTrue(unlink($entryPath));
+            }
+        }
+        self::assertTrue(rmdir($path));
     }
 
     public function testMachineContractDeniesEveryExternalReviewerMutation(): void
@@ -760,13 +823,47 @@ class ReviewerAuthorityContractTest extends TestCase
 
             self::assertSame(1, $exitCode);
             self::assertSame('', $stdout);
-            self::assertSame("Reviewer exact commit tree contains a tracked symlink or invalid entry.\n", $stderr);
+            self::assertSame(
+                "Reviewer exact commit tree contains a tracked symlink, gitlink, or invalid entry.\n",
+                $stderr,
+            );
             self::assertFileDoesNotExist($executionMarker);
         } finally {
             $this->removeRunnerFixture($fixture);
             if (is_file($executionMarker)) {
                 unlink($executionMarker);
             }
+        }
+    }
+
+    public function testRunnerRejectsATrackedGitlinkBeforeAnyModelExecution(): void
+    {
+        $executionMarker = sys_get_temp_dir() . '/reviewer-gitlink-executed-' . bin2hex(random_bytes(8));
+        $fixture = $this->runnerFixture(
+            'reviewer-tracked-gitlink',
+            "#!/bin/sh\n: > " . escapeshellarg($executionMarker) . "\nexit 0\n",
+            'codex',
+        );
+
+        try {
+            $submoduleRoot = $fixture['root'] . '/tracked-submodule';
+            $this->runGitCommand(['clone', '-q', '--no-hardlinks', $fixture['root'], $submoduleRoot], null);
+            $this->runGitCommand(['add', 'tracked-submodule'], $fixture['root']);
+            $this->commitRunnerFixture($fixture['root'], 'Add tracked gitlink fixture');
+            $head = $this->runGitCommand(['rev-parse', 'HEAD'], $fixture['root']);
+
+            [$exitCode, $stdout, $stderr] = $this->runRunnerFixture($fixture, $fixture['base'], $head);
+
+            self::assertSame(1, $exitCode);
+            self::assertSame('', $stdout);
+            self::assertSame(
+                "Reviewer exact commit tree contains a tracked symlink, gitlink, or invalid entry.\n",
+                $stderr,
+            );
+            self::assertFileDoesNotExist($executionMarker);
+        } finally {
+            $this->removeRunnerFixture($fixture);
+            @unlink($executionMarker);
         }
     }
 
@@ -785,6 +882,36 @@ class ReviewerAuthorityContractTest extends TestCase
             self::assertNotFalse(file_put_contents($role, "developer_instructions = \"weakened\"\n"));
             $this->runGitCommand(['add', '--all'], $fixture['root']);
             $this->commitRunnerFixture($fixture['root'], 'Change trusted reviewer policy');
+            $head = $this->runGitCommand(['rev-parse', 'HEAD'], $fixture['root']);
+
+            [$exitCode, $stdout, $stderr] = $this->runRunnerFixture($fixture, $fixture['base'], $head);
+
+            self::assertSame(1, $exitCode);
+            self::assertSame('', $stdout);
+            self::assertSame(
+                "Reviewer runtime configuration changed; external bootstrap review is required.\n",
+                $stderr,
+            );
+            self::assertFileDoesNotExist($executionMarker);
+        } finally {
+            $this->removeRunnerFixture($fixture);
+            @unlink($executionMarker);
+        }
+    }
+
+    public function testRunnerRequiresExternalBootstrapReviewForWorkflowPolicyChanges(): void
+    {
+        $executionMarker = sys_get_temp_dir() . '/reviewer-workflow-executed-' . bin2hex(random_bytes(8));
+        $fixture = $this->runnerFixture(
+            'reviewer-workflow-drift',
+            "#!/bin/sh\n: > " . escapeshellarg($executionMarker) . "\nexit 0\n",
+            'codex',
+        );
+
+        try {
+            self::assertNotFalse(file_put_contents($fixture['root'] . '/WORKFLOW.md', "weakened review policy\n"));
+            $this->runGitCommand(['add', '--all'], $fixture['root']);
+            $this->commitRunnerFixture($fixture['root'], 'Change workflow review policy');
             $head = $this->runGitCommand(['rev-parse', 'HEAD'], $fixture['root']);
 
             [$exitCode, $stdout, $stderr] = $this->runRunnerFixture($fixture, $fixture['base'], $head);
@@ -1412,13 +1539,13 @@ class ReviewerAuthorityContractTest extends TestCase
         ReadonlyReviewerContract::trustedBasePaths($policy);
     }
 
-    public function testRuntimeBoundaryDiagnosticNamesTheDriftedKey(): void
+    public function testRuntimeBoundaryAttestationRejectsDriftedPolicy(): void
     {
         $policy = $this->canonicalReviewerPolicy();
         $policy['invocation_source'] = 'permissive-checkout-entrypoint';
 
         $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('runtime boundary is invalid: invocation_source');
+        $this->expectExceptionMessage('runtime boundary attestation is invalid: actual sha256');
         ReadonlyReviewerContract::trustedBasePaths($policy);
     }
 

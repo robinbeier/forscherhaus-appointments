@@ -276,7 +276,9 @@ class ParallelWorkContractCliTest extends TestCase
     public function testCliRejectsSharedOwnershipPathMatcherAsPrimaryOwned(): void
     {
         $path = 'scripts/ci/ownership_path_rules.py';
-        $manifestPath = $this->writeJsonFixture('shared-path-matcher', $this->manifestForPath($path));
+        $manifest = $this->manifestForPath($path);
+        $manifest['lanes'][0]['ownership'][0]['match'] = 'exact_file';
+        $manifestPath = $this->writeJsonFixture('shared-path-matcher', $manifest);
 
         [$exitCode, $stdout, $stderr] = $this->runCli(['--manifest=' . $manifestPath]);
 
@@ -297,7 +299,7 @@ class ParallelWorkContractCliTest extends TestCase
             JSON_THROW_ON_ERROR,
         );
         self::assertIsArray($workingContract);
-        $workingContract['parallel_work']['primary_owned_path_prefixes'] = [];
+        $workingContract['parallel_work']['primary_owned_path_rules'] = [];
         self::assertNotFalse(
             file_put_contents(
                 $this->repoRoot . '/.codex/contracts/agent-workflow.json',
@@ -328,7 +330,7 @@ class ParallelWorkContractCliTest extends TestCase
             JSON_THROW_ON_ERROR,
         );
         self::assertIsArray($replacementContract);
-        $replacementContract['parallel_work']['primary_owned_path_prefixes'] = [];
+        $replacementContract['parallel_work']['primary_owned_path_rules'] = [];
         self::assertNotFalse(
             file_put_contents(
                 $this->repoRoot . '/.codex/contracts/agent-workflow.json',
