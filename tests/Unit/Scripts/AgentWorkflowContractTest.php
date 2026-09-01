@@ -89,10 +89,21 @@ class AgentWorkflowContractTest extends TestCase
         );
         self::assertSame('/usr/bin/python3', $contract['authority']['interpreter_trust']['system_python'] ?? null);
         self::assertSame(['-I', '-B'], $contract['authority']['interpreter_trust']['system_python_arguments'] ?? null);
-        self::assertTrue($contract['authority']['interpreter_trust']['php']['allow_root_owned_closure'] ?? false);
+        self::assertTrue($contract['authority']['interpreter_trust']['php']['require_exact_closure_sha256'] ?? false);
+        self::assertArrayNotHasKey('allow_root_owned_closure', $contract['authority']['interpreter_trust']['php']);
+        self::assertArrayNotHasKey('candidates_by_platform', $contract['authority']['interpreter_trust']['php']);
+        self::assertSame(
+            array_keys($contract['authority']['interpreter_trust']['php']['candidate_by_platform'] ?? []),
+            array_keys($contract['authority']['interpreter_trust']['php']['closure_sha256_by_platform'] ?? []),
+            'Every admitted PHP platform must have an exact closure pin.',
+        );
         self::assertSame(
             'a788de9d1f58a58a8eaf425e78d8eb8f103391596e8a320877475ba8eb0f0873',
             $contract['authority']['interpreter_trust']['php']['closure_sha256_by_platform']['Darwin-arm64'] ?? null,
+        );
+        self::assertSame(
+            '40aab180ea2a8f847304bcb063a931ed43283ae9b714d5fdd74f5da71160f532',
+            $contract['authority']['interpreter_trust']['php']['closure_sha256_by_platform']['Linux-aarch64'] ?? null,
         );
         self::assertSame(
             'ignore_ambient_and_disable_helpers',
@@ -358,6 +369,7 @@ class AgentWorkflowContractTest extends TestCase
                 'code_review.md',
                 'docs/maps/component_ownership_map.json',
                 'scripts/agent',
+                'scripts/ci/ownership_path_rules.py',
                 'scripts/ci/exact_head_mergegate.php',
                 'scripts/ci/lib/ExactHeadMergegate.php',
             ],

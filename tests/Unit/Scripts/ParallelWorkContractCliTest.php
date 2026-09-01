@@ -68,6 +68,10 @@ class ParallelWorkContractCliTest extends TestCase
             $sourceRepoRoot . '/.codex/contracts/agent-workflow.json',
             $this->repoRoot . '/.codex/contracts/agent-workflow.json',
         );
+        $this->bindFixtureRuntimePin(
+            $this->repoRoot . '/scripts/agent/verify_trusted_php_runtime.py',
+            $this->repoRoot . '/.codex/contracts/agent-workflow.json',
+        );
         copy(
             $sourceRepoRoot . '/docs/maps/component_ownership_map.json',
             $this->repoRoot . '/docs/maps/component_ownership_map.json',
@@ -234,6 +238,21 @@ class ParallelWorkContractCliTest extends TestCase
         self::assertSame('', $stderr);
         $result = json_decode($stdout, true, 512, JSON_THROW_ON_ERROR);
         self::assertContains('primary_owned_path:0:scripts/agent', $result['errors']);
+    }
+
+    public function testCliRejectsSharedOwnershipPathMatcherAsPrimaryOwned(): void
+    {
+        $path = 'scripts/ci/ownership_path_rules.py';
+        $manifestPath = $this->writeJsonFixture('shared-path-matcher', $this->manifestForPath($path));
+
+        [$exitCode, $stdout, $stderr] = $this->runCli(['--manifest=' . $manifestPath]);
+
+        self::assertSame(1, $exitCode, $stderr);
+        self::assertSame('', $stderr);
+        self::assertContains(
+            'primary_owned_path:0:' . $path,
+            json_decode($stdout, true, 512, JSON_THROW_ON_ERROR)['errors'],
+        );
     }
 
     public function testCliAnchorsPolicyAndOwnershipMapToDeclaredBase(): void
@@ -713,6 +732,86 @@ class ParallelWorkContractCliTest extends TestCase
         self::assertNotFalse(file_put_contents($path, json_encode($value, JSON_THROW_ON_ERROR)));
 
         return $path;
+    }
+
+    private function bindFixtureRuntimePin(string $verifierPath, string $contractPath): void
+    {
+        $system = match (PHP_OS_FAMILY) {
+            'Darwin' => 'Darwin',
+            'Linux' => 'Linux',
+            default => null,
+        };
+        $architecture = match (strtolower(php_uname('m'))) {
+            'arm64', 'aarch64' => 'aarch64',
+            'amd64', 'x86_64' => 'x86_64',
+            default => null,
+        };
+        if ($system === null || $architecture === null) {
+            $this->markTestSkipped('The trusted PHP runtime fixture supports Darwin and Linux on known architectures.');
+        }
+        if ($system === 'Darwin' && $architecture === 'aarch64') {
+            $architecture = 'arm64';
+        }
+
+        $candidates = array_values(
+            array_unique([PHP_BINARY, '/usr/bin/php8.4', '/usr/bin/php8.3', '/usr/bin/php', '/usr/local/bin/php']),
+        );
+        $candidate = null;
+        foreach ($candidates as $logicalPath) {
+            $canonicalPath = realpath($logicalPath);
+            if (
+                $canonicalPath === false ||
+                !is_file($canonicalPath) ||
+                !is_executable($canonicalPath) ||
+                (fileperms($canonicalPath) & 0o022) !== 0
+            ) {
+                continue;
+            }
+            if ($system === 'Linux' && fileowner($canonicalPath) !== 0) {
+                continue;
+            }
+            $candidate = $logicalPath;
+            break;
+        }
+        if ($candidate === null) {
+            $this->markTestSkipped('No safely inspectable PHP runtime is available for the wrapper fixture.');
+        }
+
+        $probe = <<<'PYTHON'
+        import importlib.util
+        import sys
+
+        spec = importlib.util.spec_from_file_location("trusted_php_runtime_fixture", sys.argv[1])
+        if spec is None or spec.loader is None:
+            raise RuntimeError("trusted PHP runtime verifier could not be loaded")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        paths, sealed = module.dependency_closure(sys.argv[2], sys.argv[3])
+        print(module.closure_attestation(sys.argv[2], paths, sealed))
+        PYTHON;
+        $process = proc_open(
+            ['/usr/bin/python3', '-I', '-B', '-c', $probe, $verifierPath, $candidate, $system],
+            [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+            $pipes,
+            $this->repoRoot,
+            ['PATH' => '/usr/bin:/bin', 'LC_ALL' => 'C'],
+        );
+        self::assertIsResource($process);
+        $stdout = trim((string) stream_get_contents($pipes[1]));
+        $stderr = (string) stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        self::assertSame(0, proc_close($process), $stderr);
+        self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/D', $stdout);
+
+        $contract = json_decode((string) file_get_contents($contractPath), true, 512, JSON_THROW_ON_ERROR);
+        self::assertIsArray($contract);
+        $platform = $system . '-' . $architecture;
+        $contract['authority']['interpreter_trust']['php']['candidate_by_platform'] = [$platform => $candidate];
+        $contract['authority']['interpreter_trust']['php']['closure_sha256_by_platform'] = [$platform => $stdout];
+        self::assertNotFalse(
+            file_put_contents($contractPath, json_encode($contract, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES)),
+        );
     }
 
     /** @return array<string, mixed> */

@@ -41,8 +41,8 @@ class TrustedPhpRuntimeTest(unittest.TestCase):
 
     def test_valid_pinned_candidate_prints_canonical_path(self):
         self.write_contract(
-            candidates_by_platform={"Darwin-arm64": [self.php]},
-            allow_root_owned_closure=False,
+            candidate_by_platform={"Darwin-arm64": self.php},
+            require_exact_closure_sha256=True,
             closure_sha256_by_platform={"Darwin-arm64": self.digest()},
         )
         self.assertEqual(
@@ -52,8 +52,8 @@ class TrustedPhpRuntimeTest(unittest.TestCase):
 
     def test_digest_mismatch_rejected(self):
         self.write_contract(
-            candidates_by_platform={"Darwin-arm64": [self.php]},
-            allow_root_owned_closure=True,
+            candidate_by_platform={"Darwin-arm64": self.php},
+            require_exact_closure_sha256=True,
             closure_sha256_by_platform={"Darwin-arm64": "0" * 64},
         )
         with self.assertRaises(verifier.AttestationError):
@@ -76,8 +76,8 @@ class TrustedPhpRuntimeTest(unittest.TestCase):
         paths, sealed = verifier.dependency_closure(self.php, "Darwin", inspect)
         digest = verifier.closure_attestation(self.php, paths, sealed)
         self.write_contract(
-            candidates_by_platform={"Darwin-arm64": [self.php]},
-            allow_root_owned_closure=False,
+            candidate_by_platform={"Darwin-arm64": self.php},
+            require_exact_closure_sha256=True,
             closure_sha256_by_platform={"Darwin-arm64": digest},
         )
         os.chmod(dependency, 0o755)
@@ -91,8 +91,8 @@ class TrustedPhpRuntimeTest(unittest.TestCase):
     def test_writable_candidate_rejected(self):
         os.chmod(self.php, 0o775)
         self.write_contract(
-            candidates_by_platform={"Darwin-arm64": [self.php]},
-            allow_root_owned_closure=True,
+            candidate_by_platform={"Darwin-arm64": self.php},
+            require_exact_closure_sha256=True,
             closure_sha256_by_platform={"Darwin-arm64": "0" * 64},
         )
         with self.assertRaises(verifier.AttestationError):
@@ -105,7 +105,7 @@ class TrustedPhpRuntimeTest(unittest.TestCase):
         with self.assertRaises(verifier.AttestationError):
             verifier.attest(self.contract, "Darwin-arm64", self.inspector)
 
-    def test_root_owned_policy_is_checked_without_host_assumption(self):
+    def test_exact_platform_pin_is_required_even_for_root_owned_closure(self):
         original = verifier.os.lstat
 
         class RootStat:
@@ -116,21 +116,41 @@ class TrustedPhpRuntimeTest(unittest.TestCase):
         verifier.os.lstat = lambda path: RootStat()
         try:
             self.write_contract(
-                candidates_by_platform={"Darwin-arm64": [self.php]},
-                allow_root_owned_closure=False,
+                candidate_by_platform={"Linux-x86_64": self.php},
+                require_exact_closure_sha256=True,
                 closure_sha256_by_platform={},
             )
             with self.assertRaises(verifier.AttestationError):
-                verifier.attest(self.contract, "Darwin-arm64", self.inspector)
+                verifier.attest(self.contract, "Linux-x86_64", self.inspector)
             self.write_contract(
-                candidates_by_platform={"Darwin-arm64": [self.php]},
-                allow_root_owned_closure=True,
-                closure_sha256_by_platform={},
+                candidate_by_platform={"Linux-x86_64": self.php},
+                require_exact_closure_sha256=True,
+                closure_sha256_by_platform={"Linux-x86_64": self.digest()},
             )
             self.assertEqual(
                 os.path.realpath(self.php),
-                verifier.attest(self.contract, "Darwin-arm64", self.inspector),
+                verifier.attest(self.contract, "Linux-x86_64", self.inspector),
             )
+        finally:
+            verifier.os.lstat = original
+
+    def test_linux_closure_must_remain_system_owned_even_when_pinned(self):
+        original = verifier.os.lstat
+
+        class UserStat:
+            st_mode = stat.S_IFREG | 0o555
+            st_uid = 501
+            st_gid = 20
+
+        verifier.os.lstat = lambda path: UserStat()
+        try:
+            self.write_contract(
+                candidate_by_platform={"Linux-x86_64": self.php},
+                require_exact_closure_sha256=True,
+                closure_sha256_by_platform={"Linux-x86_64": self.digest()},
+            )
+            with self.assertRaises(verifier.AttestationError):
+                verifier.attest(self.contract, "Linux-x86_64", self.inspector)
         finally:
             verifier.os.lstat = original
 

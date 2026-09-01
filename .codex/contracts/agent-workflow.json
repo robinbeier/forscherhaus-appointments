@@ -23,15 +23,14 @@
             "php": {
                 "selection": "exact_base_policy_before_first_php_execution",
                 "dependency_inspection": "non_executing_otool_on_darwin_root_owned_ldd_only_on_linux",
-                "allow_root_owned_closure": true,
-                "candidates_by_platform": {
-                    "Darwin-arm64": ["/opt/homebrew/bin/php"],
-                    "Darwin-x86_64": ["/usr/local/bin/php", "/opt/local/bin/php"],
-                    "Linux-x86_64": ["/usr/local/bin/php", "/usr/bin/php"],
-                    "Linux-aarch64": ["/usr/local/bin/php", "/usr/bin/php"]
+                "require_exact_closure_sha256": true,
+                "candidate_by_platform": {
+                    "Darwin-arm64": "/opt/homebrew/bin/php",
+                    "Linux-aarch64": "/usr/local/bin/php"
                 },
                 "closure_sha256_by_platform": {
-                    "Darwin-arm64": "a788de9d1f58a58a8eaf425e78d8eb8f103391596e8a320877475ba8eb0f0873"
+                    "Darwin-arm64": "a788de9d1f58a58a8eaf425e78d8eb8f103391596e8a320877475ba8eb0f0873",
+                    "Linux-aarch64": "40aab180ea2a8f847304bcb063a931ed43283ae9b714d5fdd74f5da71160f532"
                 }
             }
         },
@@ -220,6 +219,7 @@
             "code_review.md",
             "docs/maps/component_ownership_map.json",
             "scripts/agent",
+            "scripts/ci/ownership_path_rules.py",
             "scripts/ci/exact_head_mergegate.php",
             "scripts/ci/lib/ExactHeadMergegate.php"
         ]

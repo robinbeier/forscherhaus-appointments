@@ -121,10 +121,13 @@ bootstrap.
 Both agent-harness entry points establish a root-owned POSIX-shell boundary,
 discard caller startup configuration, and use isolated `/usr/bin/python3`
 before any PHP runs. `scripts/agent/verify_trusted_php_runtime.py` then binds
-PHP and its dynamic dependency closure to the exact-base machine contract. A
-user-owned runtime without the exact platform pin, or any pin drift, fails
-closed and requires a reviewed contract update; ambient `PATH` never grants
-interpreter authority.
+PHP and its dynamic dependency closure to the exact-base machine contract.
+Every admitted platform requires an exact closure pin, including root-owned
+Linux runtimes; a missing platform pin or any pin drift fails closed and
+requires a reviewed contract update. Platforms absent from both the candidate
+and pin maps are deliberately unsupported rather than admitted by ownership.
+Ambient `PATH` never grants interpreter authority. The centralized ownership
+matcher is also Primary-owned because it defines shared lane and CI semantics.
 
 Exactly one primary remains the external single writer for commits, pushes,
 PRs, checks, Linear, workpads, attestations, merges, and production actions.

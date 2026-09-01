@@ -233,36 +233,29 @@ def attest(contract_path, requested_platform, inspector=None):
         raise AttestationError("contract is invalid") from exc
     try:
         policy = contract["authority"]["interpreter_trust"]["php"]
-        candidates = policy["candidates_by_platform"][requested_platform]
-        allow_root = policy["allow_root_owned_closure"]
-        pins = policy.get("closure_sha256_by_platform", {})
+        logical = policy["candidate_by_platform"][requested_platform]
+        require_exact_pin = policy["require_exact_closure_sha256"]
+        pins = policy["closure_sha256_by_platform"]
     except (KeyError, TypeError, AttributeError) as exc:
         raise AttestationError("contract shape is invalid") from exc
-    if not isinstance(candidates, list) or not candidates or not isinstance(allow_root, bool):
+    if not isinstance(logical, str) or require_exact_pin is not True:
         raise AttestationError("contract shape is invalid")
-    if not all(isinstance(path, str) and path.startswith("/") for path in candidates):
-        raise AttestationError("contract candidates are invalid")
-    pin = pins.get(requested_platform) if isinstance(pins, dict) else None
-    if pin is not None and (not isinstance(pin, str) or not HEX64.fullmatch(pin)):
-        raise AttestationError("contract pin is invalid")
+    if not logical.startswith("/"):
+        raise AttestationError("contract candidate is invalid")
+    if not isinstance(pins, dict):
+        raise AttestationError("contract pins are invalid")
+    pin = pins.get(requested_platform)
+    if not isinstance(pin, str) or not HEX64.fullmatch(pin):
+        raise AttestationError("exact platform closure pin is required")
     system = requested_platform.split("-", 1)[0]
-    for logical in candidates:
-        try:
-            canonical = _canonical_regular(logical)
-            paths, sealed_dependencies = dependency_closure(canonical, system, inspector=inspector)
-            root_owned = all(os.lstat(path).st_uid == 0 for path in paths)
-            digest = closure_attestation(logical, paths, sealed_dependencies)
-            if root_owned and not allow_root:
-                if pin is None or digest != pin:
-                    raise AttestationError("root-owned closure is not permitted")
-            elif pin is not None and digest != pin:
-                raise AttestationError("runtime closure digest mismatch")
-            elif not root_owned and pin is None:
-                raise AttestationError("non-root closure requires a digest pin")
-            return canonical
-        except AttestationError:
-            continue
-    raise AttestationError("no trusted PHP candidate")
+    canonical = _canonical_regular(logical)
+    paths, sealed_dependencies = dependency_closure(canonical, system, inspector=inspector)
+    if system == "Linux" and any(os.lstat(path).st_uid != 0 for path in paths):
+        raise AttestationError("Linux runtime closure is not system-owned")
+    digest = closure_attestation(logical, paths, sealed_dependencies)
+    if digest != pin:
+        raise AttestationError("runtime closure digest mismatch")
+    return canonical
 
 
 def main(argv=None):
