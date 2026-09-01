@@ -239,24 +239,57 @@ trusted_root="$(/usr/bin/mktemp -d /tmp/parallel-work-validator.XXXXXX)" || {
 }
 trap '/bin/rm -rf "$trusted_root"' EXIT
 
-trusted_paths=(
-    .codex/contracts/agent-workflow.json
-    scripts/agent/trusted_base_launcher.sh
-    scripts/agent/check_parallel_work_contract.sh
-    scripts/agent/check_parallel_work_contract.php
-    scripts/agent/verify_trusted_php_runtime.py
-    scripts/agent/lib/ParallelWorkContract.php
-    scripts/agent/lib/ParallelWorkOwnershipContract.php
-    scripts/agent/lib/ParallelWorkPolicyContract.php
-    scripts/agent/lib/RepoPath.php
-)
-for path in "${trusted_paths[@]}"; do
+contract_relative_path=.codex/contracts/agent-workflow.json
+/bin/mkdir -p "$trusted_root/$(/usr/bin/dirname -- "$contract_relative_path")"
+if ! trusted_git_run show "${validator_head}:${contract_relative_path}" > "$trusted_root/$contract_relative_path"; then
+    echo "Parallel-work validator contract is unavailable in the declared base." >&2
+    exit 2
+fi
+trusted_paths_output="$(trusted_python -c '
+import json
+import re
+import sys
+
+try:
+    with open(sys.argv[1], "r", encoding="utf-8") as stream:
+        paths = json.load(stream)["parallel_work"]["validator_bootstrap_paths"]
+except (KeyError, OSError, TypeError, ValueError, UnicodeError):
+    raise SystemExit(1)
+if not isinstance(paths, list) or not paths:
+    raise SystemExit(1)
+seen = set()
+for path in paths:
+    if (
+        not isinstance(path, str)
+        or not path
+        or path.startswith("/")
+        or path.endswith("/")
+        or "\\" in path
+        or re.search(r"[\x00-\x1f\x7f]", path)
+        or any(segment in ("", ".", "..") for segment in path.split("/"))
+        or path in seen
+    ):
+        raise SystemExit(1)
+    seen.add(path)
+    print(path)
+' "$trusted_root/$contract_relative_path")" || {
+    echo "Parallel-work validator bootstrap-path policy is invalid." >&2
+    exit 2
+}
+while IFS= read -r path || [[ -n "$path" ]]; do
+    if [[ -z "$path" ]]; then
+        echo "Parallel-work validator bootstrap-path policy is invalid." >&2
+        exit 2
+    fi
     /bin/mkdir -p "$trusted_root/$(/usr/bin/dirname -- "$path")"
+    if [[ "$path" == "$contract_relative_path" ]]; then
+        continue
+    fi
     if ! trusted_git_run show "${validator_head}:${path}" > "$trusted_root/$path"; then
         echo "Parallel-work validator base source is unavailable." >&2
         exit 2
     fi
-done
+done <<< "$trusted_paths_output"
 
 validator_os_name="$(/usr/bin/uname -s 2>/dev/null)" || {
     echo "Parallel-work validator operating system is unavailable." >&2
@@ -269,7 +302,7 @@ validator_os_arch="$(/usr/bin/uname -m 2>/dev/null)" || {
 validator_platform="$validator_os_name-$validator_os_arch"
 trusted_php="$(
     trusted_python "$trusted_root/scripts/agent/verify_trusted_php_runtime.py" \
-        --contract="$trusted_root/.codex/contracts/agent-workflow.json" \
+        --contract="$trusted_root/$contract_relative_path" \
         --platform="$validator_platform" \
         --materialize-root="$trusted_root/php-runtime"
 )" || exit $?

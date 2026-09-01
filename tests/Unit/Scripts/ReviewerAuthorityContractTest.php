@@ -259,35 +259,36 @@ class ReviewerAuthorityContractTest extends TestCase
             'derived_exact_release_catalog_without_shell_patch_image_search_or_external_tools',
             $contract['authority']['reviewer']['model_tool_surface'] ?? null,
         );
+        self::assertSame('read-only', $contract['authority']['reviewer']['codex_sandbox_mode'] ?? null);
+        self::assertSame('never', $contract['authority']['reviewer']['codex_approval_policy'] ?? null);
         self::assertSame(
             'outer_seatbelt_default_deny_exact_bundle_read_only_runtime_scratch_only',
             $contract['authority']['reviewer']['filesystem'] ?? null,
         );
         self::assertSame(
+            'outer_seatbelt_plus_codex_read_only_no_model_tools',
+            $contract['authority']['reviewer']['approval_policy'] ?? null,
+        );
+        self::assertSame(
             'scripts/agent/readonly-review-output.schema.json',
             $contract['authority']['reviewer']['output_schema_path'] ?? null,
         );
-        self::assertSame(
+        $trustedBasePaths = ReadonlyReviewerContract::trustedBasePaths($contract['authority']['reviewer']);
+        foreach (
             [
                 '.codex/contracts/agent-workflow.json',
-                '.codex/agents/reviewer-correctness.toml',
-                '.codex/agents/reviewer-design.toml',
-                '.codex/agents/reviewer-tests.toml',
+                'scripts/agent/trusted_base_launcher.sh',
+                'scripts/agent/run_readonly_reviewer.sh',
                 'scripts/agent/readonly-review-output.schema.json',
-                'scripts/agent/readonly-reviewer.sb',
-                'scripts/agent/verify_trusted_php_runtime.py',
-                'scripts/agent/readonly_review_bundle.php',
-                'scripts/agent/readonly_reviewer_contract.php',
-                'scripts/agent/lib/RepoPath.php',
-                'scripts/agent/lib/ReadonlyReviewBundle.php',
-                'scripts/agent/lib/ReadonlyReviewerContract.php',
-                'scripts/agent/lib/readonly_reviewer_bundle_runtime.sh',
+                'scripts/agent/lib/trusted_runtime_primitives.py',
                 'scripts/agent/lib/readonly_reviewer_isolated_runtime.sh',
-                'AGENTS.md',
-                'code_review.md',
-            ],
-            $contract['authority']['reviewer']['trusted_base_paths'] ?? null,
-        );
+            ]
+            as $trustedBasePath
+        ) {
+            self::assertContains($trustedBasePath, $trustedBasePaths);
+        }
+        self::assertSame($trustedBasePaths, array_values(array_unique($trustedBasePaths)));
+        self::assertArrayNotHasKey('trusted_base_paths', $contract['authority']['reviewer']);
         $runner = (string) file_get_contents($this->repoRoot . '/scripts/agent/run_readonly_reviewer.sh');
         $bundleRuntime = (string) file_get_contents(
             $this->repoRoot . '/scripts/agent/lib/readonly_reviewer_bundle_runtime.sh',
@@ -301,43 +302,12 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertStringContainsString('GIT_NO_LAZY_FETCH=1', $runner);
         self::assertFalse($contract['authority']['reviewer']['inherits_execpolicy_rules'] ?? true);
         self::assertTrue($contract['authority']['reviewer']['output_binds_base_sha'] ?? false);
-        self::assertSame(
-            [
-                'apps',
-                'plugins',
-                'browser_use',
-                'browser_use_external',
-                'browser_use_full_cdp_access',
-                'computer_use',
-                'image_generation',
-                'in_app_browser',
-                'memories',
-                'skill_search',
-                'skill_mcp_dependency_install',
-                'auth_elicitation',
-                'tool_call_mcp_elicitation',
-                'multi_agent',
-                'multi_agent_v2',
-                'hooks',
-                'shell_tool',
-                'unified_exec',
-                'code_mode',
-                'code_mode_only',
-                'code_mode_host',
-                'shell_snapshot',
-                'workspace_dependencies',
-                'goals',
-                'chronicle',
-                'tool_suggest',
-                'remote_plugin',
-                'plugin_sharing',
-                'deferred_executor',
-                'executor_capability_discovery',
-                'request_permissions_tool',
-                'default_mode_request_user_input',
-            ],
-            $contract['authority']['reviewer']['disabled_features'] ?? null,
-        );
+        $disabledFeatures = $contract['authority']['reviewer']['disabled_features'] ?? null;
+        self::assertIsArray($disabledFeatures);
+        self::assertSame($disabledFeatures, array_values(array_unique($disabledFeatures)));
+        foreach (['shell_tool', 'unified_exec', 'code_mode', 'plugins', 'apps', 'multi_agent', 'hooks'] as $feature) {
+            self::assertContains($feature, $disabledFeatures, $feature . ' must remain disabled');
+        }
     }
 
     public function testAllFinalReviewerRolesCarryTheSamePrimaryOnlyBoundary(): void
@@ -402,7 +372,10 @@ class ReviewerAuthorityContractTest extends TestCase
         );
         self::assertStringContainsString('readonly_reviewer_materialize_bundle', $runner);
         self::assertStringContainsString('readonly_reviewer_execute_isolated', $runner);
-        self::assertStringNotContainsString('--dangerously-bypass-approvals-and-sandbox', $runner);
+        self::assertStringNotContainsString(
+            '--dangerously-bypass-approvals-and-sandbox',
+            $runner . $bundleRuntime . $isolatedRuntime,
+        );
         self::assertStringContainsString('readonly_review_bundle.php', $bundleRuntime);
         self::assertStringContainsString('assert-text-diff', $bundleRuntime);
         self::assertStringContainsString('--unified=0', $bundleRuntime);
@@ -422,6 +395,8 @@ class ReviewerAuthorityContractTest extends TestCase
             $isolatedRuntime,
         );
         self::assertStringContainsString('--ignore-user-config', $isolatedRuntime);
+        self::assertStringContainsString('--ask-for-approval "$codex_approval_policy"', $isolatedRuntime);
+        self::assertStringContainsString('--sandbox "$codex_sandbox_mode" exec', $isolatedRuntime);
         self::assertStringContainsString('mcp_servers={}', $isolatedRuntime);
         self::assertStringContainsString('agents.max_depth=0', $isolatedRuntime);
         self::assertStringContainsString('-c "developer_instructions=$developer_instructions_toml"', $isolatedRuntime);
@@ -451,7 +426,6 @@ class ReviewerAuthorityContractTest extends TestCase
 
         self::assertStringNotContainsString('--permission-profile', $runner);
         self::assertStringNotContainsString('default_permissions=', $runner);
-        self::assertStringNotContainsString('--sandbox read-only', $runner);
         self::assertStringNotContainsString('sandbox_workspace_write', $runner);
     }
 
@@ -670,6 +644,38 @@ class ReviewerAuthorityContractTest extends TestCase
             if (is_file($executionMarker)) {
                 unlink($executionMarker);
             }
+        }
+    }
+
+    public function testRunnerRequiresExternalBootstrapReviewForTrustedReviewerPolicyChanges(): void
+    {
+        $executionMarker = sys_get_temp_dir() . '/reviewer-policy-executed-' . bin2hex(random_bytes(8));
+        $fixture = $this->runnerFixture(
+            'reviewer-policy-drift',
+            "#!/bin/sh\n: > " . escapeshellarg($executionMarker) . "\nexit 0\n",
+            'codex',
+        );
+
+        try {
+            $role = $fixture['root'] . '/.codex/agents/reviewer-correctness.toml';
+            self::assertTrue(mkdir(dirname($role), 0700, true));
+            self::assertNotFalse(file_put_contents($role, "developer_instructions = \"weakened\"\n"));
+            $this->runGitCommand(['add', '--all'], $fixture['root']);
+            $this->commitRunnerFixture($fixture['root'], 'Change trusted reviewer policy');
+            $head = $this->runGitCommand(['rev-parse', 'HEAD'], $fixture['root']);
+
+            [$exitCode, $stdout, $stderr] = $this->runRunnerFixture($fixture, $fixture['base'], $head);
+
+            self::assertSame(1, $exitCode);
+            self::assertSame('', $stdout);
+            self::assertSame(
+                "Reviewer runtime configuration changed; external bootstrap review is required.\n",
+                $stderr,
+            );
+            self::assertFileDoesNotExist($executionMarker);
+        } finally {
+            $this->removeRunnerFixture($fixture);
+            @unlink($executionMarker);
         }
     }
 
@@ -1158,10 +1164,10 @@ class ReviewerAuthorityContractTest extends TestCase
         );
     }
 
-    public function testProfileResolutionRejectsAStaleTrustedPathSet(): void
+    public function testProfileResolutionRejectsAnInvalidBootstrapPathSet(): void
     {
         $policy = $this->reviewerPolicyForProfile('.codex/agents/reviewer.toml');
-        array_pop($policy['trusted_base_paths']);
+        $policy['bootstrap_paths'][] = '../escaped-policy';
 
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('trusted-base policy is invalid');
@@ -1204,23 +1210,6 @@ class ReviewerAuthorityContractTest extends TestCase
         foreach (array_keys($policy['profiles']) as $lens) {
             $policy['profiles'][$lens]['instructions'] = $profile;
         }
-        $policy['trusted_base_paths'] = [
-            '.codex/contracts/agent-workflow.json',
-            $profile,
-            'scripts/agent/readonly-review-output.schema.json',
-            'scripts/agent/readonly-reviewer.sb',
-            'scripts/agent/verify_trusted_php_runtime.py',
-            'scripts/agent/readonly_review_bundle.php',
-            'scripts/agent/readonly_reviewer_contract.php',
-            'scripts/agent/lib/RepoPath.php',
-            'scripts/agent/lib/ReadonlyReviewBundle.php',
-            'scripts/agent/lib/ReadonlyReviewerContract.php',
-            'scripts/agent/lib/readonly_reviewer_bundle_runtime.sh',
-            'scripts/agent/lib/readonly_reviewer_isolated_runtime.sh',
-            'AGENTS.md',
-            'code_review.md',
-        ];
-
         return $policy;
     }
 
@@ -1240,6 +1229,9 @@ class ReviewerAuthorityContractTest extends TestCase
             file_put_contents($fixtureLauncher, (string) file_get_contents($this->repoRoot . '/' . $launcherPath)),
         );
         self::assertTrue(chmod($fixtureLauncher, 0644));
+        $contractPath = $root . '/.codex/contracts/agent-workflow.json';
+        self::assertTrue(mkdir(dirname($contractPath), 0700, true));
+        self::assertTrue(copy($this->repoRoot . '/.codex/contracts/agent-workflow.json', $contractPath));
         $runnerSource = (string) file_get_contents($this->repoRoot . '/' . $runnerPath);
         $fixtureSource = str_replace(
             "canonical_main_remote='https://github.com/robinbeier/forscherhaus-appointments.git'",

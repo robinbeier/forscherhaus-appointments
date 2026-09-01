@@ -8,6 +8,7 @@ readonly_reviewer_materialize_bundle() {
     local control_root="$1" review_root="$2" base_sha="$3" head_sha="$4" lens="$5"
     local changed_paths_file trusted_paths trusted_path trusted_path_count trusted_paths_file
     local reviewer_config role_file model reasoning disabled_features output_schema_path
+    local ignored_sandbox_mode ignored_approval_policy
     local trusted_role_instructions review_input developer_instructions_file
 
     changed_paths_file="$control_root/changed-paths.json"
@@ -48,7 +49,8 @@ readonly_reviewer_materialize_bundle() {
     fi
 
     reviewer_config="$(trusted_php "$control_root/scripts/agent/readonly_reviewer_contract.php" resolve --lens="$lens")" || exit $?
-    IFS=$'\t' read -r role_file model reasoning disabled_features output_schema_path <<< "$reviewer_config"
+    IFS=$'\t' read -r role_file model reasoning disabled_features output_schema_path \
+        ignored_sandbox_mode ignored_approval_policy <<< "$reviewer_config"
     if [[ -z "$role_file" || -z "$model" || -z "$reasoning" || -z "$disabled_features" || -z "$output_schema_path" ]]; then
         echo "Reviewer invocation policy is incomplete." >&2
         exit 1

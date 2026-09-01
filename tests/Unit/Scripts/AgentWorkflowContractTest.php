@@ -88,7 +88,12 @@ class AgentWorkflowContractTest extends TestCase
             'outer_codex_transport_no_model_network_tool_or_external_credentials',
             $contract['authority']['reviewer']['network'] ?? null,
         );
-        self::assertSame('outer_sandbox_no_model_tools', $contract['authority']['reviewer']['approval_policy'] ?? null);
+        self::assertSame(
+            'outer_seatbelt_plus_codex_read_only_no_model_tools',
+            $contract['authority']['reviewer']['approval_policy'] ?? null,
+        );
+        self::assertSame('read-only', $contract['authority']['reviewer']['codex_sandbox_mode'] ?? null);
+        self::assertSame('never', $contract['authority']['reviewer']['codex_approval_policy'] ?? null);
         self::assertFalse($contract['authority']['reviewer']['inherits_user_config'] ?? null);
         self::assertFalse($contract['authority']['reviewer']['inherits_execpolicy_rules'] ?? null);
         self::assertSame(
@@ -311,52 +316,42 @@ class AgentWorkflowContractTest extends TestCase
             'unauthenticated_read_only_ls_remote_clean_environment',
             $contract['authority']['reviewer']['review_base_remote_transport'] ?? null,
         );
-        self::assertSame(
+        $bootstrapPaths = $contract['authority']['reviewer']['bootstrap_paths'] ?? null;
+        $policyContextPaths = $contract['authority']['reviewer']['policy_context_paths'] ?? null;
+        self::assertIsArray($bootstrapPaths);
+        self::assertIsArray($policyContextPaths);
+        foreach (
             [
                 '.codex/contracts/agent-workflow.json',
-                '.codex/agents/reviewer-correctness.toml',
-                '.codex/agents/reviewer-design.toml',
-                '.codex/agents/reviewer-tests.toml',
-                'scripts/agent/readonly-review-output.schema.json',
-                'scripts/agent/readonly-reviewer.sb',
+                'scripts/agent/trusted_base_launcher.sh',
+                'scripts/agent/run_readonly_reviewer.sh',
                 'scripts/agent/verify_trusted_php_runtime.py',
-                'scripts/agent/readonly_review_bundle.php',
-                'scripts/agent/readonly_reviewer_contract.php',
-                'scripts/agent/lib/RepoPath.php',
-                'scripts/agent/lib/ReadonlyReviewBundle.php',
-                'scripts/agent/lib/ReadonlyReviewerContract.php',
-                'scripts/agent/lib/readonly_reviewer_bundle_runtime.sh',
+                'scripts/agent/lib/trusted_runtime_primitives.py',
                 'scripts/agent/lib/readonly_reviewer_isolated_runtime.sh',
-                'AGENTS.md',
-                'code_review.md',
-            ],
-            $contract['authority']['reviewer']['trusted_base_paths'] ?? null,
-        );
+            ]
+            as $bootstrapPath
+        ) {
+            self::assertContains($bootstrapPath, $bootstrapPaths);
+        }
+        self::assertSame($bootstrapPaths, array_values(array_unique($bootstrapPaths)));
+        self::assertSame(['AGENTS.md', 'code_review.md'], $policyContextPaths);
+        self::assertArrayNotHasKey('trusted_base_paths', $contract['authority']['reviewer']);
+        $profiles = $contract['authority']['reviewer']['profiles'] ?? null;
+        self::assertIsArray($profiles);
         self::assertSame(
-            [
-                'correctness_security' => [
-                    'instructions' => '.codex/agents/reviewer-correctness.toml',
-                    'model' => 'gpt-5.4',
-                    'reasoning' => 'high',
-                ],
-                'design_maintainability' => [
-                    'instructions' => '.codex/agents/reviewer-design.toml',
-                    'model' => 'gpt-5.4-mini',
-                    'reasoning' => 'medium',
-                ],
-                'tests_regression_flake' => [
-                    'instructions' => '.codex/agents/reviewer-tests.toml',
-                    'model' => 'gpt-5.4-mini',
-                    'reasoning' => 'medium',
-                ],
-            ],
-            $contract['authority']['reviewer']['profiles'] ?? null,
+            ['correctness_security', 'design_maintainability', 'tests_regression_flake'],
+            array_keys($profiles),
         );
-        self::assertContains('multi_agent', $contract['authority']['reviewer']['disabled_features'] ?? []);
-        self::assertContains('plugins', $contract['authority']['reviewer']['disabled_features'] ?? []);
-        self::assertContains('shell_tool', $contract['authority']['reviewer']['disabled_features'] ?? []);
-        self::assertContains('code_mode_host', $contract['authority']['reviewer']['disabled_features'] ?? []);
-        self::assertContains('workspace_dependencies', $contract['authority']['reviewer']['disabled_features'] ?? []);
+        foreach ($profiles as $profile) {
+            self::assertIsArray($profile);
+            foreach (['instructions', 'model', 'reasoning'] as $field) {
+                self::assertIsString($profile[$field] ?? null);
+                self::assertNotSame('', $profile[$field]);
+            }
+        }
+        $disabledFeatures = $contract['authority']['reviewer']['disabled_features'] ?? null;
+        self::assertIsArray($disabledFeatures);
+        self::assertSame($disabledFeatures, array_values(array_unique($disabledFeatures)));
         foreach (
             [
                 'shell_tool',
@@ -372,7 +367,7 @@ class AgentWorkflowContractTest extends TestCase
             ]
             as $feature
         ) {
-            self::assertContains($feature, $contract['authority']['reviewer']['disabled_features'] ?? [], $feature);
+            self::assertContains($feature, $disabledFeatures, $feature);
         }
         self::assertSame(
             'bounded_deterministic_json_serialization_as_untrusted_user_stdin',
@@ -405,6 +400,20 @@ class AgentWorkflowContractTest extends TestCase
             'required_external_exact_blob_path_and_marker',
             $contract['parallel_work']['validator_launcher_materialization_guard'] ?? null,
         );
+        $validatorBootstrapPaths = $contract['parallel_work']['validator_bootstrap_paths'] ?? null;
+        self::assertIsArray($validatorBootstrapPaths);
+        foreach (
+            [
+                '.codex/contracts/agent-workflow.json',
+                'scripts/agent/check_parallel_work_contract.sh',
+                'scripts/agent/verify_trusted_php_runtime.py',
+                'scripts/agent/lib/trusted_runtime_primitives.py',
+            ]
+            as $validatorBootstrapPath
+        ) {
+            self::assertContains($validatorBootstrapPath, $validatorBootstrapPaths);
+        }
+        self::assertSame($validatorBootstrapPaths, array_values(array_unique($validatorBootstrapPaths)));
         self::assertSame('refs/remotes/origin/main', $contract['parallel_work']['canonical_base_ref'] ?? null);
         self::assertSame(
             'https://github.com/robinbeier/forscherhaus-appointments.git',

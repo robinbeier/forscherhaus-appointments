@@ -23,14 +23,17 @@ readonly_reviewer_execute_isolated() (
     local model_catalog prompt_role_probe allowed_canary outside_canary_root outside_canary home_canary
     local private_temp_parent reviewer_os_user
     local codex_stderr review_pipeline_status
-    local ignored_role model reasoning disabled_features output_schema_path developer_instructions_toml
+    local ignored_role model reasoning disabled_features output_schema_path codex_sandbox_mode codex_approval_policy
+    local developer_instructions_toml
     local developer_instructions_file review_input changed_paths_file
     local reviewer_config feature
     local -a disable_arguments disabled_feature_list reviewer_environment
 
     reviewer_config="$(trusted_php "$control_root/scripts/agent/readonly_reviewer_contract.php" resolve --lens="$lens")" || exit $?
-    IFS=$'\t' read -r ignored_role model reasoning disabled_features output_schema_path <<< "$reviewer_config"
-    if [[ -z "$model" || -z "$reasoning" || -z "$disabled_features" || -z "$output_schema_path" ]]; then
+    IFS=$'\t' read -r ignored_role model reasoning disabled_features output_schema_path \
+        codex_sandbox_mode codex_approval_policy <<< "$reviewer_config"
+    if [[ -z "$model" || -z "$reasoning" || -z "$disabled_features" || -z "$output_schema_path" || \
+        "$codex_sandbox_mode" != "read-only" || "$codex_approval_policy" != "never" ]]; then
         echo "Reviewer invocation policy is incomplete." >&2
         exit 1
     fi
@@ -159,8 +162,8 @@ readonly_reviewer_execute_isolated() (
     codex_stderr="$runtime_tmp/codex.stderr"
     set +e
     readonly_reviewer_seatbelt_run "$sandbox_exec" "$seatbelt_profile" "$codex_bin" "$sealed_root" "$arg0_root" "$runtime_tmp" "$auth_source" "$installation_id" \
-        "${reviewer_environment[@]}" "$codex_bin" --ask-for-approval never exec \
-            --dangerously-bypass-approvals-and-sandbox \
+        "${reviewer_environment[@]}" "$codex_bin" --ask-for-approval "$codex_approval_policy" \
+            --sandbox "$codex_sandbox_mode" exec \
             --ignore-user-config \
             --ignore-rules \
             --strict-config \

@@ -53,6 +53,10 @@ class ParallelWorkContractCliTest extends TestCase
             $sourceRepoRoot . '/scripts/agent/verify_trusted_php_runtime.py',
             $this->repoRoot . '/scripts/agent/verify_trusted_php_runtime.py',
         );
+        copy(
+            $sourceRepoRoot . '/scripts/agent/lib/trusted_runtime_primitives.py',
+            $this->repoRoot . '/scripts/agent/lib/trusted_runtime_primitives.py',
+        );
         self::assertTrue(chmod($this->repoRoot . '/scripts/agent/check_parallel_work_contract.sh', 0644));
         self::assertTrue(chmod($this->repoRoot . '/scripts/agent/trusted_base_launcher.sh', 0644));
         foreach (

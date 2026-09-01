@@ -10,6 +10,7 @@ import struct
 import tarfile
 import tempfile
 import unittest
+from unittest import mock
 
 MODULE_PATH = Path(__file__).resolve().parents[3] / "scripts/agent/verify_trusted_php_runtime.py"
 MODULE_SPEC = importlib.util.spec_from_file_location("verify_trusted_php_runtime", MODULE_PATH)
@@ -580,6 +581,74 @@ class TrustedPhpRuntimeTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(verifier.AttestationError, "ownership is invalid"):
             verifier.attest_codex(self.contract, "Darwin-arm64", self.php, self.inspector)
+
+    def test_cli_defaults_to_php_attestation_and_prints_result(self):
+        with mock.patch.object(verifier, "attest", return_value="/trusted/php") as attest:
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                result = verifier.main(
+                    [
+                        "--contract",
+                        self.contract,
+                        "--platform",
+                        "Darwin-arm64",
+                    ]
+                )
+
+        self.assertEqual(0, result)
+        self.assertEqual("/trusted/php\n", stdout.getvalue())
+        attest.assert_called_once_with(
+            self.contract,
+            "Darwin-arm64",
+            materialize_root=None,
+        )
+
+    def test_cli_codex_dispatch_requires_path_and_passes_expected_closure(self):
+        with mock.patch.object(verifier, "attest_codex", return_value="/trusted/codex") as attest:
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                result = verifier.main(
+                    [
+                        "--runtime",
+                        "codex",
+                        "--contract",
+                        self.contract,
+                        "--platform",
+                        "Darwin-arm64",
+                        "--path",
+                        self.php,
+                        "--expected-closure-sha256",
+                        "a" * 64,
+                    ]
+                )
+
+        self.assertEqual(0, result)
+        self.assertEqual("/trusted/codex\n", stdout.getvalue())
+        attest.assert_called_once_with(
+            self.contract,
+            "Darwin-arm64",
+            self.php,
+            expected_closure_sha256="a" * 64,
+        )
+
+    def test_cli_rejects_php_path_before_attestation(self):
+        stderr = io.StringIO()
+        with mock.patch.object(verifier, "attest") as attest:
+            with contextlib.redirect_stderr(stderr):
+                result = verifier.main(
+                    [
+                        "--contract",
+                        self.contract,
+                        "--platform",
+                        "Darwin-arm64",
+                        "--path",
+                        self.php,
+                    ]
+                )
+
+        self.assertEqual(2, result)
+        self.assertIn("trusted php runtime rejected: PHP attestation arguments are invalid", stderr.getvalue())
+        attest.assert_not_called()
 
 
 if __name__ == "__main__":

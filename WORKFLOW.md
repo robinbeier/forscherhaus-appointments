@@ -165,8 +165,10 @@ repository-selected Bash can run.
 Both agent-harness entry points begin with the same exact-base system-Git
 launcher, discard caller startup configuration, and use isolated
 `/usr/bin/python3` before any PHP runs.
-`scripts/agent/verify_trusted_php_runtime.py` then binds
-PHP and its dynamic dependency closure to the exact-base machine contract.
+`scripts/agent/verify_trusted_php_runtime.py` owns contract policy and CLI
+dispatch; `scripts/agent/lib/trusted_runtime_primitives.py` owns the separately
+testable file, archive, ELF, and dependency-closure mechanics. Together they
+bind PHP and its dynamic dependency closure to the exact-base machine contract.
 Every admitted platform requires an exact closure pin; a missing platform pin
 or any pin drift fails closed and requires a reviewed contract update. A
 fixed-host-path closure must also be entirely system-owned. Alternatively, a
@@ -412,11 +414,15 @@ Consult `.codex/contracts/agent-workflow.json`,
 implementation details.
 
 The first introduction of this trust root cannot bootstrap itself. Likewise,
-a change to `.codex/config.toml` or any `AGENTS.md` can affect reviewer runtime
-instructions before repository code runs. Those changes fail closed and need a
-separately enforced external read-only bootstrap review authorized and run by
-the primary. A bootstrap review is review evidence only; it grants no mutation,
-publication, Linear, or landing authority.
+a change to `.codex/config.toml`, any `AGENTS.md`, or any reviewer bootstrap,
+role, schema, isolation, runtime, or policy-context path declared by the exact
+base contract can affect future review authority. Those changes fail closed and
+need a separately enforced external read-only bootstrap review authorized and
+run by the primary. The contract owns those path lists; shell and tests consume
+them instead of maintaining additional allowlist copies. The isolated model call
+uses both the outer Seatbelt boundary and Codex `read-only` sandboxing with
+approval mode `never`. A bootstrap review is review evidence only; it grants no
+mutation, publication, Linear, or landing authority.
 
 After the final reviews are finding-free, record their canonical,
 privacy-safe exact-head attestation on the PR and run the repository-owned

@@ -147,6 +147,8 @@ try {
                 $invocation['reasoning'],
                 implode(',', $invocation['disabled_features']),
                 $invocation['output_schema_path'],
+                $invocation['codex_sandbox_mode'],
+                $invocation['codex_approval_policy'],
             ]) . PHP_EOL,
         );
         exit(0);

@@ -8,7 +8,8 @@ use PHPUnit\Framework\TestCase;
 
 class ReadonlyReviewerRuntimeLibraryTest extends TestCase
 {
-    public function testFixtureBackedRuntimeCompletesWithValidatedNoFindings(): void
+    #[\PHPUnit\Framework\Attributes\DataProvider('runtimeOutputScenarios')]
+    public function testFixtureBackedRuntimeValidatesModelOutput(string $scenario): void
     {
         $repoRoot = dirname(__DIR__, 3);
         $fixtureRoot = sys_get_temp_dir() . '/readonly-reviewer-runtime-' . bin2hex(random_bytes(8));
@@ -69,16 +70,19 @@ class ReadonlyReviewerRuntimeLibraryTest extends TestCase
             ],
             JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
         );
-        $validatedOutput = json_encode(
-            [
-                'lens' => 'correctness_security',
-                'base_sha' => $baseSha,
-                'head_sha' => $headSha,
-                'verdict' => 'no_findings',
-                'findings' => [],
-            ],
-            JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
-        );
+        $validatedOutput =
+            $scenario === 'valid'
+                ? json_encode(
+                    [
+                        'lens' => 'correctness_security',
+                        'base_sha' => $baseSha,
+                        'head_sha' => $headSha,
+                        'verdict' => 'no_findings',
+                        'findings' => [],
+                    ],
+                    JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
+                )
+                : '{invalid-review-output';
 
         $codexStub = $fixtureRoot . '/codex';
         self::assertNotFalse(
@@ -217,17 +221,32 @@ class ReadonlyReviewerRuntimeLibraryTest extends TestCase
             fclose($pipes[1]);
             fclose($pipes[2]);
 
-            self::assertSame(0, proc_close($process), $stderr);
-            self::assertSame('', $stderr);
-            $result = json_decode($stdout, true, 512, JSON_THROW_ON_ERROR);
-            self::assertSame('correctness_security', $result['lens'] ?? null);
-            self::assertSame($baseSha, $result['base_sha'] ?? null);
-            self::assertSame($headSha, $result['head_sha'] ?? null);
-            self::assertSame('no_findings', $result['verdict'] ?? null);
-            self::assertSame([], $result['findings'] ?? null);
+            $exitCode = proc_close($process);
+            if ($scenario === 'invalid') {
+                self::assertSame(1, $exitCode);
+                self::assertSame('', $stdout);
+                self::assertStringContainsString('Reviewer output is not valid JSON.', $stderr);
+                self::assertStringContainsString('Reviewer isolated model call or output validation failed.', $stderr);
+            } else {
+                self::assertSame(0, $exitCode, $stderr);
+                self::assertSame('', $stderr);
+                $result = json_decode($stdout, true, 512, JSON_THROW_ON_ERROR);
+                self::assertSame('correctness_security', $result['lens'] ?? null);
+                self::assertSame($baseSha, $result['base_sha'] ?? null);
+                self::assertSame($headSha, $result['head_sha'] ?? null);
+                self::assertSame('no_findings', $result['verdict'] ?? null);
+                self::assertSame([], $result['findings'] ?? null);
+            }
         } finally {
             $this->removeDirectory($fixtureRoot);
         }
+    }
+
+    /** @return iterable<string, array{string}> */
+    public static function runtimeOutputScenarios(): iterable
+    {
+        yield 'valid no-findings output' => ['valid'];
+        yield 'malformed output fails closed' => ['invalid'];
     }
 
     private function removeDirectory(string $directory): void
@@ -246,6 +265,7 @@ class ReadonlyReviewerRuntimeLibraryTest extends TestCase
                 chmod($path, 0700);
                 rmdir($path);
             } else {
+                chmod(dirname($path), 0700);
                 chmod($path, 0600);
                 unlink($path);
             }

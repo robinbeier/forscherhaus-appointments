@@ -75,6 +75,8 @@ final class ReadonlyReviewerContract
      *     model: string,
      *     reasoning: string,
      *     disabled_features: list<string>,
+     *     codex_sandbox_mode: string,
+     *     codex_approval_policy: string,
      *     output_schema_path: string,
      *     trusted_base_paths: list<string>
      * }
@@ -124,6 +126,8 @@ final class ReadonlyReviewerContract
             'model' => $model,
             'reasoning' => $reasoning,
             'disabled_features' => array_values($disabledFeatures),
+            'codex_sandbox_mode' => $reviewerPolicy['codex_sandbox_mode'],
+            'codex_approval_policy' => $reviewerPolicy['codex_approval_policy'],
             'output_schema_path' => $reviewerPolicy['output_schema_path'],
             'trusted_base_paths' => $trustedBasePaths,
         ];
@@ -159,30 +163,18 @@ final class ReadonlyReviewerContract
             $instructionPaths[] = $instructions;
         }
 
-        $expectedPaths = array_values(
-            array_unique([
-                '.codex/contracts/agent-workflow.json',
-                ...$instructionPaths,
-                'scripts/agent/readonly-review-output.schema.json',
-                'scripts/agent/readonly-reviewer.sb',
-                'scripts/agent/verify_trusted_php_runtime.py',
-                'scripts/agent/readonly_review_bundle.php',
-                'scripts/agent/readonly_reviewer_contract.php',
-                'scripts/agent/lib/RepoPath.php',
-                'scripts/agent/lib/ReadonlyReviewBundle.php',
-                'scripts/agent/lib/ReadonlyReviewerContract.php',
-                'scripts/agent/lib/readonly_reviewer_bundle_runtime.sh',
-                'scripts/agent/lib/readonly_reviewer_isolated_runtime.sh',
-                'AGENTS.md',
-                'code_review.md',
-            ]),
-        );
-        $trustedPaths = $reviewerPolicy['trusted_base_paths'] ?? null;
-        if ($trustedPaths !== $expectedPaths) {
+        $bootstrapPaths = self::normalizedPolicyPaths($reviewerPolicy, 'bootstrap_paths');
+        $policyContextPaths = self::normalizedPolicyPaths($reviewerPolicy, 'policy_context_paths');
+        $outputSchemaPath = $reviewerPolicy['output_schema_path'] ?? null;
+        if (
+            !in_array('.codex/contracts/agent-workflow.json', $bootstrapPaths, true) ||
+            !is_string($outputSchemaPath) ||
+            !in_array($outputSchemaPath, $bootstrapPaths, true)
+        ) {
             throw new \RuntimeException('Reviewer trusted-base policy is invalid.');
         }
 
-        return $expectedPaths;
+        return array_values(array_unique([...$bootstrapPaths, ...$instructionPaths, ...$policyContextPaths]));
     }
 
     /**
@@ -340,10 +332,12 @@ final class ReadonlyReviewerContract
             'isolation_profile' => 'default_deny_runtime_allowlist_exact_bundle_and_auth_read_only',
             'isolation_preflight' => 'bundle_readable_temp_home_and_original_worktree_denied',
             'model_tool_surface' => 'derived_exact_release_catalog_without_shell_patch_image_search_or_external_tools',
+            'codex_sandbox_mode' => 'read-only',
+            'codex_approval_policy' => 'never',
             'output_schema_path' => 'scripts/agent/readonly-review-output.schema.json',
             'filesystem' => 'outer_seatbelt_default_deny_exact_bundle_read_only_runtime_scratch_only',
             'network' => 'outer_codex_transport_no_model_network_tool_or_external_credentials',
-            'approval_policy' => 'outer_sandbox_no_model_tools',
+            'approval_policy' => 'outer_seatbelt_plus_codex_read_only_no_model_tools',
             'inherits_user_config' => false,
             'inherits_execpolicy_rules' => false,
             'output_binds_base_sha' => true,
@@ -406,6 +400,27 @@ final class ReadonlyReviewerContract
         }
 
         return $features;
+    }
+
+    /** @param array<string, mixed> $reviewerPolicy
+     *  @return list<string>
+     */
+    private static function normalizedPolicyPaths(array $reviewerPolicy, string $key): array
+    {
+        $paths = $reviewerPolicy[$key] ?? null;
+        if (!is_array($paths) || !array_is_list($paths) || $paths === []) {
+            throw new \RuntimeException('Reviewer trusted-base policy is invalid.');
+        }
+        foreach ($paths as $path) {
+            if (!is_string($path) || !RepoPath::isNormalized($path)) {
+                throw new \RuntimeException('Reviewer trusted-base policy is invalid.');
+            }
+        }
+        if (count($paths) !== count(array_unique($paths))) {
+            throw new \RuntimeException('Reviewer trusted-base policy is invalid.');
+        }
+
+        return $paths;
     }
 
     /**

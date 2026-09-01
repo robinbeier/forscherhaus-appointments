@@ -241,7 +241,54 @@ if [[ -n "$(trusted_git status --porcelain --untracked-files=all)" ]]; then
     exit 1
 fi
 
-if ! trusted_git diff --quiet --no-ext-diff --no-textconv "$base_sha" "$head_sha" -- .codex/config.toml ':(glob)**/AGENTS.md'; then
+bootstrap_review_paths=(.codex/config.toml)
+bootstrap_review_paths_output="$({
+    trusted_git show "${base_sha}:.codex/contracts/agent-workflow.json" 2>/dev/null | trusted_python -c '
+import json
+import re
+import sys
+
+try:
+    reviewer = json.load(sys.stdin)["authority"]["reviewer"]
+    profiles = reviewer["profiles"]
+    paths = (
+        reviewer["bootstrap_paths"]
+        + [profiles[lens]["instructions"] for lens in sorted(profiles)]
+        + reviewer["policy_context_paths"]
+    )
+except (KeyError, TypeError, ValueError):
+    raise SystemExit(1)
+if not isinstance(paths, list) or not paths:
+    raise SystemExit(1)
+seen = set()
+for path in paths:
+    if (
+        not isinstance(path, str)
+        or not path
+        or path.startswith("/")
+        or path.endswith("/")
+        or "\\" in path
+        or re.search(r"[\x00-\x1f\x7f]", path)
+        or any(segment in ("", ".", "..") for segment in path.split("/"))
+        or path in seen
+    ):
+        raise SystemExit(1)
+    seen.add(path)
+    print(path)
+'
+})" || {
+    echo "Reviewer trusted-path policy is invalid; external bootstrap review is required." >&2
+    exit 1
+}
+while IFS= read -r bootstrap_review_path || [[ -n "$bootstrap_review_path" ]]; do
+    if [[ -z "$bootstrap_review_path" ]]; then
+        echo "Reviewer trusted-path policy is invalid; external bootstrap review is required." >&2
+        exit 1
+    fi
+    bootstrap_review_paths+=("$bootstrap_review_path")
+done <<< "$bootstrap_review_paths_output"
+bootstrap_review_paths+=(':(glob)**/AGENTS.md')
+if ! trusted_git diff --quiet --no-ext-diff --no-textconv "$base_sha" "$head_sha" -- "${bootstrap_review_paths[@]}"; then
     echo "Reviewer runtime configuration changed; external bootstrap review is required." >&2
     exit 1
 fi
@@ -362,25 +409,56 @@ trusted_php() {
 }
 
 contract_relative_path=".codex/contracts/agent-workflow.json"
-bootstrap_paths=(
-    "$contract_relative_path"
-    "scripts/agent/readonly-reviewer.sb"
-    "scripts/agent/verify_trusted_php_runtime.py"
-    "scripts/agent/readonly_review_bundle.php"
-    "scripts/agent/readonly_reviewer_contract.php"
-    "scripts/agent/lib/RepoPath.php"
-    "scripts/agent/lib/ReadonlyReviewBundle.php"
-    "scripts/agent/lib/ReadonlyReviewerContract.php"
-    "scripts/agent/lib/readonly_reviewer_bundle_runtime.sh"
-    "scripts/agent/lib/readonly_reviewer_isolated_runtime.sh"
-)
-for bootstrap_path in "${bootstrap_paths[@]}"; do
+mkdir -p "$control_root/$(dirname "$contract_relative_path")"
+if ! trusted_git show "${base_sha}:${contract_relative_path}" > "$control_root/$contract_relative_path"; then
+    echo "Reviewer machine contract is unavailable in the review base." >&2
+    exit 1
+fi
+bootstrap_paths_output="$(trusted_python -c '
+import json
+import re
+import sys
+
+try:
+    with open(sys.argv[1], "r", encoding="utf-8") as stream:
+        paths = json.load(stream)["authority"]["reviewer"]["bootstrap_paths"]
+except (KeyError, OSError, TypeError, ValueError, UnicodeError):
+    raise SystemExit(1)
+if not isinstance(paths, list) or not paths:
+    raise SystemExit(1)
+seen = set()
+for path in paths:
+    if (
+        not isinstance(path, str)
+        or not path
+        or path.startswith("/")
+        or path.endswith("/")
+        or "\\" in path
+        or re.search(r"[\x00-\x1f\x7f]", path)
+        or any(segment in ("", ".", "..") for segment in path.split("/"))
+        or path in seen
+    ):
+        raise SystemExit(1)
+    seen.add(path)
+    print(path)
+' "$control_root/$contract_relative_path")" || {
+    echo "Reviewer bootstrap-path policy is invalid." >&2
+    exit 1
+}
+while IFS= read -r bootstrap_path || [[ -n "$bootstrap_path" ]]; do
+    if [[ -z "$bootstrap_path" ]]; then
+        echo "Reviewer bootstrap-path policy is invalid." >&2
+        exit 1
+    fi
     mkdir -p "$control_root/$(dirname "$bootstrap_path")"
+    if [[ "$bootstrap_path" == "$contract_relative_path" ]]; then
+        continue
+    fi
     if ! trusted_git show "${base_sha}:${bootstrap_path}" > "$control_root/$bootstrap_path"; then
         echo "Reviewer trust bootstrap is unavailable in the review base." >&2
         exit 1
     fi
-done
+done <<< "$bootstrap_paths_output"
 
 php_bin="$(
     trusted_python "$control_root/scripts/agent/verify_trusted_php_runtime.py" \

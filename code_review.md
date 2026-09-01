@@ -125,8 +125,12 @@ remain unavailable. Non-macOS execution fails closed. The host
 login authenticates only the authorized model request and cannot be refreshed by
 the harness. Consult the contract and runner for implementation details.
 Before any PHP helper executes, a root-owned clean bootstrap and isolated
-system Python attest the PHP binary plus its dynamic dependency closure against
-an exact per-platform pin in the exact-base contract. Fixed host closures must
+system Python use the policy/CLI entry point in
+`scripts/agent/verify_trusted_php_runtime.py` and the separately scoped
+file/archive/ELF/dependency primitives in
+`scripts/agent/lib/trusted_runtime_primitives.py` to attest the PHP binary plus
+its dynamic dependency closure against an exact per-platform pin in the
+exact-base contract. Fixed host closures must
 also be entirely system-owned; missing pins and ambient, user-owned, or drifted
 runtimes fail closed. An admitted platform may instead materialize the single
 runtime member from an exact URL and archive/member digest into its private
@@ -143,9 +147,13 @@ dependency closure must match the per-platform contract pin before the first
 allowance fails closed.
 
 The initial trust-root introduction and changes to runtime-loaded
-`.codex/config.toml` or `AGENTS.md` require a separately enforced external
-read-only bootstrap review. The repository runner refuses those cases instead
-of allowing a head to review its own authority boundary.
+`.codex/config.toml`, any `AGENTS.md`, or any bootstrap, role, schema, isolation,
+runtime, or policy-context path declared by the exact-base reviewer contract
+require a separately enforced external read-only bootstrap review. The runner
+derives that fail-closed set from the base contract and refuses those cases
+instead of allowing a head to review its own authority boundary. The model call
+remains inside both the outer Seatbelt profile and Codex `read-only` sandboxing
+with approval mode `never`.
 
 Any later push invalidates those final reviews and requires exact-head review
 again.
