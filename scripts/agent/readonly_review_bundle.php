@@ -39,12 +39,24 @@ try {
             fwrite(STDOUT, json_encode($paths, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES));
             break;
 
-        case 'changed-paths-nul':
-            $paths = json_decode((string) file_get_contents($required('input')), true, 512, JSON_THROW_ON_ERROR);
+        case 'assert-text-diff':
+            $paths = json_decode(
+                (string) file_get_contents($required('changed-paths')),
+                true,
+                512,
+                JSON_THROW_ON_ERROR,
+            );
             if (!is_array($paths)) {
                 throw new RuntimeException('Reviewer changed-path evidence is invalid.');
             }
-            fwrite(STDOUT, ReadonlyReviewBundle::changedPathsToNul($paths));
+            ReadonlyReviewBundle::assertTextDiffNumstat((string) stream_get_contents(STDIN), $paths);
+            break;
+
+        case 'sanitize-patch':
+            if ($options !== []) {
+                throw new InvalidArgumentException('sanitize-patch accepts no options.');
+            }
+            fwrite(STDOUT, ReadonlyReviewBundle::sanitizeZeroContextPatch((string) stream_get_contents(STDIN)));
             break;
 
         case 'manifest':
@@ -54,10 +66,8 @@ try {
                 $required('base-sha'),
                 $required('head-sha'),
                 $required('changed-paths'),
-                $required('blob-evidence'),
                 $required('trusted-paths'),
             );
-            $manifest = ReadonlyReviewBundle::deduplicateAddedTextHeads($required('bundle-root'), $manifest);
             fwrite(
                 STDOUT,
                 json_encode($manifest, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n",

@@ -198,7 +198,7 @@ class AgentWorkflowContractTest extends TestCase
             $contract['authority']['reviewer']['review_bundle_parent_policy'] ?? null,
         );
         self::assertSame(
-            'committed_patch_manifest_changed_base_head_and_trusted_policy',
+            'zero_context_text_patch_manifest_changed_paths_and_trusted_policy',
             $contract['authority']['reviewer']['review_bundle_contents'] ?? null,
         );
         self::assertSame(
@@ -206,9 +206,22 @@ class AgentWorkflowContractTest extends TestCase
             $contract['authority']['reviewer']['review_bundle_manifest_policy'] ?? null,
         );
         self::assertSame(
-            'exact_complete_textual_new_file_hunk_matches_head_else_retain_blob',
-            $contract['authority']['reviewer']['review_bundle_added_text_deduplication'] ?? null,
+            'zero_context_changed_lines_only_no_full_base_or_head_blobs',
+            $contract['authority']['reviewer']['review_bundle_context_policy'] ?? null,
         );
+        self::assertSame(
+            'strip_unchanged_section_text_before_model_input',
+            $contract['authority']['reviewer']['review_bundle_hunk_header_policy'] ?? null,
+        );
+        self::assertSame(
+            'reject_before_model_input',
+            $contract['authority']['reviewer']['review_bundle_binary_policy'] ?? null,
+        );
+        self::assertSame(
+            'manifest_patch_changed_paths_and_trusted_policy_only',
+            $contract['authority']['reviewer']['review_bundle_file_allowlist'] ?? null,
+        );
+        self::assertArrayNotHasKey('review_bundle_added_text_deduplication', $contract['authority']['reviewer']);
         self::assertSame(
             'trusted_base_policy_as_developer_instructions_untrusted_bundle_as_user_input',
             $contract['authority']['reviewer']['review_instruction_policy'] ?? null,

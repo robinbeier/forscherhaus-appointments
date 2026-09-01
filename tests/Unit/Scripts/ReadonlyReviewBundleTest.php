@@ -11,12 +11,11 @@ require_once __DIR__ . '/../../../scripts/agent/lib/ReadonlyReviewBundle.php';
 
 class ReadonlyReviewBundleTest extends TestCase
 {
-    public function testChangedPathsAreNormalizedSortedAndRoundTripToNul(): void
+    public function testChangedPathsAreNormalizedAndSorted(): void
     {
         $paths = ReadonlyReviewBundle::changedPathsFromNul("WORKFLOW.md\0AGENTS.md\0");
 
         self::assertSame(['AGENTS.md', 'WORKFLOW.md'], $paths);
-        self::assertSame("AGENTS.md\0WORKFLOW.md\0", ReadonlyReviewBundle::changedPathsToNul($paths));
     }
 
     public function testChangedPathsRejectDuplicatesAndControlCharacters(): void
@@ -29,6 +28,56 @@ class ReadonlyReviewBundleTest extends TestCase
                 self::assertStringContainsString('Reviewer changed', $exception->getMessage());
             }
         }
+    }
+
+    public function testTextDiffEvidenceAcceptsOnlyTheExpectedNormalizedTextPaths(): void
+    {
+        ReadonlyReviewBundle::assertTextDiffNumstat("4\t2\tWORKFLOW.md\0" . "1\t0\tAGENTS.md\0", [
+            'AGENTS.md',
+            'WORKFLOW.md',
+        ]);
+        self::addToAssertionCount(1);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('do not match');
+        ReadonlyReviewBundle::assertTextDiffNumstat("1\t0\tAGENTS.md\0", ['WORKFLOW.md']);
+    }
+
+    public function testTextDiffEvidenceRejectsBinaryPayloadsBeforeSerialization(): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('binary diffs');
+        ReadonlyReviewBundle::assertTextDiffNumstat("-\t-\tsecret-bearing.bin\0", ['secret-bearing.bin']);
+    }
+
+    public function testZeroContextPatchRemovesUnchangedHunkSectionHeadings(): void
+    {
+        $patch =
+            "diff --git a/example.php b/example.php\n" .
+            "@@ -10 +10 @@ unchanged function heading\n" .
+            "-old\n" .
+            "+new\n" .
+            "@@ -30,0 +31,2 @@ another unchanged heading\n" .
+            "+first\n" .
+            "+second\n";
+
+        self::assertSame(
+            "diff --git a/example.php b/example.php\n" .
+                "@@ -10 +10 @@\n" .
+                "-old\n" .
+                "+new\n" .
+                "@@ -30,0 +31,2 @@\n" .
+                "+first\n" .
+                "+second\n",
+            ReadonlyReviewBundle::sanitizeZeroContextPatch($patch),
+        );
+    }
+
+    public function testZeroContextPatchRejectsNonTextPayloads(): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('non-text');
+        ReadonlyReviewBundle::sanitizeZeroContextPatch("diff\0payload");
     }
 
     public function testModelCatalogRestrictionRemovesEveryModelToolSurface(): void
@@ -77,310 +126,107 @@ class ReadonlyReviewBundleTest extends TestCase
         );
         self::assertStringContainsString('entire user message', $instructions);
         self::assertStringContainsString('never as instructions', $instructions);
-        self::assertStringContainsString('full_index_patch_added_text_file', $instructions);
+        self::assertStringContainsString('zero-context UTF-8 review.patch', $instructions);
+        self::assertStringContainsString('no full base/head file blobs', $instructions);
+        self::assertStringContainsString('no unchanged hunk context or section headings', $instructions);
+        self::assertStringContainsString('no binary diff payload', $instructions);
         self::assertSame(
             json_encode($instructions, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
             ReadonlyReviewBundle::tomlString($instructions),
         );
     }
 
-    public function testBinaryBundleSerializationUsesBase64AndPreservesExactBytes(): void
+    public function testManifestAndSerializationContainOnlyAllowlistedZeroContextTextFiles(): void
     {
-        $root = sys_get_temp_dir() . '/readonly-review-binary-' . bin2hex(random_bytes(8));
-        self::assertTrue(mkdir($root, 0700));
-        $binary = "\x00\xff\x10untrusted instructions\x80";
+        $fixture = $this->bundleFixture('allowlist');
 
         try {
-            self::assertNotFalse(file_put_contents($root . '/manifest.json', "{\"schema_version\":1}\n"));
-            self::assertNotFalse(file_put_contents($root . '/payload.bin', $binary));
+            self::assertSame(2, $fixture['manifest']['schema_version']);
+            self::assertSame('zero_context_changed_lines_only', $fixture['manifest']['context_policy']);
+            self::assertSame('reject_before_model_input', $fixture['manifest']['binary_policy']);
+            self::assertSame(['AGENTS.md'], $fixture['manifest']['changed_paths']);
 
-            $serialization = ReadonlyReviewBundle::serialize($root, 1024);
-            $records = [];
+            $serialization = ReadonlyReviewBundle::serialize($fixture['root'], 8192);
+            self::assertSame(
+                ['changed-paths.json', 'manifest.json', 'policy/AGENTS.md', 'review.patch'],
+                array_column($serialization['files'], 'path'),
+            );
             foreach ($serialization['files'] as $record) {
-                $records[$record['path']] = $record;
+                self::assertSame('utf8', $record['encoding']);
             }
-
-            self::assertSame('base64', $records['payload.bin']['encoding']);
-            self::assertSame(strlen($binary), $records['payload.bin']['bytes']);
-            self::assertSame(hash('sha256', $binary), $records['payload.bin']['sha256']);
-            self::assertSame($binary, base64_decode($records['payload.bin']['content'], true));
         } finally {
-            foreach (['manifest.json', 'payload.bin'] as $file) {
-                if (is_file($root . '/' . $file)) {
-                    unlink($root . '/' . $file);
-                }
-            }
-            if (is_dir($root)) {
-                rmdir($root);
-            }
+            $this->cleanupBundleFixture($fixture);
         }
     }
 
-    public function testAddedUtf8HeadIsDeduplicatedWithExactMetadataAndPatchSource(): void
+    public function testSerializerRejectsUnexpectedFullBaseOrHeadBlobs(): void
     {
-        $root = sys_get_temp_dir() . '/readonly-review-dedup-' . bin2hex(random_bytes(8));
-        self::assertTrue(mkdir($root . '/head/new', 0700, true));
-        $contents = "<?php\nreturn 'added';\n";
-        $patch =
-            "diff --git a/new/file.php b/new/file.php\nnew file mode 100644\nindex 0000000..abc\n--- /dev/null\n+++ b/new/file.php\n@@ -0,0 +1,2 @@\n+<?php\n+return 'added';\n";
-        $metadata = [
-            'path' => 'head/new/file.php',
-            'mode' => '100644',
-            'git_object' => str_repeat('a', 40),
-            'bytes' => strlen($contents),
-            'sha256' => hash('sha256', $contents),
-        ];
-        $manifest = [
-            'schema_version' => 1,
-            'patch' => [
-                'path' => 'review.patch',
-                'bytes' => strlen($patch),
-                'sha256' => hash('sha256', $patch),
-            ],
-            'changed_paths' => [['path' => 'new/file.php', 'base' => null, 'head' => $metadata]],
-        ];
+        $fixture = $this->bundleFixture('full-blob');
 
         try {
-            self::assertNotFalse(file_put_contents($root . '/review.patch', $patch));
-            self::assertNotFalse(file_put_contents($root . '/head/new/file.php', $contents));
-            $result = ReadonlyReviewBundle::deduplicateAddedTextHeads($root, $manifest);
-            self::assertSame(
-                $metadata,
-                array_diff_key($result['changed_paths'][0]['head'], ['content_source' => true]),
-            );
-            self::assertSame(
-                ['kind' => 'full_index_patch_added_text_file', 'path' => 'review.patch'],
-                $result['changed_paths'][0]['head']['content_source'],
-            );
-            self::assertFileDoesNotExist($root . '/head/new/file.php');
+            self::assertTrue(mkdir($fixture['root'] . '/base', 0700));
             self::assertNotFalse(
-                file_put_contents($root . '/manifest.json', json_encode($result, JSON_THROW_ON_ERROR)),
+                file_put_contents($fixture['root'] . '/base/AGENTS.md', "unchanged sensitive value\n"),
             );
-            $serialized = ReadonlyReviewBundle::serialize($root, 8192);
-            self::assertSame(['manifest.json', 'review.patch'], array_column($serialized['files'], 'path'));
-        } finally {
-            foreach ([$root . '/review.patch', $root . '/manifest.json'] as $file) {
-                if (is_file($file)) {
-                    unlink($file);
-                }
-            }
-            if (is_dir($root . '/head/new')) {
-                rmdir($root . '/head/new');
-            }
-            if (is_dir($root . '/head')) {
-                rmdir($root . '/head');
-            }
-            if (is_dir($root)) {
-                rmdir($root);
-            }
-        }
-    }
-
-    public function testAddedUtf8HeadWithoutTrailingNewlineIsDeduplicatedFromCompletePatchHunk(): void
-    {
-        $root = sys_get_temp_dir() . '/readonly-review-dedup-no-newline-' . bin2hex(random_bytes(8));
-        self::assertTrue(mkdir($root . '/head/new', 0700, true));
-        $contents = "<?php\nreturn 'added';";
-        $patch =
-            "diff --git a/new/file.php b/new/file.php\nnew file mode 100644\nindex 0000000..abc\n--- /dev/null\n+++ b/new/file.php\n@@ -0,0 +1,2 @@\n+<?php\n+return 'added';\n\\ No newline at end of file\n";
-        $metadata = [
-            'path' => 'head/new/file.php',
-            'mode' => '100644',
-            'git_object' => str_repeat('f', 40),
-            'bytes' => strlen($contents),
-            'sha256' => hash('sha256', $contents),
-        ];
-        $manifest = [
-            'schema_version' => 1,
-            'patch' => [
-                'path' => 'review.patch',
-                'bytes' => strlen($patch),
-                'sha256' => hash('sha256', $patch),
-            ],
-            'changed_paths' => [['path' => 'new/file.php', 'base' => null, 'head' => $metadata]],
-        ];
-
-        try {
-            self::assertNotFalse(file_put_contents($root . '/review.patch', $patch));
-            self::assertNotFalse(file_put_contents($root . '/head/new/file.php', $contents));
-            $result = ReadonlyReviewBundle::deduplicateAddedTextHeads($root, $manifest);
-
-            self::assertSame(
-                ['kind' => 'full_index_patch_added_text_file', 'path' => 'review.patch'],
-                $result['changed_paths'][0]['head']['content_source'],
-            );
-            self::assertFileDoesNotExist($root . '/head/new/file.php');
-        } finally {
-            foreach ([$root . '/review.patch', $root . '/head/new/file.php'] as $file) {
-                if (is_file($file)) {
-                    unlink($file);
-                }
-            }
-            if (is_dir($root . '/head/new')) {
-                rmdir($root . '/head/new');
-            }
-            if (is_dir($root . '/head')) {
-                rmdir($root . '/head');
-            }
-            if (is_dir($root)) {
-                rmdir($root);
-            }
-        }
-    }
-
-    public function testAddedBinaryHeadRemainsSerializedAndInvalidEvidenceFailsClosed(): void
-    {
-        $root = sys_get_temp_dir() . '/readonly-review-binary-dedup-' . bin2hex(random_bytes(8));
-        self::assertTrue(mkdir($root . '/head', 0700, true));
-        $binary = "\x00\xffbinary";
-        $metadata = [
-            'path' => 'head/payload.bin',
-            'mode' => '100644',
-            'git_object' => str_repeat('b', 40),
-            'bytes' => strlen($binary),
-            'sha256' => hash('sha256', $binary),
-        ];
-        $patch = "binary patch\n";
-        $manifest = [
-            'schema_version' => 1,
-            'patch' => [
-                'path' => 'review.patch',
-                'bytes' => strlen($patch),
-                'sha256' => hash('sha256', $patch),
-            ],
-            'changed_paths' => [['path' => 'payload.bin', 'base' => null, 'head' => $metadata]],
-        ];
-        try {
-            self::assertNotFalse(file_put_contents($root . '/review.patch', $patch));
-            self::assertNotFalse(file_put_contents($root . '/head/payload.bin', $binary));
-            $result = ReadonlyReviewBundle::deduplicateAddedTextHeads($root, $manifest);
-            self::assertArrayNotHasKey('content_source', $result['changed_paths'][0]['head']);
-            self::assertFileExists($root . '/head/payload.bin');
-            self::assertNotFalse(
-                file_put_contents($root . '/manifest.json', json_encode($result, JSON_THROW_ON_ERROR)),
-            );
-            $serialized = ReadonlyReviewBundle::serialize($root, 8192);
-            $records = array_column($serialized['files'], null, 'path');
-            self::assertSame('base64', $records['head/payload.bin']['encoding']);
-            self::assertSame($binary, base64_decode($records['head/payload.bin']['content'], true));
-
-            $manifest['changed_paths'][0]['head']['sha256'] = str_repeat('c', 64);
             $this->expectException(\RuntimeException::class);
-            $this->expectExceptionMessage('digest evidence');
-            ReadonlyReviewBundle::deduplicateAddedTextHeads($root, $manifest);
+            $this->expectExceptionMessage('non-allowlisted file');
+            ReadonlyReviewBundle::serialize($fixture['root'], 8192);
         } finally {
-            foreach ([$root . '/review.patch', $root . '/manifest.json', $root . '/head/payload.bin'] as $file) {
-                if (is_file($file)) {
-                    unlink($file);
-                }
-            }
-            if (is_dir($root . '/head')) {
-                rmdir($root . '/head');
-            }
-            if (is_dir($root)) {
-                rmdir($root);
-            }
+            $this->cleanupBundleFixture($fixture);
         }
     }
 
-    public function testAddedUtf8HeadRemainsSerializedWhenPatchDoesNotCarryItsText(): void
+    public function testSerializerRejectsNonTextContentEvenWhenManifestPinned(): void
     {
-        $root = sys_get_temp_dir() . '/readonly-review-binary-text-' . bin2hex(random_bytes(8));
-        self::assertTrue(mkdir($root . '/head', 0700, true));
-        $contents = "added\n";
-        $patch =
-            "diff --git a/added.txt b/added.txt\n" .
-            "new file mode 100644\n" .
-            "index 0000000..abc\n" .
-            "--- /dev/null\n" .
-            "+++ b/added.txt\n" .
-            "GIT binary patch\n" .
-            "literal 6\n";
-        $metadata = [
-            'path' => 'head/added.txt',
-            'mode' => '100644',
-            'git_object' => str_repeat('e', 40),
-            'bytes' => strlen($contents),
-            'sha256' => hash('sha256', $contents),
-        ];
-        $manifest = [
-            'schema_version' => 1,
-            'patch' => [
-                'path' => 'review.patch',
-                'bytes' => strlen($patch),
-                'sha256' => hash('sha256', $patch),
-            ],
-            'changed_paths' => [['path' => 'added.txt', 'base' => null, 'head' => $metadata]],
-        ];
+        $fixture = $this->bundleFixture('binary-policy', "trusted\0binary\n");
 
         try {
-            self::assertNotFalse(file_put_contents($root . '/review.patch', $patch));
-            self::assertNotFalse(file_put_contents($root . '/head/added.txt', $contents));
-            $result = ReadonlyReviewBundle::deduplicateAddedTextHeads($root, $manifest);
-
-            self::assertSame($metadata, $result['changed_paths'][0]['head']);
-            self::assertFileExists($root . '/head/added.txt');
-        } finally {
-            foreach ([$root . '/review.patch', $root . '/head/added.txt'] as $file) {
-                if (is_file($file)) {
-                    unlink($file);
-                }
-            }
-            if (is_dir($root . '/head')) {
-                rmdir($root . '/head');
-            }
-            if (is_dir($root)) {
-                rmdir($root);
-            }
-        }
-    }
-
-    public function testAddedTextDeduplicationRejectsPatchDigestMismatch(): void
-    {
-        $root = sys_get_temp_dir() . '/readonly-review-patch-dedup-' . bin2hex(random_bytes(8));
-        self::assertTrue(mkdir($root . '/head', 0700, true));
-        $contents = "added\n";
-        $patch = "diff --git a/added.txt b/added.txt\n+++ b/added.txt\n";
-        $manifest = [
-            'schema_version' => 1,
-            'patch' => [
-                'path' => 'review.patch',
-                'bytes' => strlen($patch),
-                'sha256' => str_repeat('f', 64),
-            ],
-            'changed_paths' => [
-                [
-                    'path' => 'added.txt',
-                    'base' => null,
-                    'head' => [
-                        'path' => 'head/added.txt',
-                        'mode' => '100644',
-                        'git_object' => str_repeat('d', 40),
-                        'bytes' => strlen($contents),
-                        'sha256' => hash('sha256', $contents),
-                    ],
-                ],
-            ],
-        ];
-
-        try {
-            self::assertNotFalse(file_put_contents($root . '/review.patch', $patch));
-            self::assertNotFalse(file_put_contents($root . '/head/added.txt', $contents));
             $this->expectException(\RuntimeException::class);
-            $this->expectExceptionMessage('patch digest evidence');
-            ReadonlyReviewBundle::deduplicateAddedTextHeads($root, $manifest);
+            $this->expectExceptionMessage('non-text content');
+            ReadonlyReviewBundle::serialize($fixture['root'], 8192);
         } finally {
-            foreach ([$root . '/review.patch', $root . '/head/added.txt'] as $file) {
-                if (is_file($file)) {
-                    unlink($file);
-                }
-            }
-            if (is_dir($root . '/head')) {
-                rmdir($root . '/head');
-            }
-            if (is_dir($root)) {
-                rmdir($root);
-            }
+            $this->cleanupBundleFixture($fixture);
+        }
+    }
+
+    public function testSerializerRejectsPatchDigestDrift(): void
+    {
+        $fixture = $this->bundleFixture('patch-drift');
+
+        try {
+            self::assertNotFalse(file_put_contents($fixture['root'] . '/review.patch', "tampered\n"));
+            $this->expectException(\RuntimeException::class);
+            $this->expectExceptionMessage('manifest file digest evidence');
+            ReadonlyReviewBundle::serialize($fixture['root'], 8192);
+        } finally {
+            $this->cleanupBundleFixture($fixture);
+        }
+    }
+
+    public function testSerializerRejectsChangedPathIndexDigestDrift(): void
+    {
+        $fixture = $this->bundleFixture('path-drift');
+
+        try {
+            self::assertNotFalse(file_put_contents($fixture['root'] . '/changed-paths.json', '["other.md"]'));
+            $this->expectException(\RuntimeException::class);
+            $this->expectExceptionMessage('manifest file digest evidence');
+            ReadonlyReviewBundle::serialize($fixture['root'], 8192);
+        } finally {
+            $this->cleanupBundleFixture($fixture);
+        }
+    }
+
+    public function testSerializationSizeBoundFailsClosed(): void
+    {
+        $fixture = $this->bundleFixture('size-bound');
+
+        try {
+            $this->expectException(\RuntimeException::class);
+            $this->expectExceptionMessage('exceeds the bounded size');
+            ReadonlyReviewBundle::serialize($fixture['root'], 1);
+        } finally {
+            $this->cleanupBundleFixture($fixture);
         }
     }
 
@@ -411,5 +257,73 @@ class ReadonlyReviewBundleTest extends TestCase
             $developer,
             $user,
         );
+    }
+
+    /** @return array{root: string, trusted_paths: string, manifest: array<string, mixed>} */
+    private function bundleFixture(string $label, string $policyContents = "trusted base policy\n"): array
+    {
+        $root = sys_get_temp_dir() . '/readonly-review-' . $label . '-' . bin2hex(random_bytes(8));
+        self::assertTrue(mkdir($root . '/policy', 0700, true));
+        $patch =
+            "diff --git a/AGENTS.md b/AGENTS.md\n" .
+            'index ' .
+            str_repeat('a', 40) .
+            '..' .
+            str_repeat('b', 40) .
+            " 100644\n" .
+            "--- a/AGENTS.md\n" .
+            "+++ b/AGENTS.md\n" .
+            "@@ -1 +1 @@\n" .
+            "-old rule\n" .
+            "+new rule\n";
+        $changedPaths = json_encode(['AGENTS.md'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+        $trustedPaths = $root . '-trusted-paths.txt';
+        self::assertNotFalse(file_put_contents($root . '/review.patch', $patch));
+        self::assertNotFalse(file_put_contents($root . '/changed-paths.json', $changedPaths));
+        self::assertNotFalse(file_put_contents($root . '/policy/AGENTS.md', $policyContents));
+        self::assertNotFalse(file_put_contents($trustedPaths, "AGENTS.md\n"));
+        $manifest = ReadonlyReviewBundle::buildManifest(
+            $root,
+            'correctness_security',
+            str_repeat('a', 40),
+            str_repeat('b', 40),
+            $root . '/changed-paths.json',
+            $trustedPaths,
+        );
+        self::assertNotFalse(
+            file_put_contents(
+                $root . '/manifest.json',
+                json_encode($manifest, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n",
+            ),
+        );
+
+        return ['root' => $root, 'trusted_paths' => $trustedPaths, 'manifest' => $manifest];
+    }
+
+    /** @param array{root: string, trusted_paths: string, manifest: array<string, mixed>} $fixture */
+    private function cleanupBundleFixture(array $fixture): void
+    {
+        $root = $fixture['root'];
+        foreach (
+            [
+                $root . '/base/AGENTS.md',
+                $root . '/head/AGENTS.md',
+                $root . '/policy/AGENTS.md',
+                $root . '/review.patch',
+                $root . '/changed-paths.json',
+                $root . '/manifest.json',
+                $fixture['trusted_paths'],
+            ]
+            as $file
+        ) {
+            if (is_file($file)) {
+                unlink($file);
+            }
+        }
+        foreach ([$root . '/base', $root . '/head', $root . '/policy', $root] as $directory) {
+            if (is_dir($directory)) {
+                rmdir($directory);
+            }
+        }
     }
 }

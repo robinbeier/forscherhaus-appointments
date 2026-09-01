@@ -112,9 +112,13 @@ The machine contract owns runtime pins, disabled reviewer tools, output schema,
 and trusted paths. The runner orchestrates separately materialized exact-base
 bundle and isolated-runtime libraries for deterministic SHA-256 serialization,
 macOS Seatbelt default-deny isolation, canaries, and bounded privacy-safe
-output. The sealed bundle is the sole review input; the original
-worktree, `.git`, user configuration, connectors, delegation, credentials, and
-external writes remain unavailable. Non-macOS execution fails closed. The host
+output. The sealed bundle is the sole review input. It carries only a
+zero-context UTF-8 patch, changed paths, deterministic manifest, and allowlisted
+trusted base policy; full base/head blobs and binary payloads are rejected, and
+unchanged hunk context including section headings is stripped before the model
+call. The original worktree, `.git`,
+user configuration, connectors, delegation, credentials, and external writes
+remain unavailable. Non-macOS execution fails closed. The host
 login authenticates only the authorized model request and cannot be refreshed by
 the harness. Consult the contract and runner for implementation details.
 Before any PHP helper executes, a root-owned clean bootstrap and isolated

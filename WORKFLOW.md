@@ -134,6 +134,15 @@ both runtime-source maps and the closure-pin map are deliberately unsupported.
 Ambient `PATH` never grants interpreter authority. The centralized ownership
 matcher is also Primary-owned because it defines shared lane and CI semantics.
 
+External review input is deliberately narrower than a checkout. It contains a
+zero-context UTF-8 patch (changed lines only), the normalized changed-path
+index, its deterministic manifest, and the allowlisted trusted base policy.
+Full base/head file blobs and unchanged hunk context are never materialized or
+serialized; unchanged hunk-section headings are stripped as well. Binary diffs
+stop before any model request because they cannot be reviewed without
+transmitting broader blob content. The serializer rejects every file outside
+its exact manifest-derived allowlist.
+
 Exactly one primary remains the external single writer for commits, pushes,
 PRs, checks, Linear, workpads, attestations, merges, and production actions.
 Workers may edit only their assigned local ownership. Shared contracts,

@@ -176,13 +176,26 @@ class ReviewerAuthorityContractTest extends TestCase
             $contract['authority']['reviewer']['review_bundle_parent_policy'] ?? null,
         );
         self::assertSame(
-            'committed_patch_manifest_changed_base_head_and_trusted_policy',
+            'zero_context_text_patch_manifest_changed_paths_and_trusted_policy',
             $contract['authority']['reviewer']['review_bundle_contents'] ?? null,
         );
         self::assertSame(
-            'exact_complete_textual_new_file_hunk_matches_head_else_retain_blob',
-            $contract['authority']['reviewer']['review_bundle_added_text_deduplication'] ?? null,
+            'zero_context_changed_lines_only_no_full_base_or_head_blobs',
+            $contract['authority']['reviewer']['review_bundle_context_policy'] ?? null,
         );
+        self::assertSame(
+            'strip_unchanged_section_text_before_model_input',
+            $contract['authority']['reviewer']['review_bundle_hunk_header_policy'] ?? null,
+        );
+        self::assertSame(
+            'reject_before_model_input',
+            $contract['authority']['reviewer']['review_bundle_binary_policy'] ?? null,
+        );
+        self::assertSame(
+            'manifest_patch_changed_paths_and_trusted_policy_only',
+            $contract['authority']['reviewer']['review_bundle_file_allowlist'] ?? null,
+        );
+        self::assertArrayNotHasKey('review_bundle_added_text_deduplication', $contract['authority']['reviewer']);
         self::assertSame(
             'deterministic_sha256_base_head_binding',
             $contract['authority']['reviewer']['review_bundle_manifest_policy'] ?? null,
@@ -351,6 +364,13 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertStringContainsString('readonly_reviewer_execute_isolated', $runner);
         self::assertStringNotContainsString('--dangerously-bypass-approvals-and-sandbox', $runner);
         self::assertStringContainsString('readonly_review_bundle.php', $bundleRuntime);
+        self::assertStringContainsString('assert-text-diff', $bundleRuntime);
+        self::assertStringContainsString('--unified=0', $bundleRuntime);
+        self::assertStringContainsString('sanitize-patch', $bundleRuntime);
+        self::assertStringNotContainsString('readonly_reviewer_materialize_changed_blob', $bundleRuntime);
+        self::assertStringNotContainsString('cat-file blob', $bundleRuntime);
+        self::assertStringNotContainsString('$review_root/base/', $bundleRuntime);
+        self::assertStringNotContainsString('$review_root/head/', $bundleRuntime);
         self::assertStringNotContainsString('sandbox_exec', $bundleRuntime);
         self::assertStringNotContainsString('--ask-for-approval', $bundleRuntime);
         self::assertStringContainsString('-f "$seatbelt_profile"', $isolatedRuntime);

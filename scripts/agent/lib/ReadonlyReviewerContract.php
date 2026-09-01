@@ -307,10 +307,12 @@ final class ReadonlyReviewerContract
             'review_checkout' => 'deterministic_exact_commit_bundle',
             'review_checkout_symlink_policy' => 'reject_all_tracked_symlinks',
             'review_bundle_parent_policy' => 'private_system_temp_random_directory',
-            'review_bundle_contents' => 'committed_patch_manifest_changed_base_head_and_trusted_policy',
+            'review_bundle_contents' => 'zero_context_text_patch_manifest_changed_paths_and_trusted_policy',
             'review_bundle_manifest_policy' => 'deterministic_sha256_base_head_binding',
-            'review_bundle_added_text_deduplication' =>
-                'exact_complete_textual_new_file_hunk_matches_head_else_retain_blob',
+            'review_bundle_context_policy' => 'zero_context_changed_lines_only_no_full_base_or_head_blobs',
+            'review_bundle_hunk_header_policy' => 'strip_unchanged_section_text_before_model_input',
+            'review_bundle_binary_policy' => 'reject_before_model_input',
+            'review_bundle_file_allowlist' => 'manifest_patch_changed_paths_and_trusted_policy_only',
             'review_instruction_policy' =>
                 'trusted_base_policy_as_developer_instructions_untrusted_bundle_as_user_input',
             'prompt_role_preflight' => 'pinned_cli_requires_developer_policy_and_user_bundle_channels',
