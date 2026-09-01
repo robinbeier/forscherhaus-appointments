@@ -105,14 +105,19 @@ require three independent final reviews on the same unchanged exact head:
 Invoke final lenses through the fixed-system-Git exact-base protocol in
 `scripts/agent/trusted_base_launcher.sh`, using the trusted base described in
 `WORKFLOW.md`; never execute either checked-out harness script. The launcher
-privately materializes `scripts/agent/run_readonly_reviewer.sh` only after the
-base boundary is established. The runner and
+privately materializes `scripts/agent/lib/trusted_base_payload_runtime.sh` and
+`scripts/agent/run_readonly_reviewer.sh` only after the base boundary is
+established. The shared runtime owns clean Git/Python and exact-base declared
+path materialization for reviewer and parallel-work payloads. The runner and
 `.codex/contracts/agent-workflow.json` own live-main/exact-merge-base binding,
 deterministic SHA-256 bundle construction, and trusted-path selection. Do not
 duplicate its bootstrap and materialization internals here. The contract pins
 the official 0.145.0 release digest.
 The machine contract owns runtime pins, disabled reviewer tools, output schema,
-and trusted paths. The runner orchestrates separately materialized exact-base
+and trusted paths. Bundle construction, model/prompt policy, and output
+validation are separate modules. Structural output rules come from the
+exact-base schema; exact Base/Head/lens/path and privacy are additional semantic
+checks. The runner orchestrates separately materialized exact-base
 bundle and isolated-runtime libraries for deterministic SHA-256 serialization,
 macOS Seatbelt default-deny isolation, canaries, and bounded privacy-safe
 output. The sealed bundle is the sole review input. It carries only a
@@ -154,6 +159,12 @@ derives that fail-closed set from the base contract and refuses those cases
 instead of allowing a head to review its own authority boundary. The model call
 remains inside both the outer Seatbelt profile and Codex `read-only` sandboxing
 with approval mode `never`.
+
+The Primary can use `--diagnostic-bootstrap-only`, without `--codex-bin`, to
+exercise the same exact-base launcher, attested PHP bootstrap, and real macOS
+Seatbelt allow/deny boundary without a model call. It never writes a user-home
+canary and reports `review_evidence: false`; it is diagnostic evidence only and
+never substitutes for a required reviewer lens.
 
 Any later push invalidates those final reviews and requires exact-head review
 again.

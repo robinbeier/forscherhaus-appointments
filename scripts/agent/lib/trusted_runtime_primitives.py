@@ -15,6 +15,22 @@ import urllib.parse
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 PLATFORM = re.compile(r"^[A-Za-z0-9_.-]+-[A-Za-z0-9_.-]+$")
 SYSTEM_UTILITIES = {"Darwin": "/usr/bin/otool", "Linux": "/usr/bin/ldd"}
+CURL_EXECUTABLE = "/usr/bin/curl"
+# Curl reads user configuration before interpreting most command-line options.
+# Keep --disable as the first option and pass an explicit allowlist environment;
+# this excludes curlrc/netrc/proxy and credential-related ambient variables.
+SAFE_CURL_ENVIRONMENT = {"PATH": "/usr/bin:/bin", "LC_ALL": "C"}
+CURL_SECURITY_OPTIONS = (
+    "--disable",
+    "--fail",
+    "--silent",
+    "--show-error",
+    "--location",
+    "--proto",
+    "=https",
+    "--proto-redir",
+    "=https",
+)
 DARWIN_SEALED_PREFIXES = ("/usr/lib/", "/System/Library/")
 PINNED_ARCHIVE_MAX_BYTES = 64 * 1024 * 1024
 PINNED_ARCHIVE_MEMBER_MAX_BYTES = 128 * 1024 * 1024
@@ -90,7 +106,7 @@ def _private_materialization_root(path):
 
 
 def _download_pinned_archive(url, target):
-    curl = "/usr/bin/curl"
+    curl = CURL_EXECUTABLE
     try:
         metadata = _regular_secure(os.path.realpath(curl))
     except AttestationError as exc:
@@ -101,15 +117,7 @@ def _download_pinned_archive(url, target):
         subprocess.run(
             [
                 curl,
-                "--disable",
-                "--fail",
-                "--silent",
-                "--show-error",
-                "--location",
-                "--proto",
-                "=https",
-                "--proto-redir",
-                "=https",
+                *CURL_SECURITY_OPTIONS,
                 "--max-filesize",
                 str(PINNED_ARCHIVE_MAX_BYTES),
                 "--output",
@@ -118,7 +126,7 @@ def _download_pinned_archive(url, target):
             ],
             check=True,
             capture_output=True,
-            env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"},
+            env=dict(SAFE_CURL_ENVIRONMENT),
             timeout=180,
         )
     except (OSError, subprocess.SubprocessError) as exc:

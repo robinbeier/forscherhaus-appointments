@@ -4,33 +4,11 @@ declare(strict_types=1);
 
 namespace Forscherhaus\AgentHarness;
 
-use JsonException;
-
 require_once __DIR__ . '/RepoPath.php';
+require_once __DIR__ . '/ReadonlyReviewOutput.php';
 
 final class ReadonlyReviewerContract
 {
-    /** @var array<string, int> */
-    private const FINDING_TEXT_MAX_BYTES = [
-        'title' => 160,
-        'impact' => 1200,
-        'trigger' => 1200,
-    ];
-
-    /** @var list<string> */
-    private const SENSITIVE_FINDING_TEXT_PATTERNS = [
-        '/[\x00-\x1F\x7F]/',
-        '/\b(?:Bearer|Basic)\s+[A-Za-z0-9+\/_=.-]{8,}\b/i',
-        '/\b(?:sk|rk|pk|gh[pousr]|xox[baprs])[-_][A-Za-z0-9._-]{12,}\b/i',
-        '/\bAKIA[0-9A-Z]{16}\b/',
-        '/\b(?:password|passwd|secret|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|session[_ -]?id|cookie)\s*[:=]\s*\S+/i',
-        '/\b[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}\b/i',
-        '#\b(?:https?|ssh)://\S+#i',
-        '#(?:^|[\s(])/(?:root(?:/|\b)|(?:Users|home)/[^/\s]+)#',
-        '/\b[0-9a-f]{32,}\b/i',
-        '#(?<![A-Za-z0-9+/_-])[A-Za-z0-9+/_-]{48,}={0,2}(?![A-Za-z0-9+/_-])#',
-    ];
-
     /** @var list<string> */
     private const MINIMUM_DISABLED_FEATURES = [
         'apps',
@@ -330,7 +308,8 @@ final class ReadonlyReviewerContract
             'review_original_worktree_access' => 'not_model_visible',
             'isolation_platform' => 'darwin_seatbelt_fail_closed_elsewhere',
             'isolation_profile' => 'default_deny_runtime_allowlist_exact_bundle_and_auth_read_only',
-            'isolation_preflight' => 'bundle_readable_temp_home_and_original_worktree_denied',
+            'isolation_preflight' =>
+                'bundle_readable_foreign_temp_and_original_worktree_denied_exact_auth_file_only_no_home_write',
             'model_tool_surface' => 'derived_exact_release_catalog_without_shell_patch_image_search_or_external_tools',
             'codex_sandbox_mode' => 'read-only',
             'codex_approval_policy' => 'never',
@@ -434,115 +413,12 @@ final class ReadonlyReviewerContract
         string $expectedHeadSha,
         array $changedPaths,
     ): array {
-        $changedPathSet = self::changedPathSet($changedPaths);
-
-        try {
-            $review = json_decode(trim($output), true, 512, JSON_THROW_ON_ERROR);
-        } catch (JsonException) {
-            throw new \InvalidArgumentException('Reviewer output is not valid JSON.');
-        }
-
-        if (!is_array($review) || array_is_list($review)) {
-            throw new \InvalidArgumentException('Reviewer output has an invalid shape.');
-        }
-
-        $requiredKeys = ['base_sha', 'findings', 'head_sha', 'lens', 'verdict'];
-        $actualKeys = array_keys($review);
-        sort($requiredKeys, SORT_STRING);
-        sort($actualKeys, SORT_STRING);
-        if (
-            $actualKeys !== $requiredKeys ||
-            $review['lens'] !== $expectedLens ||
-            $review['base_sha'] !== $expectedBaseSha ||
-            $review['head_sha'] !== $expectedHeadSha
-        ) {
-            throw new \InvalidArgumentException(
-                'Reviewer output is not bound to the requested base, exact head, and lens.',
-            );
-        }
-
-        $findings = $review['findings'] ?? null;
-        $verdict = $review['verdict'] ?? null;
-        if (
-            !is_array($findings) ||
-            !array_is_list($findings) ||
-            !in_array($verdict, ['no_findings', 'findings'], true)
-        ) {
-            throw new \InvalidArgumentException('Reviewer output verdict or findings are invalid.');
-        }
-        if (($verdict === 'no_findings') !== ($findings === [])) {
-            throw new \InvalidArgumentException('Reviewer output verdict does not match its findings.');
-        }
-
-        foreach ($findings as $finding) {
-            self::validateFinding($finding, $changedPathSet);
-        }
-
-        return $review;
-    }
-
-    /** @param array<string, true> $changedPathSet */
-    private static function validateFinding(mixed $finding, array $changedPathSet): void
-    {
-        if (!is_array($finding) || array_is_list($finding)) {
-            throw new \InvalidArgumentException('Reviewer finding has an invalid shape.');
-        }
-
-        $requiredKeys = ['file', 'impact', 'line', 'priority', 'title', 'trigger'];
-        $actualKeys = array_keys($finding);
-        sort($requiredKeys, SORT_STRING);
-        sort($actualKeys, SORT_STRING);
-        if ($actualKeys !== $requiredKeys) {
-            throw new \InvalidArgumentException('Reviewer finding has unexpected fields.');
-        }
-
-        if (!in_array($finding['priority'] ?? null, ['P0', 'P1', 'P2', 'P3'], true)) {
-            throw new \InvalidArgumentException('Reviewer finding priority is invalid.');
-        }
-        foreach (['title', 'impact', 'trigger'] as $key) {
-            self::validateFindingText($key, $finding[$key] ?? null);
-        }
-        $file = $finding['file'] ?? null;
-        if (!is_string($file) || !RepoPath::isNormalized($file) || !isset($changedPathSet[$file])) {
-            throw new \InvalidArgumentException('Reviewer finding file is not a changed repository path.');
-        }
-        if (($finding['line'] ?? null) !== null && (!is_int($finding['line']) || $finding['line'] < 1)) {
-            throw new \InvalidArgumentException('Reviewer finding line is invalid.');
-        }
-    }
-
-    private static function validateFindingText(string $field, mixed $value): void
-    {
-        $maxBytes = self::FINDING_TEXT_MAX_BYTES[$field] ?? null;
-        if (!is_int($maxBytes) || !is_string($value) || trim($value) === '' || strlen($value) > $maxBytes) {
-            throw new \InvalidArgumentException('Reviewer finding text is invalid.');
-        }
-
-        foreach (self::SENSITIVE_FINDING_TEXT_PATTERNS as $pattern) {
-            if (preg_match($pattern, $value) === 1) {
-                throw new \InvalidArgumentException('Reviewer finding text is not privacy-safe.');
-            }
-        }
-    }
-
-    /**
-     * @param list<string> $changedPaths
-     * @return array<string, true>
-     */
-    private static function changedPathSet(array $changedPaths): array
-    {
-        if (!array_is_list($changedPaths)) {
-            throw new \InvalidArgumentException('Reviewer changed-path evidence is invalid.');
-        }
-
-        $set = [];
-        foreach ($changedPaths as $path) {
-            if (!is_string($path) || !RepoPath::isNormalized($path)) {
-                throw new \InvalidArgumentException('Reviewer changed-path evidence is invalid.');
-            }
-            $set[$path] = true;
-        }
-
-        return $set;
+        return ReadonlyReviewOutput::validate(
+            $output,
+            $expectedLens,
+            $expectedBaseSha,
+            $expectedHeadSha,
+            $changedPaths,
+        );
     }
 }

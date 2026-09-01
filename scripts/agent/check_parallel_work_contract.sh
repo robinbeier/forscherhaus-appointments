@@ -7,8 +7,8 @@ if [[ "${TRUSTED_BASE_LAUNCHER:-}" != "1" ]]; then
     exit 2
 fi
 
-# With `bash -s -- <runner> ...`, Bash retains its own `$0` and exposes the
-# materialized declared-base runner as `$1`.
+# The launcher executes one private script assembled from the verified shared
+# runtime and this payload, then supplies the materialized payload path as `$1`.
 runner_source_input="${1:-}"
 if [[ -z "$runner_source_input" ]]; then
     echo "Parallel-work validator trusted source path is unavailable." >&2
@@ -50,24 +50,17 @@ if [[ -z "$validator_checkout" || "$validator_checkout" != /* ]]; then
     echo "Parallel-work validator checkout must be supplied as an absolute path." >&2
     exit 2
 fi
-validator_checkout="$(CDPATH= cd -- "$validator_checkout" 2>/dev/null && /bin/pwd -P)" || {
-    echo "Parallel-work validator checkout is invalid." >&2
-    exit 2
-}
-
-python_bin=/usr/bin/python3
-if [[ ! -x "$python_bin" ]]; then
-    echo "System Python is unavailable on the fixed parallel-work validator path." >&2
+if ! declare -F trusted_base_payload_initialize >/dev/null 2>&1; then
+    echo "Parallel-work validator requires the verified shared payload runtime." >&2
     exit 2
 fi
+trusted_base_payload_initialize \
+    'scripts/agent/check_parallel_work_contract.sh' \
+    "$runner_source_input" "$validator_checkout" "${TRUSTED_BASE_LAUNCHER_BASE_SHA:-}" || exit $?
+validator_checkout="$trusted_base_repo_root"
 
 trusted_python() {
-    /usr/bin/env -i \
-        PATH=/usr/bin:/bin:/usr/sbin:/sbin \
-        LANG=C \
-        LC_ALL=C \
-        TMPDIR=/tmp \
-        "$python_bin" -I -B "$@"
+    trusted_base_python "$@"
 }
 
 if [[ -z "$manifest_path" ]]; then
@@ -95,66 +88,14 @@ sys.stdout.write(base)
 )"; then
     exit 2
 fi
-if [[ "${TRUSTED_BASE_LAUNCHER_PAYLOAD:-}" != "scripts/agent/check_parallel_work_contract.sh" ]]; then
-    echo "Parallel-work validator is not bound to the trusted launcher context." >&2
-    exit 2
-fi
-
-trusted_git=/usr/bin/git
-if [[ ! -x "$trusted_git" ]]; then
-    echo "Git is unavailable on the fixed parallel-work validator path." >&2
-    exit 2
-fi
-
 trusted_git_run() {
-    /usr/bin/env -i \
-        GIT_ATTR_NOSYSTEM=1 \
-        GIT_CONFIG_GLOBAL=/dev/null \
-        GIT_CONFIG_NOSYSTEM=1 \
-        GIT_NO_LAZY_FETCH=1 \
-        GIT_NO_REPLACE_OBJECTS=1 \
-        GIT_OPTIONAL_LOCKS=0 \
-        GIT_PAGER=cat \
-        GIT_TERMINAL_PROMPT=0 \
-        LANG=C \
-        LC_ALL=C \
-        PATH=/usr/bin:/bin:/usr/sbin:/sbin \
-        TMPDIR=/tmp \
-        "$trusted_git" \
-        -c core.fsmonitor=false \
-        -c core.hooksPath=/dev/null \
-        -c core.untrackedCache=false \
-        -c diff.external= \
-        -c core.excludesfile=/dev/null \
-        -C "$validator_checkout" "$@"
+    trusted_base_git "$@"
 }
 
 canonical_repository_url='https://github.com/robinbeier/forscherhaus-appointments.git'
 canonical_main_record="$(
-    /usr/bin/env -i \
-        GIT_ATTR_NOSYSTEM=1 \
-        GIT_CONFIG_GLOBAL=/dev/null \
-        GIT_CONFIG_NOSYSTEM=1 \
-        GIT_CONFIG_SYSTEM=/dev/null \
-        GIT_NO_LAZY_FETCH=1 \
-        GIT_NO_REPLACE_OBJECTS=1 \
-        GIT_OPTIONAL_LOCKS=0 \
-        GIT_PAGER=cat \
-        GIT_TERMINAL_PROMPT=0 \
-        LANG=C \
-        LC_ALL=C \
-        PATH=/usr/bin:/bin:/usr/sbin:/sbin \
-        TMPDIR=/tmp \
-        "$trusted_git" \
-        -c core.fsmonitor=false \
-        -c core.hooksPath=/dev/null \
-        -c core.untrackedCache=false \
-        -c credential.helper= \
-        -c diff.external= \
-        -c http.proxy= \
-        -c https.proxy= \
-        -c core.excludesfile=/dev/null \
-        ls-remote --exit-code --refs "$canonical_repository_url" refs/heads/main 2>/dev/null
+    trusted_base_remote_git ls-remote --exit-code --refs \
+        "$canonical_repository_url" refs/heads/main 2>/dev/null
 )" || {
     echo "Parallel-work canonical main is unavailable." >&2
     exit 2
@@ -174,19 +115,6 @@ if [[ ! "$local_origin_main" =~ ^[a-f0-9]{40}$ || "$local_origin_main" != "$cano
     exit 1
 fi
 
-resolved_checkout="$(trusted_git_run rev-parse --show-toplevel 2>/dev/null)" || {
-    echo "Parallel-work validator checkout is invalid." >&2
-    exit 2
-}
-resolved_checkout="$(CDPATH= cd -- "$resolved_checkout" 2>/dev/null && /bin/pwd -P)" || {
-    echo "Parallel-work validator checkout is invalid." >&2
-    exit 2
-}
-if [[ "$resolved_checkout" != "$validator_checkout" ]]; then
-    echo "Parallel-work validator checkout is invalid." >&2
-    exit 2
-fi
-
 validator_head="$(trusted_git_run rev-parse --verify HEAD 2>/dev/null)" || {
     echo "Parallel-work validator base is unavailable." >&2
     exit 2
@@ -204,35 +132,6 @@ if [[ "${TRUSTED_BASE_LAUNCHER_BASE_SHA:-}" != "$validator_head" ]]; then
     exit 2
 fi
 
-if [[ -L "$runner_source_input" ]]; then
-    echo "Parallel-work validator runner is invalid." >&2
-    exit 2
-fi
-runner_directory="$(CDPATH= cd -- "$(/usr/bin/dirname -- "$runner_source_input")" 2>/dev/null && /bin/pwd -P)" || {
-    echo "Parallel-work validator runner is invalid." >&2
-    exit 2
-}
-runner_source="$runner_directory/$(/usr/bin/basename -- "$runner_source_input")"
-if [[ ! -f "$runner_source" ]]; then
-    echo "Parallel-work validator runner is invalid." >&2
-    exit 2
-fi
-if [[ "${TRUSTED_BASE_LAUNCHER_MATERIALIZED_PATH:-}" != "$runner_source" ]]; then
-    echo "Parallel-work validator materialization is not bound to the trusted launcher." >&2
-    exit 2
-fi
-case "$runner_source" in
-    "$validator_checkout"|"$validator_checkout"/*)
-        echo "Parallel-work validator runner must be materialized outside the checkout." >&2
-        exit 1
-        ;;
-esac
-if ! trusted_git_run show "${validator_head}:scripts/agent/check_parallel_work_contract.sh" | \
-    /usr/bin/cmp -s - "$runner_source"; then
-    echo "Parallel-work validator runner is not the declared-base blob." >&2
-    exit 1
-fi
-
 trusted_root="$(/usr/bin/mktemp -d /tmp/parallel-work-validator.XXXXXX)" || {
     echo "Parallel-work validator trust bundle could not be created." >&2
     exit 2
@@ -240,56 +139,11 @@ trusted_root="$(/usr/bin/mktemp -d /tmp/parallel-work-validator.XXXXXX)" || {
 trap '/bin/rm -rf "$trusted_root"' EXIT
 
 contract_relative_path=.codex/contracts/agent-workflow.json
-/bin/mkdir -p "$trusted_root/$(/usr/bin/dirname -- "$contract_relative_path")"
-if ! trusted_git_run show "${validator_head}:${contract_relative_path}" > "$trusted_root/$contract_relative_path"; then
-    echo "Parallel-work validator contract is unavailable in the declared base." >&2
-    exit 2
-fi
-trusted_paths_output="$(trusted_python -c '
-import json
-import re
-import sys
-
-try:
-    with open(sys.argv[1], "r", encoding="utf-8") as stream:
-        paths = json.load(stream)["parallel_work"]["validator_bootstrap_paths"]
-except (KeyError, OSError, TypeError, ValueError, UnicodeError):
-    raise SystemExit(1)
-if not isinstance(paths, list) or not paths:
-    raise SystemExit(1)
-seen = set()
-for path in paths:
-    if (
-        not isinstance(path, str)
-        or not path
-        or path.startswith("/")
-        or path.endswith("/")
-        or "\\" in path
-        or re.search(r"[\x00-\x1f\x7f]", path)
-        or any(segment in ("", ".", "..") for segment in path.split("/"))
-        or path in seen
-    ):
-        raise SystemExit(1)
-    seen.add(path)
-    print(path)
-' "$trusted_root/$contract_relative_path")" || {
+if ! trusted_base_materialize_declared_paths \
+    "$trusted_root" "$contract_relative_path" 'parallel_work.validator_bootstrap_paths'; then
     echo "Parallel-work validator bootstrap-path policy is invalid." >&2
     exit 2
-}
-while IFS= read -r path || [[ -n "$path" ]]; do
-    if [[ -z "$path" ]]; then
-        echo "Parallel-work validator bootstrap-path policy is invalid." >&2
-        exit 2
-    fi
-    /bin/mkdir -p "$trusted_root/$(/usr/bin/dirname -- "$path")"
-    if [[ "$path" == "$contract_relative_path" ]]; then
-        continue
-    fi
-    if ! trusted_git_run show "${validator_head}:${path}" > "$trusted_root/$path"; then
-        echo "Parallel-work validator base source is unavailable." >&2
-        exit 2
-    fi
-done <<< "$trusted_paths_output"
+fi
 
 validator_os_name="$(/usr/bin/uname -s 2>/dev/null)" || {
     echo "Parallel-work validator operating system is unavailable." >&2

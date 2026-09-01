@@ -59,6 +59,7 @@ case "$payload_name" in
         exit 2
         ;;
 esac
+shared_runtime_path="scripts/agent/lib/trusted_base_payload_runtime.sh"
 
 git_bin=/usr/bin/git
 python_bin=/usr/bin/python3
@@ -195,13 +196,6 @@ if metadata.st_uid != os.geteuid() or stat.S_IMODE(metadata.st_mode) != 0o500:
     exit 2
 }
 
-tree_entry="$(trusted_git ls-tree "$base_sha" -- "$payload_path")" || exit 2
-IFS=$' \t' read -r payload_mode payload_type payload_blob payload_tree_path <<< "$tree_entry"
-if [[ "$payload_mode" != "100644" || "$payload_type" != "blob" || ! "$payload_blob" =~ ^[a-f0-9]{40}$ || "$payload_tree_path" != "$payload_path" ]]; then
-    echo "Trusted-base launcher payload is absent or has an unsafe tree mode." >&2
-    exit 2
-fi
-
 case "$(/usr/bin/uname -s 2>/dev/null)" in
     Darwin) private_parent=/private/tmp ;;
     Linux) private_parent=/tmp ;;
@@ -222,37 +216,56 @@ cleanup_materialized_root() {
 }
 trap cleanup_materialized_root EXIT
 
-materialized_payload="$materialized_root/$(/usr/bin/basename -- "$payload_path")"
-if ! trusted_git show "${base_sha}:${payload_path}" > "$materialized_payload"; then
-    echo "Trusted-base launcher could not materialize the exact base payload." >&2
-    exit 2
-fi
-materialized_blob="$(trusted_git hash-object --no-filters "$materialized_payload")" || exit 2
-if [[ "$materialized_blob" != "$payload_blob" ]]; then
-    echo "Trusted-base launcher materialized payload digest mismatch." >&2
-    exit 2
-fi
-chmod 0500 "$materialized_payload"
+materialize_exact_base_file() {
+    local repository_path="$1" target_path="$2" runtime_mode="$3"
+    local tree_entry='' tree_mode='' tree_type='' tree_blob='' tree_path='' materialized_blob=''
 
-trusted_python -c '
+    tree_entry="$(trusted_git ls-tree "$base_sha" -- "$repository_path")" || return 1
+    IFS=$' \t' read -r tree_mode tree_type tree_blob tree_path <<< "$tree_entry"
+    if [[ "$tree_mode" != '100644' || "$tree_type" != 'blob' || \
+        ! "$tree_blob" =~ ^[a-f0-9]{40}$ || "$tree_path" != "$repository_path" ]]; then
+        return 1
+    fi
+    if ! trusted_git show "${base_sha}:${repository_path}" > "$target_path"; then
+        return 1
+    fi
+    materialized_blob="$(trusted_git hash-object --no-filters "$target_path")" || return 1
+    if [[ "$materialized_blob" != "$tree_blob" ]]; then
+        return 1
+    fi
+    chmod "$runtime_mode" "$target_path"
+    trusted_python -c '
 import os
 import stat
 import sys
 
-payload, root, repository = map(os.path.realpath, sys.argv[1:4])
-metadata = os.stat(payload, follow_symlinks=False)
+path, root, repository = map(os.path.realpath, sys.argv[1:4])
+expected_mode = int(sys.argv[4], 8)
+metadata = os.stat(path, follow_symlinks=False)
 if os.path.islink(sys.argv[1]) or not stat.S_ISREG(metadata.st_mode):
     raise SystemExit(1)
-if metadata.st_uid != os.geteuid() or stat.S_IMODE(metadata.st_mode) != 0o500:
+if metadata.st_uid != os.geteuid() or stat.S_IMODE(metadata.st_mode) != expected_mode:
     raise SystemExit(1)
-if os.path.commonpath([payload, root]) != root:
+if os.path.commonpath([path, root]) != root:
     raise SystemExit(1)
-if os.path.commonpath([payload, repository]) == repository:
+if os.path.commonpath([path, repository]) == repository:
     raise SystemExit(1)
-' "$materialized_payload" "$materialized_root" "$repo_root" || {
+' "$target_path" "$materialized_root" "$repo_root" "$runtime_mode"
+}
+
+materialized_payload="$materialized_root/$(/usr/bin/basename -- "$payload_path")"
+materialized_runtime="$materialized_root/$(/usr/bin/basename -- "$shared_runtime_path")"
+if ! materialize_exact_base_file "$payload_path" "$materialized_payload" 0500 || \
+    ! materialize_exact_base_file "$shared_runtime_path" "$materialized_runtime" 0400; then
     echo "Trusted-base launcher private payload boundary is invalid." >&2
     exit 2
-}
+fi
+combined_payload="$materialized_root/combined-payload.sh"
+if ! /bin/cat -- "$materialized_runtime" "$materialized_payload" > "$combined_payload"; then
+    echo "Trusted-base launcher could not assemble the verified payload seam." >&2
+    exit 2
+fi
+chmod 0500 "$combined_payload"
 
 account_record="$(trusted_python -c '
 import os
@@ -290,6 +303,7 @@ payload_environment=(
     TRUSTED_BASE_LAUNCHER_BASE_SHA="$base_sha"
     TRUSTED_BASE_LAUNCHER_PAYLOAD="$payload_path"
     TRUSTED_BASE_LAUNCHER_MATERIALIZED_PATH="$materialized_payload"
+    TRUSTED_BASE_SHARED_RUNTIME_PATH="$materialized_runtime"
 )
 case "$payload_name" in
     reviewer)
@@ -310,7 +324,7 @@ esac
 
 set +e
 "${payload_environment[@]}" \
-    "$materialized_payload" "$materialized_payload" \
+    /bin/bash --noprofile --norc "$combined_payload" "$materialized_payload" \
         "${payload_prefix_arguments[@]}" "${payload_arguments[@]}"
 payload_status=$?
 set -e

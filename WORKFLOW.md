@@ -114,8 +114,10 @@ approvals, primary-reserved paths, and at most two implementation-worker lanes.
 The Primary privately materializes the launcher with fixed system Git from the
 already verified declared base, verifies its exact blob and non-executable tree
 mode, and only then starts it in clean Bash. The launcher in turn privately
-materializes and verifies the exact-base validator before any checkout code can
-execute. Direct execution of either checked-out script is forbidden and fails
+materializes and verifies the shared exact-base payload runtime plus the
+validator before any checkout code can execute. The shared runtime owns clean
+Git/Python and declared-path materialization for both agent-harness payloads.
+Direct execution of any checked-out bootstrap script is forbidden and fails
 closed. The validator verifies provisional pre-commit ownership and clean
 post-commit integration evidence. Shared path matching is centralized in
 `scripts/ci/ownership_path_rules.py`. Do not reproduce the bootstrap command in
@@ -393,8 +395,9 @@ the exact-base launcher contract in `scripts/agent/trusted_base_launcher.sh`;
 never execute the checked-out launcher or reviewer payload. Fixed system Git
 must completely materialize and verify the launcher from the verified base
 before clean Bash starts it; only then may it privately materialize
+`scripts/agent/lib/trusted_base_payload_runtime.sh` and
 `scripts/agent/run_readonly_reviewer.sh`.
-The runner, policy, profiles, schema,
+The shared runtime, runner, policy, profiles, schema,
 and validator are trusted base artifacts, never head artifacts. It requires
 the live canonical main, local tracking ref, exact merge base, and reviewed
 head to match; later pushes invalidate all review evidence.
@@ -409,6 +412,9 @@ configuration, connectors, delegation, credentials, or external writes;
 non-macOS execution fails closed. The machine contract is the source for model,
 feature, schema, runtime, and trusted-path settings; the runner orchestrates
 separately materialized exact-base bundle and isolated-runtime libraries.
+Bundle construction, model/prompt policy, and output validation remain separate
+modules. Structural output rules come from the exact-base JSON schema; exact
+Base/Head/lens/path binding and privacy are additional semantic checks.
 Consult `.codex/contracts/agent-workflow.json`,
 `scripts/agent/trusted_base_launcher.sh`, and the reviewer payload for those
 implementation details.
@@ -423,6 +429,14 @@ them instead of maintaining additional allowlist copies. The isolated model call
 uses both the outer Seatbelt boundary and Codex `read-only` sandboxing with
 approval mode `never`. A bootstrap review is review evidence only; it grants no
 mutation, publication, Linear, or landing authority.
+
+For an executable bootstrap/isolation check without a model request, the
+Primary may invoke the reviewer payload through the same exact-base launcher
+with `--diagnostic-bootstrap-only` and without `--codex-bin`. On macOS this runs
+the real exact-base materialization, PHP attestation, and Seatbelt allow/deny
+canaries. It writes only inside private system-temporary roots, never the user
+home, and returns `review_evidence: false`; it can diagnose the harness but can
+never satisfy a final-review or landing requirement.
 
 After the final reviews are finding-free, record their canonical,
 privacy-safe exact-head attestation on the PR and run the repository-owned

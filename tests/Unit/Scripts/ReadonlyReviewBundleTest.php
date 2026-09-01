@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace Tests\Unit\Scripts;
 
 use Forscherhaus\AgentHarness\ReadonlyReviewBundle;
+use Forscherhaus\AgentHarness\ReadonlyReviewerModelPolicy;
 use PHPUnit\Framework\TestCase;
 
 require_once __DIR__ . '/../../../scripts/agent/lib/ReadonlyReviewBundle.php';
+require_once __DIR__ . '/../../../scripts/agent/lib/ReadonlyReviewerModelPolicy.php';
 
 class ReadonlyReviewBundleTest extends TestCase
 {
@@ -82,7 +84,7 @@ class ReadonlyReviewBundleTest extends TestCase
 
     public function testModelCatalogRestrictionRemovesEveryModelToolSurface(): void
     {
-        $catalog = ReadonlyReviewBundle::restrictModelCatalog(
+        $catalog = ReadonlyReviewerModelPolicy::restrictModelCatalog(
             json_encode(
                 [
                     'models' => [
@@ -112,7 +114,7 @@ class ReadonlyReviewBundleTest extends TestCase
     {
         $base = str_repeat('a', 40);
         $head = str_repeat('b', 40);
-        $instructions = ReadonlyReviewBundle::buildDeveloperInstructions(
+        $instructions = ReadonlyReviewerModelPolicy::buildDeveloperInstructions(
             'Review correctness and security.',
             'correctness_security',
             $base,
@@ -132,7 +134,7 @@ class ReadonlyReviewBundleTest extends TestCase
         self::assertStringContainsString('no binary diff payload', $instructions);
         self::assertSame(
             json_encode($instructions, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
-            ReadonlyReviewBundle::tomlString($instructions),
+            ReadonlyReviewerModelPolicy::tomlString($instructions),
         );
     }
 
@@ -241,12 +243,12 @@ class ReadonlyReviewBundleTest extends TestCase
             ],
             JSON_THROW_ON_ERROR,
         );
-        ReadonlyReviewBundle::assertPromptRoles($valid, $developer, $user);
+        ReadonlyReviewerModelPolicy::assertPromptRoles($valid, $developer, $user);
         self::addToAssertionCount(1);
 
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('prompt roles are inverted');
-        ReadonlyReviewBundle::assertPromptRoles(
+        ReadonlyReviewerModelPolicy::assertPromptRoles(
             json_encode(
                 [
                     ['role' => 'user', 'content' => [['type' => 'input_text', 'text' => $developer]]],

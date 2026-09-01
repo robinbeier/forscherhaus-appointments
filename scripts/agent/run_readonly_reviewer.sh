@@ -7,8 +7,8 @@ if [[ "${TRUSTED_BASE_LAUNCHER:-}" != "1" ]]; then
     exit 2
 fi
 
-# With `bash -s -- <runner> ...`, Bash keeps its own `$0` and assigns the
-# materialized runner path to `$1`.
+# The launcher executes one private script assembled from the verified shared
+# runtime and this payload, then supplies the materialized payload path as `$1`.
 runner_source_input="${1:-}"
 if [[ -z "$runner_source_input" ]]; then
     echo "Reviewer trusted source path is unavailable." >&2
@@ -20,7 +20,7 @@ reviewer_system_path="/usr/bin:/bin:/usr/sbin:/sbin"
 export PATH="$reviewer_system_path"
 
 usage() {
-    echo "Usage: $runner_source_input [--repo-root=<absolute-path>] [--codex-bin=<absolute-path>] --lens=<lens> --base-sha=<sha> --head-sha=<sha>" >&2
+    echo "Usage: $runner_source_input [--repo-root=<absolute-path>] [--codex-bin=<absolute-path>] [--diagnostic-bootstrap-only] --lens=<lens> --base-sha=<sha> --head-sha=<sha>" >&2
 }
 
 lens=""
@@ -28,6 +28,7 @@ base_sha=""
 head_sha=""
 requested_repo_root=""
 requested_codex_bin=""
+diagnostic_bootstrap_only=false
 
 for argument in "$@"; do
     case "$argument" in
@@ -36,113 +37,34 @@ for argument in "$@"; do
         --head-sha=*) head_sha="${argument#*=}" ;;
         --repo-root=*) requested_repo_root="${argument#*=}" ;;
         --codex-bin=*) requested_codex_bin="${argument#*=}" ;;
+        --diagnostic-bootstrap-only) diagnostic_bootstrap_only=true ;;
         *) usage; exit 2 ;;
     esac
 done
 
-if [[ "${TRUSTED_BASE_LAUNCHER_BASE_SHA:-}" != "$base_sha" || \
-    "${TRUSTED_BASE_LAUNCHER_PAYLOAD:-}" != "scripts/agent/run_readonly_reviewer.sh" ]]; then
-    echo "Reviewer runner is not bound to the trusted launcher context." >&2
+if ! declare -F trusted_base_payload_initialize >/dev/null 2>&1; then
+    echo "Reviewer runner requires the verified shared payload runtime." >&2
     exit 2
 fi
-
-git_bin=/usr/bin/git
-if [[ ! -x "$git_bin" ]]; then
-    echo "Git is unavailable on the fixed reviewer tool path." >&2
-    exit 2
-fi
-python_bin=/usr/bin/python3
-if [[ ! -x "$python_bin" ]]; then
-    echo "System Python is unavailable on the fixed reviewer tool path." >&2
-    exit 2
-fi
+trusted_base_payload_initialize \
+    'scripts/agent/run_readonly_reviewer.sh' "$runner_source_input" "$requested_repo_root" "$base_sha" || exit $?
+repo_root="$trusted_base_repo_root"
+cd "$repo_root"
 
 trusted_python() {
-    /usr/bin/env -i \
-        PATH=/usr/bin:/bin:/usr/sbin:/sbin \
-        LANG=C \
-        LC_ALL=C \
-        TMPDIR=/tmp \
-        "$python_bin" -I -B "$@"
+    trusted_base_python "$@"
 }
 
 canonical_path() {
-    trusted_python -c '
-import os
-import sys
-
-resolved = os.path.realpath(sys.argv[1])
-if not os.path.exists(resolved):
-    raise SystemExit(1)
-sys.stdout.write(resolved)
-' "$1"
+    trusted_base_canonical_path "$@"
 }
 
 trusted_git() {
-    env \
-        -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
-        -u GIT_ASKPASS \
-        -u GIT_COMMON_DIR \
-        -u GIT_CONFIG_COUNT \
-        -u GIT_CONFIG_PARAMETERS \
-        -u GIT_DIR \
-        -u GIT_EXEC_PATH \
-        -u GIT_INDEX_FILE \
-        -u GIT_NAMESPACE \
-        -u GIT_OBJECT_DIRECTORY \
-        -u GIT_PROXY_COMMAND \
-        -u GIT_SSH \
-        -u GIT_SSH_COMMAND \
-        -u GIT_TEMPLATE_DIR \
-        -u GIT_WORK_TREE \
-        -u SSH_ASKPASS \
-        GIT_ATTR_NOSYSTEM=1 \
-        GIT_CONFIG_GLOBAL=/dev/null \
-        GIT_CONFIG_NOSYSTEM=1 \
-        GIT_CONFIG_SYSTEM=/dev/null \
-        GIT_NO_LAZY_FETCH=1 \
-        GIT_NO_REPLACE_OBJECTS=1 \
-        GIT_OPTIONAL_LOCKS=0 \
-        GIT_PAGER=cat \
-        GIT_TERMINAL_PROMPT=0 \
-        "$git_bin" \
-        -c core.fsmonitor=false \
-        -c core.hooksPath=/dev/null \
-        -c core.untrackedCache=false \
-        -c diff.external= \
-        -c http.proxy= \
-        -c https.proxy= \
-        -c pager.diff=false \
-        "$@"
+    trusted_base_git "$@"
 }
 
 trusted_remote_git() {
-    /usr/bin/env -i \
-        GIT_ATTR_NOSYSTEM=1 \
-        GIT_CONFIG_GLOBAL=/dev/null \
-        GIT_CONFIG_NOSYSTEM=1 \
-        GIT_CONFIG_SYSTEM=/dev/null \
-        GIT_NO_LAZY_FETCH=1 \
-        GIT_NO_REPLACE_OBJECTS=1 \
-        GIT_OPTIONAL_LOCKS=0 \
-        GIT_PAGER=cat \
-        GIT_TERMINAL_PROMPT=0 \
-        LANG=C \
-        LC_ALL=C \
-        PATH=/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin:/opt/local/bin \
-        TMPDIR=/tmp \
-        "$git_bin" \
-        -c credential.helper= \
-        -c core.askPass= \
-        -c core.fsmonitor=false \
-        -c core.hooksPath=/dev/null \
-        -c core.untrackedCache=false \
-        -c diff.external= \
-        -c http.proxy= \
-        -c https.proxy= \
-        -c pager.diff=false \
-        -C /tmp \
-        "$@"
+    trusted_base_remote_git "$@"
 }
 
 sha_pattern='^[a-f0-9]{40}$'
@@ -150,24 +72,6 @@ if [[ ! "$base_sha" =~ $sha_pattern || ! "$head_sha" =~ $sha_pattern ]]; then
     echo "Reviewer SHAs must be full lowercase commit IDs." >&2
     exit 2
 fi
-
-if [[ -n "$requested_repo_root" && "$requested_repo_root" != /* ]]; then
-    echo "Reviewer repository root must be absolute." >&2
-    exit 2
-fi
-repo_root_input="$(trusted_git -C "${requested_repo_root:-.}" rev-parse --show-toplevel 2>/dev/null)" || {
-    echo "Reviewer must run inside a Git worktree." >&2
-    exit 2
-}
-repo_root="$(canonical_path "$repo_root_input")" || {
-    echo "Reviewer repository root could not be resolved." >&2
-    exit 2
-}
-if [[ ! -d "$repo_root" ]]; then
-    echo "Reviewer repository root is invalid." >&2
-    exit 2
-fi
-cd "$repo_root"
 
 review_base_ref="refs/remotes/origin/main"
 canonical_main_remote='https://github.com/robinbeier/forscherhaus-appointments.git'
@@ -204,27 +108,6 @@ expected_base_sha="$(trusted_git merge-base "$remote_main_sha" "$head_sha")" || 
 }
 if [[ "$base_sha" != "$expected_base_sha" ]]; then
     echo "Reviewer base does not match the canonical origin/main merge base." >&2
-    exit 1
-fi
-
-runner_source="$(canonical_path "$runner_source_input")" || {
-    echo "Reviewer trusted source path could not be resolved." >&2
-    exit 2
-}
-if [[ "${TRUSTED_BASE_LAUNCHER_MATERIALIZED_PATH:-}" != "$runner_source" ]]; then
-    echo "Reviewer runner materialization is not bound to the trusted launcher." >&2
-    exit 2
-fi
-case "$runner_source" in
-    "$repo_root"|"$repo_root"/*)
-        echo "Reviewer runner must be materialized from the review base outside the worktree." >&2
-        exit 1
-        ;;
-esac
-
-runner_path="scripts/agent/run_readonly_reviewer.sh"
-if ! trusted_git show "${base_sha}:${runner_path}" 2>/dev/null | cmp -s - "$runner_source"; then
-    echo "Reviewer runner is not the trusted copy from the review base; external bootstrap review is required." >&2
     exit 1
 fi
 
@@ -313,32 +196,39 @@ if ! assert_tree_has_no_symlinks "$base_sha" || ! assert_tree_has_no_symlinks "$
     exit 1
 fi
 
-if [[ -z "$requested_codex_bin" ]]; then
-    echo "Reviewer Codex binary must be supplied explicitly by the primary." >&2
-    exit 2
-fi
-if [[ "$requested_codex_bin" != /* || ! -x "$requested_codex_bin" ]]; then
-    echo "Reviewer Codex binary must be an executable absolute path." >&2
-    exit 2
-fi
-requested_codex_name="$(basename -- "$requested_codex_bin")"
-codex_source="$(canonical_path "$requested_codex_bin")" || {
-    echo "Reviewer Codex binary target could not be resolved." >&2
-    exit 2
-}
-if [[ ! -x "$codex_source" ]]; then
-    echo "Reviewer Codex binary target must be executable." >&2
-    exit 2
-fi
-case "$codex_source" in
-    "$repo_root"|"$repo_root"/*)
-        echo "Reviewer Codex binary must be outside the reviewed repository." >&2
+if [[ "$diagnostic_bootstrap_only" == true ]]; then
+    if [[ -n "$requested_codex_bin" ]]; then
+        echo "Reviewer bootstrap diagnostic must not receive a Codex binary." >&2
         exit 2
-        ;;
-esac
-if [[ "$requested_codex_name" != "codex" ]]; then
-    echo "Reviewer Codex binary does not identify as Codex CLI." >&2
-    exit 2
+    fi
+else
+    if [[ -z "$requested_codex_bin" ]]; then
+        echo "Reviewer Codex binary must be supplied explicitly by the primary." >&2
+        exit 2
+    fi
+    if [[ "$requested_codex_bin" != /* || ! -x "$requested_codex_bin" ]]; then
+        echo "Reviewer Codex binary must be an executable absolute path." >&2
+        exit 2
+    fi
+    requested_codex_name="$(basename -- "$requested_codex_bin")"
+    codex_source="$(canonical_path "$requested_codex_bin")" || {
+        echo "Reviewer Codex binary target could not be resolved." >&2
+        exit 2
+    }
+    if [[ ! -x "$codex_source" ]]; then
+        echo "Reviewer Codex binary target must be executable." >&2
+        exit 2
+    fi
+    case "$codex_source" in
+        "$repo_root"|"$repo_root"/*)
+            echo "Reviewer Codex binary must be outside the reviewed repository." >&2
+            exit 2
+            ;;
+    esac
+    if [[ "$requested_codex_name" != "codex" ]]; then
+        echo "Reviewer Codex binary does not identify as Codex CLI." >&2
+        exit 2
+    fi
 fi
 
 reviewer_os_name="$(/usr/bin/uname -s 2>/dev/null)" || {
@@ -392,6 +282,10 @@ esac
 cleanup_sealed_review() {
     chmod -R u+w -- "$sealed_root" 2>/dev/null || true
     rm -rf -- "$sealed_root"
+    if [[ -n "${diagnostic_outside_root:-}" ]]; then
+        chmod -R u+w -- "$diagnostic_outside_root" 2>/dev/null || true
+        rm -rf -- "$diagnostic_outside_root"
+    fi
 }
 trap cleanup_sealed_review EXIT
 
@@ -409,56 +303,11 @@ trusted_php() {
 }
 
 contract_relative_path=".codex/contracts/agent-workflow.json"
-mkdir -p "$control_root/$(dirname "$contract_relative_path")"
-if ! trusted_git show "${base_sha}:${contract_relative_path}" > "$control_root/$contract_relative_path"; then
-    echo "Reviewer machine contract is unavailable in the review base." >&2
-    exit 1
-fi
-bootstrap_paths_output="$(trusted_python -c '
-import json
-import re
-import sys
-
-try:
-    with open(sys.argv[1], "r", encoding="utf-8") as stream:
-        paths = json.load(stream)["authority"]["reviewer"]["bootstrap_paths"]
-except (KeyError, OSError, TypeError, ValueError, UnicodeError):
-    raise SystemExit(1)
-if not isinstance(paths, list) or not paths:
-    raise SystemExit(1)
-seen = set()
-for path in paths:
-    if (
-        not isinstance(path, str)
-        or not path
-        or path.startswith("/")
-        or path.endswith("/")
-        or "\\" in path
-        or re.search(r"[\x00-\x1f\x7f]", path)
-        or any(segment in ("", ".", "..") for segment in path.split("/"))
-        or path in seen
-    ):
-        raise SystemExit(1)
-    seen.add(path)
-    print(path)
-' "$control_root/$contract_relative_path")" || {
+if ! trusted_base_materialize_declared_paths \
+    "$control_root" "$contract_relative_path" 'authority.reviewer.bootstrap_paths'; then
     echo "Reviewer bootstrap-path policy is invalid." >&2
     exit 1
-}
-while IFS= read -r bootstrap_path || [[ -n "$bootstrap_path" ]]; do
-    if [[ -z "$bootstrap_path" ]]; then
-        echo "Reviewer bootstrap-path policy is invalid." >&2
-        exit 1
-    fi
-    mkdir -p "$control_root/$(dirname "$bootstrap_path")"
-    if [[ "$bootstrap_path" == "$contract_relative_path" ]]; then
-        continue
-    fi
-    if ! trusted_git show "${base_sha}:${bootstrap_path}" > "$control_root/$bootstrap_path"; then
-        echo "Reviewer trust bootstrap is unavailable in the review base." >&2
-        exit 1
-    fi
-done <<< "$bootstrap_paths_output"
+fi
 
 php_bin="$(
     trusted_python "$control_root/scripts/agent/verify_trusted_php_runtime.py" \
@@ -469,6 +318,51 @@ php_bin="$(
 if [[ "$php_bin" != /* || ! -x "$php_bin" ]]; then
     echo "Reviewer trusted PHP runtime attestation is invalid." >&2
     exit 2
+fi
+
+if [[ "$diagnostic_bootstrap_only" == true ]]; then
+    seatbelt_profile="$control_root/scripts/agent/readonly-reviewer.sb"
+    diagnostic_allowed="$control_root/bootstrap-diagnostic-readable"
+    diagnostic_arg0_root="$sealed_root/diagnostic-arg0"
+    diagnostic_runtime_tmp="$sealed_root/diagnostic-runtime"
+    diagnostic_installation_id="$diagnostic_runtime_tmp/installation-id"
+    diagnostic_outside_root="$(mktemp -d "/private/tmp/forscherhaus-reviewer-bootstrap-denied.XXXXXX")" || {
+        echo "Reviewer bootstrap diagnostic could not create its denied canary root." >&2
+        exit 2
+    }
+    diagnostic_outside="$diagnostic_outside_root/denied"
+    if [[ ! -f "$repo_root/AGENTS.md" || -L "$repo_root/AGENTS.md" ]]; then
+        echo "Reviewer bootstrap diagnostic worktree canary is unavailable." >&2
+        exit 2
+    fi
+    mkdir -m 0700 "$diagnostic_arg0_root" "$diagnostic_runtime_tmp"
+    : > "$diagnostic_allowed"
+    : > "$diagnostic_outside"
+    chmod 0400 "$diagnostic_allowed" "$diagnostic_outside"
+    if ! "$sandbox_exec" \
+        -D CODEX_BIN=/bin/cat -D SEALED_ROOT="$sealed_root" \
+        -D ARG0_ROOT="$diagnostic_arg0_root" -D RUNTIME_TMP="$diagnostic_runtime_tmp" \
+        -D AUTH_FILE=/dev/null -D INSTALLATION_ID="$diagnostic_installation_id" \
+        -f "$seatbelt_profile" /bin/cat "$diagnostic_allowed" >/dev/null 2>&1; then
+        echo "Reviewer bootstrap diagnostic did not admit its exact-base bundle." >&2
+        exit 1
+    fi
+    if "$sandbox_exec" \
+        -D CODEX_BIN=/bin/cat -D SEALED_ROOT="$sealed_root" \
+        -D ARG0_ROOT="$diagnostic_arg0_root" -D RUNTIME_TMP="$diagnostic_runtime_tmp" \
+        -D AUTH_FILE=/dev/null -D INSTALLATION_ID="$diagnostic_installation_id" \
+        -f "$seatbelt_profile" /bin/cat "$diagnostic_outside" >/dev/null 2>&1 || \
+        "$sandbox_exec" \
+            -D CODEX_BIN=/bin/cat -D SEALED_ROOT="$sealed_root" \
+            -D ARG0_ROOT="$diagnostic_arg0_root" -D RUNTIME_TMP="$diagnostic_runtime_tmp" \
+            -D AUTH_FILE=/dev/null -D INSTALLATION_ID="$diagnostic_installation_id" \
+            -f "$seatbelt_profile" /bin/cat "$repo_root/AGENTS.md" >/dev/null 2>&1; then
+        echo "Reviewer bootstrap diagnostic did not deny external repository data." >&2
+        exit 1
+    fi
+    /usr/bin/printf '{"schema_version":1,"status":"diagnostic_pass","base_sha":"%s","head_sha":"%s","review_evidence":false}\n' \
+        "$base_sha" "$head_sha"
+    exit 0
 fi
 
 runtime_config="$(trusted_php "$control_root/scripts/agent/readonly_reviewer_contract.php" runtime --platform="$reviewer_platform")" || exit $?

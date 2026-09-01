@@ -44,6 +44,10 @@ class ParallelWorkContractCliTest extends TestCase
             $sourceRepoRoot . '/scripts/agent/trusted_base_launcher.sh',
             $this->repoRoot . '/scripts/agent/trusted_base_launcher.sh',
         );
+        copy(
+            $sourceRepoRoot . '/scripts/agent/lib/trusted_base_payload_runtime.sh',
+            $this->repoRoot . '/scripts/agent/lib/trusted_base_payload_runtime.sh',
+        );
         self::assertSame(1, $replacementCount);
         copy(
             $sourceRepoRoot . '/scripts/agent/check_parallel_work_contract.php',
@@ -59,6 +63,7 @@ class ParallelWorkContractCliTest extends TestCase
         );
         self::assertTrue(chmod($this->repoRoot . '/scripts/agent/check_parallel_work_contract.sh', 0644));
         self::assertTrue(chmod($this->repoRoot . '/scripts/agent/trusted_base_launcher.sh', 0644));
+        self::assertTrue(chmod($this->repoRoot . '/scripts/agent/lib/trusted_base_payload_runtime.sh', 0644));
         foreach (
             [
                 'RepoPath.php',
@@ -165,6 +170,9 @@ class ParallelWorkContractCliTest extends TestCase
     {
         $launcher = (string) file_get_contents($this->repoRoot . '/scripts/agent/trusted_base_launcher.sh');
         $payload = (string) file_get_contents($this->repoRoot . '/scripts/agent/check_parallel_work_contract.sh');
+        $sharedRuntime = (string) file_get_contents(
+            $this->repoRoot . '/scripts/agent/lib/trusted_base_payload_runtime.sh',
+        );
 
         self::assertStringStartsWith("#!/bin/bash\n", $launcher);
         self::assertStringContainsString('/usr/bin/git', $launcher);
@@ -173,7 +181,8 @@ class ParallelWorkContractCliTest extends TestCase
         self::assertStringContainsString('hash-object --no-filters', $launcher);
         self::assertStringStartsWith("#!/bin/bash\n", $payload);
         self::assertStringContainsString('TRUSTED_BASE_LAUNCHER', $payload);
-        self::assertStringContainsString('-I -B', $payload);
+        self::assertStringContainsString('trusted_base_payload_initialize', $payload);
+        self::assertStringContainsString('-I -B', $sharedRuntime);
         self::assertStringContainsString('scripts/agent/verify_trusted_php_runtime.py', $payload);
         self::assertStringContainsString('.codex/contracts/agent-workflow.json', $payload);
         self::assertStringNotContainsString('command -v php', $payload);

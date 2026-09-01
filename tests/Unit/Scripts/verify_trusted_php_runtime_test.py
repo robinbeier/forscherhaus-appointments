@@ -226,6 +226,46 @@ class TrustedPhpRuntimeTest(unittest.TestCase):
         self.assertEqual(0o500, stat.S_IMODE(os.stat(result).st_mode))
         self.assertFalse(os.path.exists(os.path.join(materialize_root, "runtime.tar.gz")))
 
+    def test_pinned_archive_download_ignores_malicious_user_curl_configuration(self):
+        """The transport must not inherit curlrc, netrc, proxy, or credentials."""
+        _, descriptor, _ = self.archive_fixture()
+        target = os.path.join(self.root, "download.tar.gz")
+        curl_home = os.path.join(self.root, "curl-home")
+        unexpected_output = os.path.join(self.root, "unexpected-output")
+        os.mkdir(curl_home)
+        with open(os.path.join(curl_home, ".curlrc"), "w", encoding="utf-8") as stream:
+            stream.write("output %s\nproxy http://attacker.invalid\n" % unexpected_output)
+        with open(os.path.join(curl_home, "credentials"), "w", encoding="utf-8") as stream:
+            stream.write("machine attacker.invalid login leaked password secret\n")
+        with mock.patch.dict(
+            os.environ,
+            {
+                "HOME": curl_home,
+                "CURL_HOME": curl_home,
+                "NETRC": os.path.join(curl_home, "credentials"),
+                "HTTPS_PROXY": "http://attacker.invalid",
+                "ALL_PROXY": "http://attacker.invalid",
+            },
+            clear=False,
+        ), mock.patch.object(verifier._RUNTIME_PRIMITIVES.subprocess, "run") as run:
+            verifier._download_pinned_archive(descriptor["url"], target)
+
+        primitives = verifier._RUNTIME_PRIMITIVES
+        command = run.call_args.args[0]
+        self.assertEqual(primitives.CURL_EXECUTABLE, command[0])
+        self.assertEqual("--disable", command[1])
+        self.assertEqual(
+            list(primitives.CURL_SECURITY_OPTIONS), command[1 : 1 + len(primitives.CURL_SECURITY_OPTIONS)]
+        )
+        self.assertEqual(dict(primitives.SAFE_CURL_ENVIRONMENT), run.call_args.kwargs["env"])
+        self.assertNotIn("HOME", run.call_args.kwargs["env"])
+        self.assertNotIn("CURL_HOME", run.call_args.kwargs["env"])
+        self.assertNotIn("NETRC", run.call_args.kwargs["env"])
+        self.assertNotIn("HTTPS_PROXY", run.call_args.kwargs["env"])
+        self.assertNotIn("ALL_PROXY", run.call_args.kwargs["env"])
+        self.assertFalse(os.path.exists(target))
+        self.assertFalse(os.path.exists(unexpected_output))
+
     def test_linux_x86_64_pinned_static_archive_is_parsed_without_loader_execution(self):
         archive_path, descriptor, closure_sha256 = self.archive_fixture(content=self.static_elf())
         self.write_contract(

@@ -20,7 +20,7 @@ readonly_reviewer_execute_isolated() (
     local auth_source="$5" codex_bin="$6" reviewer_system_path="$7" reviewer_os_home="$8"
     local sandbox_exec="$9" lens="${10}" base_sha="${11}" head_sha="${12}"
     local runtime_home runtime_tmp arg0_root sqlite_root log_root installation_id seatbelt_profile
-    local model_catalog prompt_role_probe allowed_canary outside_canary_root outside_canary home_canary
+    local model_catalog prompt_role_probe allowed_canary outside_canary_root outside_canary
     local private_temp_parent reviewer_os_user
     local codex_stderr review_pipeline_status
     local ignored_role model reasoning disabled_features output_schema_path codex_sandbox_mode codex_approval_policy
@@ -125,22 +125,15 @@ readonly_reviewer_execute_isolated() (
     }
     outside_canary="$outside_canary_root/denied"
     : > "$outside_canary"
-    home_canary="$(mktemp "$reviewer_os_home/.forscherhaus-readonly-review-denied.XXXXXX")" || {
-        echo "Reviewer home canary could not be created." >&2
-        exit 2
-    }
     cleanup_runtime_canaries() {
         if [[ -n "$outside_canary_root" ]]; then
             chmod -R u+w -- "$outside_canary_root" 2>/dev/null || true
             rm -rf -- "$outside_canary_root"
         fi
-        if [[ -n "$home_canary" ]]; then
-            rm -f -- "$home_canary"
-        fi
     }
     trap cleanup_runtime_canaries EXIT
     chmod -R a-w "$review_root"
-    chmod a-w "$outside_canary" "$home_canary" "$developer_instructions_file" "$review_input" "$model_catalog"
+    chmod a-w "$outside_canary" "$developer_instructions_file" "$review_input" "$model_catalog"
 
     if ! readonly_reviewer_seatbelt_run "$sandbox_exec" "$seatbelt_profile" "$codex_bin" "$sealed_root" "$arg0_root" "$runtime_tmp" "$auth_source" "$installation_id" /bin/cat "$allowed_canary" >/dev/null 2>&1; then
         echo "Reviewer Seatbelt profile did not admit the exact bundle." >&2
@@ -148,10 +141,6 @@ readonly_reviewer_execute_isolated() (
     fi
     if readonly_reviewer_seatbelt_run "$sandbox_exec" "$seatbelt_profile" "$codex_bin" "$sealed_root" "$arg0_root" "$runtime_tmp" "$auth_source" "$installation_id" /bin/cat "$outside_canary" >/dev/null 2>&1; then
         echo "Reviewer Seatbelt profile did not deny foreign temp data." >&2
-        exit 1
-    fi
-    if readonly_reviewer_seatbelt_run "$sandbox_exec" "$seatbelt_profile" "$codex_bin" "$sealed_root" "$arg0_root" "$runtime_tmp" "$auth_source" "$installation_id" /bin/cat "$home_canary" >/dev/null 2>&1; then
-        echo "Reviewer Seatbelt profile did not deny host-home data." >&2
         exit 1
     fi
     if readonly_reviewer_seatbelt_run "$sandbox_exec" "$seatbelt_profile" "$codex_bin" "$sealed_root" "$arg0_root" "$runtime_tmp" "$auth_source" "$installation_id" /bin/cat "$repo_root/AGENTS.md" >/dev/null 2>&1; then

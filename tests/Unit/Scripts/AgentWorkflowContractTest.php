@@ -288,7 +288,7 @@ class AgentWorkflowContractTest extends TestCase
             $contract['authority']['reviewer']['isolation_profile'] ?? null,
         );
         self::assertSame(
-            'bundle_readable_temp_home_and_original_worktree_denied',
+            'bundle_readable_foreign_temp_and_original_worktree_denied_exact_auth_file_only_no_home_write',
             $contract['authority']['reviewer']['isolation_preflight'] ?? null,
         );
         self::assertSame(
@@ -325,8 +325,11 @@ class AgentWorkflowContractTest extends TestCase
                 '.codex/contracts/agent-workflow.json',
                 'scripts/agent/trusted_base_launcher.sh',
                 'scripts/agent/run_readonly_reviewer.sh',
+                'scripts/agent/lib/trusted_base_payload_runtime.sh',
                 'scripts/agent/verify_trusted_php_runtime.py',
                 'scripts/agent/lib/trusted_runtime_primitives.py',
+                'scripts/agent/lib/ReadonlyReviewerModelPolicy.php',
+                'scripts/agent/lib/ReadonlyReviewOutput.php',
                 'scripts/agent/lib/readonly_reviewer_isolated_runtime.sh',
             ]
             as $bootstrapPath
@@ -406,6 +409,7 @@ class AgentWorkflowContractTest extends TestCase
             [
                 '.codex/contracts/agent-workflow.json',
                 'scripts/agent/check_parallel_work_contract.sh',
+                'scripts/agent/lib/trusted_base_payload_runtime.sh',
                 'scripts/agent/verify_trusted_php_runtime.py',
                 'scripts/agent/lib/trusted_runtime_primitives.py',
             ]

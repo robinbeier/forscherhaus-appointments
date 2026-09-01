@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Scripts;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 final class ArchitectureOwnershipMapCheckTest extends TestCase
@@ -86,6 +87,60 @@ final class ArchitectureOwnershipMapCheckTest extends TestCase
         self::assertStringContainsString('must declare human_bus_factor = 1', $combinedOutput);
         self::assertStringContainsString("must declare agent_policy = 'conservative'", $combinedOutput);
         self::assertStringContainsString('must set manual_approval_required = true', $combinedOutput);
+    }
+
+    /** @param array<string, mixed> $pathRule */
+    #[DataProvider('malformedPathRules')]
+    public function testCheckRejectsMalformedPathRulesThroughCanonicalParser(
+        array $pathRule,
+        string $expectedError,
+    ): void {
+        $mapPath = $this->tmpDir . '/component-map.json';
+        file_put_contents(
+            $mapPath,
+            json_encode(
+                $this->buildComponentMap(['path_rules' => [$pathRule]]),
+                JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
+            ),
+        );
+
+        $result = $this->runCommand([
+            'python3',
+            'scripts/ci/check_architecture_ownership_map.py',
+            '--map=' . $mapPath,
+            '--skip-diff-coverage',
+            '--skip-generated-docs-check',
+        ]);
+
+        self::assertSame(1, $result['exit_code']);
+        self::assertStringContainsString($expectedError, $result['stdout'] . $result['stderr']);
+    }
+
+    /**
+     * @return array<string, array{0: array<string, mixed>, 1: string}>
+     */
+    public static function malformedPathRules(): array
+    {
+        return [
+            'unknown match mode' => [['path' => 'scripts/ci', 'match' => 'glob'], '.match must be one of'],
+            'missing path value' => [['match' => 'directory'], 'must contain exactly path and match'],
+            'empty filename prefix' => [
+                ['path' => 'scripts/ci/', 'match' => 'filename_prefix'],
+                '.path must be a normalized repository-relative path',
+            ],
+            'dot-slash path' => [
+                ['path' => './scripts/ci', 'match' => 'directory'],
+                '.path must be a normalized repository-relative path',
+            ],
+            'absolute path' => [
+                ['path' => '/scripts/ci', 'match' => 'directory'],
+                '.path must be a normalized repository-relative path',
+            ],
+            'parent traversal path' => [
+                ['path' => '../scripts/ci', 'match' => 'directory'],
+                '.path must be a normalized repository-relative path',
+            ],
+        ];
     }
 
     /**

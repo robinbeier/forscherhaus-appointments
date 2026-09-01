@@ -3,8 +3,10 @@
 declare(strict_types=1);
 
 use Forscherhaus\AgentHarness\ReadonlyReviewBundle;
+use Forscherhaus\AgentHarness\ReadonlyReviewerModelPolicy;
 
 require_once __DIR__ . '/lib/ReadonlyReviewBundle.php';
+require_once __DIR__ . '/lib/ReadonlyReviewerModelPolicy.php';
 
 $command = $argv[1] ?? '';
 $options = [];
@@ -93,7 +95,7 @@ try {
             }
             fwrite(
                 STDOUT,
-                ReadonlyReviewBundle::buildDeveloperInstructions(
+                ReadonlyReviewerModelPolicy::buildDeveloperInstructions(
                     $role,
                     $required('lens'),
                     $required('base-sha'),
@@ -107,7 +109,7 @@ try {
             if (!is_string($value)) {
                 throw new RuntimeException('Reviewer TOML string input is unavailable.');
             }
-            fwrite(STDOUT, ReadonlyReviewBundle::tomlString($value));
+            fwrite(STDOUT, ReadonlyReviewerModelPolicy::tomlString($value));
             break;
 
         case 'validate-prompt-roles':
@@ -115,7 +117,7 @@ try {
             if (!is_string($developerInstructions)) {
                 throw new RuntimeException('Reviewer prompt-role developer input is unavailable.');
             }
-            ReadonlyReviewBundle::assertPromptRoles(
+            ReadonlyReviewerModelPolicy::assertPromptRoles(
                 (string) stream_get_contents(STDIN),
                 $developerInstructions,
                 $required('user-probe'),
@@ -123,7 +125,7 @@ try {
             break;
 
         case 'model-catalog':
-            $catalog = ReadonlyReviewBundle::restrictModelCatalog(
+            $catalog = ReadonlyReviewerModelPolicy::restrictModelCatalog(
                 (string) stream_get_contents(STDIN),
                 $required('model'),
             );
