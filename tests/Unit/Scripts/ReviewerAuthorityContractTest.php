@@ -19,6 +19,28 @@ class ReviewerAuthorityContractTest extends TestCase
         $this->repoRoot = dirname(__DIR__, 3);
     }
 
+    public function testTrustedPhpRuntimeVerifierUnitSuiteRunsInIsolatedSystemPython(): void
+    {
+        $process = proc_open(
+            [
+                '/usr/bin/python3',
+                '-I',
+                '-B',
+                $this->repoRoot . '/tests/Unit/Scripts/verify_trusted_php_runtime_test.py',
+            ],
+            [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+            $pipes,
+            $this->repoRoot,
+        );
+        self::assertIsResource($process);
+        $stdout = (string) stream_get_contents($pipes[1]);
+        $stderr = (string) stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+
+        self::assertSame(0, proc_close($process), $stdout . $stderr);
+    }
+
     public function testMachineContractDeniesEveryExternalReviewerMutation(): void
     {
         $contract = json_decode(
@@ -88,7 +110,7 @@ class ReviewerAuthorityContractTest extends TestCase
             $contract['authority']['reviewer']['runtime_configuration_change_policy'] ?? null,
         );
         self::assertSame(
-            'clean_bootstrap_environment',
+            'root_owned_posix_bootstrap_and_clean_bash_environment',
             $contract['authority']['reviewer']['shell_runtime_configuration'] ?? null,
         );
         self::assertSame(
@@ -99,7 +121,10 @@ class ReviewerAuthorityContractTest extends TestCase
             'private_system_temp_bundle_and_internal_runtime_only',
             $contract['authority']['reviewer']['temporary_directory_policy'] ?? null,
         );
-        self::assertSame('ignore_ambient_ini', $contract['authority']['reviewer']['php_runtime_configuration'] ?? null);
+        self::assertSame(
+            'exact_base_attested_binary_and_dynamic_closure_ignore_ambient_ini',
+            $contract['authority']['reviewer']['php_runtime_configuration'] ?? null,
+        );
         self::assertSame(
             'ignore_ambient_and_disable_helpers',
             $contract['authority']['reviewer']['git_runtime_configuration'] ?? null,
@@ -210,6 +235,7 @@ class ReviewerAuthorityContractTest extends TestCase
                 '.codex/agents/reviewer-tests.toml',
                 'scripts/agent/readonly-review-output.schema.json',
                 'scripts/agent/readonly-reviewer.sb',
+                'scripts/agent/verify_trusted_php_runtime.py',
                 'scripts/agent/readonly_review_bundle.php',
                 'scripts/agent/readonly_reviewer_contract.php',
                 'scripts/agent/lib/RepoPath.php',
@@ -298,7 +324,13 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertIsString($isolatedRuntime);
         self::assertIsString($seatbelt);
 
+        self::assertStringStartsWith("#!/bin/sh\n", $runner);
         self::assertStringContainsString('env -i', $runner);
+        self::assertStringContainsString('/usr/bin/python3', $runner);
+        self::assertStringContainsString('-I -B', $runner);
+        self::assertStringContainsString('scripts/agent/verify_trusted_php_runtime.py', $runner);
+        self::assertStringNotContainsString('command -v php', $runner);
+        self::assertStringNotContainsString('#!/usr/bin/env -S', $runner);
         self::assertStringContainsString('GIT_NO_REPLACE_OBJECTS=1', $runner);
         self::assertStringContainsString('trusted_remote_git()', $runner);
         $remoteGitStart = strpos($runner, 'trusted_remote_git() {');
@@ -362,7 +394,7 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertStringNotContainsString('sandbox_workspace_write', $runner);
     }
 
-    public function testPhpBootstrapDropsAmbientPhpAndShellStartupConfiguration(): void
+    public function testSystemBootstrapDropsAmbientPhpAndShellStartupConfiguration(): void
     {
         $temporaryDirectory = sys_get_temp_dir() . '/reviewer-bootstrap-' . bin2hex(random_bytes(8));
         self::assertTrue(mkdir($temporaryDirectory, 0700));
@@ -410,6 +442,42 @@ class ReviewerAuthorityContractTest extends TestCase
                     unlink($path);
                 }
             }
+            rmdir($temporaryDirectory);
+        }
+    }
+
+    public function testReviewerBootstrapNeverExecutesPhpResolvedFromAmbientPath(): void
+    {
+        $temporaryDirectory = sys_get_temp_dir() . '/reviewer-path-bootstrap-' . bin2hex(random_bytes(8));
+        self::assertTrue(mkdir($temporaryDirectory, 0700));
+        $marker = $temporaryDirectory . '/ambient-php-ran';
+        $ambientPhp = $temporaryDirectory . '/php';
+        self::assertNotFalse(
+            file_put_contents($ambientPhp, "#!/bin/sh\n: > " . escapeshellarg($marker) . "\nexit 99\n"),
+        );
+        self::assertTrue(chmod($ambientPhp, 0700));
+
+        try {
+            $process = proc_open(
+                [$this->repoRoot . '/scripts/agent/run_readonly_reviewer.sh'],
+                [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+                $pipes,
+                $this->repoRoot,
+                array_merge($_ENV, ['PATH' => $temporaryDirectory]),
+            );
+            self::assertIsResource($process);
+            stream_get_contents($pipes[1]);
+            $stderr = (string) stream_get_contents($pipes[2]);
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+
+            self::assertNotSame(0, proc_close($process));
+            self::assertFileDoesNotExist($marker, $stderr);
+        } finally {
+            if (is_file($marker)) {
+                unlink($marker);
+            }
+            unlink($ambientPhp);
             rmdir($temporaryDirectory);
         }
     }
@@ -979,6 +1047,7 @@ class ReviewerAuthorityContractTest extends TestCase
             $profile,
             'scripts/agent/readonly-review-output.schema.json',
             'scripts/agent/readonly-reviewer.sb',
+            'scripts/agent/verify_trusted_php_runtime.py',
             'scripts/agent/readonly_review_bundle.php',
             'scripts/agent/readonly_reviewer_contract.php',
             'scripts/agent/lib/RepoPath.php',

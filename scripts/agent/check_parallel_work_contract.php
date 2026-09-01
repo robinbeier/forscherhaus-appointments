@@ -317,8 +317,10 @@ function verifyValidatorSource(string $gitBinary, string $validatorRoot, string 
 
     foreach (
         [
+            '.codex/contracts/agent-workflow.json',
             'scripts/agent/check_parallel_work_contract.sh',
             'scripts/agent/check_parallel_work_contract.php',
+            'scripts/agent/verify_trusted_php_runtime.py',
             'scripts/agent/lib/ParallelWorkContract.php',
             'scripts/agent/lib/ParallelWorkOwnershipContract.php',
             'scripts/agent/lib/ParallelWorkPolicyContract.php',

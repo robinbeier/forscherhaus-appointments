@@ -1,76 +1,78 @@
-#!/usr/bin/env -S PATH=/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin:/opt/local/bin php -n
-<?php
+#!/bin/sh
 
-declare(strict_types=1);
+# POSIX sh does not evaluate BASH_ENV for a non-interactive script. It is the
+# root-owned bootstrap used to discard all caller startup/runtime configuration
+# before the Bash payload or any repository-selected interpreter can execute.
+set -eu
+unset BASH_ENV ENV CDPATH PYTHONHOME PYTHONPATH PHPRC PHP_INI_SCAN_DIR
 
-$source = (string) file_get_contents(__FILE__);
-$payload = substr($source, __COMPILER_HALT_OFFSET__);
-if ($payload === false || $payload === '') {
-    fwrite(STDERR, "Reviewer bootstrap payload is unavailable.\n");
-    exit(2);
+bootstrap_python=/usr/bin/python3
+if [ ! -x "$bootstrap_python" ]; then
+    echo "Reviewer system Python bootstrap is unavailable." >&2
+    exit 2
+fi
+case "$(/usr/bin/uname -s 2>/dev/null)" in
+    Darwin) bootstrap_python_metadata="$(/usr/bin/stat -f '%u:%OLp' "$bootstrap_python" 2>/dev/null)" ;;
+    Linux) bootstrap_python_metadata="$(/usr/bin/stat -Lc '%u:%a' "$bootstrap_python" 2>/dev/null)" ;;
+    *) bootstrap_python_metadata='' ;;
+esac
+bootstrap_python_mode="${bootstrap_python_metadata#*:}"
+bootstrap_python_group_other="$(/usr/bin/printf '%s\n' "$bootstrap_python_mode" | /usr/bin/sed 's/.*\(..\)$/\1/')"
+case "$bootstrap_python_metadata:$bootstrap_python_group_other" in
+    0:[0-7][0-7][0-7]:[0145][0145]|0:[0-7][0-7][0-7][0-7]:[0145][0145]) ;;
+    *)
+        echo "Reviewer system Python bootstrap ownership is unsafe." >&2
+        exit 2
+        ;;
+esac
+
+account_record="$(
+    /usr/bin/env -i \
+        PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+        LANG=C \
+        LC_ALL=C \
+        "$bootstrap_python" -I -B -c '
+import os
+import pwd
+import sys
+
+account = pwd.getpwuid(os.geteuid())
+home = os.path.realpath(account.pw_dir)
+if not account.pw_name or not os.path.isabs(home) or not os.path.isdir(home):
+    raise SystemExit(2)
+stat_result = os.stat(home)
+if os.geteuid() != 0 and stat_result.st_uid != os.geteuid():
+    raise SystemExit(2)
+sys.stdout.write(f"{os.geteuid()}\n{account.pw_name}\n{home}\n")
+' 2>/dev/null
+)" || {
+    echo "Reviewer OS account could not be resolved." >&2
+    exit 2
 }
+reviewer_effective_uid="$(/usr/bin/printf '%s\n' "$account_record" | /usr/bin/sed -n '1p')"
+reviewer_os_user="$(/usr/bin/printf '%s\n' "$account_record" | /usr/bin/sed -n '2p')"
+reviewer_os_home="$(/usr/bin/printf '%s\n' "$account_record" | /usr/bin/sed -n '3p')"
+if [ -z "$reviewer_effective_uid" ] || [ -z "$reviewer_os_user" ] || [ -z "$reviewer_os_home" ]; then
+    echo "Reviewer OS account could not be resolved." >&2
+    exit 2
+fi
 
-$effectiveUid = function_exists('posix_geteuid') ? posix_geteuid() : false;
-$account = is_int($effectiveUid) && function_exists('posix_getpwuid') ? posix_getpwuid($effectiveUid) : false;
-if (
-    !is_array($account) ||
-    !is_string($account['name'] ?? null) ||
-    $account['name'] === '' ||
-    !is_string($account['dir'] ?? null)
-) {
-    fwrite(STDERR, "Reviewer OS account could not be resolved.\n");
-    exit(2);
-}
-$osHome = realpath($account['dir']);
-if (
-    $osHome === false ||
-    !str_starts_with($osHome, '/') ||
-    !is_dir($osHome) ||
-    ($effectiveUid !== 0 && fileowner($osHome) !== $effectiveUid)
-) {
-    fwrite(STDERR, "Reviewer OS home could not be resolved.\n");
-    exit(2);
-}
+/usr/bin/sed '1,/^__ROB501_BASH_PAYLOAD__$/d' "$0" | \
+    /usr/bin/env -i \
+        PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+        TMPDIR=/tmp \
+        LANG=C \
+        LC_ALL=C \
+        HOME="$reviewer_os_home" \
+        USER="$reviewer_os_user" \
+        LOGNAME="$reviewer_os_user" \
+        CODEX_HOME="$reviewer_os_home/.codex" \
+        REVIEWER_OS_HOME="$reviewer_os_home" \
+        REVIEWER_EFFECTIVE_UID="$reviewer_effective_uid" \
+        /bin/bash --noprofile --norc -s -- "$0" "$@"
+exit $?
 
-$environment = [
-    'PATH' => '/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin:/opt/local/bin',
-    'TMPDIR' => '/tmp',
-    'HOME' => $osHome,
-    'USER' => $account['name'],
-    'LOGNAME' => $account['name'],
-    'CODEX_HOME' => $osHome . '/.codex',
-    'REVIEWER_OS_HOME' => $osHome,
-    'REVIEWER_EFFECTIVE_UID' => (string) $effectiveUid,
-];
-$process = proc_open(
-    ['/bin/bash', '-s', '--', __FILE__, ...array_slice($argv, 1)],
-    [0 => ['pipe', 'r'], 1 => STDOUT, 2 => STDERR],
-    $pipes,
-    getcwd() ?: null,
-    $environment,
-);
-if (!is_resource($process)) {
-    fwrite(STDERR, "Reviewer bootstrap could not start the trusted shell.\n");
-    exit(2);
-}
-
-$offset = 0;
-$length = strlen($payload);
-while ($offset < $length) {
-    $written = fwrite($pipes[0], substr($payload, $offset));
-    if ($written === false || $written === 0) {
-        fclose($pipes[0]);
-        proc_terminate($process);
-        proc_close($process);
-        fwrite(STDERR, "Reviewer bootstrap payload could not be delivered.\n");
-        exit(2);
-    }
-    $offset += $written;
-}
-fclose($pipes[0]);
-exit(proc_close($process));
-
-__halt_compiler();
+__ROB501_BASH_PAYLOAD__
 #!/bin/bash
 
 set -euo pipefail
@@ -84,7 +86,7 @@ if [[ -z "$runner_source_input" ]]; then
 fi
 shift
 
-reviewer_system_path="/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin:/opt/local/bin"
+reviewer_system_path="/usr/bin:/bin:/usr/sbin:/sbin"
 export PATH="$reviewer_system_path"
 
 usage() {
@@ -108,23 +110,36 @@ for argument in "$@"; do
     esac
 done
 
-git_bin="$(command -v git 2>/dev/null)" || {
+git_bin=/usr/bin/git
+if [[ ! -x "$git_bin" ]]; then
     echo "Git is unavailable on the fixed reviewer tool path." >&2
     exit 2
-}
-php_bin="$(command -v php 2>/dev/null)" || {
-    echo "PHP is unavailable on the fixed reviewer tool path." >&2
+fi
+python_bin=/usr/bin/python3
+if [[ ! -x "$python_bin" ]]; then
+    echo "System Python is unavailable on the fixed reviewer tool path." >&2
     exit 2
+fi
+
+trusted_python() {
+    /usr/bin/env -i \
+        PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+        LANG=C \
+        LC_ALL=C \
+        TMPDIR=/tmp \
+        "$python_bin" -I -B "$@"
 }
 
 canonical_path() {
-    "$php_bin" -n -d auto_prepend_file= -d auto_append_file= -r '
-        $resolved = realpath($argv[1]);
-        if ($resolved === false) {
-            exit(1);
-        }
-        fwrite(STDOUT, $resolved);
-    ' "$1"
+    trusted_python -c '
+import os
+import sys
+
+resolved = os.path.realpath(sys.argv[1])
+if not os.path.exists(resolved):
+    raise SystemExit(1)
+sys.stdout.write(resolved)
+' "$1"
 }
 
 trusted_git() {
@@ -293,21 +308,18 @@ fi
 
 assert_tree_has_no_symlinks() {
     local tree_sha="$1"
-    trusted_git ls-tree -r -z "$tree_sha" | env -u PHPRC -u PHP_INI_SCAN_DIR \
-        "$php_bin" -n -d auto_prepend_file= -d auto_append_file= -r '
-            $raw = (string) stream_get_contents(STDIN);
-            if ($raw !== "" && !str_ends_with($raw, "\0")) {
-                exit(1);
-            }
-            foreach ($raw === "" ? [] : explode("\0", substr($raw, 0, -1)) as $entry) {
-                if (preg_match("/^([0-7]{6}) (?:blob|commit) [0-9a-f]{40,64}\t/sD", $entry, $matches) !== 1) {
-                    exit(1);
-                }
-                if ($matches[1] === "120000") {
-                    exit(1);
-                }
-            }
-        '
+    trusted_git ls-tree -r -z "$tree_sha" | trusted_python -c '
+import re
+import sys
+
+raw = sys.stdin.buffer.read()
+if raw and not raw.endswith(b"\0"):
+    raise SystemExit(1)
+for entry in ([] if not raw else raw[:-1].split(b"\0")):
+    match = re.match(rb"^([0-7]{6}) (?:blob|commit) [0-9a-f]{40,64}\t", entry, re.DOTALL)
+    if match is None or match.group(1) == b"120000":
+        raise SystemExit(1)
+'
 }
 if ! assert_tree_has_no_symlinks "$base_sha" || ! assert_tree_has_no_symlinks "$head_sha"; then
     echo "Reviewer exact commit tree contains a tracked symlink or invalid entry." >&2
@@ -360,13 +372,14 @@ if [[ ! -x "$sandbox_exec" || -L "$sandbox_exec" ]]; then
     echo "Reviewer Seatbelt launcher is unavailable or not canonical." >&2
     exit 2
 fi
-if ! "$php_bin" -n -d auto_prepend_file= -d auto_append_file= -r '
-    $path = $argv[1];
-    $owner = fileowner($path);
-    $mode = fileperms($path);
-    if ($owner !== 0 || !is_int($mode) || ($mode & 0o022) !== 0) {
-        exit(1);
-    }
+if ! trusted_python -c '
+import os
+import stat
+import sys
+
+metadata = os.stat(sys.argv[1], follow_symlinks=False)
+if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != 0 or metadata.st_mode & 0o022:
+    raise SystemExit(1)
 ' "$sandbox_exec"; then
     echo "Reviewer Seatbelt launcher ownership is unsafe." >&2
     exit 2
@@ -409,7 +422,11 @@ review_root="$sealed_root/bundle"
 mkdir -m 0700 "$control_root" "$review_root"
 
 trusted_php() {
-    env -u PHPRC -u PHP_INI_SCAN_DIR \
+    /usr/bin/env -i \
+        PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+        LANG=C \
+        LC_ALL=C \
+        TMPDIR=/tmp \
         "$php_bin" -n -d auto_prepend_file= -d auto_append_file= "$@"
 }
 
@@ -417,6 +434,7 @@ contract_relative_path=".codex/contracts/agent-workflow.json"
 bootstrap_paths=(
     "$contract_relative_path"
     "scripts/agent/readonly-reviewer.sb"
+    "scripts/agent/verify_trusted_php_runtime.py"
     "scripts/agent/readonly_review_bundle.php"
     "scripts/agent/readonly_reviewer_contract.php"
     "scripts/agent/lib/RepoPath.php"
@@ -432,6 +450,16 @@ for bootstrap_path in "${bootstrap_paths[@]}"; do
         exit 1
     fi
 done
+
+php_bin="$(
+    trusted_python "$control_root/scripts/agent/verify_trusted_php_runtime.py" \
+        --contract="$control_root/$contract_relative_path" \
+        --platform="$reviewer_platform"
+)" || exit $?
+if [[ "$php_bin" != /* || ! -x "$php_bin" ]]; then
+    echo "Reviewer trusted PHP runtime attestation is invalid." >&2
+    exit 2
+fi
 
 runtime_config="$(trusted_php "$control_root/scripts/agent/readonly_reviewer_contract.php" runtime --platform="$reviewer_platform")" || exit $?
 IFS=$'\t' read -r expected_codex_version expected_codex_sha256 expected_codex_archive_sha256 <<< "$runtime_config"
@@ -477,16 +505,18 @@ if [[ "$reviewer_os_home" != "${HOME:-}" || "${CODEX_HOME:-}" != "$reviewer_os_h
     exit 2
 fi
 auth_source="$reviewer_os_home/.codex/auth.json"
-if ! "$php_bin" -n -d auto_prepend_file= -d auto_append_file= -r '
-    [$path, $expectedOwner] = array_slice($argv, 1);
-    if (!is_file($path) || is_link($path) || realpath($path) !== $path) {
-        exit(1);
-    }
-    $owner = fileowner($path);
-    $mode = fileperms($path);
-    if ($owner !== (int) $expectedOwner || !is_int($mode) || ($mode & 0o077) !== 0) {
-        exit(1);
-    }
+if ! trusted_python -c '
+import os
+import stat
+import sys
+
+path = sys.argv[1]
+expected_owner = int(sys.argv[2])
+if os.path.islink(path) or os.path.realpath(path) != path:
+    raise SystemExit(1)
+metadata = os.stat(path, follow_symlinks=False)
+if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != expected_owner or metadata.st_mode & 0o077:
+    raise SystemExit(1)
 ' "$auth_source" "$REVIEWER_EFFECTIVE_UID"; then
     echo "Reviewer host login is unavailable or not private." >&2
     exit 2

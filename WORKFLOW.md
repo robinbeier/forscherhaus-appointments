@@ -118,6 +118,14 @@ validator internals here; use the validator CLI and its machine contract.
 Do not replace it with an ambient `git show`. The validator owns the trusted
 bootstrap.
 
+Both agent-harness entry points establish a root-owned POSIX-shell boundary,
+discard caller startup configuration, and use isolated `/usr/bin/python3`
+before any PHP runs. `scripts/agent/verify_trusted_php_runtime.py` then binds
+PHP and its dynamic dependency closure to the exact-base machine contract. A
+user-owned runtime without the exact platform pin, or any pin drift, fails
+closed and requires a reviewed contract update; ambient `PATH` never grants
+interpreter authority.
+
 Exactly one primary remains the external single writer for commits, pushes,
 PRs, checks, Linear, workpads, attestations, merges, and production actions.
 Workers may edit only their assigned local ownership. Shared contracts,
@@ -317,7 +325,8 @@ the live canonical main, local tracking ref, exact merge base, and reviewed
 head to match; later pushes invalidate all review evidence.
 
 The harness enforces the deterministic sealed bundle, exact Base/Head binding,
-macOS Seatbelt default-deny isolation, pinned runtime, disabled reviewer tools,
+macOS Seatbelt default-deny isolation, attested interpreter/runtime closure,
+disabled reviewer tools,
 and privacy-safe fail-closed output. It exposes no worktree or `.git`, user
 configuration, connectors, delegation, credentials, or external writes;
 non-macOS execution fails closed. The machine contract is the source for model,

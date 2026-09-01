@@ -16,6 +16,25 @@
             "linear_mutation",
             "workpad_update"
         ],
+        "interpreter_trust": {
+            "bootstrap": "root_owned_posix_shell_to_clean_system_python",
+            "system_python": "/usr/bin/python3",
+            "system_python_arguments": ["-I", "-B"],
+            "php": {
+                "selection": "exact_base_policy_before_first_php_execution",
+                "dependency_inspection": "non_executing_otool_on_darwin_root_owned_ldd_only_on_linux",
+                "allow_root_owned_closure": true,
+                "candidates_by_platform": {
+                    "Darwin-arm64": ["/opt/homebrew/bin/php"],
+                    "Darwin-x86_64": ["/usr/local/bin/php", "/opt/local/bin/php"],
+                    "Linux-x86_64": ["/usr/local/bin/php", "/usr/bin/php"],
+                    "Linux-aarch64": ["/usr/local/bin/php", "/usr/bin/php"]
+                },
+                "closure_sha256_by_platform": {
+                    "Darwin-arm64": "a788de9d1f58a58a8eaf425e78d8eb8f103391596e8a320877475ba8eb0f0873"
+                }
+            }
+        },
         "reviewer": {
             "invocation": "scripts/agent/run_readonly_reviewer.sh",
             "invocation_source": "hardened_system_git_materialized_base_blob_outside_worktree",
@@ -27,10 +46,10 @@
             "review_base_remote_transport": "unauthenticated_read_only_ls_remote_clean_environment",
             "requires_base_runner": true,
             "runtime_configuration_change_policy": "external_bootstrap_review",
-            "shell_runtime_configuration": "clean_bootstrap_environment",
+            "shell_runtime_configuration": "root_owned_posix_bootstrap_and_clean_bash_environment",
             "transport_environment_policy": "fixed_direct_no_ambient_proxy_or_endpoint_override",
             "temporary_directory_policy": "private_system_temp_bundle_and_internal_runtime_only",
-            "php_runtime_configuration": "ignore_ambient_ini",
+            "php_runtime_configuration": "exact_base_attested_binary_and_dynamic_closure_ignore_ambient_ini",
             "git_runtime_configuration": "ignore_ambient_and_disable_helpers",
             "git_lazy_fetch": "disabled",
             "tool_path_policy": "explicit_primary_codex_with_verified_private_copy",
@@ -75,6 +94,7 @@
                 ".codex/agents/reviewer-tests.toml",
                 "scripts/agent/readonly-review-output.schema.json",
                 "scripts/agent/readonly-reviewer.sb",
+                "scripts/agent/verify_trusted_php_runtime.py",
                 "scripts/agent/readonly_review_bundle.php",
                 "scripts/agent/readonly_reviewer_contract.php",
                 "scripts/agent/lib/RepoPath.php",
@@ -179,8 +199,8 @@
         "requires_clean_post_commit_verification": true,
         "dirty_precommit_status": "provisional_pass",
         "clean_integration_status": "pass",
-        "php_runtime_configuration": "ignore_ambient_ini",
-        "shell_bootstrap": "php_n_before_bash_with_explicit_environment_allowlist",
+        "php_runtime_configuration": "exact_base_attested_binary_and_dynamic_closure_ignore_ambient_ini",
+        "shell_bootstrap": "root_owned_posix_shell_before_clean_bash_and_attested_php",
         "shell_environment_allowlist": ["PATH", "TMPDIR", "LANG", "LC_ALL"],
         "ownership_map": "docs/maps/component_ownership_map.json",
         "ownership_map_schema_version": 3,

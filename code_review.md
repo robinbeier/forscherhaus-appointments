@@ -117,6 +117,9 @@ worktree, `.git`, user configuration, connectors, delegation, credentials, and
 external writes remain unavailable. Non-macOS execution fails closed. The host
 login authenticates only the authorized model request and cannot be refreshed by
 the harness. Consult the contract and runner for implementation details.
+Before any PHP helper executes, a root-owned clean bootstrap and isolated
+system Python attest the PHP binary plus its dynamic dependency closure against
+the exact-base contract; ambient or drifted runtimes fail closed.
 
 The initial trust-root introduction and changes to runtime-loaded
 `.codex/config.toml` or `AGENTS.md` require a separately enforced external

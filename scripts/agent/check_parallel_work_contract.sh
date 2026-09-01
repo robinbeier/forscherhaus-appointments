@@ -1,50 +1,40 @@
-#!/usr/bin/env -S PATH=/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin:/opt/local/bin php -n
-<?php
+#!/bin/sh
 
-declare(strict_types=1);
+# Establish a clean, root-owned shell boundary before any repository-selected
+# interpreter is resolved. Non-interactive POSIX sh does not evaluate BASH_ENV.
+set -eu
+unset BASH_ENV ENV CDPATH PYTHONHOME PYTHONPATH PHPRC PHP_INI_SCAN_DIR
 
-$source = (string) file_get_contents(__FILE__);
-$payload = substr($source, __COMPILER_HALT_OFFSET__);
-if ($payload === false || $payload === '') {
-    fwrite(STDERR, "Parallel-work validator bootstrap payload is unavailable.\n");
-    exit(2);
-}
+bootstrap_python=/usr/bin/python3
+if [ ! -x "$bootstrap_python" ]; then
+    echo "Parallel-work system Python bootstrap is unavailable." >&2
+    exit 2
+fi
+case "$(/usr/bin/uname -s 2>/dev/null)" in
+    Darwin) bootstrap_python_metadata="$(/usr/bin/stat -f '%u:%OLp' "$bootstrap_python" 2>/dev/null)" ;;
+    Linux) bootstrap_python_metadata="$(/usr/bin/stat -Lc '%u:%a' "$bootstrap_python" 2>/dev/null)" ;;
+    *) bootstrap_python_metadata='' ;;
+esac
+bootstrap_python_mode="${bootstrap_python_metadata#*:}"
+bootstrap_python_group_other="$(/usr/bin/printf '%s\n' "$bootstrap_python_mode" | /usr/bin/sed 's/.*\(..\)$/\1/')"
+case "$bootstrap_python_metadata:$bootstrap_python_group_other" in
+    0:[0-7][0-7][0-7]:[0145][0145]|0:[0-7][0-7][0-7][0-7]:[0145][0145]) ;;
+    *)
+        echo "Parallel-work system Python bootstrap ownership is unsafe." >&2
+        exit 2
+        ;;
+esac
 
-$environment = [
-    'PATH' => '/usr/bin:/bin:/usr/sbin:/sbin',
-    'TMPDIR' => '/tmp',
-    'LANG' => 'C',
-    'LC_ALL' => 'C',
-];
-$process = proc_open(
-    ['/bin/bash', '-s', '--', __FILE__, ...array_slice($argv, 1)],
-    [0 => ['pipe', 'r'], 1 => STDOUT, 2 => STDERR],
-    $pipes,
-    getcwd() ?: null,
-    $environment,
-);
-if (!is_resource($process)) {
-    fwrite(STDERR, "Parallel-work validator bootstrap could not start the trusted shell.\n");
-    exit(2);
-}
+/usr/bin/sed '1,/^__ROB501_BASH_PAYLOAD__$/d' "$0" | \
+    /usr/bin/env -i \
+        PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+        TMPDIR=/tmp \
+        LANG=C \
+        LC_ALL=C \
+        /bin/bash --noprofile --norc -s -- "$0" "$@"
+exit $?
 
-$offset = 0;
-$length = strlen($payload);
-while ($offset < $length) {
-    $written = fwrite($pipes[0], substr($payload, $offset));
-    if ($written === false || $written === 0) {
-        fclose($pipes[0]);
-        proc_terminate($process);
-        proc_close($process);
-        fwrite(STDERR, "Parallel-work validator bootstrap payload could not be delivered.\n");
-        exit(2);
-    }
-    $offset += $written;
-}
-fclose($pipes[0]);
-exit(proc_close($process));
-
-__halt_compiler();
+__ROB501_BASH_PAYLOAD__
 #!/bin/bash
 
 set -euo pipefail
@@ -97,58 +87,49 @@ validator_checkout="$(CDPATH= cd -- "$validator_checkout" 2>/dev/null && /bin/pw
     exit 2
 }
 
-trusted_php=''
-for candidate in /usr/bin/php /opt/homebrew/bin/php /usr/local/bin/php /opt/local/bin/php; do
-    if [[ -x "$candidate" ]]; then
-        trusted_php="$candidate"
-        break
-    fi
-done
-if [[ -z "$trusted_php" ]]; then
-    echo "PHP is unavailable on the fixed parallel-work validator path." >&2
+python_bin=/usr/bin/python3
+if [[ ! -x "$python_bin" ]]; then
+    echo "System Python is unavailable on the fixed parallel-work validator path." >&2
     exit 2
 fi
+
+trusted_python() {
+    /usr/bin/env -i \
+        PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+        LANG=C \
+        LC_ALL=C \
+        TMPDIR=/tmp \
+        "$python_bin" -I -B "$@"
+}
 
 if [[ -z "$manifest_path" ]]; then
     echo "Missing --manifest." >&2
     exit 2
 fi
 if ! manifest_base="$(
-    /usr/bin/env -i \
-        PATH=/usr/bin:/bin:/usr/sbin:/sbin \
-        LANG=C \
-        LC_ALL=C \
-        "$trusted_php" -n -d auto_prepend_file= -d auto_append_file= -r '
-            $raw = @file_get_contents($argv[1] ?? "");
-            if (!is_string($raw)) {
-                fwrite(STDERR, "Parallel-work manifest is not valid JSON.\n");
-                exit(2);
-            }
-            try {
-                $manifest = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
-            } catch (Throwable) {
-                fwrite(STDERR, "Parallel-work manifest is not valid JSON.\n");
-                exit(2);
-            }
-            $base = is_array($manifest) ? ($manifest["base_sha"] ?? null) : null;
-            if (!is_string($base) || preg_match("/^[a-f0-9]{40}$/D", $base) !== 1) {
-                fwrite(STDERR, "Parallel-work input has an invalid shape.\n");
-                exit(2);
-            }
-            fwrite(STDOUT, $base);
-        ' "$manifest_path"
+    trusted_python -c '
+import json
+import re
+import sys
+
+try:
+    with open(sys.argv[1], "r", encoding="utf-8") as stream:
+        manifest = json.load(stream)
+except (OSError, ValueError, UnicodeError):
+    print("Parallel-work manifest is not valid JSON.", file=sys.stderr)
+    raise SystemExit(2)
+base = manifest.get("base_sha") if isinstance(manifest, dict) else None
+if not isinstance(base, str) or re.fullmatch(r"[a-f0-9]{40}", base) is None:
+    print("Parallel-work input has an invalid shape.", file=sys.stderr)
+    raise SystemExit(2)
+sys.stdout.write(base)
+' "$manifest_path"
 )"; then
     exit 2
 fi
 
-trusted_git=''
-for candidate in /usr/bin/git /opt/homebrew/bin/git /usr/local/bin/git /opt/local/bin/git; do
-    if [[ -x "$candidate" ]]; then
-        trusted_git="$candidate"
-        break
-    fi
-done
-if [[ -z "$trusted_git" ]]; then
+trusted_git=/usr/bin/git
+if [[ ! -x "$trusted_git" ]]; then
     echo "Git is unavailable on the fixed parallel-work validator path." >&2
     exit 2
 fi
@@ -279,8 +260,10 @@ trusted_root="$(/usr/bin/mktemp -d /tmp/parallel-work-validator.XXXXXX)" || {
 trap '/bin/rm -rf "$trusted_root"' EXIT
 
 trusted_paths=(
+    .codex/contracts/agent-workflow.json
     scripts/agent/check_parallel_work_contract.sh
     scripts/agent/check_parallel_work_contract.php
+    scripts/agent/verify_trusted_php_runtime.py
     scripts/agent/lib/ParallelWorkContract.php
     scripts/agent/lib/ParallelWorkOwnershipContract.php
     scripts/agent/lib/ParallelWorkPolicyContract.php
@@ -293,6 +276,25 @@ for path in "${trusted_paths[@]}"; do
         exit 2
     fi
 done
+
+validator_os_name="$(/usr/bin/uname -s 2>/dev/null)" || {
+    echo "Parallel-work validator operating system is unavailable." >&2
+    exit 2
+}
+validator_os_arch="$(/usr/bin/uname -m 2>/dev/null)" || {
+    echo "Parallel-work validator architecture is unavailable." >&2
+    exit 2
+}
+validator_platform="$validator_os_name-$validator_os_arch"
+trusted_php="$(
+    trusted_python "$trusted_root/scripts/agent/verify_trusted_php_runtime.py" \
+        --contract="$trusted_root/.codex/contracts/agent-workflow.json" \
+        --platform="$validator_platform"
+)" || exit $?
+if [[ "$trusted_php" != /* || ! -x "$trusted_php" ]]; then
+    echo "Parallel-work trusted PHP runtime attestation is invalid." >&2
+    exit 2
+fi
 
 /usr/bin/env -i \
     PATH=/usr/bin:/bin:/usr/sbin:/sbin \

@@ -83,7 +83,17 @@ class AgentWorkflowContractTest extends TestCase
             'private_system_temp_bundle_and_internal_runtime_only',
             $contract['authority']['reviewer']['temporary_directory_policy'] ?? null,
         );
-        self::assertSame('ignore_ambient_ini', $contract['authority']['reviewer']['php_runtime_configuration'] ?? null);
+        self::assertSame(
+            'exact_base_attested_binary_and_dynamic_closure_ignore_ambient_ini',
+            $contract['authority']['reviewer']['php_runtime_configuration'] ?? null,
+        );
+        self::assertSame('/usr/bin/python3', $contract['authority']['interpreter_trust']['system_python'] ?? null);
+        self::assertSame(['-I', '-B'], $contract['authority']['interpreter_trust']['system_python_arguments'] ?? null);
+        self::assertTrue($contract['authority']['interpreter_trust']['php']['allow_root_owned_closure'] ?? false);
+        self::assertSame(
+            'a788de9d1f58a58a8eaf425e78d8eb8f103391596e8a320877475ba8eb0f0873',
+            $contract['authority']['interpreter_trust']['php']['closure_sha256_by_platform']['Darwin-arm64'] ?? null,
+        );
         self::assertSame(
             'ignore_ambient_and_disable_helpers',
             $contract['authority']['reviewer']['git_runtime_configuration'] ?? null,
@@ -216,6 +226,7 @@ class AgentWorkflowContractTest extends TestCase
                 '.codex/agents/reviewer-tests.toml',
                 'scripts/agent/readonly-review-output.schema.json',
                 'scripts/agent/readonly-reviewer.sb',
+                'scripts/agent/verify_trusted_php_runtime.py',
                 'scripts/agent/readonly_review_bundle.php',
                 'scripts/agent/readonly_reviewer_contract.php',
                 'scripts/agent/lib/RepoPath.php',
@@ -313,9 +324,12 @@ class AgentWorkflowContractTest extends TestCase
         self::assertTrue($contract['parallel_work']['requires_clean_post_commit_verification'] ?? null);
         self::assertSame('provisional_pass', $contract['parallel_work']['dirty_precommit_status'] ?? null);
         self::assertSame('pass', $contract['parallel_work']['clean_integration_status'] ?? null);
-        self::assertSame('ignore_ambient_ini', $contract['parallel_work']['php_runtime_configuration'] ?? null);
         self::assertSame(
-            'php_n_before_bash_with_explicit_environment_allowlist',
+            'exact_base_attested_binary_and_dynamic_closure_ignore_ambient_ini',
+            $contract['parallel_work']['php_runtime_configuration'] ?? null,
+        );
+        self::assertSame(
+            'root_owned_posix_shell_before_clean_bash_and_attested_php',
             $contract['parallel_work']['shell_bootstrap'] ?? null,
         );
         self::assertSame(

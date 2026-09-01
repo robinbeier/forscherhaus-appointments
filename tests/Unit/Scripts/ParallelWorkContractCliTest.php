@@ -45,6 +45,10 @@ class ParallelWorkContractCliTest extends TestCase
             $sourceRepoRoot . '/scripts/agent/check_parallel_work_contract.php',
             $this->repoRoot . '/scripts/agent/check_parallel_work_contract.php',
         );
+        copy(
+            $sourceRepoRoot . '/scripts/agent/verify_trusted_php_runtime.py',
+            $this->repoRoot . '/scripts/agent/verify_trusted_php_runtime.py',
+        );
         self::assertTrue(chmod($this->repoRoot . '/scripts/agent/check_parallel_work_contract.sh', 0700));
         foreach (
             [
@@ -141,6 +145,22 @@ class ParallelWorkContractCliTest extends TestCase
         self::assertSame(
             ['schema_version' => 1, 'status' => 'pass', 'errors' => []],
             json_decode($stdout, true, 512, JSON_THROW_ON_ERROR),
+        );
+    }
+
+    public function testWrapperAttestsExactBasePhpBeforeAnyPhpExecution(): void
+    {
+        $wrapper = (string) file_get_contents($this->repoRoot . '/scripts/agent/check_parallel_work_contract.sh');
+
+        self::assertStringStartsWith("#!/bin/sh\n", $wrapper);
+        self::assertStringContainsString('/usr/bin/python3', $wrapper);
+        self::assertStringContainsString('-I -B', $wrapper);
+        self::assertStringContainsString('scripts/agent/verify_trusted_php_runtime.py', $wrapper);
+        self::assertStringContainsString('.codex/contracts/agent-workflow.json', $wrapper);
+        self::assertStringNotContainsString('command -v php', $wrapper);
+        self::assertStringNotContainsString('#!/usr/bin/env -S', $wrapper);
+        self::assertTrue(
+            strpos($wrapper, 'verify_trusted_php_runtime.py') < strrpos($wrapper, 'check_parallel_work_contract.php'),
         );
     }
 
@@ -381,6 +401,32 @@ class ParallelWorkContractCliTest extends TestCase
         }
     }
 
+    public function testCliNeverExecutesPhpResolvedFromAmbientPathBeforeFailClosedBootstrap(): void
+    {
+        $ambientDirectory = sys_get_temp_dir() . '/parallel-work-path-bootstrap-' . bin2hex(random_bytes(8));
+        self::assertTrue(mkdir($ambientDirectory, 0700));
+        $marker = $ambientDirectory . '/ambient-php-ran';
+        $ambientPhp = $ambientDirectory . '/php';
+        self::assertNotFalse(
+            file_put_contents($ambientPhp, "#!/bin/sh\n: > " . escapeshellarg($marker) . "\nexit 99\n"),
+        );
+        self::assertTrue(chmod($ambientPhp, 0700));
+
+        try {
+            [$exitCode, $stdout, $stderr] = $this->runCli([], environment: ['PATH' => $ambientDirectory]);
+
+            self::assertNotSame(0, $exitCode);
+            self::assertSame('', $stdout);
+            self::assertFileDoesNotExist($marker, $stderr);
+        } finally {
+            if (is_file($marker)) {
+                unlink($marker);
+            }
+            unlink($ambientPhp);
+            rmdir($ambientDirectory);
+        }
+    }
+
     public function testTrustedVerificationBindsActualLaneChangesToDeclaredOwnership(): void
     {
         $manifestPath = $this->writeJsonFixture(
@@ -592,6 +638,35 @@ class ParallelWorkContractCliTest extends TestCase
         ]);
         self::assertSame('', $this->runGit($this->trustedValidatorRoot, ['status', '--porcelain']));
         $manifestPath = $this->writeJsonFixture('transformed-source', $this->manifestForPath('scripts/agent'));
+
+        [$exitCode, $stdout, $stderr] = $this->runCli(['--manifest=' . $manifestPath]);
+
+        self::assertSame(1, $exitCode, $stderr);
+        self::assertSame('', $stderr);
+        self::assertContains(
+            'primary_owned_path:0:scripts/agent',
+            json_decode($stdout, true, 512, JSON_THROW_ON_ERROR)['errors'],
+        );
+        self::assertFileDoesNotExist($marker);
+    }
+
+    public function testAdmissionNeverExecutesAnAssumeUnchangedRuntimeAttestor(): void
+    {
+        $marker = sys_get_temp_dir() . '/parallel-work-runtime-attestor-' . bin2hex(random_bytes(8));
+        $sourcePath = $this->trustedValidatorRoot . '/scripts/agent/verify_trusted_php_runtime.py';
+        self::assertNotFalse(
+            file_put_contents(
+                $sourcePath,
+                "#!/usr/bin/python3\nfrom pathlib import Path\nPath(" . var_export($marker, true) . ").touch()\n",
+            ),
+        );
+        $this->runGit($this->trustedValidatorRoot, [
+            'update-index',
+            '--assume-unchanged',
+            'scripts/agent/verify_trusted_php_runtime.py',
+        ]);
+        self::assertSame('', $this->runGit($this->trustedValidatorRoot, ['status', '--porcelain']));
+        $manifestPath = $this->writeJsonFixture('transformed-attestor', $this->manifestForPath('scripts/agent'));
 
         [$exitCode, $stdout, $stderr] = $this->runCli(['--manifest=' . $manifestPath]);
 
