@@ -140,6 +140,63 @@ if os.path.commonpath([canonical, repository]) == repository:
 ' "$materialized_path" "$trusted_base_repo_root" "$expected_mode"
 }
 
+trusted_base_assert_bootstrap_manifest() {
+    local expected_payload_id="$1" contract_path="$2" payload_path="$3" payload_mode="$4"
+    local runtime_path="$5" runtime_mode="$6"
+
+    trusted_base_git show "${trusted_base_base_sha}:${contract_path}" 2>/dev/null | trusted_base_python -c '
+import json
+import re
+import sys
+
+def repository_path(value):
+    return isinstance(value, str) and bool(value) and not (
+        value.startswith("/")
+        or value.startswith(":")
+        or value.endswith("/")
+        or "\\" in value
+        or any(character in value for character in "*?[]")
+        or re.search(r"[\x00-\x1f\x7f]", value)
+        or any(segment in ("", ".", "..") for segment in value.split("/"))
+    )
+
+try:
+    contract = json.load(sys.stdin)
+    bootstrap = contract["trusted_base_bootstrap"]
+    launcher = bootstrap["launcher"]
+    runtime = bootstrap["shared_runtime"]
+    payloads = bootstrap["payloads"]
+    payload = payloads[sys.argv[1]]
+except (KeyError, TypeError, ValueError, UnicodeError):
+    raise SystemExit(1)
+if set(bootstrap) != {"schema_version", "contract_path", "launcher", "shared_runtime", "payloads"}:
+    raise SystemExit(1)
+if bootstrap["schema_version"] != 1 or bootstrap["contract_path"] != sys.argv[2]:
+    raise SystemExit(1)
+if set(payloads) != {"reviewer", "parallel"}:
+    raise SystemExit(1)
+if set(launcher) != {"path", "mode"} or set(runtime) != {"path", "mode"}:
+    raise SystemExit(1)
+if set(payload) != {"path", "mode", "environment_profile"}:
+    raise SystemExit(1)
+if launcher != {"path": "scripts/agent/trusted_base_launcher.sh", "mode": "0500"}:
+    raise SystemExit(1)
+for payload_id, declared_payload in payloads.items():
+    if set(declared_payload) != {"path", "mode", "environment_profile"}:
+        raise SystemExit(1)
+    if declared_payload["mode"] != "0500" or declared_payload["environment_profile"] != payload_id:
+        raise SystemExit(1)
+    if not repository_path(declared_payload["path"]):
+        raise SystemExit(1)
+if not repository_path(runtime["path"]):
+    raise SystemExit(1)
+if runtime != {"path": sys.argv[5], "mode": sys.argv[6]}:
+    raise SystemExit(1)
+if payload != {"path": sys.argv[3], "mode": sys.argv[4], "environment_profile": sys.argv[1]}:
+    raise SystemExit(1)
+' "$expected_payload_id" "$contract_path" "$payload_path" "$payload_mode" "$runtime_path" "$runtime_mode"
+}
+
 trusted_base_materialize_declared_paths() {
     local target_root="$1" contract_path="$2" selector="$3"
     local paths_output='' path=''
@@ -183,8 +240,10 @@ for path in value:
         not isinstance(path, str)
         or not path
         or path.startswith("/")
+        or path.startswith(":")
         or path.endswith("/")
         or "\\" in path
+        or any(character in path for character in "*?[]")
         or re.search(r"[\x00-\x1f\x7f]", path)
         or any(segment in ("", ".", "..") for segment in path.split("/"))
         or path in seen
@@ -208,13 +267,20 @@ for path in value:
 }
 
 trusted_base_payload_initialize() {
-    local expected_payload="$1" runner_source_input="$2" requested_repo_root="$3" requested_base_sha="$4"
+    local expected_payload_id="$1" runner_source_input="$2" requested_repo_root="$3" requested_base_sha="$4"
     local runtime_source_input="${TRUSTED_BASE_SHARED_RUNTIME_PATH:-}"
+    local contract_path="${TRUSTED_BASE_BOOTSTRAP_CONTRACT_PATH:-}"
+    local payload_path="${TRUSTED_BASE_LAUNCHER_PAYLOAD_REPOSITORY_PATH:-}"
+    local payload_mode="${TRUSTED_BASE_LAUNCHER_PAYLOAD_MODE:-}"
+    local runtime_path="${TRUSTED_BASE_SHARED_RUNTIME_REPOSITORY_PATH:-}"
+    local runtime_mode="${TRUSTED_BASE_SHARED_RUNTIME_MODE:-}"
     local resolved_root='' resolved_base='' runner_source='' runtime_source=''
 
     if [[ "${TRUSTED_BASE_LAUNCHER:-}" != '1' || \
-        "${TRUSTED_BASE_LAUNCHER_PAYLOAD:-}" != "$expected_payload" || \
+        "${TRUSTED_BASE_LAUNCHER_PAYLOAD_ID:-}" != "$expected_payload_id" || \
         "${TRUSTED_BASE_LAUNCHER_BASE_SHA:-}" != "$requested_base_sha" || \
+        "$contract_path" != '.codex/contracts/agent-workflow.json' || \
+        "$payload_mode" != '0500' || "$runtime_mode" != '0400' || \
         "$runner_source_input" != /* || "$runtime_source_input" != /* || \
         "$requested_repo_root" != /* || ! "$requested_base_sha" =~ ^[a-f0-9]{40}$ ]]; then
         echo 'Trusted-base payload is not bound to the launcher context.' >&2
@@ -249,18 +315,24 @@ trusted_base_payload_initialize() {
     fi
     trusted_base_base_sha="$requested_base_sha"
 
+    if ! trusted_base_assert_bootstrap_manifest \
+        "$expected_payload_id" "$contract_path" "$payload_path" "$payload_mode" "$runtime_path" "$runtime_mode"; then
+        echo 'Trusted-base payload bootstrap manifest is invalid.' >&2
+        return 2
+    fi
+
     runner_source="$(trusted_base_canonical_path "$runner_source_input")" || return 2
     runtime_source="$(trusted_base_canonical_path "$runtime_source_input")" || return 2
     if [[ "${TRUSTED_BASE_LAUNCHER_MATERIALIZED_PATH:-}" != "$runner_source" ]]; then
         echo 'Trusted-base payload materialization is not bound to the launcher.' >&2
         return 2
     fi
-    if ! trusted_base_assert_materialized_blob "$runner_source" "$expected_payload" 0500; then
+    if ! trusted_base_assert_materialized_blob "$runner_source" "$payload_path" "$payload_mode"; then
         echo 'Trusted-base payload is not the exact declared-base blob.' >&2
         return 2
     fi
     if ! trusted_base_assert_materialized_blob \
-        "$runtime_source" 'scripts/agent/lib/trusted_base_payload_runtime.sh' 0400; then
+        "$runtime_source" "$runtime_path" "$runtime_mode"; then
         echo 'Trusted-base shared runtime is not the exact declared-base blob.' >&2
         return 2
     fi

@@ -349,10 +349,15 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertStringContainsString('/usr/bin/git', $launcher);
         self::assertStringContainsString('hash-object --no-filters', $launcher);
         self::assertStringContainsString('TRUSTED_BASE_LAUNCHER=1', $launcher);
-        self::assertStringContainsString('trusted_base_payload_runtime.sh', $launcher);
+        self::assertStringContainsString('trusted_base_bootstrap', $launcher);
+        self::assertStringNotContainsString(
+            'shared_runtime_path="scripts/agent/lib/trusted_base_payload_runtime.sh"',
+            $launcher,
+        );
         self::assertStringContainsString('combined-payload.sh', $launcher);
         self::assertStringContainsString('trusted_base_payload_initialize', $sharedRuntime);
         self::assertStringContainsString('trusted_base_assert_materialized_blob', $sharedRuntime);
+        self::assertStringContainsString('trusted_base_assert_bootstrap_manifest', $sharedRuntime);
         self::assertStringStartsWith("#!/bin/bash\n", $runner);
         self::assertStringContainsString('must be launched from the exact-base trusted launcher', $runner);
         self::assertStringContainsString('trusted_base_payload_initialize', $runner);
@@ -761,6 +766,33 @@ class ReviewerAuthorityContractTest extends TestCase
             $this->removeRunnerFixture($fixture);
             @unlink($launcherMarker);
             @unlink($payloadMarker);
+        }
+    }
+
+    public function testExactBaseLauncherRejectsAnInvalidBootstrapManifestBeforePayloadExecution(): void
+    {
+        $executionMarker = sys_get_temp_dir() . '/reviewer-invalid-bootstrap-manifest-' . bin2hex(random_bytes(8));
+        $fixture = $this->runnerFixture(
+            'reviewer-invalid-bootstrap-manifest',
+            "#!/bin/sh\n: > " . escapeshellarg($executionMarker) . "\nexit 0\n",
+            'codex',
+            false,
+            static function (array $contract): array {
+                $contract['trusted_base_bootstrap']['payloads']['parallel']['mode'] = '0700';
+                return $contract;
+            },
+        );
+
+        try {
+            [$exitCode, $stdout, $stderr] = $this->runRunnerFixture($fixture);
+
+            self::assertSame(2, $exitCode);
+            self::assertSame('', $stdout);
+            self::assertSame("Trusted-base launcher bootstrap manifest is invalid.\n", $stderr);
+            self::assertFileDoesNotExist($executionMarker);
+        } finally {
+            $this->removeRunnerFixture($fixture);
+            @unlink($executionMarker);
         }
     }
 
@@ -1239,6 +1271,33 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertStringContainsString("model = 'untrusted-body-value'", $resolved['role_instructions']);
     }
 
+    public function testTestsRegressionFlakeLensResolvesTheCanonicalRepositoryRole(): void
+    {
+        $contract = json_decode(
+            (string) file_get_contents($this->repoRoot . '/.codex/contracts/agent-workflow.json'),
+            true,
+            512,
+            JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($contract);
+        self::assertIsArray($contract['authority']['reviewer'] ?? null);
+
+        $resolved = ReadonlyReviewerContract::resolveInvocation(
+            $this->repoRoot,
+            'tests_regression_flake',
+            $contract['authority']['reviewer'],
+        );
+
+        self::assertSame('.codex/agents/reviewer-tests.toml', $resolved['role_file']);
+        self::assertSame('gpt-5.4-mini', $resolved['model']);
+        self::assertSame('medium', $resolved['reasoning']);
+        self::assertSame(
+            (string) file_get_contents($this->repoRoot . '/.codex/agents/reviewer-tests.toml'),
+            $resolved['role_instructions'],
+        );
+        self::assertStringContainsString('regression coverage', $resolved['role_instructions']);
+    }
+
     public function testRuntimeConfigurationBindsOfficialPlatformDigests(): void
     {
         $runtime = ReadonlyReviewerContract::runtimeConfiguration(
@@ -1307,12 +1366,16 @@ class ReviewerAuthorityContractTest extends TestCase
         return $policy;
     }
 
-    /** @return array{root: string, runner: string, binary: string, base: string, remote: string} */
+    /**
+     * @param (callable(array<string, mixed>): array<string, mixed>)|null $contractMutator
+     * @return array{root: string, runner: string, binary: string, base: string, remote: string}
+     */
     private function runnerFixture(
         string $label,
         string $binarySource,
         string $binaryName,
         bool $completeBootstrap = false,
+        ?callable $contractMutator = null,
     ): array {
         $root = sys_get_temp_dir() . '/' . $label . '-' . bin2hex(random_bytes(8));
         $remote = sys_get_temp_dir() . '/' . $label . '-remote-' . bin2hex(random_bytes(8)) . '.git';
@@ -1340,6 +1403,16 @@ class ReviewerAuthorityContractTest extends TestCase
         $contractPath = $root . '/.codex/contracts/agent-workflow.json';
         self::assertTrue(mkdir(dirname($contractPath), 0700, true));
         self::assertTrue(copy($this->repoRoot . '/.codex/contracts/agent-workflow.json', $contractPath));
+        if ($contractMutator !== null) {
+            $contract = json_decode((string) file_get_contents($contractPath), true, 512, JSON_THROW_ON_ERROR);
+            self::assertIsArray($contract);
+            self::assertNotFalse(
+                file_put_contents(
+                    $contractPath,
+                    json_encode($contractMutator($contract), JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n",
+                ),
+            );
+        }
         $runnerSource = (string) file_get_contents($this->repoRoot . '/' . $runnerPath);
         $fixtureSource = str_replace(
             "canonical_main_remote='https://github.com/robinbeier/forscherhaus-appointments.git'",

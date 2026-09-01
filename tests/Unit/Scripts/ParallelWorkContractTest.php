@@ -152,6 +152,13 @@ class ParallelWorkContractTest extends TestCase
             ParallelWorkContract::validate($this->validManifest(), $policy, $this->ownershipMap),
         );
 
+        $policy = $this->policy;
+        $policy['ownership_rule_contract'] = 'caller-selected-semantics.json';
+        self::assertContains(
+            'invalid_policy_ownership_rule_contract',
+            ParallelWorkContract::validate($this->validManifest(), $policy, $this->ownershipMap),
+        );
+
         $ownershipMap = $this->ownershipMap;
         $ownershipMap['schema_version'] = 2;
         self::assertContains(

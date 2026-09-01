@@ -170,7 +170,31 @@ if (!is_array($ownershipMap)) {
     exit(2);
 }
 
-$errors = ParallelWorkContract::validate($manifest, $contract['parallel_work'], $ownershipMap);
+$pathRuleContractPath = $contract['parallel_work']['ownership_rule_contract'] ?? null;
+if (!is_string($pathRuleContractPath) || !RepoPath::isNormalized($pathRuleContractPath)) {
+    fwrite(STDERR, "Parallel-work ownership path-rule contract is invalid.\n");
+    exit(2);
+}
+$pathRuleContractJson = readGitBlob($gitBinary, $root, $baseSha, $pathRuleContractPath);
+if ($pathRuleContractJson === null) {
+    fwrite(STDERR, "Parallel-work base ownership path-rule contract is unavailable.\n");
+    exit(2);
+}
+try {
+    $pathRuleContract = json_decode($pathRuleContractJson, true, 512, JSON_THROW_ON_ERROR);
+} catch (Throwable) {
+    fwrite(STDERR, "Parallel-work base ownership path-rule contract is not valid JSON.\n");
+    exit(2);
+}
+if (!is_array($pathRuleContract) || array_is_list($pathRuleContract)) {
+    fwrite(STDERR, "Parallel-work ownership path-rule contract has an invalid shape.\n");
+    exit(2);
+}
+
+$errors = [
+    ...Forscherhaus\AgentHarness\ParallelWorkOwnershipContract::validateSemanticsContract($pathRuleContract),
+    ...ParallelWorkContract::validate($manifest, $contract['parallel_work'], $ownershipMap),
+];
 $verification = null;
 if ($verifyLane !== null && $errors === []) {
     $errors = verifyValidatorSeparation($validatorCheckoutRoot, $root);
@@ -326,6 +350,7 @@ function verifyValidatorSource(string $gitBinary, string $validatorRoot, string 
             'scripts/agent/lib/ParallelWorkOwnershipContract.php',
             'scripts/agent/lib/ParallelWorkPolicyContract.php',
             'scripts/agent/lib/RepoPath.php',
+            '.codex/contracts/ownership-path-rules.json',
         ]
         as $path
     ) {

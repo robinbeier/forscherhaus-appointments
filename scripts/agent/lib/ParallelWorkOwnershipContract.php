@@ -9,6 +9,105 @@ require_once __DIR__ . '/RepoPath.php';
 final class ParallelWorkOwnershipContract
 {
     /**
+     * Execute the language-neutral semantics fixture through the trusted PHP
+     * matcher. Python CI consumers execute the same fixture at import time.
+     *
+     * @param array<string, mixed> $contract
+     * @return list<string>
+     */
+    public static function validateSemanticsContract(array $contract): array
+    {
+        $errors = [];
+        $expectedKeys = ['candidate_path_policy', 'invalid_rule_cases', 'match_cases', 'match_modes', 'schema_version'];
+        $actualKeys = array_keys($contract);
+        sort($expectedKeys, SORT_STRING);
+        sort($actualKeys, SORT_STRING);
+        if (
+            $actualKeys !== $expectedKeys ||
+            ($contract['schema_version'] ?? null) !== 1 ||
+            ($contract['candidate_path_policy'] ?? null) !== 'strict_normalized_repository_relative' ||
+            ($contract['match_modes'] ?? null) !== [
+                'directory' => 'descendants_only',
+                'exact_file' => 'exact_path_only',
+                'filename_prefix' => 'same_directory_filename_prefix',
+            ]
+        ) {
+            return ['invalid_ownership_path_rule_contract'];
+        }
+
+        $matchCases = $contract['match_cases'] ?? null;
+        if (!is_array($matchCases) || !array_is_list($matchCases) || $matchCases === []) {
+            $errors[] = 'invalid_ownership_path_rule_match_cases';
+        } else {
+            $seen = [];
+            foreach ($matchCases as $index => $case) {
+                if (!is_array($case) || array_is_list($case)) {
+                    $errors[] = 'invalid_ownership_path_rule_match_case:' . $index;
+                    continue;
+                }
+                $expectedCaseKeys = ['candidate', 'matches', 'name', 'rule'];
+                $actualCaseKeys = array_keys($case);
+                sort($expectedCaseKeys, SORT_STRING);
+                sort($actualCaseKeys, SORT_STRING);
+                $name = $case['name'] ?? null;
+                $candidate = $case['candidate'] ?? null;
+                $matches = $case['matches'] ?? null;
+                if (
+                    $actualCaseKeys !== $expectedCaseKeys ||
+                    !is_string($name) ||
+                    $name === '' ||
+                    isset($seen[$name]) ||
+                    !is_string($candidate) ||
+                    !RepoPath::isNormalized($candidate) ||
+                    !is_bool($matches)
+                ) {
+                    $errors[] = 'invalid_ownership_path_rule_match_case:' . $index;
+                    continue;
+                }
+                $seen[$name] = true;
+                $ruleErrors = [];
+                $rule = self::readPathRule($case['rule'] ?? null, $ruleErrors, 'invalid');
+                if ($rule === null || $ruleErrors !== []) {
+                    $errors[] = 'invalid_ownership_path_rule_match_case:' . $name;
+                    continue;
+                }
+                if (self::pathRuleCoversChangedPath($rule, $candidate) !== $matches) {
+                    $errors[] = 'ownership_path_rule_match_case_failed:' . $name;
+                }
+            }
+        }
+
+        $invalidCases = $contract['invalid_rule_cases'] ?? null;
+        if (!is_array($invalidCases) || !array_is_list($invalidCases) || $invalidCases === []) {
+            $errors[] = 'invalid_ownership_path_rule_invalid_cases';
+        } else {
+            $seen = [];
+            foreach ($invalidCases as $index => $case) {
+                if (!is_array($case) || array_is_list($case)) {
+                    $errors[] = 'invalid_ownership_path_rule_invalid_case:' . $index;
+                    continue;
+                }
+                $expectedCaseKeys = ['name', 'rule'];
+                $actualCaseKeys = array_keys($case);
+                sort($expectedCaseKeys, SORT_STRING);
+                sort($actualCaseKeys, SORT_STRING);
+                $name = $case['name'] ?? null;
+                if ($actualCaseKeys !== $expectedCaseKeys || !is_string($name) || $name === '' || isset($seen[$name])) {
+                    $errors[] = 'invalid_ownership_path_rule_invalid_case:' . $index;
+                    continue;
+                }
+                $seen[$name] = true;
+                $ruleErrors = [];
+                if (self::readPathRule($case['rule'] ?? null, $ruleErrors, 'invalid') !== null) {
+                    $errors[] = 'ownership_path_rule_invalid_case_accepted:' . $name;
+                }
+            }
+        }
+
+        return array_values(array_unique($errors));
+    }
+
+    /**
      * @param array<string, mixed> $manifest
      * @param list<string> $errors
      * @return array<string, true>

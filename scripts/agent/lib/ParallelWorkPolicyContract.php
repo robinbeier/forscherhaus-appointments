@@ -27,6 +27,9 @@ final class ParallelWorkPolicyContract
         if (($policy['ownership_rule_format'] ?? null) !== 'explicit_path_and_match_objects') {
             $errors[] = 'invalid_policy_ownership_rule_format';
         }
+        if (($policy['ownership_rule_contract'] ?? null) !== '.codex/contracts/ownership-path-rules.json') {
+            $errors[] = 'invalid_policy_ownership_rule_contract';
+        }
 
         foreach (
             [

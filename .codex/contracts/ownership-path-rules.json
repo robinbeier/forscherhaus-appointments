@@ -1,0 +1,68 @@
+{
+    "schema_version": 1,
+    "candidate_path_policy": "strict_normalized_repository_relative",
+    "match_modes": {
+        "directory": "descendants_only",
+        "exact_file": "exact_path_only",
+        "filename_prefix": "same_directory_filename_prefix"
+    },
+    "match_cases": [
+        {
+            "name": "directory-descendant",
+            "rule": {"path": "application/models", "match": "directory"},
+            "candidate": "application/models/Appointments_model.php",
+            "matches": true
+        },
+        {
+            "name": "directory-self-is-not-a-file-match",
+            "rule": {"path": "application/models", "match": "directory"},
+            "candidate": "application/models",
+            "matches": false
+        },
+        {
+            "name": "directory-adjacent-prefix",
+            "rule": {"path": "application/models", "match": "directory"},
+            "candidate": "application/models_archive/example.php",
+            "matches": false
+        },
+        {
+            "name": "exact-file",
+            "rule": {"path": "WORKFLOW.md", "match": "exact_file"},
+            "candidate": "WORKFLOW.md",
+            "matches": true
+        },
+        {
+            "name": "exact-file-descendant",
+            "rule": {"path": "WORKFLOW.md", "match": "exact_file"},
+            "candidate": "WORKFLOW.md/example",
+            "matches": false
+        },
+        {
+            "name": "filename-prefix-sibling",
+            "rule": {"path": "application/views/components/booking_", "match": "filename_prefix"},
+            "candidate": "application/views/components/booking_step.php",
+            "matches": true
+        },
+        {
+            "name": "filename-prefix-adjacent-directory",
+            "rule": {"path": "application/views/components/booking_", "match": "filename_prefix"},
+            "candidate": "application/views/booking_step.php",
+            "matches": false
+        },
+        {
+            "name": "filename-prefix-adjacent-name",
+            "rule": {"path": "application/views/components/booking_", "match": "filename_prefix"},
+            "candidate": "application/views/components/bookings_step.php",
+            "matches": false
+        }
+    ],
+    "invalid_rule_cases": [
+        {"name": "unknown-match", "rule": {"path": "WORKFLOW.md", "match": "glob"}},
+        {"name": "missing-path", "rule": {"match": "exact_file"}},
+        {"name": "absolute-path", "rule": {"path": "/WORKFLOW.md", "match": "exact_file"}},
+        {"name": "dot-segment", "rule": {"path": "./WORKFLOW.md", "match": "exact_file"}},
+        {"name": "parent-segment", "rule": {"path": "docs/../WORKFLOW.md", "match": "exact_file"}},
+        {"name": "trailing-slash", "rule": {"path": "application/models/", "match": "directory"}},
+        {"name": "wildcard", "rule": {"path": "application/*.php", "match": "filename_prefix"}}
+    ]
+}

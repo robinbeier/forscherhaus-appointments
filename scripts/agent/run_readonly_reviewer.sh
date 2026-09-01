@@ -47,7 +47,7 @@ if ! declare -F trusted_base_payload_initialize >/dev/null 2>&1; then
     exit 2
 fi
 trusted_base_payload_initialize \
-    'scripts/agent/run_readonly_reviewer.sh' "$runner_source_input" "$requested_repo_root" "$base_sha" || exit $?
+    'reviewer' "$runner_source_input" "$requested_repo_root" "$base_sha" || exit $?
 repo_root="$trusted_base_repo_root"
 cd "$repo_root"
 

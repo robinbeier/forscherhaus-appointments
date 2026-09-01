@@ -82,6 +82,10 @@ class ParallelWorkContractCliTest extends TestCase
             $sourceRepoRoot . '/.codex/contracts/agent-workflow.json',
             $this->repoRoot . '/.codex/contracts/agent-workflow.json',
         );
+        copy(
+            $sourceRepoRoot . '/.codex/contracts/ownership-path-rules.json',
+            $this->repoRoot . '/.codex/contracts/ownership-path-rules.json',
+        );
         $this->bindFixtureRuntimePin(
             $this->repoRoot . '/scripts/agent/verify_trusted_php_runtime.py',
             $this->repoRoot . '/.codex/contracts/agent-workflow.json',

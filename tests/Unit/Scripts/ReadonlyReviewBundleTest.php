@@ -219,6 +219,43 @@ class ReadonlyReviewBundleTest extends TestCase
         }
     }
 
+    public function testSerializerRejectsManifestPinnedUnsortedAndDuplicateChangedPathIndices(): void
+    {
+        foreach (
+            [
+                'unsorted' => ['WORKFLOW.md', 'AGENTS.md'],
+                'duplicate' => ['AGENTS.md', 'AGENTS.md'],
+            ]
+            as $label => $paths
+        ) {
+            $fixture = $this->bundleFixture('changed-path-' . $label);
+
+            try {
+                $encoded = json_encode($paths, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+                self::assertNotFalse(file_put_contents($fixture['root'] . '/changed-paths.json', $encoded));
+                $manifest = $fixture['manifest'];
+                $manifest['changed_paths'] = $paths;
+                $manifest['changed_path_index']['bytes'] = strlen($encoded);
+                $manifest['changed_path_index']['sha256'] = hash('sha256', $encoded);
+                self::assertNotFalse(
+                    file_put_contents(
+                        $fixture['root'] . '/manifest.json',
+                        json_encode($manifest, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n",
+                    ),
+                );
+
+                try {
+                    ReadonlyReviewBundle::serialize($fixture['root'], 8192);
+                    self::fail('Non-canonical changed-path index was accepted: ' . $label);
+                } catch (\RuntimeException $exception) {
+                    self::assertStringContainsString('JSON path order is invalid', $exception->getMessage());
+                }
+            } finally {
+                $this->cleanupBundleFixture($fixture);
+            }
+        }
+    }
+
     public function testSerializationSizeBoundFailsClosed(): void
     {
         $fixture = $this->bundleFixture('size-bound');

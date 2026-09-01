@@ -55,7 +55,7 @@ if ! declare -F trusted_base_payload_initialize >/dev/null 2>&1; then
     exit 2
 fi
 trusted_base_payload_initialize \
-    'scripts/agent/check_parallel_work_contract.sh' \
+    'parallel' \
     "$runner_source_input" "$validator_checkout" "${TRUSTED_BASE_LAUNCHER_BASE_SHA:-}" || exit $?
 validator_checkout="$trusted_base_repo_root"
 

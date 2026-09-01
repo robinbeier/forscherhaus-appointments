@@ -2,7 +2,7 @@
 
 Canonical source: `docs/maps/component_ownership_map.json`
 
-Every path rule declares `match: directory`, `match: exact_file`, or `match: filename_prefix`; path spelling has no implicit match semantics.
+Every path rule declares `match: directory`, `match: exact_file`, or `match: filename_prefix`; path spelling has no implicit match semantics. Canonical PHP/Python matching cases live in `.codex/contracts/ownership-path-rules.json`.
 
 Ownership model: Role + Handles plus explicit single-owner risk metadata.
 

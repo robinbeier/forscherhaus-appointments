@@ -114,15 +114,19 @@ approvals, primary-reserved paths, and at most two implementation-worker lanes.
 The Primary privately materializes the launcher with fixed system Git from the
 already verified declared base, verifies its exact blob and non-executable tree
 mode, and only then starts it in clean Bash. The launcher in turn privately
-materializes and verifies the shared exact-base payload runtime plus the
-validator before any checkout code can execute. The shared runtime owns clean
-Git/Python and declared-path materialization for both agent-harness payloads.
+reads the `trusted_base_bootstrap` manifest from that exact base, then
+materializes and verifies its declared shared runtime and payload before any
+checkout code can execute. The shared runtime independently validates the same
+manifest and owns clean Git/Python plus declared-path materialization for both
+agent-harness payloads.
 Direct execution of any checked-out bootstrap script is forbidden and fails
 closed. The validator verifies provisional pre-commit ownership and clean
-post-commit integration evidence. Shared path matching is centralized in
-`scripts/ci/ownership_path_rules.py`. Do not reproduce the bootstrap command in
-other docs or duplicate validator internals; use this canonical command and the
-machine contract.
+post-commit integration evidence. PHP validation and Python CI/documentation
+consumers execute the same language-neutral semantics and conformance cases in
+`.codex/contracts/ownership-path-rules.json`; neither runtime may silently
+normalize caller-supplied ownership candidates. Do not reproduce the bootstrap
+command in other docs or duplicate validator internals; use this canonical
+command and the machine contract.
 Do not replace this with an ambient `git show` or a checked-out wrapper. The
 machine contract owns the fixed system-Git bootstrap and payload selection.
 

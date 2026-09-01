@@ -5,6 +5,30 @@
         "may_set_ready_to_merge": false,
         "push_invalidates_exact_head_evidence": true
     },
+    "trusted_base_bootstrap": {
+        "schema_version": 1,
+        "contract_path": ".codex/contracts/agent-workflow.json",
+        "launcher": {
+            "path": "scripts/agent/trusted_base_launcher.sh",
+            "mode": "0500"
+        },
+        "shared_runtime": {
+            "path": "scripts/agent/lib/trusted_base_payload_runtime.sh",
+            "mode": "0400"
+        },
+        "payloads": {
+            "reviewer": {
+                "path": "scripts/agent/run_readonly_reviewer.sh",
+                "mode": "0500",
+                "environment_profile": "reviewer"
+            },
+            "parallel": {
+                "path": "scripts/agent/check_parallel_work_contract.sh",
+                "mode": "0500",
+                "environment_profile": "parallel"
+            }
+        }
+    },
     "authority": {
         "primary_external_single_writer": true,
         "primary_owned_mutations": [
@@ -236,7 +260,8 @@
             "scripts/agent/lib/ParallelWorkContract.php",
             "scripts/agent/lib/ParallelWorkOwnershipContract.php",
             "scripts/agent/lib/ParallelWorkPolicyContract.php",
-            "scripts/agent/lib/RepoPath.php"
+            "scripts/agent/lib/RepoPath.php",
+            ".codex/contracts/ownership-path-rules.json"
         ],
         "canonical_base_ref": "refs/remotes/origin/main",
         "canonical_base_remote_url": "https://github.com/robinbeier/forscherhaus-appointments.git",
@@ -255,6 +280,7 @@
         "ownership_map": "docs/maps/component_ownership_map.json",
         "ownership_map_schema_version": 3,
         "ownership_rule_format": "explicit_path_and_match_objects",
+        "ownership_rule_contract": ".codex/contracts/ownership-path-rules.json",
         "primary_owned_path_prefixes": [
             ".codex/agents/reviewer-correctness.toml",
             ".codex/agents/reviewer-design.toml",

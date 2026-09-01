@@ -105,10 +105,12 @@ require three independent final reviews on the same unchanged exact head:
 Invoke final lenses through the fixed-system-Git exact-base protocol in
 `scripts/agent/trusted_base_launcher.sh`, using the trusted base described in
 `WORKFLOW.md`; never execute either checked-out harness script. The launcher
-privately materializes `scripts/agent/lib/trusted_base_payload_runtime.sh` and
-`scripts/agent/run_readonly_reviewer.sh` only after the base boundary is
-established. The shared runtime owns clean Git/Python and exact-base declared
-path materialization for reviewer and parallel-work payloads. The runner and
+resolves the shared runtime and reviewer payload only from the exact-base
+`trusted_base_bootstrap` manifest and materializes both only after the base
+boundary is established. The shared runtime validates that same manifest and
+owns clean Git/Python plus exact-base declared
+path materialization for reviewer and parallel-work payloads. The declared
+reviewer payload remains `scripts/agent/run_readonly_reviewer.sh`. The runner and
 `.codex/contracts/agent-workflow.json` own live-main/exact-merge-base binding,
 deterministic SHA-256 bundle construction, and trusted-path selection. Do not
 duplicate its bootstrap and materialization internals here. The contract pins

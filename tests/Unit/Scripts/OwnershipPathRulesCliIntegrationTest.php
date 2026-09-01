@@ -4,10 +4,52 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Scripts;
 
+use Forscherhaus\AgentHarness\ParallelWorkOwnershipContract;
 use PHPUnit\Framework\TestCase;
+
+require_once __DIR__ . '/../../../scripts/agent/lib/ParallelWorkOwnershipContract.php';
 
 final class OwnershipPathRulesCliIntegrationTest extends TestCase
 {
+    public function testPhpAndPythonExecuteTheSameLanguageNeutralSemanticsContract(): void
+    {
+        $contractPath = dirname(__DIR__, 3) . '/.codex/contracts/ownership-path-rules.json';
+        $contract = json_decode((string) file_get_contents($contractPath), true, 512, JSON_THROW_ON_ERROR);
+        self::assertIsArray($contract);
+        self::assertSame([], ParallelWorkOwnershipContract::validateSemanticsContract($contract));
+
+        $script = <<<'PYTHON'
+        import json
+        import pathlib
+        import sys
+
+        sys.path.insert(0, "scripts/ci")
+        import ownership_path_rules as rules
+
+        print(json.dumps({
+            "contract": str(rules.CONTRACT_PATH.relative_to(pathlib.Path.cwd())),
+            "match_cases": len(rules.CONTRACT["match_cases"]),
+            "invalid_rule_cases": len(rules.CONTRACT["invalid_rule_cases"]),
+        }, sort_keys=True))
+        PYTHON;
+        $python = json_decode(
+            $this->runCommand(['/usr/bin/python3', '-I', '-B', '-c', $script]),
+            true,
+            512,
+            JSON_THROW_ON_ERROR,
+        );
+        self::assertSame('.codex/contracts/ownership-path-rules.json', $python['contract'] ?? null);
+        self::assertSame(count($contract['match_cases']), $python['match_cases'] ?? null);
+        self::assertSame(count($contract['invalid_rule_cases']), $python['invalid_rule_cases'] ?? null);
+
+        $drifted = $contract;
+        $drifted['match_cases'][1]['matches'] = true;
+        self::assertContains(
+            'ownership_path_rule_match_case_failed:directory-self-is-not-a-file-match',
+            ParallelWorkOwnershipContract::validateSemanticsContract($drifted),
+        );
+    }
+
     public function testCliDistinguishesDirectoryAndExactFileRulesAndRendersCodeownersPatterns(): void
     {
         $root = sys_get_temp_dir() . '/ownership-path-rules-' . bin2hex(random_bytes(8));
@@ -53,6 +95,7 @@ final class OwnershipPathRulesCliIntegrationTest extends TestCase
         try {
             file_put_contents($mapPath, json_encode($directoryMap, JSON_THROW_ON_ERROR));
             self::assertSame(['test-directory'], $this->matchComponents($mapPath, $changedPath));
+            self::assertSame([], $this->matchComponents($mapPath, 'tests/Unit/Scripts'));
             self::assertSame([], $this->matchComponents($mapPath, 'tests/Unit/ScriptSibling/example.php'));
 
             file_put_contents($mapPath, json_encode($exactMap, JSON_THROW_ON_ERROR));

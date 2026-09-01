@@ -51,16 +51,6 @@ if [[ "$repo_root_input" != /* || ! "$base_sha" =~ ^[a-f0-9]{40}$ ]]; then
     exit 2
 fi
 
-case "$payload_name" in
-    reviewer) payload_path="scripts/agent/run_readonly_reviewer.sh" ;;
-    parallel) payload_path="scripts/agent/check_parallel_work_contract.sh" ;;
-    *)
-        echo "Trusted-base launcher payload is not allowlisted." >&2
-        exit 2
-        ;;
-esac
-shared_runtime_path="scripts/agent/lib/trusted_base_payload_runtime.sh"
-
 git_bin=/usr/bin/git
 python_bin=/usr/bin/python3
 
@@ -157,6 +147,86 @@ if [[ "$resolved_base" != "$base_sha" ]]; then
     exit 2
 fi
 
+bootstrap_contract_path='.codex/contracts/agent-workflow.json'
+bootstrap_record="$({
+    trusted_git show "${base_sha}:${bootstrap_contract_path}" 2>/dev/null | trusted_python -c '
+import json
+import re
+import sys
+
+def repository_path(value):
+    if (
+        not isinstance(value, str)
+        or not value
+        or value.startswith("/")
+        or value.startswith(":")
+        or value.endswith("/")
+        or "\\" in value
+        or any(character in value for character in "*?[]")
+        or re.search(r"[\x00-\x1f\x7f]", value)
+        or any(segment in ("", ".", "..") for segment in value.split("/"))
+    ):
+        raise SystemExit(1)
+    return value
+
+try:
+    contract = json.load(sys.stdin)
+    bootstrap = contract["trusted_base_bootstrap"]
+    if set(bootstrap) != {"schema_version", "contract_path", "launcher", "shared_runtime", "payloads"}:
+        raise SystemExit(1)
+    if bootstrap["schema_version"] != 1 or bootstrap["contract_path"] != ".codex/contracts/agent-workflow.json":
+        raise SystemExit(1)
+    if set(bootstrap["payloads"]) != {"reviewer", "parallel"}:
+        raise SystemExit(1)
+    launcher = bootstrap["launcher"]
+    runtime = bootstrap["shared_runtime"]
+    payloads = bootstrap["payloads"]
+    payload = payloads[sys.argv[1]]
+    if set(launcher) != {"path", "mode"} or set(runtime) != {"path", "mode"}:
+        raise SystemExit(1)
+    if set(payload) != {"path", "mode", "environment_profile"}:
+        raise SystemExit(1)
+    if launcher["mode"] != "0500" or runtime["mode"] != "0400" or payload["mode"] != "0500":
+        raise SystemExit(1)
+    if payload["environment_profile"] != sys.argv[1]:
+        raise SystemExit(1)
+    for payload_id, declared_payload in payloads.items():
+        if set(declared_payload) != {"path", "mode", "environment_profile"}:
+            raise SystemExit(1)
+        if declared_payload["mode"] != "0500" or declared_payload["environment_profile"] != payload_id:
+            raise SystemExit(1)
+        repository_path(declared_payload["path"])
+    values = [
+        bootstrap["contract_path"],
+        repository_path(launcher["path"]),
+        launcher["mode"],
+        repository_path(runtime["path"]),
+        runtime["mode"],
+        repository_path(payload["path"]),
+        payload["mode"],
+        payload["environment_profile"],
+    ]
+except (KeyError, TypeError, ValueError, UnicodeError):
+    raise SystemExit(1)
+sys.stdout.write("\n".join(values))
+' "$payload_name"
+})" || {
+    echo "Trusted-base launcher bootstrap manifest is invalid." >&2
+    exit 2
+}
+bootstrap_contract_path="$(/usr/bin/printf '%s\n' "$bootstrap_record" | /usr/bin/sed -n '1p')"
+launcher_repository_path="$(/usr/bin/printf '%s\n' "$bootstrap_record" | /usr/bin/sed -n '2p')"
+launcher_runtime_mode="$(/usr/bin/printf '%s\n' "$bootstrap_record" | /usr/bin/sed -n '3p')"
+shared_runtime_path="$(/usr/bin/printf '%s\n' "$bootstrap_record" | /usr/bin/sed -n '4p')"
+shared_runtime_mode="$(/usr/bin/printf '%s\n' "$bootstrap_record" | /usr/bin/sed -n '5p')"
+payload_path="$(/usr/bin/printf '%s\n' "$bootstrap_record" | /usr/bin/sed -n '6p')"
+payload_runtime_mode="$(/usr/bin/printf '%s\n' "$bootstrap_record" | /usr/bin/sed -n '7p')"
+payload_environment_profile="$(/usr/bin/printf '%s\n' "$bootstrap_record" | /usr/bin/sed -n '8p')"
+if [[ -z "$payload_path" || "$payload_environment_profile" != "$payload_name" ]]; then
+    echo "Trusted-base launcher payload is not allowlisted." >&2
+    exit 2
+fi
+
 launcher_source="$(canonical_path "$launcher_source_input")" || {
     echo "Trusted-base launcher materialization path is invalid." >&2
     exit 2
@@ -167,16 +237,16 @@ case "$launcher_source" in
         exit 2
         ;;
 esac
-launcher_tree_entry="$(trusted_git ls-tree "$base_sha" -- scripts/agent/trusted_base_launcher.sh)" || exit 2
+launcher_tree_entry="$(trusted_git ls-tree "$base_sha" -- "$launcher_repository_path")" || exit 2
 IFS=$' \t' read -r launcher_mode launcher_type launcher_blob launcher_tree_path <<< "$launcher_tree_entry"
 if [[ "$launcher_mode" != "100644" || "$launcher_type" != "blob" || \
     ! "$launcher_blob" =~ ^[a-f0-9]{40}$ || \
-    "$launcher_tree_path" != "scripts/agent/trusted_base_launcher.sh" ]]; then
+    "$launcher_tree_path" != "$launcher_repository_path" ]]; then
     echo "Trusted-base launcher base blob has an unsafe tree record." >&2
     exit 2
 fi
 if [[ "$(trusted_git hash-object --no-filters "$launcher_source")" != "$launcher_blob" ]] || \
-    ! trusted_git show "${base_sha}:scripts/agent/trusted_base_launcher.sh" | /usr/bin/cmp -s - "$launcher_source"; then
+    ! trusted_git show "${base_sha}:${launcher_repository_path}" | /usr/bin/cmp -s - "$launcher_source"; then
     echo "Trusted-base launcher is not the exact verified-base blob." >&2
     exit 2
 fi
@@ -189,9 +259,9 @@ path = sys.argv[1]
 metadata = os.stat(path, follow_symlinks=False)
 if os.path.islink(path) or not stat.S_ISREG(metadata.st_mode):
     raise SystemExit(1)
-if metadata.st_uid != os.geteuid() or stat.S_IMODE(metadata.st_mode) != 0o500:
+if metadata.st_uid != os.geteuid() or stat.S_IMODE(metadata.st_mode) != int(sys.argv[2], 8):
     raise SystemExit(1)
-' "$launcher_source" || {
+' "$launcher_source" "$launcher_runtime_mode" || {
     echo "Trusted-base launcher materialization ownership or mode is unsafe." >&2
     exit 2
 }
@@ -255,8 +325,8 @@ if os.path.commonpath([path, repository]) == repository:
 
 materialized_payload="$materialized_root/$(/usr/bin/basename -- "$payload_path")"
 materialized_runtime="$materialized_root/$(/usr/bin/basename -- "$shared_runtime_path")"
-if ! materialize_exact_base_file "$payload_path" "$materialized_payload" 0500 || \
-    ! materialize_exact_base_file "$shared_runtime_path" "$materialized_runtime" 0400; then
+if ! materialize_exact_base_file "$payload_path" "$materialized_payload" "$payload_runtime_mode" || \
+    ! materialize_exact_base_file "$shared_runtime_path" "$materialized_runtime" "$shared_runtime_mode"; then
     echo "Trusted-base launcher private payload boundary is invalid." >&2
     exit 2
 fi
@@ -301,11 +371,16 @@ payload_environment=(
     LC_ALL=C
     TRUSTED_BASE_LAUNCHER=1
     TRUSTED_BASE_LAUNCHER_BASE_SHA="$base_sha"
-    TRUSTED_BASE_LAUNCHER_PAYLOAD="$payload_path"
+    TRUSTED_BASE_BOOTSTRAP_CONTRACT_PATH="$bootstrap_contract_path"
+    TRUSTED_BASE_LAUNCHER_PAYLOAD_ID="$payload_name"
+    TRUSTED_BASE_LAUNCHER_PAYLOAD_REPOSITORY_PATH="$payload_path"
+    TRUSTED_BASE_LAUNCHER_PAYLOAD_MODE="$payload_runtime_mode"
     TRUSTED_BASE_LAUNCHER_MATERIALIZED_PATH="$materialized_payload"
     TRUSTED_BASE_SHARED_RUNTIME_PATH="$materialized_runtime"
+    TRUSTED_BASE_SHARED_RUNTIME_REPOSITORY_PATH="$shared_runtime_path"
+    TRUSTED_BASE_SHARED_RUNTIME_MODE="$shared_runtime_mode"
 )
-case "$payload_name" in
+case "$payload_environment_profile" in
     reviewer)
         payload_prefix_arguments=("--repo-root=$repo_root" "--base-sha=$base_sha")
         payload_environment+=(

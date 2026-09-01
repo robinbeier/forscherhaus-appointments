@@ -51,6 +51,30 @@ class AgentWorkflowContractTest extends TestCase
         self::assertSame('In Review', $contract['publish']['linear_state'] ?? null);
         self::assertFalse($contract['publish']['may_set_ready_to_merge'] ?? null);
         self::assertTrue($contract['publish']['push_invalidates_exact_head_evidence'] ?? null);
+        self::assertSame(
+            [
+                'schema_version' => 1,
+                'contract_path' => '.codex/contracts/agent-workflow.json',
+                'launcher' => ['path' => 'scripts/agent/trusted_base_launcher.sh', 'mode' => '0500'],
+                'shared_runtime' => [
+                    'path' => 'scripts/agent/lib/trusted_base_payload_runtime.sh',
+                    'mode' => '0400',
+                ],
+                'payloads' => [
+                    'reviewer' => [
+                        'path' => 'scripts/agent/run_readonly_reviewer.sh',
+                        'mode' => '0500',
+                        'environment_profile' => 'reviewer',
+                    ],
+                    'parallel' => [
+                        'path' => 'scripts/agent/check_parallel_work_contract.sh',
+                        'mode' => '0500',
+                        'environment_profile' => 'parallel',
+                    ],
+                ],
+            ],
+            $contract['trusted_base_bootstrap'] ?? null,
+        );
         self::assertTrue($contract['authority']['primary_external_single_writer'] ?? null);
         self::assertSame(
             ['commit', 'push', 'pr_mutation', 'check_rerun', 'merge', 'linear_mutation', 'workpad_update'],
@@ -418,6 +442,11 @@ class AgentWorkflowContractTest extends TestCase
             self::assertContains($validatorBootstrapPath, $validatorBootstrapPaths);
         }
         self::assertSame($validatorBootstrapPaths, array_values(array_unique($validatorBootstrapPaths)));
+        self::assertContains('.codex/contracts/ownership-path-rules.json', $validatorBootstrapPaths);
+        self::assertSame(
+            '.codex/contracts/ownership-path-rules.json',
+            $contract['parallel_work']['ownership_rule_contract'] ?? null,
+        );
         self::assertSame('refs/remotes/origin/main', $contract['parallel_work']['canonical_base_ref'] ?? null);
         self::assertSame(
             'https://github.com/robinbeier/forscherhaus-appointments.git',
