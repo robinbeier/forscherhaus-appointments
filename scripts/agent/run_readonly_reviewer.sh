@@ -463,11 +463,12 @@ if [[ "$php_bin" != /* || ! -x "$php_bin" ]]; then
 fi
 
 runtime_config="$(trusted_php "$control_root/scripts/agent/readonly_reviewer_contract.php" runtime --platform="$reviewer_platform")" || exit $?
-IFS=$'\t' read -r expected_codex_version expected_codex_sha256 expected_codex_archive_sha256 <<< "$runtime_config"
+IFS=$'\t' read -r expected_codex_version expected_codex_sha256 expected_codex_archive_sha256 expected_codex_closure_sha256 <<< "$runtime_config"
 if (
     [[ ! "$expected_codex_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
     [[ ! "$expected_codex_sha256" =~ ^[a-f0-9]{64}$ ]] ||
-    [[ ! "$expected_codex_archive_sha256" =~ ^[a-f0-9]{64}$ ]]
+    [[ ! "$expected_codex_archive_sha256" =~ ^[a-f0-9]{64}$ ]] ||
+    [[ ! "$expected_codex_closure_sha256" =~ ^[a-f0-9]{64}$ ]]
 ); then
     echo "Reviewer Codex runtime policy is invalid." >&2
     exit 1
@@ -487,7 +488,19 @@ trusted_php "$control_root/scripts/agent/readonly_reviewer_contract.php" validat
     --path="$materialized_codex" \
     --expected-owner="$REVIEWER_EFFECTIVE_UID" \
     --expected-sha256="$expected_codex_sha256" || exit $?
-codex_bin="$materialized_codex"
+attested_codex="$(
+    trusted_python "$control_root/scripts/agent/verify_trusted_php_runtime.py" \
+        --runtime=codex \
+        --contract="$control_root/$contract_relative_path" \
+        --platform="$reviewer_platform" \
+        --path="$materialized_codex" \
+        --expected-closure-sha256="$expected_codex_closure_sha256"
+)" || exit $?
+if [[ "$attested_codex" != "$materialized_codex" ]]; then
+    echo "Reviewer Codex dependency attestation is invalid." >&2
+    exit 2
+fi
+codex_bin="$attested_codex"
 
 codex_version="$("$codex_bin" --version 2>/dev/null)" || {
     echo "Reviewer Codex binary does not identify as Codex CLI." >&2

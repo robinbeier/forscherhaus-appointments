@@ -127,9 +127,17 @@ an exact per-platform pin in the exact-base contract. Fixed host closures must
 also be entirely system-owned; missing pins and ambient, user-owned, or drifted
 runtimes fail closed. An admitted platform may instead materialize the single
 runtime member from an exact URL and archive/member digest into its private
-control directory. That path rejects extra archive members and non-system
-dynamic dependencies, and it still must match the exact aggregate closure pin
-before PHP executes.
+control directory. macOS dependencies are inspected without execution; pinned
+Linux archives must parse as the expected static ELF architecture with no
+interpreter or needed library, so user-owned code is never passed to `ldd`.
+That path rejects extra archive members and non-system dynamic dependencies,
+and it still must match the exact aggregate closure pin before PHP executes.
+
+The selected Codex release is copied into the private control directory,
+rehashed, and inspected without execution. Its exact system-only dynamic
+dependency closure must match the per-platform contract pin before the first
+`codex` invocation. Any non-system dependency or broad package-manager library
+allowance fails closed.
 
 The initial trust-root introduction and changes to runtime-loaded
 `.codex/config.toml` or `AGENTS.md` require a separately enforced external

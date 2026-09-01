@@ -27,7 +27,6 @@
   (subpath "/usr/bin")
   (subpath "/usr/sbin")
   (subpath "/usr/libexec")
-  (subpath "/opt/homebrew/lib")
   (literal "/System/Library/CoreServices")
   (literal "/System/Library/CoreServices/.SystemVersionPlatform.plist")
   (literal "/System/Library/CoreServices/SystemVersion.plist"))

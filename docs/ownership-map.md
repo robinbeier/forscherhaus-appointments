@@ -2,7 +2,7 @@
 
 Canonical source: `docs/maps/component_ownership_map.json`
 
-Every path rule declares `match: directory` or `match: exact_file`; path spelling has no implicit match semantics.
+Every path rule declares `match: directory`, `match: exact_file`, or `match: filename_prefix`; path spelling has no implicit match semantics.
 
 Ownership model: Role + Handles plus explicit single-owner risk metadata.
 
@@ -97,13 +97,7 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
 - Path rules:
   - `application/controllers/Booking.php` (exact_file)
   - `application/views/pages/booking.php` (exact_file)
-  - `application/views/components/booking_cancellation_frame.php` (exact_file)
-  - `application/views/components/booking_final_step.php` (exact_file)
-  - `application/views/components/booking_footer.php` (exact_file)
-  - `application/views/components/booking_header.php` (exact_file)
-  - `application/views/components/booking_info_step.php` (exact_file)
-  - `application/views/components/booking_time_step.php` (exact_file)
-  - `application/views/components/booking_type_step.php` (exact_file)
+  - `application/views/components/booking_` (filename_prefix)
   - `assets/js/http/booking_http_client.js` (exact_file)
   - `assets/js/pages/booking.js` (exact_file)
   - `assets/js/pages/booking_webmcp.js` (exact_file)

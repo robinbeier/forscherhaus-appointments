@@ -1,9 +1,10 @@
 #!/usr/bin/python3
-"""Attest a PHP interpreter and its dynamic dependency closure.
+"""Attest trusted PHP and Codex executables before their first execution.
 
 This module is deliberately runnable by the system Python bootstrap. It never
 launches user-owned PHP: Darwin uses non-executing ``otool`` inspection, while
-Linux permits ``ldd`` only after the candidate is proved root-owned.
+Linux permits ``ldd`` only after a fixed candidate is proved root-owned and
+parses private pinned archives as static ELF without executing loader tooling.
 """
 
 import argparse
@@ -12,6 +13,7 @@ import json
 import os
 import re
 import stat
+import struct
 import subprocess
 import sys
 import tarfile
@@ -24,6 +26,15 @@ SYSTEM_UTILITIES = {"Darwin": "/usr/bin/otool", "Linux": "/usr/bin/ldd"}
 DARWIN_SEALED_PREFIXES = ("/usr/lib/", "/System/Library/")
 PINNED_ARCHIVE_MAX_BYTES = 64 * 1024 * 1024
 PINNED_ARCHIVE_MEMBER_MAX_BYTES = 128 * 1024 * 1024
+CODEX_BINARY_MAX_BYTES = 512 * 1024 * 1024
+ELF_MACHINE_BY_ARCHITECTURE = {"x86_64": 62, "aarch64": 183}
+ELF_HEADER_64_SIZE = 64
+ELF_PROGRAM_HEADER_64_SIZE = 56
+ELF_PROGRAM_HEADER_MAX_COUNT = 4096
+ELF_PT_DYNAMIC = 2
+ELF_PT_INTERP = 3
+ELF_DT_NULL = 0
+ELF_DT_NEEDED = 1
 
 
 class AttestationError(Exception):
@@ -241,6 +252,97 @@ def _materialize_pinned_archive(descriptor, materialize_root, downloader=None):
     return target, "%s#%s" % (url, member), member
 
 
+def _assert_linux_static_elf(path, architecture):
+    expected_machine = ELF_MACHINE_BY_ARCHITECTURE.get(architecture)
+    if expected_machine is None:
+        raise AttestationError("pinned Linux runtime architecture is unsupported")
+    try:
+        with open(path, "rb") as stream:
+            payload = stream.read(PINNED_ARCHIVE_MEMBER_MAX_BYTES + 1)
+    except OSError as exc:
+        raise AttestationError("pinned Linux runtime ELF is unavailable") from exc
+    if len(payload) > PINNED_ARCHIVE_MEMBER_MAX_BYTES:
+        raise AttestationError("pinned runtime artifact exceeds its size bound")
+    if (
+        len(payload) < ELF_HEADER_64_SIZE
+        or payload[:4] != b"\x7fELF"
+        or payload[4] != 2
+        or payload[5] != 1
+        or payload[6] != 1
+    ):
+        raise AttestationError("pinned Linux runtime is not a supported ELF64 executable")
+    try:
+        (
+            elf_type,
+            machine,
+            version,
+            _entry,
+            program_header_offset,
+            _section_header_offset,
+            _flags,
+            elf_header_size,
+            program_header_size,
+            program_header_count,
+            _section_header_size,
+            _section_header_count,
+            _section_name_index,
+        ) = struct.unpack_from("<HHIQQQIHHHHHH", payload, 16)
+    except struct.error as exc:
+        raise AttestationError("pinned Linux runtime ELF header is invalid") from exc
+    if (
+        elf_type not in (2, 3)
+        or machine != expected_machine
+        or version != 1
+        or elf_header_size != ELF_HEADER_64_SIZE
+        or program_header_size != ELF_PROGRAM_HEADER_64_SIZE
+        or program_header_count < 1
+        or program_header_count > ELF_PROGRAM_HEADER_MAX_COUNT
+        or program_header_offset < ELF_HEADER_64_SIZE
+        or program_header_offset + program_header_size * program_header_count > len(payload)
+    ):
+        raise AttestationError("pinned Linux runtime ELF header is invalid")
+
+    dynamic_segments = []
+    for index in range(program_header_count):
+        offset = program_header_offset + index * program_header_size
+        try:
+            (
+                segment_type,
+                _segment_flags,
+                segment_offset,
+                _virtual_address,
+                _physical_address,
+                segment_file_size,
+                _segment_memory_size,
+                _alignment,
+            ) = struct.unpack_from("<IIQQQQQQ", payload, offset)
+        except struct.error as exc:
+            raise AttestationError("pinned Linux runtime program header is invalid") from exc
+        if segment_offset + segment_file_size > len(payload):
+            raise AttestationError("pinned Linux runtime segment is invalid")
+        if segment_type == ELF_PT_INTERP:
+            raise AttestationError("pinned Linux runtime requires a dynamic interpreter")
+        if segment_type == ELF_PT_DYNAMIC:
+            dynamic_segments.append((segment_offset, segment_file_size))
+
+    for segment_offset, segment_file_size in dynamic_segments:
+        if segment_file_size % 16 != 0:
+            raise AttestationError("pinned Linux runtime dynamic table is invalid")
+        terminated = False
+        for offset in range(segment_offset, segment_offset + segment_file_size, 16):
+            try:
+                tag, _value = struct.unpack_from("<qQ", payload, offset)
+            except struct.error as exc:
+                raise AttestationError("pinned Linux runtime dynamic table is invalid") from exc
+            if tag == ELF_DT_NEEDED:
+                raise AttestationError("pinned Linux runtime has a dynamic dependency")
+            if tag == ELF_DT_NULL:
+                terminated = True
+                break
+        if not terminated:
+            raise AttestationError("pinned Linux runtime dynamic table is invalid")
+
+
 def _run_inspector(executable, system, runner=None):
     inspector = SYSTEM_UTILITIES.get(system)
     if inspector is None or not os.path.isfile(inspector) or not os.access(inspector, os.X_OK):
@@ -353,7 +455,7 @@ def _resolve_darwin_dependency(dependency, current, root_executable):
 
 
 def dependency_closure(executable, system, inspector=None):
-    """Return canonical files and OS-sealed dependencies without executing PHP."""
+    """Return canonical files and OS-sealed dependencies without executing the target."""
     root_executable = _canonical_regular(executable)
     if system == "Linux":
         output = (
@@ -391,8 +493,7 @@ def closure_attestation(logical, paths, sealed_dependencies=(), path_labels=None
     records = []
     for path in sorted(paths):
         metadata = _regular_secure(path)
-        with open(path, "rb") as stream:
-            digest = hashlib.sha256(stream.read()).hexdigest()
+        digest = _sha256_file(path)
         if path_labels is None:
             records.append({
                 "canonical": path,
@@ -419,17 +520,21 @@ def closure_attestation(logical, paths, sealed_dependencies=(), path_labels=None
     return hashlib.sha256(encoded).hexdigest()
 
 
-def attest(contract_path, requested_platform, inspector=None, materialize_root=None, downloader=None):
-    if not isinstance(requested_platform, str) or not PLATFORM.fullmatch(requested_platform):
-        raise AttestationError("invalid platform")
+def _load_contract(contract_path):
     if not os.path.isabs(contract_path):
         raise AttestationError("contract path must be absolute")
     _regular_secure(contract_path)
     try:
         with open(contract_path, "r", encoding="utf-8") as stream:
-            contract = json.load(stream)
+            return json.load(stream)
     except (OSError, ValueError, UnicodeError) as exc:
         raise AttestationError("contract is invalid") from exc
+
+
+def attest(contract_path, requested_platform, inspector=None, materialize_root=None, downloader=None):
+    if not isinstance(requested_platform, str) or not PLATFORM.fullmatch(requested_platform):
+        raise AttestationError("invalid platform")
+    contract = _load_contract(contract_path)
     try:
         policy = contract["authority"]["interpreter_trust"]["php"]
         candidates = policy["candidate_by_platform"]
@@ -465,7 +570,7 @@ def attest(contract_path, requested_platform, inspector=None, materialize_root=N
         raise AttestationError("exactly one platform runtime source is required")
     path_labels = None
     if archive is not None:
-        if system != "Darwin" or materialize_root is None:
+        if system not in ("Darwin", "Linux") or materialize_root is None:
             raise AttestationError("pinned runtime materialization is unavailable")
         materialized, logical, member = _materialize_pinned_archive(
             archive,
@@ -478,7 +583,12 @@ def attest(contract_path, requested_platform, inspector=None, materialize_root=N
         if not isinstance(logical, str) or not logical.startswith("/"):
             raise AttestationError("contract candidate is invalid")
         canonical = _canonical_regular(logical)
-    paths, sealed_dependencies = dependency_closure(canonical, system, inspector=inspector)
+    if archive is not None and system == "Linux":
+        architecture = requested_platform.split("-", 1)[1]
+        _assert_linux_static_elf(canonical, architecture)
+        paths, sealed_dependencies = [canonical], []
+    else:
+        paths, sealed_dependencies = dependency_closure(canonical, system, inspector=inspector)
     if path_labels is not None and paths != [canonical]:
         raise AttestationError("materialized runtime has a non-system dynamic dependency")
     if path_labels is None and any(os.lstat(path).st_uid != 0 for path in paths):
@@ -489,17 +599,87 @@ def attest(contract_path, requested_platform, inspector=None, materialize_root=N
     return canonical
 
 
+def attest_codex(contract_path, requested_platform, executable, inspector=None, expected_closure_sha256=None):
+    if not isinstance(requested_platform, str) or not PLATFORM.fullmatch(requested_platform):
+        raise AttestationError("invalid platform")
+    system = requested_platform.split("-", 1)[0]
+    if system != "Darwin":
+        raise AttestationError("Codex dependency attestation is unavailable on this platform")
+    contract = _load_contract(contract_path)
+    try:
+        policy = contract["authority"]["reviewer"]
+        binary_pins = policy["codex_binary_sha256_by_platform"]
+        closure_pins = policy["codex_closure_sha256_by_platform"]
+        dependency_policy = policy["codex_dynamic_dependency_policy"]
+    except (KeyError, TypeError, AttributeError) as exc:
+        raise AttestationError("contract shape is invalid") from exc
+    if (
+        not isinstance(binary_pins, dict)
+        or not isinstance(closure_pins, dict)
+        or set(binary_pins) != set(closure_pins)
+        or dependency_policy != "system_sealed_only_non_system_dependency_rejected"
+    ):
+        raise AttestationError("Codex dependency policy is invalid")
+    binary_pin = binary_pins.get(requested_platform)
+    closure_pin = closure_pins.get(requested_platform)
+    if (
+        not isinstance(binary_pin, str)
+        or HEX64.fullmatch(binary_pin) is None
+        or not isinstance(closure_pin, str)
+        or HEX64.fullmatch(closure_pin) is None
+    ):
+        raise AttestationError("exact Codex platform pins are required")
+    if expected_closure_sha256 is not None and expected_closure_sha256 != closure_pin:
+        raise AttestationError("Codex closure policy binding mismatch")
+
+    canonical = _canonical_regular(executable)
+    metadata = _regular_secure(canonical)
+    if metadata.st_uid != os.geteuid() or stat.S_IMODE(metadata.st_mode) != 0o500:
+        raise AttestationError("materialized Codex ownership is invalid")
+    if _sha256_file(canonical, CODEX_BINARY_MAX_BYTES) != binary_pin:
+        raise AttestationError("materialized Codex binary digest mismatch")
+    paths, sealed_dependencies = dependency_closure(canonical, system, inspector=inspector)
+    if paths != [canonical]:
+        raise AttestationError("materialized Codex has a non-system dynamic dependency")
+    digest = closure_attestation(
+        "codex",
+        paths,
+        sealed_dependencies,
+        path_labels={canonical: "codex"},
+    )
+    if digest != closure_pin:
+        raise AttestationError("Codex dependency closure digest mismatch")
+    return canonical
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--runtime", choices=("php", "codex"), default="php")
     parser.add_argument("--contract", required=True)
     parser.add_argument("--platform", required=True)
     parser.add_argument("--materialize-root")
+    parser.add_argument("--path")
+    parser.add_argument("--expected-closure-sha256")
     args = parser.parse_args(argv)
     try:
-        print(attest(args.contract, args.platform, materialize_root=args.materialize_root))
+        if args.runtime == "codex":
+            if args.materialize_root is not None or args.path is None:
+                raise AttestationError("Codex attestation arguments are invalid")
+            print(
+                attest_codex(
+                    args.contract,
+                    args.platform,
+                    args.path,
+                    expected_closure_sha256=args.expected_closure_sha256,
+                )
+            )
+        else:
+            if args.path is not None or args.expected_closure_sha256 is not None:
+                raise AttestationError("PHP attestation arguments are invalid")
+            print(attest(args.contract, args.platform, materialize_root=args.materialize_root))
         return 0
     except (AttestationError, OSError, ValueError) as exc:
-        print("trusted PHP runtime rejected: %s" % exc, file=sys.stderr)
+        print("trusted %s runtime rejected: %s" % (args.runtime, exc), file=sys.stderr)
         return 2
 
 

@@ -43,7 +43,7 @@ class ParallelWorkContractTest extends TestCase
                     'component_id' => 'booking-public',
                     'ownership_mode' => 'single-owner',
                     'manual_approval_required' => true,
-                    'path_rules' => [$this->pathRule('application/views/components/booking_sidebar.php', 'exact_file')],
+                    'path_rules' => [$this->pathRule('application/views/components/booking_', 'filename_prefix')],
                 ],
             ],
         ];
@@ -193,18 +193,56 @@ class ParallelWorkContractTest extends TestCase
         );
     }
 
-    public function testTrailingUnderscoreDoesNotImplicitlyCreateStemOwnership(): void
+    public function testExplicitFilenamePrefixOwnsFuturePartialsOnlyInItsDirectory(): void
     {
         $manifest = $this->validManifest();
         $manifest['primary_approved_component_ids'] = ['booking-public', 'platform-quality-tooling'];
-        $manifest['lanes'][0]['ownership'] = [$this->pathRule('application/views/components/booking_')];
+        $manifest['lanes'][0]['ownership'] = [
+            $this->pathRule('application/views/components/booking_', 'filename_prefix'),
+        ];
         $manifest['lanes'][1]['ownership'] = [
-            $this->pathRule('application/views/components/booking_sidebar.php', 'exact_file'),
+            $this->pathRule('application/views/components/bookings_sidebar.php', 'exact_file'),
         ];
 
+        self::assertSame(
+            [],
+            ParallelWorkContract::validateLaneChanges($manifest, 'lane-a', [
+                'application/views/components/booking_future_step.php',
+            ]),
+        );
+        self::assertSame(
+            ['ownership_violation:lane-a:application/views/bookings_future_step.php'],
+            ParallelWorkContract::validateLaneChanges($manifest, 'lane-a', [
+                'application/views/bookings_future_step.php',
+            ]),
+        );
         self::assertNotContains(
             'ownership_overlap:0:1',
             ParallelWorkContract::validate($manifest, $this->policy, $this->ownershipMap),
+        );
+    }
+
+    public function testFilenamePrefixRejectsAdjacentFilenameAndDirectoryRules(): void
+    {
+        $rule = $this->pathRule('application/views/components/booking_', 'filename_prefix');
+        $manifest = $this->validManifest();
+        $manifest['lanes'][0]['ownership'] = [$rule];
+
+        self::assertSame(
+            [],
+            ParallelWorkContract::validateLaneChanges($manifest, 'lane-a', [
+                'application/views/components/booking_future.php',
+            ]),
+        );
+        self::assertSame(
+            ['ownership_violation:lane-a:application/views/components/bookings_sidebar.php'],
+            ParallelWorkContract::validateLaneChanges($manifest, 'lane-a', [
+                'application/views/components/bookings_sidebar.php',
+            ]),
+        );
+        self::assertSame(
+            ['ownership_violation:lane-a:application/views/booking_future.php'],
+            ParallelWorkContract::validateLaneChanges($manifest, 'lane-a', ['application/views/booking_future.php']),
         );
     }
 

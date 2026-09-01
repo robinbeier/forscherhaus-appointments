@@ -1,15 +1,15 @@
 """Canonical parsing and matching for component ownership path rules.
 
 The ownership map is consumed by CI checks and documentation generators.  Keep
-normalisation and the two supported match modes here so those consumers cannot
-silently drift apart.
+normalisation and matching modes here so those consumers cannot silently drift
+apart.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-MATCH_MODES = frozenset({"directory", "exact_file"})
+MATCH_MODES = frozenset({"directory", "exact_file", "filename_prefix"})
 
 
 def normalize_path(value: str) -> str:
@@ -43,6 +43,9 @@ def parse_path_rule(rule: Any, context: str = "path rule") -> dict[str, str]:
     ):
         raise ValueError(f"{context}.path must be a normalized repository-relative path")
 
+    if match == "filename_prefix" and not normalized_path.rsplit("/", 1)[-1]:
+        raise ValueError(f"{context}.path must contain a non-empty filename prefix")
+
     return {"path": normalized_path, "match": match}
 
 
@@ -59,6 +62,10 @@ def path_rule_matches(rule: dict[str, str], repo_path: str) -> bool:
     normalized_path = normalize_path(repo_path)
     if normalized_rule["match"] == "exact_file":
         return normalized_path == normalized_rule["path"]
+    if normalized_rule["match"] == "filename_prefix":
+        rule_directory, _, filename_prefix = normalized_rule["path"].rpartition("/")
+        candidate_directory, _, candidate_name = normalized_path.rpartition("/")
+        return candidate_directory == rule_directory and candidate_name.startswith(filename_prefix)
     return normalized_path == normalized_rule["path"] or normalized_path.startswith(normalized_rule["path"] + "/")
 
 
@@ -67,4 +74,6 @@ def codeowners_pattern(rule: dict[str, str]) -> str:
     normalized_rule = parse_path_rule(rule)
     if normalized_rule["match"] == "directory":
         return f"/{normalized_rule['path']}/**"
+    if normalized_rule["match"] == "filename_prefix":
+        return f"/{normalized_rule['path']}*"
     return f"/{normalized_rule['path']}"

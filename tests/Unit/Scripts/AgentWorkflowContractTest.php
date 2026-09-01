@@ -139,6 +139,19 @@ class AgentWorkflowContractTest extends TestCase
             $contract['authority']['interpreter_trust']['php']['closure_sha256_by_platform']['Darwin-x86_64'] ?? null,
         );
         self::assertSame(
+            [
+                'url' => 'https://dl.static-php.dev/static-php-cli/bulk/php-8.4.12-cli-linux-x86_64.tar.gz',
+                'archive_sha256' => '54558cc7433d3ca526412d8642881c1a1d8a09b964f5c409db92719bce52ce21',
+                'member' => 'php',
+                'member_sha256' => 'f0cf895506ad98d32e360fd8f29e8cc07bd751964297516d57835ae0b01f2d7a',
+            ],
+            $contract['authority']['interpreter_trust']['php']['pinned_archive_by_platform']['Linux-x86_64'] ?? null,
+        );
+        self::assertSame(
+            '373ce1d4d9dd2ef439a60bdfff61203688d97025eeda4efae52849f1fba0a0d9',
+            $contract['authority']['interpreter_trust']['php']['closure_sha256_by_platform']['Linux-x86_64'] ?? null,
+        );
+        self::assertSame(
             'ignore_ambient_and_disable_helpers',
             $contract['authority']['reviewer']['git_runtime_configuration'] ?? null,
         );
@@ -152,7 +165,7 @@ class AgentWorkflowContractTest extends TestCase
             $contract['authority']['reviewer']['repository_root_policy'] ?? null,
         );
         self::assertSame(
-            'official_release_binary_sha256_platform_and_version',
+            'official_release_binary_sha256_platform_version_and_dynamic_closure',
             $contract['authority']['reviewer']['codex_identity_check'] ?? null,
         );
         self::assertSame('0.145.0', $contract['authority']['reviewer']['codex_version'] ?? null);
@@ -161,8 +174,19 @@ class AgentWorkflowContractTest extends TestCase
             $contract['authority']['reviewer']['codex_version_policy'] ?? null,
         );
         self::assertSame(
-            'private_copy_rehashed_before_first_execution',
+            'private_copy_rehashed_and_closure_attested_before_first_execution',
             $contract['authority']['reviewer']['codex_binary_materialization_policy'] ?? null,
+        );
+        self::assertSame(
+            'system_sealed_only_non_system_dependency_rejected',
+            $contract['authority']['reviewer']['codex_dynamic_dependency_policy'] ?? null,
+        );
+        self::assertSame(
+            [
+                'Darwin-arm64' => 'cb24bcb9e973a8258c763e4b2777a398799c653996b395b3e2ab4cf1aa806a0a',
+                'Darwin-x86_64' => 'a74149a742b113e72e0d59ab1f86786dd52bb2538cdbc42794b718155f06d90b',
+            ],
+            $contract['authority']['reviewer']['codex_closure_sha256_by_platform'] ?? null,
         );
         self::assertSame(
             'host_codex_login_without_connector_authority',

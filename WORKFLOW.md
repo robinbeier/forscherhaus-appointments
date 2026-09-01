@@ -342,8 +342,10 @@ the live canonical main, local tracking ref, exact merge base, and reviewed
 head to match; later pushes invalidate all review evidence.
 
 The harness enforces the deterministic sealed bundle, exact Base/Head binding,
-macOS Seatbelt default-deny isolation, attested interpreter/runtime closure,
-disabled reviewer tools,
+macOS Seatbelt default-deny isolation, an attested PHP runtime, and a private
+Codex copy whose exact binary and system-only dynamic dependency closure are
+pinned before its first execution. The sandbox has no broad Homebrew-library
+allowance. It also enforces disabled reviewer tools,
 and privacy-safe fail-closed output. It exposes no worktree or `.git`, user
 configuration, connectors, delegation, credentials, or external writes;
 non-macOS execution fails closed. The machine contract is the source for model,

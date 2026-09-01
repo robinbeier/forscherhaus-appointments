@@ -187,7 +187,12 @@ final class ReadonlyReviewerContract
 
     /**
      * @param array<string, mixed> $reviewerPolicy
-     * @return array{version: string, binary_sha256: string, release_archive_sha256: string}
+     * @return array{
+     *     version: string,
+     *     binary_sha256: string,
+     *     release_archive_sha256: string,
+     *     closure_sha256: string
+     * }
      */
     public static function runtimeConfiguration(array $reviewerPolicy, string $platform): array
     {
@@ -197,13 +202,17 @@ final class ReadonlyReviewerContract
         assert(is_string($version));
         $binaryDigests = $reviewerPolicy['codex_binary_sha256_by_platform'];
         $archiveDigests = $reviewerPolicy['codex_release_archive_sha256_by_platform'];
+        $closureDigests = $reviewerPolicy['codex_closure_sha256_by_platform'];
         $binarySha256 = is_array($binaryDigests) ? $binaryDigests[$platform] ?? null : null;
         $archiveSha256 = is_array($archiveDigests) ? $archiveDigests[$platform] ?? null : null;
+        $closureSha256 = is_array($closureDigests) ? $closureDigests[$platform] ?? null : null;
         if (
             !is_string($binarySha256) ||
             preg_match('/^[a-f0-9]{64}$/D', $binarySha256) !== 1 ||
             !is_string($archiveSha256) ||
-            preg_match('/^[a-f0-9]{64}$/D', $archiveSha256) !== 1
+            preg_match('/^[a-f0-9]{64}$/D', $archiveSha256) !== 1 ||
+            !is_string($closureSha256) ||
+            preg_match('/^[a-f0-9]{64}$/D', $closureSha256) !== 1
         ) {
             throw new \InvalidArgumentException('Reviewer Codex binary platform is not pinned.');
         }
@@ -212,6 +221,7 @@ final class ReadonlyReviewerContract
             'version' => $version,
             'binary_sha256' => $binarySha256,
             'release_archive_sha256' => $archiveSha256,
+            'closure_sha256' => $closureSha256,
         ];
     }
 
@@ -295,9 +305,11 @@ final class ReadonlyReviewerContract
             'git_lazy_fetch' => 'disabled',
             'tool_path_policy' => 'explicit_primary_codex_with_verified_private_copy',
             'repository_root_policy' => 'canonical_physical_root',
-            'codex_identity_check' => 'official_release_binary_sha256_platform_and_version',
+            'codex_identity_check' => 'official_release_binary_sha256_platform_version_and_dynamic_closure',
             'codex_version_policy' => 'exact_machine_pinned_version_with_bounded_build_metadata',
-            'codex_binary_materialization_policy' => 'private_copy_rehashed_before_first_execution',
+            'codex_binary_materialization_policy' =>
+                'private_copy_rehashed_and_closure_attested_before_first_execution',
+            'codex_dynamic_dependency_policy' => 'system_sealed_only_non_system_dependency_rejected',
             'codex_authentication_source' => 'host_codex_login_without_connector_authority',
             'codex_authentication_home_policy' => 'isolated_runtime_home_read_only_link_to_canonical_auth_file',
             'codex_api_key_override_policy' => 'reject_ambient_api_keys',
@@ -345,7 +357,14 @@ final class ReadonlyReviewerContract
             throw new \RuntimeException('Reviewer runtime version boundary is invalid.');
         }
         $platforms = ['Darwin-arm64', 'Darwin-x86_64'];
-        foreach (['codex_binary_sha256_by_platform', 'codex_release_archive_sha256_by_platform'] as $digestMapKey) {
+        foreach (
+            [
+                'codex_binary_sha256_by_platform',
+                'codex_release_archive_sha256_by_platform',
+                'codex_closure_sha256_by_platform',
+            ]
+            as $digestMapKey
+        ) {
             $digestMap = $reviewerPolicy[$digestMapKey] ?? null;
             if (!is_array($digestMap) || array_keys($digestMap) !== $platforms) {
                 throw new \RuntimeException('Reviewer runtime digest boundary is invalid.');

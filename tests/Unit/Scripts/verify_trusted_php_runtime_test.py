@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import stat
+import struct
 import tarfile
 import tempfile
 import unittest
@@ -35,6 +36,14 @@ class TrustedPhpRuntimeTest(unittest.TestCase):
     def write_contract(self, **policy):
         policy.setdefault("pinned_archive_by_platform", {})
         document = {"authority": {"interpreter_trust": {"php": policy}}}
+        if os.path.exists(self.contract):
+            os.chmod(self.contract, 0o644)
+        with open(self.contract, "w", encoding="utf-8") as stream:
+            json.dump(document, stream)
+        os.chmod(self.contract, 0o444)
+
+    def write_reviewer_contract(self, **policy):
+        document = {"authority": {"reviewer": policy}}
         if os.path.exists(self.contract):
             os.chmod(self.contract, 0o644)
         with open(self.contract, "w", encoding="utf-8") as stream:
@@ -92,6 +101,65 @@ class TrustedPhpRuntimeTest(unittest.TestCase):
             json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
         ).hexdigest()
         return archive_path, descriptor, closure_sha256
+
+    @staticmethod
+    def static_elf(architecture="x86_64", interpreter=False, needed=False):
+        machine = {"x86_64": 62, "aarch64": 183}[architecture]
+        extra_segments = int(interpreter) + int(needed)
+        program_header_count = 1 + extra_segments
+        payload_offset = 64 + program_header_count * 56
+        interpreter_payload = b"/lib64/ld-linux-x86-64.so.2\x00" if interpreter else b""
+        dynamic_payload = struct.pack("<qQqQ", 1, 0, 0, 0) if needed else b""
+        total_size = payload_offset + len(interpreter_payload) + len(dynamic_payload)
+        identity = b"\x7fELF" + bytes([2, 1, 1, 0]) + bytes(8)
+        header = identity + struct.pack(
+            "<HHIQQQIHHHHHH",
+            2,
+            machine,
+            1,
+            0,
+            64,
+            0,
+            0,
+            64,
+            56,
+            program_header_count,
+            0,
+            0,
+            0,
+        )
+        program_headers = [struct.pack("<IIQQQQQQ", 1, 5, 0, 0, 0, total_size, total_size, 4096)]
+        next_offset = payload_offset
+        if interpreter:
+            program_headers.append(
+                struct.pack(
+                    "<IIQQQQQQ",
+                    verifier.ELF_PT_INTERP,
+                    4,
+                    next_offset,
+                    0,
+                    0,
+                    len(interpreter_payload),
+                    len(interpreter_payload),
+                    1,
+                )
+            )
+            next_offset += len(interpreter_payload)
+        if needed:
+            program_headers.append(
+                struct.pack(
+                    "<IIQQQQQQ",
+                    verifier.ELF_PT_DYNAMIC,
+                    4,
+                    next_offset,
+                    0,
+                    0,
+                    len(dynamic_payload),
+                    len(dynamic_payload),
+                    8,
+                )
+            )
+        return header + b"".join(program_headers) + interpreter_payload + dynamic_payload
 
     @staticmethod
     def archive_downloader(source):
@@ -156,6 +224,80 @@ class TrustedPhpRuntimeTest(unittest.TestCase):
         self.assertEqual(os.path.realpath(os.path.join(materialize_root, "php")), result)
         self.assertEqual(0o500, stat.S_IMODE(os.stat(result).st_mode))
         self.assertFalse(os.path.exists(os.path.join(materialize_root, "runtime.tar.gz")))
+
+    def test_linux_x86_64_pinned_static_archive_is_parsed_without_loader_execution(self):
+        archive_path, descriptor, closure_sha256 = self.archive_fixture(content=self.static_elf())
+        self.write_contract(
+            candidate_by_platform={},
+            pinned_archive_by_platform={"Linux-x86_64": descriptor},
+            require_exact_closure_sha256=True,
+            closure_sha256_by_platform={"Linux-x86_64": closure_sha256},
+        )
+
+        def forbidden_inspector(_path):
+            self.fail("A private Linux archive must not be passed to loader tooling.")
+
+        materialize_root = os.path.join(self.root, "runtime")
+        result = verifier.attest(
+            self.contract,
+            "Linux-x86_64",
+            forbidden_inspector,
+            materialize_root=materialize_root,
+            downloader=self.archive_downloader(archive_path),
+        )
+        self.assertEqual(os.path.realpath(os.path.join(materialize_root, "php")), result)
+
+    def test_linux_pinned_archive_rejects_wrong_elf_architecture(self):
+        archive_path, descriptor, closure_sha256 = self.archive_fixture(
+            content=self.static_elf(architecture="aarch64")
+        )
+        self.write_contract(
+            candidate_by_platform={},
+            pinned_archive_by_platform={"Linux-x86_64": descriptor},
+            require_exact_closure_sha256=True,
+            closure_sha256_by_platform={"Linux-x86_64": closure_sha256},
+        )
+        with self.assertRaisesRegex(verifier.AttestationError, "ELF header is invalid"):
+            verifier.attest(
+                self.contract,
+                "Linux-x86_64",
+                materialize_root=os.path.join(self.root, "runtime"),
+                downloader=self.archive_downloader(archive_path),
+            )
+
+    def test_linux_pinned_archive_rejects_dynamic_interpreter(self):
+        archive_path, descriptor, closure_sha256 = self.archive_fixture(
+            content=self.static_elf(interpreter=True)
+        )
+        self.write_contract(
+            candidate_by_platform={},
+            pinned_archive_by_platform={"Linux-x86_64": descriptor},
+            require_exact_closure_sha256=True,
+            closure_sha256_by_platform={"Linux-x86_64": closure_sha256},
+        )
+        with self.assertRaisesRegex(verifier.AttestationError, "dynamic interpreter"):
+            verifier.attest(
+                self.contract,
+                "Linux-x86_64",
+                materialize_root=os.path.join(self.root, "runtime"),
+                downloader=self.archive_downloader(archive_path),
+            )
+
+    def test_linux_pinned_archive_rejects_dynamic_dependency(self):
+        archive_path, descriptor, closure_sha256 = self.archive_fixture(content=self.static_elf(needed=True))
+        self.write_contract(
+            candidate_by_platform={},
+            pinned_archive_by_platform={"Linux-x86_64": descriptor},
+            require_exact_closure_sha256=True,
+            closure_sha256_by_platform={"Linux-x86_64": closure_sha256},
+        )
+        with self.assertRaisesRegex(verifier.AttestationError, "dynamic dependency"):
+            verifier.attest(
+                self.contract,
+                "Linux-x86_64",
+                materialize_root=os.path.join(self.root, "runtime"),
+                downloader=self.archive_downloader(archive_path),
+            )
 
     def test_pinned_archive_requires_materialization_root(self):
         _, descriptor, closure_sha256 = self.archive_fixture()
@@ -373,6 +515,71 @@ class TrustedPhpRuntimeTest(unittest.TestCase):
                 verifier.attest(self.contract, "Linux-x86_64", self.inspector)
         finally:
             verifier.os.lstat = original
+
+    def test_materialized_codex_binary_and_system_closure_are_attested(self):
+        os.chmod(self.php, 0o500)
+        binary_sha256 = hashlib.sha256(b"php-fixture").hexdigest()
+        sealed = ["/usr/lib/libSystem.B.dylib"]
+        closure_sha256 = verifier.closure_attestation(
+            "codex",
+            [os.path.realpath(self.php)],
+            sealed,
+            path_labels={os.path.realpath(self.php): "codex"},
+        )
+        self.write_reviewer_contract(
+            codex_binary_sha256_by_platform={"Darwin-arm64": binary_sha256},
+            codex_closure_sha256_by_platform={"Darwin-arm64": closure_sha256},
+            codex_dynamic_dependency_policy="system_sealed_only_non_system_dependency_rejected",
+        )
+
+        self.assertEqual(
+            os.path.realpath(self.php),
+            verifier.attest_codex(
+                self.contract,
+                "Darwin-arm64",
+                self.php,
+                lambda _path: "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1.0.0)\n",
+                expected_closure_sha256=closure_sha256,
+            ),
+        )
+
+    def test_materialized_codex_rejects_non_system_dynamic_dependency(self):
+        os.chmod(self.php, 0o500)
+        dependency = os.path.join(self.root, "libfixture.dylib")
+        with open(dependency, "wb") as stream:
+            stream.write(b"dependency")
+        os.chmod(dependency, 0o500)
+        binary_sha256 = hashlib.sha256(b"php-fixture").hexdigest()
+        closure_sha256 = verifier.closure_attestation(
+            "codex",
+            [os.path.realpath(self.php)],
+            [],
+            path_labels={os.path.realpath(self.php): "codex"},
+        )
+        self.write_reviewer_contract(
+            codex_binary_sha256_by_platform={"Darwin-arm64": binary_sha256},
+            codex_closure_sha256_by_platform={"Darwin-arm64": closure_sha256},
+            codex_dynamic_dependency_policy="system_sealed_only_non_system_dependency_rejected",
+        )
+
+        def inspect(path):
+            if path == os.path.realpath(self.php):
+                return "\t%s (compatibility version 1.0.0, current version 1.0.0)\n" % dependency
+            return ""
+
+        with self.assertRaisesRegex(verifier.AttestationError, "non-system dynamic dependency"):
+            verifier.attest_codex(self.contract, "Darwin-arm64", self.php, inspect)
+
+    def test_materialized_codex_requires_private_exact_mode(self):
+        os.chmod(self.php, 0o555)
+        binary_sha256 = hashlib.sha256(b"php-fixture").hexdigest()
+        self.write_reviewer_contract(
+            codex_binary_sha256_by_platform={"Darwin-arm64": binary_sha256},
+            codex_closure_sha256_by_platform={"Darwin-arm64": "0" * 64},
+            codex_dynamic_dependency_policy="system_sealed_only_non_system_dependency_rejected",
+        )
+        with self.assertRaisesRegex(verifier.AttestationError, "ownership is invalid"):
+            verifier.attest_codex(self.contract, "Darwin-arm64", self.php, self.inspector)
 
 
 if __name__ == "__main__":

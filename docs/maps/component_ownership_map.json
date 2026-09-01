@@ -140,32 +140,8 @@
           "match": "exact_file"
         },
         {
-          "path": "application/views/components/booking_cancellation_frame.php",
-          "match": "exact_file"
-        },
-        {
-          "path": "application/views/components/booking_final_step.php",
-          "match": "exact_file"
-        },
-        {
-          "path": "application/views/components/booking_footer.php",
-          "match": "exact_file"
-        },
-        {
-          "path": "application/views/components/booking_header.php",
-          "match": "exact_file"
-        },
-        {
-          "path": "application/views/components/booking_info_step.php",
-          "match": "exact_file"
-        },
-        {
-          "path": "application/views/components/booking_time_step.php",
-          "match": "exact_file"
-        },
-        {
-          "path": "application/views/components/booking_type_step.php",
-          "match": "exact_file"
+          "path": "application/views/components/booking_",
+          "match": "filename_prefix"
         },
         {
           "path": "assets/js/http/booking_http_client.js",

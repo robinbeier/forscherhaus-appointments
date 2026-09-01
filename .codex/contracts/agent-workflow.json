@@ -22,7 +22,7 @@
             "system_python_arguments": ["-I", "-B"],
             "php": {
                 "selection": "exact_base_policy_before_first_php_execution_system_owned_fixed_path_or_pinned_private_archive",
-                "dependency_inspection": "non_executing_otool_on_darwin_root_owned_ldd_only_on_linux",
+                "dependency_inspection": "non_executing_otool_on_darwin_root_owned_ldd_or_private_static_elf_parse_on_linux",
                 "require_exact_closure_sha256": true,
                 "candidate_by_platform": {
                     "Linux-aarch64": "/usr/local/bin/php"
@@ -39,12 +39,19 @@
                         "archive_sha256": "ba8ebc6784757106124bc4a37d7815ee9e0facb89425d9cfadd453635687bba2",
                         "member": "php",
                         "member_sha256": "6e596791f60a50bb1cf9ad769555598137b57da592b01a1ecd2e9888be3a61ec"
+                    },
+                    "Linux-x86_64": {
+                        "url": "https://dl.static-php.dev/static-php-cli/bulk/php-8.4.12-cli-linux-x86_64.tar.gz",
+                        "archive_sha256": "54558cc7433d3ca526412d8642881c1a1d8a09b964f5c409db92719bce52ce21",
+                        "member": "php",
+                        "member_sha256": "f0cf895506ad98d32e360fd8f29e8cc07bd751964297516d57835ae0b01f2d7a"
                     }
                 },
                 "closure_sha256_by_platform": {
                     "Darwin-arm64": "b9d81b2ab2e48895ecfe285c350d468cdcb2d910d7b560cffe0a1399a0f77e75",
                     "Darwin-x86_64": "59f41f2a9e80cf0f359a5ba7e08fff10d62cb6c74ab424b895b9acfb6730216d",
-                    "Linux-aarch64": "40aab180ea2a8f847304bcb063a931ed43283ae9b714d5fdd74f5da71160f532"
+                    "Linux-aarch64": "40aab180ea2a8f847304bcb063a931ed43283ae9b714d5fdd74f5da71160f532",
+                    "Linux-x86_64": "373ce1d4d9dd2ef439a60bdfff61203688d97025eeda4efae52849f1fba0a0d9"
                 }
             }
         },
@@ -67,10 +74,11 @@
             "git_lazy_fetch": "disabled",
             "tool_path_policy": "explicit_primary_codex_with_verified_private_copy",
             "repository_root_policy": "canonical_physical_root",
-            "codex_identity_check": "official_release_binary_sha256_platform_and_version",
+            "codex_identity_check": "official_release_binary_sha256_platform_version_and_dynamic_closure",
             "codex_version": "0.145.0",
             "codex_version_policy": "exact_machine_pinned_version_with_bounded_build_metadata",
-            "codex_binary_materialization_policy": "private_copy_rehashed_before_first_execution",
+            "codex_binary_materialization_policy": "private_copy_rehashed_and_closure_attested_before_first_execution",
+            "codex_dynamic_dependency_policy": "system_sealed_only_non_system_dependency_rejected",
             "codex_binary_sha256_by_platform": {
                 "Darwin-arm64": "1da3f4e0e96028b8a771814293c3033dafd1971f943f6c7e79b0897fe705f590",
                 "Darwin-x86_64": "6db9193ce2c9a8cef2b5482612cde24202a4329dfc34f4687a036d5d7da619af"
@@ -78,6 +86,10 @@
             "codex_release_archive_sha256_by_platform": {
                 "Darwin-arm64": "072a30a65f05666735889ef0f60b56db186adbdde9d5c5cc1a64be0b598530fe",
                 "Darwin-x86_64": "4216d7a40aa49d74b65fab93d2a86d2e25a902482b827dbdb3f357777b09fadf"
+            },
+            "codex_closure_sha256_by_platform": {
+                "Darwin-arm64": "cb24bcb9e973a8258c763e4b2777a398799c653996b395b3e2ab4cf1aa806a0a",
+                "Darwin-x86_64": "a74149a742b113e72e0d59ab1f86786dd52bb2538cdbc42794b718155f06d90b"
             },
             "codex_authentication_source": "host_codex_login_without_connector_authority",
             "codex_authentication_home_policy": "isolated_runtime_home_read_only_link_to_canonical_auth_file",

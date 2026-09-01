@@ -139,7 +139,7 @@ class ReviewerAuthorityContractTest extends TestCase
             $contract['authority']['reviewer']['repository_root_policy'] ?? null,
         );
         self::assertSame(
-            'official_release_binary_sha256_platform_and_version',
+            'official_release_binary_sha256_platform_version_and_dynamic_closure',
             $contract['authority']['reviewer']['codex_identity_check'] ?? null,
         );
         self::assertSame('0.145.0', $contract['authority']['reviewer']['codex_version'] ?? null);
@@ -148,8 +148,12 @@ class ReviewerAuthorityContractTest extends TestCase
             $contract['authority']['reviewer']['codex_version_policy'] ?? null,
         );
         self::assertSame(
-            'private_copy_rehashed_before_first_execution',
+            'private_copy_rehashed_and_closure_attested_before_first_execution',
             $contract['authority']['reviewer']['codex_binary_materialization_policy'] ?? null,
+        );
+        self::assertSame(
+            'system_sealed_only_non_system_dependency_rejected',
+            $contract['authority']['reviewer']['codex_dynamic_dependency_policy'] ?? null,
         );
         self::assertSame(
             [
@@ -157,6 +161,13 @@ class ReviewerAuthorityContractTest extends TestCase
                 'Darwin-x86_64' => '6db9193ce2c9a8cef2b5482612cde24202a4329dfc34f4687a036d5d7da619af',
             ],
             $contract['authority']['reviewer']['codex_binary_sha256_by_platform'] ?? null,
+        );
+        self::assertSame(
+            [
+                'Darwin-arm64' => 'cb24bcb9e973a8258c763e4b2777a398799c653996b395b3e2ab4cf1aa806a0a',
+                'Darwin-x86_64' => 'a74149a742b113e72e0d59ab1f86786dd52bb2538cdbc42794b718155f06d90b',
+            ],
+            $contract['authority']['reviewer']['codex_closure_sha256_by_platform'] ?? null,
         );
         self::assertSame(
             'isolated_runtime_home_read_only_link_to_canonical_auth_file',
@@ -360,6 +371,12 @@ class ReviewerAuthorityContractTest extends TestCase
         );
         self::assertStringContainsString('materialized_codex="$control_root/codex"', $runner);
         self::assertStringContainsString('validate-codex-copy', $runner);
+        self::assertStringContainsString('--runtime=codex', $runner);
+        self::assertStringContainsString('--expected-closure-sha256="$expected_codex_closure_sha256"', $runner);
+        self::assertTrue(
+            strpos($runner, '--runtime=codex') < strpos($runner, 'codex_version="$("$codex_bin" --version'),
+            'The Codex dependency closure must be attested before the first Codex execution.',
+        );
         self::assertStringContainsString('readonly_reviewer_materialize_bundle', $runner);
         self::assertStringContainsString('readonly_reviewer_execute_isolated', $runner);
         self::assertStringNotContainsString('--dangerously-bypass-approvals-and-sandbox', $runner);
@@ -407,6 +424,7 @@ class ReviewerAuthorityContractTest extends TestCase
             '(allow file-write* (subpath (param "ARG0_ROOT")) (subpath (param "RUNTIME_TMP"))',
             $seatbelt,
         );
+        self::assertStringNotContainsString('/opt/homebrew/lib', $seatbelt);
 
         self::assertStringNotContainsString('--permission-profile', $runner);
         self::assertStringNotContainsString('default_permissions=', $runner);
@@ -1023,6 +1041,10 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertSame(
             '072a30a65f05666735889ef0f60b56db186adbdde9d5c5cc1a64be0b598530fe',
             $runtime['release_archive_sha256'],
+        );
+        self::assertSame(
+            'cb24bcb9e973a8258c763e4b2777a398799c653996b395b3e2ab4cf1aa806a0a',
+            $runtime['closure_sha256'],
         );
     }
 

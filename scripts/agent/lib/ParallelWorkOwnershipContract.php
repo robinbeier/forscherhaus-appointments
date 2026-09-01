@@ -129,7 +129,7 @@ final class ParallelWorkOwnershipContract
             $actualKeys !== $expectedKeys ||
             !is_string($path) ||
             !RepoPath::isNormalized($path) ||
-            !in_array($match, ['directory', 'exact_file'], true)
+            !in_array($match, ['directory', 'exact_file', 'filename_prefix'], true)
         ) {
             $errors[] = $error;
             return null;
@@ -142,6 +142,18 @@ final class ParallelWorkOwnershipContract
     {
         if ($match === 'directory') {
             return str_starts_with($candidatePath, $rulePath . '/');
+        }
+
+        if ($match === 'filename_prefix') {
+            $ruleSeparator = strrpos($rulePath, '/');
+            $candidateSeparator = strrpos($candidatePath, '/');
+            $ruleDirectory = $ruleSeparator === false ? '' : substr($rulePath, 0, $ruleSeparator);
+            $candidateDirectory = $candidateSeparator === false ? '' : substr($candidatePath, 0, $candidateSeparator);
+            $filenamePrefix = $ruleSeparator === false ? $rulePath : substr($rulePath, $ruleSeparator + 1);
+            $candidateName =
+                $candidateSeparator === false ? $candidatePath : substr($candidatePath, $candidateSeparator + 1);
+
+            return $ruleDirectory === $candidateDirectory && str_starts_with($candidateName, $filenamePrefix);
         }
 
         return $rulePath === $candidatePath;

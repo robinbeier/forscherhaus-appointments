@@ -202,6 +202,10 @@ def validate_structure(data: dict[str, Any], tracked_files: set[str]) -> list[st
                     errors.append(f"{component_id}.path rule does not match an existing file: {path}")
                 if match == "directory" and not any(file_path.startswith(path + "/") for file_path in tracked_files):
                     errors.append(f"{component_id}.path rule does not match an existing directory: {path}")
+                if match == "filename_prefix" and not any(
+                    path_rule_matches(parsed_rule, file_path) for file_path in tracked_files
+                ):
+                    errors.append(f"{component_id}.path rule does not match an existing filename prefix: {path}")
 
         key_files = component["key_files"]
         if not isinstance(key_files, list) or not key_files:
