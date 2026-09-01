@@ -808,6 +808,7 @@ class ParallelWorkContractCliTest extends TestCase
         self::assertIsArray($contract);
         $platform = $system . '-' . $architecture;
         $contract['authority']['interpreter_trust']['php']['candidate_by_platform'] = [$platform => $candidate];
+        $contract['authority']['interpreter_trust']['php']['pinned_archive_by_platform'] = (object) [];
         $contract['authority']['interpreter_trust']['php']['closure_sha256_by_platform'] = [$platform => $stdout];
         self::assertNotFalse(
             file_put_contents($contractPath, json_encode($contract, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES)),

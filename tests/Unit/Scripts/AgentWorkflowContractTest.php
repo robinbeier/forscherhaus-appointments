@@ -92,11 +92,22 @@ class AgentWorkflowContractTest extends TestCase
         self::assertTrue($contract['authority']['interpreter_trust']['php']['require_exact_closure_sha256'] ?? false);
         self::assertArrayNotHasKey('allow_root_owned_closure', $contract['authority']['interpreter_trust']['php']);
         self::assertArrayNotHasKey('candidates_by_platform', $contract['authority']['interpreter_trust']['php']);
+        $fixedPlatforms = array_keys($contract['authority']['interpreter_trust']['php']['candidate_by_platform'] ?? []);
+        $archivePlatforms = array_keys(
+            $contract['authority']['interpreter_trust']['php']['pinned_archive_by_platform'] ?? [],
+        );
+        $admittedPlatforms = array_merge($fixedPlatforms, $archivePlatforms);
+        sort($admittedPlatforms);
+        $pinnedPlatforms = array_keys(
+            $contract['authority']['interpreter_trust']['php']['closure_sha256_by_platform'] ?? [],
+        );
+        sort($pinnedPlatforms);
         self::assertSame(
-            array_keys($contract['authority']['interpreter_trust']['php']['candidate_by_platform'] ?? []),
-            array_keys($contract['authority']['interpreter_trust']['php']['closure_sha256_by_platform'] ?? []),
+            $admittedPlatforms,
+            $pinnedPlatforms,
             'Every admitted PHP platform must have an exact closure pin.',
         );
+        self::assertSame([], array_intersect($fixedPlatforms, $archivePlatforms));
         self::assertSame(
             'a788de9d1f58a58a8eaf425e78d8eb8f103391596e8a320877475ba8eb0f0873',
             $contract['authority']['interpreter_trust']['php']['closure_sha256_by_platform']['Darwin-arm64'] ?? null,
@@ -104,6 +115,19 @@ class AgentWorkflowContractTest extends TestCase
         self::assertSame(
             '40aab180ea2a8f847304bcb063a931ed43283ae9b714d5fdd74f5da71160f532',
             $contract['authority']['interpreter_trust']['php']['closure_sha256_by_platform']['Linux-aarch64'] ?? null,
+        );
+        self::assertSame(
+            [
+                'url' => 'https://dl.static-php.dev/static-php-cli/bulk/php-8.4.12-cli-macos-x86_64.tar.gz',
+                'archive_sha256' => 'ba8ebc6784757106124bc4a37d7815ee9e0facb89425d9cfadd453635687bba2',
+                'member' => 'php',
+                'member_sha256' => '6e596791f60a50bb1cf9ad769555598137b57da592b01a1ecd2e9888be3a61ec',
+            ],
+            $contract['authority']['interpreter_trust']['php']['pinned_archive_by_platform']['Darwin-x86_64'] ?? null,
+        );
+        self::assertSame(
+            '59f41f2a9e80cf0f359a5ba7e08fff10d62cb6c74ab424b895b9acfb6730216d',
+            $contract['authority']['interpreter_trust']['php']['closure_sha256_by_platform']['Darwin-x86_64'] ?? null,
         );
         self::assertSame(
             'ignore_ambient_and_disable_helpers',

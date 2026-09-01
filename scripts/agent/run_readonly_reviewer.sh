@@ -454,7 +454,8 @@ done
 php_bin="$(
     trusted_python "$control_root/scripts/agent/verify_trusted_php_runtime.py" \
         --contract="$control_root/$contract_relative_path" \
-        --platform="$reviewer_platform"
+        --platform="$reviewer_platform" \
+        --materialize-root="$control_root/php-runtime"
 )" || exit $?
 if [[ "$php_bin" != /* || ! -x "$php_bin" ]]; then
     echo "Reviewer trusted PHP runtime attestation is invalid." >&2

@@ -289,7 +289,8 @@ validator_platform="$validator_os_name-$validator_os_arch"
 trusted_php="$(
     trusted_python "$trusted_root/scripts/agent/verify_trusted_php_runtime.py" \
         --contract="$trusted_root/.codex/contracts/agent-workflow.json" \
-        --platform="$validator_platform"
+        --platform="$validator_platform" \
+        --materialize-root="$trusted_root/php-runtime"
 )" || exit $?
 if [[ "$trusted_php" != /* || ! -x "$trusted_php" ]]; then
     echo "Parallel-work trusted PHP runtime attestation is invalid." >&2

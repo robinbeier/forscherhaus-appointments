@@ -124,8 +124,13 @@ before any PHP runs. `scripts/agent/verify_trusted_php_runtime.py` then binds
 PHP and its dynamic dependency closure to the exact-base machine contract.
 Every admitted platform requires an exact closure pin, including root-owned
 Linux runtimes; a missing platform pin or any pin drift fails closed and
-requires a reviewed contract update. Platforms absent from both the candidate
-and pin maps are deliberately unsupported rather than admitted by ownership.
+requires a reviewed contract update. A platform may use either one fixed host
+path or one HTTPS archive whose URL, archive digest, sole member, member digest,
+private extraction mode, static non-system closure, and aggregate closure are
+all exact-base-bound. The Intel macOS runtime uses that bounded archive path;
+it is downloaded without ambient proxy or credential state, verified before
+extraction, and never executed from the archive. Platforms absent from both
+runtime-source maps and the closure-pin map are deliberately unsupported.
 Ambient `PATH` never grants interpreter authority. The centralized ownership
 matcher is also Primary-owned because it defines shared lane and CI semantics.
 

@@ -1,8 +1,11 @@
 import importlib.util
+import hashlib
+import io
 import json
 import os
 from pathlib import Path
 import stat
+import tarfile
 import tempfile
 import unittest
 
@@ -29,6 +32,7 @@ class TrustedPhpRuntimeTest(unittest.TestCase):
         self.temp.cleanup()
 
     def write_contract(self, **policy):
+        policy.setdefault("pinned_archive_by_platform", {})
         document = {"authority": {"interpreter_trust": {"php": policy}}}
         if os.path.exists(self.contract):
             os.chmod(self.contract, 0o644)
@@ -38,6 +42,48 @@ class TrustedPhpRuntimeTest(unittest.TestCase):
 
     def digest(self):
         return verifier.closure_attestation(self.php, [os.path.realpath(self.php)])
+
+    def archive_fixture(self, content=b"static-php-fixture", extra_member=False):
+        archive_path = os.path.join(self.root, "fixture-runtime.tar.gz")
+        with tarfile.open(archive_path, "w:gz") as archive:
+            member = tarfile.TarInfo("php")
+            member.size = len(content)
+            member.mode = 0o755
+            member.mtime = 0
+            archive.addfile(member, io.BytesIO(content))
+            if extra_member:
+                extra = tarfile.TarInfo("unexpected")
+                extra.size = 1
+                extra.mode = 0o644
+                extra.mtime = 0
+                archive.addfile(extra, io.BytesIO(b"x"))
+        with open(archive_path, "rb") as stream:
+            archive_sha256 = hashlib.sha256(stream.read()).hexdigest()
+        member_sha256 = hashlib.sha256(content).hexdigest()
+        descriptor = {
+            "url": "https://artifacts.example.invalid/php-runtime.tar.gz",
+            "archive_sha256": archive_sha256,
+            "member": "php",
+            "member_sha256": member_sha256,
+        }
+        payload = {
+            "logical": descriptor["url"] + "#php",
+            "paths": [{"canonical": "php", "sha256": member_sha256, "mode": 0o500}],
+            "sealed_system_dependencies": [],
+        }
+        closure_sha256 = hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        return archive_path, descriptor, closure_sha256
+
+    @staticmethod
+    def archive_downloader(source):
+        def download(url, target):
+            del url
+            with open(source, "rb") as input_stream, open(target, "wb") as output_stream:
+                output_stream.write(input_stream.read())
+
+        return download
 
     def test_valid_pinned_candidate_prints_canonical_path(self):
         self.write_contract(
@@ -55,6 +101,147 @@ class TrustedPhpRuntimeTest(unittest.TestCase):
             candidate_by_platform={"Darwin-arm64": self.php},
             require_exact_closure_sha256=True,
             closure_sha256_by_platform={"Darwin-arm64": "0" * 64},
+        )
+        with self.assertRaises(verifier.AttestationError):
+            verifier.attest(self.contract, "Darwin-arm64", self.inspector)
+
+    def test_valid_pinned_archive_is_materialized_privately_and_attested(self):
+        archive_path, descriptor, closure_sha256 = self.archive_fixture()
+        self.write_contract(
+            candidate_by_platform={},
+            pinned_archive_by_platform={"Darwin-x86_64": descriptor},
+            require_exact_closure_sha256=True,
+            closure_sha256_by_platform={"Darwin-x86_64": closure_sha256},
+        )
+        materialize_root = os.path.join(self.root, "runtime")
+        result = verifier.attest(
+            self.contract,
+            "Darwin-x86_64",
+            self.inspector,
+            materialize_root=materialize_root,
+            downloader=self.archive_downloader(archive_path),
+        )
+        self.assertEqual(os.path.realpath(os.path.join(materialize_root, "php")), result)
+        self.assertEqual(0o500, stat.S_IMODE(os.stat(result).st_mode))
+        self.assertFalse(os.path.exists(os.path.join(materialize_root, "runtime.tar.gz")))
+
+    def test_pinned_archive_requires_materialization_root(self):
+        _, descriptor, closure_sha256 = self.archive_fixture()
+        self.write_contract(
+            candidate_by_platform={},
+            pinned_archive_by_platform={"Darwin-x86_64": descriptor},
+            require_exact_closure_sha256=True,
+            closure_sha256_by_platform={"Darwin-x86_64": closure_sha256},
+        )
+        with self.assertRaises(verifier.AttestationError):
+            verifier.attest(self.contract, "Darwin-x86_64", self.inspector)
+
+    def test_pinned_archive_digest_mismatch_is_rejected_before_extraction(self):
+        archive_path, descriptor, closure_sha256 = self.archive_fixture()
+        descriptor["archive_sha256"] = "0" * 64
+        self.write_contract(
+            candidate_by_platform={},
+            pinned_archive_by_platform={"Darwin-x86_64": descriptor},
+            require_exact_closure_sha256=True,
+            closure_sha256_by_platform={"Darwin-x86_64": closure_sha256},
+        )
+        materialize_root = os.path.join(self.root, "runtime")
+        with self.assertRaises(verifier.AttestationError):
+            verifier.attest(
+                self.contract,
+                "Darwin-x86_64",
+                self.inspector,
+                materialize_root=materialize_root,
+                downloader=self.archive_downloader(archive_path),
+            )
+        self.assertFalse(os.path.exists(os.path.join(materialize_root, "php")))
+
+    def test_pinned_archive_member_digest_mismatch_is_rejected(self):
+        archive_path, descriptor, closure_sha256 = self.archive_fixture()
+        descriptor["member_sha256"] = "0" * 64
+        self.write_contract(
+            candidate_by_platform={},
+            pinned_archive_by_platform={"Darwin-x86_64": descriptor},
+            require_exact_closure_sha256=True,
+            closure_sha256_by_platform={"Darwin-x86_64": closure_sha256},
+        )
+        with self.assertRaises(verifier.AttestationError):
+            verifier.attest(
+                self.contract,
+                "Darwin-x86_64",
+                self.inspector,
+                materialize_root=os.path.join(self.root, "runtime"),
+                downloader=self.archive_downloader(archive_path),
+            )
+
+    def test_pinned_archive_rejects_unexpected_members(self):
+        archive_path, descriptor, closure_sha256 = self.archive_fixture(extra_member=True)
+        self.write_contract(
+            candidate_by_platform={},
+            pinned_archive_by_platform={"Darwin-x86_64": descriptor},
+            require_exact_closure_sha256=True,
+            closure_sha256_by_platform={"Darwin-x86_64": closure_sha256},
+        )
+        with self.assertRaises(verifier.AttestationError):
+            verifier.attest(
+                self.contract,
+                "Darwin-x86_64",
+                self.inspector,
+                materialize_root=os.path.join(self.root, "runtime"),
+                downloader=self.archive_downloader(archive_path),
+            )
+
+    def test_pinned_archive_rejects_non_system_dynamic_dependency(self):
+        archive_path, descriptor, closure_sha256 = self.archive_fixture()
+        dependency = os.path.join(self.root, "libfixture.dylib")
+        with open(dependency, "wb") as stream:
+            stream.write(b"dependency")
+        os.chmod(dependency, 0o555)
+        self.write_contract(
+            candidate_by_platform={},
+            pinned_archive_by_platform={"Darwin-x86_64": descriptor},
+            require_exact_closure_sha256=True,
+            closure_sha256_by_platform={"Darwin-x86_64": closure_sha256},
+        )
+
+        def inspect(path):
+            if path.endswith("/php"):
+                return "\t%s (compatibility version 1.0.0, current version 1.0.0)\n" % dependency
+            return ""
+
+        with self.assertRaises(verifier.AttestationError):
+            verifier.attest(
+                self.contract,
+                "Darwin-x86_64",
+                inspect,
+                materialize_root=os.path.join(self.root, "runtime"),
+                downloader=self.archive_downloader(archive_path),
+            )
+
+    def test_platform_cannot_have_both_fixed_and_archive_runtime_sources(self):
+        archive_path, descriptor, closure_sha256 = self.archive_fixture()
+        self.write_contract(
+            candidate_by_platform={"Darwin-x86_64": self.php},
+            pinned_archive_by_platform={"Darwin-x86_64": descriptor},
+            require_exact_closure_sha256=True,
+            closure_sha256_by_platform={"Darwin-x86_64": closure_sha256},
+        )
+        with self.assertRaises(verifier.AttestationError):
+            verifier.attest(
+                self.contract,
+                "Darwin-x86_64",
+                self.inspector,
+                materialize_root=os.path.join(self.root, "runtime"),
+                downloader=self.archive_downloader(archive_path),
+            )
+
+    def test_every_runtime_source_requires_an_exact_platform_pin(self):
+        _, descriptor, _ = self.archive_fixture()
+        self.write_contract(
+            candidate_by_platform={"Darwin-arm64": self.php},
+            pinned_archive_by_platform={"Darwin-x86_64": descriptor},
+            require_exact_closure_sha256=True,
+            closure_sha256_by_platform={"Darwin-arm64": self.digest()},
         )
         with self.assertRaises(verifier.AttestationError):
             verifier.attest(self.contract, "Darwin-arm64", self.inspector)

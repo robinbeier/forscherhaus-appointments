@@ -21,15 +21,24 @@
             "system_python": "/usr/bin/python3",
             "system_python_arguments": ["-I", "-B"],
             "php": {
-                "selection": "exact_base_policy_before_first_php_execution",
+                "selection": "exact_base_policy_before_first_php_execution_fixed_path_or_pinned_private_archive",
                 "dependency_inspection": "non_executing_otool_on_darwin_root_owned_ldd_only_on_linux",
                 "require_exact_closure_sha256": true,
                 "candidate_by_platform": {
                     "Darwin-arm64": "/opt/homebrew/bin/php",
                     "Linux-aarch64": "/usr/local/bin/php"
                 },
+                "pinned_archive_by_platform": {
+                    "Darwin-x86_64": {
+                        "url": "https://dl.static-php.dev/static-php-cli/bulk/php-8.4.12-cli-macos-x86_64.tar.gz",
+                        "archive_sha256": "ba8ebc6784757106124bc4a37d7815ee9e0facb89425d9cfadd453635687bba2",
+                        "member": "php",
+                        "member_sha256": "6e596791f60a50bb1cf9ad769555598137b57da592b01a1ecd2e9888be3a61ec"
+                    }
+                },
                 "closure_sha256_by_platform": {
                     "Darwin-arm64": "a788de9d1f58a58a8eaf425e78d8eb8f103391596e8a320877475ba8eb0f0873",
+                    "Darwin-x86_64": "59f41f2a9e80cf0f359a5ba7e08fff10d62cb6c74ab424b895b9acfb6730216d",
                     "Linux-aarch64": "40aab180ea2a8f847304bcb063a931ed43283ae9b714d5fdd74f5da71160f532"
                 }
             }
