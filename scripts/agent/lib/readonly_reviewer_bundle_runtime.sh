@@ -24,7 +24,7 @@ readonly_reviewer_prepare_evidence_git() {
     /usr/bin/env -i GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_SYSTEM=/dev/null \
         LANG=C LC_ALL=C PATH=/usr/bin:/bin:/usr/sbin:/sbin TMPDIR=/tmp \
         /usr/bin/git init --bare --template="$template_dir" -q "$evidence_git_dir" || return 1
-    chmod 0700 -- "$evidence_git_dir" || return 1
+    chmod 0700 "$evidence_git_dir" || return 1
     evidence_git_dir_canonical="$(canonical_path "$evidence_git_dir")" || return 1
     [[ "$evidence_git_dir_canonical" == "$evidence_git_dir" && "$evidence_git_dir_canonical" != "$repo_root" && "$evidence_git_dir_canonical" != "$repo_root"/* ]] || return 1
     evidence_entries="$(/usr/bin/find "$evidence_git_dir_canonical" -mindepth 1 -print)" || return 1
@@ -91,7 +91,7 @@ readonly_reviewer_bind_evidence_head() {
             [[ "$(readonly_reviewer_evidence_git hash-object --no-filters "$work_tree_canonical/$path")" != "$object" ]]; then
             return 1
         fi
-        chmod 0400 -- "$work_tree_canonical/$path" || return 1
+        chmod 0400 "$work_tree_canonical/$path" || return 1
     done < "$tree_manifest"
     /bin/rm -f -- "$tree_manifest" || return 1
 }

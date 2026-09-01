@@ -219,6 +219,22 @@ final class TrustedBaseBootstrapContractTest extends TestCase
         }
     }
 
+    public function testMacOsReviewerBootstrapAvoidsUnsupportedChmodOptionSeparators(): void
+    {
+        foreach (
+            [
+                'scripts/agent/trusted_base_launcher.sh',
+                'scripts/agent/run_readonly_reviewer.sh',
+                'scripts/agent/lib/readonly_reviewer_bundle_runtime.sh',
+                'scripts/agent/lib/readonly_reviewer_isolated_runtime.sh',
+            ]
+            as $path
+        ) {
+            $source = (string) file_get_contents($this->repoRoot . '/' . $path);
+            self::assertDoesNotMatchRegularExpression('/\\bchmod(?:\\s+-R)?\\s+\\S+\\s+--(?:\\s|\")/', $source, $path);
+        }
+    }
+
     public function testSterileReviewerEvidenceIgnoresLocalGitDriftButPreservesCommittedAttributes(): void
     {
         $fixture = sys_get_temp_dir() . '/reviewer-evidence-' . bin2hex(random_bytes(8));
@@ -327,6 +343,11 @@ final class TrustedBaseBootstrapContractTest extends TestCase
     {
         $controlRoot = sys_get_temp_dir() . '/reviewer-evidence-control-' . $label . '-' . bin2hex(random_bytes(8));
         self::assertTrue(mkdir($controlRoot, 0700, true));
+        $canonicalControlRoot = realpath($controlRoot);
+        $canonicalFixture = realpath($fixture);
+        self::assertIsString($canonicalControlRoot);
+        self::assertIsString($canonicalFixture);
+        $controlRoot = $canonicalControlRoot;
         $trustedRuntime = $this->repoRoot . '/scripts/agent/lib/trusted_base_payload_runtime.sh';
         $bundleRuntime = $this->repoRoot . '/scripts/agent/lib/readonly_reviewer_bundle_runtime.sh';
         $script = implode("\n", [
@@ -334,14 +355,17 @@ final class TrustedBaseBootstrapContractTest extends TestCase
             'TRUSTED_BASE_LAUNCHER=1',
             'source ' . escapeshellarg($trustedRuntime),
             'source ' . escapeshellarg($bundleRuntime),
-            'trusted_base_repo_root=' . escapeshellarg($fixture),
+            'trusted_base_repo_root=' . escapeshellarg($canonicalFixture),
             'trusted_git() { trusted_base_git "$@"; }',
             'canonical_path() { trusted_base_canonical_path "$@"; }',
-            'readonly_reviewer_prepare_evidence_git ' . escapeshellarg($controlRoot) . ' ' . escapeshellarg($fixture),
+            'readonly_reviewer_prepare_evidence_git ' .
+            escapeshellarg($controlRoot) .
+            ' ' .
+            escapeshellarg($canonicalFixture),
             'readonly_reviewer_bind_evidence_head ' .
             escapeshellarg($controlRoot) .
             ' ' .
-            escapeshellarg($fixture) .
+            escapeshellarg($canonicalFixture) .
             ' ' .
             escapeshellarg($head),
             'readonly_reviewer_evidence_git diff --name-only --no-color --no-renames --no-ext-diff --no-textconv -z ' .

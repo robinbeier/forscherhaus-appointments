@@ -331,10 +331,10 @@ case "$sealed_root" in
         ;;
 esac
 cleanup_sealed_review() {
-    chmod -R u+w -- "$sealed_root" 2>/dev/null || true
+    chmod -R u+w "$sealed_root" 2>/dev/null || true
     rm -rf -- "$sealed_root"
     if [[ -n "${diagnostic_outside_root:-}" ]]; then
-        chmod -R u+w -- "$diagnostic_outside_root" 2>/dev/null || true
+        chmod -R u+w "$diagnostic_outside_root" 2>/dev/null || true
         rm -rf -- "$diagnostic_outside_root"
     fi
 }

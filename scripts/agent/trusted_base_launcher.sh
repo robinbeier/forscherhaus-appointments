@@ -160,7 +160,7 @@ case "$(/usr/bin/uname -s 2>/dev/null)" in
 esac
 umask 077
 parser_root="$(/usr/bin/mktemp -d "$private_parent/trusted-base-bootstrap.XXXXXX")" || exit 2
-trap 'chmod -R u+w -- "$parser_root" 2>/dev/null || true; /bin/rm -rf -- "$parser_root"' EXIT
+trap 'chmod -R u+w "$parser_root" 2>/dev/null || true; /bin/rm -rf -- "$parser_root"' EXIT
 parser_target="$parser_root/contract-parser.py"
 if ! trusted_git show "${base_sha}:${parser_repository_path}" > "$parser_target"; then
     echo "Trusted-base launcher contract parser is unavailable." >&2
@@ -263,9 +263,9 @@ materialized_root="$(/usr/bin/mktemp -d "$private_parent/forscherhaus-trusted-ba
     exit 2
 }
 cleanup_materialized_root() {
-    chmod -R u+w -- "$materialized_root" 2>/dev/null || true
+    chmod -R u+w "$materialized_root" 2>/dev/null || true
     /bin/rm -rf -- "$materialized_root"
-    chmod -R u+w -- "$parser_root" 2>/dev/null || true
+    chmod -R u+w "$parser_root" 2>/dev/null || true
     /bin/rm -rf -- "$parser_root"
 }
 trap cleanup_materialized_root EXIT

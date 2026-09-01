@@ -134,7 +134,7 @@ readonly_reviewer_execute_isolated() (
     : > "$outside_canary"
     cleanup_runtime_canaries() {
         if [[ -n "$outside_canary_root" ]]; then
-            chmod -R u+w -- "$outside_canary_root" 2>/dev/null || true
+            chmod -R u+w "$outside_canary_root" 2>/dev/null || true
             rm -rf -- "$outside_canary_root"
         fi
     }
