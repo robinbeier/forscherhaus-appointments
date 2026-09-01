@@ -57,6 +57,7 @@ try {
                 $required('blob-evidence'),
                 $required('trusted-paths'),
             );
+            $manifest = ReadonlyReviewBundle::deduplicateAddedTextHeads($required('bundle-root'), $manifest);
             fwrite(
                 STDOUT,
                 json_encode($manifest, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n",

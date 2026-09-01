@@ -152,7 +152,14 @@ external diff drivers, and text conversion. The runner rejects every tracked
 symlink in the exact base and head trees, then materializes a deterministic
 bundle containing the full-index patch, sorted changed paths, committed base and
 head blobs, trusted base policy, and a SHA-256 manifest. It serializes that
-bounded bundle into deterministic JSON. The trusted role and exact Base/Head
+bounded bundle into deterministic JSON. For a newly added UTF-8 text file, the
+exact head metadata remains in the manifest while its redundant `head/` blob
+is omitted because `review.patch` is binary/full-index and carries the complete
+added text; binary, NUL-containing, or non-UTF-8 additions remain serialized.
+This optional metadata is schema-compatible
+(`content_source.kind: full_index_patch_added_text_file` points to
+`review.patch`) and the deduplication operation fails closed on any evidence
+mismatch. The trusted role and exact Base/Head
 binding are supplied as developer instructions; only the serialized bundle is
 sent as the untrusted user message over standard input. Patch content can
 therefore never occupy the reviewer policy's instruction priority. Before the

@@ -151,9 +151,13 @@ chmod 700 "$trusted_validator"
 rm -f "$trusted_validator"
 ```
 
-The wrapper reads the manifest base with a fixed PHP runtime, rejects any
-checkout-HEAD mismatch before executing validator source, verifies that it is
-the checkout's exact base blob, then
+The materialized wrapper enters through a `php -n` bootstrap before Bash can
+process caller startup state. That bootstrap passes only fixed `PATH`, `TMPDIR`,
+`LANG`, and `LC_ALL` values into the Bash payload, excluding `BASH_ENV`,
+exported functions, shell options, `HOME`, `CODEX_HOME`, and other ambient
+variables. The wrapper then reads the manifest base with a fixed PHP runtime,
+rejects any checkout-HEAD mismatch before executing validator source, verifies
+that it is the checkout's exact base blob, then
 materializes the CLI and both shared validator libraries directly from that
 same commit into a private trust bundle. The checker therefore executes no PHP
 source from the checkout and starts PHP without ambient `php.ini`, `PHPRC`, scan

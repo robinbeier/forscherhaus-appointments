@@ -283,6 +283,14 @@ class AgentWorkflowContractTest extends TestCase
         self::assertSame('provisional_pass', $contract['parallel_work']['dirty_precommit_status'] ?? null);
         self::assertSame('pass', $contract['parallel_work']['clean_integration_status'] ?? null);
         self::assertSame('ignore_ambient_ini', $contract['parallel_work']['php_runtime_configuration'] ?? null);
+        self::assertSame(
+            'php_n_before_bash_with_explicit_environment_allowlist',
+            $contract['parallel_work']['shell_bootstrap'] ?? null,
+        );
+        self::assertSame(
+            ['PATH', 'TMPDIR', 'LANG', 'LC_ALL'],
+            $contract['parallel_work']['shell_environment_allowlist'] ?? null,
+        );
         self::assertSame('docs/maps/component_ownership_map.json', $contract['parallel_work']['ownership_map'] ?? null);
         self::assertSame(3, $contract['parallel_work']['ownership_map_schema_version'] ?? null);
         self::assertSame(

@@ -170,6 +170,8 @@
         "dirty_precommit_status": "provisional_pass",
         "clean_integration_status": "pass",
         "php_runtime_configuration": "ignore_ambient_ini",
+        "shell_bootstrap": "php_n_before_bash_with_explicit_environment_allowlist",
+        "shell_environment_allowlist": ["PATH", "TMPDIR", "LANG", "LC_ALL"],
         "ownership_map": "docs/maps/component_ownership_map.json",
         "ownership_map_schema_version": 3,
         "ownership_rule_format": "explicit_path_and_match_objects",

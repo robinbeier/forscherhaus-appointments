@@ -263,6 +263,40 @@ class ParallelWorkContractCliTest extends TestCase
         self::assertFileDoesNotExist($marker);
     }
 
+    public function testCliDoesNotSourceCallerBashEnvironmentBeforeTrustChecks(): void
+    {
+        $ambientDirectory = sys_get_temp_dir() . '/parallel-work-bash-' . bin2hex(random_bytes(8));
+        self::assertTrue(mkdir($ambientDirectory, 0700));
+        $marker = $ambientDirectory . '/bash-env-ran';
+        $bashEnvironment = $ambientDirectory . '/bash-env';
+        self::assertNotFalse(file_put_contents($bashEnvironment, ': > ' . escapeshellarg($marker) . "\n"));
+        $manifestPath = $this->writeJsonFixture('ambient-bash', $this->manifestForPath('scripts/agent'));
+
+        try {
+            [$exitCode, $stdout, $stderr] = $this->runCli(
+                ['--manifest=' . $manifestPath],
+                environment: [
+                    'BASH_ENV' => $bashEnvironment,
+                    'CODEX_HOME' => $ambientDirectory . '/codex-home',
+                    'HOME' => $ambientDirectory . '/home',
+                    'PATH' => '/usr/bin:/bin',
+                ],
+            );
+
+            self::assertSame(1, $exitCode, $stderr);
+            self::assertSame('', $stderr);
+            self::assertContains(
+                'primary_owned_path:0:scripts/agent',
+                json_decode($stdout, true, 512, JSON_THROW_ON_ERROR)['errors'],
+            );
+            self::assertFileDoesNotExist($marker);
+        } finally {
+            @unlink($marker);
+            @unlink($bashEnvironment);
+            @rmdir($ambientDirectory);
+        }
+    }
+
     public function testTrustedVerificationBindsActualLaneChangesToDeclaredOwnership(): void
     {
         $manifestPath = $this->writeJsonFixture(

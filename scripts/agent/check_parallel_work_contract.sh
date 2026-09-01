@@ -1,6 +1,62 @@
+#!/usr/bin/env -S PATH=/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin:/opt/local/bin php -n
+<?php
+
+declare(strict_types=1);
+
+$source = (string) file_get_contents(__FILE__);
+$payload = substr($source, __COMPILER_HALT_OFFSET__);
+if ($payload === false || $payload === '') {
+    fwrite(STDERR, "Parallel-work validator bootstrap payload is unavailable.\n");
+    exit(2);
+}
+
+$environment = [
+    'PATH' => '/usr/bin:/bin:/usr/sbin:/sbin',
+    'TMPDIR' => '/tmp',
+    'LANG' => 'C',
+    'LC_ALL' => 'C',
+];
+$process = proc_open(
+    ['/bin/bash', '-s', '--', __FILE__, ...array_slice($argv, 1)],
+    [0 => ['pipe', 'r'], 1 => STDOUT, 2 => STDERR],
+    $pipes,
+    getcwd() ?: null,
+    $environment,
+);
+if (!is_resource($process)) {
+    fwrite(STDERR, "Parallel-work validator bootstrap could not start the trusted shell.\n");
+    exit(2);
+}
+
+$offset = 0;
+$length = strlen($payload);
+while ($offset < $length) {
+    $written = fwrite($pipes[0], substr($payload, $offset));
+    if ($written === false || $written === 0) {
+        fclose($pipes[0]);
+        proc_terminate($process);
+        proc_close($process);
+        fwrite(STDERR, "Parallel-work validator bootstrap payload could not be delivered.\n");
+        exit(2);
+    }
+    $offset += $written;
+}
+fclose($pipes[0]);
+exit(proc_close($process));
+
+__halt_compiler();
 #!/bin/bash
 
 set -euo pipefail
+
+# With `bash -s -- <runner> ...`, Bash retains its own `$0` and exposes the
+# materialized declared-base runner as `$1`.
+runner_source_input="${1:-}"
+if [[ -z "$runner_source_input" ]]; then
+    echo "Parallel-work validator trusted source path is unavailable." >&2
+    exit 2
+fi
+shift
 
 validator_checkout=''
 manifest_path=''
@@ -146,15 +202,15 @@ if [[ "$validator_head" != "$manifest_base" ]]; then
     exit 1
 fi
 
-if [[ -L "$0" ]]; then
+if [[ -L "$runner_source_input" ]]; then
     echo "Parallel-work validator runner is invalid." >&2
     exit 2
 fi
-runner_directory="$(CDPATH= cd -- "$(/usr/bin/dirname -- "$0")" 2>/dev/null && /bin/pwd -P)" || {
+runner_directory="$(CDPATH= cd -- "$(/usr/bin/dirname -- "$runner_source_input")" 2>/dev/null && /bin/pwd -P)" || {
     echo "Parallel-work validator runner is invalid." >&2
     exit 2
 }
-runner_source="$runner_directory/$(/usr/bin/basename -- "$0")"
+runner_source="$runner_directory/$(/usr/bin/basename -- "$runner_source_input")"
 if [[ ! -f "$runner_source" ]]; then
     echo "Parallel-work validator runner is invalid." >&2
     exit 2
