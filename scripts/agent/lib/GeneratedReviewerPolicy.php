@@ -75,6 +75,8 @@ return json_decode(
             "scripts/agent/trusted_base_launcher.sh",
             "scripts/agent/run_readonly_reviewer.sh",
             "scripts/agent/lib/trusted_base_payload_runtime.sh",
+            "scripts/agent/lib/trusted_base_bootstrap_contract.py",
+            "scripts/agent/generate_reviewer_policy_snapshot.php",
             "scripts/agent/readonly-review-output.schema.json",
             "scripts/agent/readonly-reviewer.sb",
             "scripts/agent/verify_trusted_php_runtime.py",

@@ -174,6 +174,12 @@ repository-selected Bash can run.
 Both agent-harness entry points begin with the same exact-base system-Git
 launcher, discard caller startup configuration, and use isolated
 `/usr/bin/python3` before any PHP runs.
+The launcher first materializes the fixed bootstrap-contract parser as an
+exact regular blob from that base. Launcher and shared runtime invoke that same
+parser at separate attestation points, so manifest, mode, payload, and runtime
+bindings are checked twice. The runtime also retains a deliberately independent
+structural cross-check; this small security-floor redundancy may not be removed
+as ordinary cleanup.
 `scripts/agent/verify_trusted_php_runtime.py` owns contract policy and CLI
 dispatch; `scripts/agent/lib/trusted_runtime_primitives.py` owns the separately
 testable file, archive, ELF, and dependency-closure mechanics. Together they
@@ -196,14 +202,15 @@ contains no second normalization, match, or overlap implementation.
 
 The exact-base JSON contract is the sole declarative configuration authority
 for reviewer profiles, runtime pins, disabled features, and trusted paths. PHP
-requires the deterministic committed snapshot produced by
+requires both the deterministic committed snapshot and the complete code-side
+policy attestation produced by
 `php scripts/agent/generate_reviewer_policy_snapshot.php` to match that policy
-exactly; `--check` detects a stale snapshot without changing it. Shell, PHP, and
-focused behavior tests also enforce an independent digest over the complete
-runtime-boundary projection plus explicit disabled-feature floors. Descriptive
-policy values are therefore not copied into PHP. A missing field is named and a
-changed projection reports its actual digest so an externally reviewed contract
-update remains reproducible.
+exactly. The generator owns a delimited PHP source block containing every
+top-level reviewer-policy key and its independent digest; `--check` detects a
+stale snapshot or source attestation without changing either file. Explicit
+disabled-feature floors remain hand-enforced. The generator itself is a trusted
+bootstrap path, so changing generation semantics also requires the external
+bootstrap-review path.
 
 External review input is deliberately narrower than a checkout. It contains a
 zero-context UTF-8 patch (changed lines only), the normalized changed-path
@@ -413,8 +420,9 @@ Run final reviewers through the repository-owned sealed-bundle boundary using
 the exact-base launcher contract in `scripts/agent/trusted_base_launcher.sh`;
 never execute the checked-out launcher or reviewer payload. Fixed system Git
 must completely materialize and verify the launcher from the verified base
-before clean Bash starts it; only then may it privately materialize
-`scripts/agent/lib/trusted_base_payload_runtime.sh` and
+before clean Bash starts it; only then may it privately materialize the fixed
+`scripts/agent/lib/trusted_base_bootstrap_contract.py` parser, validate the
+manifest, and materialize `scripts/agent/lib/trusted_base_payload_runtime.sh` and
 `scripts/agent/run_readonly_reviewer.sh`.
 The shared runtime, runner, policy, profiles, schema,
 and validator are trusted base artifacts, never head artifacts. It requires

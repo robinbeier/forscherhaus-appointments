@@ -118,7 +118,7 @@ class ReviewerAuthorityContractTest extends TestCase
         $policy['profiles']['tests_regression_flake']['model'] = 'untrusted-model';
 
         $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('generated exact-base snapshot');
+        $this->expectExceptionMessage('runtime boundary attestation is invalid');
         ReadonlyReviewerContract::trustedBasePaths($policy);
     }
 
@@ -406,6 +406,8 @@ class ReviewerAuthorityContractTest extends TestCase
                 'scripts/agent/trusted_base_launcher.sh',
                 'scripts/agent/run_readonly_reviewer.sh',
                 'scripts/agent/lib/trusted_base_payload_runtime.sh',
+                'scripts/agent/lib/trusted_base_bootstrap_contract.py',
+                'scripts/agent/generate_reviewer_policy_snapshot.php',
                 'scripts/agent/readonly-review-output.schema.json',
                 'scripts/agent/lib/trusted_runtime_primitives.py',
                 'scripts/agent/lib/ReadonlyReviewerModelPolicy.php',
@@ -474,7 +476,8 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertStringContainsString('/usr/bin/git', $launcher);
         self::assertStringContainsString('hash-object --no-filters', $launcher);
         self::assertStringContainsString('TRUSTED_BASE_LAUNCHER=1', $launcher);
-        self::assertStringContainsString('trusted_base_bootstrap', $launcher);
+        self::assertStringContainsString('trusted_base_bootstrap_contract.py', $launcher);
+        self::assertStringContainsString('TRUSTED_BASE_BOOTSTRAP_PARSER_BLOB', $launcher);
         self::assertStringNotContainsString(
             'shared_runtime_path="scripts/agent/lib/trusted_base_payload_runtime.sh"',
             $launcher,
@@ -487,6 +490,7 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertStringContainsString('trusted_base_payload_initialize', $sharedRuntime);
         self::assertStringContainsString('trusted_base_assert_materialized_blob', $sharedRuntime);
         self::assertStringContainsString('trusted_base_assert_bootstrap_manifest', $sharedRuntime);
+        self::assertStringContainsString('TRUSTED_BASE_BOOTSTRAP_PARSER_BLOB', $sharedRuntime);
         self::assertStringContainsString('trusted_base_dispatch_payload', $sharedRuntime);
         self::assertStringContainsString('source "$payload_source" "$payload_source" "$@"', $sharedRuntime);
         self::assertStringStartsWith("#!/bin/bash\n", $runner);
@@ -934,6 +938,7 @@ class ReviewerAuthorityContractTest extends TestCase
         $fixture = $this->runnerFixture('reviewer-tampered-entrypoints', "#!/bin/sh\nexit 0\n", 'codex');
         $launcherMarker = sys_get_temp_dir() . '/reviewer-launcher-canary-' . bin2hex(random_bytes(8));
         $payloadMarker = sys_get_temp_dir() . '/reviewer-payload-canary-' . bin2hex(random_bytes(8));
+        $parserMarker = sys_get_temp_dir() . '/reviewer-parser-canary-' . bin2hex(random_bytes(8));
 
         try {
             self::assertNotFalse(
@@ -948,6 +953,14 @@ class ReviewerAuthorityContractTest extends TestCase
                     "#!/bin/bash\n: > " . escapeshellarg($payloadMarker) . "\nexit 99\n",
                 ),
             );
+            self::assertNotFalse(
+                file_put_contents(
+                    $fixture['root'] . '/scripts/agent/lib/trusted_base_bootstrap_contract.py',
+                    "#!/usr/bin/python3\nfrom pathlib import Path\nPath(" .
+                        var_export($parserMarker, true) .
+                        ").touch()\n",
+                ),
+            );
             $this->runGitCommand(['add', '--all'], $fixture['root']);
             $this->commitRunnerFixture($fixture['root'], 'Tamper checked-out reviewer entrypoints');
             $head = $this->runGitCommand(['rev-parse', 'HEAD'], $fixture['root']);
@@ -957,10 +970,12 @@ class ReviewerAuthorityContractTest extends TestCase
             self::assertNotSame(0, $exitCode, $stderr);
             self::assertFileDoesNotExist($launcherMarker);
             self::assertFileDoesNotExist($payloadMarker);
+            self::assertFileDoesNotExist($parserMarker);
         } finally {
             $this->removeRunnerFixture($fixture);
             @unlink($launcherMarker);
             @unlink($payloadMarker);
+            @unlink($parserMarker);
         }
     }
 
@@ -974,6 +989,33 @@ class ReviewerAuthorityContractTest extends TestCase
             false,
             static function (array $contract): array {
                 $contract['trusted_base_bootstrap']['payloads']['parallel']['mode'] = '0700';
+                return $contract;
+            },
+        );
+
+        try {
+            [$exitCode, $stdout, $stderr] = $this->runRunnerFixture($fixture);
+
+            self::assertSame(2, $exitCode);
+            self::assertSame('', $stdout);
+            self::assertSame("Trusted-base launcher bootstrap manifest is invalid.\n", $stderr);
+            self::assertFileDoesNotExist($executionMarker);
+        } finally {
+            $this->removeRunnerFixture($fixture);
+            @unlink($executionMarker);
+        }
+    }
+
+    public function testExactBaseLauncherRejectsAnInvalidBootstrapParserDeclaration(): void
+    {
+        $executionMarker = sys_get_temp_dir() . '/reviewer-invalid-bootstrap-parser-' . bin2hex(random_bytes(8));
+        $fixture = $this->runnerFixture(
+            'reviewer-invalid-bootstrap-parser',
+            "#!/bin/sh\n: > " . escapeshellarg($executionMarker) . "\nexit 0\n",
+            'codex',
+            false,
+            static function (array $contract): array {
+                $contract['trusted_base_bootstrap']['contract_parser']['mode'] = '0500';
                 return $contract;
             },
         );
@@ -1599,6 +1641,15 @@ class ReviewerAuthorityContractTest extends TestCase
             ),
         );
         self::assertTrue(chmod($fixtureSharedRuntime, 0644));
+        $bootstrapParserPath = 'scripts/agent/lib/trusted_base_bootstrap_contract.py';
+        $fixtureBootstrapParser = $root . '/' . $bootstrapParserPath;
+        self::assertNotFalse(
+            file_put_contents(
+                $fixtureBootstrapParser,
+                (string) file_get_contents($this->repoRoot . '/' . $bootstrapParserPath),
+            ),
+        );
+        self::assertTrue(chmod($fixtureBootstrapParser, 0644));
         $contractPath = $root . '/.codex/contracts/agent-workflow.json';
         self::assertTrue(mkdir(dirname($contractPath), 0700, true));
         self::assertTrue(copy($this->repoRoot . '/.codex/contracts/agent-workflow.json', $contractPath));

@@ -10,76 +10,88 @@ require_once __DIR__ . '/ReadonlyReviewOutput.php';
 final class ReadonlyReviewerContract
 {
     /**
-     * Every independently attested boundary field. Values remain human-edited
-     * only in the JSON authority; this key projection plus the digest keeps an
-     * independent fail-closed code attestation without duplicating the policy.
-     * Updating the digest requires the external bootstrap-review path.
+     * Every independently attested reviewer-policy field. The generator owns
+     * this delimited block so policy evolution keeps the code-side pin exact
+     * without hand-editing a key projection or digest. Runtime enforcement
+     * remains independent from the JSON authority and any update still changes
+     * a bootstrap-reviewed PHP source file.
      *
      * @var list<string>
      */
+    // BEGIN GENERATED REVIEWER RUNTIME BOUNDARY ATTESTATION
     private const RUNTIME_BOUNDARY_ATTESTATION_KEYS = [
-        'invocation',
-        'payload_path',
-        'invocation_source',
+        'allows_delegation',
+        'allows_external_connectors',
+        'approval_policy',
         'bootstrap_materialization_policy',
-        'launcher_materialization_guard',
-        'trust_anchor',
-        'review_base_ref',
-        'review_base_remote_url',
-        'review_base_policy',
-        'review_base_remote_transport',
-        'requires_base_runner',
-        'direct_checkout_execution',
-        'runtime_configuration_change_policy',
-        'shell_runtime_configuration',
-        'transport_environment_policy',
-        'temporary_directory_policy',
-        'php_runtime_configuration',
-        'git_runtime_configuration',
-        'git_lazy_fetch',
-        'tool_path_policy',
-        'repository_root_policy',
-        'codex_identity_check',
-        'codex_version_policy',
-        'codex_binary_materialization_policy',
-        'codex_dynamic_dependency_policy',
-        'codex_authentication_source',
-        'codex_authentication_home_policy',
+        'bootstrap_paths',
         'codex_api_key_override_policy',
+        'codex_approval_policy',
+        'codex_authentication_home_policy',
+        'codex_authentication_source',
+        'codex_binary_materialization_policy',
+        'codex_binary_sha256_by_platform',
+        'codex_closure_sha256_by_platform',
+        'codex_dynamic_dependency_policy',
+        'codex_identity_check',
+        'codex_release_archive_sha256_by_platform',
+        'codex_sandbox_mode',
+        'codex_version',
+        'codex_version_policy',
+        'denied_mutations',
+        'direct_checkout_execution',
+        'disabled_features',
+        'filesystem',
         'finding_path_policy',
         'finding_text_policy',
-        'web_search',
+        'git_lazy_fetch',
+        'git_runtime_configuration',
+        'inherits_execpolicy_rules',
+        'inherits_user_config',
+        'invocation',
+        'invocation_source',
+        'isolation_platform',
+        'isolation_preflight',
+        'isolation_profile',
+        'launcher_materialization_guard',
+        'model_tool_surface',
+        'network',
+        'output_binds_base_sha',
+        'output_schema_path',
+        'payload_path',
+        'php_runtime_configuration',
+        'policy_context_paths',
+        'profiles',
+        'prompt_role_preflight',
+        'repository_root_policy',
+        'requires_base_runner',
+        'review_base_policy',
+        'review_base_ref',
+        'review_base_remote_transport',
+        'review_base_remote_url',
+        'review_bundle_binary_policy',
+        'review_bundle_contents',
+        'review_bundle_context_policy',
+        'review_bundle_file_allowlist',
+        'review_bundle_hunk_header_policy',
+        'review_bundle_manifest_policy',
+        'review_bundle_parent_policy',
         'review_checkout',
         'review_checkout_tree_entry_policy',
-        'review_bundle_parent_policy',
-        'review_bundle_contents',
-        'review_bundle_manifest_policy',
-        'review_bundle_context_policy',
-        'review_bundle_hunk_header_policy',
-        'review_bundle_binary_policy',
-        'review_bundle_file_allowlist',
-        'review_instruction_policy',
-        'prompt_role_preflight',
         'review_input_policy',
+        'review_instruction_policy',
         'review_original_worktree_access',
-        'isolation_platform',
-        'isolation_profile',
-        'isolation_preflight',
-        'model_tool_surface',
-        'codex_sandbox_mode',
-        'codex_approval_policy',
-        'output_schema_path',
-        'filesystem',
-        'network',
-        'approval_policy',
-        'inherits_user_config',
-        'inherits_execpolicy_rules',
-        'output_binds_base_sha',
-        'allows_external_connectors',
-        'allows_delegation',
+        'runtime_configuration_change_policy',
+        'shell_runtime_configuration',
+        'temporary_directory_policy',
+        'tool_path_policy',
+        'transport_environment_policy',
+        'trust_anchor',
+        'web_search',
     ];
 
-    private const RUNTIME_BOUNDARY_ATTESTATION_SHA256 = '63c27baa5472e4bb4663030f8ac2c442307a4e5ddb53f4dfe7f67f4fda4a86d5';
+    private const RUNTIME_BOUNDARY_ATTESTATION_SHA256 = '0232aa1e8ff07e1ae777722f1efc770f9b2016fee33115a846dbe562bd66f695';
+    // END GENERATED REVIEWER RUNTIME BOUNDARY ATTESTATION
 
     /** @var list<string> */
     private const MINIMUM_DISABLED_FEATURES = [
@@ -189,8 +201,6 @@ final class ReadonlyReviewerContract
      */
     public static function trustedBasePaths(array $reviewerPolicy): array
     {
-        self::assertRuntimeBoundary($reviewerPolicy);
-
         $profiles = $reviewerPolicy['profiles'] ?? null;
         if (!is_array($profiles) || array_is_list($profiles)) {
             throw new \RuntimeException('Reviewer profile policy is invalid.');
@@ -227,6 +237,7 @@ final class ReadonlyReviewerContract
         $trustedBasePaths = array_values(
             array_unique([...$bootstrapPaths, ...$instructionPaths, ...$policyContextPaths]),
         );
+        self::assertRuntimeBoundary($reviewerPolicy);
         self::assertGeneratedPolicy($reviewerPolicy);
 
         return $trustedBasePaths;
@@ -336,6 +347,8 @@ final class ReadonlyReviewerContract
     /** @param array<string, mixed> $reviewerPolicy */
     private static function assertRuntimeBoundary(array $reviewerPolicy): void
     {
+        self::disabledFeatures($reviewerPolicy);
+
         $attestedBoundary = [];
         foreach (self::RUNTIME_BOUNDARY_ATTESTATION_KEYS as $key) {
             if (!array_key_exists($key, $reviewerPolicy)) {
@@ -377,7 +390,6 @@ final class ReadonlyReviewerContract
                 }
             }
         }
-        self::disabledFeatures($reviewerPolicy);
     }
 
     /** @param array<string, mixed> $reviewerPolicy */

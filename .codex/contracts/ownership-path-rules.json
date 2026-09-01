@@ -1,4 +1,5 @@
 {
+    "protocol_version": 1,
     "schema_version": 1,
     "candidate_path_policy": "strict_normalized_repository_relative",
     "match_modes": {

@@ -24,8 +24,9 @@ final class ParallelWorkOwnershipContract
     public static function validateSemanticsContract(array $contract): array
     {
         $output = self::runCanonicalEngine(['operation' => 'validate_contract', 'contract' => $contract]);
-        return is_array($output['errors'] ?? null)
-            ? array_values(array_unique($output['errors']))
+        $result = $output['result'];
+        return is_array($result['errors'] ?? null)
+            ? array_values(array_unique($result['errors']))
             : ['ownership_path_rule_engine_output_invalid'];
     }
 
@@ -143,19 +144,15 @@ final class ParallelWorkOwnershipContract
             return null;
         }
         if (
-            ($output['valid'] ?? null) !== true ||
-            !is_array($output['rule'] ?? null) ||
-            array_is_list($output['rule'])
+            ($output['result']['valid'] ?? null) !== true ||
+            !is_array($output['result']['rule'] ?? null) ||
+            array_is_list($output['result']['rule'])
         ) {
             $errors[] = $error;
             return null;
         }
-        $rule = $output['rule'];
-        if (
-            array_keys($rule) !== ['match', 'path'] ||
-            !is_string($rule['path'] ?? null) ||
-            !is_string($rule['match'] ?? null)
-        ) {
+        $rule = $output['result']['rule'];
+        if (!is_string($rule['path'] ?? null) || !is_string($rule['match'] ?? null)) {
             $errors[] = $error;
             return null;
         }
@@ -173,10 +170,10 @@ final class ParallelWorkOwnershipContract
             'left' => ['path' => $leftPath, 'match' => $leftMatch],
             'right' => ['path' => $rightPath, 'match' => $rightMatch],
         ]);
-        if (!is_bool($output['overlaps'] ?? null)) {
+        if (!is_bool($output['result']['overlaps'] ?? null)) {
             throw new \RuntimeException('Ownership path-rule engine output invalid');
         }
-        return $output['overlaps'];
+        return $output['result']['overlaps'];
     }
 
     /** @param array{path: string, match: string} $pathRule */
@@ -187,10 +184,10 @@ final class ParallelWorkOwnershipContract
             'rule' => $pathRule,
             'candidate' => $changedPath,
         ]);
-        if (!is_bool($output['matches'] ?? null)) {
+        if (!is_bool($output['result']['matches'] ?? null)) {
             throw new \RuntimeException('Ownership path-rule engine output invalid');
         }
-        return $output['matches'];
+        return $output['result']['matches'];
     }
 
     /** @param array<string, mixed> $request @return array<string, mixed> */
@@ -243,31 +240,63 @@ final class ParallelWorkOwnershipContract
             throw new \RuntimeException('Ownership path-rule engine failed');
         }
         $output = json_decode($stdout, true);
-        $expectedKeys = match ($request['operation'] ?? null) {
-            'parse' => ['rule', 'valid'],
+        $operation = $request['operation'] ?? null;
+        if (
+            !is_array($output) ||
+            array_diff(array_keys($output), ['protocol_version', 'operation', 'result', 'extensions']) !== [] ||
+            ($output['protocol_version'] ?? null) !== 1 ||
+            ($output['operation'] ?? null) !== $operation ||
+            !is_array($output['result'] ?? null) ||
+            (array_key_exists('extensions', $output) &&
+                (!is_array($output['extensions']) ||
+                    (array_is_list($output['extensions']) && $output['extensions'] !== [])))
+        ) {
+            throw new \RuntimeException('Ownership path-rule engine output invalid');
+        }
+        $result = $output['result'];
+        self::validateEngineResult($operation, $result);
+        return $output;
+    }
+
+    /** @param array<string, mixed> $result */
+    private static function validateEngineResult(mixed $operation, array $result): void
+    {
+        $requiredKeys = match ($operation) {
+            'parse' => ['valid', 'rule'],
             'covers' => ['matches'],
             'overlap' => ['overlaps'],
             'validate_contract' => ['errors'],
             default => [],
         };
-        if (!is_array($output) || array_keys($output) !== $expectedKeys) {
+        if ($requiredKeys === []) {
+            throw new \RuntimeException('Ownership path-rule engine output invalid');
+        }
+        foreach ($requiredKeys as $requiredKey) {
+            if (!array_key_exists($requiredKey, $result)) {
+                throw new \RuntimeException('Ownership path-rule engine output invalid');
+            }
+        }
+        if ($operation === 'covers' && !is_bool($result['matches'])) {
+            throw new \RuntimeException('Ownership path-rule engine output invalid');
+        }
+        if ($operation === 'overlap' && !is_bool($result['overlaps'])) {
             throw new \RuntimeException('Ownership path-rule engine output invalid');
         }
         if (
-            ($request['operation'] ?? null) === 'parse' &&
-            (!is_bool($output['valid']) ||
-                ($output['valid'] && (!is_array($output['rule']) || array_is_list($output['rule']))))
+            $operation === 'validate_contract' &&
+            (!is_array($result['errors']) ||
+                !array_is_list($result['errors']) ||
+                array_filter($result['errors'], 'is_string') !== $result['errors'])
         ) {
             throw new \RuntimeException('Ownership path-rule engine output invalid');
         }
         if (
-            ($request['operation'] ?? null) === 'validate_contract' &&
-            (!is_array($output['errors']) ||
-                !array_is_list($output['errors']) ||
-                array_filter($output['errors'], 'is_string') !== $output['errors'])
+            $operation === 'parse' &&
+            (!is_bool($result['valid']) ||
+                ($result['valid'] && (!is_array($result['rule']) || array_is_list($result['rule']))) ||
+                (!$result['valid'] && $result['rule'] !== null))
         ) {
             throw new \RuntimeException('Ownership path-rule engine output invalid');
         }
-        return $output;
     }
 }

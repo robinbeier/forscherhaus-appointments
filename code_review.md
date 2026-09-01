@@ -107,9 +107,12 @@ Invoke final lenses through the fixed-system-Git exact-base protocol in
 `WORKFLOW.md`; never execute either checked-out harness script. The launcher
 resolves the shared runtime and reviewer payload only from the exact-base
 `trusted_base_bootstrap` manifest and materializes both only after the base
-boundary is established. The launcher starts that attested runtime directly;
-the runtime dispatches only the separately attested payload, validates the
-same manifest, and owns clean Git/Python plus exact-base declared
+boundary is established. A fixed, exact-base-materialized bootstrap parser is
+the single implementation of that manifest contract; launcher and runtime call
+it at independent attestation points. The launcher starts that attested runtime
+directly; the runtime dispatches only the separately attested payload,
+revalidates the same manifest, retains an intentionally independent structural
+cross-check as a security floor, and owns clean Git/Python plus exact-base declared
 path materialization for reviewer and parallel-work payloads. The declared
 reviewer payload remains `scripts/agent/run_readonly_reviewer.sh`. The runner and
 `.codex/contracts/agent-workflow.json` own live-main/exact-merge-base binding,
@@ -118,7 +121,10 @@ duplicate its bootstrap and materialization internals here. The contract pins
 the official 0.145.0 release digest.
 The machine contract owns runtime pins, disabled reviewer tools, output schema,
 and trusted paths; its deterministic committed reviewer-policy snapshot must
-pass `php scripts/agent/generate_reviewer_policy_snapshot.php --check`. Bundle
+pass `php scripts/agent/generate_reviewer_policy_snapshot.php --check`. That
+same generator maintains a delimited code-side attestation over every reviewer
+policy field, while explicit security floors remain independently enforced;
+generator changes are themselves bootstrap-reviewed. Bundle
 construction, model/prompt policy, and output
 validation are separate modules. Structural output rules come from the
 exact-base schema; exact Base/Head/lens/path and privacy are additional semantic

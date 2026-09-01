@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 CONTRACT_PATH = Path(__file__).resolve().parents[2] / ".codex/contracts/ownership-path-rules.json"
+PROTOCOL_VERSION = 1
 
 
 def _load_contract() -> dict[str, Any]:
@@ -27,6 +28,7 @@ def _load_contract() -> dict[str, Any]:
         not isinstance(contract, dict)
         or set(contract)
         != {
+            "protocol_version",
             "schema_version",
             "candidate_path_policy",
             "match_modes",
@@ -34,6 +36,7 @@ def _load_contract() -> dict[str, Any]:
             "invalid_rule_cases",
             "overlap_cases",
         }
+        or contract.get("protocol_version") != PROTOCOL_VERSION
         or contract.get("schema_version") != 1
         or contract.get("candidate_path_policy") != "strict_normalized_repository_relative"
         or contract.get("match_modes") != expected_modes
@@ -134,6 +137,7 @@ def validate_contract(contract: Any) -> list[str]:
     if (
         set(contract)
         != {
+            "protocol_version",
             "schema_version",
             "candidate_path_policy",
             "match_modes",
@@ -141,6 +145,7 @@ def validate_contract(contract: Any) -> list[str]:
             "invalid_rule_cases",
             "overlap_cases",
         }
+        or contract.get("protocol_version") != PROTOCOL_VERSION
         or contract.get("schema_version") != 1
         or contract.get("candidate_path_policy") != "strict_normalized_repository_relative"
         or contract.get("match_modes") != expected_modes
@@ -263,7 +268,15 @@ def _cli() -> None:
             result = {"overlaps": path_rules_overlap(request.get("left"), request.get("right"))}
         else:
             raise ValueError("unknown operation")
-        print(json.dumps(result, sort_keys=True, separators=(",", ":")))
+        # Keep the transport contract stable independently of result field
+        # ordering.  Consumers must dispatch on the authenticated operation
+        # and validate the typed result rather than infer either from keys.
+        response = {
+            "protocol_version": PROTOCOL_VERSION,
+            "operation": operation,
+            "result": result,
+        }
+        print(json.dumps(response, sort_keys=True, separators=(",", ":")))
     except (OSError, TypeError, ValueError, json.JSONDecodeError) as error:
         print(json.dumps({"error": str(error)}, sort_keys=True, separators=(",", ":")))
         raise SystemExit(1)

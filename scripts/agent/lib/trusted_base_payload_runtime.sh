@@ -111,6 +111,7 @@ trusted_base_remote_git() {
 
 trusted_base_assert_materialized_blob() {
     local materialized_path="$1" repository_path="$2" expected_mode="$3"
+    local expected_blob="${4:-}"
     local tree_entry='' tree_mode='' tree_type='' tree_blob='' tree_path=''
 
     tree_entry="$(trusted_base_git ls-tree "$trusted_base_base_sha" -- "$repository_path")" || return 1
@@ -119,7 +120,8 @@ trusted_base_assert_materialized_blob() {
         ! "$tree_blob" =~ ^[a-f0-9]{40}$ || "$tree_path" != "$repository_path" ]]; then
         return 1
     fi
-    if [[ "$(trusted_base_git hash-object --no-filters "$materialized_path")" != "$tree_blob" ]] || \
+    if [[ -n "$expected_blob" && "$tree_blob" != "$expected_blob" ]] || \
+        [[ "$(trusted_base_git hash-object --no-filters "$materialized_path")" != "$tree_blob" ]] || \
         ! trusted_base_git show "${trusted_base_base_sha}:${repository_path}" | /usr/bin/cmp -s - "$materialized_path"; then
         return 1
     fi
@@ -143,7 +145,27 @@ if os.path.commonpath([canonical, repository]) == repository:
 trusted_base_assert_bootstrap_manifest() {
     local expected_payload_id="$1" contract_path="$2" payload_path="$3" payload_mode="$4"
     local runtime_path="$5" runtime_mode="$6"
+    local parser_source="${TRUSTED_BASE_BOOTSTRAP_PARSER_PATH:-}"
+    local parser_path="${TRUSTED_BASE_BOOTSTRAP_PARSER_REPOSITORY_PATH:-}"
+    local parser_mode="${TRUSTED_BASE_BOOTSTRAP_PARSER_MODE:-}"
+    local parser_blob="${TRUSTED_BASE_BOOTSTRAP_PARSER_BLOB:-}"
 
+    if [[ "$parser_source" != /* || "$parser_path" != 'scripts/agent/lib/trusted_base_bootstrap_contract.py' || \
+        "$parser_mode" != '0400' || ! "$parser_blob" =~ ^[a-f0-9]{40}$ ]]; then
+        return 1
+    fi
+    if ! trusted_base_assert_materialized_blob "$parser_source" "$parser_path" "$parser_mode" "$parser_blob"; then
+        return 1
+    fi
+    if ! trusted_base_git show "${trusted_base_base_sha}:${contract_path}" 2>/dev/null | \
+        trusted_base_python "$parser_source" "$expected_payload_id" >/dev/null; then
+        return 1
+    fi
+
+    # Keep an independent structural cross-check after the canonical parser.
+    # This deliberate implementation diversity is a security floor: parser
+    # drift must fail both checks rather than silently redefining its own trust
+    # inputs. Do not consolidate it without a separately reviewed replacement.
     trusted_base_git show "${trusted_base_base_sha}:${contract_path}" 2>/dev/null | trusted_base_python -c '
 import json
 import re
@@ -164,14 +186,15 @@ try:
     contract = json.load(sys.stdin)
     bootstrap = contract["trusted_base_bootstrap"]
     launcher = bootstrap["launcher"]
+    parser = bootstrap["contract_parser"]
     runtime = bootstrap["shared_runtime"]
     payloads = bootstrap["payloads"]
     payload = payloads[sys.argv[1]]
 except (KeyError, TypeError, ValueError, UnicodeError):
     raise SystemExit(1)
-if set(bootstrap) != {"schema_version", "contract_path", "launcher", "shared_runtime", "payloads"}:
+if set(bootstrap) != {"schema_version", "contract_path", "launcher", "contract_parser", "shared_runtime", "payloads"}:
     raise SystemExit(1)
-if bootstrap["schema_version"] != 1 or bootstrap["contract_path"] != sys.argv[2]:
+if bootstrap["schema_version"] != 2 or bootstrap["contract_path"] != sys.argv[2]:
     raise SystemExit(1)
 if set(payloads) != {"reviewer", "parallel"}:
     raise SystemExit(1)
@@ -180,6 +203,8 @@ if set(launcher) != {"path", "mode"} or set(runtime) != {"path", "mode"}:
 if set(payload) != {"path", "mode", "environment_profile"}:
     raise SystemExit(1)
 if launcher != {"path": "scripts/agent/trusted_base_launcher.sh", "mode": "0500"}:
+    raise SystemExit(1)
+if parser != {"path": "scripts/agent/lib/trusted_base_bootstrap_contract.py", "mode": "0400"}:
     raise SystemExit(1)
 for payload_id, declared_payload in payloads.items():
     if set(declared_payload) != {"path", "mode", "environment_profile"}:

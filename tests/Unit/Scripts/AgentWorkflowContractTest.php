@@ -53,9 +53,13 @@ class AgentWorkflowContractTest extends TestCase
         self::assertTrue($contract['publish']['push_invalidates_exact_head_evidence'] ?? null);
         self::assertSame(
             [
-                'schema_version' => 1,
+                'schema_version' => 2,
                 'contract_path' => '.codex/contracts/agent-workflow.json',
                 'launcher' => ['path' => 'scripts/agent/trusted_base_launcher.sh', 'mode' => '0500'],
+                'contract_parser' => [
+                    'path' => 'scripts/agent/lib/trusted_base_bootstrap_contract.py',
+                    'mode' => '0400',
+                ],
                 'shared_runtime' => [
                     'path' => 'scripts/agent/lib/trusted_base_payload_runtime.sh',
                     'mode' => '0400',
@@ -434,6 +438,7 @@ class AgentWorkflowContractTest extends TestCase
                 '.codex/contracts/agent-workflow.json',
                 'scripts/agent/check_parallel_work_contract.sh',
                 'scripts/agent/lib/trusted_base_payload_runtime.sh',
+                'scripts/agent/lib/trusted_base_bootstrap_contract.py',
                 'scripts/agent/verify_trusted_php_runtime.py',
                 'scripts/agent/lib/trusted_runtime_primitives.py',
                 'scripts/ci/ownership_path_rules.py',

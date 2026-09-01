@@ -213,6 +213,110 @@ final class OwnershipPathRulesCliIntegrationTest extends TestCase
         }
     }
 
+    public function testPhpRequiresVersionedOperationEnvelopeAndToleratesStructuredExtensions(): void
+    {
+        $root = sys_get_temp_dir() . '/ownership-engine-envelope-' . bin2hex(random_bytes(8));
+        self::assertTrue(mkdir($root . '/scripts/ci', 0700, true));
+        $engine = $root . '/scripts/ci/ownership_path_rules.py';
+        $previous = getenv('PARALLEL_WORK_OWNERSHIP_ENGINE');
+
+        try {
+            $valid = <<<'PYTHON'
+            import json
+            print(json.dumps({
+                "protocol_version": 1,
+                "operation": "covers",
+                "result": {"matches": True},
+                "extensions": {"diagnostics": {"engine": "test"}},
+            }))
+            PYTHON;
+            self::assertNotFalse(file_put_contents($engine, $valid));
+            self::assertTrue(chmod($engine, 0700));
+            putenv('PARALLEL_WORK_OWNERSHIP_ENGINE=' . $engine);
+            self::assertTrue(
+                ParallelWorkOwnershipContract::pathRuleCoversChangedPath(
+                    ['path' => 'tests/Unit/Scripts', 'match' => 'directory'],
+                    'tests/Unit/Scripts/example.php',
+                ),
+            );
+
+            foreach (
+                [
+                    '{"protocol_version":2,"operation":"covers","result":{"matches":true}}',
+                    '{"protocol_version":1,"operation":"overlap","result":{"matches":true}}',
+                    '{"protocol_version":1,"operation":"covers","result":{}}',
+                    '{"protocol_version":1,"operation":"covers","result":{"matches":"true"}}',
+                    '{"protocol_version":1,"operation":"covers","result":{"matches":true},"unexpected":true}',
+                    '{"protocol_version":1,"operation":"covers","result":{"matches":true},"extensions":null}',
+                    '{"protocol_version":1,"operation":"covers","result":{"matches":true},"extensions":["diagnostic"]}',
+                ]
+                as $malformed
+            ) {
+                self::assertNotFalse(file_put_contents($engine, 'print(' . var_export($malformed, true) . ")\n"));
+                $caught = null;
+                try {
+                    ParallelWorkOwnershipContract::pathRuleCoversChangedPath(
+                        ['path' => 'tests/Unit/Scripts', 'match' => 'directory'],
+                        'tests/Unit/Scripts/example.php',
+                    );
+                } catch (\RuntimeException $exception) {
+                    $caught = $exception;
+                } finally {
+                    self::assertInstanceOf(\RuntimeException::class, $caught);
+                }
+            }
+
+            foreach (
+                [
+                    ['operation' => 'overlap', 'result' => ['overlaps' => 'true']],
+                    ['operation' => 'validate_contract', 'result' => ['errors' => [123]]],
+                    ['operation' => 'parse', 'result' => ['valid' => 'true', 'rule' => null]],
+                    ['operation' => 'parse', 'result' => ['valid' => false, 'rule' => []]],
+                ]
+                as $case
+            ) {
+                self::assertNotFalse(
+                    file_put_contents(
+                        $engine,
+                        'print(' . var_export(json_encode(['protocol_version' => 1] + $case), true) . ")\n",
+                    ),
+                );
+                if ($case['operation'] === 'parse') {
+                    $errors = [];
+                    self::assertNull(ParallelWorkOwnershipContract::readPathRule([], $errors, 'invalid'));
+                    self::assertSame(['invalid'], $errors);
+                    continue;
+                }
+                $caught = null;
+                try {
+                    match ($case['operation']) {
+                        'overlap' => ParallelWorkOwnershipContract::pathRulesOverlap(
+                            'foo',
+                            'directory',
+                            'bar',
+                            'directory',
+                        ),
+                        'validate_contract' => ParallelWorkOwnershipContract::validateSemanticsContract([]),
+                    };
+                } catch (\RuntimeException $exception) {
+                    $caught = $exception;
+                } finally {
+                    self::assertInstanceOf(\RuntimeException::class, $caught);
+                }
+            }
+        } finally {
+            if ($previous === false) {
+                putenv('PARALLEL_WORK_OWNERSHIP_ENGINE');
+            } else {
+                putenv('PARALLEL_WORK_OWNERSHIP_ENGINE=' . $previous);
+            }
+            unlink($engine);
+            rmdir($root . '/scripts/ci');
+            rmdir($root . '/scripts');
+            rmdir($root);
+        }
+    }
+
     public function testPhpDelegatesMatchAndOverlapToCanonicalEngine(): void
     {
         $source = (string) file_get_contents(

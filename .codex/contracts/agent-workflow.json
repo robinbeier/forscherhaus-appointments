@@ -6,11 +6,15 @@
         "push_invalidates_exact_head_evidence": true
     },
     "trusted_base_bootstrap": {
-        "schema_version": 1,
+        "schema_version": 2,
         "contract_path": ".codex/contracts/agent-workflow.json",
         "launcher": {
             "path": "scripts/agent/trusted_base_launcher.sh",
             "mode": "0500"
+        },
+        "contract_parser": {
+            "path": "scripts/agent/lib/trusted_base_bootstrap_contract.py",
+            "mode": "0400"
         },
         "shared_runtime": {
             "path": "scripts/agent/lib/trusted_base_payload_runtime.sh",
@@ -149,6 +153,8 @@
                 "scripts/agent/trusted_base_launcher.sh",
                 "scripts/agent/run_readonly_reviewer.sh",
                 "scripts/agent/lib/trusted_base_payload_runtime.sh",
+                "scripts/agent/lib/trusted_base_bootstrap_contract.py",
+                "scripts/agent/generate_reviewer_policy_snapshot.php",
                 "scripts/agent/readonly-review-output.schema.json",
                 "scripts/agent/readonly-reviewer.sb",
                 "scripts/agent/verify_trusted_php_runtime.py",
@@ -255,6 +261,7 @@
             "scripts/agent/trusted_base_launcher.sh",
             "scripts/agent/check_parallel_work_contract.sh",
             "scripts/agent/lib/trusted_base_payload_runtime.sh",
+            "scripts/agent/lib/trusted_base_bootstrap_contract.py",
             "scripts/agent/check_parallel_work_contract.php",
             "scripts/agent/verify_trusted_php_runtime.py",
             "scripts/agent/lib/trusted_runtime_primitives.py",

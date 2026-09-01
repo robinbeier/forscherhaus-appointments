@@ -49,6 +49,10 @@ class ParallelWorkContractCliTest extends TestCase
             $sourceRepoRoot . '/scripts/agent/lib/trusted_base_payload_runtime.sh',
             $this->repoRoot . '/scripts/agent/lib/trusted_base_payload_runtime.sh',
         );
+        copy(
+            $sourceRepoRoot . '/scripts/agent/lib/trusted_base_bootstrap_contract.py',
+            $this->repoRoot . '/scripts/agent/lib/trusted_base_bootstrap_contract.py',
+        );
         self::assertSame(1, $replacementCount);
         copy(
             $sourceRepoRoot . '/scripts/agent/check_parallel_work_contract.php',
@@ -69,6 +73,7 @@ class ParallelWorkContractCliTest extends TestCase
         self::assertTrue(chmod($this->repoRoot . '/scripts/agent/check_parallel_work_contract.sh', 0644));
         self::assertTrue(chmod($this->repoRoot . '/scripts/agent/trusted_base_launcher.sh', 0644));
         self::assertTrue(chmod($this->repoRoot . '/scripts/agent/lib/trusted_base_payload_runtime.sh', 0644));
+        self::assertTrue(chmod($this->repoRoot . '/scripts/agent/lib/trusted_base_bootstrap_contract.py', 0644));
         foreach (
             [
                 'RepoPath.php',
