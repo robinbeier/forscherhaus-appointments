@@ -43,14 +43,13 @@ class ReadonlyReviewerRuntimeLibraryTest extends TestCase
         $modelCatalog = json_encode(
             [
                 'models' => [
-                    [
-                        'slug' => 'gpt-5.4',
+                    $this->modelCatalogEntry([
                         'shell_type' => 'unified_exec',
                         'apply_patch_tool_type' => 'freeform',
                         'input_modalities' => ['text', 'image'],
                         'supports_search_tool' => true,
                         'experimental_supported_tools' => ['fixture'],
-                    ],
+                    ]),
                 ],
             ],
             JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
@@ -91,12 +90,21 @@ class ReadonlyReviewerRuntimeLibraryTest extends TestCase
                 "#!/bin/bash\n" .
                     "set -euo pipefail\n" .
                     "arguments=\" \$* \"\n" .
-                    "for required_flag in --ignore-user-config --ignore-rules --strict-config; do\n" .
-                    "  if [[ \"\$arguments\" != *\" \$required_flag \"* ]]; then\n" .
-                    "    echo \"Missing required isolated-config flag: \$required_flag\" >&2\n" .
-                    "    exit 91\n" .
-                    "  fi\n" .
-                    "done\n" .
+                    "if [[ \"\$arguments\" == *\" debug \"* ]]; then\n" .
+                    "  for exec_only_flag in --ignore-user-config --ignore-rules --strict-config; do\n" .
+                    "    if [[ \"\$arguments\" == *\" \$exec_only_flag \"* ]]; then\n" .
+                    "      echo \"Unsupported debug flag: \$exec_only_flag\" >&2\n" .
+                    "      exit 91\n" .
+                    "    fi\n" .
+                    "  done\n" .
+                    "else\n" .
+                    "  for required_flag in --ignore-user-config --ignore-rules --strict-config; do\n" .
+                    "    if [[ \"\$arguments\" != *\" \$required_flag \"* ]]; then\n" .
+                    "      echo \"Missing required exec isolation flag: \$required_flag\" >&2\n" .
+                    "      exit 92\n" .
+                    "    fi\n" .
+                    "  done\n" .
+                    "fi\n" .
                     "/usr/bin/printf '%s\\n' \"\$*\" >> \"\$TMPDIR/codex-args.log\"\n" .
                     "if [[ \"\$arguments\" == *\" debug models --bundled \"* ]]; then\n" .
                     '  /usr/bin/printf ' .
@@ -231,12 +239,16 @@ class ReadonlyReviewerRuntimeLibraryTest extends TestCase
             $exitCode = proc_close($process);
             $invocationLog = (string) file_get_contents($controlRoot . '/runtime-tmp/codex-args.log');
             $invocations = array_values(array_filter(explode("\n", trim($invocationLog))));
-            self::assertGreaterThanOrEqual(2, count($invocations));
+            self::assertGreaterThanOrEqual(3, count($invocations));
             foreach (array_slice($invocations, 0, 2) as $invocation) {
-                self::assertStringContainsString('--ignore-user-config', $invocation);
-                self::assertStringContainsString('--ignore-rules', $invocation);
-                self::assertStringContainsString('--strict-config', $invocation);
+                self::assertStringNotContainsString('--ignore-user-config', $invocation);
+                self::assertStringNotContainsString('--ignore-rules', $invocation);
+                self::assertStringNotContainsString('--strict-config', $invocation);
             }
+            $execInvocation = $invocations[array_key_last($invocations)];
+            self::assertStringContainsString('--strict-config', $execInvocation);
+            self::assertStringContainsString('--ignore-user-config', $execInvocation);
+            self::assertStringContainsString('--ignore-rules', $execInvocation);
             if ($scenario === 'invalid') {
                 self::assertSame(1, $exitCode);
                 self::assertSame('', $stdout);
@@ -262,6 +274,48 @@ class ReadonlyReviewerRuntimeLibraryTest extends TestCase
     {
         yield 'valid no-findings output' => ['valid'];
         yield 'malformed output fails closed' => ['invalid'];
+    }
+
+    /** @param array<string, mixed> $overrides @return array<string, mixed> */
+    private function modelCatalogEntry(array $overrides = []): array
+    {
+        return array_replace(
+            [
+                'slug' => 'gpt-5.4',
+                'display_name' => 'Reviewer model',
+                'description' => 'Pinned reviewer model fixture.',
+                'default_reasoning_level' => 'medium',
+                'supported_reasoning_levels' => [['effort' => 'medium']],
+                'shell_type' => 'shell_command',
+                'visibility' => 'list',
+                'supported_in_api' => true,
+                'priority' => 1,
+                'additional_speed_tiers' => [],
+                'service_tiers' => ['priority'],
+                'availability_nux' => null,
+                'upgrade' => ['target' => 'gpt-5.4'],
+                'base_instructions' => 'Fixture model instructions.',
+                'model_messages' => ['notice' => 'Fixture notice.'],
+                'include_skills_usage_instructions' => true,
+                'default_reasoning_summary' => 'none',
+                'support_verbosity' => true,
+                'default_verbosity' => 'medium',
+                'apply_patch_tool_type' => 'freeform',
+                'web_search_tool_type' => 'web_search',
+                'truncation_policy' => ['mode' => 'bytes'],
+                'supports_parallel_tool_calls' => true,
+                'supports_image_detail_original' => true,
+                'context_window' => 200000,
+                'max_context_window' => 200000,
+                'comp_hash' => 'fixture-comp-hash',
+                'effective_context_window_percent' => 95,
+                'experimental_supported_tools' => ['external_tool'],
+                'input_modalities' => ['text', 'image'],
+                'supports_search_tool' => true,
+                'use_responses_lite' => false,
+            ],
+            $overrides,
+        );
     }
 
     private function removeDirectory(string $directory): void

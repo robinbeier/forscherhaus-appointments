@@ -88,14 +88,16 @@ class ReadonlyReviewBundleTest extends TestCase
             json_encode(
                 [
                     'models' => [
-                        [
-                            'slug' => 'review-model',
+                        $this->modelCatalogEntry([
                             'shell_type' => 'shell_command',
                             'apply_patch_tool_type' => 'freeform',
                             'input_modalities' => ['text', 'image'],
                             'supports_search_tool' => true,
                             'experimental_supported_tools' => ['external_tool'],
-                        ],
+                            'include_skills_usage_instructions' => true,
+                            'supports_parallel_tool_calls' => true,
+                            'supports_image_detail_original' => true,
+                        ]),
                     ],
                 ],
                 JSON_THROW_ON_ERROR,
@@ -108,6 +110,9 @@ class ReadonlyReviewBundleTest extends TestCase
         self::assertSame(['text'], $catalog['models'][0]['input_modalities']);
         self::assertFalse($catalog['models'][0]['supports_search_tool']);
         self::assertSame([], $catalog['models'][0]['experimental_supported_tools']);
+        self::assertFalse($catalog['models'][0]['include_skills_usage_instructions']);
+        self::assertFalse($catalog['models'][0]['supports_parallel_tool_calls']);
+        self::assertFalse($catalog['models'][0]['supports_image_detail_original']);
     }
 
     public function testModelCatalogRestrictionDropsUnknownFutureCapabilityFields(): void
@@ -115,17 +120,7 @@ class ReadonlyReviewBundleTest extends TestCase
         $catalog = ReadonlyReviewerModelPolicy::restrictModelCatalog(
             json_encode(
                 [
-                    'models' => [
-                        [
-                            'slug' => 'review-model',
-                            'shell_type' => 'shell_command',
-                            'apply_patch_tool_type' => 'freeform',
-                            'input_modalities' => ['text'],
-                            'supports_search_tool' => false,
-                            'experimental_supported_tools' => [],
-                            'future_capability' => ['network' => true],
-                        ],
-                    ],
+                    'models' => [$this->modelCatalogEntry(['future_capability' => ['network' => true]])],
                 ],
                 JSON_THROW_ON_ERROR,
             ),
@@ -134,19 +129,43 @@ class ReadonlyReviewBundleTest extends TestCase
 
         self::assertSame(
             [
-                'models' => [
-                    [
-                        'slug' => 'review-model',
-                        'shell_type' => 'disabled',
-                        'apply_patch_tool_type' => null,
-                        'input_modalities' => ['text'],
-                        'supports_search_tool' => false,
-                        'experimental_supported_tools' => [],
-                    ],
-                ],
+                'slug',
+                'display_name',
+                'description',
+                'default_reasoning_level',
+                'supported_reasoning_levels',
+                'shell_type',
+                'visibility',
+                'supported_in_api',
+                'priority',
+                'additional_speed_tiers',
+                'service_tiers',
+                'availability_nux',
+                'upgrade',
+                'base_instructions',
+                'model_messages',
+                'include_skills_usage_instructions',
+                'default_reasoning_summary',
+                'support_verbosity',
+                'default_verbosity',
+                'apply_patch_tool_type',
+                'web_search_tool_type',
+                'truncation_policy',
+                'supports_parallel_tool_calls',
+                'supports_image_detail_original',
+                'context_window',
+                'max_context_window',
+                'comp_hash',
+                'effective_context_window_percent',
+                'experimental_supported_tools',
+                'input_modalities',
+                'supports_search_tool',
+                'use_responses_lite',
             ],
-            $catalog,
+            array_keys($catalog['models'][0]),
         );
+        self::assertArrayNotHasKey('future_capability', $catalog['models'][0]);
+        self::assertSame('Reviewer model', $catalog['models'][0]['display_name']);
     }
 
     public function testModelCatalogRestrictionRejectsSchemaTypeDrift(): void
@@ -156,16 +175,7 @@ class ReadonlyReviewBundleTest extends TestCase
         ReadonlyReviewerModelPolicy::restrictModelCatalog(
             json_encode(
                 [
-                    'models' => [
-                        [
-                            'slug' => 'review-model',
-                            'shell_type' => ['unexpected' => true],
-                            'apply_patch_tool_type' => 'freeform',
-                            'input_modalities' => ['text'],
-                            'supports_search_tool' => false,
-                            'experimental_supported_tools' => [],
-                        ],
-                    ],
+                    'models' => [$this->modelCatalogEntry(['shell_type' => ['unexpected' => true]])],
                 ],
                 JSON_THROW_ON_ERROR,
             ),
@@ -358,6 +368,48 @@ class ReadonlyReviewBundleTest extends TestCase
             ),
             $developer,
             $user,
+        );
+    }
+
+    /** @param array<string, mixed> $overrides @return array<string, mixed> */
+    private function modelCatalogEntry(array $overrides = []): array
+    {
+        return array_replace(
+            [
+                'slug' => 'review-model',
+                'display_name' => 'Reviewer model',
+                'description' => 'Pinned reviewer model fixture.',
+                'default_reasoning_level' => 'medium',
+                'supported_reasoning_levels' => [['effort' => 'medium']],
+                'shell_type' => 'shell_command',
+                'visibility' => 'list',
+                'supported_in_api' => true,
+                'priority' => 1,
+                'additional_speed_tiers' => [],
+                'service_tiers' => ['priority'],
+                'availability_nux' => null,
+                'upgrade' => ['target' => 'review-model'],
+                'base_instructions' => 'Fixture model instructions.',
+                'model_messages' => ['notice' => 'Fixture notice.'],
+                'include_skills_usage_instructions' => true,
+                'default_reasoning_summary' => 'none',
+                'support_verbosity' => true,
+                'default_verbosity' => 'medium',
+                'apply_patch_tool_type' => 'freeform',
+                'web_search_tool_type' => 'web_search',
+                'truncation_policy' => ['mode' => 'bytes'],
+                'supports_parallel_tool_calls' => true,
+                'supports_image_detail_original' => true,
+                'context_window' => 200000,
+                'max_context_window' => 200000,
+                'comp_hash' => 'fixture-comp-hash',
+                'effective_context_window_percent' => 95,
+                'experimental_supported_tools' => ['external_tool'],
+                'input_modalities' => ['text', 'image'],
+                'supports_search_tool' => true,
+                'use_responses_lite' => false,
+            ],
+            $overrides,
         );
     }
 

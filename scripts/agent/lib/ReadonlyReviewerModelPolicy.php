@@ -124,38 +124,79 @@ final class ReadonlyReviewerModelPolicy
             throw new RuntimeException('Reviewer model is unavailable.');
         }
         $entry = $matches[0];
-        $requiredKeys = [
+        $stringKeys = [
             'slug',
+            'display_name',
+            'description',
+            'default_reasoning_level',
             'shell_type',
-            'apply_patch_tool_type',
-            'input_modalities',
-            'supports_search_tool',
+            'visibility',
+            'base_instructions',
+            'default_reasoning_summary',
+            'default_verbosity',
+            'web_search_tool_type',
+            'comp_hash',
+        ];
+        $listKeys = [
+            'supported_reasoning_levels',
+            'additional_speed_tiers',
+            'service_tiers',
             'experimental_supported_tools',
+            'input_modalities',
+        ];
+        $objectKeys = ['upgrade', 'model_messages', 'truncation_policy'];
+        $booleanKeys = [
+            'supported_in_api',
+            'include_skills_usage_instructions',
+            'support_verbosity',
+            'supports_parallel_tool_calls',
+            'supports_image_detail_original',
+            'supports_search_tool',
+            'use_responses_lite',
+        ];
+        $numberKeys = ['priority', 'context_window', 'max_context_window', 'effective_context_window_percent'];
+        $requiredKeys = [
+            ...$stringKeys,
+            ...$listKeys,
+            ...$objectKeys,
+            ...$booleanKeys,
+            ...$numberKeys,
+            'availability_nux',
+            'apply_patch_tool_type',
         ];
         foreach ($requiredKeys as $key) {
             if (!array_key_exists($key, $entry)) {
                 throw new RuntimeException('Reviewer model tool surface is incomplete.');
             }
         }
+        foreach ($stringKeys as $key) {
+            if (!is_string($entry[$key])) {
+                throw new RuntimeException('Reviewer model catalog schema is invalid.');
+            }
+        }
+        foreach ($listKeys as $key) {
+            if (!is_array($entry[$key]) || !array_is_list($entry[$key])) {
+                throw new RuntimeException('Reviewer model catalog schema is invalid.');
+            }
+        }
+        foreach ($objectKeys as $key) {
+            if (!is_array($entry[$key]) || array_is_list($entry[$key])) {
+                throw new RuntimeException('Reviewer model catalog schema is invalid.');
+            }
+        }
+        foreach ($booleanKeys as $key) {
+            if (!is_bool($entry[$key])) {
+                throw new RuntimeException('Reviewer model catalog schema is invalid.');
+            }
+        }
+        foreach ($numberKeys as $key) {
+            if (!is_int($entry[$key]) && !is_float($entry[$key])) {
+                throw new RuntimeException('Reviewer model catalog schema is invalid.');
+            }
+        }
         if (
-            !is_string($entry['slug']) ||
-            !is_string($entry['shell_type']) ||
-            !(is_string($entry['apply_patch_tool_type']) || $entry['apply_patch_tool_type'] === null) ||
-            !is_array($entry['input_modalities']) ||
-            !array_is_list($entry['input_modalities']) ||
-            !array_reduce(
-                $entry['input_modalities'],
-                static fn(bool $valid, mixed $value): bool => $valid && is_string($value),
-                true,
-            ) ||
-            !is_bool($entry['supports_search_tool']) ||
-            !is_array($entry['experimental_supported_tools']) ||
-            !array_is_list($entry['experimental_supported_tools']) ||
-            !array_reduce(
-                $entry['experimental_supported_tools'],
-                static fn(bool $valid, mixed $value): bool => $valid && is_string($value),
-                true,
-            )
+            $entry['availability_nux'] !== null ||
+            !(is_string($entry['apply_patch_tool_type']) || $entry['apply_patch_tool_type'] === null)
         ) {
             throw new RuntimeException('Reviewer model catalog schema is invalid.');
         }
@@ -166,11 +207,37 @@ final class ReadonlyReviewerModelPolicy
             'models' => [
                 [
                     'slug' => $entry['slug'],
+                    'display_name' => $entry['display_name'],
+                    'description' => $entry['description'],
+                    'default_reasoning_level' => $entry['default_reasoning_level'],
+                    'supported_reasoning_levels' => $entry['supported_reasoning_levels'],
                     'shell_type' => 'disabled',
+                    'visibility' => $entry['visibility'],
+                    'supported_in_api' => $entry['supported_in_api'],
+                    'priority' => $entry['priority'],
+                    'additional_speed_tiers' => $entry['additional_speed_tiers'],
+                    'service_tiers' => $entry['service_tiers'],
+                    'availability_nux' => null,
+                    'upgrade' => $entry['upgrade'],
+                    'base_instructions' => $entry['base_instructions'],
+                    'model_messages' => $entry['model_messages'],
+                    'include_skills_usage_instructions' => false,
+                    'default_reasoning_summary' => $entry['default_reasoning_summary'],
+                    'support_verbosity' => $entry['support_verbosity'],
+                    'default_verbosity' => $entry['default_verbosity'],
                     'apply_patch_tool_type' => null,
+                    'web_search_tool_type' => $entry['web_search_tool_type'],
+                    'truncation_policy' => $entry['truncation_policy'],
+                    'supports_parallel_tool_calls' => false,
+                    'supports_image_detail_original' => false,
+                    'context_window' => $entry['context_window'],
+                    'max_context_window' => $entry['max_context_window'],
+                    'comp_hash' => $entry['comp_hash'],
+                    'effective_context_window_percent' => $entry['effective_context_window_percent'],
+                    'experimental_supported_tools' => [],
                     'input_modalities' => ['text'],
                     'supports_search_tool' => false,
-                    'experimental_supported_tools' => [],
+                    'use_responses_lite' => $entry['use_responses_lite'],
                 ],
             ],
         ];

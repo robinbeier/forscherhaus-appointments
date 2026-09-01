@@ -457,6 +457,11 @@ Commit-derived evidence is rendered through an empty-template private Gitdir
 whose index and materialized `.gitattributes` files are bound to the verified
 head. Source-worktree Git configuration, `.git/info/attributes`, and host Git
 templates cannot influence changed paths, numstat, or patch bytes.
+The pinned CLI exposes `--ignore-user-config`, `--ignore-rules`, and
+`--strict-config` on `exec` but rejects them on its `debug` preflights. Those
+preflights therefore use `env -i`, a newly created non-writable `CODEX_HOME`
+containing no config or rules, a sealed working directory, and the same
+Seatbelt boundary; the final `exec` requires all three flags.
 Bundle construction, model/prompt policy, and output validation remain separate
 modules. Structural output rules come from the exact-base JSON schema; exact
 Base/Head/lens/path binding and privacy are additional semantic checks.
