@@ -528,9 +528,13 @@ if [[ "$trusted_path_count" -eq 0 ]]; then
 fi
 
 reviewer_config="$(trusted_php "$control_root/scripts/agent/readonly_reviewer_contract.php" resolve --lens="$lens")" || exit $?
-IFS=$'\t' read -r role_file model reasoning disabled_features <<< "$reviewer_config"
-if [[ -z "$role_file" || -z "$model" || -z "$reasoning" || -z "$disabled_features" ]]; then
+IFS=$'\t' read -r role_file model reasoning disabled_features output_schema_path <<< "$reviewer_config"
+if [[ -z "$role_file" || -z "$model" || -z "$reasoning" || -z "$disabled_features" || -z "$output_schema_path" ]]; then
     echo "Reviewer invocation policy is incomplete." >&2
+    exit 1
+fi
+if [[ ! -f "$control_root/$output_schema_path" ]]; then
+    echo "Reviewer output schema is unavailable from the trusted policy bundle." >&2
     exit 1
 fi
 
@@ -764,7 +768,7 @@ seatbelt_run "${reviewer_environment[@]}" "$codex_bin" --ask-for-approval never 
         --skip-git-repo-check \
         --color never \
         --model "$model" \
-        --output-schema "$control_root/scripts/agent/readonly-review-output.schema.json" \
+        --output-schema "$control_root/$output_schema_path" \
         "${disable_arguments[@]}" \
         -c "model_catalog_json=\"$model_catalog\"" \
         -c "model_reasoning_effort=\"$reasoning\"" \

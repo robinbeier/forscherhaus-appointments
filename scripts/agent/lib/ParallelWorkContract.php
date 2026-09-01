@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Forscherhaus\AgentHarness;
 
 require_once __DIR__ . '/RepoPath.php';
+require_once __DIR__ . '/ParallelWorkOwnershipContract.php';
+require_once __DIR__ . '/ParallelWorkPolicyContract.php';
 
 final class ParallelWorkContract
 {
@@ -16,29 +18,8 @@ final class ParallelWorkContract
      */
     public static function validate(array $manifest, array $policy, array $ownershipMap = []): array
     {
-        $errors = [];
-
-        if (($policy['ownership_map_schema_version'] ?? null) !== 3) {
-            $errors[] = 'invalid_policy_ownership_map_schema_version';
-        }
-        if (($policy['ownership_rule_format'] ?? null) !== 'explicit_path_and_match_objects') {
-            $errors[] = 'invalid_policy_ownership_rule_format';
-        }
-
-        foreach (
-            [
-                'local_implementation_only',
-                'requires_common_base_sha',
-                'requires_disjoint_ownership',
-                'external_mutations_remain_serial',
-                'requires_semantic_independence_attestation',
-            ]
-            as $requiredPolicy
-        ) {
-            if (($policy[$requiredPolicy] ?? null) !== true) {
-                $errors[] = 'invalid_policy_requirement:' . $requiredPolicy;
-            }
-        }
+        $policyInspection = ParallelWorkPolicyContract::inspect($policy);
+        $errors = $policyInspection['errors'];
 
         if (($manifest['schema_version'] ?? null) !== 1) {
             $errors[] = 'unsupported_schema_version';
@@ -76,25 +57,18 @@ final class ParallelWorkContract
             }
         }
 
-        $approvedComponentIds = self::readApprovedComponentIds($manifest, $errors);
-        $canonicalComponents = self::readCanonicalComponents($ownershipMap, $errors);
+        $approvedComponentIds = ParallelWorkOwnershipContract::readApprovedComponentIds($manifest, $errors);
+        $canonicalComponents = ParallelWorkOwnershipContract::readCanonicalComponents($ownershipMap, $errors);
         $requiredComponentIds = [];
-
-        $primaryOwnedPrefixes = $policy['primary_owned_path_prefixes'] ?? null;
-        if (!is_array($primaryOwnedPrefixes) || !array_is_list($primaryOwnedPrefixes)) {
-            $errors[] = 'invalid_policy_primary_owned_path_prefixes';
-            $primaryOwnedPrefixes = [];
-        }
+        $primaryOwnedPrefixes = $policyInspection['primary_owned_path_prefixes'];
 
         $lanes = $manifest['lanes'] ?? null;
         if (!is_array($lanes) || !array_is_list($lanes)) {
             return array_values(array_unique([...$errors, 'invalid_lanes']));
         }
 
-        $maximumWriterLanes = $policy['max_local_writer_lanes'] ?? null;
-        if (!is_int($maximumWriterLanes) || $maximumWriterLanes < 1) {
-            $errors[] = 'invalid_policy_max_local_writer_lanes';
-        } elseif (count($lanes) > $maximumWriterLanes) {
+        $maximumWriterLanes = $policyInspection['max_local_writer_lanes'];
+        if ($maximumWriterLanes !== null && count($lanes) > $maximumWriterLanes) {
             $errors[] = 'too_many_writer_lanes';
         }
 
@@ -115,7 +89,7 @@ final class ParallelWorkContract
                 $laneIds[$laneId] = true;
             }
 
-            if (($lane['role'] ?? null) !== ($policy['writer_role'] ?? null)) {
+            if (($lane['role'] ?? null) !== $policyInspection['writer_role']) {
                 $errors[] = 'invalid_writer_role:' . $index;
             }
 
@@ -134,7 +108,7 @@ final class ParallelWorkContract
             }
 
             foreach ($ownership as $ruleIndex => $ownershipRule) {
-                $pathRule = self::readPathRule(
+                $pathRule = ParallelWorkOwnershipContract::readPathRule(
                     $ownershipRule,
                     $errors,
                     'invalid_ownership_path:' . $index . ':' . $ruleIndex,
@@ -146,25 +120,37 @@ final class ParallelWorkContract
                 $match = $pathRule['match'];
 
                 foreach ($primaryOwnedPrefixes as $primaryOwnedPrefix) {
-                    if (!is_string($primaryOwnedPrefix) || !RepoPath::isNormalized($primaryOwnedPrefix)) {
-                        $errors[] = 'invalid_policy_primary_owned_path_prefix';
-                        continue;
-                    }
-                    if (self::pathRulesOverlap($path, $match, $primaryOwnedPrefix, 'directory')) {
+                    if (
+                        ParallelWorkOwnershipContract::pathRulesOverlap($path, $match, $primaryOwnedPrefix, 'directory')
+                    ) {
                         $errors[] = 'primary_owned_path:' . $index . ':' . $primaryOwnedPrefix;
                     }
                 }
 
                 foreach ($canonicalComponents as $componentId => $component) {
                     foreach ($component['path_rules'] as $canonicalRule) {
-                        if (self::pathRulesOverlap($path, $match, $canonicalRule['path'], $canonicalRule['match'])) {
+                        if (
+                            ParallelWorkOwnershipContract::pathRulesOverlap(
+                                $path,
+                                $match,
+                                $canonicalRule['path'],
+                                $canonicalRule['match'],
+                            )
+                        ) {
                             $requiredComponentIds[$componentId] = true;
                         }
                     }
                 }
 
                 foreach ($ownedPathRules as $ownedPathRule) {
-                    if (self::pathRulesOverlap($path, $match, $ownedPathRule['path'], $ownedPathRule['match'])) {
+                    if (
+                        ParallelWorkOwnershipContract::pathRulesOverlap(
+                            $path,
+                            $match,
+                            $ownedPathRule['path'],
+                            $ownedPathRule['match'],
+                        )
+                    ) {
                         $errors[] = 'ownership_overlap:' . $ownedPathRule['owner'] . ':' . $index;
                     }
                 }
@@ -215,7 +201,7 @@ final class ParallelWorkContract
 
         $pathRules = [];
         foreach ($ownership as $ruleIndex => $ownershipRule) {
-            $pathRule = self::readPathRule(
+            $pathRule = ParallelWorkOwnershipContract::readPathRule(
                 $ownershipRule,
                 $errors,
                 'invalid_lane_ownership_for_verification:' . $laneId . ':' . $ruleIndex,
@@ -233,7 +219,7 @@ final class ParallelWorkContract
 
             $covered = false;
             foreach ($pathRules as $pathRule) {
-                if (self::pathRuleCovers($pathRule['path'], $pathRule['match'], $changedPath)) {
+                if (ParallelWorkOwnershipContract::pathRuleCoversChangedPath($pathRule, $changedPath)) {
                     $covered = true;
                     break;
                 }
@@ -244,158 +230,5 @@ final class ParallelWorkContract
         }
 
         return array_values(array_unique($errors));
-    }
-
-    /**
-     * @param array<string, mixed> $manifest
-     * @param list<string> $errors
-     * @return array<string, true>
-     */
-    private static function readApprovedComponentIds(array $manifest, array &$errors): array
-    {
-        $approved = $manifest['primary_approved_component_ids'] ?? null;
-        if (!is_array($approved) || !array_is_list($approved)) {
-            $errors[] = 'invalid_primary_approved_component_ids';
-            return [];
-        }
-
-        $ids = [];
-        foreach ($approved as $componentId) {
-            if (!is_string($componentId) || preg_match('/^[a-z0-9][a-z0-9-]*$/D', $componentId) !== 1) {
-                $errors[] = 'invalid_primary_component_approval';
-                continue;
-            }
-            if (isset($ids[$componentId])) {
-                $errors[] = 'duplicate_primary_component_approval:' . $componentId;
-                continue;
-            }
-            $ids[$componentId] = true;
-        }
-
-        return $ids;
-    }
-
-    /**
-     * @param array<string, mixed> $ownershipMap
-     * @param list<string> $errors
-     * @return array<string, array{path_rules: list<array{path: string, match: string}>}>
-     */
-    private static function readCanonicalComponents(array $ownershipMap, array &$errors): array
-    {
-        if (($ownershipMap['schema_version'] ?? null) !== 3) {
-            $errors[] = 'invalid_canonical_ownership_schema_version';
-            return [];
-        }
-        $components = $ownershipMap['components'] ?? null;
-        if (!is_array($components) || !array_is_list($components) || $components === []) {
-            $errors[] = 'invalid_canonical_ownership_map';
-            return [];
-        }
-
-        $canonical = [];
-        foreach ($components as $component) {
-            if (!is_array($component)) {
-                $errors[] = 'invalid_canonical_ownership_component';
-                continue;
-            }
-            $componentId = $component['component_id'] ?? null;
-            $canonicalPathRules = $component['path_rules'] ?? null;
-            $ownershipMode = $component['ownership_mode'] ?? null;
-            $manualApprovalRequired = $component['manual_approval_required'] ?? null;
-            if (!is_string($componentId) || !is_array($canonicalPathRules) || !array_is_list($canonicalPathRules)) {
-                $errors[] = 'invalid_canonical_ownership_component';
-                continue;
-            }
-            if ($canonicalPathRules === []) {
-                $errors[] = 'invalid_canonical_path_rules:' . $componentId;
-                continue;
-            }
-            if (!is_string($ownershipMode) || !in_array($ownershipMode, ['single-owner', 'multi-owner'], true)) {
-                $errors[] = 'invalid_canonical_ownership_mode:' . $componentId;
-                continue;
-            }
-            if (!is_bool($manualApprovalRequired)) {
-                $errors[] = 'invalid_canonical_manual_approval:' . $componentId;
-                continue;
-            }
-            if ($ownershipMode === 'single-owner' && $manualApprovalRequired !== true) {
-                $errors[] = 'invalid_canonical_single_owner_approval:' . $componentId;
-                continue;
-            }
-            $requiresApproval = $ownershipMode === 'single-owner' || $manualApprovalRequired;
-            if (!$requiresApproval) {
-                continue;
-            }
-            if (isset($canonical[$componentId])) {
-                $errors[] = 'duplicate_canonical_component_id:' . $componentId;
-                continue;
-            }
-            $pathRules = [];
-            foreach ($canonicalPathRules as $canonicalPathRule) {
-                $pathRule = self::readPathRule(
-                    $canonicalPathRule,
-                    $errors,
-                    'invalid_canonical_ownership_path_rule:' . $componentId,
-                );
-                if ($pathRule === null) {
-                    continue 2;
-                }
-                $pathRules[] = $pathRule;
-            }
-            $canonical[$componentId] = ['path_rules' => $pathRules];
-        }
-
-        return $canonical;
-    }
-
-    /**
-     * @param list<string> $errors
-     * @return array{path: string, match: string}|null
-     */
-    private static function readPathRule(mixed $value, array &$errors, string $error): ?array
-    {
-        if (!is_array($value) || array_is_list($value)) {
-            $errors[] = $error;
-            return null;
-        }
-        $expectedKeys = ['match', 'path'];
-        $actualKeys = array_keys($value);
-        sort($expectedKeys, SORT_STRING);
-        sort($actualKeys, SORT_STRING);
-        $path = $value['path'] ?? null;
-        $match = $value['match'] ?? null;
-        if (
-            $actualKeys !== $expectedKeys ||
-            !is_string($path) ||
-            !RepoPath::isNormalized($path) ||
-            !in_array($match, ['directory', 'exact_file'], true)
-        ) {
-            $errors[] = $error;
-            return null;
-        }
-
-        return ['path' => $path, 'match' => $match];
-    }
-
-    private static function pathRulesOverlap(
-        string $leftPath,
-        string $leftMatch,
-        string $rightPath,
-        string $rightMatch,
-    ): bool {
-        if ($leftMatch === 'directory' && $rightMatch === 'directory' && $leftPath === $rightPath) {
-            return true;
-        }
-        return self::pathRuleCovers($leftPath, $leftMatch, $rightPath) ||
-            self::pathRuleCovers($rightPath, $rightMatch, $leftPath);
-    }
-
-    private static function pathRuleCovers(string $rulePath, string $match, string $candidatePath): bool
-    {
-        if ($match === 'directory') {
-            return str_starts_with($candidatePath, $rulePath . '/');
-        }
-
-        return $rulePath === $candidatePath;
     }
 }

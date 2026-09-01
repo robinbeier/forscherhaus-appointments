@@ -13,6 +13,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from ownership_path_rules import normalize_path, parse_path_rules, path_rule_matches
+
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MAP_PATH = ROOT / "docs/maps/component_ownership_map.json"
 DEFAULT_SCOPE_CONFIG = ROOT / "scripts/ci/config/component_boundary_scope.php"
@@ -47,13 +50,6 @@ BLOCKING_UNRESOLVED_REASONS = {
 
 def run(cmd: list[str], check: bool = True) -> subprocess.CompletedProcess[str]:
     return subprocess.run(cmd, cwd=ROOT, check=check, text=True, capture_output=True)
-
-
-def normalize_path(value: str) -> str:
-    path = value.replace("\\", "/").strip()
-    if path.startswith("./"):
-        path = path[2:]
-    return path.lstrip("/")
 
 
 def line_number(content: str, index: int) -> int:
@@ -116,14 +112,6 @@ def load_scope_config(path: Path) -> dict[str, Any]:
     return config
 
 
-def path_rule_matches(rule: dict[str, str], repo_path: str) -> bool:
-    normalized_rule_path = normalize_path(rule["path"]).rstrip("/")
-    normalized_path = normalize_path(repo_path)
-    if rule["match"] == "exact_file":
-        return normalized_path == normalized_rule_path
-    return normalized_path == normalized_rule_path or normalized_path.startswith(normalized_rule_path + "/")
-
-
 def build_component_index(map_payload: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, set[str]]]:
     if map_payload.get("schema_version") != 3:
         raise ValueError('"schema_version" must be 3')
@@ -145,15 +133,7 @@ def build_component_index(map_payload: dict[str, Any]) -> tuple[list[dict[str, A
         path_rules = component.get("path_rules")
         if not isinstance(path_rules, list):
             raise ValueError(f"{component_id}.path_rules must be a list")
-        normalized_path_rules: list[dict[str, str]] = []
-        for rule in path_rules:
-            if not isinstance(rule, dict) or set(rule) != {"path", "match"}:
-                raise ValueError(f"{component_id}.path_rules contains an invalid rule")
-            path = rule.get("path")
-            match = rule.get("match")
-            if not isinstance(path, str) or not path or match not in {"directory", "exact_file"}:
-                raise ValueError(f"{component_id}.path_rules contains an invalid rule")
-            normalized_path_rules.append({"path": normalize_path(path).rstrip("/"), "match": match})
+        normalized_path_rules = parse_path_rules(path_rules, f"{component_id}.path_rules")
 
         depends_on = component.get("depends_on", [])
         if not isinstance(depends_on, list):

@@ -74,12 +74,14 @@ final class ReadonlyReviewerContract
      *     role_instructions: string,
      *     model: string,
      *     reasoning: string,
-     *     disabled_features: list<string>
+     *     disabled_features: list<string>,
+     *     output_schema_path: string,
+     *     trusted_base_paths: list<string>
      * }
      */
     public static function resolveInvocation(string $repoRoot, string $lens, array $reviewerPolicy): array
     {
-        self::trustedBasePaths($reviewerPolicy);
+        $trustedBasePaths = self::trustedBasePaths($reviewerPolicy);
 
         $profiles = $reviewerPolicy['profiles'] ?? null;
         $profile = is_array($profiles) ? $profiles[$lens] ?? null : null;
@@ -122,6 +124,8 @@ final class ReadonlyReviewerContract
             'model' => $model,
             'reasoning' => $reasoning,
             'disabled_features' => array_values($disabledFeatures),
+            'output_schema_path' => $reviewerPolicy['output_schema_path'],
+            'trusted_base_paths' => $trustedBasePaths,
         ];
     }
 
@@ -313,6 +317,7 @@ final class ReadonlyReviewerContract
             'isolation_profile' => 'default_deny_runtime_allowlist_exact_bundle_and_auth_read_only',
             'isolation_preflight' => 'bundle_readable_temp_home_and_original_worktree_denied',
             'model_tool_surface' => 'derived_exact_release_catalog_without_shell_patch_image_search_or_external_tools',
+            'output_schema_path' => 'scripts/agent/readonly-review-output.schema.json',
             'filesystem' => 'outer_seatbelt_default_deny_exact_bundle_read_only_runtime_scratch_only',
             'network' => 'outer_codex_transport_no_model_network_tool_or_external_credentials',
             'approval_policy' => 'outer_sandbox_no_model_tools',

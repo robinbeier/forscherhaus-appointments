@@ -12,6 +12,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from ownership_path_rules import parse_path_rules, path_rule_matches
+
 ROOT = Path(__file__).resolve().parents[2]
 MAP_PATH = ROOT / "docs/maps/component_ownership_map.json"
 GENERATOR_CHECK_CMD = [
@@ -188,18 +190,14 @@ def validate_structure(data: dict[str, Any], tracked_files: set[str]) -> list[st
         if not isinstance(path_rules, list) or not path_rules:
             errors.append(f"{component_id}.path_rules must be a non-empty list")
         else:
-            for rule in path_rules:
-                if not isinstance(rule, dict) or set(rule) != {"path", "match"}:
-                    errors.append(f"{component_id}.path_rules contains an invalid rule")
-                    continue
-                path = rule.get("path")
-                match = rule.get("match")
-                if not isinstance(path, str) or not path.strip() or path.endswith("/"):
-                    errors.append(f"{component_id}.path_rules contains an invalid path")
-                    continue
-                if match not in {"directory", "exact_file"}:
-                    errors.append(f"{component_id}.path_rules contains an invalid match")
-                    continue
+            try:
+                parsed_rules = parse_path_rules(path_rules, f"{component_id}.path_rules")
+            except ValueError as exc:
+                errors.append(str(exc))
+                parsed_rules = []
+            for parsed_rule in parsed_rules:
+                path = parsed_rule["path"]
+                match = parsed_rule["match"]
                 if match == "exact_file" and path not in tracked_files:
                     errors.append(f"{component_id}.path rule does not match an existing file: {path}")
                 if match == "directory" and not any(file_path.startswith(path + "/") for file_path in tracked_files):
@@ -286,11 +284,7 @@ def match_components(file_path: str, components: list[dict[str, Any]]) -> list[s
     for component in components:
         component_id = component["component_id"]
         for rule in component["path_rules"]:
-            path = rule["path"]
-            if rule["match"] == "exact_file" and file_path == path:
-                matches.append(component_id)
-                break
-            if rule["match"] == "directory" and (file_path == path or file_path.startswith(path + "/")):
+            if path_rule_matches(rule, file_path):
                 matches.append(component_id)
                 break
     return matches

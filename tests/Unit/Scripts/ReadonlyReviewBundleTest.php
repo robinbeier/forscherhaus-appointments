@@ -176,6 +176,58 @@ class ReadonlyReviewBundleTest extends TestCase
         }
     }
 
+    public function testAddedUtf8HeadWithoutTrailingNewlineIsDeduplicatedFromCompletePatchHunk(): void
+    {
+        $root = sys_get_temp_dir() . '/readonly-review-dedup-no-newline-' . bin2hex(random_bytes(8));
+        self::assertTrue(mkdir($root . '/head/new', 0700, true));
+        $contents = "<?php\nreturn 'added';";
+        $patch =
+            "diff --git a/new/file.php b/new/file.php\nnew file mode 100644\nindex 0000000..abc\n--- /dev/null\n+++ b/new/file.php\n@@ -0,0 +1,2 @@\n+<?php\n+return 'added';\n\\ No newline at end of file\n";
+        $metadata = [
+            'path' => 'head/new/file.php',
+            'mode' => '100644',
+            'git_object' => str_repeat('f', 40),
+            'bytes' => strlen($contents),
+            'sha256' => hash('sha256', $contents),
+        ];
+        $manifest = [
+            'schema_version' => 1,
+            'patch' => [
+                'path' => 'review.patch',
+                'bytes' => strlen($patch),
+                'sha256' => hash('sha256', $patch),
+            ],
+            'changed_paths' => [['path' => 'new/file.php', 'base' => null, 'head' => $metadata]],
+        ];
+
+        try {
+            self::assertNotFalse(file_put_contents($root . '/review.patch', $patch));
+            self::assertNotFalse(file_put_contents($root . '/head/new/file.php', $contents));
+            $result = ReadonlyReviewBundle::deduplicateAddedTextHeads($root, $manifest);
+
+            self::assertSame(
+                ['kind' => 'full_index_patch_added_text_file', 'path' => 'review.patch'],
+                $result['changed_paths'][0]['head']['content_source'],
+            );
+            self::assertFileDoesNotExist($root . '/head/new/file.php');
+        } finally {
+            foreach ([$root . '/review.patch', $root . '/head/new/file.php'] as $file) {
+                if (is_file($file)) {
+                    unlink($file);
+                }
+            }
+            if (is_dir($root . '/head/new')) {
+                rmdir($root . '/head/new');
+            }
+            if (is_dir($root . '/head')) {
+                rmdir($root . '/head');
+            }
+            if (is_dir($root)) {
+                rmdir($root);
+            }
+        }
+    }
+
     public function testAddedBinaryHeadRemainsSerializedAndInvalidEvidenceFailsClosed(): void
     {
         $root = sys_get_temp_dir() . '/readonly-review-binary-dedup-' . bin2hex(random_bytes(8));

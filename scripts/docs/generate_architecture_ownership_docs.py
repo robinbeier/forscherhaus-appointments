@@ -5,10 +5,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts/ci"))
+from ownership_path_rules import parse_path_rules
 MAP_PATH = ROOT / "docs/maps/component_ownership_map.json"
 ARCH_PATH = ROOT / "docs/architecture-map.md"
 OWNER_PATH = ROOT / "docs/ownership-map.md"
@@ -80,7 +83,7 @@ def render_architecture(data: dict[str, Any]) -> str:
 
         lines.append("")
         lines.append("Path rules:")
-        for rule in component["path_rules"]:
+        for rule in parse_path_rules(component["path_rules"], f"{component['component_id']}.path_rules"):
             lines.append(f"- `{rule['path']}` ({rule['match']})")
 
         lines.append("")
@@ -153,7 +156,7 @@ def render_ownership(data: dict[str, Any]) -> str:
         for key_file in component["key_files"]:
             lines.append(f"  - `{key_file}`")
         lines.append("- Path rules:")
-        for rule in component["path_rules"]:
+        for rule in parse_path_rules(component["path_rules"], f"{component['component_id']}.path_rules"):
             lines.append(f"  - `{rule['path']}` ({rule['match']})")
         lines.append("")
 

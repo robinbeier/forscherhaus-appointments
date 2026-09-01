@@ -199,6 +199,10 @@ class ReviewerAuthorityContractTest extends TestCase
             $contract['authority']['reviewer']['filesystem'] ?? null,
         );
         self::assertSame(
+            'scripts/agent/readonly-review-output.schema.json',
+            $contract['authority']['reviewer']['output_schema_path'] ?? null,
+        );
+        self::assertSame(
             [
                 '.codex/contracts/agent-workflow.json',
                 '.codex/agents/reviewer-correctness.toml',
@@ -218,6 +222,8 @@ class ReviewerAuthorityContractTest extends TestCase
         );
         $runner = (string) file_get_contents($this->repoRoot . '/scripts/agent/run_readonly_reviewer.sh');
         self::assertStringContainsString(' trusted-paths --lens=', $runner);
+        self::assertStringContainsString('output_schema_path', $runner);
+        self::assertStringContainsString('--output-schema "$control_root/$output_schema_path"', $runner);
         self::assertStringContainsString('GIT_NO_LAZY_FETCH=1', $runner);
         self::assertFalse($contract['authority']['reviewer']['inherits_execpolicy_rules'] ?? true);
         self::assertTrue($contract['authority']['reviewer']['output_binds_base_sha'] ?? false);
@@ -856,6 +862,8 @@ class ReviewerAuthorityContractTest extends TestCase
 
         self::assertSame('gpt-5.4-mini', $resolved['model']);
         self::assertSame('medium', $resolved['reasoning']);
+        self::assertSame('scripts/agent/readonly-review-output.schema.json', $resolved['output_schema_path']);
+        self::assertContains('.codex/agents/reviewer.toml', $resolved['trusted_base_paths']);
         self::assertStringContainsString("model = 'untrusted-body-value'", $resolved['role_instructions']);
     }
 

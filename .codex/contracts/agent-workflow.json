@@ -67,6 +67,7 @@
             "isolation_profile": "default_deny_runtime_allowlist_exact_bundle_and_auth_read_only",
             "isolation_preflight": "bundle_readable_temp_home_and_original_worktree_denied",
             "model_tool_surface": "derived_exact_release_catalog_without_shell_patch_image_search_or_external_tools",
+            "output_schema_path": "scripts/agent/readonly-review-output.schema.json",
             "trusted_base_paths": [
                 ".codex/contracts/agent-workflow.json",
                 ".codex/agents/reviewer-correctness.toml",

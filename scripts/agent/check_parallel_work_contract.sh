@@ -282,6 +282,8 @@ trusted_paths=(
     scripts/agent/check_parallel_work_contract.sh
     scripts/agent/check_parallel_work_contract.php
     scripts/agent/lib/ParallelWorkContract.php
+    scripts/agent/lib/ParallelWorkOwnershipContract.php
+    scripts/agent/lib/ParallelWorkPolicyContract.php
     scripts/agent/lib/RepoPath.php
 )
 for path in "${trusted_paths[@]}"; do

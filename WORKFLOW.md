@@ -161,8 +161,8 @@ fixed public canonical repository URL in a separate empty Git environment. It
 requires that live SHA, the local `refs/remotes/origin/main`, the manifest base,
 and the clean validator checkout HEAD all match exactly. The wrapper then reads
 the manifest base with a fixed PHP runtime, verifies that it is the checkout's
-exact base blob, and
-materializes the CLI and both shared validator libraries directly from that
+exact base blob, and materializes the CLI plus the orchestration, policy,
+ownership, and shared-path validator libraries directly from that
 same commit into a private trust bundle. The checker therefore executes no PHP
 source from the checkout and starts PHP without ambient `php.ini`, `PHPRC`, scan
 directories, or prepend/append hooks. It requires the validator checkout to be
@@ -184,9 +184,10 @@ more than two `implementation_worker` lanes. Every lane repeats that
 base SHA, lists normalized repository-relative ownership rules, and
 declares an empty `external_mutations` list. Ownership must be disjoint and may
 not include the primary-owned harness, reviewer, workflow, or landing paths in
-the machine contract. The checker, ownership validator, and reviewer trust
-manifest all use `scripts/agent/lib/RepoPath.php` as their single normalized
-repository-path grammar. Every ownership rule is an object with `path` and an
+the machine contract. PHP admission and lane verification use
+`scripts/agent/lib/RepoPath.php`; ownership-map validation, component matching,
+generated architecture docs, and CODEOWNERS projection share
+`scripts/ci/ownership_path_rules.py`. Every ownership rule is an object with `path` and an
 explicit `match` value: `directory` or `exact_file`. `directory` covers
 descendants only and `exact_file` covers one file. Canonical ownership maps
 use the same explicit object grammar; trailing slashes, underscores, and other
@@ -513,8 +514,10 @@ overrides.
 
 Its trusted PHP contract and output
 validator run without ambient `php.ini` files, `PHPRC`, `PHP_INI_SCAN_DIR`, or
-prepend/append hooks. The machine contract selects the role;
-the runner reads its one canonical trust-path manifest from the base commit,
+prepend/append hooks. The machine contract selects the role and output schema.
+Its exact validator resolves the role, model, reasoning, disabled features,
+schema, and canonical trust-path manifest; the shell runner does not maintain a
+second operational copy of those values. The runner reads that resolved trust manifest from the base commit,
 extracts the listed contract, reviewer profiles, schema, validator, and review
 instructions, derives model and reasoning settings from the structured machine
 contract, and
@@ -525,10 +528,10 @@ contact-, user-home-, URL-, and long hash-like values are rejected. Reviewer
 output returns to the primary; reviewers do not write
 files, Git, GitHub, Linear, checks, reviews, comments, or workpads and do not
 delegate. The primary alone decides how findings are integrated or published.
-Model, reasoning, feature-disable, runtime-pin, and trusted-path changes start in
+Model, reasoning, feature-disable, runtime-pin, output-schema, and trusted-path changes start in
 `.codex/contracts/agent-workflow.json`. The trusted helper enforces the
-fail-closed safety invariants and the focused contract tests intentionally fail
-on drift; update those validation expectations in the same reviewed change.
+independent exact fail-closed safety invariants; focused tests exercise the
+resolver and behavior rather than reproducing shell policy.
 
 The first introduction of this trust root cannot bootstrap itself. Likewise,
 a change to `.codex/config.toml` or any `AGENTS.md` can affect reviewer runtime

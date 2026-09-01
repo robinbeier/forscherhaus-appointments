@@ -320,6 +320,8 @@ function verifyValidatorSource(string $gitBinary, string $validatorRoot, string 
             'scripts/agent/check_parallel_work_contract.sh',
             'scripts/agent/check_parallel_work_contract.php',
             'scripts/agent/lib/ParallelWorkContract.php',
+            'scripts/agent/lib/ParallelWorkOwnershipContract.php',
+            'scripts/agent/lib/ParallelWorkPolicyContract.php',
             'scripts/agent/lib/RepoPath.php',
         ]
         as $path

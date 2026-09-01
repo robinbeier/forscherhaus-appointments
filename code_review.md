@@ -191,7 +191,8 @@ authenticates only the outer model-service request and is not a reviewer
 capability; no credential content enters the bundle or prompt. Do not mix this
 boundary with legacy `sandbox_mode`, `--sandbox`, or permission-profile
 configuration. The runner denies reviewer file/Git/external mutation,
-derives model settings from the selected reviewer profile, and returns one
+uses the exact base validator to resolve the selected profile, output schema,
+disabled features, and trust paths from the machine contract, and returns one
 lens-, base-, and exact-head-bound JSON result only to the primary. Finding
 prose is length-bounded and rejected when it contains credential-, capability-,
 contact-, user-home-, URL-, or long hash-like values. Invalid, privacy-unsafe,

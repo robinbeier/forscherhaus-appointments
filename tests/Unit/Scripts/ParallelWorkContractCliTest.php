@@ -46,11 +46,20 @@ class ParallelWorkContractCliTest extends TestCase
             $this->repoRoot . '/scripts/agent/check_parallel_work_contract.php',
         );
         self::assertTrue(chmod($this->repoRoot . '/scripts/agent/check_parallel_work_contract.sh', 0700));
-        copy($sourceRepoRoot . '/scripts/agent/lib/RepoPath.php', $this->repoRoot . '/scripts/agent/lib/RepoPath.php');
-        copy(
-            $sourceRepoRoot . '/scripts/agent/lib/ParallelWorkContract.php',
-            $this->repoRoot . '/scripts/agent/lib/ParallelWorkContract.php',
-        );
+        foreach (
+            [
+                'RepoPath.php',
+                'ParallelWorkContract.php',
+                'ParallelWorkOwnershipContract.php',
+                'ParallelWorkPolicyContract.php',
+            ]
+            as $validatorLibrary
+        ) {
+            copy(
+                $sourceRepoRoot . '/scripts/agent/lib/' . $validatorLibrary,
+                $this->repoRoot . '/scripts/agent/lib/' . $validatorLibrary,
+            );
+        }
         copy(
             $sourceRepoRoot . '/.codex/contracts/agent-workflow.json',
             $this->repoRoot . '/.codex/contracts/agent-workflow.json',

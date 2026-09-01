@@ -146,6 +146,7 @@ try {
                 $invocation['model'],
                 $invocation['reasoning'],
                 implode(',', $invocation['disabled_features']),
+                $invocation['output_schema_path'],
             ]) . PHP_EOL,
         );
         exit(0);

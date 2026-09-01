@@ -187,6 +187,10 @@ class AgentWorkflowContractTest extends TestCase
             'derived_exact_release_catalog_without_shell_patch_image_search_or_external_tools',
             $contract['authority']['reviewer']['model_tool_surface'] ?? null,
         );
+        self::assertSame(
+            'scripts/agent/readonly-review-output.schema.json',
+            $contract['authority']['reviewer']['output_schema_path'] ?? null,
+        );
         self::assertTrue($contract['authority']['reviewer']['output_binds_base_sha'] ?? null);
         self::assertFalse($contract['authority']['reviewer']['allows_external_connectors'] ?? null);
         self::assertFalse($contract['authority']['reviewer']['allows_delegation'] ?? null);
