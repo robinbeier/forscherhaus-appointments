@@ -10,7 +10,7 @@ This map defines component boundaries, path ownership scope, and dependency edge
 |---|---|---|---:|---:|
 | `auth-session` | Access & Session | integrations-sync, people-services-admin, scheduling-backoffice, shared-core | 13 | 3 |
 | `installation-bootstrap` | Installation & Bootstrap | people-services-admin, settings-compliance, shared-core | 4 | 3 |
-| `booking-public` | Public Booking | integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 10 | 7 |
+| `booking-public` | Public Booking | integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 16 | 7 |
 | `booking-lifecycle` | Booking Confirmation/Cancellation | booking-public, integrations-sync, people-services-admin, scheduling-backoffice, shared-core | 5 | 3 |
 | `scheduling-backoffice` | Calendar & Scheduling | integrations-sync, people-services-admin, settings-compliance, shared-core | 18 | 3 |
 | `dashboard-exports` | Dashboard & Exports | scheduling-backoffice, people-services-admin, shared-core | 11 | 3 |
@@ -87,7 +87,13 @@ Dependencies:
 Path prefixes:
 - `application/controllers/Booking.php`
 - `application/views/pages/booking.php`
-- `application/views/components/booking_`
+- `application/views/components/booking_cancellation_frame.php`
+- `application/views/components/booking_final_step.php`
+- `application/views/components/booking_footer.php`
+- `application/views/components/booking_header.php`
+- `application/views/components/booking_info_step.php`
+- `application/views/components/booking_time_step.php`
+- `application/views/components/booking_type_step.php`
 - `assets/js/http/booking_http_client.js`
 - `assets/js/pages/booking.js`
 - `assets/js/pages/booking_webmcp.js`

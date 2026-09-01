@@ -95,7 +95,13 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
 - Path prefixes:
   - `application/controllers/Booking.php`
   - `application/views/pages/booking.php`
-  - `application/views/components/booking_`
+  - `application/views/components/booking_cancellation_frame.php`
+  - `application/views/components/booking_final_step.php`
+  - `application/views/components/booking_footer.php`
+  - `application/views/components/booking_header.php`
+  - `application/views/components/booking_info_step.php`
+  - `application/views/components/booking_time_step.php`
+  - `application/views/components/booking_type_step.php`
   - `assets/js/http/booking_http_client.js`
   - `assets/js/pages/booking.js`
   - `assets/js/pages/booking_webmcp.js`
