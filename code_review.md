@@ -143,8 +143,9 @@ user configuration, connectors, delegation, credentials, and external writes
 remain unavailable. Non-macOS execution fails closed. The host
 login authenticates only the authorized model request and cannot be refreshed by
 the harness. On pinned CLI 0.145.0, debug preflights use the clean synthetic
-home and sealed working directory because all three config-isolation flags are
-rejected by the debug ABI; the final exec requires all three.
+`HOME`/`CODEX_HOME` and sealed working directory because all three
+config-isolation flags are rejected by the debug ABI; the final exec requires
+all three.
 Consult the contract and runner for implementation details.
 Before any PHP helper executes, a root-owned clean bootstrap and isolated
 system Python use the policy/CLI entry point in

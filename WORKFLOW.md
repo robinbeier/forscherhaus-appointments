@@ -459,13 +459,14 @@ head. Source-worktree Git configuration, `.git/info/attributes`, and host Git
 templates cannot influence changed paths, numstat, or patch bytes.
 The pinned CLI exposes `--ignore-user-config`, `--ignore-rules`, and
 `--strict-config` on `exec` but rejects them on its `debug` preflights. Those
-preflights therefore use `env -i`, a newly created non-writable `CODEX_HOME`
-containing no config or rules, a sealed working directory, and the same
-Seatbelt boundary; the final `exec` requires all three flags.
+preflights therefore use `env -i`, a newly created non-writable synthetic
+`HOME`/`CODEX_HOME` containing no config or rules, a sealed working directory,
+and the same Seatbelt boundary; the final `exec` requires all three flags.
 The version-pinned model-catalog adapter drops unknown catalog additions
 without failing, but rejects missing or type-drifted fields needed by that
 exact CLI ABI. Capability-bearing fields are always reconstructed to the
-disabled reviewer surface.
+disabled reviewer surface; the required web-search representation enum is
+pinned to its smallest text-only form while search support stays disabled.
 Bundle construction, model/prompt policy, and output validation remain separate
 modules. Structural output rules come from the exact-base JSON schema; exact
 Base/Head/lens/path binding and privacy are additional semantic checks.

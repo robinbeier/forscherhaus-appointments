@@ -635,6 +635,8 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertStringNotContainsString('sandbox_exec', $bundleRuntime);
         self::assertStringNotContainsString('--ask-for-approval', $bundleRuntime);
         self::assertStringContainsString('-f "$seatbelt_profile"', $isolatedRuntime);
+        self::assertStringContainsString('HOME="$runtime_home"', $isolatedRuntime);
+        self::assertStringNotContainsString('HOME="$reviewer_os_home"', $isolatedRuntime);
         self::assertStringNotContainsString('trusted_git diff --binary', $isolatedRuntime);
         self::assertStringContainsString('Reviewer Seatbelt profile did not deny foreign temp data.', $isolatedRuntime);
         self::assertStringNotContainsString('mktemp "$reviewer_os_home/', $isolatedRuntime);

@@ -77,7 +77,7 @@ readonly_reviewer_execute_isolated() (
     reviewer_environment=(
         env -i
         PATH="$reviewer_system_path"
-        HOME="$reviewer_os_home"
+        HOME="$runtime_home"
         USER="$reviewer_os_user"
         LOGNAME="$reviewer_os_user"
         CODEX_HOME="$runtime_home"
@@ -92,7 +92,7 @@ readonly_reviewer_execute_isolated() (
     cd "$sealed_root"
 
     # Codex 0.145 rejects the exec-only config-isolation flags on debug.
-    # These probes instead inherit only the fresh synthetic home, clean env,
+    # These probes instead inherit only the fresh synthetic HOME/CODEX_HOME, clean env,
     # sealed working directory, and Seatbelt boundary established above.
     model_catalog="$control_root/models.json"
     if ! readonly_reviewer_seatbelt_run "$sandbox_exec" "$seatbelt_profile" "$codex_bin" "$sealed_root" "$arg0_root" "$runtime_tmp" "$auth_source" "$installation_id" \

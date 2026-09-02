@@ -89,6 +89,10 @@ class ReadonlyReviewerRuntimeLibraryTest extends TestCase
                 $codexStub,
                 "#!/bin/bash\n" .
                     "set -euo pipefail\n" .
+                    "if [[ \"\${HOME:-}\" != \"\${CODEX_HOME:-}\" ]]; then\n" .
+                    "  echo \"Reviewer HOME is not synthetic.\" >&2\n" .
+                    "  exit 90\n" .
+                    "fi\n" .
                     "arguments=\" \$* \"\n" .
                     "if [[ \"\$arguments\" == *\" debug \"* ]]; then\n" .
                     "  for exec_only_flag in --ignore-user-config --ignore-rules --strict-config; do\n" .
@@ -301,7 +305,7 @@ class ReadonlyReviewerRuntimeLibraryTest extends TestCase
                 'support_verbosity' => true,
                 'default_verbosity' => 'medium',
                 'apply_patch_tool_type' => 'freeform',
-                'web_search_tool_type' => 'web_search',
+                'web_search_tool_type' => 'text_and_image',
                 'truncation_policy' => ['mode' => 'bytes'],
                 'supports_parallel_tool_calls' => true,
                 'supports_image_detail_original' => true,

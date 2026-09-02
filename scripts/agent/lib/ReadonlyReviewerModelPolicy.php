@@ -199,7 +199,8 @@ final class ReadonlyReviewerModelPolicy
         }
         if (
             $entry['availability_nux'] !== null ||
-            !(is_string($entry['apply_patch_tool_type']) || $entry['apply_patch_tool_type'] === null)
+            !(is_string($entry['apply_patch_tool_type']) || $entry['apply_patch_tool_type'] === null) ||
+            !in_array($entry['web_search_tool_type'], ['text', 'text_and_image'], true)
         ) {
             throw new RuntimeException('Reviewer model catalog schema is invalid.');
         }
@@ -229,7 +230,7 @@ final class ReadonlyReviewerModelPolicy
                     'support_verbosity' => $entry['support_verbosity'],
                     'default_verbosity' => $entry['default_verbosity'],
                     'apply_patch_tool_type' => null,
-                    'web_search_tool_type' => $entry['web_search_tool_type'],
+                    'web_search_tool_type' => 'text',
                     'truncation_policy' => $entry['truncation_policy'],
                     'supports_parallel_tool_calls' => false,
                     'supports_image_detail_original' => false,

@@ -113,6 +113,7 @@ class ReadonlyReviewBundleTest extends TestCase
         self::assertFalse($catalog['models'][0]['include_skills_usage_instructions']);
         self::assertFalse($catalog['models'][0]['supports_parallel_tool_calls']);
         self::assertFalse($catalog['models'][0]['supports_image_detail_original']);
+        self::assertSame('text', $catalog['models'][0]['web_search_tool_type']);
     }
 
     public function testModelCatalogRestrictionDropsUnknownFutureCapabilityFields(): void
@@ -176,6 +177,21 @@ class ReadonlyReviewBundleTest extends TestCase
             json_encode(
                 [
                     'models' => [$this->modelCatalogEntry(['shell_type' => ['unexpected' => true]])],
+                ],
+                JSON_THROW_ON_ERROR,
+            ),
+            'review-model',
+        );
+    }
+
+    public function testModelCatalogRestrictionRejectsUnknownWebSearchRepresentation(): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('schema is invalid');
+        ReadonlyReviewerModelPolicy::restrictModelCatalog(
+            json_encode(
+                [
+                    'models' => [$this->modelCatalogEntry(['web_search_tool_type' => 'future_search_surface'])],
                 ],
                 JSON_THROW_ON_ERROR,
             ),
@@ -248,6 +264,26 @@ class ReadonlyReviewBundleTest extends TestCase
             ReadonlyReviewBundle::serialize($fixture['root'], 8192);
         } finally {
             $this->cleanupBundleFixture($fixture);
+        }
+    }
+
+    public function testSerializerRejectsSymlinkedAllowlistedPolicyFile(): void
+    {
+        $fixture = $this->bundleFixture('symlink-policy');
+        $outside = $fixture['root'] . '-outside.txt';
+
+        try {
+            self::assertNotFalse(file_put_contents($outside, "trusted base policy\n"));
+            self::assertTrue(unlink($fixture['root'] . '/policy/AGENTS.md'));
+            self::assertTrue(symlink($outside, $fixture['root'] . '/policy/AGENTS.md'));
+            $this->expectException(\RuntimeException::class);
+            $this->expectExceptionMessage('manifest file digest evidence is invalid');
+            ReadonlyReviewBundle::serialize($fixture['root'], 8192);
+        } finally {
+            $this->cleanupBundleFixture($fixture);
+            if (is_file($outside)) {
+                unlink($outside);
+            }
         }
     }
 
@@ -396,7 +432,7 @@ class ReadonlyReviewBundleTest extends TestCase
                 'support_verbosity' => true,
                 'default_verbosity' => 'medium',
                 'apply_patch_tool_type' => 'freeform',
-                'web_search_tool_type' => 'web_search',
+                'web_search_tool_type' => 'text_and_image',
                 'truncation_policy' => ['mode' => 'bytes'],
                 'supports_parallel_tool_calls' => true,
                 'supports_image_detail_original' => true,

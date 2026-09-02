@@ -118,6 +118,25 @@ class ParallelWorkContractTest extends TestCase
         );
     }
 
+    public function testLaneChangeVerificationMatchesExactFileOnly(): void
+    {
+        $manifest = $this->validManifest();
+        $manifest['lanes'][0]['ownership'] = [$this->pathRule('scripts/github/check.php', 'exact_file')];
+
+        self::assertSame(
+            [],
+            ParallelWorkContract::validateLaneChanges($manifest, 'lane-a', ['scripts/github/check.php']),
+        );
+        self::assertSame(
+            ['ownership_violation:lane-a:scripts/github/check.php.bak'],
+            ParallelWorkContract::validateLaneChanges($manifest, 'lane-a', ['scripts/github/check.php.bak']),
+        );
+        self::assertSame(
+            ['ownership_violation:lane-a:scripts/github/check.php/child'],
+            ParallelWorkContract::validateLaneChanges($manifest, 'lane-a', ['scripts/github/check.php/child']),
+        );
+    }
+
     public function testRejectsDisabledOrUnknownMachinePolicySemantics(): void
     {
         foreach (
