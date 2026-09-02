@@ -219,7 +219,7 @@ final class TrustedBaseBootstrapContractTest extends TestCase
         }
     }
 
-    public function testMacOsReviewerBootstrapAvoidsUnsupportedChmodOptionSeparators(): void
+    public function testMacOsReviewerBootstrapUsesPortableCoreutilsInvocations(): void
     {
         foreach (
             [
@@ -233,6 +233,10 @@ final class TrustedBaseBootstrapContractTest extends TestCase
             $source = (string) file_get_contents($this->repoRoot . '/' . $path);
             self::assertDoesNotMatchRegularExpression('/\\bchmod(?:\\s+-R)?\\s+\\S+\\s+--(?:\\s|\")/', $source, $path);
         }
+
+        $runner = (string) file_get_contents($this->repoRoot . '/scripts/agent/run_readonly_reviewer.sh');
+        self::assertStringContainsString('/bin/cp "$codex_source" "$materialized_codex"', $runner);
+        self::assertStringNotContainsString('/bin/cp --', $runner);
     }
 
     public function testSterileReviewerEvidenceIgnoresLocalGitDriftButPreservesCommittedAttributes(): void

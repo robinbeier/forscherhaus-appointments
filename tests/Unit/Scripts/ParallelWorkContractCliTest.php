@@ -389,6 +389,15 @@ class ParallelWorkContractCliTest extends TestCase
         self::assertStringNotContainsString('/opt/local/bin/git', $source);
     }
 
+    public function testValidatorSourceVerificationUsesTheDeclaredBootstrapPaths(): void
+    {
+        $source = (string) file_get_contents($this->repoRoot . '/scripts/agent/check_parallel_work_contract.php');
+
+        self::assertStringContainsString("['parallel_work']['validator_bootstrap_paths']", $source);
+        self::assertStringNotContainsString("'scripts/ci/ownership_path_rules.py',", $source);
+        self::assertStringNotContainsString("'.codex/contracts/ownership-path-rules.json',", $source);
+    }
+
     public function testCliRejectsInvalidManifestJsonAndShape(): void
     {
         $invalidJsonPath = sys_get_temp_dir() . '/parallel-work-invalid-' . bin2hex(random_bytes(8)) . '.json';

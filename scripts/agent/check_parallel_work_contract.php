@@ -342,22 +342,37 @@ function verifyValidatorSource(string $gitBinary, string $validatorRoot, string 
         return ['untrusted_validator_source'];
     }
 
-    foreach (
-        [
-            '.codex/contracts/agent-workflow.json',
-            'scripts/agent/trusted_base_launcher.sh',
-            'scripts/agent/check_parallel_work_contract.sh',
-            'scripts/agent/check_parallel_work_contract.php',
-            'scripts/agent/verify_trusted_php_runtime.py',
-            'scripts/agent/lib/ParallelWorkContract.php',
-            'scripts/agent/lib/OwnershipPathRuleEngineClient.php',
-            'scripts/agent/lib/ParallelWorkOwnershipContract.php',
-            'scripts/agent/lib/ParallelWorkPolicyContract.php',
-            'scripts/agent/lib/RepoPath.php',
-            '.codex/contracts/ownership-path-rules.json',
-        ]
-        as $path
-    ) {
+    $contractPath = '.codex/contracts/agent-workflow.json';
+    $sourceContract = file_get_contents($validatorRoot . '/' . $contractPath);
+    $trustedContract = readGitBlob($gitBinary, $root, $baseSha, $contractPath);
+    if (!is_string($sourceContract) || $trustedContract === null || !hash_equals($trustedContract, $sourceContract)) {
+        return ['untrusted_validator_source:' . $contractPath];
+    }
+    try {
+        $validatorContract = json_decode($sourceContract, true, 512, JSON_THROW_ON_ERROR);
+    } catch (Throwable) {
+        return ['untrusted_validator_source:' . $contractPath];
+    }
+    $bootstrapPaths = is_array($validatorContract)
+        ? $validatorContract['parallel_work']['validator_bootstrap_paths'] ?? null
+        : null;
+    if (!is_array($bootstrapPaths) || !array_is_list($bootstrapPaths) || $bootstrapPaths === []) {
+        return ['untrusted_validator_source:' . $contractPath];
+    }
+    $seenPaths = [];
+    foreach ($bootstrapPaths as $path) {
+        if (!is_string($path) || !RepoPath::isNormalized($path) || isset($seenPaths[$path])) {
+            return ['untrusted_validator_source:' . $contractPath];
+        }
+        $seenPaths[$path] = true;
+    }
+    foreach ([$contractPath, 'scripts/agent/check_parallel_work_contract.php'] as $requiredPath) {
+        if (!isset($seenPaths[$requiredPath])) {
+            return ['untrusted_validator_source:' . $contractPath];
+        }
+    }
+
+    foreach ($bootstrapPaths as $path) {
         $source = file_get_contents($validatorRoot . '/' . $path);
         $trusted = readGitBlob($gitBinary, $root, $baseSha, $path);
         if (!is_string($source) || $trusted === null || !hash_equals($trusted, $source)) {

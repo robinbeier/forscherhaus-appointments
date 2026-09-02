@@ -124,6 +124,9 @@ final class ReadonlyReviewerModelPolicy
             throw new RuntimeException('Reviewer model is unavailable.');
         }
         $entry = $matches[0];
+        // The CLI version is pinned. Reconstruct only the fields its model ABI
+        // requires: unknown additions are dropped, while required-field drift
+        // fails closed for an explicit versioned upgrade.
         $stringKeys = [
             'slug',
             'display_name',

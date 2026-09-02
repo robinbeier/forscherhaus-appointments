@@ -433,7 +433,7 @@ trusted_php "$control_root/scripts/agent/readonly_reviewer_contract.php" validat
     --expected-owner="$REVIEWER_EFFECTIVE_UID" || exit $?
 
 materialized_codex="$control_root/codex"
-/bin/cp -- "$codex_source" "$materialized_codex" || {
+/bin/cp "$codex_source" "$materialized_codex" || {
     echo "Reviewer Codex binary could not be materialized privately." >&2
     exit 2
 }

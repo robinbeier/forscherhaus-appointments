@@ -21,6 +21,8 @@ readonly_reviewer_prepare_evidence_git() {
     evidence_objects_canonical="$(canonical_path "$evidence_objects")" || return 1
     [[ -d "$evidence_objects_canonical" && ! -L "$evidence_objects_canonical" ]] || return 1
     mkdir -m 0700 -- "$template_dir" || return 1
+    # The explicit empty template prevents default-template files such as
+    # description or hooks from entering this private evidence boundary.
     /usr/bin/env -i GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_SYSTEM=/dev/null \
         LANG=C LC_ALL=C PATH=/usr/bin:/bin:/usr/sbin:/sbin TMPDIR=/tmp \
         /usr/bin/git init --bare --template="$template_dir" -q "$evidence_git_dir" || return 1
