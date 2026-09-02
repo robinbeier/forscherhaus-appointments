@@ -1764,6 +1764,18 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertStringContainsString('regression coverage', $resolved['role_instructions']);
     }
 
+    public function testProfileResolutionRejectsAnUnknownReviewerLens(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Unsupported reviewer lens.');
+
+        ReadonlyReviewerContract::resolveInvocation(
+            $this->repoRoot,
+            'unknown_reviewer_lens',
+            $this->canonicalReviewerPolicy(),
+        );
+    }
+
     public function testRuntimeConfigurationBindsOfficialPlatformDigests(): void
     {
         $runtime = ReadonlyReviewerContract::runtimeConfiguration($this->canonicalReviewerPolicy(), 'Darwin-arm64');

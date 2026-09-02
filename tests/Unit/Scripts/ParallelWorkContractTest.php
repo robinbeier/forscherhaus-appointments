@@ -71,6 +71,23 @@ class ParallelWorkContractTest extends TestCase
         );
     }
 
+    public function testRejectsWriterLaneWithEmptyOrMissingOwnership(): void
+    {
+        $manifest = $this->validManifest();
+        $manifest['lanes'][0]['ownership'] = [];
+        self::assertContains(
+            'invalid_ownership:0',
+            ParallelWorkContract::validate($manifest, $this->policy, $this->ownershipMap),
+        );
+
+        $manifest = $this->validManifest();
+        unset($manifest['lanes'][0]['ownership']);
+        self::assertContains(
+            'invalid_ownership:0',
+            ParallelWorkContract::validate($manifest, $this->policy, $this->ownershipMap),
+        );
+    }
+
     public function testSharedRepositoryPathGrammarRejectsAmbiguousOrEscapingPaths(): void
     {
         self::assertTrue(RepoPath::isNormalized('scripts/agent/lib/RepoPath.php'));
