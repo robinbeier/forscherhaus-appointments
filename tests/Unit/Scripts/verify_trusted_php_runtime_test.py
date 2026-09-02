@@ -183,6 +183,18 @@ class TrustedPhpRuntimeTest(unittest.TestCase):
                 verifier.attest(self.contract, "Darwin-arm64", self.inspector),
             )
 
+    def test_valid_root_owned_linux_aarch64_fixed_candidate_is_attested(self):
+        with self.owned_lstat(0):
+            self.write_contract(
+                candidate_by_platform={"Linux-aarch64": self.php},
+                require_exact_closure_sha256=True,
+                closure_sha256_by_platform={"Linux-aarch64": self.digest()},
+            )
+            self.assertEqual(
+                os.path.realpath(self.php),
+                verifier.attest(self.contract, "Linux-aarch64", self.inspector),
+            )
+
     def test_user_owned_fixed_candidate_is_rejected_even_when_exactly_pinned(self):
         with self.owned_lstat(501):
             self.write_contract(
