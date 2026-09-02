@@ -608,6 +608,29 @@ class TrustedPhpRuntimeTest(unittest.TestCase):
                 expected_closure_sha256="f" * 64,
             )
 
+    def test_materialized_codex_rejects_binary_digest_mismatch(self):
+        os.chmod(self.php, 0o500)
+        closure_sha256 = verifier.closure_attestation(
+            "codex",
+            [os.path.realpath(self.php)],
+            [],
+            path_labels={os.path.realpath(self.php): "codex"},
+        )
+        self.write_reviewer_contract(
+            codex_binary_sha256_by_platform={"Darwin-arm64": "0" * 64},
+            codex_closure_sha256_by_platform={"Darwin-arm64": closure_sha256},
+            codex_dynamic_dependency_policy="system_sealed_only_non_system_dependency_rejected",
+        )
+
+        with self.assertRaisesRegex(verifier.AttestationError, "Codex binary digest mismatch"):
+            verifier.attest_codex(
+                self.contract,
+                "Darwin-arm64",
+                self.php,
+                self.inspector,
+                expected_closure_sha256=closure_sha256,
+            )
+
     def test_materialized_codex_rejects_non_system_dynamic_dependency(self):
         os.chmod(self.php, 0o500)
         dependency = os.path.join(self.root, "libfixture.dylib")

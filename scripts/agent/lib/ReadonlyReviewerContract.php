@@ -142,6 +142,7 @@ final class ReadonlyReviewerContract
 
         $bootstrapPaths = self::normalizedPolicyPaths($reviewerPolicy, 'bootstrap_paths');
         $policyContextPaths = self::normalizedPolicyPaths($reviewerPolicy, 'policy_context_paths');
+        self::bootstrapGuardPathspecs($reviewerPolicy);
         $outputSchemaPath = $reviewerPolicy['output_schema_path'] ?? null;
         if (
             !in_array('.codex/contracts/agent-workflow.json', $bootstrapPaths, true) ||
@@ -366,6 +367,19 @@ final class ReadonlyReviewerContract
         }
 
         return $paths;
+    }
+
+    /** @param array<string, mixed> $reviewerPolicy
+     *  @return list<string>
+     */
+    private static function bootstrapGuardPathspecs(array $reviewerPolicy): array
+    {
+        $pathspecs = $reviewerPolicy['bootstrap_guard_pathspecs'] ?? null;
+        if ($pathspecs !== [':(glob)**/AGENTS.md']) {
+            throw new \RuntimeException('Reviewer trusted-base policy is invalid.');
+        }
+
+        return $pathspecs;
     }
 
     /**

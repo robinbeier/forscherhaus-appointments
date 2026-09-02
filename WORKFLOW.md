@@ -467,6 +467,9 @@ without failing, but rejects missing or type-drifted fields needed by that
 exact CLI ABI. Capability-bearing fields are always reconstructed to the
 disabled reviewer surface; the required web-search representation enum is
 pinned to its smallest text-only form while search support stays disabled.
+The machine contract also owns the exact recursive Git pathspec that sends any
+nested `AGENTS.md` change back through bootstrap review; the shell runner does
+not add an implicit policy glob.
 Bundle construction, model/prompt policy, and output validation remain separate
 modules. Structural output rules come from the exact-base JSON schema; exact
 Base/Head/lens/path binding and privacy are additional semantic checks.

@@ -8,6 +8,8 @@ use Forscherhaus\AgentHarness\RepoPath;
 require_once __DIR__ . '/lib/RepoPath.php';
 require_once __DIR__ . '/lib/ParallelWorkContract.php';
 
+// This exact-base PHP payload exclusively owns semantic manifest, ownership,
+// and lane admission. The shell entrypoint only establishes its trust boundary.
 $validatorRoot = dirname(__DIR__, 2);
 $validatorCheckoutRootInput = getenv('PARALLEL_WORK_VALIDATOR_CHECKOUT_ROOT');
 if (!is_string($validatorCheckoutRootInput) || !str_starts_with($validatorCheckoutRootInput, '/')) {

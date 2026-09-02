@@ -2,6 +2,8 @@
 
 set -euo pipefail
 
+# This wrapper only establishes canonical-main and exact-base runtime trust.
+# Semantic manifest, ownership, and lane admission remain in the PHP payload.
 if [[ "${TRUSTED_BASE_LAUNCHER:-}" != "1" ]]; then
     echo "Parallel-work validator must be launched from the exact-base trusted launcher." >&2
     exit 2

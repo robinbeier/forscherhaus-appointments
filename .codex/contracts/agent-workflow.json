@@ -148,6 +148,7 @@
             "codex_sandbox_mode": "read-only",
             "codex_approval_policy": "never",
             "output_schema_path": "scripts/agent/readonly-review-output.schema.json",
+            "bootstrap_guard_pathspecs": [":(glob)**/AGENTS.md"],
             "bootstrap_paths": [
                 ".codex/contracts/agent-workflow.json",
                 "scripts/agent/trusted_base_launcher.sh",

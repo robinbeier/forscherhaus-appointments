@@ -12,6 +12,7 @@ final class GeneratedReviewerRuntimeAttestation
         'allows_delegation',
         'allows_external_connectors',
         'approval_policy',
+        'bootstrap_guard_pathspecs',
         'bootstrap_materialization_policy',
         'bootstrap_paths',
         'codex_api_key_override_policy',
@@ -79,7 +80,7 @@ final class GeneratedReviewerRuntimeAttestation
         'web_search',
     ];
 
-    public const SHA256 = '00aa0dbd83254c95f90ff58c77f26b5fec0a4b15095ed71eb326082eafb0f415';
+    public const SHA256 = '27c265bfc8f5121aaeade6bca6ad5a2a440f24834f878d4795ff318255393782';
 
     private function __construct() {}
 }

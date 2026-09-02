@@ -1120,6 +1120,38 @@ class ReviewerAuthorityContractTest extends TestCase
         }
     }
 
+    public function testRunnerRequiresExternalBootstrapReviewForNestedAgentPolicyChanges(): void
+    {
+        $executionMarker = sys_get_temp_dir() . '/reviewer-nested-agents-executed-' . bin2hex(random_bytes(8));
+        $fixture = $this->runnerFixture(
+            'reviewer-nested-agents-drift',
+            "#!/bin/sh\n: > " . escapeshellarg($executionMarker) . "\nexit 0\n",
+            'codex',
+        );
+
+        try {
+            $nestedPolicy = $fixture['root'] . '/application/AGENTS.md';
+            self::assertTrue(mkdir(dirname($nestedPolicy), 0700, true));
+            self::assertNotFalse(file_put_contents($nestedPolicy, "weakened nested policy\n"));
+            $this->runGitCommand(['add', '--all'], $fixture['root']);
+            $this->commitRunnerFixture($fixture['root'], 'Change nested agent policy');
+            $head = $this->runGitCommand(['rev-parse', 'HEAD'], $fixture['root']);
+
+            [$exitCode, $stdout, $stderr] = $this->runRunnerFixture($fixture, $fixture['base'], $head);
+
+            self::assertSame(1, $exitCode);
+            self::assertSame('', $stdout);
+            self::assertSame(
+                "Reviewer runtime configuration changed; external bootstrap review is required.\n",
+                $stderr,
+            );
+            self::assertFileDoesNotExist($executionMarker);
+        } finally {
+            $this->removeRunnerFixture($fixture);
+            @unlink($executionMarker);
+        }
+    }
+
     public function testExactBaseLauncherNeverExecutesTamperedCheckoutEntrypoints(): void
     {
         $fixture = $this->runnerFixture('reviewer-tampered-entrypoints', "#!/bin/sh\nexit 0\n", 'codex');
@@ -1752,6 +1784,16 @@ class ReviewerAuthorityContractTest extends TestCase
     {
         $policy = $this->canonicalReviewerPolicy();
         $policy['bootstrap_paths'][] = '../escaped-policy';
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('trusted-base policy is invalid');
+        ReadonlyReviewerContract::trustedBasePaths($policy);
+    }
+
+    public function testProfileResolutionRejectsAnUnsupportedBootstrapGuardPathspec(): void
+    {
+        $policy = $this->canonicalReviewerPolicy();
+        $policy['bootstrap_guard_pathspecs'] = [':(glob)**'];
 
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('trusted-base policy is invalid');

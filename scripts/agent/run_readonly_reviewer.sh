@@ -185,10 +185,14 @@ import sys
 try:
     reviewer = json.load(sys.stdin)["authority"]["reviewer"]
     profiles = reviewer["profiles"]
+    guard_pathspecs = reviewer["bootstrap_guard_pathspecs"]
+    if guard_pathspecs != [":(glob)**/AGENTS.md"]:
+        raise ValueError("unsupported bootstrap guard pathspec")
     paths = (
         reviewer["bootstrap_paths"]
         + [profiles[lens]["instructions"] for lens in sorted(profiles)]
         + reviewer["policy_context_paths"]
+        + guard_pathspecs
     )
 except (KeyError, TypeError, ValueError):
     raise SystemExit(1)
@@ -221,7 +225,6 @@ while IFS= read -r bootstrap_review_path || [[ -n "$bootstrap_review_path" ]]; d
     fi
     bootstrap_review_paths+=("$bootstrap_review_path")
 done <<< "$bootstrap_review_paths_output"
-bootstrap_review_paths+=(':(glob)**/AGENTS.md')
 if ! trusted_git diff --quiet --no-ext-diff --no-textconv "$base_sha" "$head_sha" -- "${bootstrap_review_paths[@]}"; then
     echo "Reviewer runtime configuration changed; external bootstrap review is required." >&2
     exit 1
