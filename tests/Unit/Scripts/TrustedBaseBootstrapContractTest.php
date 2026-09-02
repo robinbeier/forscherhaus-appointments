@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Scripts;
 
+use Forscherhaus\AgentHarness\ReadonlyReviewBundle;
 use PHPUnit\Framework\TestCase;
+
+require_once __DIR__ . '/../../../scripts/agent/lib/ReadonlyReviewBundle.php';
 
 final class TrustedBaseBootstrapContractTest extends TestCase
 {
@@ -219,11 +222,17 @@ final class TrustedBaseBootstrapContractTest extends TestCase
         self::assertStringContainsString('--template="$template_dir"', $bundleRuntime);
         self::assertStringContainsString('--src-prefix=a/ --dst-prefix=b/', $bundleRuntime);
         self::assertStringContainsString(
-            'readonly_reviewer_bind_evidence_head "$control_root" "$repo_root" "$head_sha"',
+            'readonly_reviewer_bind_evidence_base_policy "$control_root" "$repo_root" "$base_sha"',
             $bundleRuntime,
         );
+        self::assertStringNotContainsString('readonly_reviewer_bind_evidence_head', $bundleRuntime);
+        self::assertStringContainsString('check-attr --cached -z --stdin diff', $bundleRuntime);
+        self::assertStringContainsString('assert-base-diff-attributes', $bundleRuntime);
+        self::assertStringContainsString('cat-file blob', $bundleRuntime);
+        self::assertStringContainsString('assert-text-blob', $bundleRuntime);
+        self::assertStringContainsString('diff --cached --text --numstat', $bundleRuntime);
 
-        foreach (['diff --name-only', 'diff --numstat', 'diff --full-index', 'show "${base_sha}:'] as $operation) {
+        foreach (['diff --name-only', 'check-attr --cached', 'cat-file blob', 'show "${base_sha}:'] as $operation) {
             self::assertStringContainsString('evidence_git ' . $operation, $bundleRuntime);
         }
     }
@@ -302,6 +311,8 @@ final class TrustedBaseBootstrapContractTest extends TestCase
             self::assertNotSame($sourcePatchBefore, $sourcePatchAfter);
             self::assertSame($evidenceBefore, $evidenceAfter);
             self::assertSame("committed.bin\0review.txt\0", $evidenceAfter['changed_paths']);
+            self::assertStringContainsString("committed.bin\0diff\0unset\0", $evidenceAfter['base_attributes']);
+            self::assertStringContainsString("review.txt\0diff\0unspecified\0", $evidenceAfter['base_attributes']);
             self::assertMatchesRegularExpression(
                 '/(?:^|\\x00)\\d+\\t\\d+\\treview\\.txt\\x00/',
                 $evidenceAfter['numstat'],
@@ -309,11 +320,49 @@ final class TrustedBaseBootstrapContractTest extends TestCase
             self::assertStringContainsString("-\t-\tcommitted.bin\0", $evidenceAfter['numstat']);
             self::assertStringContainsString('diff --git a/review.txt b/review.txt', $evidenceAfter['patch']);
             self::assertStringContainsString('diff --git a/committed.bin b/committed.bin', $evidenceAfter['patch']);
-            self::assertStringContainsString(
-                'Binary files a/committed.bin and b/committed.bin differ',
-                $evidenceAfter['patch'],
-            );
+            self::assertStringContainsString('+head binary marker', $evidenceAfter['patch']);
             self::assertStringNotContainsString("\033[", $evidenceAfter['patch']);
+        } finally {
+            $this->removeDirectory($fixture);
+        }
+    }
+
+    public function testReviewerEvidenceUsesTrustedBaseAttributesWhenHeadReclassifiesBinary(): void
+    {
+        $fixture = sys_get_temp_dir() . '/reviewer-evidence-reclassification-' . bin2hex(random_bytes(8));
+        self::assertTrue(mkdir($fixture, 0700, true));
+
+        try {
+            $this->runGit($fixture, ['init', '-q']);
+            $this->runGit($fixture, ['config', 'user.name', 'Reviewer Evidence Test']);
+            $this->runGit($fixture, ['config', 'user.email', 'reviewer-evidence@example.invalid']);
+            file_put_contents($fixture . '/.gitattributes', "payload.bin binary\n");
+            file_put_contents($fixture . '/payload.bin', "base binary marker\n");
+            $this->runGit($fixture, ['add', '.gitattributes', 'payload.bin']);
+            $this->runGit($fixture, ['commit', '-qm', 'base']);
+            $base = trim($this->runGit($fixture, ['rev-parse', 'HEAD']));
+
+            file_put_contents($fixture . '/.gitattributes', "payload.bin text\n");
+            file_put_contents($fixture . '/payload.bin', "head binary marker\n");
+            $this->runGit($fixture, ['add', '.gitattributes', 'payload.bin']);
+            $this->runGit($fixture, ['commit', '-qm', 'head reclassifies binary']);
+            $head = trim($this->runGit($fixture, ['rev-parse', 'HEAD']));
+
+            $evidence = $this->runEvidenceSnapshot($fixture, $base, $head, 'head-reclassification');
+
+            self::assertSame(".gitattributes\0payload.bin\0", $evidence['changed_paths']);
+            self::assertStringContainsString("payload.bin\0diff\0unset\0", $evidence['base_attributes']);
+            self::assertStringContainsString('+head binary marker', $evidence['patch']);
+
+            try {
+                ReadonlyReviewBundle::assertTrustedBaseDiffAttributes(
+                    $evidence['base_attributes'],
+                    ReadonlyReviewBundle::changedPathsFromNul($evidence['changed_paths']),
+                );
+                self::fail('Head-side binary reclassification bypassed the trusted-base policy.');
+            } catch (\RuntimeException $exception) {
+                self::assertStringContainsString('trusted-base attributes', $exception->getMessage());
+            }
         } finally {
             $this->removeDirectory($fixture);
         }
@@ -351,7 +400,7 @@ final class TrustedBaseBootstrapContractTest extends TestCase
         return [proc_close($process), $stdout, $stderr];
     }
 
-    /** @return array{changed_paths: string, numstat: string, patch: string} */
+    /** @return array{changed_paths: string, base_attributes: string, numstat: string, patch: string} */
     private function runEvidenceSnapshot(string $fixture, string $base, string $head, string $label): array
     {
         $controlRoot = sys_get_temp_dir() . '/reviewer-evidence-control-' . $label . '-' . bin2hex(random_bytes(8));
@@ -375,29 +424,30 @@ final class TrustedBaseBootstrapContractTest extends TestCase
             escapeshellarg($controlRoot) .
             ' ' .
             escapeshellarg($canonicalFixture),
-            'readonly_reviewer_bind_evidence_head ' .
+            'readonly_reviewer_bind_evidence_base_policy ' .
             escapeshellarg($controlRoot) .
             ' ' .
             escapeshellarg($canonicalFixture) .
             ' ' .
-            escapeshellarg($head),
+            escapeshellarg($base),
             'readonly_reviewer_evidence_git diff --name-only --no-color --no-renames --no-ext-diff --no-textconv -z ' .
             escapeshellarg($base) .
             ' ' .
             escapeshellarg($head) .
             ' > ' .
             escapeshellarg($controlRoot . '/changed-paths'),
-            'readonly_reviewer_evidence_git diff --numstat --no-color --no-renames --no-ext-diff --no-textconv -z ' .
+            'readonly_reviewer_evidence_git check-attr --cached -z --stdin diff < ' .
+            escapeshellarg($controlRoot . '/changed-paths') .
+            ' > ' .
+            escapeshellarg($controlRoot . '/base-attributes'),
+            'readonly_reviewer_evidence_git read-tree ' . escapeshellarg($head),
+            'readonly_reviewer_evidence_git diff --cached --text --numstat --no-color --no-renames --no-ext-diff --no-textconv -z ' .
             escapeshellarg($base) .
-            ' ' .
-            escapeshellarg($head) .
             ' -- > ' .
             escapeshellarg($controlRoot . '/numstat'),
-            'readonly_reviewer_evidence_git diff --full-index --unified=0 --no-color --src-prefix=a/ --dst-prefix=b/ ' .
+            'readonly_reviewer_evidence_git diff --cached --text --full-index --unified=0 --no-color --src-prefix=a/ --dst-prefix=b/ ' .
             '--no-renames --no-ext-diff --no-textconv ' .
             escapeshellarg($base) .
-            ' ' .
-            escapeshellarg($head) .
             ' -- > ' .
             escapeshellarg($controlRoot . '/patch'),
         ]);
@@ -418,6 +468,7 @@ final class TrustedBaseBootstrapContractTest extends TestCase
 
             return [
                 'changed_paths' => (string) file_get_contents($controlRoot . '/changed-paths'),
+                'base_attributes' => (string) file_get_contents($controlRoot . '/base-attributes'),
                 'numstat' => (string) file_get_contents($controlRoot . '/numstat'),
                 'patch' => (string) file_get_contents($controlRoot . '/patch'),
             ];

@@ -54,6 +54,31 @@ try {
             ReadonlyReviewBundle::assertTextDiffNumstat((string) stream_get_contents(STDIN), $paths);
             break;
 
+        case 'assert-base-diff-attributes':
+            $paths = json_decode(
+                (string) file_get_contents($required('changed-paths')),
+                true,
+                512,
+                JSON_THROW_ON_ERROR,
+            );
+            if (!is_array($paths)) {
+                throw new RuntimeException('Reviewer changed-path evidence is invalid.');
+            }
+            ReadonlyReviewBundle::assertTrustedBaseDiffAttributes((string) stream_get_contents(STDIN), $paths);
+            break;
+
+        case 'assert-text-blob':
+            $maximumRawBytes = filter_var($required('max-raw-bytes'), FILTER_VALIDATE_INT);
+            if (!is_int($maximumRawBytes) || $maximumRawBytes < 1 || $maximumRawBytes > 8000000) {
+                throw new InvalidArgumentException('Invalid --max-raw-bytes.');
+            }
+            $blob = stream_get_contents(STDIN, $maximumRawBytes + 1);
+            if (!is_string($blob)) {
+                throw new RuntimeException('Reviewer changed blob is unavailable.');
+            }
+            ReadonlyReviewBundle::assertModelReviewableBlob($blob, $maximumRawBytes);
+            break;
+
         case 'sanitize-patch':
             if ($options !== []) {
                 throw new InvalidArgumentException('sanitize-patch accepts no options.');

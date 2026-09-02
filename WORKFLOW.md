@@ -453,10 +453,17 @@ configuration, connectors, delegation, credentials, or external writes;
 non-macOS execution fails closed. The machine contract is the source for model,
 feature, schema, runtime, and trusted-path settings; the runner orchestrates
 separately materialized exact-base bundle and isolated-runtime libraries.
-Commit-derived evidence is rendered through an empty-template private Gitdir
-whose index and materialized `.gitattributes` files are bound to the verified
-head. Source-worktree Git configuration, `.git/info/attributes`, and host Git
-templates cannot influence changed paths, numstat, or patch bytes.
+Commit-derived evidence is rendered through an empty-template private Gitdir.
+Its index is first bound to the verified review base so `check-attr --cached`
+can reject paths marked binary by trusted-base attributes. Raw blobs from both
+commits must also be bounded UTF-8 without NUL bytes before the index advances
+to the verified head and zero-context numstat and patch evidence is rendered.
+Independent numeric-numstat validation rejects any remaining binary
+classification before model input.
+Head-side attribute changes remain untrusted diff content and cannot
+reclassify or conceal binary evidence before rejection. Source-worktree Git
+configuration, `.git/info/attributes`, and host Git templates cannot influence
+changed paths, attribute evidence, numstat, or patch bytes.
 The pinned CLI exposes `--ignore-user-config`, `--ignore-rules`, and
 `--strict-config` on `exec` but rejects them on its `debug` preflights. Those
 preflights therefore use `env -i`, a newly created non-writable synthetic

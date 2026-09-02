@@ -35,6 +35,60 @@ final class ReadonlyReviewBundle
     }
 
     /** @param list<string> $expectedPaths */
+    public static function assertTrustedBaseDiffAttributes(string $raw, array $expectedPaths): void
+    {
+        if (!array_is_list($expectedPaths) || ($raw !== '' && !str_ends_with($raw, "\0"))) {
+            throw new RuntimeException('Reviewer trusted-base attribute evidence is invalid.');
+        }
+        foreach ($expectedPaths as $path) {
+            if (!is_string($path) || !RepoPath::isNormalized($path)) {
+                throw new RuntimeException('Reviewer trusted-base attribute path evidence is invalid.');
+            }
+        }
+        $fields = $raw === '' ? [] : explode("\0", substr($raw, 0, -1));
+        if (count($fields) % 3 !== 0) {
+            throw new RuntimeException('Reviewer trusted-base attribute evidence is invalid.');
+        }
+        $paths = [];
+        for ($offset = 0; $offset < count($fields); $offset += 3) {
+            [$path, $attribute, $value] = array_slice($fields, $offset, 3);
+            if (
+                !RepoPath::isNormalized($path) ||
+                $attribute !== 'diff' ||
+                $value === '' ||
+                preg_match('/[\x00-\x1F\x7F]/', $value) === 1
+            ) {
+                throw new RuntimeException('Reviewer trusted-base attribute evidence is invalid.');
+            }
+            if ($value === 'unset') {
+                throw new RuntimeException(
+                    'Reviewer binary diffs are not model-reviewable under trusted-base attributes.',
+                );
+            }
+            $paths[] = $path;
+        }
+        if (count($paths) !== count(array_unique($paths))) {
+            throw new RuntimeException('Reviewer trusted-base attribute paths are duplicated.');
+        }
+        sort($paths, SORT_STRING);
+        $normalizedExpected = $expectedPaths;
+        sort($normalizedExpected, SORT_STRING);
+        if ($paths !== $normalizedExpected) {
+            throw new RuntimeException('Reviewer trusted-base attribute paths do not match the committed diff.');
+        }
+    }
+
+    public static function assertModelReviewableBlob(string $blob, int $maximumRawBytes): void
+    {
+        if ($maximumRawBytes < 1 || strlen($blob) > $maximumRawBytes) {
+            throw new RuntimeException('Reviewer changed blob exceeds the bounded text input size.');
+        }
+        if (str_contains($blob, "\0") || preg_match('//u', $blob) !== 1) {
+            throw new RuntimeException('Reviewer changed blob contains non-text content.');
+        }
+    }
+
+    /** @param list<string> $expectedPaths */
     public static function assertTextDiffNumstat(string $raw, array $expectedPaths): void
     {
         if (!array_is_list($expectedPaths) || ($raw !== '' && !str_ends_with($raw, "\0"))) {

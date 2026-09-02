@@ -55,13 +55,9 @@ readonly_reviewer_evidence_git() {
         -c http.proxy= -c https.proxy= -c pager.diff=false -c core.excludesfile=/dev/null --git-dir="$readonly_reviewer_evidence_git_dir" "$@"
 }
 
-readonly_reviewer_bind_evidence_head() {
-    local control_root="$1" repo_root="$2" head_sha="$3"
-    local work_tree="$control_root/evidence-attributes" work_tree_canonical=''
-    local tree_manifest="$control_root/evidence-head-tree.z"
-    local entry header path mode type object attribute_parent
-    local -a path_segments
-    local segment
+readonly_reviewer_bind_evidence_base_policy() {
+    local control_root="$1" repo_root="$2" base_sha="$3"
+    local work_tree="$control_root/evidence-work-tree" work_tree_canonical=''
 
     mkdir -m 0700 -- "$work_tree" || return 1
     work_tree_canonical="$(canonical_path "$work_tree")" || return 1
@@ -69,38 +65,15 @@ readonly_reviewer_bind_evidence_head() {
         "$work_tree_canonical" != "$repo_root"/* ]] || return 1
     readonly_reviewer_evidence_work_tree="$work_tree_canonical"
 
-    readonly_reviewer_evidence_git read-tree "$head_sha" || return 1
-    readonly_reviewer_evidence_git ls-tree -r -z "$head_sha" > "$tree_manifest" || return 1
-    while IFS= read -r -d '' entry; do
-        [[ "$entry" == *$'\t'* ]] || return 1
-        header="${entry%%$'\t'*}"
-        path="${entry#*$'\t'}"
-        if [[ "$path" != '.gitattributes' && "$path" != */.gitattributes ]]; then
-            continue
-        fi
-        IFS=' ' read -r mode type object <<< "$header"
-        [[ "$mode" == '100644' && "$type" == 'blob' && "$object" =~ ^[a-f0-9]{40}$ &&
-            "$path" != /* && "$path" != */ && "$path" != *\\* && ! "$path" =~ [[:cntrl:]] ]] || return 1
-        IFS='/' read -r -a path_segments <<< "$path"
-        for segment in "${path_segments[@]}"; do
-            [[ -n "$segment" && "$segment" != '.' && "$segment" != '..' ]] || return 1
-        done
-        attribute_parent="${path%/*}"
-        if [[ "$attribute_parent" != "$path" ]]; then
-            mkdir -p -- "$work_tree_canonical/$attribute_parent" || return 1
-        fi
-        if ! readonly_reviewer_evidence_git show "${head_sha}:${path}" > "$work_tree_canonical/$path" ||
-            [[ "$(readonly_reviewer_evidence_git hash-object --no-filters "$work_tree_canonical/$path")" != "$object" ]]; then
-            return 1
-        fi
-        chmod 0400 "$work_tree_canonical/$path" || return 1
-    done < "$tree_manifest"
-    /bin/rm -f -- "$tree_manifest" || return 1
+    # Attribute policy is an authority boundary. The base index is queried
+    # explicitly with check-attr --cached before any head index is installed.
+    readonly_reviewer_evidence_git read-tree "$base_sha" || return 1
 }
 
 readonly_reviewer_materialize_bundle() {
     local control_root="$1" review_root="$2" base_sha="$3" head_sha="$4" lens="$5"
-    local changed_paths_file trusted_paths trusted_path trusted_path_count trusted_paths_file
+    local changed_paths_file changed_paths_nul changed_path changed_commit changed_blob_type
+    local trusted_paths trusted_path trusted_path_count trusted_paths_file
     local reviewer_config role_file model reasoning disabled_features output_schema_path
     local ignored_sandbox_mode ignored_approval_policy
     local trusted_role_instructions review_input developer_instructions_file
@@ -109,17 +82,50 @@ readonly_reviewer_materialize_bundle() {
         exit 1
     }
     evidence_git() { readonly_reviewer_evidence_git "$@"; }
-    if ! readonly_reviewer_bind_evidence_head "$control_root" "$repo_root" "$head_sha"; then
-        echo "Reviewer committed attribute index could not be bound to the review head." >&2
+    if ! readonly_reviewer_bind_evidence_base_policy "$control_root" "$repo_root" "$base_sha"; then
+        echo "Reviewer committed attribute index could not be bound to the trusted review base." >&2
         exit 1
     fi
 
     changed_paths_file="$control_root/changed-paths.json"
-    if ! evidence_git diff --name-only --no-color --no-renames --no-ext-diff --no-textconv -z "$base_sha" "$head_sha" \
-        | trusted_php "$control_root/scripts/agent/readonly_review_bundle.php" changed-paths > "$changed_paths_file"; then
+    changed_paths_nul="$control_root/changed-paths.z"
+    if ! evidence_git diff --name-only --no-color --no-renames --no-ext-diff --no-textconv -z \
+        "$base_sha" "$head_sha" > "$changed_paths_nul" ||
+        ! trusted_php "$control_root/scripts/agent/readonly_review_bundle.php" changed-paths \
+            < "$changed_paths_nul" > "$changed_paths_file"; then
         echo "Reviewer changed-path evidence could not be materialized." >&2
         exit 1
     fi
+    if ! evidence_git check-attr --cached -z --stdin diff < "$changed_paths_nul" \
+        | trusted_php "$control_root/scripts/agent/readonly_review_bundle.php" assert-base-diff-attributes \
+            --changed-paths="$changed_paths_file"; then
+        echo "Reviewer binary evidence was rejected by trusted-base attributes." >&2
+        exit 1
+    fi
+    while IFS= read -r -d '' changed_path; do
+        for changed_commit in "$base_sha" "$head_sha"; do
+            changed_blob_type="$(evidence_git cat-file -t "${changed_commit}:${changed_path}" 2>/dev/null || true)"
+            case "$changed_blob_type" in
+                '') continue ;;
+                blob)
+                    if ! evidence_git cat-file blob "${changed_commit}:${changed_path}" \
+                        | trusted_php "$control_root/scripts/agent/readonly_review_bundle.php" assert-text-blob \
+                            --max-raw-bytes=8000000; then
+                        echo "Reviewer changed blob is not bounded UTF-8 text." >&2
+                        exit 1
+                    fi
+                    ;;
+                *)
+                    echo "Reviewer changed path does not resolve to a regular blob." >&2
+                    exit 1
+                    ;;
+            esac
+        done
+    done < "$changed_paths_nul"
+    readonly_reviewer_evidence_git read-tree "$head_sha" || {
+        echo "Reviewer exact head index could not be materialized." >&2
+        exit 1
+    }
 
     trusted_paths="$(trusted_php "$control_root/scripts/agent/readonly_reviewer_contract.php" trusted-paths --lens="$lens")" || exit $?
 
@@ -169,15 +175,15 @@ readonly_reviewer_materialize_bundle() {
         exit 1
     fi
 
-    if ! evidence_git diff --numstat --no-color --no-renames --no-ext-diff --no-textconv -z "$base_sha" "$head_sha" -- \
+    if ! evidence_git diff --cached --text --numstat --no-color --no-renames --no-ext-diff --no-textconv -z "$base_sha" -- \
         | trusted_php "$control_root/scripts/agent/readonly_review_bundle.php" assert-text-diff \
             --changed-paths="$changed_paths_file"; then
         echo "Reviewer binary or mismatched diff evidence was rejected." >&2
         exit 1
     fi
-    if ! evidence_git diff --full-index --unified=0 --no-color --src-prefix=a/ --dst-prefix=b/ \
+    if ! evidence_git diff --cached --text --full-index --unified=0 --no-color --src-prefix=a/ --dst-prefix=b/ \
         --no-renames --no-ext-diff --no-textconv \
-        "$base_sha" "$head_sha" -- \
+        "$base_sha" -- \
         | trusted_php "$control_root/scripts/agent/readonly_review_bundle.php" sanitize-patch \
             > "$review_root/review.patch"; then
         echo "Reviewer committed patch could not be materialized." >&2

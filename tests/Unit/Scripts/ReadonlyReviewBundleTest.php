@@ -52,6 +52,45 @@ class ReadonlyReviewBundleTest extends TestCase
         ReadonlyReviewBundle::assertTextDiffNumstat("-\t-\tsecret-bearing.bin\0", ['secret-bearing.bin']);
     }
 
+    public function testTrustedBaseAttributesRejectBinaryReclassificationBeforePatchMaterialization(): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('trusted-base attributes');
+        ReadonlyReviewBundle::assertTrustedBaseDiffAttributes("payload.bin\0diff\0unset\0", ['payload.bin']);
+    }
+
+    public function testTrustedBaseAttributesAcceptOnlyTheExactChangedTextPaths(): void
+    {
+        ReadonlyReviewBundle::assertTrustedBaseDiffAttributes(
+            "WORKFLOW.md\0diff\0unspecified\0AGENTS.md\0diff\0set\0",
+            ['AGENTS.md', 'WORKFLOW.md'],
+        );
+        self::addToAssertionCount(1);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('do not match');
+        ReadonlyReviewBundle::assertTrustedBaseDiffAttributes("AGENTS.md\0diff\0unspecified\0", ['WORKFLOW.md']);
+    }
+
+    public function testChangedBlobBoundaryAcceptsBoundedUtf8AndRejectsAlternateBinaryRepresentations(): void
+    {
+        ReadonlyReviewBundle::assertModelReviewableBlob("ordinary UTF-8 text\n", 1024);
+        self::addToAssertionCount(1);
+
+        foreach (["binary\0payload", "invalid \xFF payload"] as $blob) {
+            try {
+                ReadonlyReviewBundle::assertModelReviewableBlob($blob, 1024);
+                self::fail('A non-text changed blob was accepted.');
+            } catch (\RuntimeException $exception) {
+                self::assertStringContainsString('non-text content', $exception->getMessage());
+            }
+        }
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('bounded text input size');
+        ReadonlyReviewBundle::assertModelReviewableBlob('oversized', 4);
+    }
+
     public function testZeroContextPatchRemovesUnchangedHunkSectionHeadings(): void
     {
         $patch =

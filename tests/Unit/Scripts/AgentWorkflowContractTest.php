@@ -283,7 +283,7 @@ class AgentWorkflowContractTest extends TestCase
             $contract['authority']['reviewer']['review_bundle_hunk_header_policy'] ?? null,
         );
         self::assertSame(
-            'reject_before_model_input',
+            'trusted_base_attributes_and_bounded_utf8_blobs_reject_before_model_input',
             $contract['authority']['reviewer']['review_bundle_binary_policy'] ?? null,
         );
         self::assertSame(

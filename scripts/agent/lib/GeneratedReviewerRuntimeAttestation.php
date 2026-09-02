@@ -80,7 +80,7 @@ final class GeneratedReviewerRuntimeAttestation
         'web_search',
     ];
 
-    public const SHA256 = '27c265bfc8f5121aaeade6bca6ad5a2a440f24834f878d4795ff318255393782';
+    public const SHA256 = 'c334fd5b85cb4c7fc498828ab39b5661ecee0732c3fafd5047ab07008c28d707';
 
     private function __construct() {}
 }
