@@ -47,6 +47,15 @@ final class TrustedBaseBootstrapContractTest extends TestCase
         }
     }
 
+    public function testCanonicalParserRejectsAnUnknownPayloadBeforeDispatch(): void
+    {
+        [$status, $stdout, $stderr] = $this->runParser($this->contract(), 'unknown-payload');
+
+        self::assertSame(1, $status, $stdout . $stderr);
+        self::assertSame('', $stdout);
+        self::assertSame('', $stderr);
+    }
+
     public function testCanonicalParserRejectsManifestDriftFailClosed(): void
     {
         $canonical = $this->contract();
