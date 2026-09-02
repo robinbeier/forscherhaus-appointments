@@ -109,7 +109,8 @@ class ReadonlyReviewerRuntimeLibraryTest extends TestCase
                     "    fi\n" .
                     "  done\n" .
                     "fi\n" .
-                    "/usr/bin/printf '%s\\n' \"\$*\" >> \"\$TMPDIR/codex-args.log\"\n" .
+                    "/usr/bin/printf '%s\\0' \"\$@\" >> \"\$TMPDIR/codex-args.bin\"\n" .
+                    "/usr/bin/printf '\\0' >> \"\$TMPDIR/codex-args.bin\"\n" .
                     "if [[ \"\$arguments\" == *\" debug models --bundled \"* ]]; then\n" .
                     '  /usr/bin/printf ' .
                     escapeshellarg("%s\n") .
@@ -241,18 +242,78 @@ class ReadonlyReviewerRuntimeLibraryTest extends TestCase
             fclose($pipes[2]);
 
             $exitCode = proc_close($process);
-            $invocationLog = (string) file_get_contents($controlRoot . '/runtime-tmp/codex-args.log');
-            $invocations = array_values(array_filter(explode("\n", trim($invocationLog))));
+            $invocationLog = file_get_contents($controlRoot . '/runtime-tmp/codex-args.bin');
+            self::assertIsString($invocationLog);
+            $serializedInvocations = array_values(
+                array_filter(
+                    explode("\0\0", rtrim($invocationLog, "\0")),
+                    static fn(string $invocation): bool => $invocation !== '',
+                ),
+            );
+            $invocations = array_map(
+                static fn(string $invocation): array => explode("\0", $invocation),
+                $serializedInvocations,
+            );
             self::assertGreaterThanOrEqual(3, count($invocations));
-            foreach (array_slice($invocations, 0, 2) as $invocation) {
-                self::assertStringNotContainsString('--ignore-user-config', $invocation);
-                self::assertStringNotContainsString('--ignore-rules', $invocation);
-                self::assertStringNotContainsString('--strict-config', $invocation);
+            self::assertSame(['debug', 'models', '--bundled'], $invocations[0]);
+            foreach (['--ignore-user-config', '--ignore-rules', '--strict-config'] as $execOnlyFlag) {
+                self::assertNotContains($execOnlyFlag, $invocations[0]);
+                self::assertNotContains($execOnlyFlag, $invocations[1]);
             }
+            self::assertSame(
+                ['debug', 'prompt-input', 'UNTRUSTED-REVIEW-BUNDLE-PROBE'],
+                array_slice($invocations[1], -3),
+            );
             $execInvocation = $invocations[array_key_last($invocations)];
-            self::assertStringContainsString('--strict-config', $execInvocation);
-            self::assertStringContainsString('--ignore-user-config', $execInvocation);
-            self::assertStringContainsString('--ignore-rules', $execInvocation);
+            self::assertSame(
+                [
+                    '--ask-for-approval',
+                    'never',
+                    '--sandbox',
+                    'read-only',
+                    'exec',
+                    '--ignore-user-config',
+                    '--ignore-rules',
+                    '--strict-config',
+                    '--ephemeral',
+                    '--skip-git-repo-check',
+                    '--color',
+                    'never',
+                    '--model',
+                    'gpt-5.4',
+                    '--output-schema',
+                    $controlRoot . '/scripts/agent/readonly-review-output.schema.json',
+                ],
+                array_slice($execInvocation, 0, 16),
+            );
+            self::assertSame(
+                [
+                    '-c',
+                    'model_catalog_json="' . $controlRoot . '/models.json"',
+                    '-c',
+                    'model_reasoning_effort="high"',
+                    '-c',
+                    'log_dir="' . $controlRoot . '/runtime-tmp/log"',
+                    '-c',
+                    'developer_instructions="Trusted fixture reviewer policy.\\n"',
+                    '-c',
+                    'project_root_markers=[]',
+                    '-c',
+                    'web_search="disabled"',
+                    '-c',
+                    'shell_environment_policy.inherit="none"',
+                    '-c',
+                    'mcp_servers={}',
+                    '-c',
+                    'agents.max_threads=1',
+                    '-c',
+                    'agents.max_depth=0',
+                    '-C',
+                    $sealedRoot,
+                    '-',
+                ],
+                array_slice($execInvocation, -23),
+            );
             if ($scenario === 'invalid') {
                 self::assertSame(1, $exitCode);
                 self::assertSame('', $stdout);

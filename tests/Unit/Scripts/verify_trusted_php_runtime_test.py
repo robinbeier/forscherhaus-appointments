@@ -278,6 +278,27 @@ class TrustedPhpRuntimeTest(unittest.TestCase):
         self.assertFalse(os.path.exists(target))
         self.assertFalse(os.path.exists(unexpected_output))
 
+    def test_pinned_archive_download_rejects_non_root_owned_fixed_curl_before_execution(self):
+        primitives = verifier._RUNTIME_PRIMITIVES
+        target = os.path.join(self.root, "download.tar.gz")
+        with mock.patch.object(
+            primitives,
+            "_regular_secure",
+            return_value=mock.Mock(st_uid=501),
+        ) as regular_secure, mock.patch.object(primitives.subprocess, "run") as run:
+            with self.assertRaisesRegex(
+                verifier.AttestationError,
+                "safe runtime archive transport is unavailable",
+            ):
+                verifier._download_pinned_archive(
+                    "https://artifacts.example.invalid/php-runtime.tar.gz",
+                    target,
+                )
+
+        regular_secure.assert_called_once_with(os.path.realpath(primitives.CURL_EXECUTABLE))
+        run.assert_not_called()
+        self.assertFalse(os.path.exists(target))
+
     def test_linux_x86_64_pinned_static_archive_is_parsed_without_loader_execution(self):
         archive_path, descriptor, closure_sha256 = self.archive_fixture(content=self.static_elf())
         self.write_contract(
