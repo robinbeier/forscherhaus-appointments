@@ -591,6 +591,30 @@ class ParallelWorkContractCliTest extends TestCase
         );
     }
 
+    public function testTrustedVerificationReportsStagedOnlyLaneChangeAsProvisional(): void
+    {
+        $manifestPath = $this->writeJsonFixture(
+            'staged-only-lane-verification',
+            $this->manifestForPath('tests/Fixtures/parallel/lane-a'),
+        );
+        $staged = $this->repoRoot . '/tests/Fixtures/parallel/lane-a/staged-only.txt';
+        self::assertNotFalse(file_put_contents($staged, "staged-only\n"));
+        $this->runGit($this->repoRoot, ['add', 'tests/Fixtures/parallel/lane-a/staged-only.txt']);
+
+        [$exitCode, $stdout, $stderr] = $this->runTrustedLaneVerification($manifestPath, 'lane-a');
+
+        self::assertSame(0, $exitCode, $stderr);
+        self::assertSame('', $stderr);
+        $result = json_decode($stdout, true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame('provisional_pass', $result['status']);
+        self::assertFalse($result['verification']['working_tree_clean']);
+        self::assertFalse($result['verification']['integration_ready']);
+        self::assertSame(
+            hash('sha256', 'tests/Fixtures/parallel/lane-a/staged-only.txt'),
+            $result['verification']['changed_paths_sha256'],
+        );
+    }
+
     public function testLaneVerificationRejectsAnInLaneValidator(): void
     {
         $manifestPath = $this->writeJsonFixture(

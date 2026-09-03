@@ -511,6 +511,16 @@ uses both the outer Seatbelt boundary and Codex `read-only` sandboxing with
 approval mode `never`. A bootstrap review is review evidence only; it grants no
 mutation, publication, Linear, or landing authority.
 
+The Seatbelt network allowance exists only for the Primary-authorized outer
+Codex model transport. The model receives no network tool, connector,
+endpoint override, ambient proxy setting, or external credential with which to
+select another destination. The local Primary account, the attested Codex
+binary, and the operating-system sandbox are trust anchors: containment of an
+independently compromised process already running as that same OS account (or
+of a compromised host administrator) is outside this reviewer boundary and
+must stop the landing workflow rather than be represented as valid review
+evidence.
+
 For an executable bootstrap/isolation check without a model request, the
 Primary may invoke the reviewer payload through the same exact-base launcher
 with `--diagnostic-bootstrap-only` and without `--codex-bin`. On macOS this runs

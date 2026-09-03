@@ -269,6 +269,55 @@ class TrustedPhpRuntimeTest(unittest.TestCase):
         with self.assertRaisesRegex(verifier.AttestationError, "runtime path is unavailable"):
             verifier.dependency_closure(self.php, "Darwin", inspect)
 
+    def test_linux_dependency_closure_uses_bounded_system_inspector_and_normalizes_dependencies(self):
+        primitives = verifier._RUNTIME_PRIMITIVES
+        inspector = os.path.join(self.root, "ldd-fixture")
+        dependency = os.path.join(self.root, "libfixture.so")
+        loader = os.path.join(self.root, "ld-linux-fixture.so")
+        for path in (inspector, dependency, loader):
+            with open(path, "wb") as stream:
+                stream.write(b"fixture")
+            os.chmod(path, 0o555)
+
+        output = (
+            "linux-vdso.so.1 (0x00007fff)\n"
+            f"libfixture.so => {dependency}/../libfixture.so (0x00007f00)\n"
+            f"{loader} (0x00007f01)\n"
+        )
+        runner_result = mock.Mock(stdout=output)
+        with mock.patch.dict(primitives.SYSTEM_UTILITIES, {"Linux": inspector}), mock.patch.object(
+            primitives.subprocess,
+            "run",
+            return_value=runner_result,
+        ) as run, self.owned_lstat_by_path(
+            {
+                os.path.realpath(self.php): 0,
+                os.path.realpath(inspector): 0,
+                os.path.realpath(dependency): 0,
+                os.path.realpath(loader): 0,
+            }
+        ):
+            paths, sealed = primitives.dependency_closure(self.php, "Linux")
+
+        self.assertEqual(
+            sorted(
+                [
+                    os.path.realpath(self.php),
+                    os.path.realpath(dependency),
+                    os.path.realpath(loader),
+                ]
+            ),
+            paths,
+        )
+        self.assertEqual([], sealed)
+        run.assert_called_once_with(
+            [inspector, os.path.realpath(self.php)],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"},
+        )
+
     def test_digest_mismatch_rejected(self):
         with self.owned_lstat(0):
             self.write_contract(
