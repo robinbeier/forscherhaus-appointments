@@ -250,6 +250,20 @@ class ParallelWorkContractTest extends TestCase
         );
     }
 
+    public function testAllowsOverlappingOwnershipRulesWithinTheSameLane(): void
+    {
+        $manifest = $this->validManifest();
+        $manifest['lanes'][0]['ownership'] = [
+            $this->pathRule('scripts/github'),
+            $this->pathRule('scripts/github/check.php', 'exact_file'),
+        ];
+
+        self::assertNotContains(
+            'ownership_overlap:0:0',
+            ParallelWorkContract::validate($manifest, $this->policy, $this->ownershipMap),
+        );
+    }
+
     public function testExplicitFilenamePrefixOwnsFuturePartialsOnlyInItsDirectory(): void
     {
         $manifest = $this->validManifest();

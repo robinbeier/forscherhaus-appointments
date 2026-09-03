@@ -39,6 +39,16 @@ final class ReviewerPolicyAttestationGeneratorTest extends TestCase
         self::assertSame(0, $status, $stdout . $stderr);
     }
 
+    public function testRuntimeRejectsPolicyFieldsMissingFromTheCodeSideAttestation(): void
+    {
+        $policy = $this->reviewerPolicy($this->repoRoot);
+        $policy['future_security_boundary'] = 'fail_closed';
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('runtime boundary key set is invalid');
+        \Forscherhaus\AgentHarness\ReadonlyReviewerContract::trustedBasePaths($policy);
+    }
+
     public function testGeneratorAddsNewPolicyFieldsWithoutRewritingRuntimeEnforcement(): void
     {
         $fixtureRoot = sys_get_temp_dir() . '/reviewer-attestation-generator-' . bin2hex(random_bytes(8));

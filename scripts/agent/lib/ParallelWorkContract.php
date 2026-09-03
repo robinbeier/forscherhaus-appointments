@@ -158,6 +158,9 @@ final class ParallelWorkContract
                 }
 
                 foreach ($ownedPathRules as $ownedPathRule) {
+                    if ($ownedPathRule['owner'] === (string) $index) {
+                        continue;
+                    }
                     if (
                         ParallelWorkOwnershipContract::pathRulesOverlap(
                             $path,

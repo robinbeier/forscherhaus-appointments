@@ -267,6 +267,12 @@ final class ReadonlyReviewerContract
     {
         self::disabledFeatures($reviewerPolicy);
 
+        $policyKeys = array_keys($reviewerPolicy);
+        sort($policyKeys, SORT_STRING);
+        if ($policyKeys !== GeneratedReviewerRuntimeAttestation::KEYS) {
+            throw new \RuntimeException('Reviewer runtime boundary key set is invalid.');
+        }
+
         $attestedBoundary = [];
         foreach (GeneratedReviewerRuntimeAttestation::KEYS as $key) {
             if (!array_key_exists($key, $reviewerPolicy)) {
