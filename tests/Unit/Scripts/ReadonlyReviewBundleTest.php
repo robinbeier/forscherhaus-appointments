@@ -121,6 +121,16 @@ class ReadonlyReviewBundleTest extends TestCase
         ReadonlyReviewBundle::sanitizeZeroContextPatch("diff\0payload");
     }
 
+    public function testZeroContextPatchRejectsUnchangedHunkContext(): void
+    {
+        $patch =
+            "diff --git a/example.php b/example.php\n" . "@@ -10,2 +10,2 @@\n" . " unchanged\n" . "-old\n" . "+new\n";
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('unchanged hunk context');
+        ReadonlyReviewBundle::sanitizeZeroContextPatch($patch);
+    }
+
     public function testModelCatalogRestrictionRemovesEveryModelToolSurface(): void
     {
         $catalog = ReadonlyReviewerModelPolicy::restrictModelCatalog(

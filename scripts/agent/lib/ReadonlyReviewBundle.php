@@ -134,12 +134,24 @@ final class ReadonlyReviewBundle
         if (str_contains($patch, "\0") || preg_match('//u', $patch) !== 1) {
             throw new RuntimeException('Reviewer patch contains non-text content.');
         }
+        $insideHunk = false;
         foreach (preg_split('/\r?\n/', $patch) ?: [] as $line) {
             if (
                 str_starts_with($line, '@@') &&
                 preg_match('/^@@ -[0-9]+(?:,[0-9]+)? \+[0-9]+(?:,[0-9]+)? @@(?: .*)?$/D', $line) !== 1
             ) {
                 throw new RuntimeException('Reviewer patch hunk header is invalid.');
+            }
+            if (str_starts_with($line, '@@')) {
+                $insideHunk = true;
+                continue;
+            }
+            if (str_starts_with($line, 'diff --git ')) {
+                $insideHunk = false;
+                continue;
+            }
+            if ($insideHunk && str_starts_with($line, ' ')) {
+                throw new RuntimeException('Reviewer patch contains unchanged hunk context.');
             }
         }
         $sanitized = preg_replace('/^(@@ -[0-9]+(?:,[0-9]+)? \+[0-9]+(?:,[0-9]+)? @@)[^\r\n]*$/m', '$1', $patch);
