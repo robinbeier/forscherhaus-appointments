@@ -267,6 +267,17 @@ class ParallelWorkContractTest extends TestCase
         );
     }
 
+    public function testRejectsDirectoryAndExactFileAtTheSamePathAcrossLanes(): void
+    {
+        $manifest = $this->validManifest();
+        $manifest['lanes'][1]['ownership'] = [$this->pathRule('scripts/github', 'exact_file')];
+
+        self::assertContains(
+            'ownership_overlap:0:1',
+            ParallelWorkContract::validate($manifest, $this->policy, $this->ownershipMap),
+        );
+    }
+
     public function testAllowsOverlappingOwnershipRulesWithinTheSameLane(): void
     {
         $manifest = $this->validManifest();
@@ -423,6 +434,21 @@ class ParallelWorkContractTest extends TestCase
             'unknown_primary_component_approval:unknown-component',
             ParallelWorkContract::validate($manifest, $this->policy, $this->ownershipMap),
         );
+    }
+
+    public function testRejectsDuplicateAndMalformedComponentApprovals(): void
+    {
+        $manifest = $this->validManifest();
+        $manifest['primary_approved_component_ids'] = [
+            'platform-quality-tooling',
+            'platform-quality-tooling',
+            'Invalid Component',
+        ];
+
+        $errors = ParallelWorkContract::validate($manifest, $this->policy, $this->ownershipMap);
+
+        self::assertContains('duplicate_primary_component_approval:platform-quality-tooling', $errors);
+        self::assertContains('invalid_primary_component_approval', $errors);
     }
 
     public function testExplicitCanonicalFileRequiresComponentApproval(): void

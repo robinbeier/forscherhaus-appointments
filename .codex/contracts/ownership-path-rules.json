@@ -104,10 +104,10 @@
             "overlaps": true
         },
         {
-            "name": "exact-directory-self",
+            "name": "exact-directory-tree-conflict",
             "left": {"path": "foo", "match": "directory"},
             "right": {"path": "foo", "match": "exact_file"},
-            "overlaps": false
+            "overlaps": true
         },
         {
             "name": "root-prefix-compatible",

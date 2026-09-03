@@ -223,6 +223,8 @@ def path_rules_overlap(left: Any, right: Any) -> bool:
     left_rule = parse_path_rule(left, "left path rule")
     right_rule = parse_path_rule(right, "right path rule")
     left_mode, right_mode = left_rule["match"], right_rule["match"]
+    if {left_mode, right_mode} == {"directory", "exact_file"} and left_rule["path"] == right_rule["path"]:
+        return True
     if left_mode == "exact_file":
         return path_rule_matches(right_rule, left_rule["path"])
     if right_mode == "exact_file":

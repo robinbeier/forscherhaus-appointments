@@ -89,6 +89,50 @@ final class ArchitectureOwnershipMapCheckTest extends TestCase
         self::assertStringContainsString('must set manual_approval_required = true', $combinedOutput);
     }
 
+    public function testCheckRejectsLegacySchemaAndFolderPrefixes(): void
+    {
+        foreach (
+            [
+                'schema-version-2' => [
+                    static function (array $map): array {
+                        $map['schema_version'] = 2;
+                        return $map;
+                    },
+                    '"schema_version" must be 3',
+                ],
+                'folder-prefixes' => [
+                    static function (array $map): array {
+                        $map['components'][0]['folder_prefixes'] = ['scripts/ci'];
+                        unset($map['components'][0]['path_rules']);
+                        return $map;
+                    },
+                    "missing required fields: ['path_rules']",
+                ],
+            ]
+            as $scenario => [$mutator, $expectedError]
+        ) {
+            $mapPath = $this->tmpDir . '/' . $scenario . '.json';
+            file_put_contents(
+                $mapPath,
+                json_encode(
+                    $mutator($this->buildComponentMap([])),
+                    JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
+                ),
+            );
+
+            $result = $this->runCommand([
+                'python3',
+                'scripts/ci/check_architecture_ownership_map.py',
+                '--map=' . $mapPath,
+                '--skip-diff-coverage',
+                '--skip-generated-docs-check',
+            ]);
+
+            self::assertSame(1, $result['exit_code'], $scenario);
+            self::assertStringContainsString($expectedError, $result['stdout'] . $result['stderr'], $scenario);
+        }
+    }
+
     /** @param array<string, mixed> $pathRule */
     #[DataProvider('malformedPathRules')]
     public function testCheckRejectsMalformedPathRulesThroughCanonicalParser(
