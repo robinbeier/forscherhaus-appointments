@@ -120,6 +120,10 @@ checkout code can execute. It starts the attested shared runtime directly;
 that runtime dispatches only the separately attested, manifest-bound payload,
 independently validates the same manifest, and owns clean Git/Python plus
 declared-path materialization for both agent-harness payloads.
+Both launcher and shared runtime also require their actual Bash source path to
+match the absolute materialized path supplied by the outer trusted boundary;
+an environment variable naming a different pristine copy cannot authorize the
+bytes that are being executed.
 Direct execution of any checked-out bootstrap script is forbidden and fails
 closed. The validator verifies provisional pre-commit ownership and clean
 post-commit integration evidence. One exact-base Python engine owns ownership

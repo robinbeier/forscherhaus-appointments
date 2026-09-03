@@ -9,7 +9,9 @@
 set -euo pipefail
 
 launcher_source_input="${TRUSTED_BASE_LAUNCHER_SOURCE_PATH:-}"
-if [[ "${TRUSTED_BASE_MATERIALIZED:-}" != "1" || "$launcher_source_input" != /* ]]; then
+launcher_executed_source="${BASH_SOURCE[0]:-}"
+if [[ "${TRUSTED_BASE_MATERIALIZED:-}" != "1" || "$launcher_source_input" != /* || \
+    "$launcher_executed_source" != "$launcher_source_input" ]]; then
     echo "Trusted-base launcher must be externally materialized from the verified base." >&2
     exit 2
 fi

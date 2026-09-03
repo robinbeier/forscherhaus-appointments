@@ -445,6 +445,26 @@ class TrustedPhpRuntimeTest(unittest.TestCase):
         with self.assertRaises(verifier.AttestationError):
             verifier.attest(self.contract, "Darwin-x86_64", self.inspector)
 
+    def test_pinned_archive_policy_rejects_unsafe_urls(self):
+        _, descriptor, _ = self.archive_fixture()
+        unsafe_urls = [
+            "http://artifacts.example.invalid/php-runtime.tar.gz",
+            "https://identity@artifacts.example.invalid/php-runtime.tar.gz",
+            "https://artifacts.example.invalid:444/php-runtime.tar.gz",
+            "https://artifacts.example.invalid/php-runtime.tar.gz?variant=test",
+            "https://artifacts.example.invalid/php-runtime.tar.gz#member",
+        ]
+
+        for unsafe_url in unsafe_urls:
+            with self.subTest(url=unsafe_url):
+                candidate = dict(descriptor)
+                candidate["url"] = unsafe_url
+                with self.assertRaisesRegex(
+                    verifier.AttestationError,
+                    "pinned runtime archive policy is invalid",
+                ):
+                    verifier._validated_pinned_archive_descriptor(candidate)
+
     def test_pinned_archive_digest_mismatch_is_rejected_before_extraction(self):
         archive_path, descriptor, closure_sha256 = self.archive_fixture()
         descriptor["archive_sha256"] = "0" * 64

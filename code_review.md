@@ -114,6 +114,9 @@ directly; the runtime dispatches only the separately attested payload,
 revalidates the same manifest, retains an intentionally independent structural
 cross-check as a security floor, and owns clean Git/Python plus exact-base declared
 path materialization for reviewer and parallel-work payloads. The declared
+launcher and runtime environment paths must equal their actual Bash source
+paths; a pristine path supplied alongside different executed bytes fails
+closed. The declared
 reviewer payload remains `scripts/agent/run_readonly_reviewer.sh`. The runner and
 `.codex/contracts/agent-workflow.json` own live-main/exact-merge-base binding,
 deterministic SHA-256 bundle construction, and trusted-path selection. Do not

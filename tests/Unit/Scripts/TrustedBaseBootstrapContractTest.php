@@ -141,6 +141,51 @@ final class TrustedBaseBootstrapContractTest extends TestCase
         );
     }
 
+    public function testLauncherRejectsAnEnvironmentPathDifferentFromTheExecutedSource(): void
+    {
+        $launcher = $this->repoRoot . '/scripts/agent/trusted_base_launcher.sh';
+        $modifiedLauncher = sys_get_temp_dir() . '/modified-trusted-launcher-' . bin2hex(random_bytes(8));
+        self::assertNotFalse(
+            file_put_contents($modifiedLauncher, (string) file_get_contents($launcher) . "\n# drift\n"),
+        );
+        self::assertTrue(chmod($modifiedLauncher, 0500));
+
+        try {
+            [$status, $stdout, $stderr] = $this->runBootstrapSource($modifiedLauncher, [
+                'TRUSTED_BASE_MATERIALIZED' => '1',
+                'TRUSTED_BASE_LAUNCHER_SOURCE_PATH' => $launcher,
+            ]);
+        } finally {
+            unlink($modifiedLauncher);
+        }
+
+        self::assertSame(2, $status, $stdout . $stderr);
+        self::assertSame('', $stdout);
+        self::assertStringContainsString('externally materialized from the verified base', $stderr);
+    }
+
+    public function testRuntimeRejectsAnEnvironmentPathDifferentFromTheExecutedSource(): void
+    {
+        $runtime = $this->repoRoot . '/scripts/agent/lib/trusted_base_payload_runtime.sh';
+        $modifiedRuntime = sys_get_temp_dir() . '/modified-trusted-runtime-' . bin2hex(random_bytes(8));
+        self::assertNotFalse(file_put_contents($modifiedRuntime, (string) file_get_contents($runtime) . "\n# drift\n"));
+        self::assertTrue(chmod($modifiedRuntime, 0400));
+
+        try {
+            [$status, $stdout, $stderr] = $this->runBootstrapSource($modifiedRuntime, [
+                'TRUSTED_BASE_LAUNCHER' => '1',
+                'TRUSTED_BASE_SHARED_RUNTIME_PATH' => $runtime,
+            ]);
+        } finally {
+            self::assertTrue(chmod($modifiedRuntime, 0600));
+            unlink($modifiedRuntime);
+        }
+
+        self::assertSame(2, $status, $stdout . $stderr);
+        self::assertSame('', $stdout);
+        self::assertStringContainsString('not bound to the executed source', $stderr);
+    }
+
     public function testRuntimeValidatesEveryDeclaredTreeEntryBeforeMaterialization(): void
     {
         $runtime = (string) file_get_contents($this->repoRoot . '/scripts/agent/lib/trusted_base_payload_runtime.sh');
@@ -587,6 +632,29 @@ final class TrustedBaseBootstrapContractTest extends TestCase
         self::assertSame(0, proc_close($process), $stderr);
 
         return $stdout;
+    }
+
+    /** @param array<string, string> $environment @return array{int, string, string} */
+    private function runBootstrapSource(string $source, array $environment): array
+    {
+        $arguments = ['/usr/bin/env', '-i', 'PATH=/usr/bin:/bin:/usr/sbin:/sbin'];
+        foreach ($environment as $name => $value) {
+            $arguments[] = $name . '=' . $value;
+        }
+        array_push($arguments, '/bin/bash', '--noprofile', '--norc', $source);
+        $process = proc_open(
+            $arguments,
+            [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+            $pipes,
+            $this->repoRoot,
+        );
+        self::assertIsResource($process);
+        $stdout = (string) stream_get_contents($pipes[1]);
+        $stderr = (string) stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+
+        return [proc_close($process), $stdout, $stderr];
     }
 
     private function removeDirectory(string $directory): void

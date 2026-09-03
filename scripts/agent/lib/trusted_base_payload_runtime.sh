@@ -4,8 +4,15 @@
 # trusted launcher materializes and verifies it beside the selected payload
 # before either reviewer or parallel-work code may source it.
 
+trusted_base_runtime_executed_source="${BASH_SOURCE[0]:-}"
 if [[ "${TRUSTED_BASE_LAUNCHER:-}" != '1' ]]; then
     echo 'Trusted-base shared runtime must be assembled by the exact-base launcher.' >&2
+    exit 2
+fi
+if [[ "$trusted_base_runtime_executed_source" == "$0" && \
+    ( "${TRUSTED_BASE_SHARED_RUNTIME_PATH:-}" != /* || \
+      "$trusted_base_runtime_executed_source" != "${TRUSTED_BASE_SHARED_RUNTIME_PATH:-}" ) ]]; then
+    echo 'Trusted-base shared runtime is not bound to the executed source.' >&2
     exit 2
 fi
 
@@ -321,7 +328,7 @@ trusted_base_payload_initialize() {
     local payload_mode="${TRUSTED_BASE_LAUNCHER_PAYLOAD_MODE:-}"
     local runtime_path="${TRUSTED_BASE_SHARED_RUNTIME_REPOSITORY_PATH:-}"
     local runtime_mode="${TRUSTED_BASE_SHARED_RUNTIME_MODE:-}"
-    local resolved_root='' resolved_base='' runner_source='' runtime_source=''
+    local resolved_root='' resolved_base='' runner_source='' runtime_source='' runtime_executed_source=''
 
     if [[ "${TRUSTED_BASE_LAUNCHER:-}" != '1' || \
         "${TRUSTED_BASE_LAUNCHER_PAYLOAD_ID:-}" != "$expected_payload_id" || \
@@ -370,6 +377,11 @@ trusted_base_payload_initialize() {
 
     runner_source="$(trusted_base_canonical_path "$runner_source_input")" || return 2
     runtime_source="$(trusted_base_canonical_path "$runtime_source_input")" || return 2
+    runtime_executed_source="$(trusted_base_canonical_path "$trusted_base_runtime_executed_source")" || return 2
+    if [[ "$runtime_source" != "$runtime_executed_source" ]]; then
+        echo 'Trusted-base shared runtime materialization is not bound to the executed source.' >&2
+        return 2
+    fi
     if [[ "${TRUSTED_BASE_LAUNCHER_MATERIALIZED_PATH:-}" != "$runner_source" ]]; then
         echo 'Trusted-base payload materialization is not bound to the launcher.' >&2
         return 2
