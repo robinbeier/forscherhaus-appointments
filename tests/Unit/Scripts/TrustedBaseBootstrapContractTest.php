@@ -181,6 +181,10 @@ final class TrustedBaseBootstrapContractTest extends TestCase
             $this->runGit($fixture, ['add', 'nested-repository']);
             $this->runGit($fixture, ['commit', '-qm', 'base']);
             $base = trim($this->runGit($fixture, ['rev-parse', 'HEAD']));
+            self::assertMatchesRegularExpression(
+                '/^160000 commit [a-f0-9]{40}\\tnested-repository$/D',
+                trim($this->runGit($fixture, ['ls-tree', $base, 'nested-repository'])),
+            );
 
             [$status, $stdout, $stderr] = $this->runTreeGuard($fixture, $base);
 
