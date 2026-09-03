@@ -53,6 +53,19 @@ class AgentWorkflowContractTest extends TestCase
         self::assertTrue($contract['publish']['push_invalidates_exact_head_evidence'] ?? null);
         self::assertSame(
             [
+                'path' => 'scripts/agent/github_pr_write_transport.php',
+                'authority' => 'primary_only',
+                'authentication' => 'native_gh_credential_store_without_token_export',
+                'allowed_operations' => ['update_pr_title_body', 'create_exact_issue_comment'],
+                'request_transport' => 'json_stdin',
+                'credential_environment_policy' => 'allowlist_without_token_variables',
+                'response_policy' => 'discard_remote_body_and_emit_minimal_status',
+                'forbidden_capabilities' => ['merge', 'branch_write', 'check_rerun', 'review', 'linear'],
+            ],
+            $contract['publish']['github_pr_write_transport'] ?? null,
+        );
+        self::assertSame(
+            [
                 'schema_version' => 2,
                 'contract_path' => '.codex/contracts/agent-workflow.json',
                 'launcher' => ['path' => 'scripts/agent/trusted_base_launcher.sh', 'mode' => '0500'],
