@@ -678,6 +678,16 @@ class TrustedPhpRuntimeTest(unittest.TestCase):
             ),
         )
 
+    def test_materialized_codex_rejects_non_darwin_platform_before_inspection(self):
+        def fail_if_inspected(_path):
+            self.fail("A non-Darwin Codex binary must not reach dependency inspection.")
+
+        with self.assertRaisesRegex(
+            verifier.AttestationError,
+            "Codex dependency attestation is unavailable on this platform",
+        ):
+            verifier.attest_codex(self.contract, "Linux-x86_64", self.php, fail_if_inspected)
+
     def test_materialized_codex_rejects_explicit_expected_closure_mismatch(self):
         os.chmod(self.php, 0o500)
         binary_sha256 = hashlib.sha256(b"php-fixture").hexdigest()

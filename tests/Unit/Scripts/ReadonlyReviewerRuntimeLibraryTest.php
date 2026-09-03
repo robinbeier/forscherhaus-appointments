@@ -265,6 +265,19 @@ class ReadonlyReviewerRuntimeLibraryTest extends TestCase
                 array_slice($invocations[1], -3),
             );
             $execInvocation = $invocations[array_key_last($invocations)];
+            $contract = json_decode(
+                (string) file_get_contents($repoRoot . '/.codex/contracts/agent-workflow.json'),
+                true,
+                512,
+                JSON_THROW_ON_ERROR,
+            );
+            $disabledFeatures = $contract['authority']['reviewer']['disabled_features'] ?? null;
+            self::assertIsArray($disabledFeatures);
+            $expectedDisableArguments = [];
+            foreach ($disabledFeatures as $feature) {
+                self::assertIsString($feature);
+                array_push($expectedDisableArguments, '--disable', $feature);
+            }
             self::assertSame(
                 [
                     '--ask-for-approval',
@@ -286,6 +299,7 @@ class ReadonlyReviewerRuntimeLibraryTest extends TestCase
                 ],
                 array_slice($execInvocation, 0, 16),
             );
+            self::assertSame($expectedDisableArguments, array_slice($execInvocation, 16, -23));
             self::assertSame(
                 [
                     '-c',

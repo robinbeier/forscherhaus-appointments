@@ -250,6 +250,23 @@ class ParallelWorkContractTest extends TestCase
         );
     }
 
+    public function testRejectsCrossLaneFilenamePrefixOverlap(): void
+    {
+        $manifest = $this->validManifest();
+        $manifest['primary_approved_component_ids'] = ['booking-public'];
+        $manifest['lanes'][0]['ownership'] = [
+            $this->pathRule('application/views/components/booking_', 'filename_prefix'),
+        ];
+        $manifest['lanes'][1]['ownership'] = [
+            $this->pathRule('application/views/components/booking_sidebar.php', 'exact_file'),
+        ];
+
+        self::assertContains(
+            'ownership_overlap:0:1',
+            ParallelWorkContract::validate($manifest, $this->policy, $this->ownershipMap),
+        );
+    }
+
     public function testAllowsOverlappingOwnershipRulesWithinTheSameLane(): void
     {
         $manifest = $this->validManifest();
