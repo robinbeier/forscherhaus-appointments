@@ -1117,7 +1117,22 @@ class ParallelWorkContractCliTest extends TestCase
     private function runGitRaw(string $workingDirectory, array $arguments): string
     {
         $process = proc_open(
-            ['git', '-C', $workingDirectory, ...$arguments],
+            [
+                '/usr/bin/env',
+                '-i',
+                'GIT_CONFIG_GLOBAL=/dev/null',
+                'GIT_CONFIG_NOSYSTEM=1',
+                'GIT_CONFIG_SYSTEM=/dev/null',
+                'GIT_NO_LAZY_FETCH=1',
+                'GIT_NO_REPLACE_OBJECTS=1',
+                'PATH=/usr/bin:/bin:/usr/sbin:/sbin',
+                '/usr/bin/git',
+                '-c',
+                'core.hooksPath=/dev/null',
+                '-C',
+                $workingDirectory,
+                ...$arguments,
+            ],
             [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
             $pipes,
         );
