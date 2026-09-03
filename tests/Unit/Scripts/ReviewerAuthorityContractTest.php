@@ -1215,6 +1215,7 @@ class ReviewerAuthorityContractTest extends TestCase
         $launcherMarker = sys_get_temp_dir() . '/reviewer-launcher-canary-' . bin2hex(random_bytes(8));
         $payloadMarker = sys_get_temp_dir() . '/reviewer-payload-canary-' . bin2hex(random_bytes(8));
         $parserMarker = sys_get_temp_dir() . '/reviewer-parser-canary-' . bin2hex(random_bytes(8));
+        $runtimeMarker = sys_get_temp_dir() . '/reviewer-runtime-canary-' . bin2hex(random_bytes(8));
 
         try {
             self::assertNotFalse(
@@ -1237,6 +1238,12 @@ class ReviewerAuthorityContractTest extends TestCase
                         ").touch()\n",
                 ),
             );
+            self::assertNotFalse(
+                file_put_contents(
+                    $fixture['root'] . '/scripts/agent/lib/trusted_base_payload_runtime.sh',
+                    "#!/bin/bash\n: > " . escapeshellarg($runtimeMarker) . "\nexit 99\n",
+                ),
+            );
             $this->runGitCommand(['add', '--all'], $fixture['root']);
             $this->commitRunnerFixture($fixture['root'], 'Tamper checked-out reviewer entrypoints');
             $head = $this->runGitCommand(['rev-parse', 'HEAD'], $fixture['root']);
@@ -1247,11 +1254,13 @@ class ReviewerAuthorityContractTest extends TestCase
             self::assertFileDoesNotExist($launcherMarker);
             self::assertFileDoesNotExist($payloadMarker);
             self::assertFileDoesNotExist($parserMarker);
+            self::assertFileDoesNotExist($runtimeMarker);
         } finally {
             $this->removeRunnerFixture($fixture);
             @unlink($launcherMarker);
             @unlink($payloadMarker);
             @unlink($parserMarker);
+            @unlink($runtimeMarker);
         }
     }
 
@@ -1756,6 +1765,67 @@ class ReviewerAuthorityContractTest extends TestCase
                     'head_sha' => $head,
                     'verdict' => 'findings',
                     'findings' => [['priority' => 'P2']],
+                ],
+                JSON_THROW_ON_ERROR,
+            ),
+            'correctness_security',
+            $base,
+            $head,
+            ['WORKFLOW.md'],
+        );
+    }
+
+    public function testOutputValidationRejectsUnexpectedTopLevelField(): void
+    {
+        $base = str_repeat('b', 40);
+        $head = str_repeat('a', 40);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('output has unexpected fields');
+        ReadonlyReviewerContract::validateOutput(
+            json_encode(
+                [
+                    'lens' => 'correctness_security',
+                    'base_sha' => $base,
+                    'head_sha' => $head,
+                    'verdict' => 'no_findings',
+                    'findings' => [],
+                    'unexpected' => true,
+                ],
+                JSON_THROW_ON_ERROR,
+            ),
+            'correctness_security',
+            $base,
+            $head,
+            [],
+        );
+    }
+
+    public function testOutputValidationRejectsUnexpectedCompleteFindingField(): void
+    {
+        $base = str_repeat('b', 40);
+        $head = str_repeat('a', 40);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('finding has unexpected fields');
+        ReadonlyReviewerContract::validateOutput(
+            json_encode(
+                [
+                    'lens' => 'correctness_security',
+                    'base_sha' => $base,
+                    'head_sha' => $head,
+                    'verdict' => 'findings',
+                    'findings' => [
+                        [
+                            'priority' => 'P2',
+                            'title' => 'Finding',
+                            'file' => 'WORKFLOW.md',
+                            'line' => 1,
+                            'impact' => 'Impact',
+                            'trigger' => 'Trigger',
+                            'unexpected' => true,
+                        ],
+                    ],
                 ],
                 JSON_THROW_ON_ERROR,
             ),
