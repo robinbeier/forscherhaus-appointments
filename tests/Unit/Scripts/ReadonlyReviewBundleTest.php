@@ -299,14 +299,13 @@ class ReadonlyReviewBundleTest extends TestCase
         }
     }
 
-    public function testSerializerRejectsUnexpectedFullBaseOrHeadBlobs(): void
+    public function testSerializerRejectsAnyUnexpectedBundleFile(): void
     {
-        $fixture = $this->bundleFixture('full-blob');
+        $fixture = $this->bundleFixture('unexpected-file');
 
         try {
-            self::assertTrue(mkdir($fixture['root'] . '/base', 0700));
             self::assertNotFalse(
-                file_put_contents($fixture['root'] . '/base/AGENTS.md', "unchanged sensitive value\n"),
+                file_put_contents($fixture['root'] . '/unexpected-artifact.txt', "not manifest bound\n"),
             );
             $this->expectException(\RuntimeException::class);
             $this->expectExceptionMessage('non-allowlisted file');

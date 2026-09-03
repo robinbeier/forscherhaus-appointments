@@ -80,7 +80,25 @@ final class TrustedBaseBootstrapContractTest extends TestCase
                 return $contract;
             },
             static function (array $contract): array {
+                $contract['trusted_base_bootstrap']['launcher']['path'] = 'scripts/agent/alternate-launcher.sh';
+                return $contract;
+            },
+            static function (array $contract): array {
+                $contract['trusted_base_bootstrap']['shared_runtime']['path'] =
+                    'scripts/agent/lib/alternate-runtime.sh';
+                return $contract;
+            },
+            static function (array $contract): array {
                 $contract['trusted_base_bootstrap']['shared_runtime']['mode'] = '0500';
+                return $contract;
+            },
+            static function (array $contract): array {
+                $contract['trusted_base_bootstrap']['payloads']['reviewer']['path'] =
+                    'scripts/agent/alternate-reviewer.sh';
+                return $contract;
+            },
+            static function (array $contract): array {
+                $contract['trusted_base_bootstrap']['payloads']['parallel']['mode'] = '0400';
                 return $contract;
             },
             static function (array $contract): array {

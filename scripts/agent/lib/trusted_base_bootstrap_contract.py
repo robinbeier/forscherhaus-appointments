@@ -6,20 +6,7 @@ the contract semantics here avoids two subtly different policy parsers while
 leaving both attestation points intact.
 """
 import json
-import re
 import sys
-
-
-def repository_path(value: object) -> bool:
-    return isinstance(value, str) and bool(value) and not (
-        value.startswith("/")
-        or value.startswith(":")
-        or value.endswith("/")
-        or "\\" in value
-        or any(character in value for character in "*?[]")
-        or re.search(r"[\x00-\x1f\x7f]", value)
-        or any(segment in ("", ".", "..") for segment in value.split("/"))
-    )
 
 
 def main() -> int:
@@ -51,16 +38,20 @@ def main() -> int:
         return 1
     if parser != {"path": "scripts/agent/lib/trusted_base_bootstrap_contract.py", "mode": "0400"}:
         return 1
-    for payload_id, declared_payload in payloads.items():
-        if set(declared_payload) != {"path", "mode", "environment_profile"}:
-            return 1
-        if declared_payload["mode"] != "0500" or declared_payload["environment_profile"] != payload_id:
-            return 1
-        if not repository_path(declared_payload["path"]):
-            return 1
-    if not repository_path(runtime["path"]):
+    if runtime != {"path": "scripts/agent/lib/trusted_base_payload_runtime.sh", "mode": "0400"}:
         return 1
-    if runtime["mode"] != "0400":
+    if payloads != {
+        "reviewer": {
+            "path": "scripts/agent/run_readonly_reviewer.sh",
+            "mode": "0500",
+            "environment_profile": "reviewer",
+        },
+        "parallel": {
+            "path": "scripts/agent/check_parallel_work_contract.sh",
+            "mode": "0500",
+            "environment_profile": "parallel",
+        },
+    }:
         return 1
     if payload["mode"] != "0500" or payload["environment_profile"] != sys.argv[1]:
         return 1
