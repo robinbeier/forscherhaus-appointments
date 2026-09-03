@@ -1,0 +1,38 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["lens", "base_sha", "head_sha", "verdict", "findings"],
+    "properties": {
+        "lens": {
+            "enum": ["correctness_security", "design_maintainability", "tests_regression_flake"]
+        },
+        "base_sha": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{40}$"
+        },
+        "head_sha": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{40}$"
+        },
+        "verdict": {
+            "enum": ["no_findings", "findings"]
+        },
+        "findings": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["priority", "title", "file", "line", "impact", "trigger"],
+                "properties": {
+                    "priority": {"enum": ["P0", "P1", "P2", "P3"]},
+                    "title": {"type": "string", "minLength": 1, "maxLength": 160},
+                    "file": {"type": "string"},
+                    "line": {"type": ["integer", "null"], "minimum": 1},
+                    "impact": {"type": "string", "minLength": 1, "maxLength": 1200},
+                    "trigger": {"type": "string", "minLength": 1, "maxLength": 1200}
+                }
+            }
+        }
+    }
+}

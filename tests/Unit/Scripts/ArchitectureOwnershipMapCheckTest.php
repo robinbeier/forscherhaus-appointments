@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Scripts;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 final class ArchitectureOwnershipMapCheckTest extends TestCase
@@ -88,6 +89,104 @@ final class ArchitectureOwnershipMapCheckTest extends TestCase
         self::assertStringContainsString('must set manual_approval_required = true', $combinedOutput);
     }
 
+    public function testCheckRejectsLegacySchemaAndFolderPrefixes(): void
+    {
+        foreach (
+            [
+                'schema-version-2' => [
+                    static function (array $map): array {
+                        $map['schema_version'] = 2;
+                        return $map;
+                    },
+                    '"schema_version" must be 3',
+                ],
+                'folder-prefixes' => [
+                    static function (array $map): array {
+                        $map['components'][0]['folder_prefixes'] = ['scripts/ci'];
+                        unset($map['components'][0]['path_rules']);
+                        return $map;
+                    },
+                    "missing required fields: ['path_rules']",
+                ],
+            ]
+            as $scenario => [$mutator, $expectedError]
+        ) {
+            $mapPath = $this->tmpDir . '/' . $scenario . '.json';
+            file_put_contents(
+                $mapPath,
+                json_encode(
+                    $mutator($this->buildComponentMap([])),
+                    JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
+                ),
+            );
+
+            $result = $this->runCommand([
+                'python3',
+                'scripts/ci/check_architecture_ownership_map.py',
+                '--map=' . $mapPath,
+                '--skip-diff-coverage',
+                '--skip-generated-docs-check',
+            ]);
+
+            self::assertSame(1, $result['exit_code'], $scenario);
+            self::assertStringContainsString($expectedError, $result['stdout'] . $result['stderr'], $scenario);
+        }
+    }
+
+    /** @param array<string, mixed> $pathRule */
+    #[DataProvider('malformedPathRules')]
+    public function testCheckRejectsMalformedPathRulesThroughCanonicalParser(
+        array $pathRule,
+        string $expectedError,
+    ): void {
+        $mapPath = $this->tmpDir . '/component-map.json';
+        file_put_contents(
+            $mapPath,
+            json_encode(
+                $this->buildComponentMap(['path_rules' => [$pathRule]]),
+                JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
+            ),
+        );
+
+        $result = $this->runCommand([
+            'python3',
+            'scripts/ci/check_architecture_ownership_map.py',
+            '--map=' . $mapPath,
+            '--skip-diff-coverage',
+            '--skip-generated-docs-check',
+        ]);
+
+        self::assertSame(1, $result['exit_code']);
+        self::assertStringContainsString($expectedError, $result['stdout'] . $result['stderr']);
+    }
+
+    /**
+     * @return array<string, array{0: array<string, mixed>, 1: string}>
+     */
+    public static function malformedPathRules(): array
+    {
+        return [
+            'unknown match mode' => [['path' => 'scripts/ci', 'match' => 'glob'], '.match must be one of'],
+            'missing path value' => [['match' => 'directory'], 'must contain exactly path and match'],
+            'empty filename prefix' => [
+                ['path' => 'scripts/ci/', 'match' => 'filename_prefix'],
+                '.path must be a normalized repository-relative path',
+            ],
+            'dot-slash path' => [
+                ['path' => './scripts/ci', 'match' => 'directory'],
+                '.path must be a normalized repository-relative path',
+            ],
+            'absolute path' => [
+                ['path' => '/scripts/ci', 'match' => 'directory'],
+                '.path must be a normalized repository-relative path',
+            ],
+            'parent traversal path' => [
+                ['path' => '../scripts/ci', 'match' => 'directory'],
+                '.path must be a normalized repository-relative path',
+            ],
+        ];
+    }
+
     /**
      * @param array<string, mixed> $overrides
      * @return array<string, mixed>
@@ -106,7 +205,7 @@ final class ArchitectureOwnershipMapCheckTest extends TestCase
                 'agent_policy' => 'conservative',
                 'manual_approval_required' => true,
                 'ownership_notes' => 'Single owner only.',
-                'folder_prefixes' => ['scripts/ci/'],
+                'path_rules' => [['path' => 'scripts/ci', 'match' => 'directory']],
                 'key_files' => ['scripts/ci/check_architecture_ownership_map.py'],
                 'depends_on' => [],
             ],
@@ -114,7 +213,7 @@ final class ArchitectureOwnershipMapCheckTest extends TestCase
         );
 
         return [
-            'schema_version' => 2,
+            'schema_version' => 3,
             'source' => 'docs/maps/component_ownership_map.json',
             'components' => [$component],
         ];

@@ -36,7 +36,7 @@ final class ArchitectureOwnershipDocsGeneratorTest extends TestCase
             $mapPath,
             json_encode(
                 [
-                    'schema_version' => 2,
+                    'schema_version' => 3,
                     'source' => 'docs/maps/component_ownership_map.json',
                     'components' => [
                         [
@@ -50,7 +50,7 @@ final class ArchitectureOwnershipDocsGeneratorTest extends TestCase
                             'agent_policy' => 'conservative',
                             'manual_approval_required' => true,
                             'ownership_notes' => 'Single owner only.',
-                            'folder_prefixes' => ['scripts/ci/'],
+                            'path_rules' => [['path' => 'scripts/ci', 'match' => 'directory']],
                             'key_files' => ['scripts/ci/check_architecture_ownership_map.py'],
                             'depends_on' => [],
                         ],
@@ -90,7 +90,7 @@ final class ArchitectureOwnershipDocsGeneratorTest extends TestCase
             $mapPath,
             json_encode(
                 [
-                    'schema_version' => 2,
+                    'schema_version' => 3,
                     'source' => 'docs/maps/component_ownership_map.json',
                     'components' => [
                         [
@@ -104,7 +104,7 @@ final class ArchitectureOwnershipDocsGeneratorTest extends TestCase
                             'agent_policy' => 'conservative',
                             'manual_approval_required' => true,
                             'ownership_notes' => 'Single owner only.',
-                            'folder_prefixes' => ['application/libraries/Accounts.php'],
+                            'path_rules' => [['path' => 'application/libraries/Accounts.php', 'match' => 'exact_file']],
                             'key_files' => ['application/libraries/Accounts.php'],
                             'depends_on' => [],
                         ],
@@ -136,6 +136,59 @@ final class ArchitectureOwnershipDocsGeneratorTest extends TestCase
 
         self::assertSame(1, $check['exit_code']);
         self::assertStringContainsString('Out-of-date generated file', $check['stdout'] . $check['stderr']);
+    }
+
+    public function testCodeownersGeneratorProjectsFilenamePrefixRule(): void
+    {
+        $mapPath = $this->tmpDir . '/component-map.json';
+        $codeownersPath = $this->tmpDir . '/CODEOWNERS';
+        file_put_contents(
+            $mapPath,
+            json_encode(
+                [
+                    'schema_version' => 3,
+                    'source' => 'docs/maps/component_ownership_map.json',
+                    'components' => [
+                        [
+                            'component_id' => 'booking-public',
+                            'role' => 'Public Booking',
+                            'summary' => 'Public booking components.',
+                            'primary_handle' => '@robinbeier',
+                            'secondary_handle' => '@robinbeier',
+                            'ownership_mode' => 'single-owner',
+                            'human_bus_factor' => 1,
+                            'agent_policy' => 'conservative',
+                            'manual_approval_required' => true,
+                            'ownership_notes' => 'Single owner only.',
+                            'path_rules' => [
+                                [
+                                    'path' => 'application/views/components/booking_',
+                                    'match' => 'filename_prefix',
+                                ],
+                            ],
+                            'key_files' => ['application/views/components/booking_sidebar.php'],
+                            'depends_on' => [],
+                        ],
+                    ],
+                ],
+                JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES,
+            ),
+        );
+
+        $result = $this->runCommand([
+            'python3',
+            'scripts/docs/generate_codeowners_from_map.py',
+            '--map=' . $mapPath,
+            '--output=' . $codeownersPath,
+        ]);
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertSame(
+            "# Generated from docs/maps/component_ownership_map.json; do not edit manually.\n" .
+                "# Run: python3 scripts/docs/generate_codeowners_from_map.py\n\n" .
+                "/application/views/components/booking_* @robinbeier\n",
+            file_get_contents($codeownersPath),
+        );
     }
 
     /**

@@ -1,7 +1,5 @@
 name = "reviewer_correctness"
 description = "Read-only reviewer focused on correctness, regressions, security, and edge cases."
-model = "gpt-5.4"
-model_reasoning_effort = "high"
 sandbox_mode = "read-only"
 nickname_candidates = ["Delta", "Sentinel", "Aegis"]
 developer_instructions = """
@@ -21,6 +19,10 @@ Repo-specific constraints to enforce:
 - Never assume edits to system/ are acceptable unless explicitly requested.
 
 Review rules:
+- Run only through the repository contract in .codex/contracts/agent-workflow.json and
+  scripts/agent/trusted_base_launcher.sh and its exact-base reviewer payload for final review.
+- Do not delegate or mutate files, Git, GitHub, checks, reviews, comments, Linear, workpads,
+  merges, or any external system. Return findings only to the primary.
 - Lead with concrete findings only.
 - Prioritize real risk over style feedback.
 - Explain impact, triggering conditions, and likely user-visible or operational consequences.

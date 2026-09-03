@@ -5,6 +5,315 @@
         "may_set_ready_to_merge": false,
         "push_invalidates_exact_head_evidence": true
     },
+    "trusted_base_bootstrap": {
+        "schema_version": 2,
+        "contract_path": ".codex/contracts/agent-workflow.json",
+        "launcher": {
+            "path": "scripts/agent/trusted_base_launcher.sh",
+            "mode": "0500"
+        },
+        "contract_parser": {
+            "path": "scripts/agent/lib/trusted_base_bootstrap_contract.py",
+            "mode": "0400"
+        },
+        "shared_runtime": {
+            "path": "scripts/agent/lib/trusted_base_payload_runtime.sh",
+            "mode": "0400"
+        },
+        "payloads": {
+            "reviewer": {
+                "path": "scripts/agent/run_readonly_reviewer.sh",
+                "mode": "0500",
+                "environment_profile": "reviewer"
+            },
+            "parallel": {
+                "path": "scripts/agent/check_parallel_work_contract.sh",
+                "mode": "0500",
+                "environment_profile": "parallel"
+            }
+        }
+    },
+    "authority": {
+        "primary_external_single_writer": true,
+        "primary_owned_mutations": [
+            "commit",
+            "push",
+            "pr_mutation",
+            "check_rerun",
+            "merge",
+            "linear_mutation",
+            "workpad_update"
+        ],
+        "interpreter_trust": {
+            "bootstrap": "root_owned_system_git_and_clean_bash_to_clean_system_python",
+            "system_python": "/usr/bin/python3",
+            "system_python_arguments": ["-I", "-B"],
+            "php": {
+                "selection": "exact_base_policy_before_first_php_execution_system_owned_fixed_path_or_pinned_private_archive",
+                "dependency_inspection": "non_executing_otool_on_darwin_root_owned_ldd_or_private_static_elf_parse_on_linux",
+                "require_exact_closure_sha256": true,
+                "candidate_by_platform": {
+                    "Linux-aarch64": "/usr/local/bin/php"
+                },
+                "pinned_archive_by_platform": {
+                    "Darwin-arm64": {
+                        "url": "https://dl.static-php.dev/static-php-cli/bulk/php-8.4.12-cli-macos-aarch64.tar.gz",
+                        "archive_sha256": "11b291a5e346d1978f133c523f21691bbbb233d18cfe0499fd2b7cfd8ed1e1a6",
+                        "member": "php",
+                        "member_sha256": "918e07c4799de22f50fc5767a99a559d14026d0e37759f3a1265de3e38614c3f"
+                    },
+                    "Darwin-x86_64": {
+                        "url": "https://dl.static-php.dev/static-php-cli/bulk/php-8.4.12-cli-macos-x86_64.tar.gz",
+                        "archive_sha256": "ba8ebc6784757106124bc4a37d7815ee9e0facb89425d9cfadd453635687bba2",
+                        "member": "php",
+                        "member_sha256": "6e596791f60a50bb1cf9ad769555598137b57da592b01a1ecd2e9888be3a61ec"
+                    },
+                    "Linux-x86_64": {
+                        "url": "https://dl.static-php.dev/static-php-cli/bulk/php-8.4.12-cli-linux-x86_64.tar.gz",
+                        "archive_sha256": "54558cc7433d3ca526412d8642881c1a1d8a09b964f5c409db92719bce52ce21",
+                        "member": "php",
+                        "member_sha256": "f0cf895506ad98d32e360fd8f29e8cc07bd751964297516d57835ae0b01f2d7a"
+                    }
+                },
+                "closure_sha256_by_platform": {
+                    "Darwin-arm64": "b9d81b2ab2e48895ecfe285c350d468cdcb2d910d7b560cffe0a1399a0f77e75",
+                    "Darwin-x86_64": "59f41f2a9e80cf0f359a5ba7e08fff10d62cb6c74ab424b895b9acfb6730216d",
+                    "Linux-aarch64": "40aab180ea2a8f847304bcb063a931ed43283ae9b714d5fdd74f5da71160f532",
+                    "Linux-x86_64": "373ce1d4d9dd2ef439a60bdfff61203688d97025eeda4efae52849f1fba0a0d9"
+                }
+            }
+        },
+        "reviewer": {
+            "invocation": "scripts/agent/trusted_base_launcher.sh",
+            "payload_path": "scripts/agent/run_readonly_reviewer.sh",
+            "invocation_source": "external_system_git_materialized_exact_base_launcher_then_private_exact_base_payload",
+            "bootstrap_materialization_policy": "absolute_system_git_clean_environment_private_blob_verification_before_any_repository_code_execution",
+            "launcher_materialization_guard": "required_external_exact_blob_path_and_marker",
+            "trust_anchor": "review_base_commit",
+            "review_base_ref": "refs/remotes/origin/main",
+            "review_base_remote_url": "https://github.com/robinbeier/forscherhaus-appointments.git",
+            "review_base_policy": "exact_merge_base_with_live_pinned_public_remote_main_and_matching_tracking_ref",
+            "review_base_remote_transport": "unauthenticated_read_only_ls_remote_clean_environment",
+            "requires_base_runner": true,
+            "direct_checkout_execution": "forbidden_fail_closed",
+            "runtime_configuration_change_policy": "external_bootstrap_review",
+            "shell_runtime_configuration": "root_owned_system_git_then_clean_bash_environment",
+            "transport_environment_policy": "fixed_direct_no_ambient_proxy_or_endpoint_override",
+            "temporary_directory_policy": "private_system_temp_bundle_and_internal_runtime_only",
+            "php_runtime_configuration": "exact_base_attested_binary_and_dynamic_closure_ignore_ambient_ini",
+            "git_runtime_configuration": "ignore_ambient_and_disable_helpers",
+            "git_lazy_fetch": "disabled",
+            "tool_path_policy": "explicit_primary_codex_with_verified_private_copy",
+            "repository_root_policy": "canonical_physical_root",
+            "codex_identity_check": "official_release_binary_sha256_platform_version_and_dynamic_closure",
+            "codex_version": "0.145.0",
+            "codex_version_policy": "exact_machine_pinned_version_with_bounded_build_metadata",
+            "codex_binary_materialization_policy": "private_copy_rehashed_and_closure_attested_before_first_execution",
+            "codex_dynamic_dependency_policy": "system_sealed_only_non_system_dependency_rejected",
+            "codex_binary_sha256_by_platform": {
+                "Darwin-arm64": "1da3f4e0e96028b8a771814293c3033dafd1971f943f6c7e79b0897fe705f590",
+                "Darwin-x86_64": "6db9193ce2c9a8cef2b5482612cde24202a4329dfc34f4687a036d5d7da619af"
+            },
+            "codex_release_archive_sha256_by_platform": {
+                "Darwin-arm64": "072a30a65f05666735889ef0f60b56db186adbdde9d5c5cc1a64be0b598530fe",
+                "Darwin-x86_64": "4216d7a40aa49d74b65fab93d2a86d2e25a902482b827dbdb3f357777b09fadf"
+            },
+            "codex_closure_sha256_by_platform": {
+                "Darwin-arm64": "cb24bcb9e973a8258c763e4b2777a398799c653996b395b3e2ab4cf1aa806a0a",
+                "Darwin-x86_64": "a74149a742b113e72e0d59ab1f86786dd52bb2538cdbc42794b718155f06d90b"
+            },
+            "codex_authentication_source": "host_codex_login_without_connector_authority",
+            "codex_authentication_home_policy": "isolated_runtime_home_read_only_link_to_canonical_auth_file",
+            "codex_api_key_override_policy": "reject_ambient_api_keys",
+            "finding_path_policy": "normalized_exact_diff_paths",
+            "finding_text_policy": "bounded_privacy_safe_prose",
+            "web_search": "disabled",
+            "review_checkout": "deterministic_exact_commit_bundle",
+            "review_checkout_tree_entry_policy": "reject_tracked_symlinks_gitlinks_and_non_blob_leaf_entries",
+            "review_bundle_parent_policy": "private_system_temp_random_directory",
+            "review_bundle_contents": "zero_context_text_patch_manifest_changed_paths_and_trusted_policy",
+            "review_bundle_manifest_policy": "deterministic_sha256_base_head_binding",
+            "review_bundle_context_policy": "zero_context_changed_lines_only_no_full_base_or_head_blobs",
+            "review_bundle_hunk_header_policy": "strip_unchanged_section_text_before_model_input",
+            "review_bundle_binary_policy": "trusted_base_attributes_and_bounded_utf8_blobs_reject_before_model_input",
+            "review_bundle_file_allowlist": "manifest_patch_changed_paths_and_trusted_policy_only",
+            "review_instruction_policy": "trusted_base_policy_as_developer_instructions_untrusted_bundle_as_user_input",
+            "prompt_role_preflight": "pinned_cli_requires_developer_policy_and_user_bundle_channels",
+            "review_input_policy": "bounded_deterministic_json_serialization_as_untrusted_user_stdin",
+            "review_original_worktree_access": "not_model_visible",
+            "isolation_platform": "darwin_seatbelt_fail_closed_elsewhere",
+            "isolation_profile": "default_deny_runtime_allowlist_exact_bundle_and_auth_read_only",
+            "isolation_preflight": "bundle_readable_foreign_temp_and_original_worktree_denied_exact_auth_file_only_no_home_write",
+            "model_tool_surface": "derived_exact_release_catalog_without_shell_patch_image_search_or_external_tools",
+            "codex_sandbox_mode": "read-only",
+            "codex_approval_policy": "never",
+            "output_schema_path": "scripts/agent/readonly-review-output.schema.json",
+            "bootstrap_guard_pathspecs": [":(glob)**/AGENTS.md"],
+            "bootstrap_paths": [
+                ".codex/contracts/agent-workflow.json",
+                "scripts/agent/trusted_base_launcher.sh",
+                "scripts/agent/run_readonly_reviewer.sh",
+                "scripts/agent/lib/trusted_base_payload_runtime.sh",
+                "scripts/agent/lib/trusted_base_bootstrap_contract.py",
+                "scripts/agent/generate_reviewer_policy_snapshot.php",
+                "scripts/agent/generate_reviewer_runtime_attestation.php",
+                "scripts/agent/readonly-review-output.schema.json",
+                "scripts/agent/readonly-reviewer.sb",
+                "scripts/agent/verify_trusted_php_runtime.py",
+                "scripts/agent/lib/trusted_runtime_primitives.py",
+                "scripts/agent/readonly_review_bundle.php",
+                "scripts/agent/readonly_reviewer_contract.php",
+                "scripts/agent/lib/RepoPath.php",
+                "scripts/agent/lib/ReadonlyReviewBundle.php",
+                "scripts/agent/lib/ReadonlyReviewerContract.php",
+                "scripts/agent/lib/GeneratedReviewerPolicy.php",
+                "scripts/agent/lib/GeneratedReviewerRuntimeAttestation.php",
+                "scripts/agent/lib/ReadonlyReviewerModelPolicy.php",
+                "scripts/agent/lib/ReadonlyReviewOutput.php",
+                "scripts/agent/lib/readonly_reviewer_bundle_runtime.sh",
+                "scripts/agent/lib/readonly_reviewer_isolated_runtime.sh"
+            ],
+            "policy_context_paths": ["AGENTS.md", "WORKFLOW.md", "code_review.md"],
+            "profiles": {
+                "correctness_security": {
+                    "instructions": ".codex/agents/reviewer-correctness.toml",
+                    "model": "gpt-5.4",
+                    "reasoning": "high"
+                },
+                "design_maintainability": {
+                    "instructions": ".codex/agents/reviewer-design.toml",
+                    "model": "gpt-5.4-mini",
+                    "reasoning": "medium"
+                },
+                "tests_regression_flake": {
+                    "instructions": ".codex/agents/reviewer-tests.toml",
+                    "model": "gpt-5.4-mini",
+                    "reasoning": "medium"
+                }
+            },
+            "disabled_features": [
+                "apps",
+                "plugins",
+                "browser_use",
+                "browser_use_external",
+                "browser_use_full_cdp_access",
+                "computer_use",
+                "image_generation",
+                "in_app_browser",
+                "memories",
+                "skill_search",
+                "skill_mcp_dependency_install",
+                "auth_elicitation",
+                "tool_call_mcp_elicitation",
+                "multi_agent",
+                "multi_agent_v2",
+                "hooks",
+                "shell_tool",
+                "unified_exec",
+                "code_mode",
+                "code_mode_only",
+                "code_mode_host",
+                "shell_snapshot",
+                "workspace_dependencies",
+                "goals",
+                "chronicle",
+                "tool_suggest",
+                "remote_plugin",
+                "plugin_sharing",
+                "deferred_executor",
+                "executor_capability_discovery",
+                "request_permissions_tool",
+                "default_mode_request_user_input"
+            ],
+            "filesystem": "outer_seatbelt_default_deny_exact_bundle_read_only_runtime_scratch_only",
+            "network": "outer_codex_transport_no_model_network_tool_or_external_credentials",
+            "approval_policy": "outer_seatbelt_plus_codex_read_only_no_model_tools",
+            "inherits_user_config": false,
+            "inherits_execpolicy_rules": false,
+            "output_binds_base_sha": true,
+            "allows_external_connectors": false,
+            "allows_delegation": false,
+            "denied_mutations": [
+                "file_write",
+                "commit",
+                "push",
+                "pr_mutation",
+                "pr_comment",
+                "pr_review",
+                "check_rerun",
+                "merge",
+                "linear_mutation",
+                "workpad_update"
+            ]
+        }
+    },
+    "parallel_work": {
+        "local_implementation_only": true,
+        "requires_common_base_sha": true,
+        "requires_disjoint_ownership": true,
+        "max_local_writer_lanes": 2,
+        "writer_role": "implementation_worker",
+        "external_mutations_remain_serial": true,
+        "requires_semantic_independence_attestation": true,
+        "validator_invocation": "scripts/agent/trusted_base_launcher.sh",
+        "validator_payload_path": "scripts/agent/check_parallel_work_contract.sh",
+        "validator_trust_anchor": "external_system_git_materialized_declared_base_launcher_then_private_declared_base_payload",
+        "validator_launcher_materialization_guard": "required_external_exact_blob_path_and_marker",
+        "validator_bootstrap_paths": [
+            ".codex/contracts/agent-workflow.json",
+            "scripts/agent/trusted_base_launcher.sh",
+            "scripts/agent/check_parallel_work_contract.sh",
+            "scripts/agent/lib/trusted_base_payload_runtime.sh",
+            "scripts/agent/lib/trusted_base_bootstrap_contract.py",
+            "scripts/agent/check_parallel_work_contract.php",
+            "scripts/agent/verify_trusted_php_runtime.py",
+            "scripts/agent/lib/trusted_runtime_primitives.py",
+            "scripts/agent/lib/ParallelWorkContract.php",
+            "scripts/agent/lib/OwnershipPathRuleEngineClient.php",
+            "scripts/agent/lib/ParallelWorkOwnershipContract.php",
+            "scripts/agent/lib/ParallelWorkPolicyContract.php",
+            "scripts/agent/lib/RepoPath.php",
+            "scripts/ci/ownership_path_rules.py",
+            ".codex/contracts/ownership-path-rules.json"
+        ],
+        "canonical_base_ref": "refs/remotes/origin/main",
+        "canonical_base_remote_url": "https://github.com/robinbeier/forscherhaus-appointments.git",
+        "canonical_base_policy": "live_pinned_public_remote_main_and_matching_tracking_ref",
+        "canonical_base_remote_transport": "unauthenticated_read_only_ls_remote_clean_environment",
+        "admission_requires_clean_exact_base_checkout": true,
+        "admission_executes_only_declared_base_blobs": true,
+        "admission_binds_base_before_source_execution": true,
+        "requires_post_implementation_verification": true,
+        "requires_clean_post_commit_verification": true,
+        "dirty_precommit_status": "provisional_pass",
+        "clean_integration_status": "pass",
+        "php_runtime_configuration": "exact_base_attested_binary_and_dynamic_closure_ignore_ambient_ini",
+        "shell_bootstrap": "root_owned_system_git_before_clean_bash_and_attested_php",
+        "shell_environment_allowlist": ["PATH", "TMPDIR", "LANG", "LC_ALL"],
+        "ownership_map": "docs/maps/component_ownership_map.json",
+        "ownership_map_schema_version": 3,
+        "ownership_rule_format": "explicit_path_and_match_objects",
+        "ownership_rule_contract": ".codex/contracts/ownership-path-rules.json",
+        "primary_owned_path_rules": [
+            {"path": ".codex/agents/reviewer-correctness.toml", "match": "exact_file"},
+            {"path": ".codex/agents/reviewer-design.toml", "match": "exact_file"},
+            {"path": ".codex/agents/reviewer-tests.toml", "match": "exact_file"},
+            {"path": ".codex/agents/implementation-worker.toml", "match": "exact_file"},
+            {"path": ".codex/config.toml", "match": "exact_file"},
+            {"path": ".codex/contracts", "match": "directory"},
+            {"path": ".codex/skills/land", "match": "directory"},
+            {"path": ".codex/skills/push", "match": "directory"},
+            {"path": ".github/workflows", "match": "directory"},
+            {"path": "AGENTS.md", "match": "exact_file"},
+            {"path": "WORKFLOW.md", "match": "exact_file"},
+            {"path": "code_review.md", "match": "exact_file"},
+            {"path": "docs/maps/component_ownership_map.json", "match": "exact_file"},
+            {"path": "scripts/agent", "match": "directory"},
+            {"path": "scripts/ci/ownership_path_rules.py", "match": "exact_file"},
+            {"path": "scripts/ci/exact_head_mergegate.php", "match": "exact_file"},
+            {"path": "scripts/ci/lib/ExactHeadMergegate.php", "match": "exact_file"}
+        ]
+    },
     "land": {
         "requires_exact_head": true,
         "merge_command": "gh pr merge --merge --match-head-commit <current_head_sha>",
@@ -89,6 +398,12 @@
         "WORKFLOW.md": {
             "contract_reference": ".codex/contracts/agent-workflow.json",
             "required_sections": {
+                "## Controlled Parallel Work": [
+                    "Parallel work means local implementation only",
+                    "Do not replace this with an ambient `git",
+                    "Exactly one primary remains the external single writer",
+                    "A merge invalidates the base of every remaining lane"
+                ],
                 "### 3. Validate locally": [
                     "blocking GitHub CI plus final reviews on the unchanged exact PR head establish"
                 ],
@@ -104,6 +419,8 @@
             "contract_reference": ".codex/contracts/agent-workflow.json",
             "required_sections": {
                 "## Review Process": [
+                    "scripts/agent/run_readonly_reviewer.sh",
+                    "official 0.145.0 release digest",
                     "require three independent final reviews on the same unchanged exact head",
                     "Any later push invalidates those final reviews and requires exact-head review",
                     "The read-only exact-head mergegate does not replace reviewer judgment."
@@ -111,6 +428,14 @@
             }
         },
         "docs/agent-harness-index.md": {
+            "contract_reference": ".codex/contracts/agent-workflow.json",
+            "required_sections": {}
+        },
+        "scripts/agent/run_readonly_reviewer.sh": {
+            "contract_reference": ".codex/contracts/agent-workflow.json",
+            "required_sections": {}
+        },
+        "scripts/agent/trusted_base_launcher.sh": {
             "contract_reference": ".codex/contracts/agent-workflow.json",
             "required_sections": {}
         },

@@ -5,11 +5,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts/ci"))
+from ownership_path_rules import codeowners_pattern, parse_path_rule
 MAP_PATH = ROOT / "docs/maps/component_ownership_map.json"
 CODEOWNERS_PATH = ROOT / ".github/CODEOWNERS"
 
@@ -21,31 +24,14 @@ def display_path(path: Path) -> str:
         return str(path)
 
 
-def normalize_prefix(prefix: str) -> str:
-    normalized = prefix.replace("\\", "/").strip()
-    if normalized.startswith("./"):
-        normalized = normalized[2:]
-    return normalized.lstrip("/")
-
-
-def codeowners_pattern(prefix: str) -> str:
-    normalized = normalize_prefix(prefix)
-
-    if normalized.endswith("/"):
-        return f"/{normalized}**"
-
-    if normalized.endswith("_"):
-        return f"/{normalized}*"
-
-    return f"/{normalized}"
-
-
 def load_map(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
         payload = json.load(handle)
 
     if not isinstance(payload, dict):
         raise ValueError("Component map must be a JSON object")
+    if payload.get("schema_version") != 3:
+        raise ValueError('"schema_version" must be 3')
 
     components = payload.get("components")
     if not isinstance(components, list) or not components:
@@ -77,17 +63,16 @@ def render_codeowners(payload: dict[str, Any]) -> str:
         if not isinstance(component, dict):
             raise ValueError("Each component must be an object")
 
-        folder_prefixes = component.get("folder_prefixes")
-        if not isinstance(folder_prefixes, list):
-            component_id = component.get("component_id", "<unknown>")
-            raise ValueError(f"Component {component_id} has invalid folder_prefixes")
+        component_id = component.get("component_id", "<unknown>")
+        path_rules = component.get("path_rules")
+        if not isinstance(path_rules, list):
+            raise ValueError(f"Component {component_id} has invalid path_rules")
 
         owners = unique_handles(component)
 
-        for prefix in folder_prefixes:
-            if not isinstance(prefix, str) or not prefix.strip():
-                continue
-            pattern = codeowners_pattern(prefix)
+        for rule in path_rules:
+            parsed_rule = parse_path_rule(rule, f"Component {component_id}.path_rules")
+            pattern = codeowners_pattern(parsed_rule)
             entries[pattern].update(owners)
 
     lines: list[str] = [

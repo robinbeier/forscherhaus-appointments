@@ -102,6 +102,91 @@ require three independent final reviews on the same unchanged exact head:
 - `reviewer_design` for architecture and maintainability
 - `reviewer_tests` for regression coverage and flake risk
 
+Invoke final lenses through the fixed-system-Git exact-base protocol in
+`scripts/agent/trusted_base_launcher.sh`, using the trusted base described in
+`WORKFLOW.md`; never execute either checked-out harness script. The launcher
+resolves the shared runtime and reviewer payload only from the exact-base
+`trusted_base_bootstrap` manifest and materializes both only after the base
+boundary is established. A fixed, exact-base-materialized bootstrap parser is
+the single implementation of that manifest contract; launcher and runtime call
+it at independent attestation points. The launcher starts that attested runtime
+directly; the runtime dispatches only the separately attested payload,
+revalidates the same manifest, retains an intentionally independent structural
+cross-check as a security floor, and owns clean Git/Python plus exact-base declared
+path materialization for reviewer and parallel-work payloads. The declared
+launcher and runtime environment paths must equal their actual Bash source
+paths; a pristine path supplied alongside different executed bytes fails
+closed. The declared
+reviewer payload remains `scripts/agent/run_readonly_reviewer.sh`. The runner and
+`.codex/contracts/agent-workflow.json` own live-main/exact-merge-base binding,
+deterministic SHA-256 bundle construction, and trusted-path selection. Do not
+duplicate its bootstrap and materialization internals here. The contract pins
+the official 0.145.0 release digest.
+The machine contract owns runtime pins, disabled reviewer tools, output schema,
+and trusted paths; its deterministic committed reviewer-policy snapshot must
+pass `php scripts/agent/generate_reviewer_policy_snapshot.php --check`. That
+snapshot generator never mutates runtime code. The separate
+`php scripts/agent/generate_reviewer_runtime_attestation.php --check` command
+guards a dedicated generated code-side attestation artifact over every reviewer
+policy field without rewriting runtime enforcement code, while explicit
+security floors remain independently enforced; changes to either generator are
+themselves bootstrap-reviewed. Bundle
+construction, model/prompt policy, and output
+validation are separate modules. Structural output rules come from the
+exact-base schema; exact Base/Head/lens/path and privacy are additional semantic
+checks. The runner orchestrates separately materialized exact-base
+bundle and isolated-runtime libraries for deterministic SHA-256 serialization,
+macOS Seatbelt default-deny isolation, canaries, and bounded privacy-safe
+output. The sealed bundle is the sole review input. It carries only a
+zero-context UTF-8 patch, changed paths, deterministic manifest, and allowlisted
+trusted base policy; full base/head blobs and binary payloads are rejected, and
+unchanged hunk context including section headings is stripped before the model
+call. The original worktree, `.git`,
+user configuration, connectors, delegation, credentials, and external writes
+remain unavailable. Non-macOS execution fails closed. The host
+login authenticates only the authorized model request and cannot be refreshed by
+the harness. On pinned CLI 0.145.0, debug preflights use the clean synthetic
+`HOME`/`CODEX_HOME` and sealed working directory because all three
+config-isolation flags are rejected by the debug ABI; the final exec requires
+all three.
+Consult the contract and runner for implementation details.
+Before any PHP helper executes, a root-owned clean bootstrap and isolated
+system Python use the policy/CLI entry point in
+`scripts/agent/verify_trusted_php_runtime.py` and the separately scoped
+file/archive/ELF/dependency primitives in
+`scripts/agent/lib/trusted_runtime_primitives.py` to attest the PHP binary plus
+its dynamic dependency closure against an exact per-platform pin in the
+exact-base contract. Fixed host closures must
+also be entirely system-owned; missing pins and ambient, user-owned, or drifted
+runtimes fail closed. An admitted platform may instead materialize the single
+runtime member from an exact URL and archive/member digest into its private
+control directory. macOS dependencies are inspected without execution; pinned
+Linux archives must parse as the expected static ELF architecture with no
+interpreter or needed library, so user-owned code is never passed to `ldd`.
+That path rejects extra archive members and non-system dynamic dependencies,
+and it still must match the exact aggregate closure pin before PHP executes.
+
+The selected Codex release is copied into the private control directory,
+rehashed, and inspected without execution. Its exact system-only dynamic
+dependency closure must match the per-platform contract pin before the first
+`codex` invocation. Any non-system dependency or broad package-manager library
+allowance fails closed.
+
+The initial trust-root introduction and changes to runtime-loaded
+`.codex/config.toml`, any `AGENTS.md`, or any bootstrap, role, schema, isolation,
+runtime, or policy-context path declared by the exact-base reviewer contract
+require a separately enforced external read-only bootstrap review. The runner
+derives that fail-closed set from the base contract and refuses those cases
+instead of allowing a head to review its own authority boundary. The model call
+remains inside both the outer Seatbelt profile and Codex `read-only` sandboxing
+with approval mode `never`.
+
+The Primary can use `--diagnostic-bootstrap-only`, without `--codex-bin`, to
+exercise the same exact-base launcher, attested PHP bootstrap, and real macOS
+Seatbelt allow/deny boundary without a model call. It never writes a user-home
+canary and reports `review_evidence: false`; it is diagnostic evidence only and
+never substitutes for a required reviewer lens.
+
 Any later push invalidates those final reviews and requires exact-head review
 again.
 

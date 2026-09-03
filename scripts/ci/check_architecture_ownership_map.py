@@ -12,6 +12,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from ownership_path_rules import parse_path_rules, path_rule_matches
+
 ROOT = Path(__file__).resolve().parents[2]
 MAP_PATH = ROOT / "docs/maps/component_ownership_map.json"
 GENERATOR_CHECK_CMD = [
@@ -33,7 +35,7 @@ REQUIRED_COMPONENT_FIELDS = {
     "agent_policy",
     "manual_approval_required",
     "ownership_notes",
-    "folder_prefixes",
+    "path_rules",
     "key_files",
     "depends_on",
 }
@@ -86,8 +88,8 @@ def load_map(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError("Top-level mapping must be a JSON object.")
 
-    if not isinstance(data.get("schema_version"), int):
-        raise ValueError('"schema_version" must be an integer.')
+    if data.get("schema_version") != 3:
+        raise ValueError('"schema_version" must be 3.')
 
     components = data.get("components")
     if not isinstance(components, list) or not components:
@@ -184,17 +186,26 @@ def validate_structure(data: dict[str, Any], tracked_files: set[str]) -> list[st
             if human_bus_factor < 2:
                 errors.append(f"{component_id} uses multi-owner mode and must declare human_bus_factor >= 2")
 
-        folder_prefixes = component["folder_prefixes"]
-        if not isinstance(folder_prefixes, list) or not folder_prefixes:
-            errors.append(f"{component_id}.folder_prefixes must be a non-empty list")
+        path_rules = component["path_rules"]
+        if not isinstance(path_rules, list) or not path_rules:
+            errors.append(f"{component_id}.path_rules must be a non-empty list")
         else:
-            for prefix in folder_prefixes:
-                if not isinstance(prefix, str) or not prefix.strip():
-                    errors.append(f"{component_id}.folder_prefixes contains an invalid empty entry")
-                    continue
-
-                if not prefix_exists(prefix, tracked_files):
-                    errors.append(f"{component_id}.folder_prefix does not match existing repo path/prefix: {prefix}")
+            try:
+                parsed_rules = parse_path_rules(path_rules, f"{component_id}.path_rules")
+            except ValueError as exc:
+                errors.append(str(exc))
+                parsed_rules = []
+            for parsed_rule in parsed_rules:
+                path = parsed_rule["path"]
+                match = parsed_rule["match"]
+                if match == "exact_file" and path not in tracked_files:
+                    errors.append(f"{component_id}.path rule does not match an existing file: {path}")
+                if match == "directory" and not any(file_path.startswith(path + "/") for file_path in tracked_files):
+                    errors.append(f"{component_id}.path rule does not match an existing directory: {path}")
+                if match == "filename_prefix" and not any(
+                    path_rule_matches(parsed_rule, file_path) for file_path in tracked_files
+                ):
+                    errors.append(f"{component_id}.path rule does not match an existing filename prefix: {path}")
 
         key_files = component["key_files"]
         if not isinstance(key_files, list) or not key_files:
@@ -276,8 +287,8 @@ def match_components(file_path: str, components: list[dict[str, Any]]) -> list[s
     matches: list[str] = []
     for component in components:
         component_id = component["component_id"]
-        for prefix in component["folder_prefixes"]:
-            if file_path == prefix or file_path.startswith(prefix):
+        for rule in component["path_rules"]:
+            if path_rule_matches(rule, file_path):
                 matches.append(component_id)
                 break
     return matches
