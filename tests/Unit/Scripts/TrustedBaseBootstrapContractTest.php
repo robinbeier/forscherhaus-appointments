@@ -196,6 +196,81 @@ final class TrustedBaseBootstrapContractTest extends TestCase
         }
     }
 
+    public function testRemoteGitIsolationIgnoresRepositoryLocalUrlRewrites(): void
+    {
+        $fixture = sys_get_temp_dir() . '/trusted-remote-git-' . bin2hex(random_bytes(8));
+        $canonicalRemote = $fixture . '/canonical.git';
+        $redirectedRemote = $fixture . '/redirected.git';
+        $worktree = $fixture . '/worktree';
+        self::assertTrue(mkdir($fixture, 0700, true));
+
+        try {
+            $this->runGit($fixture, ['init', '-q', '--bare', $canonicalRemote]);
+            $this->runGit($fixture, ['init', '-q', '--bare', $redirectedRemote]);
+            $this->runGit($fixture, ['init', '-q', $worktree]);
+            $this->runGit($worktree, ['config', 'user.name', 'Trusted Remote Test']);
+            $this->runGit($worktree, ['config', 'user.email', 'trusted-remote@example.invalid']);
+            $this->runGit($worktree, ['commit', '-qm', 'canonical', '--allow-empty']);
+            $canonicalSha = trim($this->runGit($worktree, ['rev-parse', 'HEAD']));
+            $this->runGit($worktree, ['push', '-q', $canonicalRemote, 'HEAD:main']);
+            $this->runGit($worktree, ['commit', '-qm', 'redirected', '--allow-empty']);
+            $redirectedSha = trim($this->runGit($worktree, ['rev-parse', 'HEAD']));
+            $this->runGit($worktree, ['push', '-q', $redirectedRemote, 'HEAD:main']);
+            $this->runGit($worktree, ['config', 'url.' . $redirectedRemote . '.insteadOf', $canonicalRemote]);
+
+            self::assertStringStartsWith(
+                $redirectedSha,
+                $this->runGit($worktree, ['ls-remote', '--exit-code', '--refs', $canonicalRemote, 'refs/heads/main']),
+            );
+
+            $process = proc_open(
+                [
+                    '/usr/bin/env',
+                    '-i',
+                    'GIT_CONFIG_GLOBAL=/dev/null',
+                    'GIT_CONFIG_NOSYSTEM=1',
+                    'GIT_CONFIG_SYSTEM=/dev/null',
+                    'GIT_DIR=/dev/null',
+                    'PATH=/usr/bin:/bin:/usr/sbin:/sbin',
+                    '/usr/bin/git',
+                    '-C',
+                    $worktree,
+                    'ls-remote',
+                    '--exit-code',
+                    '--refs',
+                    $canonicalRemote,
+                    'refs/heads/main',
+                ],
+                [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+                $pipes,
+                $worktree,
+            );
+            self::assertIsResource($process);
+            fclose($pipes[0]);
+            $stdout = (string) stream_get_contents($pipes[1]);
+            $stderr = (string) stream_get_contents($pipes[2]);
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+
+            self::assertSame(0, proc_close($process), $stderr);
+            self::assertStringStartsWith($canonicalSha, $stdout);
+
+            $runtime = (string) file_get_contents(
+                $this->repoRoot . '/scripts/agent/lib/trusted_base_payload_runtime.sh',
+            );
+            $remoteGitStart = strpos($runtime, 'trusted_base_remote_git() {');
+            self::assertIsInt($remoteGitStart);
+            $remoteGitEnd = strpos($runtime, "\n}\n\ntrusted_base_assert_materialized_blob", $remoteGitStart);
+            self::assertIsInt($remoteGitEnd);
+            self::assertStringContainsString(
+                'GIT_DIR=/dev/null',
+                substr($runtime, $remoteGitStart, $remoteGitEnd - $remoteGitStart),
+            );
+        } finally {
+            $this->removeDirectory($fixture);
+        }
+    }
+
     public function testReviewerEvidenceUsesSterileGitMetadataAndCanonicalObjects(): void
     {
         $bundleRuntime = (string) file_get_contents(
