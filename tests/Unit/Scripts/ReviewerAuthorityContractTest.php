@@ -806,6 +806,59 @@ class ReviewerAuthorityContractTest extends TestCase
         }
     }
 
+    public function testRunnerRejectsACodexBinaryInsideTheReviewedRepositoryBeforeModelExecution(): void
+    {
+        $executionMarker = sys_get_temp_dir() . '/reviewer-repository-codex-' . bin2hex(random_bytes(8));
+        $fixture = $this->runnerFixture(
+            'reviewer-repository-codex',
+            "#!/bin/sh\n: > " . escapeshellarg($executionMarker) . "\nexit 99\n",
+            'codex',
+        );
+        $repositoryBinary = $fixture['root'] . '/codex';
+
+        try {
+            self::assertNotFalse(
+                file_put_contents(
+                    $repositoryBinary,
+                    "#!/bin/sh\n: > " . escapeshellarg($executionMarker) . "\nexit 99\n",
+                ),
+            );
+            self::assertTrue(chmod($repositoryBinary, 0700));
+            $fixture['binary'] = $repositoryBinary;
+            $this->runGitCommand(['add', 'codex'], $fixture['root']);
+            $this->runGitCommand(
+                [
+                    '-c',
+                    'user.name=Reviewer Fixture',
+                    '-c',
+                    'user.email=reviewer-fixture.invalid',
+                    '-c',
+                    'commit.gpgsign=false',
+                    '-c',
+                    'core.hooksPath=/dev/null',
+                    'commit',
+                    '-q',
+                    '-m',
+                    'Add repository-local reviewer binary',
+                ],
+                $fixture['root'],
+            );
+            $fixture['base'] = $this->runGitCommand(['rev-parse', 'HEAD'], $fixture['root']);
+            $this->runGitCommand(['push', '-q', $fixture['remote'], 'HEAD:refs/heads/main'], $fixture['root']);
+            $this->runGitCommand(['update-ref', 'refs/remotes/origin/main', $fixture['base']], $fixture['root']);
+
+            [$exitCode, $stdout, $stderr] = $this->runRunnerFixture($fixture);
+
+            self::assertSame(2, $exitCode);
+            self::assertSame('', $stdout);
+            self::assertSame("Reviewer Codex binary must be outside the reviewed repository.\n", $stderr);
+            self::assertFileDoesNotExist($executionMarker);
+        } finally {
+            $this->removeRunnerFixture($fixture);
+            @unlink($executionMarker);
+        }
+    }
+
     public function testDiagnosticRunsTheExactLauncherAndSeatbeltWithoutModelExecution(): void
     {
         if (PHP_OS_FAMILY !== 'Darwin' || !is_executable('/usr/bin/sandbox-exec')) {

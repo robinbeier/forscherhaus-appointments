@@ -70,6 +70,26 @@ class TrustedPhpRuntimeTest(unittest.TestCase):
         finally:
             verifier.os.lstat = original
 
+    @contextlib.contextmanager
+    def owned_lstat_by_path(self, owners):
+        original = verifier.os.lstat
+
+        class OwnedStat:
+            def __init__(self, metadata, uid):
+                self.st_mode = metadata.st_mode
+                self.st_uid = uid
+                self.st_gid = 0
+
+        def fake_lstat(path):
+            metadata = original(path)
+            return OwnedStat(metadata, owners.get(path, metadata.st_uid))
+
+        verifier.os.lstat = fake_lstat
+        try:
+            yield
+        finally:
+            verifier.os.lstat = original
+
     def archive_fixture(self, content=b"static-php-fixture", extra_member=False):
         archive_path = os.path.join(self.root, "fixture-runtime.tar.gz")
         with tarfile.open(archive_path, "w:gz") as archive:
@@ -207,6 +227,47 @@ class TrustedPhpRuntimeTest(unittest.TestCase):
                 "fixed-path runtime closure is not system-owned",
             ):
                 verifier.attest(self.contract, "Darwin-arm64", self.inspector)
+
+    def test_user_owned_transitive_dependency_is_rejected_for_root_owned_pinned_candidate(self):
+        dependency = os.path.join(self.root, "libfixture.dylib")
+        with open(dependency, "wb") as stream:
+            stream.write(b"dependency")
+        os.chmod(dependency, 0o555)
+        candidate = os.path.realpath(self.php)
+        dependency = os.path.realpath(dependency)
+
+        def inspect(path):
+            if path == candidate:
+                return "\t%s (compatibility version 1.0.0, current version 1.0.0)\n" % dependency
+            return ""
+
+        with self.owned_lstat_by_path({candidate: 0, dependency: 501}):
+            closure_sha256 = verifier.closure_attestation(
+                candidate,
+                [candidate, dependency],
+                [],
+            )
+            self.write_contract(
+                candidate_by_platform={"Darwin-arm64": candidate},
+                require_exact_closure_sha256=True,
+                closure_sha256_by_platform={"Darwin-arm64": closure_sha256},
+            )
+            with self.assertRaisesRegex(
+                verifier.AttestationError,
+                "fixed-path runtime closure is not system-owned",
+            ):
+                verifier.attest(self.contract, "Darwin-arm64", inspect)
+
+    def test_darwin_absolute_dependency_is_normalized_before_sealed_prefix_classification(self):
+        escaped_install_name = "/usr/lib/../private/rob501-evil.dylib"
+
+        def inspect(path):
+            if path == os.path.realpath(self.php):
+                return "\t%s (compatibility version 1.0.0, current version 1.0.0)\n" % escaped_install_name
+            return ""
+
+        with self.assertRaisesRegex(verifier.AttestationError, "runtime path is unavailable"):
+            verifier.dependency_closure(self.php, "Darwin", inspect)
 
     def test_digest_mismatch_rejected(self):
         with self.owned_lstat(0):

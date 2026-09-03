@@ -437,7 +437,8 @@ def _expand_darwin_path(value, current, root_executable):
 
 def _resolve_darwin_dependency(dependency, current, root_executable):
     if dependency.startswith("/"):
-        return dependency
+        # Collapse traversal before dependency_closure classifies sealed paths.
+        return os.path.normpath(dependency)
     if dependency.startswith("@loader_path") or dependency.startswith("@executable_path"):
         return _expand_darwin_path(dependency, current, root_executable)
     if not dependency.startswith("@rpath/"):
