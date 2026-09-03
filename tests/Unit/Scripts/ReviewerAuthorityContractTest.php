@@ -1009,6 +1009,35 @@ class ReviewerAuthorityContractTest extends TestCase
         }
     }
 
+    public function testRuntimeValidatorRejectsCorrectDigestWithUnexpectedOwner(): void
+    {
+        $binary = sys_get_temp_dir() . '/codex-owner-' . bin2hex(random_bytes(8));
+        self::assertNotFalse(file_put_contents($binary, "#!/bin/sh\nexit 0\n"));
+        self::assertTrue(chmod($binary, 0500));
+        $canonicalBinary = realpath($binary);
+        self::assertIsString($canonicalBinary);
+        $actualOwner = fileowner($canonicalBinary);
+        self::assertIsInt($actualOwner);
+
+        try {
+            try {
+                ReadonlyReviewerContract::assertMaterializedCodex(
+                    $canonicalBinary,
+                    $actualOwner + 1,
+                    (string) hash_file('sha256', $canonicalBinary),
+                );
+                self::fail('A materialized Codex binary with an unexpected owner was accepted.');
+            } catch (\InvalidArgumentException $exception) {
+                self::assertStringContainsString(
+                    'does not match the pinned official release',
+                    $exception->getMessage(),
+                );
+            }
+        } finally {
+            unlink($binary);
+        }
+    }
+
     public function testRuntimeValidatorsRejectSymlinkedCodexFiles(): void
     {
         $directory = sys_get_temp_dir() . '/reviewer-codex-symlink-' . bin2hex(random_bytes(8));
