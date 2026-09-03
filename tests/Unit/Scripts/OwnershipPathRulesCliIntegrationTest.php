@@ -241,6 +241,51 @@ final class OwnershipPathRulesCliIntegrationTest extends TestCase
         }
     }
 
+    public function testPhpFailsClosedWhenCanonicalEngineWritesToStderr(): void
+    {
+        $root = sys_get_temp_dir() . '/ownership-engine-stderr-' . bin2hex(random_bytes(8));
+        self::assertTrue(mkdir($root . '/scripts/ci', 0700, true));
+        $engine = $root . '/scripts/ci/ownership_path_rules.py';
+        self::assertNotFalse(
+            file_put_contents(
+                $engine,
+                <<<'PYTHON'
+                #!/usr/bin/python3
+                import json
+                import sys
+
+                print(json.dumps({
+                    "protocol_version": 1,
+                    "operation": "covers",
+                    "result": {"matches": True},
+                }))
+                print("unexpected diagnostic", file=sys.stderr)
+                PYTHON. "\n",
+            ),
+        );
+        self::assertTrue(chmod($engine, 0700));
+        $previous = getenv('PARALLEL_WORK_OWNERSHIP_ENGINE');
+        putenv('PARALLEL_WORK_OWNERSHIP_ENGINE=' . $engine);
+
+        try {
+            $this->expectException(\RuntimeException::class);
+            ParallelWorkOwnershipContract::pathRuleCoversChangedPath(
+                ['path' => 'tests/Unit/Scripts', 'match' => 'directory'],
+                'tests/Unit/Scripts/example.php',
+            );
+        } finally {
+            if ($previous === false) {
+                putenv('PARALLEL_WORK_OWNERSHIP_ENGINE');
+            } else {
+                putenv('PARALLEL_WORK_OWNERSHIP_ENGINE=' . $previous);
+            }
+            unlink($engine);
+            rmdir($root . '/scripts/ci');
+            rmdir($root . '/scripts');
+            rmdir($root);
+        }
+    }
+
     public function testPhpRequiresVersionedOperationEnvelopeAndToleratesStructuredExtensions(): void
     {
         $root = sys_get_temp_dir() . '/ownership-engine-envelope-' . bin2hex(random_bytes(8));

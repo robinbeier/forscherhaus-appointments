@@ -69,19 +69,38 @@ class ReadonlyReviewerRuntimeLibraryTest extends TestCase
             ],
             JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
         );
-        $validatedOutput =
-            $scenario === 'valid'
-                ? json_encode(
-                    [
-                        'lens' => 'correctness_security',
-                        'base_sha' => $baseSha,
-                        'head_sha' => $headSha,
-                        'verdict' => 'no_findings',
-                        'findings' => [],
+        $validatedOutput = match ($scenario) {
+            'valid' => json_encode(
+                [
+                    'lens' => 'correctness_security',
+                    'base_sha' => $baseSha,
+                    'head_sha' => $headSha,
+                    'verdict' => 'no_findings',
+                    'findings' => [],
+                ],
+                JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
+            ),
+            'control-character' => json_encode(
+                [
+                    'lens' => 'correctness_security',
+                    'base_sha' => $baseSha,
+                    'head_sha' => $headSha,
+                    'verdict' => 'findings',
+                    'findings' => [
+                        [
+                            'priority' => 'P2',
+                            'title' => "Spoofed\nreview title",
+                            'file' => 'WORKFLOW.md',
+                            'line' => 1,
+                            'impact' => 'Malformed reviewer output could obscure the actual finding.',
+                            'trigger' => 'A model emits a control character in bounded finding prose.',
+                        ],
                     ],
-                    JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
-                )
-                : '{invalid-review-output';
+                ],
+                JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
+            ),
+            default => '{invalid-review-output',
+        };
 
         $codexStub = $fixtureRoot . '/codex';
         self::assertNotFalse(
@@ -328,10 +347,15 @@ class ReadonlyReviewerRuntimeLibraryTest extends TestCase
                 ],
                 array_slice($execInvocation, -23),
             );
-            if ($scenario === 'invalid') {
+            if ($scenario !== 'valid') {
                 self::assertSame(1, $exitCode);
                 self::assertSame('', $stdout);
-                self::assertStringContainsString('Reviewer output is not valid JSON.', $stderr);
+                self::assertStringContainsString(
+                    $scenario === 'control-character'
+                        ? 'Reviewer finding text is not privacy-safe.'
+                        : 'Reviewer output is not valid JSON.',
+                    $stderr,
+                );
                 self::assertStringContainsString('Reviewer isolated model call or output validation failed.', $stderr);
             } else {
                 self::assertSame(0, $exitCode, $stderr);
@@ -353,6 +377,7 @@ class ReadonlyReviewerRuntimeLibraryTest extends TestCase
     {
         yield 'valid no-findings output' => ['valid'];
         yield 'malformed output fails closed' => ['invalid'];
+        yield 'control characters in findings fail closed' => ['control-character'];
     }
 
     /** @param array<string, mixed> $overrides @return array<string, mixed> */
