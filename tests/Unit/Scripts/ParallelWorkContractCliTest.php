@@ -123,6 +123,8 @@ class ParallelWorkContractCliTest extends TestCase
             $this->repoRoot,
             $this->trustedValidatorRoot,
         ]);
+        $this->runGit($this->trustedValidatorRoot, ['config', 'user.name', 'Parallel Work Test']);
+        $this->runGit($this->trustedValidatorRoot, ['config', 'user.email', 'parallel-work-test@example.invalid']);
         $this->runGit($this->trustedValidatorRoot, ['checkout', '-q', '--detach', $this->baseSha]);
         $this->runGit($this->trustedValidatorRoot, ['update-ref', 'refs/remotes/origin/main', $this->baseSha]);
     }
