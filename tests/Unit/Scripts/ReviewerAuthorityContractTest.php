@@ -1176,33 +1176,39 @@ class ReviewerAuthorityContractTest extends TestCase
         }
     }
 
-    public function testRunnerRequiresExternalBootstrapReviewForWorkflowPolicyChanges(): void
+    public function testRunnerRequiresExternalBootstrapReviewForEveryRootPolicyChange(): void
     {
-        $executionMarker = sys_get_temp_dir() . '/reviewer-workflow-executed-' . bin2hex(random_bytes(8));
-        $fixture = $this->runnerFixture(
-            'reviewer-workflow-drift',
-            "#!/bin/sh\n: > " . escapeshellarg($executionMarker) . "\nexit 0\n",
-            'codex',
-        );
-
-        try {
-            self::assertNotFalse(file_put_contents($fixture['root'] . '/WORKFLOW.md', "weakened review policy\n"));
-            $this->runGitCommand(['add', '--all'], $fixture['root']);
-            $this->commitRunnerFixture($fixture['root'], 'Change workflow review policy');
-            $head = $this->runGitCommand(['rev-parse', 'HEAD'], $fixture['root']);
-
-            [$exitCode, $stdout, $stderr] = $this->runRunnerFixture($fixture, $fixture['base'], $head);
-
-            self::assertSame(1, $exitCode);
-            self::assertSame('', $stdout);
-            self::assertSame(
-                "Reviewer runtime configuration changed; external bootstrap review is required.\n",
-                $stderr,
+        foreach (['AGENTS.md', 'WORKFLOW.md', 'code_review.md'] as $policyPath) {
+            $label = strtolower(str_replace(['.', '_'], '-', $policyPath));
+            $executionMarker = sys_get_temp_dir() . '/reviewer-' . $label . '-executed-' . bin2hex(random_bytes(8));
+            $fixture = $this->runnerFixture(
+                'reviewer-' . $label . '-drift',
+                "#!/bin/sh\n: > " . escapeshellarg($executionMarker) . "\nexit 0\n",
+                'codex',
             );
-            self::assertFileDoesNotExist($executionMarker);
-        } finally {
-            $this->removeRunnerFixture($fixture);
-            @unlink($executionMarker);
+
+            try {
+                self::assertNotFalse(
+                    file_put_contents($fixture['root'] . '/' . $policyPath, "weakened review policy\n"),
+                );
+                $this->runGitCommand(['add', '--all'], $fixture['root']);
+                $this->commitRunnerFixture($fixture['root'], 'Change root review policy');
+                $head = $this->runGitCommand(['rev-parse', 'HEAD'], $fixture['root']);
+
+                [$exitCode, $stdout, $stderr] = $this->runRunnerFixture($fixture, $fixture['base'], $head);
+
+                self::assertSame(1, $exitCode, $policyPath);
+                self::assertSame('', $stdout, $policyPath);
+                self::assertSame(
+                    "Reviewer runtime configuration changed; external bootstrap review is required.\n",
+                    $stderr,
+                    $policyPath,
+                );
+                self::assertFileDoesNotExist($executionMarker, $policyPath);
+            } finally {
+                $this->removeRunnerFixture($fixture);
+                @unlink($executionMarker);
+            }
         }
     }
 
