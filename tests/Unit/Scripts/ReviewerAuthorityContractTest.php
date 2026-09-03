@@ -1893,7 +1893,7 @@ class ReviewerAuthorityContractTest extends TestCase
         }
     }
 
-    public function testTestsRegressionFlakeLensResolvesTheCanonicalRepositoryRole(): void
+    public function testEveryReviewerLensResolvesTheCanonicalRepositoryRole(): void
     {
         $contract = json_decode(
             (string) file_get_contents($this->repoRoot . '/.codex/contracts/agent-workflow.json'),
@@ -1904,20 +1904,28 @@ class ReviewerAuthorityContractTest extends TestCase
         self::assertIsArray($contract);
         self::assertIsArray($contract['authority']['reviewer'] ?? null);
 
-        $resolved = ReadonlyReviewerContract::resolveInvocation(
-            $this->repoRoot,
-            'tests_regression_flake',
-            $contract['authority']['reviewer'],
-        );
+        $expectedProfiles = [
+            'correctness_security' => ['.codex/agents/reviewer-correctness.toml', 'gpt-5.4', 'high'],
+            'design_maintainability' => ['.codex/agents/reviewer-design.toml', 'gpt-5.4-mini', 'medium'],
+            'tests_regression_flake' => ['.codex/agents/reviewer-tests.toml', 'gpt-5.4-mini', 'medium'],
+        ];
 
-        self::assertSame('.codex/agents/reviewer-tests.toml', $resolved['role_file']);
-        self::assertSame('gpt-5.4-mini', $resolved['model']);
-        self::assertSame('medium', $resolved['reasoning']);
-        self::assertSame(
-            (string) file_get_contents($this->repoRoot . '/.codex/agents/reviewer-tests.toml'),
-            $resolved['role_instructions'],
-        );
-        self::assertStringContainsString('regression coverage', $resolved['role_instructions']);
+        foreach ($expectedProfiles as $lens => [$roleFile, $model, $reasoning]) {
+            $resolved = ReadonlyReviewerContract::resolveInvocation(
+                $this->repoRoot,
+                $lens,
+                $contract['authority']['reviewer'],
+            );
+
+            self::assertSame($roleFile, $resolved['role_file'], $lens);
+            self::assertSame($model, $resolved['model'], $lens);
+            self::assertSame($reasoning, $resolved['reasoning'], $lens);
+            self::assertSame(
+                (string) file_get_contents($this->repoRoot . '/' . $roleFile),
+                $resolved['role_instructions'],
+                $lens,
+            );
+        }
     }
 
     public function testProfileResolutionRejectsAnUnknownReviewerLens(): void
