@@ -103,6 +103,10 @@ merge, or production authority.
 Parallel work means local implementation only. It is opt-in for explicitly
 approved, independently verifiable lanes; normal PR publication, Linear
 mutation, integration, attestation, and landing remain serial.
+Only version-controlled lane changes are candidates for ownership admission
+and landing. Ignored local dependencies or configuration never become merge
+evidence; the Primary integrates committed lane heads and repeats validation
+from that committed state.
 
 The machine-readable contract and validator are the implementation authority:
 `.codex/contracts/agent-workflow.json`,

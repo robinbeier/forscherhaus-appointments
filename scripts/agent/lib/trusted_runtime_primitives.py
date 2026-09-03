@@ -9,6 +9,7 @@ import stat
 import struct
 import subprocess
 import tarfile
+import time
 import urllib.parse
 
 
@@ -16,6 +17,7 @@ HEX64 = re.compile(r"^[0-9a-f]{64}$")
 PLATFORM = re.compile(r"^[A-Za-z0-9_.-]+-[A-Za-z0-9_.-]+$")
 SYSTEM_UTILITIES = {"Darwin": "/usr/bin/otool", "Linux": "/usr/bin/ldd"}
 CURL_EXECUTABLE = "/usr/bin/curl"
+HEAD_EXECUTABLE = "/usr/bin/head"
 # Curl reads user configuration before interpreting most command-line options.
 # Keep --disable as the first option and pass an explicit allowlist environment;
 # this excludes curlrc/netrc/proxy and credential-related ambient variables.
@@ -107,29 +109,65 @@ def _private_materialization_root(path):
 
 def _download_pinned_archive(url, target):
     curl = CURL_EXECUTABLE
+    limiter = HEAD_EXECUTABLE
     try:
-        metadata = _regular_secure(os.path.realpath(curl))
+        curl_metadata = _regular_secure(os.path.realpath(curl))
+        limiter_metadata = _regular_secure(os.path.realpath(limiter))
     except AttestationError as exc:
         raise AttestationError("safe runtime archive transport is unavailable") from exc
-    if metadata.st_uid != 0 or not os.access(curl, os.X_OK):
+    if (
+        curl_metadata.st_uid != 0
+        or limiter_metadata.st_uid != 0
+        or not os.access(curl, os.X_OK)
+        or not os.access(limiter, os.X_OK)
+    ):
         raise AttestationError("safe runtime archive transport is unavailable")
+    curl_process = None
+    limiter_process = None
     try:
-        subprocess.run(
-            [
-                curl,
-                *CURL_SECURITY_OPTIONS,
-                "--max-filesize",
-                str(PINNED_ARCHIVE_MAX_BYTES),
-                "--output",
-                target,
-                url,
-            ],
-            check=True,
-            capture_output=True,
-            env=dict(SAFE_CURL_ENVIRONMENT),
-            timeout=180,
-        )
+        with open(target, "xb") as output:
+            curl_process = subprocess.Popen(
+                [
+                    curl,
+                    *CURL_SECURITY_OPTIONS,
+                    "--max-filesize",
+                    str(PINNED_ARCHIVE_MAX_BYTES),
+                    url,
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                env=dict(SAFE_CURL_ENVIRONMENT),
+            )
+            if curl_process.stdout is None:
+                raise OSError("runtime archive transport pipe is unavailable")
+            limiter_process = subprocess.Popen(
+                [limiter, "-c", str(PINNED_ARCHIVE_MAX_BYTES + 1)],
+                stdin=curl_process.stdout,
+                stdout=output,
+                stderr=subprocess.DEVNULL,
+                env=dict(SAFE_CURL_ENVIRONMENT),
+            )
+            curl_process.stdout.close()
+            deadline = time.monotonic() + 180
+            limiter_status = limiter_process.wait(timeout=max(0.1, deadline - time.monotonic()))
+            curl_status = curl_process.wait(timeout=max(0.1, deadline - time.monotonic()))
+        if (
+            limiter_status != 0
+            or curl_status != 0
+            or os.path.getsize(target) > PINNED_ARCHIVE_MAX_BYTES
+        ):
+            raise subprocess.SubprocessError("runtime archive transport exceeded its boundary")
     except (OSError, subprocess.SubprocessError) as exc:
+        for process in (limiter_process, curl_process):
+            if process is not None and process.poll() is None:
+                process.kill()
+                process.wait()
+        try:
+            os.unlink(target)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            pass
         raise AttestationError("pinned runtime archive download failed") from exc
 
 

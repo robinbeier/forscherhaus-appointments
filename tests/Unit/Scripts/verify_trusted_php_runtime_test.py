@@ -310,6 +310,13 @@ class TrustedPhpRuntimeTest(unittest.TestCase):
             stream.write("output %s\nproxy http://attacker.invalid\n" % unexpected_output)
         with open(os.path.join(curl_home, "credentials"), "w", encoding="utf-8") as stream:
             stream.write("machine attacker.invalid login leaked password secret\n")
+        curl_stdout = io.BytesIO()
+        curl_process = mock.Mock(stdout=curl_stdout)
+        curl_process.wait.return_value = 0
+        curl_process.poll.return_value = 0
+        limiter_process = mock.Mock()
+        limiter_process.wait.return_value = 0
+        limiter_process.poll.return_value = 0
         with mock.patch.dict(
             os.environ,
             {
@@ -320,23 +327,32 @@ class TrustedPhpRuntimeTest(unittest.TestCase):
                 "ALL_PROXY": "http://attacker.invalid",
             },
             clear=False,
-        ), mock.patch.object(verifier._RUNTIME_PRIMITIVES.subprocess, "run") as run:
+        ), mock.patch.object(
+            verifier._RUNTIME_PRIMITIVES.subprocess,
+            "Popen",
+            side_effect=[curl_process, limiter_process],
+        ) as popen, mock.patch.object(
+            verifier._RUNTIME_PRIMITIVES.os.path,
+            "getsize",
+            return_value=0,
+        ):
             verifier._download_pinned_archive(descriptor["url"], target)
 
         primitives = verifier._RUNTIME_PRIMITIVES
-        command = run.call_args.args[0]
+        command = popen.call_args_list[0].args[0]
         self.assertEqual(primitives.CURL_EXECUTABLE, command[0])
         self.assertEqual("--disable", command[1])
         self.assertEqual(
             list(primitives.CURL_SECURITY_OPTIONS), command[1 : 1 + len(primitives.CURL_SECURITY_OPTIONS)]
         )
-        self.assertEqual(dict(primitives.SAFE_CURL_ENVIRONMENT), run.call_args.kwargs["env"])
-        self.assertNotIn("HOME", run.call_args.kwargs["env"])
-        self.assertNotIn("CURL_HOME", run.call_args.kwargs["env"])
-        self.assertNotIn("NETRC", run.call_args.kwargs["env"])
-        self.assertNotIn("HTTPS_PROXY", run.call_args.kwargs["env"])
-        self.assertNotIn("ALL_PROXY", run.call_args.kwargs["env"])
-        self.assertFalse(os.path.exists(target))
+        environment = popen.call_args_list[0].kwargs["env"]
+        self.assertEqual(dict(primitives.SAFE_CURL_ENVIRONMENT), environment)
+        self.assertNotIn("HOME", environment)
+        self.assertNotIn("CURL_HOME", environment)
+        self.assertNotIn("NETRC", environment)
+        self.assertNotIn("HTTPS_PROXY", environment)
+        self.assertNotIn("ALL_PROXY", environment)
+        self.assertTrue(os.path.exists(target))
         self.assertFalse(os.path.exists(unexpected_output))
 
     def test_pinned_archive_download_rejects_non_root_owned_fixed_curl_before_execution(self):
@@ -346,7 +362,7 @@ class TrustedPhpRuntimeTest(unittest.TestCase):
             primitives,
             "_regular_secure",
             return_value=mock.Mock(st_uid=501),
-        ) as regular_secure, mock.patch.object(primitives.subprocess, "run") as run:
+        ) as regular_secure, mock.patch.object(primitives.subprocess, "Popen") as popen:
             with self.assertRaisesRegex(
                 verifier.AttestationError,
                 "safe runtime archive transport is unavailable",
@@ -356,8 +372,32 @@ class TrustedPhpRuntimeTest(unittest.TestCase):
                     target,
                 )
 
-        regular_secure.assert_called_once_with(os.path.realpath(primitives.CURL_EXECUTABLE))
-        run.assert_not_called()
+        regular_secure.assert_any_call(os.path.realpath(primitives.CURL_EXECUTABLE))
+        popen.assert_not_called()
+        self.assertFalse(os.path.exists(target))
+
+    def test_pinned_archive_download_removes_stream_larger_than_the_byte_limit(self):
+        primitives = verifier._RUNTIME_PRIMITIVES
+        fake_curl = os.path.join(self.root, "curl-fixture")
+        target = os.path.join(self.root, "download.tar.gz")
+        with open(fake_curl, "w", encoding="utf-8") as stream:
+            stream.write("#!/bin/bash\nprintf '0123456789abcdef'\n")
+        os.chmod(fake_curl, 0o700)
+
+        with mock.patch.object(primitives, "CURL_EXECUTABLE", fake_curl), mock.patch.object(
+            primitives,
+            "PINNED_ARCHIVE_MAX_BYTES",
+            8,
+        ), mock.patch.object(primitives, "_regular_secure", return_value=mock.Mock(st_uid=0)):
+            with self.assertRaisesRegex(
+                verifier.AttestationError,
+                "pinned runtime archive download failed",
+            ):
+                verifier._download_pinned_archive(
+                    "https://artifacts.example.invalid/php-runtime.tar.gz",
+                    target,
+                )
+
         self.assertFalse(os.path.exists(target))
 
     def test_linux_x86_64_pinned_static_archive_is_parsed_without_loader_execution(self):
