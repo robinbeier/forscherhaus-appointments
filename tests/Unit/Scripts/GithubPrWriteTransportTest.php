@@ -17,6 +17,8 @@ final class GithubPrWriteTransportTest extends TestCase
     private string $stdin;
     private string $head;
     private string $branch;
+    private string $home;
+    private string $runtimeRoot;
 
     protected function setUp(): void
     {
@@ -27,8 +29,16 @@ final class GithubPrWriteTransportTest extends TestCase
         $this->stdin = $this->tmp . '/stdin';
         $this->head = trim((string) shell_exec('/usr/bin/git -C ' . escapeshellarg($root) . ' rev-parse HEAD'));
         $this->branch = 'test/pr-branch';
+        $this->home = $this->tmp . '/home';
+        $this->runtimeRoot = $this->tmp . '/runtime';
         self::assertMatchesRegularExpression('/\A[a-f0-9]{40}\z/D', $this->head);
         self::assertTrue(mkdir($this->bin, 0700, true));
+        self::assertTrue(mkdir($this->home . '/.config/gh', 0700, true));
+        self::assertTrue(mkdir($this->runtimeRoot, 0700, true));
+        self::assertNotFalse(file_put_contents($this->home . '/.config/gh/hosts.yml', "github.com:\n  user: test\n"));
+        self::assertNotFalse(file_put_contents($this->home . '/.config/gh/config.yml', "aliases:\n  api: '!unsafe'\n"));
+        self::assertTrue(chmod($this->home . '/.config/gh/hosts.yml', 0600));
+        self::assertTrue(chmod($this->home . '/.config/gh/config.yml', 0600));
 
         $fake = <<<'BASH'
         #!/bin/bash
@@ -51,6 +61,14 @@ final class GithubPrWriteTransportTest extends TestCase
         for arg in "$@"; do printf '\n%s' "$arg" >> "$record"; done
         printf '\n--env--\n' >> "$record"
         /usr/bin/env | LC_ALL=C /usr/bin/sort >> "$record"
+        printf '\n--gh-config--\n' >> "$record"
+        for entry in "$GH_CONFIG_DIR"/*; do
+          if [[ -L "$entry" ]]; then
+            printf 'entry:%s:symlink\n' "${entry##*/}" >> "$record"
+          elif [[ -e "$entry" ]]; then
+            printf 'entry:%s:file\n' "${entry##*/}" >> "$record"
+          fi
+        done
         printf '\n--call-end--\n' >> "$record"
 
         if [[ "${1:-}" == "auth" && "${2:-}" == "status" ]]; then
@@ -181,6 +199,15 @@ final class GithubPrWriteTransportTest extends TestCase
         self::assertStringNotContainsString('do-not-leak', $record);
         self::assertStringContainsString('PATH=/usr/bin:/bin:/usr/sbin:/sbin', $record);
         self::assertStringNotContainsString($this->bin . ':', $record);
+        self::assertMatchesRegularExpression(
+            '/\nGH_CONFIG_DIR=' .
+                preg_quote((string) realpath($this->runtimeRoot), '/') .
+                '\/github-pr-write-gh-[a-f0-9]{32}\n/',
+            $record,
+        );
+        self::assertStringContainsString("\n--gh-config--\nentry:hosts.yml:symlink\n", $record);
+        self::assertStringNotContainsString('entry:config.yml', $record);
+        self::assertSame(['.', '..'], scandir($this->runtimeRoot));
     }
 
     public function testCreateCommentPreservesExactBodyBytesWithoutTrailingLf(): void
@@ -460,11 +487,14 @@ final class GithubPrWriteTransportTest extends TestCase
             [
                 'resolveGhBinary',
                 'validateGhBinary',
+                'createGhRuntime',
+                'removeGhRuntime',
                 'resolveLocalTarget',
                 'verifyTarget',
                 'verifyUpdatedFields',
                 'extractCommentId',
                 'execute',
+                'executeWithEnvironment',
                 'runCommand',
             ]
             as $method
@@ -492,15 +522,52 @@ final class GithubPrWriteTransportTest extends TestCase
 
     public function testGhBinaryMustBeASafeAbsoluteExecutable(): void
     {
+        $trusted = [
+            $this->bin . '/gh' => [
+                'resolved_path' => realpath($this->bin . '/gh'),
+                'sha256' => hash_file('sha256', $this->bin . '/gh'),
+            ],
+        ];
         self::assertSame(
             realpath($this->bin . '/gh'),
-            $this->invokeTransport('validateGhBinary', [$this->bin . '/gh']),
+            $this->invokeTransport('validateGhBinary', [$this->bin . '/gh', $trusted]),
         );
 
         chmod($this->bin . '/gh', 0777);
         $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('ownership or mode is unsafe');
-        $this->invokeTransport('validateGhBinary', [$this->bin . '/gh']);
+        $this->expectExceptionMessage('ownership, mode, or digest is unsafe');
+        $this->invokeTransport('validateGhBinary', [$this->bin . '/gh', $trusted]);
+    }
+
+    public function testGhBinaryDigestAndResolvedPathArePinned(): void
+    {
+        $originalResolved = realpath($this->bin . '/gh');
+        $trusted = [
+            $this->bin . '/gh' => [
+                'resolved_path' => $originalResolved,
+                'sha256' => hash_file('sha256', $this->bin . '/gh'),
+            ],
+        ];
+
+        self::assertNotFalse(file_put_contents($this->bin . '/gh', "\n# changed\n", FILE_APPEND));
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('ownership, mode, or digest is unsafe');
+        $this->invokeTransport('validateGhBinary', [$this->bin . '/gh', $trusted]);
+    }
+
+    public function testGhBinaryTrustManifestMatchesMachineContract(): void
+    {
+        $contract = json_decode(
+            (string) file_get_contents(dirname(__DIR__, 3) . '/.codex/contracts/agent-workflow.json'),
+            true,
+            512,
+            JSON_THROW_ON_ERROR,
+        );
+
+        self::assertSame(
+            GITHUB_PR_WRITE_GH_CANDIDATES,
+            $contract['publish']['github_pr_write_transport']['gh_executable_manifest'] ?? null,
+        );
     }
 
     private function runTransport(array $args, string $input, ?array $targetSequence = null): array
@@ -523,13 +590,21 @@ final class GithubPrWriteTransportTest extends TestCase
                 }
                 return ['sha' => $target['sha'], 'branch' => $target['branch']];
             };
-            $options = $invoke('parseArguments', [array_slice($argv, 6)]);
+            $runtimeFactory = static function () use ($invoke, $argv): array {
+                return $invoke('createGhRuntime', [[
+                    'name' => 'test-user',
+                    'dir' => $argv[6],
+                    'uid' => posix_geteuid(),
+                ], $argv[7]]);
+            };
+            $options = $invoke('parseArguments', [array_slice($argv, 8)]);
             $payload = $invoke('parsePayload', [$options['operation'], is_string($input) ? $input : '']);
             $invoke('execute', [
                 $options,
                 $payload,
                 $argv[2],
                 $resolver,
+                $runtimeFactory,
             ]);
             exit(0);
         } catch (InvalidArgumentException $exception) {
@@ -560,6 +635,8 @@ final class GithubPrWriteTransportTest extends TestCase
                 $this->head,
                 $this->branch,
                 $targetSequenceJson,
+                $this->home,
+                $this->runtimeRoot,
                 ...$args,
             ],
             [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],

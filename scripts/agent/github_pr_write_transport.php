@@ -8,7 +8,12 @@ const GITHUB_PR_WRITE_MAX_BODY_BYTES = 65536;
 const GITHUB_PR_WRITE_MAX_TITLE_BYTES = 256;
 const GITHUB_PR_WRITE_MAX_INPUT_BYTES = 400000;
 const GITHUB_PR_WRITE_MAX_COMMAND_OUTPUT_BYTES = 131072;
-const GITHUB_PR_WRITE_GH_CANDIDATES = ['/opt/homebrew/bin/gh', '/usr/local/bin/gh', '/usr/bin/gh'];
+const GITHUB_PR_WRITE_GH_CANDIDATES = [
+    '/opt/homebrew/bin/gh' => [
+        'resolved_path' => '/opt/homebrew/Cellar/gh/2.88.0/bin/gh',
+        'sha256' => '07661fba523076af4a0bfea9d3862b2855c05561d70e6f7629c60cdade1a9abf',
+    ],
+];
 
 final class GithubPrWriteTransport
 {
@@ -110,15 +115,24 @@ final class GithubPrWriteTransport
         return $payload;
     }
 
-    /** @return array<string, string> */
-    private static function childEnvironment(): array
+    /**
+     * @param array{name: string, dir: string, uid: int}|null $accountOverride
+     * @return array{environment: array<string, string>, config_dir: string}
+     */
+    private static function createGhRuntime(?array $accountOverride = null, string $temporaryRoot = '/tmp'): array
     {
         if (!function_exists('posix_geteuid') || !function_exists('posix_getpwuid')) {
             throw new RuntimeException('OS account lookup is unavailable.');
         }
         $effectiveUid = posix_geteuid();
-        $account = posix_getpwuid($effectiveUid);
-        if (!is_array($account) || !is_string($account['name'] ?? null) || !is_string($account['dir'] ?? null)) {
+        $account = $accountOverride ?? posix_getpwuid($effectiveUid);
+        if (
+            !is_array($account) ||
+            !is_string($account['name'] ?? null) ||
+            !is_string($account['dir'] ?? null) ||
+            !is_int($account['uid'] ?? null) ||
+            $account['uid'] !== $effectiveUid
+        ) {
             throw new RuntimeException('OS account lookup failed.');
         }
         $home = realpath($account['dir']);
@@ -126,27 +140,104 @@ final class GithubPrWriteTransport
             throw new RuntimeException('OS account home is unsafe.');
         }
 
+        $nativeConfig = $home . '/.config/gh';
+        $hostsFile = $nativeConfig . '/hosts.yml';
+        if (
+            !is_dir($nativeConfig) ||
+            is_link($nativeConfig) ||
+            fileowner($nativeConfig) !== $effectiveUid ||
+            !is_file($hostsFile) ||
+            is_link($hostsFile) ||
+            fileowner($hostsFile) !== $effectiveUid
+        ) {
+            throw new RuntimeException('Native GitHub authentication metadata is unsafe.');
+        }
+        $nativeConfigMode = fileperms($nativeConfig);
+        $hostsMode = fileperms($hostsFile);
+        if (
+            !is_int($nativeConfigMode) ||
+            ($nativeConfigMode & 0o022) !== 0 ||
+            !is_int($hostsMode) ||
+            ($hostsMode & 0o077) !== 0
+        ) {
+            throw new RuntimeException('Native GitHub authentication metadata is unsafe.');
+        }
+
+        $resolvedTemporaryRoot = realpath($temporaryRoot);
+        if ($resolvedTemporaryRoot === false || !is_dir($resolvedTemporaryRoot)) {
+            throw new RuntimeException('Private GitHub CLI runtime root is unavailable.');
+        }
+        $configDir = '';
+        for ($attempt = 0; $attempt < 8; $attempt++) {
+            $candidate = $resolvedTemporaryRoot . '/github-pr-write-gh-' . bin2hex(random_bytes(16));
+            if (@mkdir($candidate, 0700)) {
+                $configDir = $candidate;
+                break;
+            }
+        }
+        if ($configDir === '') {
+            throw new RuntimeException('Private GitHub CLI configuration could not be created.');
+        }
+        if (!@symlink($hostsFile, $configDir . '/hosts.yml')) {
+            @rmdir($configDir);
+            throw new RuntimeException('Native GitHub authentication metadata could not be isolated.');
+        }
+
         return [
-            'PATH' => '/usr/bin:/bin:/usr/sbin:/sbin',
-            'HOME' => $home,
-            'USER' => $account['name'],
-            'LOGNAME' => $account['name'],
-            'TMPDIR' => '/tmp',
-            'LANG' => 'C',
-            'LC_ALL' => 'C',
-            'GH_PROMPT_DISABLED' => '1',
-            'NO_COLOR' => '1',
+            'environment' => [
+                'PATH' => '/usr/bin:/bin:/usr/sbin:/sbin',
+                'HOME' => $home,
+                'USER' => $account['name'],
+                'LOGNAME' => $account['name'],
+                'TMPDIR' => '/tmp',
+                'LANG' => 'C',
+                'LC_ALL' => 'C',
+                'GH_CONFIG_DIR' => $configDir,
+                'GH_PROMPT_DISABLED' => '1',
+                'NO_COLOR' => '1',
+            ],
+            'config_dir' => $configDir,
         ];
     }
 
-    private static function validateGhBinary(string $candidate): string
+    private static function removeGhRuntime(string $configDir): void
+    {
+        $hostsLink = $configDir . '/hosts.yml';
+        if (is_link($hostsLink)) {
+            @unlink($hostsLink);
+        }
+        if (is_dir($configDir)) {
+            @rmdir($configDir);
+        }
+    }
+
+    /**
+     * @param array<string, array{resolved_path: string, sha256: string}>|null $trustedCandidates
+     */
+    private static function validateGhBinary(string $candidate, ?array $trustedCandidates = null): string
     {
         if ($candidate === '' || !str_starts_with($candidate, '/') || basename($candidate) !== 'gh') {
             throw new RuntimeException('GitHub CLI path is invalid.');
         }
+        $trustedCandidates ??= GITHUB_PR_WRITE_GH_CANDIDATES;
+        $trusted = $trustedCandidates[$candidate] ?? null;
+        if (
+            !is_array($trusted) ||
+            preg_match('/\A[a-f0-9]{64}\z/D', $trusted['sha256'] ?? '') !== 1 ||
+            !is_string($trusted['resolved_path'] ?? null) ||
+            !str_starts_with($trusted['resolved_path'], '/')
+        ) {
+            throw new RuntimeException('GitHub CLI path is not in the exact trust manifest.');
+        }
 
         $resolved = realpath($candidate);
-        if ($resolved === false || !is_file($resolved) || !is_executable($resolved) || is_link($resolved)) {
+        if (
+            $resolved === false ||
+            $resolved !== $trusted['resolved_path'] ||
+            !is_file($resolved) ||
+            !is_executable($resolved) ||
+            is_link($resolved)
+        ) {
             throw new RuntimeException('GitHub CLI is unavailable.');
         }
         if (!function_exists('posix_geteuid')) {
@@ -159,9 +250,10 @@ final class GithubPrWriteTransport
             !is_int($owner) ||
             !in_array($owner, [0, posix_geteuid()], true) ||
             !is_int($mode) ||
-            ($mode & 0o022) !== 0
+            ($mode & 0o022) !== 0 ||
+            !hash_equals($trusted['sha256'], hash_file('sha256', $resolved) ?: '')
         ) {
-            throw new RuntimeException('GitHub CLI ownership or mode is unsafe.');
+            throw new RuntimeException('GitHub CLI ownership, mode, or digest is unsafe.');
         }
 
         return $resolved;
@@ -169,7 +261,7 @@ final class GithubPrWriteTransport
 
     private static function resolveGhBinary(): string
     {
-        foreach (GITHUB_PR_WRITE_GH_CANDIDATES as $candidate) {
+        foreach (array_keys(GITHUB_PR_WRITE_GH_CANDIDATES) as $candidate) {
             if (!file_exists($candidate)) {
                 continue;
             }
@@ -368,14 +460,37 @@ final class GithubPrWriteTransport
     /** @param array{operation: string, repo: string, number: int} $options
      *  @param array{title?: string, body?: string} $payload
      *  @param (callable(): array{sha: string, branch: string})|null $localTargetResolver
+     *  @param (callable(): array{environment: array<string, string>, config_dir: string})|null $ghRuntimeFactory
      */
     private static function execute(
         array $options,
         array $payload,
         string $ghBinary,
         ?callable $localTargetResolver = null,
+        ?callable $ghRuntimeFactory = null,
     ): void {
-        $environment = self::childEnvironment();
+        $ghRuntimeFactory ??= static fn(): array => self::createGhRuntime();
+        $runtime = $ghRuntimeFactory();
+        $environment = $runtime['environment'];
+        try {
+            self::executeWithEnvironment($options, $payload, $ghBinary, $environment, $localTargetResolver);
+        } finally {
+            self::removeGhRuntime($runtime['config_dir']);
+        }
+    }
+
+    /** @param array{operation: string, repo: string, number: int} $options
+     *  @param array{title?: string, body?: string} $payload
+     *  @param array<string, string> $environment
+     *  @param (callable(): array{sha: string, branch: string})|null $localTargetResolver
+     */
+    private static function executeWithEnvironment(
+        array $options,
+        array $payload,
+        string $ghBinary,
+        array $environment,
+        ?callable $localTargetResolver,
+    ): void {
         $auth = self::runCommand([$ghBinary, 'auth', 'status', '--hostname', 'github.com'], '', $environment);
         if ($auth['exit_code'] !== 0) {
             throw new UnexpectedValueException('Native GitHub authentication is unavailable.');

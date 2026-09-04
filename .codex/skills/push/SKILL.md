@@ -83,10 +83,11 @@ gh pr view --json state,url,number 2>/dev/null || true
 - Keep the PR linked on the Linear issue itself; do not duplicate the PR URL in
   the workpad.
 - Never obtain, export, print, or pass a raw GitHub token. The narrow REST
-  fallback uses an absolute verified `gh` binary, the native credential store,
-  a fixed child environment, and independent local plus canonical remote
-  exact-head-and-branch preflight/postflight checks. Any write invocation with
-  an uncertain outcome must be reconciled and never retried; metadata writes do
-  not grant merge, branch, rerun, review, or Linear authority.
+  fallback uses the manifest-pinned path and SHA-256 of `gh`, the native
+  credential store through a private alias-free per-invocation config, a fixed
+  child environment, and independent local plus canonical remote exact-head-
+  and-branch preflight/postflight checks. Any write invocation with an uncertain
+  outcome must be reconciled and never retried; metadata writes do not grant
+  merge, branch, rerun, review, or Linear authority.
 - If the correct diff is already present and validated, stop exploring and
   publish it instead of reopening analysis.
