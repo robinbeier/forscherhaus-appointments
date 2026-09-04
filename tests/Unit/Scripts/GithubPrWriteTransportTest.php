@@ -37,6 +37,8 @@ final class GithubPrWriteTransportTest extends TestCase
         api_fail=__API_FAIL__
         head_mismatch=__HEAD_MISMATCH__
         repo_mismatch=__REPO_MISMATCH__
+        post_write_head_mismatch=__POST_WRITE_HEAD_MISMATCH__
+        get_count=__GET_COUNT__
 
         printf 'argv:' >> "$record"
         for arg in "$@"; do printf '\n%s' "$arg" >> "$record"; done
@@ -59,9 +61,14 @@ final class GithubPrWriteTransportTest extends TestCase
         done
 
         if [[ "$method" == 'GET' ]]; then
+          count=0
+          if [[ -f "$get_count" ]]; then count="$(/bin/cat "$get_count")"; fi
+          count=$((count + 1))
+          printf '%s' "$count" > "$get_count"
           head_sha='__HEAD__'
           repo='robinbeier/forscherhaus-appointments'
           if [[ -f "$head_mismatch" ]]; then head_sha='0000000000000000000000000000000000000000'; fi
+          if [[ -f "$post_write_head_mismatch" && "$count" -ge 2 ]]; then head_sha='0000000000000000000000000000000000000000'; fi
           if [[ -f "$repo_mismatch" ]]; then repo='other/repository'; fi
           printf '{"number":123,"state":"open","base":{"ref":"main","repo":{"full_name":"%s"}},"head":{"sha":"%s","repo":{"full_name":"%s"}}}' "$repo" "$head_sha" "$repo"
           exit 0
@@ -80,6 +87,8 @@ final class GithubPrWriteTransportTest extends TestCase
                 '__API_FAIL__',
                 '__HEAD_MISMATCH__',
                 '__REPO_MISMATCH__',
+                '__POST_WRITE_HEAD_MISMATCH__',
+                '__GET_COUNT__',
                 '__HEAD__',
             ],
             [
@@ -89,6 +98,8 @@ final class GithubPrWriteTransportTest extends TestCase
                 $this->shellQuote($this->tmp . '/api-fail'),
                 $this->shellQuote($this->tmp . '/head-mismatch'),
                 $this->shellQuote($this->tmp . '/repo-mismatch'),
+                $this->shellQuote($this->tmp . '/post-write-head-mismatch'),
+                $this->shellQuote($this->tmp . '/get-count'),
                 $this->head,
             ],
             $fake,
@@ -129,6 +140,7 @@ final class GithubPrWriteTransportTest extends TestCase
         $record = (string) file_get_contents($this->record);
         self::assertStringContainsString('repos/' . GITHUB_PR_WRITE_REPOSITORY . '/pulls/123', $record);
         self::assertStringContainsString("\n--method\nGET", $record);
+        self::assertSame(2, substr_count($record, "\n--method\nGET"));
         self::assertStringContainsString("\n--method\nPATCH", $record);
         self::assertStringNotContainsString('GH_TOKEN', $record);
         self::assertStringNotContainsString('GITHUB_TOKEN', $record);
@@ -154,6 +166,7 @@ final class GithubPrWriteTransportTest extends TestCase
         $record = (string) file_get_contents($this->record);
         self::assertStringContainsString('repos/' . GITHUB_PR_WRITE_REPOSITORY . '/issues/123/comments', $record);
         self::assertStringContainsString("\n--method\nPOST", $record);
+        self::assertSame(2, substr_count($record, "\n--method\nGET"));
     }
 
     public function testNulPayloadIsRejectedBeforeAnyGitHubProcess(): void
@@ -236,6 +249,24 @@ final class GithubPrWriteTransportTest extends TestCase
         }
     }
 
+    public function testPostWriteHeadDriftRejectsSuccessWithoutHidingThatWriteOccurred(): void
+    {
+        file_put_contents($this->tmp . '/post-write-head-mismatch', '1');
+
+        [$exit, $out, $err] = $this->runTransport(
+            ['create-comment', '--repo', GITHUB_PR_WRITE_REPOSITORY, '--number', '123'],
+            '{"body":"safe"}',
+        );
+
+        self::assertSame(3, $exit);
+        self::assertSame('', $out);
+        self::assertStringContainsString('target changed during the write request', $err);
+        self::assertSame('{"body":"safe"}', file_get_contents($this->stdin));
+        $record = (string) file_get_contents($this->record);
+        self::assertSame(2, substr_count($record, "\n--method\nGET"));
+        self::assertStringContainsString("\n--method\nPOST", $record);
+    }
+
     public function testAuthAndApiFailuresAreFailClosedAndRedacted(): void
     {
         foreach (['auth-fail' => 3, 'api-fail' => 4] as $marker => $expectedExit) {
@@ -252,14 +283,29 @@ final class GithubPrWriteTransportTest extends TestCase
         }
     }
 
-    public function testGhBinaryMustResolveToSafeAbsoluteExecutable(): void
+    public function testProductionEntrypointCannotInjectBinaryOrExecutionSeams(): void
     {
-        self::assertSame(realpath($this->bin . '/gh'), resolveGithubPrWriteGhBinary([$this->bin . '/gh']));
+        $entrypoint = new \ReflectionMethod(\GithubPrWriteTransport::class, 'main');
+        self::assertTrue($entrypoint->isPublic());
+        self::assertTrue($entrypoint->isStatic());
+        self::assertSame(1, $entrypoint->getNumberOfParameters());
+
+        foreach (['resolveGhBinary', 'validateGhBinary', 'execute', 'runCommand'] as $method) {
+            self::assertTrue((new \ReflectionMethod(\GithubPrWriteTransport::class, $method))->isPrivate(), $method);
+        }
+    }
+
+    public function testGhBinaryMustBeASafeAbsoluteExecutable(): void
+    {
+        self::assertSame(
+            realpath($this->bin . '/gh'),
+            $this->invokeTransport('validateGhBinary', [$this->bin . '/gh']),
+        );
 
         chmod($this->bin . '/gh', 0777);
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('ownership or mode is unsafe');
-        resolveGithubPrWriteGhBinary([$this->bin . '/gh']);
+        $this->invokeTransport('validateGhBinary', [$this->bin . '/gh']);
     }
 
     private function runTransport(array $args, string $input): array
@@ -268,7 +314,25 @@ final class GithubPrWriteTransportTest extends TestCase
         $bootstrap = <<<'PHP'
         require $argv[1];
         $input = stream_get_contents(STDIN);
-        exit(githubPrWriteMain(array_slice($argv, 3), $argv[2], is_string($input) ? $input : null));
+        $invoke = static function (string $method, array $arguments): mixed {
+            $reflection = new ReflectionMethod(GithubPrWriteTransport::class, $method);
+            return $reflection->invoke(null, ...$arguments);
+        };
+        try {
+            $options = $invoke('parseArguments', [array_slice($argv, 3)]);
+            $payload = $invoke('parsePayload', [$options['operation'], is_string($input) ? $input : '']);
+            $invoke('execute', [$options, $payload, $argv[2]]);
+            exit(0);
+        } catch (InvalidArgumentException $exception) {
+            fwrite(STDERR, 'Input rejected: ' . $exception->getMessage() . PHP_EOL);
+            exit(2);
+        } catch (UnexpectedValueException $exception) {
+            fwrite(STDERR, $exception->getMessage() . PHP_EOL);
+            exit(3);
+        } catch (Throwable $exception) {
+            fwrite(STDERR, $exception->getMessage() . PHP_EOL);
+            exit(4);
+        }
         PHP;
         $env = array_merge(getenv() ?: [], [
             'PATH' => $this->bin . ':' . (getenv('PATH') ?: ''),
@@ -298,6 +362,12 @@ final class GithubPrWriteTransportTest extends TestCase
         fclose($pipes[2]);
 
         return [proc_close($process), (string) $out, (string) $err];
+    }
+
+    private function invokeTransport(string $method, array $arguments): mixed
+    {
+        $reflection = new \ReflectionMethod(\GithubPrWriteTransport::class, $method);
+        return $reflection->invoke(null, ...$arguments);
     }
 
     private function shellQuote(string $value): string

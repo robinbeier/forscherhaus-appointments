@@ -41,8 +41,9 @@ contract.
     - If `gh pr edit` requests GitHub Projects scope, do not widen the token.
       Use the Primary-only repository transport documented in
       `docs/github-pr-write-transport.md` for title/body updates. Feed its
-      bounded JSON only through stdin; it rejects payload-file options, foreign
-      repositories, and PRs not bound to the local exact head.
+      bounded JSON only through stdin; it rejects payload-file options and
+      foreign repositories, then revalidates the canonical local exact-head PR
+      immediately before and after the write.
     - If the branch is tied to a closed or merged PR, create a fresh branch and
       reopen from there.
 6. Use [`.github/pull_request_template.md`](../../../.github/pull_request_template.md)
@@ -80,7 +81,8 @@ gh pr view --json state,url,number 2>/dev/null || true
   the workpad.
 - Never obtain, export, print, or pass a raw GitHub token. The narrow REST
   fallback uses an absolute verified `gh` binary, the native credential store,
-  a fixed child environment, and a canonical exact-head PR target; it does not
-  grant merge, branch, rerun, review, or Linear authority.
+  a fixed child environment, and canonical exact-head PR preflight/postflight;
+  its metadata writes do not grant merge, branch, rerun, review, or Linear
+  authority.
 - If the correct diff is already present and validated, stop exploring and
   publish it instead of reopening analysis.

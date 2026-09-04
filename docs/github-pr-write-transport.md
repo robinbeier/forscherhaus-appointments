@@ -15,9 +15,10 @@ environment allowlist. JSON request content arrives only on standard input, so
 neither content nor a caller-chosen payload path appears in process arguments.
 
 The target repository is fixed to `robinbeier/forscherhaus-appointments`.
-Before every write, the helper reads the target PR through GitHub REST and
-requires an open PR into `main` whose base and head repositories are canonical
-and whose head SHA equals the local checkout's exact `HEAD`. A caller-supplied
+Immediately before and after every write, the helper reads the target PR
+through GitHub REST and requires an open PR into `main` whose base and head
+repositories are canonical and whose head SHA equals the local checkout's
+exact `HEAD`. Success is reported only if both checks pass. A caller-supplied
 repository name or PR number alone therefore grants no write authority.
 
 The transport has exactly two operations:
@@ -50,7 +51,17 @@ private location and verify it before redirecting it; the helper itself never
 opens a caller-selected content path.
 
 Invalid input, missing native authentication, and GitHub API failures are
-rejected before success is reported. Target drift is rejected before the write.
+rejected before success is reported. Preflight target drift is rejected before
+the write; drift detected by the postflight check rejects success after the
+requested metadata write may already have occurred. GitHub's unsafe REST writes
+used here do not provide an atomic head compare-and-swap precondition, so this
+boundary must not be described as atomic mutation rejection.
+
+PR metadata never grants landing authority. In particular, authority-bearing
+review comments remain bound to their explicit reviewed SHA and are accepted
+only when the independent exact-head mergegate revalidates them against the
+current PR head. A concurrent head move therefore makes that evidence stale;
+generic title or body metadata is never treated as review or merge evidence.
 Remote response bodies and `gh` diagnostic text are never echoed. Child output
 is bounded; successful output contains only a minimal operation status and safe
 numeric identifier. The helper has no merge, branch-write, check-rerun, review,
