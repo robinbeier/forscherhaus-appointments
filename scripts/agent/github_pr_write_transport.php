@@ -360,16 +360,46 @@ final class GithubPrWriteTransport
             throw new RuntimeException('Canonical repository checkout could not be verified.');
         }
 
-        $head = self::runCommand([...$common, 'rev-parse', '--verify', 'HEAD^{commit}'], '', $environment);
-        $headSha = trim($head['stdout']);
-        if ($head['exit_code'] !== 0 || preg_match('/\A[a-f0-9]{40}\z/D', $headSha) !== 1) {
-            throw new RuntimeException('Canonical repository HEAD could not be verified.');
+        $snapshot = self::runCommand(
+            [
+                ...$common,
+                'status',
+                '--porcelain=v2',
+                '--branch',
+                '--untracked-files=no',
+                '--ignore-submodules=all',
+                '--no-renames',
+                '-z',
+            ],
+            '',
+            $environment,
+        );
+        if ($snapshot['exit_code'] !== 0 || !str_ends_with($snapshot['stdout'], "\0")) {
+            throw new RuntimeException('Canonical repository target snapshot could not be verified.');
         }
 
-        $branch = self::runCommand([...$common, 'symbolic-ref', '--quiet', '--short', 'HEAD'], '', $environment);
-        $branchName = rtrim($branch['stdout'], "\r\n");
+        $headSha = null;
+        $branchName = null;
+        $records = explode("\0", $snapshot['stdout']);
+        array_pop($records);
+        foreach ($records as $record) {
+            if (str_starts_with($record, '# branch.oid ')) {
+                if ($headSha !== null) {
+                    throw new RuntimeException('Canonical repository target snapshot is ambiguous.');
+                }
+                $headSha = substr($record, strlen('# branch.oid '));
+            } elseif (str_starts_with($record, '# branch.head ')) {
+                if ($branchName !== null) {
+                    throw new RuntimeException('Canonical repository target snapshot is ambiguous.');
+                }
+                $branchName = substr($record, strlen('# branch.head '));
+            }
+        }
+        if (!is_string($headSha) || preg_match('/\A[a-f0-9]{40}\z/D', $headSha) !== 1) {
+            throw new RuntimeException('Canonical repository HEAD could not be verified.');
+        }
         if (
-            $branch['exit_code'] !== 0 ||
+            !is_string($branchName) ||
             $branchName === '' ||
             strlen($branchName) > 255 ||
             str_contains($branchName, "\0") ||

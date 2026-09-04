@@ -520,6 +520,24 @@ final class GithubPrWriteTransportTest extends TestCase
         self::assertSame(['sha' => $this->head, 'branch' => $branch], $this->invokeTransport('resolveLocalTarget', []));
     }
 
+    public function testLocalTargetPairsHeadAndBranchFromOneGitSnapshot(): void
+    {
+        $method = new \ReflectionMethod(\GithubPrWriteTransport::class, 'resolveLocalTarget');
+        $lines = file($method->getFileName());
+        self::assertIsArray($lines);
+        $source = implode(
+            '',
+            array_slice($lines, $method->getStartLine() - 1, $method->getEndLine() - $method->getStartLine() + 1),
+        );
+
+        self::assertSame(1, substr_count($source, "'status',"));
+        self::assertStringContainsString("'--porcelain=v2'", $source);
+        self::assertStringContainsString("'# branch.oid '", $source);
+        self::assertStringContainsString("'# branch.head '", $source);
+        self::assertStringNotContainsString("'rev-parse', '--verify', 'HEAD^{commit}'", $source);
+        self::assertStringNotContainsString("'symbolic-ref'", $source);
+    }
+
     public function testGhBinaryMustBeASafeAbsoluteExecutable(): void
     {
         $trusted = [

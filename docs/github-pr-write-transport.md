@@ -24,11 +24,12 @@ Homebrew path change requires a reviewed repository change to the exact
 resolved path and SHA-256 before this transport can run again.
 
 The target repository is fixed to `robinbeier/forscherhaus-appointments`.
-Immediately before and after every write, the helper independently resolves the
-local checkout's exact `HEAD` and symbolic branch, reads the target PR through
-GitHub REST, and requires an open PR into `main` whose base and head repositories
-are canonical and whose head SHA and head branch equal that local target. The
-two local resolutions must also match each other. After `update-pr`, the
+Immediately before and after every write, the helper resolves the local
+checkout's exact `HEAD` and symbolic branch together from one Git porcelain-v2
+status snapshot, reads the target PR through GitHub REST, and requires an open
+PR into `main` whose base and head repositories are canonical and whose head SHA
+and head branch equal that local target. The two local snapshots must also match
+each other. After `update-pr`, the
 postflight read must return every requested title/body field byte-for-byte. A
 caller-supplied repository name, PR number, or SHA alone therefore grants no
 write authority or successful-write result.
