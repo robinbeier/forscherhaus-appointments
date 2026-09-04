@@ -395,7 +395,9 @@ When the branch is ready to publish:
 - create or update the PR from the current branch
 - if `gh pr edit` would require GitHub Projects scope, keep the existing native
   `gh` authentication and use the Primary-only allowlisted REST transport in
-  `docs/github-pr-write-transport.md`; never export or expose a raw token
+  `docs/github-pr-write-transport.md`; provide bounded JSON only on stdin and
+  require its canonical repository/local exact-head target check; never export
+  or expose a raw token
 - fill the PR template completely
 - attach the PR to the Linear issue when applicable
 - move the Linear issue to `In Review`

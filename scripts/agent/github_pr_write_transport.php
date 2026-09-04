@@ -2,12 +2,17 @@
 
 declare(strict_types=1);
 
+const GITHUB_PR_WRITE_REPOSITORY = 'robinbeier/forscherhaus-appointments';
+const GITHUB_PR_WRITE_BASE_REF = 'main';
 const GITHUB_PR_WRITE_MAX_BODY_BYTES = 65536;
 const GITHUB_PR_WRITE_MAX_TITLE_BYTES = 256;
+const GITHUB_PR_WRITE_MAX_INPUT_BYTES = 400000;
+const GITHUB_PR_WRITE_MAX_COMMAND_OUTPUT_BYTES = 131072;
+const GITHUB_PR_WRITE_GH_CANDIDATES = ['/opt/homebrew/bin/gh', '/usr/local/bin/gh', '/usr/bin/gh'];
 
 /**
  * @param list<string> $arguments
- * @return array{operation: string, repo: string, number: int, title_file?: string, body_file?: string}
+ * @return array{operation: string, repo: string, number: int}
  */
 function parseGithubPrWriteArguments(array $arguments): array
 {
@@ -17,7 +22,6 @@ function parseGithubPrWriteArguments(array $arguments): array
     }
 
     $values = [];
-    $allowed = ['repo', 'number', 'title-file', 'body-file'];
     while ($arguments !== []) {
         $argument = array_shift($arguments);
         if (!is_string($argument) || !str_starts_with($argument, '--')) {
@@ -25,7 +29,7 @@ function parseGithubPrWriteArguments(array $arguments): array
         }
 
         $name = substr($argument, 2);
-        if (!in_array($name, $allowed, true) || array_key_exists($name, $values)) {
+        if (!in_array($name, ['repo', 'number'], true) || array_key_exists($name, $values)) {
             throw new InvalidArgumentException('Unknown or duplicate option.');
         }
 
@@ -37,9 +41,8 @@ function parseGithubPrWriteArguments(array $arguments): array
         $values[$name] = $value;
     }
 
-    $repo = $values['repo'] ?? '';
-    if (preg_match('/\A[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9._-]{1,100}\z/D', $repo) !== 1) {
-        throw new InvalidArgumentException('Repository must be an explicit owner/name pair.');
+    if (($values['repo'] ?? '') !== GITHUB_PR_WRITE_REPOSITORY) {
+        throw new InvalidArgumentException('Repository must match the canonical repository.');
     }
 
     $number = filter_var($values['number'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
@@ -47,62 +50,128 @@ function parseGithubPrWriteArguments(array $arguments): array
         throw new InvalidArgumentException('Number must be a positive integer.');
     }
 
-    if ($operation === 'update-pr') {
-        if (!isset($values['title-file']) && !isset($values['body-file'])) {
-            throw new InvalidArgumentException('update-pr requires title-file or body-file.');
-        }
-    } elseif (!isset($values['body-file']) || isset($values['title-file'])) {
-        throw new InvalidArgumentException('create-comment requires body-file and forbids title-file.');
-    }
-
-    $parsed = ['operation' => $operation, 'repo' => $repo, 'number' => $number];
-    if (isset($values['title-file'])) {
-        $parsed['title_file'] = $values['title-file'];
-    }
-    if (isset($values['body-file'])) {
-        $parsed['body_file'] = $values['body-file'];
-    }
-
-    return $parsed;
+    return ['operation' => $operation, 'repo' => GITHUB_PR_WRITE_REPOSITORY, 'number' => $number];
 }
 
-function readGithubPrWritePayload(string $path, string $label, int $maximumBytes): string
+/**
+ * @return array{title?: string, body?: string}
+ */
+function parseGithubPrWritePayload(string $operation, string $input): array
 {
-    if (!is_file($path) || is_link($path) || !is_readable($path)) {
-        throw new InvalidArgumentException($label . ' must reference a readable regular file.');
+    if (strlen($input) > GITHUB_PR_WRITE_MAX_INPUT_BYTES) {
+        throw new InvalidArgumentException('JSON input exceeds the bounded request size.');
+    }
+    if ($input === '' || str_contains($input, "\0") || preg_match('//u', $input) !== 1) {
+        throw new InvalidArgumentException('JSON input must be non-empty UTF-8 without NUL bytes.');
     }
 
-    $size = filesize($path);
-    if (!is_int($size) || $size > $maximumBytes) {
-        throw new InvalidArgumentException($label . ' exceeds the bounded payload size.');
+    try {
+        $payload = json_decode($input, true, 8, JSON_THROW_ON_ERROR);
+    } catch (JsonException) {
+        throw new InvalidArgumentException('JSON input is invalid.');
+    }
+    if (!is_array($payload) || array_is_list($payload)) {
+        throw new InvalidArgumentException('JSON input must be an object.');
     }
 
-    $contents = file_get_contents($path);
-    if (!is_string($contents) || strlen($contents) !== $size) {
-        throw new InvalidArgumentException($label . ' could not be read completely.');
-    }
-    if (str_contains($contents, "\0") || preg_match('//u', $contents) !== 1) {
-        throw new InvalidArgumentException($label . ' must be UTF-8 text without NUL bytes.');
+    $allowedFieldSets = $operation === 'update-pr' ? [['body'], ['title'], ['body', 'title']] : [['body']];
+    $actualFields = array_keys($payload);
+    sort($actualFields);
+    if (!in_array($actualFields, $allowedFieldSets, true)) {
+        throw new InvalidArgumentException('JSON input fields do not match the operation.');
     }
 
-    return $contents;
+    foreach ($payload as $name => $value) {
+        if (!is_string($value)) {
+            throw new InvalidArgumentException($name . ' must be a string.');
+        }
+        $maximumBytes = $name === 'title' ? GITHUB_PR_WRITE_MAX_TITLE_BYTES : GITHUB_PR_WRITE_MAX_BODY_BYTES;
+        if (strlen($value) > $maximumBytes) {
+            throw new InvalidArgumentException($name . ' exceeds the bounded payload size.');
+        }
+        if (str_contains($value, "\0") || preg_match('//u', $value) !== 1) {
+            throw new InvalidArgumentException($name . ' must be UTF-8 text without NUL bytes.');
+        }
+    }
+
+    if (
+        isset($payload['title']) &&
+        ($payload['title'] === '' || str_contains($payload['title'], "\n") || str_contains($payload['title'], "\r"))
+    ) {
+        throw new InvalidArgumentException('title must contain one non-empty line without a terminator.');
+    }
+    if ($operation === 'create-comment' && ($payload['body'] ?? '') === '') {
+        throw new InvalidArgumentException('comment body must not be empty.');
+    }
+
+    /** @var array{title?: string, body?: string} $payload */
+    return $payload;
 }
 
 /** @return array<string, string> */
 function githubPrWriteChildEnvironment(): array
 {
-    $environment = [
+    if (!function_exists('posix_geteuid') || !function_exists('posix_getpwuid')) {
+        throw new RuntimeException('OS account lookup is unavailable.');
+    }
+    $effectiveUid = posix_geteuid();
+    $account = posix_getpwuid($effectiveUid);
+    if (!is_array($account) || !is_string($account['name'] ?? null) || !is_string($account['dir'] ?? null)) {
+        throw new RuntimeException('OS account lookup failed.');
+    }
+    $home = realpath($account['dir']);
+    if ($home === false || !is_dir($home) || is_link($account['dir']) || fileowner($home) !== $effectiveUid) {
+        throw new RuntimeException('OS account home is unsafe.');
+    }
+
+    return [
+        'PATH' => '/usr/bin:/bin:/usr/sbin:/sbin',
+        'HOME' => $home,
+        'USER' => $account['name'],
+        'LOGNAME' => $account['name'],
+        'TMPDIR' => '/tmp',
+        'LANG' => 'C',
+        'LC_ALL' => 'C',
         'GH_PROMPT_DISABLED' => '1',
         'NO_COLOR' => '1',
     ];
-    foreach (['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL'] as $name) {
-        $value = getenv($name);
-        if (is_string($value) && $value !== '') {
-            $environment[$name] = $value;
-        }
+}
+
+function validateGithubPrWriteGhBinary(string $candidate): string
+{
+    if ($candidate === '' || !str_starts_with($candidate, '/') || basename($candidate) !== 'gh') {
+        throw new RuntimeException('GitHub CLI path is invalid.');
     }
 
-    return $environment;
+    $resolved = realpath($candidate);
+    if ($resolved === false || !is_file($resolved) || !is_executable($resolved) || is_link($resolved)) {
+        throw new RuntimeException('GitHub CLI is unavailable.');
+    }
+    if (!function_exists('posix_geteuid')) {
+        throw new RuntimeException('GitHub CLI ownership cannot be verified.');
+    }
+
+    $owner = fileowner($resolved);
+    $mode = fileperms($resolved);
+    if (!is_int($owner) || !in_array($owner, [0, posix_geteuid()], true) || !is_int($mode) || ($mode & 0o022) !== 0) {
+        throw new RuntimeException('GitHub CLI ownership or mode is unsafe.');
+    }
+
+    return $resolved;
+}
+
+/** @param list<string>|null $candidates */
+function resolveGithubPrWriteGhBinary(?array $candidates = null): string
+{
+    foreach ($candidates ?? GITHUB_PR_WRITE_GH_CANDIDATES as $candidate) {
+        if (!is_string($candidate) || !file_exists($candidate)) {
+            continue;
+        }
+
+        return validateGithubPrWriteGhBinary($candidate);
+    }
+
+    throw new RuntimeException('GitHub CLI is unavailable on the fixed path allowlist.');
 }
 
 /**
@@ -116,38 +185,140 @@ function runGithubPrWriteCommand(array $command, string $stdin, array $environme
         'bypass_shell' => true,
     ]);
     if (!is_resource($process)) {
-        throw new RuntimeException('Unable to start the GitHub CLI.');
+        throw new RuntimeException('Unable to start the bounded child process.');
     }
 
-    fwrite($pipes[0], $stdin);
+    $offset = 0;
+    while ($offset < strlen($stdin)) {
+        $written = fwrite($pipes[0], substr($stdin, $offset));
+        if ($written === false || $written === 0) {
+            fclose($pipes[0]);
+            proc_terminate($process);
+            proc_close($process);
+            throw new RuntimeException('Unable to deliver bounded child input.');
+        }
+        $offset += $written;
+    }
     fclose($pipes[0]);
-    $stdout = stream_get_contents($pipes[1]);
+
+    $stdout = stream_get_contents($pipes[1], GITHUB_PR_WRITE_MAX_COMMAND_OUTPUT_BYTES + 1);
     fclose($pipes[1]);
-    $stderr = stream_get_contents($pipes[2]);
+    $stderr = stream_get_contents($pipes[2], GITHUB_PR_WRITE_MAX_COMMAND_OUTPUT_BYTES + 1);
     fclose($pipes[2]);
     $exitCode = proc_close($process);
 
+    $stdout = is_string($stdout) ? $stdout : '';
+    $stderr = is_string($stderr) ? $stderr : '';
+    if (
+        strlen($stdout) > GITHUB_PR_WRITE_MAX_COMMAND_OUTPUT_BYTES ||
+        strlen($stderr) > GITHUB_PR_WRITE_MAX_COMMAND_OUTPUT_BYTES
+    ) {
+        throw new RuntimeException('Child process output exceeded the bounded size.');
+    }
+
     return [
         'exit_code' => is_int($exitCode) ? $exitCode : 1,
-        'stdout' => is_string($stdout) ? $stdout : '',
-        'stderr' => is_string($stderr) ? $stderr : '',
+        'stdout' => $stdout,
+        'stderr' => $stderr,
     ];
 }
 
-/** @param array{operation: string, repo: string, number: int, title_file?: string, body_file?: string} $options */
-function executeGithubPrWrite(array $options): void
+function resolveGithubPrWriteLocalHead(): string
 {
-    $payload = [];
-    if (isset($options['title_file'])) {
-        $title = readGithubPrWritePayload($options['title_file'], 'title-file', GITHUB_PR_WRITE_MAX_TITLE_BYTES);
-        if ($title === '' || str_contains($title, "\n") || str_contains($title, "\r")) {
-            throw new InvalidArgumentException('title-file must contain one non-empty line without a terminator.');
-        }
-        $payload['title'] = $title;
+    $repoRoot = dirname(__DIR__, 2);
+    $resolvedRoot = realpath($repoRoot);
+    if ($resolvedRoot === false || !is_dir($resolvedRoot)) {
+        throw new RuntimeException('Canonical repository checkout is unavailable.');
     }
-    if (isset($options['body_file'])) {
-        $payload['body'] = readGithubPrWritePayload($options['body_file'], 'body-file', GITHUB_PR_WRITE_MAX_BODY_BYTES);
+
+    $environment = [
+        'PATH' => '/usr/bin:/bin:/usr/sbin:/sbin',
+        'TMPDIR' => '/tmp',
+        'LANG' => 'C',
+        'LC_ALL' => 'C',
+        'GIT_CONFIG_GLOBAL' => '/dev/null',
+        'GIT_CONFIG_SYSTEM' => '/dev/null',
+        'GIT_CONFIG_NOSYSTEM' => '1',
+        'GIT_NO_LAZY_FETCH' => '1',
+        'GIT_NO_REPLACE_OBJECTS' => '1',
+        'GIT_OPTIONAL_LOCKS' => '0',
+        'GIT_TERMINAL_PROMPT' => '0',
+    ];
+    $common = [
+        '/usr/bin/git',
+        '-c',
+        'core.fsmonitor=false',
+        '-c',
+        'core.hooksPath=/dev/null',
+        '-c',
+        'credential.helper=',
+        '-C',
+        $resolvedRoot,
+    ];
+
+    $topLevel = runGithubPrWriteCommand([...$common, 'rev-parse', '--show-toplevel'], '', $environment);
+    if ($topLevel['exit_code'] !== 0 || realpath(trim($topLevel['stdout'])) !== $resolvedRoot) {
+        throw new RuntimeException('Canonical repository checkout could not be verified.');
     }
+
+    $head = runGithubPrWriteCommand([...$common, 'rev-parse', '--verify', 'HEAD^{commit}'], '', $environment);
+    $headSha = trim($head['stdout']);
+    if ($head['exit_code'] !== 0 || preg_match('/\A[a-f0-9]{40}\z/D', $headSha) !== 1) {
+        throw new RuntimeException('Canonical repository HEAD could not be verified.');
+    }
+
+    return $headSha;
+}
+
+/** @param array<string, string> $environment */
+function verifyGithubPrWriteTarget(
+    string $ghBinary,
+    string $repo,
+    int $number,
+    string $localHead,
+    array $environment,
+): void {
+    $endpoint = 'repos/' . $repo . '/pulls/' . $number;
+    $result = runGithubPrWriteCommand(
+        [$ghBinary, 'api', '--hostname', 'github.com', '--method', 'GET', $endpoint],
+        '',
+        $environment,
+    );
+    if ($result['exit_code'] !== 0) {
+        throw new UnexpectedValueException('GitHub pull request target could not be verified.');
+    }
+
+    try {
+        $record = json_decode($result['stdout'], true, 32, JSON_THROW_ON_ERROR);
+    } catch (JsonException) {
+        throw new UnexpectedValueException('GitHub pull request target returned invalid metadata.');
+    }
+    if (
+        !is_array($record) ||
+        ($record['number'] ?? null) !== $number ||
+        ($record['state'] ?? null) !== 'open' ||
+        ($record['base']['ref'] ?? null) !== GITHUB_PR_WRITE_BASE_REF ||
+        ($record['base']['repo']['full_name'] ?? null) !== GITHUB_PR_WRITE_REPOSITORY ||
+        ($record['head']['repo']['full_name'] ?? null) !== GITHUB_PR_WRITE_REPOSITORY ||
+        ($record['head']['sha'] ?? null) !== $localHead
+    ) {
+        throw new UnexpectedValueException('GitHub pull request target does not match the canonical exact head.');
+    }
+}
+
+/** @param array{operation: string, repo: string, number: int} $options
+ *  @param array{title?: string, body?: string} $payload
+ */
+function executeGithubPrWrite(array $options, array $payload, string $ghBinary): void
+{
+    $environment = githubPrWriteChildEnvironment();
+    $auth = runGithubPrWriteCommand([$ghBinary, 'auth', 'status', '--hostname', 'github.com'], '', $environment);
+    if ($auth['exit_code'] !== 0) {
+        throw new UnexpectedValueException('Native GitHub authentication is unavailable.');
+    }
+
+    $localHead = resolveGithubPrWriteLocalHead();
+    verifyGithubPrWriteTarget($ghBinary, $options['repo'], $options['number'], $localHead, $environment);
 
     if ($options['operation'] === 'update-pr') {
         $method = 'PATCH';
@@ -157,12 +328,6 @@ function executeGithubPrWrite(array $options): void
         $endpoint = 'repos/' . $options['repo'] . '/issues/' . $options['number'] . '/comments';
     }
 
-    $environment = githubPrWriteChildEnvironment();
-    $auth = runGithubPrWriteCommand(['gh', 'auth', 'status', '--hostname', 'github.com'], '', $environment);
-    if ($auth['exit_code'] !== 0) {
-        throw new UnexpectedValueException('Native GitHub authentication is unavailable.');
-    }
-
     try {
         $input = json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     } catch (JsonException) {
@@ -170,7 +335,7 @@ function executeGithubPrWrite(array $options): void
     }
 
     $result = runGithubPrWriteCommand(
-        ['gh', 'api', '--hostname', 'github.com', '--method', $method, $endpoint, '--input', '-'],
+        [$ghBinary, 'api', '--hostname', 'github.com', '--method', $method, $endpoint, '--input', '-'],
         $input,
         $environment,
     );
@@ -188,10 +353,20 @@ function executeGithubPrWrite(array $options): void
     ) . PHP_EOL;
 }
 
-function githubPrWriteMain(array $arguments): int
+function githubPrWriteMain(array $arguments, ?string $ghBinary = null, ?string $requestInput = null): int
 {
     try {
-        executeGithubPrWrite(parseGithubPrWriteArguments($arguments));
+        $options = parseGithubPrWriteArguments($arguments);
+        if ($requestInput === null) {
+            $requestInput = stream_get_contents(STDIN, GITHUB_PR_WRITE_MAX_INPUT_BYTES + 1);
+        }
+        if (!is_string($requestInput)) {
+            throw new InvalidArgumentException('JSON input could not be read.');
+        }
+        $payload = parseGithubPrWritePayload($options['operation'], $requestInput);
+        $trustedGhBinary =
+            $ghBinary === null ? resolveGithubPrWriteGhBinary() : validateGithubPrWriteGhBinary($ghBinary);
+        executeGithubPrWrite($options, $payload, $trustedGhBinary);
         return 0;
     } catch (InvalidArgumentException $exception) {
         fwrite(STDERR, 'Input rejected: ' . $exception->getMessage() . PHP_EOL);
