@@ -295,7 +295,10 @@ final class GithubPrWriteTransport
         return ['sha' => $headSha, 'branch' => $branchName];
     }
 
-    /** @param array<string, string> $environment */
+    /**
+     * @param array<string, string> $environment
+     * @return array<string, mixed>
+     */
     private static function verifyTarget(
         string $ghBinary,
         string $repo,
@@ -303,7 +306,7 @@ final class GithubPrWriteTransport
         string $localHead,
         string $localBranch,
         array $environment,
-    ): void {
+    ): array {
         $endpoint = 'repos/' . $repo . '/pulls/' . $number;
         $result = self::runCommand(
             [$ghBinary, 'api', '--hostname', 'github.com', '--method', 'GET', $endpoint],
@@ -333,6 +336,33 @@ final class GithubPrWriteTransport
                 'GitHub pull request target does not match the canonical exact local target.',
             );
         }
+
+        return $record;
+    }
+
+    /**
+     * @param array<string, mixed> $record
+     * @param array{title?: string, body?: string} $payload
+     */
+    private static function verifyUpdatedFields(array $record, array $payload): void
+    {
+        foreach ($payload as $field => $expectedValue) {
+            if (!array_key_exists($field, $record) || $record[$field] !== $expectedValue) {
+                throw new UnexpectedValueException('GitHub pull request update could not be verified.');
+            }
+        }
+    }
+
+    private static function extractCommentId(string $response): ?int
+    {
+        try {
+            $record = json_decode($response, true, 16, JSON_THROW_ON_ERROR);
+        } catch (JsonException) {
+            return null;
+        }
+
+        $commentId = is_array($record) ? $record['id'] ?? null : null;
+        return is_int($commentId) && $commentId > 0 ? $commentId : null;
     }
 
     /** @param array{operation: string, repo: string, number: int} $options
@@ -380,9 +410,10 @@ final class GithubPrWriteTransport
             throw new RuntimeException('GitHub API request failed with exit ' . $result['exit_code'] . '.');
         }
 
+        $commentId = $options['operation'] === 'create-comment' ? self::extractCommentId($result['stdout']) : null;
         $status = 'ok';
         try {
-            self::verifyTarget(
+            $remoteTarget = self::verifyTarget(
                 $ghBinary,
                 $options['repo'],
                 $options['number'],
@@ -390,20 +421,27 @@ final class GithubPrWriteTransport
                 $localTarget['branch'],
                 $environment,
             );
+            if ($options['operation'] === 'update-pr') {
+                self::verifyUpdatedFields($remoteTarget, $payload);
+            } elseif ($commentId === null) {
+                throw new UnexpectedValueException('GitHub comment identifier could not be verified.');
+            }
         } catch (Throwable) {
             // The unsafe REST write has already completed. A non-zero exit here
             // would invite a retry that can duplicate a comment or overwrite PR metadata.
             $status = 'write_completed_target_unverified';
         }
 
-        echo json_encode(
-            [
-                'status' => $status,
-                'operation' => $options['operation'],
-                'number' => $options['number'],
-            ],
-            JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
-        ) . PHP_EOL;
+        $response = [
+            'status' => $status,
+            'operation' => $options['operation'],
+            'number' => $options['number'],
+        ];
+        if ($commentId !== null) {
+            $response['comment_id'] = $commentId;
+        }
+
+        echo json_encode($response, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . PHP_EOL;
     }
 
     public static function main(array $arguments): int

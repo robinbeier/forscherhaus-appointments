@@ -41,7 +41,9 @@ final class GithubPrWriteTransportTest extends TestCase
         branch_mismatch=__BRANCH_MISMATCH__
         repo_mismatch=__REPO_MISMATCH__
         post_write_head_mismatch=__POST_WRITE_HEAD_MISMATCH__
+        post_write_metadata_mismatch=__POST_WRITE_METADATA_MISMATCH__
         post_write_api_fail=__POST_WRITE_API_FAIL__
+        comment_response_invalid=__COMMENT_RESPONSE_INVALID__
         get_count=__GET_COUNT__
 
         printf 'argv:' >> "$record"
@@ -72,18 +74,25 @@ final class GithubPrWriteTransportTest extends TestCase
           if [[ -f "$post_write_api_fail" && "$count" -ge 2 ]]; then printf 'API token=do-not-leak\n' >&2; exit 1; fi
           head_sha='__HEAD__'
           head_ref='__BRANCH__'
+          title='New title'
+          body='Private body'
           repo='robinbeier/forscherhaus-appointments'
           if [[ -f "$head_mismatch" ]]; then head_sha='0000000000000000000000000000000000000000'; fi
           if [[ -f "$branch_mismatch" ]]; then head_ref='other/branch'; fi
           if [[ -f "$post_write_head_mismatch" && "$count" -ge 2 ]]; then head_sha='0000000000000000000000000000000000000000'; fi
+          if [[ -f "$post_write_metadata_mismatch" && "$count" -ge 2 ]]; then body='Concurrent body'; fi
           if [[ -f "$repo_mismatch" ]]; then repo='other/repository'; fi
-          printf '{"number":123,"state":"open","base":{"ref":"main","repo":{"full_name":"%s"}},"head":{"ref":"%s","sha":"%s","repo":{"full_name":"%s"}}}' "$repo" "$head_ref" "$head_sha" "$repo"
+          printf '{"number":123,"state":"open","title":"%s","body":"%s","base":{"ref":"main","repo":{"full_name":"%s"}},"head":{"ref":"%s","sha":"%s","repo":{"full_name":"%s"}}}' "$title" "$body" "$repo" "$head_ref" "$head_sha" "$repo"
           exit 0
         fi
 
         if [[ -f "$api_fail" ]]; then printf 'API token=do-not-leak\n' >&2; exit 1; fi
         /bin/cat > "$stdin_record"
-        printf '{"ok":true}\n'
+        if [[ "$method" == 'POST' ]]; then
+          if [[ -f "$comment_response_invalid" ]]; then printf '{"ok":true}\n'; else printf '{"id":456}\n'; fi
+        else
+          printf '{"ok":true}\n'
+        fi
         BASH;
 
         $fake = str_replace(
@@ -96,7 +105,9 @@ final class GithubPrWriteTransportTest extends TestCase
                 '__BRANCH_MISMATCH__',
                 '__REPO_MISMATCH__',
                 '__POST_WRITE_HEAD_MISMATCH__',
+                '__POST_WRITE_METADATA_MISMATCH__',
                 '__POST_WRITE_API_FAIL__',
+                '__COMMENT_RESPONSE_INVALID__',
                 '__GET_COUNT__',
                 '__HEAD__',
                 '__BRANCH__',
@@ -110,7 +121,9 @@ final class GithubPrWriteTransportTest extends TestCase
                 $this->shellQuote($this->tmp . '/branch-mismatch'),
                 $this->shellQuote($this->tmp . '/repo-mismatch'),
                 $this->shellQuote($this->tmp . '/post-write-head-mismatch'),
+                $this->shellQuote($this->tmp . '/post-write-metadata-mismatch'),
                 $this->shellQuote($this->tmp . '/post-write-api-fail'),
+                $this->shellQuote($this->tmp . '/comment-response-invalid'),
                 $this->shellQuote($this->tmp . '/get-count'),
                 $this->head,
                 $this->branch,
@@ -170,12 +183,14 @@ final class GithubPrWriteTransportTest extends TestCase
             ['body' => $contents],
             JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES,
         );
-        [$exit, , $err] = $this->runTransport(
+        [$exit, $out, $err] = $this->runTransport(
             ['create-comment', '--repo', GITHUB_PR_WRITE_REPOSITORY, '--number', '123'],
             $request,
         );
 
         self::assertSame(0, $exit, $err);
+        self::assertSame(456, json_decode($out, true, 8, JSON_THROW_ON_ERROR)['comment_id'] ?? null);
+        self::assertStringNotContainsString($contents, $out);
         self::assertSame($request, file_get_contents($this->stdin));
         $record = (string) file_get_contents($this->record);
         self::assertStringContainsString('repos/' . GITHUB_PR_WRITE_REPOSITORY . '/issues/123/comments', $record);
@@ -280,6 +295,7 @@ final class GithubPrWriteTransportTest extends TestCase
                 json_decode($out, true, 8, JSON_THROW_ON_ERROR)['status'] ?? null,
                 $marker,
             );
+            self::assertSame(456, json_decode($out, true, 8, JSON_THROW_ON_ERROR)['comment_id'] ?? null, $marker);
             self::assertSame('{"body":"safe"}', file_get_contents($this->stdin), $marker);
             $record = (string) file_get_contents($this->record);
             self::assertSame(2, substr_count($record, "\n--method\nGET"), $marker);
@@ -290,6 +306,42 @@ final class GithubPrWriteTransportTest extends TestCase
                 unlink($this->tmp . '/' . $file);
             }
         }
+    }
+
+    public function testUpdatePrPostWriteMetadataDriftIsUnverified(): void
+    {
+        file_put_contents($this->tmp . '/post-write-metadata-mismatch', '1');
+        $request = '{"title":"New title","body":"Private body"}';
+
+        [$exit, $out, $err] = $this->runTransport(
+            ['update-pr', '--repo', GITHUB_PR_WRITE_REPOSITORY, '--number', '123'],
+            $request,
+        );
+
+        self::assertSame(0, $exit, $err);
+        self::assertSame('', $err);
+        self::assertSame(
+            'write_completed_target_unverified',
+            json_decode($out, true, 8, JSON_THROW_ON_ERROR)['status'] ?? null,
+        );
+        self::assertStringNotContainsString('Private body', $out);
+        self::assertSame($request, file_get_contents($this->stdin));
+    }
+
+    public function testCreateCommentWithoutStableResponseIdIsUnverified(): void
+    {
+        file_put_contents($this->tmp . '/comment-response-invalid', '1');
+
+        [$exit, $out, $err] = $this->runTransport(
+            ['create-comment', '--repo', GITHUB_PR_WRITE_REPOSITORY, '--number', '123'],
+            '{"body":"safe"}',
+        );
+
+        self::assertSame(0, $exit, $err);
+        self::assertSame('', $err);
+        $response = json_decode($out, true, 8, JSON_THROW_ON_ERROR);
+        self::assertSame('write_completed_target_unverified', $response['status'] ?? null);
+        self::assertArrayNotHasKey('comment_id', $response);
     }
 
     public function testAuthAndApiFailuresAreFailClosedAndRedacted(): void
@@ -315,7 +367,19 @@ final class GithubPrWriteTransportTest extends TestCase
         self::assertTrue($entrypoint->isStatic());
         self::assertSame(1, $entrypoint->getNumberOfParameters());
 
-        foreach (['resolveGhBinary', 'validateGhBinary', 'resolveLocalTarget', 'execute', 'runCommand'] as $method) {
+        foreach (
+            [
+                'resolveGhBinary',
+                'validateGhBinary',
+                'resolveLocalTarget',
+                'verifyTarget',
+                'verifyUpdatedFields',
+                'extractCommentId',
+                'execute',
+                'runCommand',
+            ]
+            as $method
+        ) {
             self::assertTrue((new \ReflectionMethod(\GithubPrWriteTransport::class, $method))->isPrivate(), $method);
         }
     }

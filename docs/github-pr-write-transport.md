@@ -18,8 +18,10 @@ The target repository is fixed to `robinbeier/forscherhaus-appointments`.
 Immediately before and after every write, the helper reads the target PR
 through GitHub REST and requires an open PR into `main` whose base and head
 repositories are canonical and whose head SHA and head branch equal the local
-checkout's exact `HEAD` and symbolic branch. A caller-supplied repository name,
-PR number, or SHA alone therefore grants no write authority.
+checkout's exact `HEAD` and symbolic branch. After `update-pr`, the postflight
+read must also return every requested title/body field byte-for-byte. A
+caller-supplied repository name, PR number, or SHA alone therefore grants no
+write authority or successful-write result.
 
 The transport has exactly two operations:
 
@@ -57,19 +59,24 @@ precondition, so this boundary must not be described as atomic mutation
 rejection.
 
 After `gh` confirms the write request, the helper always returns exit `0` with
-one of two minimal statuses. `ok` means that the write completed and the exact
-SHA-and-branch target was confirmed again. `write_completed_target_unverified`
-means that the write completed but postflight drift or a postflight read failure
-prevented confirmation. Callers must not retry that operation: they must read
-the remote PR or comment state and reconcile it before deciding on any further
-write. Neither status grants landing authority.
+one of two minimal statuses. `ok` means that the write completed, the exact
+SHA-and-branch target was confirmed again, and the requested PR fields or the
+new comment's positive GitHub identifier were verified.
+`write_completed_target_unverified` means that the write completed but target
+drift, result drift, a missing stable comment identifier, or a postflight read
+failure prevented confirmation. A verified comment identifier is returned as
+`comment_id` even when the target postflight is uncertain, so reconciliation can
+address the exact created comment. Callers must not retry that operation: they
+must read the remote PR or comment state and reconcile it before deciding on any
+further write. Neither status grants landing authority.
 
 PR metadata never grants landing authority. In particular, authority-bearing
 review comments remain bound to their explicit reviewed SHA and are accepted
 only when the independent exact-head mergegate revalidates them against the
 current PR head. A concurrent head move therefore makes that evidence stale;
 generic title or body metadata is never treated as review or merge evidence.
-Remote response bodies and `gh` diagnostic text are never echoed. Child output
-is bounded; completed-write output contains only a minimal operation status and
-safe numeric identifier. The helper has no merge, branch-write, check-rerun,
-review, or Linear operation.
+Sensitive remote fields and `gh` diagnostic text are never echoed. Child output
+is bounded; completed-write output contains only a minimal operation status,
+the safe PR number, and, when GitHub returned a valid one, the safe numeric
+comment identifier. The helper has no merge, branch-write, check-rerun, review,
+or Linear operation.
