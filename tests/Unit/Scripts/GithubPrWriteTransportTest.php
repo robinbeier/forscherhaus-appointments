@@ -26,11 +26,8 @@ final class GithubPrWriteTransportTest extends TestCase
         $this->record = $this->tmp . '/record';
         $this->stdin = $this->tmp . '/stdin';
         $this->head = trim((string) shell_exec('/usr/bin/git -C ' . escapeshellarg($root) . ' rev-parse HEAD'));
-        $this->branch = trim(
-            (string) shell_exec('/usr/bin/git -C ' . escapeshellarg($root) . ' symbolic-ref --quiet --short HEAD'),
-        );
+        $this->branch = 'test/pr-branch';
         self::assertMatchesRegularExpression('/\A[a-f0-9]{40}\z/D', $this->head);
-        self::assertNotSame('', $this->branch);
         self::assertTrue(mkdir($this->bin, 0700, true));
 
         $fake = <<<'BASH'
@@ -323,6 +320,23 @@ final class GithubPrWriteTransportTest extends TestCase
         }
     }
 
+    public function testLocalTargetUsesAttachedBranchAndRejectsDetachedHead(): void
+    {
+        $root = dirname(__DIR__, 3);
+        $branch = trim(
+            (string) shell_exec('/usr/bin/git -C ' . escapeshellarg($root) . ' symbolic-ref --quiet --short HEAD'),
+        );
+
+        if ($branch === '') {
+            $this->expectException(\RuntimeException::class);
+            $this->expectExceptionMessage('branch could not be verified');
+            $this->invokeTransport('resolveLocalTarget', []);
+            return;
+        }
+
+        self::assertSame(['sha' => $this->head, 'branch' => $branch], $this->invokeTransport('resolveLocalTarget', []));
+    }
+
     public function testGhBinaryMustBeASafeAbsoluteExecutable(): void
     {
         self::assertSame(
@@ -347,9 +361,14 @@ final class GithubPrWriteTransportTest extends TestCase
             return $reflection->invoke(null, ...$arguments);
         };
         try {
-            $options = $invoke('parseArguments', [array_slice($argv, 3)]);
+            $options = $invoke('parseArguments', [array_slice($argv, 5)]);
             $payload = $invoke('parsePayload', [$options['operation'], is_string($input) ? $input : '']);
-            $invoke('execute', [$options, $payload, $argv[2]]);
+            $invoke('execute', [
+                $options,
+                $payload,
+                $argv[2],
+                ['sha' => $argv[3], 'branch' => $argv[4]],
+            ]);
             exit(0);
         } catch (InvalidArgumentException $exception) {
             fwrite(STDERR, 'Input rejected: ' . $exception->getMessage() . PHP_EOL);
@@ -374,6 +393,8 @@ final class GithubPrWriteTransportTest extends TestCase
                 $bootstrap,
                 $root . '/scripts/agent/github_pr_write_transport.php',
                 $this->bin . '/gh',
+                $this->head,
+                $this->branch,
                 ...$args,
             ],
             [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],

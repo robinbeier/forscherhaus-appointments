@@ -337,8 +337,9 @@ final class GithubPrWriteTransport
 
     /** @param array{operation: string, repo: string, number: int} $options
      *  @param array{title?: string, body?: string} $payload
+     *  @param array{sha: string, branch: string}|null $localTarget
      */
-    private static function execute(array $options, array $payload, string $ghBinary): void
+    private static function execute(array $options, array $payload, string $ghBinary, ?array $localTarget = null): void
     {
         $environment = self::childEnvironment();
         $auth = self::runCommand([$ghBinary, 'auth', 'status', '--hostname', 'github.com'], '', $environment);
@@ -346,7 +347,7 @@ final class GithubPrWriteTransport
             throw new UnexpectedValueException('Native GitHub authentication is unavailable.');
         }
 
-        $localTarget = self::resolveLocalTarget();
+        $localTarget ??= self::resolveLocalTarget();
         self::verifyTarget(
             $ghBinary,
             $options['repo'],
