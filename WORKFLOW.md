@@ -393,6 +393,18 @@ route through `docs/agent-harness-index.md` and then `AGENTS.md`.
 When the branch is ready to publish:
 
 - create or update the PR from the current branch
+- if `gh pr edit` would require GitHub Projects scope, keep the existing native
+  `gh` authentication and use the Primary-only allowlisted REST transport in
+  `docs/github-pr-write-transport.md`; provide bounded JSON only on stdin and
+  require its manifest-pinned `gh` binary, source-handle-bound private `0500`
+  executable copy, alias-free private CLI configuration,
+  canonical repository/local exact-head-and-branch preflight, and independent
+  local and remote postwrite revalidation through fixed minimal response
+  projections, including exact created-comment identifier, repository,
+  issue/PR target, and body readback; any nonzero write exit, transport
+  uncertainty, or `write_completed_target_unverified` result is nonretryable
+  and requires remote reconciliation; never
+  export or expose a raw token, and never treat metadata as landing authority
 - fill the PR template completely
 - attach the PR to the Linear issue when applicable
 - move the Linear issue to `In Review`
