@@ -16,6 +16,7 @@ final class GithubPrWriteTransportTest extends TestCase
     private string $record;
     private string $stdin;
     private string $head;
+    private string $branch;
 
     protected function setUp(): void
     {
@@ -25,7 +26,11 @@ final class GithubPrWriteTransportTest extends TestCase
         $this->record = $this->tmp . '/record';
         $this->stdin = $this->tmp . '/stdin';
         $this->head = trim((string) shell_exec('/usr/bin/git -C ' . escapeshellarg($root) . ' rev-parse HEAD'));
+        $this->branch = trim(
+            (string) shell_exec('/usr/bin/git -C ' . escapeshellarg($root) . ' symbolic-ref --quiet --short HEAD'),
+        );
         self::assertMatchesRegularExpression('/\A[a-f0-9]{40}\z/D', $this->head);
+        self::assertNotSame('', $this->branch);
         self::assertTrue(mkdir($this->bin, 0700, true));
 
         $fake = <<<'BASH'
@@ -36,8 +41,10 @@ final class GithubPrWriteTransportTest extends TestCase
         auth_fail=__AUTH_FAIL__
         api_fail=__API_FAIL__
         head_mismatch=__HEAD_MISMATCH__
+        branch_mismatch=__BRANCH_MISMATCH__
         repo_mismatch=__REPO_MISMATCH__
         post_write_head_mismatch=__POST_WRITE_HEAD_MISMATCH__
+        post_write_api_fail=__POST_WRITE_API_FAIL__
         get_count=__GET_COUNT__
 
         printf 'argv:' >> "$record"
@@ -65,12 +72,15 @@ final class GithubPrWriteTransportTest extends TestCase
           if [[ -f "$get_count" ]]; then count="$(/bin/cat "$get_count")"; fi
           count=$((count + 1))
           printf '%s' "$count" > "$get_count"
+          if [[ -f "$post_write_api_fail" && "$count" -ge 2 ]]; then printf 'API token=do-not-leak\n' >&2; exit 1; fi
           head_sha='__HEAD__'
+          head_ref='__BRANCH__'
           repo='robinbeier/forscherhaus-appointments'
           if [[ -f "$head_mismatch" ]]; then head_sha='0000000000000000000000000000000000000000'; fi
+          if [[ -f "$branch_mismatch" ]]; then head_ref='other/branch'; fi
           if [[ -f "$post_write_head_mismatch" && "$count" -ge 2 ]]; then head_sha='0000000000000000000000000000000000000000'; fi
           if [[ -f "$repo_mismatch" ]]; then repo='other/repository'; fi
-          printf '{"number":123,"state":"open","base":{"ref":"main","repo":{"full_name":"%s"}},"head":{"sha":"%s","repo":{"full_name":"%s"}}}' "$repo" "$head_sha" "$repo"
+          printf '{"number":123,"state":"open","base":{"ref":"main","repo":{"full_name":"%s"}},"head":{"ref":"%s","sha":"%s","repo":{"full_name":"%s"}}}' "$repo" "$head_ref" "$head_sha" "$repo"
           exit 0
         fi
 
@@ -86,10 +96,13 @@ final class GithubPrWriteTransportTest extends TestCase
                 '__AUTH_FAIL__',
                 '__API_FAIL__',
                 '__HEAD_MISMATCH__',
+                '__BRANCH_MISMATCH__',
                 '__REPO_MISMATCH__',
                 '__POST_WRITE_HEAD_MISMATCH__',
+                '__POST_WRITE_API_FAIL__',
                 '__GET_COUNT__',
                 '__HEAD__',
+                '__BRANCH__',
             ],
             [
                 $this->shellQuote($this->record),
@@ -97,10 +110,13 @@ final class GithubPrWriteTransportTest extends TestCase
                 $this->shellQuote($this->tmp . '/auth-fail'),
                 $this->shellQuote($this->tmp . '/api-fail'),
                 $this->shellQuote($this->tmp . '/head-mismatch'),
+                $this->shellQuote($this->tmp . '/branch-mismatch'),
                 $this->shellQuote($this->tmp . '/repo-mismatch'),
                 $this->shellQuote($this->tmp . '/post-write-head-mismatch'),
+                $this->shellQuote($this->tmp . '/post-write-api-fail'),
                 $this->shellQuote($this->tmp . '/get-count'),
                 $this->head,
+                $this->branch,
             ],
             $fake,
         );
@@ -127,6 +143,7 @@ final class GithubPrWriteTransportTest extends TestCase
 
         self::assertSame(0, $exit, $err);
         self::assertSame('', $err);
+        self::assertSame('ok', json_decode($out, true, 8, JSON_THROW_ON_ERROR)['status'] ?? null);
         self::assertStringNotContainsString('New title', $out);
         self::assertStringNotContainsString('Private body', $out);
         self::assertSame(
@@ -233,38 +250,49 @@ final class GithubPrWriteTransportTest extends TestCase
         ];
     }
 
-    public function testTargetHeadAndRepositoryDriftAreRejectedBeforeWrite(): void
+    public function testTargetHeadBranchAndRepositoryDriftAreRejectedBeforeWrite(): void
     {
-        foreach (['head-mismatch', 'repo-mismatch'] as $marker) {
+        foreach (['head-mismatch', 'branch-mismatch', 'repo-mismatch'] as $marker) {
             file_put_contents($this->tmp . '/' . $marker, '1');
             [$exit, , $err] = $this->runTransport(
                 ['create-comment', '--repo', GITHUB_PR_WRITE_REPOSITORY, '--number', '123'],
                 '{"body":"safe"}',
             );
             self::assertSame(3, $exit, $marker);
-            self::assertStringContainsString('canonical exact head', $err, $marker);
+            self::assertStringContainsString('canonical exact local target', $err, $marker);
             self::assertFileDoesNotExist($this->stdin, $marker);
             unlink($this->tmp . '/' . $marker);
             unlink($this->record);
         }
     }
 
-    public function testPostWriteHeadDriftRejectsSuccessWithoutHidingThatWriteOccurred(): void
+    public function testPostWriteUncertaintyReportsCompletedWriteWithoutInvitingRetry(): void
     {
-        file_put_contents($this->tmp . '/post-write-head-mismatch', '1');
+        foreach (['post-write-head-mismatch', 'post-write-api-fail'] as $marker) {
+            file_put_contents($this->tmp . '/' . $marker, '1');
 
-        [$exit, $out, $err] = $this->runTransport(
-            ['create-comment', '--repo', GITHUB_PR_WRITE_REPOSITORY, '--number', '123'],
-            '{"body":"safe"}',
-        );
+            [$exit, $out, $err] = $this->runTransport(
+                ['create-comment', '--repo', GITHUB_PR_WRITE_REPOSITORY, '--number', '123'],
+                '{"body":"safe"}',
+            );
 
-        self::assertSame(3, $exit);
-        self::assertSame('', $out);
-        self::assertStringContainsString('target changed during the write request', $err);
-        self::assertSame('{"body":"safe"}', file_get_contents($this->stdin));
-        $record = (string) file_get_contents($this->record);
-        self::assertSame(2, substr_count($record, "\n--method\nGET"));
-        self::assertStringContainsString("\n--method\nPOST", $record);
+            self::assertSame(0, $exit, $marker);
+            self::assertSame('', $err, $marker);
+            self::assertSame(
+                'write_completed_target_unverified',
+                json_decode($out, true, 8, JSON_THROW_ON_ERROR)['status'] ?? null,
+                $marker,
+            );
+            self::assertSame('{"body":"safe"}', file_get_contents($this->stdin), $marker);
+            $record = (string) file_get_contents($this->record);
+            self::assertSame(2, substr_count($record, "\n--method\nGET"), $marker);
+            self::assertStringContainsString("\n--method\nPOST", $record, $marker);
+            self::assertStringNotContainsString('do-not-leak', $out . $err, $marker);
+
+            foreach ([$marker, 'get-count', 'record', 'stdin'] as $file) {
+                unlink($this->tmp . '/' . $file);
+            }
+        }
     }
 
     public function testAuthAndApiFailuresAreFailClosedAndRedacted(): void
@@ -290,7 +318,7 @@ final class GithubPrWriteTransportTest extends TestCase
         self::assertTrue($entrypoint->isStatic());
         self::assertSame(1, $entrypoint->getNumberOfParameters());
 
-        foreach (['resolveGhBinary', 'validateGhBinary', 'execute', 'runCommand'] as $method) {
+        foreach (['resolveGhBinary', 'validateGhBinary', 'resolveLocalTarget', 'execute', 'runCommand'] as $method) {
             self::assertTrue((new \ReflectionMethod(\GithubPrWriteTransport::class, $method))->isPrivate(), $method);
         }
     }

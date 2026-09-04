@@ -229,7 +229,8 @@ final class GithubPrWriteTransport
         ];
     }
 
-    private static function resolveLocalHead(): string
+    /** @return array{sha: string, branch: string} */
+    private static function resolveLocalTarget(): array
     {
         $repoRoot = dirname(__DIR__, 2);
         $resolvedRoot = realpath($repoRoot);
@@ -273,7 +274,25 @@ final class GithubPrWriteTransport
             throw new RuntimeException('Canonical repository HEAD could not be verified.');
         }
 
-        return $headSha;
+        $branch = self::runCommand([...$common, 'symbolic-ref', '--quiet', '--short', 'HEAD'], '', $environment);
+        $branchName = rtrim($branch['stdout'], "\r\n");
+        if (
+            $branch['exit_code'] !== 0 ||
+            $branchName === '' ||
+            strlen($branchName) > 255 ||
+            str_contains($branchName, "\0") ||
+            str_contains($branchName, "\n") ||
+            str_contains($branchName, "\r") ||
+            preg_match('//u', $branchName) !== 1
+        ) {
+            throw new RuntimeException('Canonical repository branch could not be verified.');
+        }
+        $branchFormat = self::runCommand([...$common, 'check-ref-format', '--branch', $branchName], '', $environment);
+        if ($branchFormat['exit_code'] !== 0 || rtrim($branchFormat['stdout'], "\r\n") !== $branchName) {
+            throw new RuntimeException('Canonical repository branch format could not be verified.');
+        }
+
+        return ['sha' => $headSha, 'branch' => $branchName];
     }
 
     /** @param array<string, string> $environment */
@@ -282,6 +301,7 @@ final class GithubPrWriteTransport
         string $repo,
         int $number,
         string $localHead,
+        string $localBranch,
         array $environment,
     ): void {
         $endpoint = 'repos/' . $repo . '/pulls/' . $number;
@@ -306,9 +326,12 @@ final class GithubPrWriteTransport
             ($record['base']['ref'] ?? null) !== GITHUB_PR_WRITE_BASE_REF ||
             ($record['base']['repo']['full_name'] ?? null) !== GITHUB_PR_WRITE_REPOSITORY ||
             ($record['head']['repo']['full_name'] ?? null) !== GITHUB_PR_WRITE_REPOSITORY ||
+            ($record['head']['ref'] ?? null) !== $localBranch ||
             ($record['head']['sha'] ?? null) !== $localHead
         ) {
-            throw new UnexpectedValueException('GitHub pull request target does not match the canonical exact head.');
+            throw new UnexpectedValueException(
+                'GitHub pull request target does not match the canonical exact local target.',
+            );
         }
     }
 
@@ -323,8 +346,15 @@ final class GithubPrWriteTransport
             throw new UnexpectedValueException('Native GitHub authentication is unavailable.');
         }
 
-        $localHead = self::resolveLocalHead();
-        self::verifyTarget($ghBinary, $options['repo'], $options['number'], $localHead, $environment);
+        $localTarget = self::resolveLocalTarget();
+        self::verifyTarget(
+            $ghBinary,
+            $options['repo'],
+            $options['number'],
+            $localTarget['sha'],
+            $localTarget['branch'],
+            $environment,
+        );
 
         if ($options['operation'] === 'update-pr') {
             $method = 'PATCH';
@@ -349,15 +379,25 @@ final class GithubPrWriteTransport
             throw new RuntimeException('GitHub API request failed with exit ' . $result['exit_code'] . '.');
         }
 
+        $status = 'ok';
         try {
-            self::verifyTarget($ghBinary, $options['repo'], $options['number'], $localHead, $environment);
-        } catch (UnexpectedValueException) {
-            throw new UnexpectedValueException('GitHub pull request target changed during the write request.');
+            self::verifyTarget(
+                $ghBinary,
+                $options['repo'],
+                $options['number'],
+                $localTarget['sha'],
+                $localTarget['branch'],
+                $environment,
+            );
+        } catch (Throwable) {
+            // The unsafe REST write has already completed. A non-zero exit here
+            // would invite a retry that can duplicate a comment or overwrite PR metadata.
+            $status = 'write_completed_target_unverified';
         }
 
         echo json_encode(
             [
-                'status' => 'ok',
+                'status' => $status,
                 'operation' => $options['operation'],
                 'number' => $options['number'],
             ],
