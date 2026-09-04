@@ -55,6 +55,9 @@ final class GithubPrWriteTransportTest extends TestCase
         post_write_api_fail=__POST_WRITE_API_FAIL__
         post_write_command_fail=__POST_WRITE_COMMAND_FAIL__
         comment_response_invalid=__COMMENT_RESPONSE_INVALID__
+        comment_wrong_bytes=__COMMENT_WRONG_BYTES__
+        comment_missing=__COMMENT_MISSING__
+        comment_wrong_target=__COMMENT_WRONG_TARGET__
         get_count=__GET_COUNT__
 
         printf 'argv0:%s\nargv:' "$0" >> "$record"
@@ -91,6 +94,17 @@ final class GithubPrWriteTransportTest extends TestCase
           count=$((count + 1))
           printf '%s' "$count" > "$get_count"
           if [[ -f "$post_write_api_fail" && "$count" -ge 2 ]]; then printf 'API token=do-not-leak\n' >&2; exit 1; fi
+          if [[ "$endpoint" == */issues/comments/456 ]]; then
+            if [[ -f "$comment_missing" ]]; then printf 'API token=do-not-leak\n' >&2; exit 1; fi
+            comment_body_json="$(/usr/bin/sed -n 's/.*\"body\":\"\([^\"]*\)\".*/\1/p' "$stdin_record")"
+            comment_repo='https://api.github.com/repos/robinbeier/forscherhaus-appointments'
+            comment_issue="$comment_repo/issues/123"
+            comment_url="$comment_repo/issues/comments/456"
+            if [[ -f "$comment_wrong_bytes" ]]; then comment_body_json='Concurrent body'; fi
+            if [[ -f "$comment_wrong_target" ]]; then comment_issue='https://api.github.com/repos/other/repository/issues/999'; comment_url='https://api.github.com/repos/other/repository/issues/comments/456'; fi
+            printf '{"id":456,"body":"%s","url":"%s","issue_url":"%s"}' "$comment_body_json" "$comment_url" "$comment_issue"
+            exit 0
+          fi
           head_sha='__HEAD__'
           head_ref='__BRANCH__'
           title='New title'
@@ -132,6 +146,9 @@ final class GithubPrWriteTransportTest extends TestCase
                 '__POST_WRITE_API_FAIL__',
                 '__POST_WRITE_COMMAND_FAIL__',
                 '__COMMENT_RESPONSE_INVALID__',
+                '__COMMENT_WRONG_BYTES__',
+                '__COMMENT_MISSING__',
+                '__COMMENT_WRONG_TARGET__',
                 '__GET_COUNT__',
                 '__HEAD__',
                 '__BRANCH__',
@@ -149,6 +166,9 @@ final class GithubPrWriteTransportTest extends TestCase
                 $this->shellQuote($this->tmp . '/post-write-api-fail'),
                 $this->shellQuote($this->tmp . '/post-write-command-fail'),
                 $this->shellQuote($this->tmp . '/comment-response-invalid'),
+                $this->shellQuote($this->tmp . '/comment-wrong-bytes'),
+                $this->shellQuote($this->tmp . '/comment-missing'),
+                $this->shellQuote($this->tmp . '/comment-wrong-target'),
                 $this->shellQuote($this->tmp . '/get-count'),
                 $this->head,
                 $this->branch,
@@ -235,7 +255,39 @@ final class GithubPrWriteTransportTest extends TestCase
         $record = (string) file_get_contents($this->record);
         self::assertStringContainsString('repos/' . GITHUB_PR_WRITE_REPOSITORY . '/issues/123/comments', $record);
         self::assertStringContainsString("\n--method\nPOST", $record);
-        self::assertSame(2, substr_count($record, "\n--method\nGET"));
+        self::assertSame(3, substr_count($record, "\n--method\nGET"));
+        self::assertStringContainsString('repos/' . GITHUB_PR_WRITE_REPOSITORY . '/issues/comments/456', $record);
+    }
+
+    public function testCreateCommentReconciliationFailsClosedForWrongBytesMissingOrWrongTarget(): void
+    {
+        foreach (['comment-wrong-bytes', 'comment-missing', 'comment-wrong-target'] as $marker) {
+            file_put_contents($this->tmp . '/' . $marker, '1');
+
+            [$exit, $out, $err] = $this->runTransport(
+                ['create-comment', '--repo', GITHUB_PR_WRITE_REPOSITORY, '--number', '123'],
+                '{"body":"safe"}',
+            );
+
+            self::assertSame(0, $exit, $marker);
+            self::assertSame('', $err, $marker);
+            $response = json_decode($out, true, 8, JSON_THROW_ON_ERROR);
+            self::assertSame('write_completed_target_unverified', $response['status'] ?? null, $marker);
+            self::assertSame(456, $response['comment_id'] ?? null, $marker);
+            self::assertStringNotContainsString('Concurrent body', $out, $marker);
+            self::assertStringNotContainsString('do-not-leak', $out . $err, $marker);
+            self::assertSame(1, substr_count((string) file_get_contents($this->record), "\n--method\nPOST"), $marker);
+            self::assertSame(3, substr_count((string) file_get_contents($this->record), "\n--method\nGET"), $marker);
+            self::assertStringContainsString(
+                '/issues/comments/456',
+                (string) file_get_contents($this->record),
+                $marker,
+            );
+
+            foreach ([$marker, 'get-count', 'record', 'stdin'] as $file) {
+                unlink($this->tmp . '/' . $file);
+            }
+        }
     }
 
     public function testNulPayloadIsRejectedBeforeAnyGitHubProcess(): void
@@ -370,7 +422,11 @@ final class GithubPrWriteTransportTest extends TestCase
             }
 
             $record = (string) file_get_contents($this->record);
-            self::assertSame(2, substr_count($record, "\n--method\nGET"), $operation);
+            self::assertSame(
+                $operation === 'create-comment' ? 3 : 2,
+                substr_count($record, "\n--method\nGET"),
+                $operation,
+            );
             self::assertSame(
                 1,
                 substr_count($record, "\n--method\n" . ($operation === 'update-pr' ? 'PATCH' : 'POST')),
@@ -501,6 +557,7 @@ final class GithubPrWriteTransportTest extends TestCase
                 'verifyTarget',
                 'verifyUpdatedFields',
                 'extractCommentId',
+                'verifyCreatedComment',
                 'execute',
                 'executeWithEnvironment',
                 'runCommand',

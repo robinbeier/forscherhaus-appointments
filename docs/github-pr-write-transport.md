@@ -37,10 +37,13 @@ checkout's exact `HEAD` and symbolic branch together from one Git porcelain-v2
 status snapshot, reads the target PR through GitHub REST, and requires an open
 PR into `main` whose base and head repositories are canonical and whose head SHA
 and head branch equal that local target. The two local snapshots must also match
-each other. After `update-pr`, the
-postflight read must return every requested title/body field byte-for-byte. A
-caller-supplied repository name, PR number, or SHA alone therefore grants no
-write authority or successful-write result.
+each other. After `update-pr`, the postflight read must return every requested
+title/body field byte-for-byte. After `create-comment`, the helper reads the
+created comment through its returned positive identifier and requires the
+canonical repository URL, exact issue/PR number, same identifier, and requested
+body byte-for-byte. A caller-supplied repository name, PR number, SHA, or
+comment identifier alone therefore grants no write authority or
+successful-write result.
 
 The transport has exactly two operations:
 
@@ -57,7 +60,9 @@ php scripts/agent/github_pr_write_transport.php create-comment \
 `update-pr` maps only to `PATCH /repos/{owner}/{repo}/pulls/{number}` and may
 set only `title` and `body`. `create-comment` maps only to
 `POST /repos/{owner}/{repo}/issues/{number}/comments` and always creates a new
-comment. The bounded stdin JSON object is `{"title":"...","body":"..."}` for an
+comment. Its postflight uses only
+`GET /repos/{owner}/{repo}/issues/comments/{comment_id}` for the exact returned
+identifier. The bounded stdin JSON object is `{"title":"...","body":"..."}` for an
 update (either field may be omitted) or exactly `{"body":"..."}` for a comment.
 Callers cannot provide a payload-file option, HTTP method, endpoint, foreign
 repository, or unbound PR target.
@@ -84,11 +89,13 @@ After the write invocation, the helper always performs its postflight checks
 and returns exit `0` with one of two minimal statuses. `ok` means that `gh`
 reported success, the independently re-resolved local SHA-and-branch target was
 unchanged and confirmed remotely, and the requested PR fields or the new
-comment's positive GitHub identifier were verified.
+comment's identifier, repository, issue/PR target, and byte-exact body were
+verified through an independent read.
 `write_completed_target_unverified` conservatively also covers a write that may
 have completed: a nonzero write exit, local transport failure, local or remote
-target drift, result drift, a missing stable comment identifier, or a postflight
-read failure prevents confirmation. A positive comment identifier recovered
+target drift, result drift, a missing stable comment identifier, comment target
+or body drift, or a postflight read failure prevents confirmation. A positive
+comment identifier recovered
 from the write response is returned as `comment_id` even when another
 postflight condition is uncertain, so reconciliation can address the exact
 created comment. Callers must not retry that operation: they must read the

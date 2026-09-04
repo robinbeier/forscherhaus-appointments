@@ -10,7 +10,7 @@
             "authentication": "native_gh_credential_store_without_token_export",
             "allowed_operations": ["update_pr_title_body", "create_exact_issue_comment"],
             "target_repository": "robinbeier/forscherhaus-appointments",
-            "target_binding": "canonical_open_main_pr_with_matching_single_process_local_exact_head_and_branch_snapshots_before_and_after_write_plus_remote_target_and_requested_update_revalidation",
+            "target_binding": "canonical_open_main_pr_with_matching_single_process_local_exact_head_and_branch_snapshots_before_and_after_write_plus_remote_target_requested_update_and_created_comment_id_repository_issue_exact_body_revalidation",
             "race_boundary": "github_unsafe_rest_write_has_no_atomic_head_compare_and_swap",
             "postwrite_uncertainty": "write_invocation_nonzero_exit_transport_failure_or_postflight_drift_returns_nonretryable_unverified_status_and_requires_remote_reconciliation",
             "landing_authority": "metadata_write_never_grants_landing_authority",

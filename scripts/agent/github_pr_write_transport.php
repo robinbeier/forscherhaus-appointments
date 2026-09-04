@@ -623,6 +623,45 @@ final class GithubPrWriteTransport
         return is_int($commentId) && $commentId > 0 ? $commentId : null;
     }
 
+    /** @param array<string, string> $environment */
+    private static function verifyCreatedComment(
+        string $ghBinary,
+        string $repo,
+        int $number,
+        int $commentId,
+        string $expectedBody,
+        array $environment,
+    ): void {
+        $endpoint = 'repos/' . $repo . '/issues/comments/' . $commentId;
+        $result = self::runCommand(
+            [$ghBinary, 'api', '--hostname', 'github.com', '--method', 'GET', $endpoint],
+            '',
+            $environment,
+        );
+        if ($result['exit_code'] !== 0) {
+            throw new UnexpectedValueException('GitHub comment state could not be verified.');
+        }
+
+        try {
+            $record = json_decode($result['stdout'], true, 16, JSON_THROW_ON_ERROR);
+        } catch (JsonException) {
+            throw new UnexpectedValueException('GitHub comment state returned invalid metadata.');
+        }
+
+        $expectedCommentUrl = 'https://api.github.com/repos/' . $repo . '/issues/comments/' . $commentId;
+        $expectedIssueUrl = 'https://api.github.com/repos/' . $repo . '/issues/' . $number;
+        if (
+            !is_array($record) ||
+            ($record['id'] ?? null) !== $commentId ||
+            ($record['url'] ?? null) !== $expectedCommentUrl ||
+            ($record['issue_url'] ?? null) !== $expectedIssueUrl ||
+            !is_string($record['body'] ?? null) ||
+            $record['body'] !== $expectedBody
+        ) {
+            throw new UnexpectedValueException('GitHub comment state does not match the requested exact target.');
+        }
+    }
+
     /** @param array{operation: string, repo: string, number: int} $options
      *  @param array{title?: string, body?: string} $payload
      *  @param (callable(): array{sha: string, branch: string})|null $localTargetResolver
@@ -719,8 +758,17 @@ final class GithubPrWriteTransport
             }
             if ($options['operation'] === 'update-pr') {
                 self::verifyUpdatedFields($remoteTarget, $payload);
-            } elseif ($commentId === null) {
+            } elseif ($commentId === null || !isset($payload['body'])) {
                 throw new UnexpectedValueException('GitHub comment identifier could not be verified.');
+            } else {
+                self::verifyCreatedComment(
+                    $ghBinary,
+                    $options['repo'],
+                    $options['number'],
+                    $commentId,
+                    $payload['body'],
+                    $environment,
+                );
             }
         } catch (Throwable) {
             // The unsafe REST write has already completed. A non-zero exit here
