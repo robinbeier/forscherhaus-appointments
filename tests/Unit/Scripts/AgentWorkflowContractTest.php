@@ -76,7 +76,7 @@ class AgentWorkflowContractTest extends TestCase
                 'credential_environment_policy' =>
                     'fixed_environment_without_token_variables_and_private_per_invocation_gh_runtime_with_attested_executable_copy_and_only_validated_native_hosts_reference',
                 'response_policy' =>
-                    'discard_sensitive_remote_fields_and_emit_minimal_write_outcome_status_with_safe_comment_id_when_available',
+                    'fixed_gh_jq_projection_of_target_identity_only_requested_update_fields_and_comment_identity_target_body_with_silent_update_write_then_minimal_outcome_status',
                 'forbidden_capabilities' => ['merge', 'branch_write', 'check_rerun', 'review', 'linear'],
             ],
             $contract['publish']['github_pr_write_transport'] ?? null,

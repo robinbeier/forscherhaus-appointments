@@ -58,6 +58,7 @@ final class GithubPrWriteTransportTest extends TestCase
         comment_wrong_bytes=__COMMENT_WRONG_BYTES__
         comment_missing=__COMMENT_MISSING__
         comment_wrong_target=__COMMENT_WRONG_TARGET__
+        large_pr_body=__LARGE_PR_BODY__
         get_count=__GET_COUNT__
 
         printf 'argv0:%s\nargv:' "$0" >> "$record"
@@ -81,9 +82,11 @@ final class GithubPrWriteTransportTest extends TestCase
 
         method=''
         endpoint=''
+        jq_expression=''
         previous=''
         for arg in "$@"; do
           if [[ "$previous" == '--method' ]]; then method="$arg"; fi
+          if [[ "$previous" == '--jq' ]]; then jq_expression="$arg"; fi
           case "$arg" in repos/*) endpoint="$arg" ;; esac
           previous="$arg"
         done
@@ -115,6 +118,17 @@ final class GithubPrWriteTransportTest extends TestCase
           if [[ -f "$post_write_head_mismatch" && "$count" -ge 2 ]]; then head_sha='0000000000000000000000000000000000000000'; fi
           if [[ -f "$post_write_metadata_mismatch" && "$count" -ge 2 ]]; then body='Concurrent body'; fi
           if [[ -f "$repo_mismatch" ]]; then repo='other/repository'; fi
+          if [[ -f "$large_pr_body" && -n "$jq_expression" ]]; then
+            if [[ "$jq_expression" == *title* && "$jq_expression" == *body* ]]; then
+              printf '{"number":123,"state":"open","title":"%s","body":"%s","base":{"ref":"main","repo":{"full_name":"%s"}},"head":{"ref":"%s","sha":"%s","repo":{"full_name":"%s"}}}' "$title" "$body" "$repo" "$head_ref" "$head_sha" "$repo"
+            elif [[ "$jq_expression" == *title* ]]; then
+              printf '{"number":123,"state":"open","title":"%s","base":{"ref":"main","repo":{"full_name":"%s"}},"head":{"ref":"%s","sha":"%s","repo":{"full_name":"%s"}}}' "$title" "$repo" "$head_ref" "$head_sha" "$repo"
+            else
+              printf '{"number":123,"state":"open","base":{"ref":"main","repo":{"full_name":"%s"}},"head":{"ref":"%s","sha":"%s","repo":{"full_name":"%s"}}}' "$repo" "$head_ref" "$head_sha" "$repo"
+            fi
+            exit 0
+          fi
+          if [[ -f "$large_pr_body" ]]; then body="$(/usr/bin/head -c 135000 /dev/zero | /usr/bin/tr '\0' x)"; fi
           printf '{"number":123,"state":"open","title":"%s","body":"%s","base":{"ref":"main","repo":{"full_name":"%s"}},"head":{"ref":"%s","sha":"%s","repo":{"full_name":"%s"}}}' "$title" "$body" "$repo" "$head_ref" "$head_sha" "$repo"
           exit 0
         fi
@@ -149,6 +163,7 @@ final class GithubPrWriteTransportTest extends TestCase
                 '__COMMENT_WRONG_BYTES__',
                 '__COMMENT_MISSING__',
                 '__COMMENT_WRONG_TARGET__',
+                '__LARGE_PR_BODY__',
                 '__GET_COUNT__',
                 '__HEAD__',
                 '__BRANCH__',
@@ -169,6 +184,7 @@ final class GithubPrWriteTransportTest extends TestCase
                 $this->shellQuote($this->tmp . '/comment-wrong-bytes'),
                 $this->shellQuote($this->tmp . '/comment-missing'),
                 $this->shellQuote($this->tmp . '/comment-wrong-target'),
+                $this->shellQuote($this->tmp . '/large-pr-body'),
                 $this->shellQuote($this->tmp . '/get-count'),
                 $this->head,
                 $this->branch,
@@ -257,6 +273,52 @@ final class GithubPrWriteTransportTest extends TestCase
         self::assertStringContainsString("\n--method\nPOST", $record);
         self::assertSame(3, substr_count($record, "\n--method\nGET"));
         self::assertStringContainsString('repos/' . GITHUB_PR_WRITE_REPOSITORY . '/issues/comments/456', $record);
+    }
+
+    public function testLargeExistingPullRequestBodyUsesBoundedTargetProjection(): void
+    {
+        file_put_contents($this->tmp . '/large-pr-body', '1');
+
+        [$exit, $out, $err] = $this->runTransport(
+            ['create-comment', '--repo', GITHUB_PR_WRITE_REPOSITORY, '--number', '123'],
+            '{"body":"safe"}',
+        );
+
+        self::assertSame(0, $exit, $err);
+        self::assertSame('', $err);
+        self::assertSame(456, json_decode($out, true, 8, JSON_THROW_ON_ERROR)['comment_id'] ?? null);
+        self::assertStringNotContainsString(str_repeat('x', 1024), $out . $err);
+        $record = (string) file_get_contents($this->record);
+        $projection = GITHUB_PR_WRITE_TARGET_PROJECTION;
+        self::assertSame(2, substr_count($record, "\n--jq\n" . $projection));
+        self::assertStringContainsString("\n--method\nGET", $record);
+        self::assertStringContainsString("\n--method\nPOST", $record);
+        self::assertSame(3, substr_count($record, "\n--method\nGET"));
+        self::assertStringNotContainsString('safe', $record);
+    }
+
+    public function testLargeExistingPullRequestBodyDoesNotBreakTitleOnlyUpdate(): void
+    {
+        file_put_contents($this->tmp . '/large-pr-body', '1');
+
+        [$exit, $out, $err] = $this->runTransport(
+            ['update-pr', '--repo', GITHUB_PR_WRITE_REPOSITORY, '--number', '123'],
+            '{"title":"New title"}',
+        );
+
+        self::assertSame(0, $exit, $err);
+        self::assertSame('', $err);
+        self::assertSame('ok', json_decode($out, true, 8, JSON_THROW_ON_ERROR)['status'] ?? null);
+        self::assertStringNotContainsString(str_repeat('x', 1024), $out . $err);
+        $record = (string) file_get_contents($this->record);
+        $projection = GITHUB_PR_WRITE_TARGET_PROJECTION;
+        $postflightProjection = GITHUB_PR_WRITE_TARGET_PROJECTION . ' + {title: .title}';
+        self::assertSame(1, substr_count($record, "\n--jq\n" . $projection . "\n--env--"));
+        self::assertSame(1, substr_count($record, "\n--jq\n" . $postflightProjection . "\n--env--"));
+        self::assertSame(2, substr_count($record, "\n--method\nGET"));
+        self::assertSame(1, substr_count($record, "\n--method\nPATCH"));
+        self::assertSame(1, substr_count($record, "\n--silent\n--env--"));
+        self::assertStringNotContainsString('New title', $record);
     }
 
     public function testCreateCommentReconciliationFailsClosedForWrongBytesMissingOrWrongTarget(): void

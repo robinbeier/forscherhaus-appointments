@@ -34,16 +34,19 @@ or during materialization is rejected before authentication or any API call.
 The target repository is fixed to `robinbeier/forscherhaus-appointments`.
 Immediately before and after every write, the helper resolves the local
 checkout's exact `HEAD` and symbolic branch together from one Git porcelain-v2
-status snapshot, reads the target PR through GitHub REST, and requires an open
-PR into `main` whose base and head repositories are canonical and whose head SHA
-and head branch equal that local target. The two local snapshots must also match
-each other. After `update-pr`, the postflight read must return every requested
-title/body field byte-for-byte. After `create-comment`, the helper reads the
-created comment through its returned positive identifier and requires the
-canonical repository URL, exact issue/PR number, same identifier, and requested
-body byte-for-byte. A caller-supplied repository name, PR number, SHA, or
-comment identifier alone therefore grants no write authority or
-successful-write result.
+status snapshot, reads the target PR through GitHub REST, and uses a fixed
+`gh api --jq` projection so only the required target identity plus any
+postflight title/body fields requested by this invocation leave the child
+process. It requires an open PR into `main` whose base and head repositories
+are canonical and whose head SHA and head branch equal that local target. The
+two local snapshots must also match each other. The update write itself is
+silent because its response is not evidence; after `update-pr`, the independent
+postflight read must return every requested title/body field byte-for-byte.
+The comment-create response is projected to its identifier, and the independent
+comment read is projected to identifier, canonical repository and issue URLs,
+and body before those fields are verified byte-for-byte. A caller-supplied
+repository name, PR number, SHA, or comment identifier alone therefore grants
+no write authority or successful-write result.
 
 The transport has exactly two operations:
 
@@ -107,8 +110,11 @@ review comments remain bound to their explicit reviewed SHA and are accepted
 only when the independent exact-head mergegate revalidates them against the
 current PR head. A concurrent head move therefore makes that evidence stale;
 generic title or body metadata is never treated as review or merge evidence.
-Sensitive remote fields and `gh` diagnostic text are never echoed. Child output
-is bounded; completed-write output contains only a minimal operation status,
-the safe PR number, and, when GitHub returned a valid one, the safe numeric
-comment identifier. The helper has no merge, branch-write, check-rerun, review,
-or Linear operation.
+Sensitive or irrelevant remote fields and `gh` diagnostic text are never
+echoed. Fixed `gh api --jq` projections keep existing large PR bodies out of
+preflight and unrelated write paths; only a requested, size-bounded update body
+or comment body may enter the corresponding postflight verification. Child
+output remains bounded; completed-write output contains only a minimal
+operation status, the safe PR number, and, when GitHub returned a valid one,
+the safe numeric comment identifier. The helper has no merge, branch-write,
+check-rerun, review, or Linear operation.

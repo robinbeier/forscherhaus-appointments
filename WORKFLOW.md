@@ -399,8 +399,9 @@ When the branch is ready to publish:
   require its manifest-pinned `gh` binary, source-handle-bound private `0500`
   executable copy, alias-free private CLI configuration,
   canonical repository/local exact-head-and-branch preflight, and independent
-  local and remote postwrite revalidation, including exact created-comment
-  identifier, repository, issue/PR target, and body readback; any nonzero write exit, transport
+  local and remote postwrite revalidation through fixed minimal response
+  projections, including exact created-comment identifier, repository,
+  issue/PR target, and body readback; any nonzero write exit, transport
   uncertainty, or `write_completed_target_unverified` result is nonretryable
   and requires remote reconciliation; never
   export or expose a raw token, and never treat metadata as landing authority

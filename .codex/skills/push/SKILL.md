@@ -44,9 +44,10 @@ contract.
       bounded JSON only through stdin; it rejects payload-file options and
       foreign repositories, then independently resolves the local exact head
       and branch and binds the canonical PR to that target immediately before
-      and after the write. For new comments it also reads the returned comment
-      identifier and revalidates the repository, issue/PR target, and exact
-      body. A nonzero write exit, transport uncertainty, or
+      and after the write through fixed minimal response projections that omit
+      unrelated existing PR content. For new comments it also reads the
+      projected returned identifier and revalidates the repository, issue/PR
+      target, and exact body. A nonzero write exit, transport uncertainty, or
       `write_completed_target_unverified` result is nonretryable; reconcile the
       remote state first.
     - If the branch is tied to a closed or merged PR, create a fresh branch and
@@ -89,8 +90,9 @@ gh pr view --json state,url,number 2>/dev/null || true
   bound private `0500` executable copy, the native credential store through a
   private alias-free per-invocation config, a fixed child environment, and
   single-process local plus canonical remote exact-head-
-  and-branch preflight/postflight snapshots plus exact created-comment
-  ID/target/body readback. Any write invocation with an uncertain
+  and-branch preflight/postflight snapshots with fixed minimal `gh api --jq`
+  projections plus exact created-comment ID/target/body readback. Any write
+  invocation with an uncertain
   outcome must be reconciled and never retried; metadata writes do not grant
   merge, branch, rerun, review, or Linear authority.
 - If the correct diff is already present and validated, stop exploring and

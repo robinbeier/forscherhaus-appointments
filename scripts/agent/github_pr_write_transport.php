@@ -8,6 +8,9 @@ const GITHUB_PR_WRITE_MAX_BODY_BYTES = 65536;
 const GITHUB_PR_WRITE_MAX_TITLE_BYTES = 256;
 const GITHUB_PR_WRITE_MAX_INPUT_BYTES = 400000;
 const GITHUB_PR_WRITE_MAX_COMMAND_OUTPUT_BYTES = 131072;
+const GITHUB_PR_WRITE_TARGET_PROJECTION = '{number: .number, state: .state, base: {ref: .base.ref, repo: {full_name: .base.repo.full_name}}, head: {ref: .head.ref, sha: .head.sha, repo: {full_name: .head.repo.full_name}}}';
+const GITHUB_PR_WRITE_COMMENT_ID_PROJECTION = '{id: .id}';
+const GITHUB_PR_WRITE_COMMENT_PROJECTION = '{id: .id, url: .url, issue_url: .issue_url, body: .body}';
 const GITHUB_PR_WRITE_GH_CANDIDATES = [
     '/opt/homebrew/bin/gh' => [
         'resolved_path' => '/opt/homebrew/Cellar/gh/2.88.0/bin/gh',
@@ -554,6 +557,7 @@ final class GithubPrWriteTransport
     }
 
     /**
+     * @param list<string> $requestedFields
      * @param array<string, string> $environment
      * @return array<string, mixed>
      */
@@ -563,11 +567,20 @@ final class GithubPrWriteTransport
         int $number,
         string $localHead,
         string $localBranch,
+        array $requestedFields,
         array $environment,
     ): array {
+        sort($requestedFields);
+        $projection = match ($requestedFields) {
+            [] => GITHUB_PR_WRITE_TARGET_PROJECTION,
+            ['body'] => GITHUB_PR_WRITE_TARGET_PROJECTION . ' + {body: .body}',
+            ['title'] => GITHUB_PR_WRITE_TARGET_PROJECTION . ' + {title: .title}',
+            ['body', 'title'] => GITHUB_PR_WRITE_TARGET_PROJECTION . ' + {body: .body, title: .title}',
+            default => throw new LogicException('GitHub pull request projection fields are invalid.'),
+        };
         $endpoint = 'repos/' . $repo . '/pulls/' . $number;
         $result = self::runCommand(
-            [$ghBinary, 'api', '--hostname', 'github.com', '--method', 'GET', $endpoint],
+            [$ghBinary, 'api', '--hostname', 'github.com', '--method', 'GET', $endpoint, '--jq', $projection],
             '',
             $environment,
         );
@@ -634,7 +647,17 @@ final class GithubPrWriteTransport
     ): void {
         $endpoint = 'repos/' . $repo . '/issues/comments/' . $commentId;
         $result = self::runCommand(
-            [$ghBinary, 'api', '--hostname', 'github.com', '--method', 'GET', $endpoint],
+            [
+                $ghBinary,
+                'api',
+                '--hostname',
+                'github.com',
+                '--method',
+                'GET',
+                $endpoint,
+                '--jq',
+                GITHUB_PR_WRITE_COMMENT_PROJECTION,
+            ],
             '',
             $environment,
         );
@@ -712,6 +735,7 @@ final class GithubPrWriteTransport
             $options['number'],
             $localTarget['sha'],
             $localTarget['branch'],
+            [],
             $environment,
         );
 
@@ -730,11 +754,24 @@ final class GithubPrWriteTransport
         }
 
         try {
-            $result = self::runCommand(
-                [$ghBinary, 'api', '--hostname', 'github.com', '--method', $method, $endpoint, '--input', '-'],
-                $input,
-                $environment,
-            );
+            $writeCommand = [
+                $ghBinary,
+                'api',
+                '--hostname',
+                'github.com',
+                '--method',
+                $method,
+                $endpoint,
+                '--input',
+                '-',
+            ];
+            if ($options['operation'] === 'update-pr') {
+                $writeCommand[] = '--silent';
+            } else {
+                $writeCommand[] = '--jq';
+                $writeCommand[] = GITHUB_PR_WRITE_COMMENT_ID_PROJECTION;
+            }
+            $result = self::runCommand($writeCommand, $input, $environment);
         } catch (Throwable) {
             // Once the write child has been invoked, even a local transport
             // failure cannot prove that GitHub did not apply the mutation.
@@ -751,6 +788,7 @@ final class GithubPrWriteTransport
                 $options['number'],
                 $postWriteLocalTarget['sha'],
                 $postWriteLocalTarget['branch'],
+                $options['operation'] === 'update-pr' ? array_keys($payload) : [],
                 $environment,
             );
             if ($postWriteLocalTarget !== $localTarget) {
