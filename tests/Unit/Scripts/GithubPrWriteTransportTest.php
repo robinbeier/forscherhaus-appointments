@@ -534,6 +534,7 @@ final class GithubPrWriteTransportTest extends TestCase
         self::assertStringContainsString("'--porcelain=v2'", $source);
         self::assertStringContainsString("'# branch.oid '", $source);
         self::assertStringContainsString("'# branch.head '", $source);
+        self::assertStringContainsString("\$branchName === '(detached)'", $source);
         self::assertStringNotContainsString("'rev-parse', '--verify', 'HEAD^{commit}'", $source);
         self::assertStringNotContainsString("'symbolic-ref'", $source);
     }

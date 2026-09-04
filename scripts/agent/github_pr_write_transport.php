@@ -401,6 +401,7 @@ final class GithubPrWriteTransport
         if (
             !is_string($branchName) ||
             $branchName === '' ||
+            $branchName === '(detached)' ||
             strlen($branchName) > 255 ||
             str_contains($branchName, "\0") ||
             str_contains($branchName, "\n") ||
