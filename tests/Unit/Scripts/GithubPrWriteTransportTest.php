@@ -59,6 +59,7 @@ final class GithubPrWriteTransportTest extends TestCase
         comment_missing=__COMMENT_MISSING__
         comment_wrong_target=__COMMENT_WRONG_TARGET__
         large_pr_body=__LARGE_PR_BODY__
+        stderr_flood=__STDERR_FLOOD__
         get_count=__GET_COUNT__
 
         printf 'argv0:%s\nargv:' "$0" >> "$record"
@@ -134,6 +135,9 @@ final class GithubPrWriteTransportTest extends TestCase
         fi
 
         if [[ -f "$api_fail" ]]; then printf 'API token=do-not-leak\n' >&2; exit 1; fi
+        if [[ -f "$stderr_flood" ]]; then
+          /usr/bin/head -c 70000 /dev/zero | /usr/bin/tr '\0' E >&2
+        fi
         /bin/cat > "$stdin_record"
         if [[ "$method" == 'POST' ]]; then
           if [[ -f "$comment_response_invalid" ]]; then printf '{"ok":true}\n'; else printf '{"id":456}\n'; fi
@@ -164,6 +168,7 @@ final class GithubPrWriteTransportTest extends TestCase
                 '__COMMENT_MISSING__',
                 '__COMMENT_WRONG_TARGET__',
                 '__LARGE_PR_BODY__',
+                '__STDERR_FLOOD__',
                 '__GET_COUNT__',
                 '__HEAD__',
                 '__BRANCH__',
@@ -185,6 +190,7 @@ final class GithubPrWriteTransportTest extends TestCase
                 $this->shellQuote($this->tmp . '/comment-missing'),
                 $this->shellQuote($this->tmp . '/comment-wrong-target'),
                 $this->shellQuote($this->tmp . '/large-pr-body'),
+                $this->shellQuote($this->tmp . '/stderr-flood'),
                 $this->shellQuote($this->tmp . '/get-count'),
                 $this->head,
                 $this->branch,
@@ -275,6 +281,51 @@ final class GithubPrWriteTransportTest extends TestCase
         self::assertStringContainsString('repos/' . GITHUB_PR_WRITE_REPOSITORY . '/issues/comments/456', $record);
     }
 
+    public function testPublicCommandApplicationReadsStdinAndCompletesASuccessfulWrite(): void
+    {
+        [$exit, $out, $err] = $this->runTransport(
+            ['create-comment', '--repo', GITHUB_PR_WRITE_REPOSITORY, '--number', '123'],
+            '{"body":"public entrypoint"}',
+        );
+
+        self::assertSame(0, $exit, $err);
+        self::assertSame('', $err);
+        self::assertSame('ok', json_decode($out, true, 8, JSON_THROW_ON_ERROR)['status'] ?? null);
+        self::assertSame('{"body":"public entrypoint"}', file_get_contents($this->stdin));
+        self::assertSame(['.', '..'], scandir($this->runtimeRoot));
+    }
+
+    public function testExecutableCommandSurfaceRejectsAnUnknownOperationBeforeRuntimeAccess(): void
+    {
+        $root = dirname(__DIR__, 3);
+        $process = proc_open(
+            [
+                PHP_BINARY,
+                $root . '/scripts/agent/github_pr_write_transport.php',
+                'delete-pr',
+                '--repo',
+                GITHUB_PR_WRITE_REPOSITORY,
+                '--number',
+                '123',
+            ],
+            [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            $pipes,
+            $root,
+        );
+        self::assertIsResource($process);
+        fwrite($pipes[0], '{"body":"must not execute"}');
+        fclose($pipes[0]);
+        $out = stream_get_contents($pipes[1]);
+        $err = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+
+        self::assertSame(2, proc_close($process));
+        self::assertSame('', $out);
+        self::assertStringContainsString('Operation must be update-pr or create-comment.', (string) $err);
+        self::assertFileDoesNotExist($this->record);
+    }
+
     public function testLargeExistingPullRequestBodyUsesBoundedTargetProjection(): void
     {
         file_put_contents($this->tmp . '/large-pr-body', '1');
@@ -319,6 +370,47 @@ final class GithubPrWriteTransportTest extends TestCase
         self::assertSame(1, substr_count($record, "\n--method\nPATCH"));
         self::assertSame(1, substr_count($record, "\n--silent\n--env--"));
         self::assertStringNotContainsString('New title', $record);
+    }
+
+    public function testReconciliationFailureRemovesPrivateGhRuntime(): void
+    {
+        file_put_contents($this->tmp . '/post-write-head-mismatch', '1');
+
+        [$exit, $out, $err] = $this->runTransport(
+            ['create-comment', '--repo', GITHUB_PR_WRITE_REPOSITORY, '--number', '123'],
+            '{"body":"safe"}',
+        );
+
+        self::assertSame(0, $exit, $err);
+        self::assertSame('', $err);
+        self::assertSame(
+            'write_completed_target_unverified',
+            json_decode($out, true, 8, JSON_THROW_ON_ERROR)['status'] ?? null,
+        );
+        self::assertSame(['.', '..'], scandir($this->runtimeRoot));
+        self::assertStringNotContainsString('gh-write-gh-', $out . $err);
+    }
+
+    public function testLargeStderrBeforeInputDoesNotDeadlockAndRemainsPrivate(): void
+    {
+        file_put_contents($this->tmp . '/stderr-flood', '1');
+        $request = json_encode(
+            ['body' => str_repeat('a', 65000)],
+            JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+        );
+
+        [$exit, $out, $err] = $this->runTransport(
+            ['create-comment', '--repo', GITHUB_PR_WRITE_REPOSITORY, '--number', '123'],
+            $request,
+            null,
+            5,
+        );
+
+        self::assertSame(0, $exit, $err);
+        self::assertSame('', $err);
+        self::assertSame(456, json_decode($out, true, 8, JSON_THROW_ON_ERROR)['comment_id'] ?? null);
+        self::assertSame(['.', '..'], scandir($this->runtimeRoot));
+        self::assertStringNotContainsString(str_repeat('a', 1024), $out . $err);
     }
 
     public function testCreateCommentReconciliationFailsClosedForWrongBytesMissingOrWrongTarget(): void
@@ -607,25 +699,7 @@ final class GithubPrWriteTransportTest extends TestCase
         self::assertTrue($entrypoint->isStatic());
         self::assertSame(1, $entrypoint->getNumberOfParameters());
 
-        foreach (
-            [
-                'resolveGhBinary',
-                'expectedGhDigest',
-                'validateGhBinary',
-                'createGhRuntime',
-                'removeGhRuntime',
-                'materializeGhBinary',
-                'resolveLocalTarget',
-                'verifyTarget',
-                'verifyUpdatedFields',
-                'extractCommentId',
-                'verifyCreatedComment',
-                'execute',
-                'executeWithEnvironment',
-                'runCommand',
-            ]
-            as $method
-        ) {
+        foreach (['repoRoot', 'processRunner', 'runtime'] as $method) {
             self::assertTrue((new \ReflectionMethod(\GithubPrWriteTransport::class, $method))->isPrivate(), $method);
         }
     }
@@ -640,16 +714,16 @@ final class GithubPrWriteTransportTest extends TestCase
         if ($branch === '') {
             $this->expectException(\RuntimeException::class);
             $this->expectExceptionMessage('branch could not be verified');
-            $this->invokeTransport('resolveLocalTarget', []);
+            $this->target()->resolveLocal();
             return;
         }
 
-        self::assertSame(['sha' => $this->head, 'branch' => $branch], $this->invokeTransport('resolveLocalTarget', []));
+        self::assertSame(['sha' => $this->head, 'branch' => $branch], $this->target()->resolveLocal());
     }
 
     public function testLocalTargetPairsHeadAndBranchFromOneGitSnapshot(): void
     {
-        $method = new \ReflectionMethod(\GithubPrWriteTransport::class, 'resolveLocalTarget');
+        $method = new \ReflectionMethod(\GithubPrWriteTarget::class, 'resolveLocal');
         $lines = file($method->getFileName());
         self::assertIsArray($lines);
         $source = implode(
@@ -676,13 +750,13 @@ final class GithubPrWriteTransportTest extends TestCase
         ];
         self::assertSame(
             realpath($this->bin . '/gh'),
-            $this->invokeTransport('validateGhBinary', [$this->bin . '/gh', $trusted]),
+            (new \GithubPrWriteRuntime($trusted))->validateBinary($this->bin . '/gh'),
         );
 
         chmod($this->bin . '/gh', 0777);
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('ownership, mode, or digest is unsafe');
-        $this->invokeTransport('validateGhBinary', [$this->bin . '/gh', $trusted]);
+        (new \GithubPrWriteRuntime($trusted))->validateBinary($this->bin . '/gh');
     }
 
     public function testGhBinaryDigestAndResolvedPathArePinned(): void
@@ -698,7 +772,7 @@ final class GithubPrWriteTransportTest extends TestCase
         self::assertNotFalse(file_put_contents($this->bin . '/gh', "\n# changed\n", FILE_APPEND));
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('ownership, mode, or digest is unsafe');
-        $this->invokeTransport('validateGhBinary', [$this->bin . '/gh', $trusted]);
+        (new \GithubPrWriteRuntime($trusted))->validateBinary($this->bin . '/gh');
     }
 
     public function testGhBinaryTrustManifestMatchesMachineContract(): void
@@ -711,7 +785,7 @@ final class GithubPrWriteTransportTest extends TestCase
         );
 
         self::assertSame(
-            GITHUB_PR_WRITE_GH_CANDIDATES,
+            \GithubPrWriteRuntimePolicy::loadCandidates(dirname(__DIR__, 3)),
             $contract['publish']['github_pr_write_transport']['gh_executable_manifest'] ?? null,
         );
     }
@@ -721,16 +795,18 @@ final class GithubPrWriteTransportTest extends TestCase
         $source = $this->bin . '/gh';
         $digest = hash_file('sha256', $source);
         self::assertIsString($digest);
-        $runtime = $this->invokeTransport('createGhRuntime', [
+        $runtimePolicy = new \GithubPrWriteRuntime([
+            $source => ['resolved_path' => (string) realpath($source), 'sha256' => $digest],
+        ]);
+        $runtime = $runtimePolicy->create(
             $source,
-            $digest,
             [
                 'name' => 'test-user',
                 'dir' => $this->home,
                 'uid' => posix_geteuid(),
             ],
             $this->runtimeRoot,
-        ]);
+        );
 
         try {
             self::assertNotSame(realpath($source), $runtime['gh_binary']);
@@ -741,7 +817,7 @@ final class GithubPrWriteTransportTest extends TestCase
             self::assertNotSame(hash_file('sha256', $source), hash_file('sha256', $runtime['gh_binary']));
             self::assertSame($digest, hash_file('sha256', $runtime['gh_binary']));
         } finally {
-            $this->invokeTransport('removeGhRuntime', [$runtime['config_dir'], $runtime['gh_binary']]);
+            \GithubPrWriteRuntime::remove($runtime['config_dir'], $runtime['gh_binary']);
         }
 
         self::assertSame(['.', '..'], scandir($this->runtimeRoot));
@@ -755,16 +831,18 @@ final class GithubPrWriteTransportTest extends TestCase
         self::assertNotFalse(file_put_contents($source, "\n# changed before materialization\n", FILE_APPEND));
 
         try {
-            $this->invokeTransport('createGhRuntime', [
+            $runtimePolicy = new \GithubPrWriteRuntime([
+                $source => ['resolved_path' => (string) realpath($source), 'sha256' => $digest],
+            ]);
+            $runtimePolicy->create(
                 $source,
-                $digest,
                 [
                     'name' => 'test-user',
                     'dir' => $this->home,
                     'uid' => posix_geteuid(),
                 ],
                 $this->runtimeRoot,
-            ]);
+            );
             self::fail('Changed GitHub CLI source was accepted.');
         } catch (\RuntimeException $exception) {
             self::assertStringContainsString('digest is unsafe', $exception->getMessage());
@@ -773,62 +851,48 @@ final class GithubPrWriteTransportTest extends TestCase
         self::assertSame(['.', '..'], scandir($this->runtimeRoot));
     }
 
-    private function runTransport(array $args, string $input, ?array $targetSequence = null): array
-    {
+    private function runTransport(
+        array $args,
+        string $input,
+        ?array $targetSequence = null,
+        ?int $timeoutSeconds = null,
+    ): array {
         $root = dirname(__DIR__, 3);
         $bootstrap = <<<'PHP'
         require $argv[1];
-        $input = stream_get_contents(STDIN);
-        $invoke = static function (string $method, array $arguments): mixed {
-            $reflection = new ReflectionMethod(GithubPrWriteTransport::class, $method);
-            return $reflection->invoke(null, ...$arguments);
+        $targets = json_decode($argv[5], true, 8, JSON_THROW_ON_ERROR);
+        $targetIndex = 0;
+        $resolver = static function () use (&$targets, &$targetIndex): array {
+            $target = $targets[min($targetIndex++, count($targets) - 1)] ?? null;
+            if (!is_array($target) || !is_string($target['sha'] ?? null) || !is_string($target['branch'] ?? null)) {
+                throw new RuntimeException('Invalid test target sequence.');
+            }
+            return ['sha' => $target['sha'], 'branch' => $target['branch']];
         };
-        try {
-            $targets = json_decode($argv[5], true, 8, JSON_THROW_ON_ERROR);
-            $targetIndex = 0;
-            $resolver = static function () use (&$targets, &$targetIndex): array {
-                $target = $targets[min($targetIndex++, count($targets) - 1)] ?? null;
-                if (!is_array($target) || !is_string($target['sha'] ?? null) || !is_string($target['branch'] ?? null)) {
-                    throw new RuntimeException('Invalid test target sequence.');
-                }
-                return ['sha' => $target['sha'], 'branch' => $target['branch']];
-            };
-            $runtimeFactory = static function (string $source) use ($invoke, $argv): array {
-                $digest = hash_file('sha256', $source);
-                if (!is_string($digest)) {
-                    throw new RuntimeException('Test GitHub CLI digest is unavailable.');
-                }
-                return $invoke('createGhRuntime', [
-                    $source,
-                    $digest,
-                    [
-                        'name' => 'test-user',
-                        'dir' => $argv[6],
-                        'uid' => posix_geteuid(),
-                    ],
-                    $argv[7],
-                ]);
-            };
-            $options = $invoke('parseArguments', [array_slice($argv, 8)]);
-            $payload = $invoke('parsePayload', [$options['operation'], is_string($input) ? $input : '']);
-            $invoke('execute', [
-                $options,
-                $payload,
-                $argv[2],
-                $resolver,
-                $runtimeFactory,
+        $runtimeFactory = static function (string $source) use ($argv): array {
+            $digest = hash_file('sha256', $source);
+            $resolved = realpath($source);
+            if (!is_string($digest) || !is_string($resolved)) {
+                throw new RuntimeException('Test GitHub CLI digest is unavailable.');
+            }
+            $runtime = new GithubPrWriteRuntime([
+                $source => ['resolved_path' => $resolved, 'sha256' => $digest],
             ]);
-            exit(0);
-        } catch (InvalidArgumentException $exception) {
-            fwrite(STDERR, 'Input rejected: ' . $exception->getMessage() . PHP_EOL);
-            exit(2);
-        } catch (UnexpectedValueException $exception) {
-            fwrite(STDERR, $exception->getMessage() . PHP_EOL);
-            exit(3);
-        } catch (Throwable $exception) {
-            fwrite(STDERR, $exception->getMessage() . PHP_EOL);
-            exit(4);
-        }
+            return $runtime->create(
+                $source,
+                ['name' => 'test-user', 'dir' => $argv[6], 'uid' => posix_geteuid()],
+                $argv[7],
+            );
+        };
+        $processRunner = new GithubPrWriteProcessRunner(GITHUB_PR_WRITE_MAX_COMMAND_OUTPUT_BYTES);
+        $application = new GithubPrWriteApplication(
+            $processRunner,
+            new GithubPrWriteTarget($processRunner, dirname($argv[1], 3)),
+            static fn(): string => $argv[2],
+            $runtimeFactory,
+            $resolver,
+        );
+        exit($application->run(array_slice($argv, 8), STDIN));
         PHP;
         $env = array_merge(getenv() ?: [], [
             'PATH' => $this->bin . ':' . (getenv('PATH') ?: ''),
@@ -837,26 +901,76 @@ final class GithubPrWriteTransportTest extends TestCase
         ]);
         $targetSequence ??= [['sha' => $this->head, 'branch' => $this->branch]];
         $targetSequenceJson = json_encode($targetSequence, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+        $command = [
+            PHP_BINARY,
+            '-r',
+            $bootstrap,
+            $root . '/scripts/agent/github_pr_write_transport.php',
+            $this->bin . '/gh',
+            $this->head,
+            $this->branch,
+            $targetSequenceJson,
+            $this->home,
+            $this->runtimeRoot,
+            ...$args,
+        ];
         $process = proc_open(
-            [
-                PHP_BINARY,
-                '-r',
-                $bootstrap,
-                $root . '/scripts/agent/github_pr_write_transport.php',
-                $this->bin . '/gh',
-                $this->head,
-                $this->branch,
-                $targetSequenceJson,
-                $this->home,
-                $this->runtimeRoot,
-                ...$args,
-            ],
+            $command,
             [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
             $pipes,
             $root,
             $env,
         );
         self::assertIsResource($process);
+        if ($timeoutSeconds !== null) {
+            stream_set_blocking($pipes[0], false);
+            stream_set_blocking($pipes[1], false);
+            stream_set_blocking($pipes[2], false);
+            $offset = 0;
+            $out = '';
+            $err = '';
+            $deadline = microtime(true) + $timeoutSeconds;
+            do {
+                if ($offset < strlen($input)) {
+                    $written = fwrite($pipes[0], substr($input, $offset, 8192));
+                    if (is_int($written) && $written > 0) {
+                        $offset += $written;
+                    }
+                } elseif (is_resource($pipes[0])) {
+                    fclose($pipes[0]);
+                }
+                $chunk = stream_get_contents($pipes[1]);
+                if (is_string($chunk)) {
+                    $out .= $chunk;
+                }
+                $chunk = stream_get_contents($pipes[2]);
+                if (is_string($chunk)) {
+                    $err .= $chunk;
+                }
+                $status = proc_get_status($process);
+                if (!($status['running'] ?? false) && feof($pipes[1]) && feof($pipes[2])) {
+                    break;
+                }
+                usleep(10000);
+            } while (microtime(true) < $deadline);
+            if (microtime(true) >= $deadline && ($status['running'] ?? false) === true) {
+                proc_terminate($process);
+            }
+            $chunk = stream_get_contents($pipes[1]);
+            if (is_string($chunk)) {
+                $out .= $chunk;
+            }
+            $chunk = stream_get_contents($pipes[2]);
+            if (is_string($chunk)) {
+                $err .= $chunk;
+            }
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+            if (is_resource($pipes[0])) {
+                fclose($pipes[0]);
+            }
+            return [proc_close($process), $out, $err];
+        }
         fwrite($pipes[0], $input);
         fclose($pipes[0]);
         $out = stream_get_contents($pipes[1]);
@@ -867,15 +981,17 @@ final class GithubPrWriteTransportTest extends TestCase
         return [proc_close($process), (string) $out, (string) $err];
     }
 
-    private function invokeTransport(string $method, array $arguments): mixed
-    {
-        $reflection = new \ReflectionMethod(\GithubPrWriteTransport::class, $method);
-        return $reflection->invoke(null, ...$arguments);
-    }
-
     private function shellQuote(string $value): string
     {
         return "'" . str_replace("'", "'\"'\"'", $value) . "'";
+    }
+
+    private function target(): \GithubPrWriteTarget
+    {
+        return new \GithubPrWriteTarget(
+            new \GithubPrWriteProcessRunner(GITHUB_PR_WRITE_MAX_COMMAND_OUTPUT_BYTES),
+            dirname(__DIR__, 3),
+        );
     }
 
     private function removeDirectory(string $dir): void

@@ -51,6 +51,22 @@ class AgentWorkflowContractTest extends TestCase
         self::assertSame('In Review', $contract['publish']['linear_state'] ?? null);
         self::assertFalse($contract['publish']['may_set_ready_to_merge'] ?? null);
         self::assertTrue($contract['publish']['push_invalidates_exact_head_evidence'] ?? null);
+        $transport = $contract['publish']['github_pr_write_transport'] ?? null;
+        self::assertIsArray($transport);
+        $manifest = $transport['gh_executable_manifest'] ?? null;
+        self::assertIsArray($manifest);
+        self::assertNotEmpty($manifest);
+        foreach ($manifest as $candidate => $record) {
+            self::assertIsString($candidate);
+            self::assertStringStartsWith('/', $candidate);
+            self::assertSame('gh', basename($candidate));
+            self::assertIsArray($record);
+            self::assertSame(['resolved_path', 'sha256'], array_keys($record));
+            self::assertIsString($record['resolved_path'] ?? null);
+            self::assertStringStartsWith('/', $record['resolved_path']);
+            self::assertSame('gh', basename($record['resolved_path']));
+            self::assertMatchesRegularExpression('/\A[a-f0-9]{64}\z/D', $record['sha256'] ?? '');
+        }
         self::assertSame(
             [
                 'path' => 'scripts/agent/github_pr_write_transport.php',
@@ -66,20 +82,24 @@ class AgentWorkflowContractTest extends TestCase
                 'landing_authority' => 'metadata_write_never_grants_landing_authority',
                 'gh_executable_policy' =>
                     'fixed_absolute_path_resolved_path_sha256_owner_and_mode_checked_then_source_handle_copied_to_private_0500_digest_revalidated_executable',
-                'gh_executable_manifest' => [
-                    '/opt/homebrew/bin/gh' => [
-                        'resolved_path' => '/opt/homebrew/Cellar/gh/2.88.0/bin/gh',
-                        'sha256' => '07661fba523076af4a0bfea9d3862b2855c05561d70e6f7629c60cdade1a9abf',
-                    ],
+                'gh_executable_manifest' => $manifest,
+                'module_boundaries' => [
+                    'entrypoint' => 'scripts/agent/github_pr_write_transport.php',
+                    'request_validation' => 'scripts/agent/lib/GithubPrWriteRequest.php',
+                    'command_orchestration' => 'scripts/agent/lib/GithubPrWriteApplication.php',
+                    'process_io' => 'scripts/agent/lib/GithubPrWriteProcessRunner.php',
+                    'runtime_and_executable_trust' => 'scripts/agent/lib/GithubPrWriteRuntime.php',
+                    'target_verification' => 'scripts/agent/lib/GithubPrWriteTarget.php',
                 ],
                 'request_transport' => 'bounded_json_stdin_without_payload_file_paths',
+                'process_io_policy' => 'concurrent_nonblocking_bounded_stdin_stdout_stderr_pump',
                 'credential_environment_policy' =>
                     'fixed_environment_without_token_variables_and_private_per_invocation_gh_runtime_with_attested_executable_copy_and_only_validated_native_hosts_reference',
                 'response_policy' =>
                     'fixed_gh_jq_projection_of_target_identity_only_requested_update_fields_and_comment_identity_target_body_with_silent_update_write_then_minimal_outcome_status',
                 'forbidden_capabilities' => ['merge', 'branch_write', 'check_rerun', 'review', 'linear'],
             ],
-            $contract['publish']['github_pr_write_transport'] ?? null,
+            $transport,
         );
         self::assertSame(
             [
