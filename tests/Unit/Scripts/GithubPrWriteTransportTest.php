@@ -57,7 +57,7 @@ final class GithubPrWriteTransportTest extends TestCase
         comment_response_invalid=__COMMENT_RESPONSE_INVALID__
         get_count=__GET_COUNT__
 
-        printf 'argv:' >> "$record"
+        printf 'argv0:%s\nargv:' "$0" >> "$record"
         for arg in "$@"; do printf '\n%s' "$arg" >> "$record"; done
         printf '\n--env--\n' >> "$record"
         /usr/bin/env | LC_ALL=C /usr/bin/sort >> "$record"
@@ -205,7 +205,13 @@ final class GithubPrWriteTransportTest extends TestCase
                 '\/github-pr-write-gh-[a-f0-9]{32}\n/',
             $record,
         );
-        self::assertStringContainsString("\n--gh-config--\nentry:hosts.yml:symlink\n", $record);
+        self::assertMatchesRegularExpression(
+            '/\Aargv0:' .
+                preg_quote((string) realpath($this->runtimeRoot), '/') .
+                '\/github-pr-write-gh-[a-f0-9]{32}\/gh\n/',
+            $record,
+        );
+        self::assertStringContainsString("\n--gh-config--\nentry:gh:file\nentry:hosts.yml:symlink\n", $record);
         self::assertStringNotContainsString('entry:config.yml', $record);
         self::assertSame(['.', '..'], scandir($this->runtimeRoot));
     }
@@ -486,9 +492,11 @@ final class GithubPrWriteTransportTest extends TestCase
         foreach (
             [
                 'resolveGhBinary',
+                'expectedGhDigest',
                 'validateGhBinary',
                 'createGhRuntime',
                 'removeGhRuntime',
+                'materializeGhBinary',
                 'resolveLocalTarget',
                 'verifyTarget',
                 'verifyUpdatedFields',
@@ -589,6 +597,63 @@ final class GithubPrWriteTransportTest extends TestCase
         );
     }
 
+    public function testGhRuntimeExecutesAnAttestedPrivateCopyIndependentOfTheSourcePath(): void
+    {
+        $source = $this->bin . '/gh';
+        $digest = hash_file('sha256', $source);
+        self::assertIsString($digest);
+        $runtime = $this->invokeTransport('createGhRuntime', [
+            $source,
+            $digest,
+            [
+                'name' => 'test-user',
+                'dir' => $this->home,
+                'uid' => posix_geteuid(),
+            ],
+            $this->runtimeRoot,
+        ]);
+
+        try {
+            self::assertNotSame(realpath($source), $runtime['gh_binary']);
+            self::assertSame($runtime['config_dir'] . '/gh', $runtime['gh_binary']);
+            self::assertSame($digest, hash_file('sha256', $runtime['gh_binary']));
+            self::assertSame(0500, fileperms($runtime['gh_binary']) & 0777);
+            self::assertNotFalse(file_put_contents($source, "\n# replaced after materialization\n", FILE_APPEND));
+            self::assertNotSame(hash_file('sha256', $source), hash_file('sha256', $runtime['gh_binary']));
+            self::assertSame($digest, hash_file('sha256', $runtime['gh_binary']));
+        } finally {
+            $this->invokeTransport('removeGhRuntime', [$runtime['config_dir'], $runtime['gh_binary']]);
+        }
+
+        self::assertSame(['.', '..'], scandir($this->runtimeRoot));
+    }
+
+    public function testGhRuntimeRejectsSourceChangedAfterItsTrustedDigestWasCaptured(): void
+    {
+        $source = $this->bin . '/gh';
+        $digest = hash_file('sha256', $source);
+        self::assertIsString($digest);
+        self::assertNotFalse(file_put_contents($source, "\n# changed before materialization\n", FILE_APPEND));
+
+        try {
+            $this->invokeTransport('createGhRuntime', [
+                $source,
+                $digest,
+                [
+                    'name' => 'test-user',
+                    'dir' => $this->home,
+                    'uid' => posix_geteuid(),
+                ],
+                $this->runtimeRoot,
+            ]);
+            self::fail('Changed GitHub CLI source was accepted.');
+        } catch (\RuntimeException $exception) {
+            self::assertStringContainsString('digest is unsafe', $exception->getMessage());
+        }
+
+        self::assertSame(['.', '..'], scandir($this->runtimeRoot));
+    }
+
     private function runTransport(array $args, string $input, ?array $targetSequence = null): array
     {
         $root = dirname(__DIR__, 3);
@@ -609,12 +674,21 @@ final class GithubPrWriteTransportTest extends TestCase
                 }
                 return ['sha' => $target['sha'], 'branch' => $target['branch']];
             };
-            $runtimeFactory = static function () use ($invoke, $argv): array {
-                return $invoke('createGhRuntime', [[
-                    'name' => 'test-user',
-                    'dir' => $argv[6],
-                    'uid' => posix_geteuid(),
-                ], $argv[7]]);
+            $runtimeFactory = static function (string $source) use ($invoke, $argv): array {
+                $digest = hash_file('sha256', $source);
+                if (!is_string($digest)) {
+                    throw new RuntimeException('Test GitHub CLI digest is unavailable.');
+                }
+                return $invoke('createGhRuntime', [
+                    $source,
+                    $digest,
+                    [
+                        'name' => 'test-user',
+                        'dir' => $argv[6],
+                        'uid' => posix_geteuid(),
+                    ],
+                    $argv[7],
+                ]);
             };
             $options = $invoke('parseArguments', [array_slice($argv, 8)]);
             $payload = $invoke('parsePayload', [$options['operation'], is_string($input) ? $input : '']);

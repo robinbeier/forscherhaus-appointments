@@ -9,19 +9,27 @@ where `gh pr edit` would require unrelated GitHub Projects permissions.
 Only the Primary may invoke `scripts/agent/github_pr_write_transport.php`.
 Authentication stays inside the native `gh` credential store. The helper never
 calls `gh auth token`, exports a token, or forwards ambient token variables. It
-resolves `gh` only from the committed absolute-path manifest, verifies its exact
-resolved path, SHA-256, ownership, and mode, and starts it with a fixed `PATH`
-plus a small environment allowlist. Each invocation creates a private
-configuration directory containing only a link to the ownership- and
-mode-validated native `hosts.yml`; it never exposes the caller's `config.yml`,
-aliases, or extensions through `GH_CONFIG_DIR`. The link is removed when the
-invocation ends, and the authentication file's contents are neither read nor
-copied by the helper. JSON request content arrives only on standard input, so
-neither content nor a caller-chosen payload path appears in process arguments.
+resolves `gh` only from the committed absolute-path manifest and verifies its
+exact resolved path, SHA-256, ownership, and mode. It then opens that verified
+source, copies the bytes through the same open file handle into a randomly
+named private per-invocation runtime, and rejects source metadata drift, byte
+count drift, or digest drift during the copy. Only the resulting ownership-,
+mode-, path-, and digest-attested `0500` private copy is executed; the mutable
+Homebrew path is never executed after validation. The helper starts that copy
+with a fixed `PATH` plus a small environment allowlist. The private runtime also
+contains only a link to the ownership- and mode-validated native `hosts.yml`;
+it never exposes the caller's `config.yml`, aliases, or extensions through
+`GH_CONFIG_DIR`. The copied executable and link are removed when the invocation
+ends, and the authentication file's contents are neither read nor copied by the
+helper. JSON request content arrives only on standard input, so neither content
+nor a caller-chosen payload path appears in process arguments.
 
 The executable manifest is intentionally fail-closed. A GitHub CLI update or
 Homebrew path change requires a reviewed repository change to the exact
-resolved path and SHA-256 before this transport can run again.
+resolved path and SHA-256 before this transport can run again. Replacement of
+the package-manager path after its first validation cannot redirect execution:
+the private copy remains bound to the expected digest, and a replacement before
+or during materialization is rejected before authentication or any API call.
 
 The target repository is fixed to `robinbeier/forscherhaus-appointments`.
 Immediately before and after every write, the helper resolves the local

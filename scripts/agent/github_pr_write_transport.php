@@ -117,10 +117,14 @@ final class GithubPrWriteTransport
 
     /**
      * @param array{name: string, dir: string, uid: int}|null $accountOverride
-     * @return array{environment: array<string, string>, config_dir: string}
+     * @return array{environment: array<string, string>, config_dir: string, gh_binary: string}
      */
-    private static function createGhRuntime(?array $accountOverride = null, string $temporaryRoot = '/tmp'): array
-    {
+    private static function createGhRuntime(
+        string $ghSource,
+        string $expectedDigest,
+        ?array $accountOverride = null,
+        string $temporaryRoot = '/tmp',
+    ): array {
         if (!function_exists('posix_geteuid') || !function_exists('posix_getpwuid')) {
             throw new RuntimeException('OS account lookup is unavailable.');
         }
@@ -183,6 +187,13 @@ final class GithubPrWriteTransport
             throw new RuntimeException('Native GitHub authentication metadata could not be isolated.');
         }
 
+        try {
+            $ghBinary = self::materializeGhBinary($ghSource, $expectedDigest, $configDir);
+        } catch (Throwable $exception) {
+            self::removeGhRuntime($configDir, $configDir . '/gh');
+            throw $exception;
+        }
+
         return [
             'environment' => [
                 'PATH' => '/usr/bin:/bin:/usr/sbin:/sbin',
@@ -197,11 +208,16 @@ final class GithubPrWriteTransport
                 'NO_COLOR' => '1',
             ],
             'config_dir' => $configDir,
+            'gh_binary' => $ghBinary,
         ];
     }
 
-    private static function removeGhRuntime(string $configDir): void
+    private static function removeGhRuntime(string $configDir, string $ghBinary): void
     {
+        if (dirname($ghBinary) === $configDir && basename($ghBinary) === 'gh' && !is_link($ghBinary)) {
+            @chmod($ghBinary, 0600);
+            @unlink($ghBinary);
+        }
         $hostsLink = $configDir . '/hosts.yml';
         if (is_link($hostsLink)) {
             @unlink($hostsLink);
@@ -209,6 +225,114 @@ final class GithubPrWriteTransport
         if (is_dir($configDir)) {
             @rmdir($configDir);
         }
+    }
+
+    private static function materializeGhBinary(string $source, string $expectedDigest, string $configDir): string
+    {
+        if (
+            $source === '' ||
+            !str_starts_with($source, '/') ||
+            preg_match('/\A[a-f0-9]{64}\z/D', $expectedDigest) !== 1 ||
+            realpath($configDir) !== $configDir ||
+            !is_dir($configDir) ||
+            is_link($configDir)
+        ) {
+            throw new RuntimeException('Private GitHub CLI executable input is invalid.');
+        }
+        if (!function_exists('posix_geteuid')) {
+            throw new RuntimeException('GitHub CLI ownership cannot be verified.');
+        }
+
+        $sourceHandle = @fopen($source, 'rb');
+        if (!is_resource($sourceHandle)) {
+            throw new RuntimeException('GitHub CLI source could not be opened safely.');
+        }
+
+        $target = $configDir . '/gh';
+        $targetHandle = false;
+        try {
+            $before = fstat($sourceHandle);
+            if (
+                !is_array($before) ||
+                (($before['mode'] ?? 0) & 0o170000) !== 0o100000 ||
+                !in_array($before['uid'] ?? null, [0, posix_geteuid()], true) ||
+                (($before['mode'] ?? 0) & 0o022) !== 0 ||
+                !is_int($before['size'] ?? null) ||
+                $before['size'] <= 0
+            ) {
+                throw new RuntimeException('GitHub CLI source handle is unsafe.');
+            }
+
+            $targetHandle = @fopen($target, 'x+b');
+            if (!is_resource($targetHandle)) {
+                throw new RuntimeException('Private GitHub CLI executable could not be created.');
+            }
+
+            $hash = hash_init('sha256');
+            $copiedBytes = 0;
+            while (!feof($sourceHandle)) {
+                $chunk = fread($sourceHandle, 65536);
+                if ($chunk === false) {
+                    throw new RuntimeException('GitHub CLI source could not be read safely.');
+                }
+                if ($chunk === '') {
+                    if (feof($sourceHandle)) {
+                        break;
+                    }
+                    throw new RuntimeException('GitHub CLI source could not be read safely.');
+                }
+                hash_update($hash, $chunk);
+                $offset = 0;
+                while ($offset < strlen($chunk)) {
+                    $written = fwrite($targetHandle, substr($chunk, $offset));
+                    if ($written === false || $written === 0) {
+                        throw new RuntimeException('Private GitHub CLI executable could not be written safely.');
+                    }
+                    $offset += $written;
+                    $copiedBytes += $written;
+                }
+            }
+            if (!fflush($targetHandle)) {
+                throw new RuntimeException('Private GitHub CLI executable could not be flushed safely.');
+            }
+
+            $after = fstat($sourceHandle);
+            foreach (['dev', 'ino', 'uid', 'gid', 'mode', 'size', 'mtime', 'ctime'] as $field) {
+                if (!is_array($after) || ($before[$field] ?? null) !== ($after[$field] ?? null)) {
+                    throw new RuntimeException('GitHub CLI source changed while it was copied.');
+                }
+            }
+            if ($copiedBytes !== $before['size'] || !hash_equals($expectedDigest, hash_final($hash))) {
+                throw new RuntimeException('Private GitHub CLI executable digest is unsafe.');
+            }
+        } finally {
+            fclose($sourceHandle);
+            if (is_resource($targetHandle)) {
+                fclose($targetHandle);
+            }
+        }
+
+        if (!@chmod($target, 0500)) {
+            @unlink($target);
+            throw new RuntimeException('Private GitHub CLI executable mode could not be restricted.');
+        }
+        clearstatcache(true, $target);
+        $targetStat = @lstat($target);
+        if (
+            !is_array($targetStat) ||
+            (($targetStat['mode'] ?? 0) & 0o170000) !== 0o100000 ||
+            (($targetStat['mode'] ?? 0) & 0o777) !== 0o500 ||
+            ($targetStat['uid'] ?? null) !== posix_geteuid() ||
+            realpath($target) !== $target ||
+            !is_executable($target) ||
+            !hash_equals($expectedDigest, hash_file('sha256', $target) ?: '')
+        ) {
+            @chmod($target, 0600);
+            @unlink($target);
+            throw new RuntimeException('Private GitHub CLI executable attestation failed.');
+        }
+
+        return $target;
     }
 
     /**
@@ -270,6 +394,17 @@ final class GithubPrWriteTransport
         }
 
         throw new RuntimeException('GitHub CLI is unavailable on the fixed path allowlist.');
+    }
+
+    private static function expectedGhDigest(string $resolved): string
+    {
+        foreach (GITHUB_PR_WRITE_GH_CANDIDATES as $trusted) {
+            if (($trusted['resolved_path'] ?? null) === $resolved) {
+                return $trusted['sha256'];
+            }
+        }
+
+        throw new RuntimeException('GitHub CLI digest is unavailable from the exact trust manifest.');
     }
 
     /**
@@ -491,7 +626,7 @@ final class GithubPrWriteTransport
     /** @param array{operation: string, repo: string, number: int} $options
      *  @param array{title?: string, body?: string} $payload
      *  @param (callable(): array{sha: string, branch: string})|null $localTargetResolver
-     *  @param (callable(): array{environment: array<string, string>, config_dir: string})|null $ghRuntimeFactory
+     *  @param (callable(string): array{environment: array<string, string>, config_dir: string, gh_binary: string})|null $ghRuntimeFactory
      */
     private static function execute(
         array $options,
@@ -500,13 +635,16 @@ final class GithubPrWriteTransport
         ?callable $localTargetResolver = null,
         ?callable $ghRuntimeFactory = null,
     ): void {
-        $ghRuntimeFactory ??= static fn(): array => self::createGhRuntime();
-        $runtime = $ghRuntimeFactory();
+        $ghRuntimeFactory ??= static fn(string $source): array => self::createGhRuntime(
+            $source,
+            self::expectedGhDigest($source),
+        );
+        $runtime = $ghRuntimeFactory($ghBinary);
         $environment = $runtime['environment'];
         try {
-            self::executeWithEnvironment($options, $payload, $ghBinary, $environment, $localTargetResolver);
+            self::executeWithEnvironment($options, $payload, $runtime['gh_binary'], $environment, $localTargetResolver);
         } finally {
-            self::removeGhRuntime($runtime['config_dir']);
+            self::removeGhRuntime($runtime['config_dir'], $runtime['gh_binary']);
         }
     }
 

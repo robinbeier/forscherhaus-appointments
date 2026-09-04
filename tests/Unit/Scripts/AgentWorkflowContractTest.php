@@ -64,7 +64,8 @@ class AgentWorkflowContractTest extends TestCase
                 'postwrite_uncertainty' =>
                     'write_invocation_nonzero_exit_transport_failure_or_postflight_drift_returns_nonretryable_unverified_status_and_requires_remote_reconciliation',
                 'landing_authority' => 'metadata_write_never_grants_landing_authority',
-                'gh_executable_policy' => 'fixed_absolute_path_resolved_path_sha256_owner_and_mode_checked',
+                'gh_executable_policy' =>
+                    'fixed_absolute_path_resolved_path_sha256_owner_and_mode_checked_then_source_handle_copied_to_private_0500_digest_revalidated_executable',
                 'gh_executable_manifest' => [
                     '/opt/homebrew/bin/gh' => [
                         'resolved_path' => '/opt/homebrew/Cellar/gh/2.88.0/bin/gh',
@@ -73,7 +74,7 @@ class AgentWorkflowContractTest extends TestCase
                 ],
                 'request_transport' => 'bounded_json_stdin_without_payload_file_paths',
                 'credential_environment_policy' =>
-                    'fixed_environment_without_token_variables_and_private_per_invocation_gh_config_with_only_validated_native_hosts_reference',
+                    'fixed_environment_without_token_variables_and_private_per_invocation_gh_runtime_with_attested_executable_copy_and_only_validated_native_hosts_reference',
                 'response_policy' =>
                     'discard_sensitive_remote_fields_and_emit_minimal_write_outcome_status_with_safe_comment_id_when_available',
                 'forbidden_capabilities' => ['merge', 'branch_write', 'check_rerun', 'review', 'linear'],

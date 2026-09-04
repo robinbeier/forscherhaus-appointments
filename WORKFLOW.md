@@ -396,7 +396,8 @@ When the branch is ready to publish:
 - if `gh pr edit` would require GitHub Projects scope, keep the existing native
   `gh` authentication and use the Primary-only allowlisted REST transport in
   `docs/github-pr-write-transport.md`; provide bounded JSON only on stdin and
-  require its manifest-pinned `gh` binary, alias-free private CLI configuration,
+  require its manifest-pinned `gh` binary, source-handle-bound private `0500`
+  executable copy, alias-free private CLI configuration,
   canonical repository/local exact-head-and-branch preflight, and independent
   local and remote postwrite revalidation; any nonzero write exit, transport
   uncertainty, or `write_completed_target_unverified` result is nonretryable
