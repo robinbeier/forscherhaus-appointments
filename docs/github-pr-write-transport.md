@@ -15,11 +15,12 @@ environment allowlist. JSON request content arrives only on standard input, so
 neither content nor a caller-chosen payload path appears in process arguments.
 
 The target repository is fixed to `robinbeier/forscherhaus-appointments`.
-Immediately before and after every write, the helper reads the target PR
-through GitHub REST and requires an open PR into `main` whose base and head
-repositories are canonical and whose head SHA and head branch equal the local
-checkout's exact `HEAD` and symbolic branch. After `update-pr`, the postflight
-read must also return every requested title/body field byte-for-byte. A
+Immediately before and after every write, the helper independently resolves the
+local checkout's exact `HEAD` and symbolic branch, reads the target PR through
+GitHub REST, and requires an open PR into `main` whose base and head repositories
+are canonical and whose head SHA and head branch equal that local target. The
+two local resolutions must also match each other. After `update-pr`, the
+postflight read must return every requested title/body field byte-for-byte. A
 caller-supplied repository name, PR number, or SHA alone therefore grants no
 write authority or successful-write result.
 
@@ -52,23 +53,29 @@ Titles must be one non-empty unterminated line. Build any request file in a
 private location and verify it before redirecting it; the helper itself never
 opens a caller-selected content path.
 
-Invalid input, missing native authentication, preflight target drift, and a
-failed write request are rejected without reporting a completed write. GitHub's
-unsafe REST writes used here do not provide an atomic head compare-and-swap
+Invalid input, missing native authentication, and preflight target drift are
+rejected without reporting a completed write. Once the write child has been
+invoked, however, a nonzero exit or local transport failure cannot prove that
+GitHub did not apply the mutation. Those outcomes enter the same nonretryable
+postwrite-reconciliation path as any other uncertain result. GitHub's unsafe
+REST writes used here do not provide an atomic head compare-and-swap
 precondition, so this boundary must not be described as atomic mutation
 rejection.
 
-After `gh` confirms the write request, the helper always returns exit `0` with
-one of two minimal statuses. `ok` means that the write completed, the exact
-SHA-and-branch target was confirmed again, and the requested PR fields or the
-new comment's positive GitHub identifier were verified.
-`write_completed_target_unverified` means that the write completed but target
-drift, result drift, a missing stable comment identifier, or a postflight read
-failure prevented confirmation. A verified comment identifier is returned as
-`comment_id` even when the target postflight is uncertain, so reconciliation can
-address the exact created comment. Callers must not retry that operation: they
-must read the remote PR or comment state and reconcile it before deciding on any
-further write. Neither status grants landing authority.
+After the write invocation, the helper always performs its postflight checks
+and returns exit `0` with one of two minimal statuses. `ok` means that `gh`
+reported success, the independently re-resolved local SHA-and-branch target was
+unchanged and confirmed remotely, and the requested PR fields or the new
+comment's positive GitHub identifier were verified.
+`write_completed_target_unverified` conservatively also covers a write that may
+have completed: a nonzero write exit, local transport failure, local or remote
+target drift, result drift, a missing stable comment identifier, or a postflight
+read failure prevents confirmation. A positive comment identifier recovered
+from the write response is returned as `comment_id` even when another
+postflight condition is uncertain, so reconciliation can address the exact
+created comment. Callers must not retry that operation: they must read the
+remote PR or comment state and reconcile it before deciding on any further
+write. Neither status grants landing authority.
 
 PR metadata never grants landing authority. In particular, authority-bearing
 review comments remain bound to their explicit reviewed SHA and are accepted

@@ -397,8 +397,9 @@ When the branch is ready to publish:
   `gh` authentication and use the Primary-only allowlisted REST transport in
   `docs/github-pr-write-transport.md`; provide bounded JSON only on stdin and
   require its canonical repository/local exact-head-and-branch preflight plus
-  postwrite revalidation; after a `write_completed_target_unverified` result,
-  never retry the operation and instead reconcile the remote state; never
+  an independent local and remote postwrite revalidation; any nonzero write
+  exit, transport uncertainty, or `write_completed_target_unverified` result
+  is nonretryable and requires remote reconciliation; never
   export or expose a raw token, and never treat metadata as landing authority
 - fill the PR template completely
 - attach the PR to the Linear issue when applicable

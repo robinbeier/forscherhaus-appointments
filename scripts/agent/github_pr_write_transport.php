@@ -367,17 +367,22 @@ final class GithubPrWriteTransport
 
     /** @param array{operation: string, repo: string, number: int} $options
      *  @param array{title?: string, body?: string} $payload
-     *  @param array{sha: string, branch: string}|null $localTarget
+     *  @param (callable(): array{sha: string, branch: string})|null $localTargetResolver
      */
-    private static function execute(array $options, array $payload, string $ghBinary, ?array $localTarget = null): void
-    {
+    private static function execute(
+        array $options,
+        array $payload,
+        string $ghBinary,
+        ?callable $localTargetResolver = null,
+    ): void {
         $environment = self::childEnvironment();
         $auth = self::runCommand([$ghBinary, 'auth', 'status', '--hostname', 'github.com'], '', $environment);
         if ($auth['exit_code'] !== 0) {
             throw new UnexpectedValueException('Native GitHub authentication is unavailable.');
         }
 
-        $localTarget ??= self::resolveLocalTarget();
+        $localTargetResolver ??= static fn(): array => self::resolveLocalTarget();
+        $localTarget = $localTargetResolver();
         self::verifyTarget(
             $ghBinary,
             $options['repo'],
@@ -401,26 +406,33 @@ final class GithubPrWriteTransport
             throw new InvalidArgumentException('Payload could not be encoded safely.');
         }
 
-        $result = self::runCommand(
-            [$ghBinary, 'api', '--hostname', 'github.com', '--method', $method, $endpoint, '--input', '-'],
-            $input,
-            $environment,
-        );
-        if ($result['exit_code'] !== 0) {
-            throw new RuntimeException('GitHub API request failed with exit ' . $result['exit_code'] . '.');
+        try {
+            $result = self::runCommand(
+                [$ghBinary, 'api', '--hostname', 'github.com', '--method', $method, $endpoint, '--input', '-'],
+                $input,
+                $environment,
+            );
+        } catch (Throwable) {
+            // Once the write child has been invoked, even a local transport
+            // failure cannot prove that GitHub did not apply the mutation.
+            $result = ['exit_code' => 1, 'stdout' => '', 'stderr' => ''];
         }
 
         $commentId = $options['operation'] === 'create-comment' ? self::extractCommentId($result['stdout']) : null;
-        $status = 'ok';
+        $status = $result['exit_code'] === 0 ? 'ok' : 'write_completed_target_unverified';
         try {
+            $postWriteLocalTarget = $localTargetResolver();
             $remoteTarget = self::verifyTarget(
                 $ghBinary,
                 $options['repo'],
                 $options['number'],
-                $localTarget['sha'],
-                $localTarget['branch'],
+                $postWriteLocalTarget['sha'],
+                $postWriteLocalTarget['branch'],
                 $environment,
             );
+            if ($postWriteLocalTarget !== $localTarget) {
+                throw new UnexpectedValueException('Canonical local target changed during the GitHub write.');
+            }
             if ($options['operation'] === 'update-pr') {
                 self::verifyUpdatedFields($remoteTarget, $payload);
             } elseif ($commentId === null) {

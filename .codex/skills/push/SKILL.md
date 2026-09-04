@@ -42,10 +42,11 @@ contract.
       Use the Primary-only repository transport documented in
       `docs/github-pr-write-transport.md` for title/body updates. Feed its
       bounded JSON only through stdin; it rejects payload-file options and
-      foreign repositories, then binds the canonical PR to the local exact head
-      and branch immediately before and after the write. If it returns
-      `write_completed_target_unverified`, do not retry; reconcile the remote
-      state first.
+      foreign repositories, then independently resolves the local exact head
+      and branch and binds the canonical PR to that target immediately before
+      and after the write. A nonzero write exit, transport uncertainty, or
+      `write_completed_target_unverified` result is nonretryable; reconcile the
+      remote state first.
     - If the branch is tied to a closed or merged PR, create a fresh branch and
       reopen from there.
 6. Use [`.github/pull_request_template.md`](../../../.github/pull_request_template.md)
@@ -83,9 +84,9 @@ gh pr view --json state,url,number 2>/dev/null || true
   the workpad.
 - Never obtain, export, print, or pass a raw GitHub token. The narrow REST
   fallback uses an absolute verified `gh` binary, the native credential store,
-  a fixed child environment, and canonical exact-head-and-branch PR
-  preflight/postflight. A completed but unverified postflight status must be
-  reconciled and never retried; metadata writes do not grant merge, branch,
-  rerun, review, or Linear authority.
+  a fixed child environment, and independent local plus canonical remote
+  exact-head-and-branch preflight/postflight checks. Any write invocation with
+  an uncertain outcome must be reconciled and never retried; metadata writes do
+  not grant merge, branch, rerun, review, or Linear authority.
 - If the correct diff is already present and validated, stop exploring and
   publish it instead of reopening analysis.
