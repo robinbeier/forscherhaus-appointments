@@ -304,5 +304,23 @@ not publish success. `marker-status <max-age-seconds>` exposes only `pass`,
 `missing`, `stale`, or `invalid` plus aggregate age. The recommended weekly
 monitor threshold is 691200 seconds (8 days).
 
+An active timer describes scheduling, not the outcome of its last execution.
+Use `bash scripts/ops/prod_cleanup_inventory.sh` to read the marker alongside
+these release-retention diagnostics:
+
+- `last_exit_status`: the service process exit status, or `unknown` when unavailable;
+- `next_run_utc`: the next scheduled timer run, or `unknown`;
+- `helper_updated_since_last_run`: whether the installed helper is newer than
+  the last recorded run (`yes`, `no`, or `unknown`).
+
+A stale marker with a nonzero last exit status indicates a previous unsuccessful
+run. If the helper was updated afterward, the old result does not establish
+that the installed correction has failed. Check the next scheduled run and its
+new marker before drawing that conclusion. A newer modification time is only
+a chronology hint, not proof of a particular fix or a successful rollout.
+A successful dry-run reports present inspectability; it does not exercise every
+execute-only check or prove that the systemd service will succeed. These fields
+do not authorize an execute pass or change the retention policy.
+
 Session retention (ROB-440) and Docker build-cache retention (ROB-450) remain
 separate services with separate roots, confirmations, policies, and markers.

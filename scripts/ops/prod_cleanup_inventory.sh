@@ -61,6 +61,7 @@ SESSION_RETENTION_HELPER="${CLEANUP_SESSION_RETENTION_HELPER:-/usr/local/libexec
 SESSION_RETENTION_TIMER="${CLEANUP_SESSION_RETENTION_TIMER:-fh-session-retention.timer}"
 RELEASE_RETENTION_HELPER="${CLEANUP_RELEASE_RETENTION_HELPER:-/usr/local/libexec/fh-release-archive-dump-retention-v1}"
 RELEASE_RETENTION_TIMER="${CLEANUP_RELEASE_RETENTION_TIMER:-fh-release-archive-dump-retention.timer}"
+RELEASE_RETENTION_SERVICE="${CLEANUP_RELEASE_RETENTION_SERVICE:-fh-release-archive-dump-retention.service}"
 APP_LOG_RETENTION_HELPER="${CLEANUP_APP_LOG_RETENTION_HELPER:-/usr/local/libexec/fh-app-log-retention-v1}"
 APP_LOG_RETENTION_TIMER="${CLEANUP_APP_LOG_RETENTION_TIMER:-fh-app-log-retention.timer}"
 
@@ -247,6 +248,70 @@ status_for_path() {
     fi
 }
 
+systemctl_show_value() {
+    local unit="$1"
+    local property="$2"
+    local value
+
+    value="$(LC_ALL=C TZ=UTC systemctl show "$unit" --property="$property" --value 2>/dev/null)" || {
+        printf unknown
+        return
+    }
+    if [[ "$value" == "${property}="* ]]; then
+        value="${value#*=}"
+    fi
+    if [[ "$value" =~ ^[^[:cntrl:]]+$ ]]; then
+        printf '%s' "$value"
+    else
+        printf 'unknown'
+    fi
+}
+
+systemctl_show_property() {
+    local property="$1"
+    local output="$2"
+    local line
+    local value=''
+
+    while IFS= read -r line; do
+        if [[ "$line" == "${property}="* ]]; then
+            value="${line#*=}"
+            break
+        fi
+    done <<< "$output"
+
+    if [[ "$value" =~ ^[0-9]+$ ]]; then
+        printf '%s' "$value"
+    else
+        printf 'unknown'
+    fi
+}
+
+systemd_timestamp_epoch() {
+    local timestamp="$1"
+    local epoch=''
+
+    [[ "$timestamp" != 'unknown' && "$timestamp" != 'n/a' && "$timestamp" != '' ]] || {
+        printf 'unknown'
+        return
+    }
+    epoch="$(date -d "$timestamp" +%s 2>/dev/null || true)"
+    if ! [[ "$epoch" =~ ^[0-9]+$ ]]; then
+        epoch="$(date -j -f '%Y-%m-%dT%H:%M:%SZ' "$timestamp" +%s 2>/dev/null || true)"
+    fi
+    if ! [[ "$epoch" =~ ^[0-9]+$ ]]; then
+        epoch="$(date -j -f '%a %Y-%m-%d %H:%M:%S %Z' "$timestamp" +%s 2>/dev/null || true)"
+    fi
+    if ! [[ "$epoch" =~ ^[0-9]+$ ]]; then
+        epoch="$(TZ=UTC date -j -f '%Y-%m-%d %H:%M:%S %Z' "$timestamp" +%s 2>/dev/null || true)"
+    fi
+    if [[ "$epoch" =~ ^[0-9]+$ ]]; then
+        printf '%s' "$epoch"
+    else
+        printf 'unknown'
+    fi
+}
+
 current_release_id() {
     if [[ -r "${APP_ROOT}/_RELEASE" ]]; then
         awk '{print $1; exit}' "${APP_ROOT}/_RELEASE" 2>/dev/null || printf 'unreadable'
@@ -421,6 +486,42 @@ if [[ -x "$RELEASE_RETENTION_HELPER" ]]; then
 fi
 kv release_retention.marker_status "$release_marker_status"
 kv release_retention.marker_age_seconds "$release_marker_age_seconds"
+release_last_exit_status=unknown
+release_next_run_utc=unknown
+release_helper_updated_since_last_run=unknown
+if command -v systemctl >/dev/null 2>&1; then
+    release_service_show="$(LC_ALL=C TZ=UTC systemctl show "$RELEASE_RETENTION_SERVICE" \
+        --property=ExecMainStatus,ExecMainExitTimestamp 2>/dev/null)" || release_service_show=''
+    release_last_exit_status="$(systemctl_show_property ExecMainStatus "$release_service_show")"
+    release_exit_timestamp=''
+    while IFS= read -r release_service_line; do
+        case "$release_service_line" in
+            ExecMainExitTimestamp=*) release_exit_timestamp="${release_service_line#*=}" ;;
+        esac
+    done <<< "$release_service_show"
+    release_run_epoch="$(systemd_timestamp_epoch "$release_exit_timestamp")"
+    if ! [[ "$release_run_epoch" =~ ^[0-9]+$ ]]; then
+        release_last_exit_status=unknown
+    fi
+    release_helper_mtime="$(file_mtime_epoch "$RELEASE_RETENTION_HELPER")"
+    if [[ "$release_run_epoch" =~ ^[0-9]+$ && "$release_helper_mtime" =~ ^[0-9]+$ ]]; then
+        if (( release_helper_mtime > release_run_epoch )); then
+            release_helper_updated_since_last_run=yes
+        else
+            release_helper_updated_since_last_run=no
+        fi
+    fi
+    release_next_run_raw="$(systemctl_show_value "$RELEASE_RETENTION_TIMER" NextElapseUSecRealtime)"
+    release_next_epoch="$(systemd_timestamp_epoch "$release_next_run_raw")"
+    if [[ "$release_next_epoch" =~ ^[0-9]+$ ]]; then
+        release_next_run_utc="$(date -u -d "@$release_next_epoch" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+            || date -u -r "$release_next_epoch" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
+        [[ "$release_next_run_utc" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || release_next_run_utc=unknown
+    fi
+fi
+kv release_retention.last_exit_status "$release_last_exit_status"
+kv release_retention.next_run_utc "$release_next_run_utc"
+kv release_retention.helper_updated_since_last_run "$release_helper_updated_since_last_run"
 
 section app_log_retention
 if command -v systemctl >/dev/null 2>&1; then
