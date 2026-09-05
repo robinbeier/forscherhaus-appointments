@@ -1,120 +1,58 @@
-# Production Journald Retention
+# Production Journal Maintenance
 
-ROB-451 fixes the persistent system journal at a maximum of 1 GiB and retains
-at most 30 days. Repository delivery only ships the contract. It does not
-install the helper, change journald, restart a service, vacuum a journal, or
-enable monitoring on production.
+Use systemd's built-in journal rotation and the existing host disk-space alert.
+There is no repository-owned journal helper, scheduled vacuum, or separate
+journal-retention monitor. The repository does not impose a 1 GiB / 30-day
+policy. Merging this documentation does not change production configuration.
 
-## Fixed contract
+## Inspect before deciding
 
-The only managed drop-in is
-`/etc/systemd/journald.conf.d/60-fh-journald-retention.conf`:
-
-```ini
-[Journal]
-SystemMaxUse=1G
-MaxRetentionSec=30day
-```
-
-The helper accepts the managed file only when it is a root-owned regular
-`0644` file with one link below a protected root-owned directory chain. Active
-`SystemMaxUse` or `MaxRetentionSec` assignments in the main configuration or
-another drop-in are conflicts, not precedence guesses. Missing, changed,
-duplicated, unreadable, or unsafe configuration fails closed.
-
-The 30-day window preserves current incident evidence. ROB-445 deploy timing is
-independently retained in its protected per-run source and does not depend on
-journald. Before any future vacuum, confirm both facts again from aggregate
-metadata; never print journal entries or timing file contents.
-
-## Read-only inspection
-
-After the reviewed helper has separately been installed root-owned and
-non-writable at `/usr/local/libexec/fh-journald-retention-v1`, inspection is the
-default:
+Run `bash scripts/ops/prod_doctor.sh` for host health and free space. For an
+aggregate journal size, use the approved production SSH target from
+[agent-operations.md](agent-operations.md):
 
 ```bash
-bash scripts/ops/prod_journald_retention.sh
+ssh root@188.245.244.123 'journalctl --disk-usage'
 ```
 
-Output is one canonical aggregate object. It contains only contract status,
-normalized limits, exact allocated bytes below the protected persistent
-`/var/log/journal` tree, and a fixed reason class. It never
-contains journal entries, units, paths from entries, customer data, or secret
-values. `pass` requires the exact unambiguous drop-in and usage at or below
-1 GiB. `drift` or `invalid` is a stop condition.
+Do not print journal entries or protected configuration. If disk usage is
+healthy, no manual cleanup is needed. If the disk alert fires, identify the
+large storage category first; journal cleanup cannot fix growth in Docker,
+backups, application logs, or other directories.
 
-## Three separate production changes
+Without overrides, `SystemMaxUse` defaults to 10% of the filesystem, capped at
+4 GiB; `SystemKeepFree` also constrains growth. Only archived journal files
+are removed, so active files can leave usage above the nominal limit. Verify
+host configuration before relying on these defaults. See the upstream
+[journald configuration reference](https://www.freedesktop.org/software/systemd/man/latest/journald.conf.html).
 
-The following commands describe future, separately approved operations. They
-are not authorized by merge and must not be combined into one approval.
-Configuration and one-time vacuum are deliberately separate approvals.
+## Manual cleanup when needed
 
-Install and activate only the fixed configuration:
+1. Check host health and journal size. Confirm that the records needed for any
+   current incident have been preserved; deployment timing evidence lives
+   separately under `/var/lib/fh-deploy-timing` (see
+   [agent-operations.md](agent-operations.md)).
+2. Agree on the journal history that may be discarded and obtain explicit
+   approval for that deletion. A size target does not guarantee a minimum
+   number of days of history.
+3. Use native `journalctl --rotate` followed by a vacuum with the approved
+   size or age bound. For example, `journalctl --vacuum-size=1G` deletes old
+   archived journal files toward a 1 GiB target; it is an example, not a
+   standing policy or authorization. Do not delete journal files by hand.
+4. Read `journalctl --disk-usage` again and run
+   `bash scripts/ops/prod_validate_after_change.sh`. Record only aggregate
+   before/after sizes and health status.
 
-```bash
-bash scripts/ops/prod_journald_retention.sh \
-  --apply-config \
-  --confirm-live-write ROB-451-CONFIG
-```
+Deleted journal history cannot be restored by undoing a setting. A one-time
+vacuum does not install a lasting limit or require a journald restart. If
+repeated manual cleanup becomes necessary, consider a native `SystemMaxUse`
+setting before introducing another tool or scheduled job.
 
-The helper holds the shared production-change lock, publishes the drop-in with
-atomic no-replace semantics, fsyncs it and its parent, validates the exact
-merged configuration with `systemd-analyze cat-config`, and restarts
-`systemd-journald.service` even when the exact file was already attached. A failed first
-activation removes only the file it just published and restarts journald with
-the prior configuration.
+## Existing installations
 
-Existing journal usage above 1 GiB is reported as `applied_needs_vacuum`; it is
-not silently treated as a configuration failure and does not authorize the
-separate vacuum step.
-
-Only after the configuration is effective, host health is green, the 30-day
-incident window is accepted again, and a new approval is recorded, rotate and
-vacuum archived journal data:
-
-```bash
-bash scripts/ops/prod_journald_retention.sh \
-  --vacuum \
-  --confirm-live-write ROB-451-VACUUM
-```
-
-The vacuum uses both fixed bounds and reports only aggregate before, after, and
-reclaimed bytes. It never broadens scope to application, Apache, database,
-backup, release, Docker, or provider data.
-
-Rollback removes only the byte-exact managed drop-in and restarts journald:
-
-```bash
-bash scripts/ops/prod_journald_retention.sh \
-  --rollback-config \
-  --confirm-live-write ROB-451-ROLLBACK
-```
-
-A missing managed file is an idempotent rollback. A different or unsafe file
-at the managed path is never removed automatically.
-
-## Validation and monitoring
-
-For each separately approved production change:
-
-1. run `prod_doctor.sh` and the default journald inspection;
-2. stop on a busy production-change lock, configuration conflict, unsafe path,
-   unavailable aggregate usage, or non-green host health;
-3. execute only the approved configuration, vacuum, or rollback operation;
-4. rerun the default inspection and `prod_validate_after_change.sh`;
-5. record only aggregate status, limits, and byte counts in Linear.
-
-`KUMA_JOURNALD_RETENTION_MONITOR_ENABLED=0` is the shipped default. After a
-separately approved production activation and successful validation, changing
-it to `1` makes the existing host-resources Push monitor fail closed on missing,
-changed, conflicting, unreadable, or over-limit journald state. The Push
-message contains only `journald_retention=drift|invalid`.
-
-## Stop conditions
-
-Stop without mutation if the production shape differs from the documented
-Ubuntu/systemd host, another retention assignment exists, the managed path or
-an ancestor is unsafe, ROB-445 evidence is not independently available, the
-accepted incident window would be shortened, or rollback direction is unclear.
-No command here grants production authorization.
+The retired helper was not installed and its optional monitor was disabled on
+the checked production host on 2026-09-05. A repository update does not remove
+host-local files or refresh the separately installed Kuma runtime bundle.
+If another host has the old helper, managed drop-in, or journal monitor enabled,
+review that installation before updating its monitoring runtime. Keep the
+ordinary disk, memory, load, and other retention checks.

@@ -91,10 +91,8 @@ Script inventory:
   host-local authorization from validated marker/archive/deployment-run
   authority, or clean only exact helper-owned stale authorization temps, and
   is not sidecar execute approval.
-- `prod_journald_retention.sh` inspects the fixed 1 GiB / 30-day journald
-  contract by default. Configuration activation, one-time vacuum, and rollback
-  use distinct confirmation tokens and remain unexecuted by repository delivery;
-  see [`docs/ops/production-journald-retention.md`](../../docs/ops/production-journald-retention.md).
+- For native journal rotation and occasional approved manual cleanup, see
+  [`docs/ops/production-journald-retention.md`](../../docs/ops/production-journald-retention.md).
 - `prod_app_log_retention.sh` inspects the closed 60-day CodeIgniter daily-log
   class and requires a separate exact confirmation before a bounded pass. It
   never traverses release-gate, CI, ops, or diagnostic evidence; see
