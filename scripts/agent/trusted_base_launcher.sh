@@ -21,7 +21,7 @@ PATH=/usr/bin:/bin:/usr/sbin:/sbin
 export PATH
 
 usage() {
-    echo "Usage: trusted-base-launcher --repo-root=<absolute-path> --base-sha=<sha> --payload=<reviewer|parallel> -- <payload-options>" >&2
+    echo "Usage: trusted-base-launcher --repo-root=<absolute-path> --base-sha=<sha> --payload=reviewer -- <payload-options>" >&2
 }
 
 repo_root_input=""
@@ -375,9 +375,6 @@ case "$payload_environment_profile" in
             REVIEWER_OS_HOME="$reviewer_os_home"
             REVIEWER_EFFECTIVE_UID="$reviewer_effective_uid"
         )
-        ;;
-    parallel)
-        payload_prefix_arguments=("--validator-checkout=$repo_root")
         ;;
 esac
 

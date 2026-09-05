@@ -23,8 +23,8 @@ conflict, follow `AGENTS.md`.
 - Use CodeIgniter migrations for DB changes and keep rollback paths complete.
 - Run CI-parity checks through Docker for merge-sensitive changes.
 - For multi-PR work, keep publication, integration, and landing serial. Local
-  implementation may overlap only under the controlled parallel-work contract
-  below.
+  implementation may overlap only with explicit disjoint ownership under the
+  controlled parallel-work guidance below.
 - Preserve the current invariant: `services.attendants_number == 1` unless the
   product scope changes explicitly.
 - When `docs/maps/component_ownership_map.json` marks a component as
@@ -103,9 +103,8 @@ merge, or production authority.
 Parallel work means local implementation only. Keep a common verified base,
 explicit disjoint ownership, at most two writer lanes, and primary-owned serial
 integration and publication. Stop overlapping or semantically dependent lanes.
-For the existing opt-in admission protocol, see
-[optional agent tooling](docs/optional-agent-review.md#controlled-parallel-work).
-It is not a prerequisite for an ordinary independent review.
+This guidance is independent of ordinary review and does not require a
+separate admission validator.
 
 ## Linear States
 

@@ -691,7 +691,6 @@ class ReviewerAuthorityContractTest extends TestCase
         $paths = [
             'scripts/agent/trusted_base_launcher.sh' => 'must be externally materialized from the verified base',
             'scripts/agent/run_readonly_reviewer.sh' => 'must be launched from the exact-base trusted launcher',
-            'scripts/agent/check_parallel_work_contract.sh' => 'must be launched from the exact-base trusted launcher',
             'scripts/agent/lib/trusted_base_payload_runtime.sh' => 'must be assembled by the exact-base launcher',
         ];
 
@@ -1308,7 +1307,7 @@ class ReviewerAuthorityContractTest extends TestCase
             'codex',
             false,
             static function (array $contract): array {
-                $contract['trusted_base_bootstrap']['payloads']['parallel']['mode'] = '0700';
+                $contract['trusted_base_bootstrap']['payloads']['reviewer']['mode'] = '0700';
                 return $contract;
             },
         );

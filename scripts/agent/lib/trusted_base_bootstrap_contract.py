@@ -28,7 +28,7 @@ def main() -> int:
         return 1
     if bootstrap["schema_version"] != 2 or bootstrap["contract_path"] != ".codex/contracts/agent-workflow.json":
         return 1
-    if set(payloads) != {"reviewer", "parallel"}:
+    if set(payloads) != {"reviewer"}:
         return 1
     if set(launcher) != {"path", "mode"} or set(runtime) != {"path", "mode"}:
         return 1
@@ -45,11 +45,6 @@ def main() -> int:
             "path": "scripts/agent/run_readonly_reviewer.sh",
             "mode": "0500",
             "environment_profile": "reviewer",
-        },
-        "parallel": {
-            "path": "scripts/agent/check_parallel_work_contract.sh",
-            "mode": "0500",
-            "environment_profile": "parallel",
         },
     }:
         return 1

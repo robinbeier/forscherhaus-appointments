@@ -70,11 +70,6 @@ class AgentWorkflowContractTest extends TestCase
                         'mode' => '0500',
                         'environment_profile' => 'reviewer',
                     ],
-                    'parallel' => [
-                        'path' => 'scripts/agent/check_parallel_work_contract.sh',
-                        'mode' => '0500',
-                        'environment_profile' => 'parallel',
-                    ],
                 ],
             ],
             $contract['trusted_base_bootstrap'] ?? null,
@@ -409,112 +404,6 @@ class AgentWorkflowContractTest extends TestCase
         self::assertSame(
             'private_system_temp_bundle_and_internal_runtime_only',
             $contract['authority']['reviewer']['temporary_directory_policy'] ?? null,
-        );
-        self::assertTrue($contract['parallel_work']['local_implementation_only'] ?? null);
-        self::assertTrue($contract['parallel_work']['requires_common_base_sha'] ?? null);
-        self::assertTrue($contract['parallel_work']['requires_disjoint_ownership'] ?? null);
-        self::assertSame(2, $contract['parallel_work']['max_local_writer_lanes'] ?? null);
-        self::assertSame('implementation_worker', $contract['parallel_work']['writer_role'] ?? null);
-        self::assertTrue($contract['parallel_work']['external_mutations_remain_serial'] ?? null);
-        self::assertTrue($contract['parallel_work']['requires_semantic_independence_attestation'] ?? null);
-        self::assertSame(
-            'scripts/agent/trusted_base_launcher.sh',
-            $contract['parallel_work']['validator_invocation'] ?? null,
-        );
-        self::assertSame(
-            'scripts/agent/check_parallel_work_contract.sh',
-            $contract['parallel_work']['validator_payload_path'] ?? null,
-        );
-        self::assertSame(
-            'external_system_git_materialized_declared_base_launcher_then_private_declared_base_payload',
-            $contract['parallel_work']['validator_trust_anchor'] ?? null,
-        );
-        self::assertSame(
-            'required_external_exact_blob_path_and_marker',
-            $contract['parallel_work']['validator_launcher_materialization_guard'] ?? null,
-        );
-        $validatorBootstrapPaths = $contract['parallel_work']['validator_bootstrap_paths'] ?? null;
-        self::assertIsArray($validatorBootstrapPaths);
-        foreach (
-            [
-                '.codex/contracts/agent-workflow.json',
-                'scripts/agent/check_parallel_work_contract.sh',
-                'scripts/agent/lib/trusted_base_payload_runtime.sh',
-                'scripts/agent/lib/trusted_base_bootstrap_contract.py',
-                'scripts/agent/verify_trusted_php_runtime.py',
-                'scripts/agent/lib/trusted_runtime_primitives.py',
-                'scripts/agent/lib/OwnershipPathRuleEngineClient.php',
-                'scripts/ci/ownership_path_rules.py',
-            ]
-            as $validatorBootstrapPath
-        ) {
-            self::assertContains($validatorBootstrapPath, $validatorBootstrapPaths);
-        }
-        self::assertSame($validatorBootstrapPaths, array_values(array_unique($validatorBootstrapPaths)));
-        self::assertContains('.codex/contracts/ownership-path-rules.json', $validatorBootstrapPaths);
-        self::assertSame(
-            '.codex/contracts/ownership-path-rules.json',
-            $contract['parallel_work']['ownership_rule_contract'] ?? null,
-        );
-        self::assertSame('refs/remotes/origin/main', $contract['parallel_work']['canonical_base_ref'] ?? null);
-        self::assertSame(
-            'https://github.com/robinbeier/forscherhaus-appointments.git',
-            $contract['parallel_work']['canonical_base_remote_url'] ?? null,
-        );
-        self::assertSame(
-            'live_pinned_public_remote_main_and_matching_tracking_ref',
-            $contract['parallel_work']['canonical_base_policy'] ?? null,
-        );
-        self::assertSame(
-            'unauthenticated_read_only_ls_remote_clean_environment',
-            $contract['parallel_work']['canonical_base_remote_transport'] ?? null,
-        );
-        self::assertTrue($contract['parallel_work']['admission_requires_clean_exact_base_checkout'] ?? null);
-        self::assertTrue($contract['parallel_work']['admission_executes_only_declared_base_blobs'] ?? null);
-        self::assertTrue($contract['parallel_work']['admission_binds_base_before_source_execution'] ?? null);
-        self::assertTrue($contract['parallel_work']['requires_post_implementation_verification'] ?? null);
-        self::assertTrue($contract['parallel_work']['requires_clean_post_commit_verification'] ?? null);
-        self::assertSame('provisional_pass', $contract['parallel_work']['dirty_precommit_status'] ?? null);
-        self::assertSame('pass', $contract['parallel_work']['clean_integration_status'] ?? null);
-        self::assertSame(
-            'exact_base_attested_binary_and_dynamic_closure_ignore_ambient_ini',
-            $contract['parallel_work']['php_runtime_configuration'] ?? null,
-        );
-        self::assertSame(
-            'root_owned_system_git_before_clean_bash_and_attested_php',
-            $contract['parallel_work']['shell_bootstrap'] ?? null,
-        );
-        self::assertSame(
-            ['PATH', 'TMPDIR', 'LANG', 'LC_ALL'],
-            $contract['parallel_work']['shell_environment_allowlist'] ?? null,
-        );
-        self::assertSame('docs/maps/component_ownership_map.json', $contract['parallel_work']['ownership_map'] ?? null);
-        self::assertSame(3, $contract['parallel_work']['ownership_map_schema_version'] ?? null);
-        self::assertSame(
-            'explicit_path_and_match_objects',
-            $contract['parallel_work']['ownership_rule_format'] ?? null,
-        );
-        self::assertSame(
-            [
-                ['path' => '.codex/agents/reviewer-correctness.toml', 'match' => 'exact_file'],
-                ['path' => '.codex/agents/reviewer-design.toml', 'match' => 'exact_file'],
-                ['path' => '.codex/agents/reviewer-tests.toml', 'match' => 'exact_file'],
-                ['path' => '.codex/agents/implementation-worker.toml', 'match' => 'exact_file'],
-                ['path' => '.codex/config.toml', 'match' => 'exact_file'],
-                ['path' => '.codex/contracts', 'match' => 'directory'],
-                ['path' => '.codex/skills/land', 'match' => 'directory'],
-                ['path' => '.codex/skills/push', 'match' => 'directory'],
-                ['path' => '.github/workflows', 'match' => 'directory'],
-                ['path' => 'AGENTS.md', 'match' => 'exact_file'],
-                ['path' => 'WORKFLOW.md', 'match' => 'exact_file'],
-                ['path' => 'code_review.md', 'match' => 'exact_file'],
-                ['path' => 'docs/maps/component_ownership_map.json', 'match' => 'exact_file'],
-                ['path' => 'scripts/agent', 'match' => 'directory'],
-                ['path' => 'scripts/ci/ownership_path_rules.py', 'match' => 'exact_file'],
-                ['path' => 'scripts/ci/exact_head_mergegate.php', 'match' => 'exact_file'],
-                ['path' => 'scripts/ci/lib/ExactHeadMergegate.php', 'match' => 'exact_file'],
-            ],
-            $contract['parallel_work']['primary_owned_path_rules'] ?? null,
         );
         self::assertTrue($contract['land']['requires_exact_head'] ?? null);
         self::assertSame(

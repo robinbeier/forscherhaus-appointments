@@ -19,15 +19,12 @@ final class TrustedBaseBootstrapContractTest extends TestCase
         $this->repoRoot = dirname(__DIR__, 3);
     }
 
-    public function testCanonicalParserResolvesBothDeclaredPayloadsDeterministically(): void
+    public function testCanonicalParserResolvesReviewerPayloadDeterministically(): void
     {
         $contract = $this->contract();
 
         foreach (
-            [
-                'reviewer' => ['scripts/agent/run_readonly_reviewer.sh', '0500', 'reviewer'],
-                'parallel' => ['scripts/agent/check_parallel_work_contract.sh', '0500', 'parallel'],
-            ]
+            ['reviewer' => ['scripts/agent/run_readonly_reviewer.sh', '0500', 'reviewer']]
             as $payload => $expectedTail
         ) {
             [$status, $stdout, $stderr] = $this->runParser($contract, $payload);
@@ -98,7 +95,7 @@ final class TrustedBaseBootstrapContractTest extends TestCase
                 return $contract;
             },
             static function (array $contract): array {
-                $contract['trusted_base_bootstrap']['payloads']['parallel']['mode'] = '0400';
+                $contract['trusted_base_bootstrap']['payloads']['reviewer']['mode'] = '0400';
                 return $contract;
             },
             static function (array $contract): array {

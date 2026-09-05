@@ -2,7 +2,7 @@
 
 # Shared exact-base payload bootstrap. This file is data in the checkout. The
 # trusted launcher materializes and verifies it beside the selected payload
-# before either reviewer or parallel-work code may source it.
+# before reviewer code may source it.
 
 trusted_base_runtime_executed_source="${BASH_SOURCE[0]:-}"
 if [[ "${TRUSTED_BASE_LAUNCHER:-}" != '1' ]]; then
@@ -117,7 +117,7 @@ trusted_base_remote_git() {
         -C /tmp "$@"
 }
 
-# Post-dispatch exact-base blob-type gate shared by both payloads.
+# Post-dispatch exact-base blob-type gate for the reviewer payload.
 trusted_base_declared_tree_entry=''
 trusted_base_assert_declared_blob() {
     local repository_path="$1"
@@ -211,7 +211,7 @@ if set(bootstrap) != {"schema_version", "contract_path", "launcher", "contract_p
     raise SystemExit(1)
 if bootstrap["schema_version"] != 2 or bootstrap["contract_path"] != sys.argv[2]:
     raise SystemExit(1)
-if set(payloads) != {"reviewer", "parallel"}:
+if set(payloads) != {"reviewer"}:
     raise SystemExit(1)
 if set(launcher) != {"path", "mode"} or set(runtime) != {"path", "mode"}:
     raise SystemExit(1)
@@ -228,11 +228,6 @@ if payloads != {
         "path": "scripts/agent/run_readonly_reviewer.sh",
         "mode": "0500",
         "environment_profile": "reviewer",
-    },
-    "parallel": {
-        "path": "scripts/agent/check_parallel_work_contract.sh",
-        "mode": "0500",
-        "environment_profile": "parallel",
     },
 }:
     raise SystemExit(1)

@@ -22,7 +22,7 @@ This file stays intentionally short. It is a map, not a second runbook.
 | Agent runtime and issue-to-merge state model | `WORKFLOW.md` | Single source for active agent behavior. |
 | Machine-readable cross-document workflow invariants | `.codex/contracts/agent-workflow.json` | Structured exact-head, review, public-write, evidence, and blocking-job contract. |
 | Model-aware implementation delegation | `WORKFLOW.md`, `.codex/agents/implementation-worker.toml` | Primary-agent authority plus the pinned Luna worker boundary. |
-| Controlled parallel implementation | `WORKFLOW.md`, `docs/optional-agent-review.md` | Existing opt-in lane admission; primary-owned integration and publication. |
+| Controlled parallel implementation | `WORKFLOW.md` | Explicit disjoint local ownership with primary-owned integration and publication. |
 | Optional legacy sealed reviewers | `docs/optional-agent-review.md`, `.codex/contracts/agent-workflow.json` | Explicit opt-in only; no separate CLI or bootstrap prerequisite for standard review. |
 | Compact guardrails and command entry points | `AGENTS.md` | Cross-topic entry point without duplicating specialist docs. |
 | Core pre-PR path | `scripts/ci/pre_pr_quick.sh`, `scripts/ci/pre_pr_full.sh` | Actual executable gate logic. |
