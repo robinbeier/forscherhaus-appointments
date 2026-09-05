@@ -539,8 +539,12 @@ class AgentWorkflowContractTest extends TestCase
             $contract['land']['exact_head_mergegate']['review_evidence_revalidation'] ?? null,
         );
         self::assertSame(
-            'review.sensitive_change_lenses',
+            'land.exact_head_mergegate.required_review_lenses',
             $contract['land']['exact_head_mergegate']['review_lens_source'] ?? null,
+        );
+        self::assertSame(
+            ['correctness_security', 'design_maintainability', 'tests_regression_flake'],
+            $contract['land']['exact_head_mergegate']['required_review_lenses'] ?? null,
         );
         self::assertSame(
             'exact-head-review-attestation:v2',
@@ -577,11 +581,18 @@ class AgentWorkflowContractTest extends TestCase
             ['OWNER'],
             $contract['land']['exact_head_mergegate']['review_attestation']['trusted_author_associations'] ?? null,
         );
-        self::assertTrue($contract['review']['sensitive_changes_require_independent_final_reviews'] ?? null);
-        self::assertSame(
-            ['correctness_security', 'design_maintainability', 'tests_regression_flake'],
-            $contract['review']['sensitive_change_lenses'] ?? null,
-        );
+        self::assertTrue($contract['land']['requires_independent_review'] ?? null);
+        self::assertTrue($contract['land']['requires_current_blocking_ci'] ?? null);
+        self::assertFalse($contract['land']['requires_exact_head_mergegate'] ?? null);
+        self::assertSame('standard', $contract['review']['mode'] ?? null);
+        self::assertSame(1, $contract['review']['minimum_independent_reviewers'] ?? null);
+        self::assertSame('risk_based', $contract['review']['specialist_review'] ?? null);
+        self::assertSame('available_read_only_reviewer_or_human', $contract['review']['execution'] ?? null);
+        self::assertFalse($contract['review']['requires_sealed_runner'] ?? null);
+        self::assertFalse($contract['review']['requires_external_bootstrap_review'] ?? null);
+        self::assertTrue($contract['review']['summary_binds_reviewed_head'] ?? null);
+        self::assertArrayNotHasKey('sensitive_changes_require_independent_final_reviews', $contract['review']);
+        self::assertArrayNotHasKey('sensitive_change_lenses', $contract['review']);
         self::assertFalse($contract['public_write']['caller_supplied_values_create_authority'] ?? null);
         self::assertTrue($contract['public_write']['requires_authority_bound_to_target'] ?? null);
         self::assertTrue($contract['public_write']['requires_null_mutation_on_rejection'] ?? null);

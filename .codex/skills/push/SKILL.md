@@ -48,8 +48,8 @@ contract.
     - attach it to the Linear issue with [$linear](../linear/SKILL.md)
     - move the issue to `In Review`
     - do not move it to `Ready to Merge` during publish; that state is reserved
-      for the later unchanged exact PR head after blocking CI and the required
-      final reviews are both green and finding-free
+      for the later unchanged exact PR head after blocking CI is green and
+      independent review is complete with substantive findings resolved
     - update the `## Codex Workpad` comment with compact validation status,
       merge/review posture, and next expected action
 8. Reply with the PR URL.
@@ -70,8 +70,12 @@ gh pr view --json state,url,number 2>/dev/null || true
   `In Progress`; move it to `In Review`.
 - Any push after review or CI evidence was collected makes that landing
   evidence stale. Return the issue to `In Review` until exact-head CI and the
-  required final reviews are re-established on the new head.
+  independent review summary is updated for the new head after reviewing its
+  delta and affected paths; broaden review if scope or risk changed.
 - Keep the PR linked on the Linear issue itself; do not duplicate the PR URL in
   the workpad.
+- Follow the standard review path in WORKFLOW.md. No separate CLI login,
+  sealed review, or owner attestation is required to publish or review a PR.
+- Creating a PR does not authorize merging it.
 - If the correct diff is already present and validated, stop exploring and
   publish it instead of reopening analysis.

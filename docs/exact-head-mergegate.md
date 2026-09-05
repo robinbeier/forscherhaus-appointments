@@ -1,14 +1,21 @@
 # Exact-Head Mergegate
 
-Purpose: provide one repository-owned, read-only decision immediately before a
-pull request enters Ready to Merge.
+This is optional legacy tooling, not the standard landing path. Follow
+[WORKFLOW.md](../WORKFLOW.md#pr-and-review-expectations) for normal reviews and
+merges. Use this stricter attestation protocol only when explicitly requested;
+its failures do not require repairing it to complete a standard review.
+
+Purpose within that opt-in path: provide one repository-owned, read-only
+decision immediately before a pull request enters Ready to Merge.
 
 The gate reads GitHub state, evaluates the canonical contract in
 .codex/contracts/agent-workflow.json, writes a sanitized local JSON report,
 and exits non-zero unless every landing invariant is satisfied. It does not
 approve, comment on, label, merge, close, or otherwise mutate a pull request.
 Policy values such as check names, review lenses, parser isolation, and the
-attestation marker are normative only in that JSON contract. This document is
+attestation marker are normative only in that JSON contract. The three legacy
+lenses live in `land.exact_head_mergegate.required_review_lenses`; they do not
+set the reviewer count for the standard path. This document is
 operational guidance; the verifier consumes those values from the reviewed
 contract instead of maintaining a second policy list.
 
