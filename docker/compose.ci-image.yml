@@ -1,0 +1,5 @@
+# Applied only by the local CI helper after resolving the build inputs.
+services:
+    php-fpm:
+        image: ${CI_DOCKER_PHP_FPM_IMAGE:?Local PHP image key is required}
+        pull_policy: never

@@ -80,6 +80,54 @@ class CiDockerComposeHelpersTest extends TestCase
         self::assertSame('changed', trim($result['stdout']));
     }
 
+    public function testSharedImageReuseSkipsBuildAndMissingImageBuildsOnce(): void
+    {
+        $result = $this->runShellScript(
+            <<<'BASH'
+            set -euo pipefail
+            source "$REPO_ROOT/scripts/ci/docker_compose_helpers.sh"
+            ci_docker_init_compose() { CI_DOCKER_PHP_FPM_IMAGE=fixture/shared:recipe; }
+            docker() { [[ "$1 $2" == "image inspect" && "$IMAGE_EXISTS" == 1 ]]; }
+            ci_docker_compose() { printf 'COMPOSE:%s\n' "$*"; }
+            IMAGE_EXISTS=1
+            ci_docker_build_php_fpm_if_inputs_changed origin/main test
+            IMAGE_EXISTS=0
+            ci_docker_build_php_fpm_if_inputs_changed origin/main test
+            BASH
+            ,
+            '',
+        );
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertSame(1, substr_count($result['stdout'], 'COMPOSE:build php-fpm'));
+        self::assertStringContainsString('Reusing local PHP image fixture/shared:recipe', $result['stdout']);
+    }
+
+    public function testAdHocBuildArgumentsDoNotOverwriteSharedImage(): void
+    {
+        $result = $this->runShellScript(
+            <<<'BASH'
+            set -euo pipefail
+            source "$REPO_ROOT/scripts/ci/docker_compose_helpers.sh"
+            ci_docker_init_compose() { :; }
+            CI_DOCKER_PHP_FPM_IMAGE=fixture/shared:recipe
+            CI_DOCKER_COMPOSE_CMD=(docker compose -p isolated -f docker-compose.yml -f docker/compose.ci-image.yml)
+            docker() { printf '%s\n' "$*"; }
+            ci_docker_compose build --build-arg PHP_FPM_BASE_IMAGE=custom php-fpm
+            ci_docker_compose up -d php-fpm
+            test -z "$CI_DOCKER_PHP_FPM_IMAGE"
+            BASH
+            ,
+            '',
+        );
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertStringNotContainsString('compose.ci-image.yml', $result['stdout']);
+        self::assertStringContainsString(
+            'compose -p isolated -f docker-compose.yml build --build-arg',
+            $result['stdout'],
+        );
+        self::assertStringContainsString('compose -p isolated -f docker-compose.yml up -d php-fpm', $result['stdout']);
+    }
+
     public function testGitCiCollectChangedPathsIncludesBranchStagedAndUnstagedFiles(): void
     {
         $tempRepo = sys_get_temp_dir() . '/ci-git-helpers-' . bin2hex(random_bytes(8));

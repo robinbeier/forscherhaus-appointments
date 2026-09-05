@@ -17,6 +17,35 @@ docker compose -p fh-hotfix up -d
 Without a unique project name, services can accidentally mix mounts across
 worktrees (for example `nginx` from one path and `php-fpm`/`mysql` from another).
 
+## Shared PHP images for local checks
+
+The local pre-PR scripts and managed commit hook keep separate Compose project
+names, networks, containers, worktree mounts and MySQL data directories. Their
+normal Compose v2 portless setup shares only the PHP image.
+
+The helper derives its local image name from the PHP build directory contents,
+resolved build arguments and target platform. Identical inputs in different
+worktrees select the same image. Changes to the Dockerfile, extensions, build
+arguments or build-context files select another image; a missing image is
+built with Docker's normal layer cache. Application files outside the build
+context do not require a new image because the worktree is mounted at runtime.
+
+Custom service images, unsupported build options, Compose v1 and non-portless
+setups retain the previous project-scoped behavior. Direct `docker compose`
+commands and production image workflows are unchanged.
+
+For an intentional refresh of upstream packages without a recipe change:
+
+```bash
+source scripts/ci/docker_compose_helpers.sh
+ci_docker_compose build --pull --no-cache php-fpm
+```
+
+Ad-hoc `build --build-arg` or `--ssh` flags use a project-scoped image. Set build
+arguments in a Compose override to include them in the shared identity. Remote package updates
+are not detected automatically. Normal cleanup still removes only the local
+project's containers and test data; images are retained for reuse.
+
 You will need modify the root `config.php` so that it matches the following example:
 
 ```php 
