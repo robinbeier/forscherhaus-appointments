@@ -425,7 +425,7 @@
         "blocking_execution_fingerprints": {
             "workflow_execution_envelope": "b00690b770e9cc3b3223dec8bbeb2f46db76443642fb7ddadf3fb8237ebb7f99",
             "changes": "260267dfcbdc0c4bf4d03b3adf03bdf46e6c637b58cdd5d9eb60489f887deb6a",
-            "build-test": "4abd030e9954f66de5746f178189754e644dfcbd2fc0fb8b0230af55333e9477",
+            "build-test": "4b080f846f944571776939404ad009d23a691f62214e1f48b2a5bae55cf790f4",
             "phpstan-application": "d7113a83e101a1d61620ceb1917a7fbc40bdf662f689a7ca321d99d43cc7920c",
             "js-lint-changed": "2be15a8595f42a9b076782789b1fe5c1386bd19e1abc4b59b936762950436305",
             "architecture-ownership-map": "7311eb7f2a7972b4eaebb9d1a69903517789f8c4ced4ee93483a283c99080cbc",
