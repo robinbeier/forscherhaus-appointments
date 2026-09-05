@@ -59,7 +59,7 @@ ensure_stack_started() {
         return
     fi
 
-    ci_docker_compose up -d php-fpm mysql >/dev/null
+    ci_docker_compose up -d --no-deps php-fpm >/dev/null
     STACK_STARTED=1
 }
 
