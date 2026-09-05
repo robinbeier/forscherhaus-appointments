@@ -18,7 +18,6 @@
             <file>./tests/Unit/Libraries/DashboardRequestDtoFactoryTest.php</file>
             <file>./tests/Unit/Libraries/IntegrationsRequestDtoFactoryTest.php</file>
             <file>./tests/Unit/Libraries/RequestNormalizerTest.php</file>
-            <directory suffix="Test.php">./tests/Unit/Scripts</directory>
         </testsuite>
     </testsuites>
     <source>

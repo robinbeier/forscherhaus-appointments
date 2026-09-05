@@ -7,74 +7,9 @@ namespace Tests\Unit\Scripts;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Yaml\Yaml;
 
-require_once __DIR__ . '/../../../scripts/ci/measure_ci_performance_baseline.php';
-
-class CiPerformanceWorkflowContractTest extends TestCase
+class CiWorkflowContractTest extends TestCase
 {
-    public function testVersionedWorkloadContractCoversEveryWorkflowJobDefinition(): void
-    {
-        $workflow = Yaml::parseFile(__DIR__ . '/../../../.github/workflows/ci.yml');
-        self::assertIsArray($workflow);
-        self::assertIsArray($workflow['jobs'] ?? null);
-        $jobs = $workflow['jobs'];
-        $policy = loadCiPerformanceBaselinePolicy(
-            __DIR__ . '/../../../scripts/ci/config/ci_performance_baseline_policy.php',
-        );
-
-        self::assertSame(15, $policy['workload_contract']['version']);
-        self::assertSame('2026-09-05T10:27:42Z', $policy['workload_contract']['cohort_epoch_utc']);
-        self::assertSame(
-            array_keys($jobs),
-            array_keys($policy['comparison_profile']['consumer_conclusions']),
-            'Every workflow job must have an explicit expected conclusion in the full-gate profile.',
-        );
-        self::assertSame(
-            $policy['workload_contract']['workflow_jobs_sha256'],
-            fingerprintCiPerformanceBaselineWorkflowJobs($jobs),
-        );
-
-        $fingerprint = fingerprintCiPerformanceBaselineWorkflowJobs($jobs);
-        foreach (array_keys($jobs) as $jobName) {
-            $mutation = $jobs;
-            $mutation[$jobName]['x-ci-performance-contract-probe'] = true;
-            self::assertNotSame(
-                $fingerprint,
-                fingerprintCiPerformanceBaselineWorkflowJobs($mutation),
-                'Workflow job definition is not covered by the workload contract: ' . $jobName,
-            );
-        }
-    }
-
-    public function testWorkloadContractFailsClosedWhenAWorkflowJobChangesWithoutAPolicyUpdate(): void
-    {
-        $workflow = Yaml::parseFile(__DIR__ . '/../../../.github/workflows/ci.yml');
-        self::assertIsArray($workflow);
-        self::assertIsArray($workflow['jobs'] ?? null);
-        $workflow['jobs']['build-test']['x-ci-performance-contract-probe'] = true;
-        $workflowPath = tempnam(sys_get_temp_dir(), 'ci-workload-contract-');
-        self::assertNotFalse($workflowPath);
-        self::assertNotFalse(
-            file_put_contents($workflowPath, json_encode(['jobs' => $workflow['jobs']], JSON_THROW_ON_ERROR)),
-        );
-        $policy = loadCiPerformanceBaselinePolicy(
-            __DIR__ . '/../../../scripts/ci/config/ci_performance_baseline_policy.php',
-        );
-
-        try {
-            assertCiPerformanceBaselineWorkflowContract($policy, $workflowPath);
-            self::fail('A changed workflow job must not match an unchanged workload contract.');
-        } catch (\RuntimeException $e) {
-            self::assertStringContainsString('workload contract mismatch:', $e->getMessage());
-            self::assertStringContainsString(
-                'increment workload_contract.version and cohort_epoch_utc',
-                $e->getMessage(),
-            );
-        } finally {
-            @unlink($workflowPath);
-        }
-    }
-
-    public function testBuildTestRunsTheGeneralSuiteFailClosedBeforePinnedRob444Tests(): void
+    public function testBuildTestRunsGeneralSuiteFailClosedBeforeRootDeploymentTests(): void
     {
         $job = $this->workflowJob('build-test');
         $steps = $this->namedSteps($job);
@@ -90,7 +25,6 @@ class CiPerformanceWorkflowContractTest extends TestCase
             'Wait for build-test MySQL readiness',
             'Install deterministic build-test instance',
             'PHPUnit Tests',
-            'ROB-444 CI baseline regression tests',
             'ROB-442 root deployment regression tests',
             'Diagnostics (build-test database)',
             'Cleanup build-test database',
@@ -135,36 +69,6 @@ class CiPerformanceWorkflowContractTest extends TestCase
         self::assertStringContainsString(
             "grep -Eq '^(OK \\([1-9][0-9]* tests?,|Tests: [1-9][0-9]*,)' storage/logs/ci/phpunit-general.log",
             $general,
-        );
-
-        $rob444 = $this->stepRun($steps, 'ROB-444 CI baseline regression tests');
-        self::assertStringNotContainsString('|| true', $rob444);
-        self::assertStringContainsString('if ! php -d memory_limit=512M vendor/bin/phpunit', $rob444);
-        self::assertStringContainsString('--no-configuration', $rob444);
-        self::assertStringContainsString('--bootstrap vendor/autoload.php', $rob444);
-        self::assertStringContainsString('--fail-on-empty-test-suite', $rob444);
-        self::assertSame(
-            [
-                'tests/Unit/Scripts/CiPerformanceBaselineTest.php',
-                'tests/Unit/Scripts/CiPerformanceWorkflowContractTest.php',
-                'tests/Unit/Scripts/CiPathFilterMatrixTest.php',
-            ],
-            array_values(
-                array_filter(
-                    array_map(
-                        static fn(string $line): string => preg_replace('/\\s+\\\\$/', '', trim($line)) ?? '',
-                        explode("\n", $rob444),
-                    ),
-                    static fn(string $line): bool => str_starts_with($line, 'tests/Unit/Scripts/'),
-                ),
-            ),
-        );
-        self::assertStringContainsString('| tee storage/logs/ci/phpunit-rob444.log', $rob444);
-        self::assertStringContainsString('The ROB-444 PHPUnit suite failed.', $rob444);
-        self::assertStringContainsString('exit 1', $rob444);
-        self::assertStringContainsString(
-            "grep -Eq '^(OK \\([1-9][0-9]* tests?,|Tests: [1-9][0-9]*,)' storage/logs/ci/phpunit-rob444.log",
-            $rob444,
         );
 
         $rootDeployment = $this->stepRun($steps, 'ROB-442 root deployment regression tests');
@@ -219,7 +123,7 @@ class CiPerformanceWorkflowContractTest extends TestCase
         );
     }
 
-    public function testBaselineMeasurementStaysInsideTheExistingAdvisorySignalJob(): void
+    public function testHeavyJobDurationTrendsStaysInsideTheExistingAdvisorySignalJob(): void
     {
         $job = $this->workflowJob('heavy-job-duration-trends');
         $steps = $this->namedSteps($job);
@@ -231,11 +135,7 @@ class CiPerformanceWorkflowContractTest extends TestCase
             self::assertArrayNotHasKey('continue-on-error', $step);
         }
 
-        $requiredOrder = [
-            'Measure full-gate PR performance baseline',
-            'Upload heavy job trend artifacts',
-            'Diagnostics (heavy job trend report)',
-        ];
+        $requiredOrder = ['Upload heavy job trend artifacts', 'Diagnostics (heavy job trend report)'];
         $stepNames = array_keys($steps);
         self::assertSame(
             $requiredOrder,
@@ -244,18 +144,10 @@ class CiPerformanceWorkflowContractTest extends TestCase
             ),
         );
 
-        $measurement = $this->stepRun($steps, 'Measure full-gate PR performance baseline');
-        self::assertStringContainsString('set +e', $measurement);
-        self::assertStringContainsString('ci-performance-baseline exited with status', $measurement);
-        self::assertStringContainsString('ci-performance-baseline-latest.json', $measurement);
-
         $upload = $steps['Upload heavy job trend artifacts'];
         self::assertSame('actions/upload-artifact@v7', $upload['uses'] ?? null);
         self::assertSame(
-            [
-                'storage/logs/ci/heavy-job-duration-trends-latest.json',
-                'storage/logs/ci/ci-performance-baseline-latest.json',
-            ],
+            ['storage/logs/ci/heavy-job-duration-trends-latest.json'],
             array_values(array_filter(array_map('trim', explode("\n", (string) ($upload['with']['path'] ?? ''))))),
         );
     }

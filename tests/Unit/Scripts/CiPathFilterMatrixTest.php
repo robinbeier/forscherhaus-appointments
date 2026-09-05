@@ -207,31 +207,6 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertFalse($matches['write_contract_api']);
     }
 
-    public function testCiPerformanceBaselineScriptUsesDedicatedAdvisoryFilterOnly(): void
-    {
-        $baselineFiles = [
-            'scripts/ci/measure_ci_performance_baseline.php',
-            'scripts/ci/config/ci_performance_baseline_policy.php',
-            'docs/ci-performance-baseline.md',
-        ];
-
-        foreach ($baselineFiles as $baselineFile) {
-            $matches = $this->applyFilters([$baselineFile]);
-
-            self::assertFalse($matches['request_contracts_required']);
-            self::assertFalse($matches['deep_bootstrap_required']);
-            self::assertFalse($matches['coverage_required']);
-            self::assertTrue($matches['heavy_job_trends_required'], $baselineFile);
-            self::assertFalse($matches['pdf_renderer_latency_required']);
-            self::assertFalse($matches['api_contract']);
-            self::assertFalse($matches['booking_flows']);
-            self::assertFalse($matches['integration_smoke']);
-            self::assertFalse($matches['ldap_guardrail_required']);
-            self::assertFalse($matches['write_contract_booking']);
-            self::assertFalse($matches['write_contract_api']);
-        }
-    }
-
     public function testPdfRendererLatencyFilterStaysScopedToPdfRendererAndGuardFiles(): void
     {
         $matches = $this->applyFilters(['pdf-renderer/server.js']);
