@@ -36,6 +36,20 @@ mandatory. A missing prerequisite fails before mutation; it never becomes a
 skip. The job therefore remains the complete native-Linux proof for the exact
 production paths, capabilities, Docker authority, and parent-death behavior.
 
+The blocking `build-test` job invokes
+`scripts/ci/run_root_deployment_regressions.sh` for its Linux-root regression
+step. Keep the test and unit lists there: changing an operations test list
+should not require editing the central workflow and triggering unrelated deep
+suites. The script preserves the required-root profile and stops on failures.
+Run it only on the disposable Linux CI test host with the existing job setup;
+it is not a production maintenance command.
+
+The workflow execution fingerprint covers the script invocation, not its
+contents. Script changes remain reviewed code, are exercised by `build-test`,
+and are checked by the existing `CiWorkflowContractTest`. No separate script
+checksum registry is maintained. Changes to the central workflow still trigger
+the full existing path-filter selection.
+
 ## Prerequisite Boundaries
 
 | Requirement | Required location | Classification before mutation |
@@ -64,7 +78,7 @@ assertion, or replace a real daemon operation with a stub.
 - Session-mode normalization still proves that `CAP_DAC_OVERRIDE` alone is
   insufficient and that the approved one-time boundary additionally requires
   `CAP_FOWNER`.
-- Session and application-log retention keep their production ownership,
+- Session retention keeps its production ownership,
   mode, identity, link, lock, and deletion assertions.
 - A skip never authorizes production execution and never substitutes for the
   required GitHub Actions Linux-root job.

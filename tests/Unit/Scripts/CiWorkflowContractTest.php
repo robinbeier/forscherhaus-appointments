@@ -72,37 +72,52 @@ class CiWorkflowContractTest extends TestCase
         );
 
         $rootDeployment = $this->stepRun($steps, 'ROB-442 root deployment regression tests');
-        self::assertStringContainsString('systemd-analyze verify', $rootDeployment);
-        self::assertStringContainsString('scripts/ops/systemd/fh-session-retention.service', $rootDeployment);
-        self::assertStringContainsString('scripts/ops/systemd/fh-session-retention.timer', $rootDeployment);
-        self::assertStringContainsString('scripts/ops/systemd/fh-dump-producer-admission.service', $rootDeployment);
-        self::assertStringContainsString('scripts/ops/systemd/fh-dump-producer-admission.timer', $rootDeployment);
+        self::assertSame('bash scripts/ci/run_root_deployment_regressions.sh', $rootDeployment);
+        $rootDeploymentScript = (string) file_get_contents(
+            __DIR__ . '/../../../scripts/ci/run_root_deployment_regressions.sh',
+        );
+        self::assertStringContainsString('set -euo pipefail', $rootDeploymentScript);
+        self::assertStringContainsString('cd "$ROOT_DIR"', $rootDeploymentScript);
+        self::assertStringContainsString('systemd-analyze verify', $rootDeploymentScript);
+        self::assertStringContainsString('scripts/ops/systemd/fh-session-retention.service', $rootDeploymentScript);
+        self::assertStringContainsString('scripts/ops/systemd/fh-session-retention.timer', $rootDeploymentScript);
+        self::assertStringContainsString(
+            'scripts/ops/systemd/fh-dump-producer-admission.service',
+            $rootDeploymentScript,
+        );
+        self::assertStringContainsString('scripts/ops/systemd/fh-dump-producer-admission.timer', $rootDeploymentScript);
         self::assertStringContainsString(
             'sudo env FH_ROOT_HOST_TESTS_REQUIRED=1 php vendor/bin/phpunit',
-            $rootDeployment,
+            $rootDeploymentScript,
         );
         self::assertStringContainsString(
             'docker pull mariadb@sha256:2f2b6bbcdbaf88afe53b76cb8d73927b623559180c5ab15db2049736f32ec590',
-            $rootDeployment,
+            $rootDeploymentScript,
         );
-        self::assertStringContainsString('tests/Unit/Scripts/DeploymentHostRunnerV1RootTest.php', $rootDeployment);
+        self::assertStringContainsString(
+            'tests/Unit/Scripts/DeploymentHostRunnerV1RootTest.php',
+            $rootDeploymentScript,
+        );
         self::assertStringContainsString(
             'tests/Unit/Scripts/DeploymentDumpAttestationProducerV1RootTest.php',
-            $rootDeployment,
+            $rootDeploymentScript,
         );
-        self::assertStringContainsString('tests/Unit/Scripts/BackupSetProducerRootTest.php', $rootDeployment);
-        self::assertStringContainsString('tests/Unit/Scripts/PinDeployTimingRootTest.php', $rootDeployment);
-        self::assertStringContainsString('tests/Unit/Scripts/PublishReleasePairRootTest.php', $rootDeployment);
-        self::assertStringContainsString('tests/Unit/Scripts/LegacyReleaseHoldRootTest.php', $rootDeployment);
-        self::assertStringContainsString('tests/Unit/Scripts/SessionRetentionRootTest.php', $rootDeployment);
+        self::assertStringContainsString('tests/Unit/Scripts/BackupSetProducerRootTest.php', $rootDeploymentScript);
+        self::assertStringContainsString('tests/Unit/Scripts/PinDeployTimingRootTest.php', $rootDeploymentScript);
+        self::assertStringContainsString('tests/Unit/Scripts/PublishReleasePairRootTest.php', $rootDeploymentScript);
+        self::assertStringContainsString('tests/Unit/Scripts/LegacyReleaseHoldRootTest.php', $rootDeploymentScript);
+        self::assertStringContainsString('tests/Unit/Scripts/SessionRetentionRootTest.php', $rootDeploymentScript);
         self::assertStringContainsString(
             'tests/Unit/Scripts/ZeroSurpriseProductionImageCleanupRootTest.php',
-            $rootDeployment,
+            $rootDeploymentScript,
         );
-        self::assertStringContainsString('tests/Unit/Scripts/ReleaseArchiveDumpRetentionRootTest.php', $rootDeployment);
+        self::assertStringContainsString(
+            'tests/Unit/Scripts/ReleaseArchiveDumpRetentionRootTest.php',
+            $rootDeploymentScript,
+        );
         self::assertStringContainsString(
             'sudo python3 -m unittest tests.Unit.Scripts.legacy_release_hold_v1_test',
-            $rootDeployment,
+            $rootDeploymentScript,
         );
 
         $diagnostics = $steps['Diagnostics (build-test database)'];
