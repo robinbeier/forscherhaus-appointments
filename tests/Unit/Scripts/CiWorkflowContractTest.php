@@ -73,8 +73,6 @@ class CiWorkflowContractTest extends TestCase
 
         $rootDeployment = $this->stepRun($steps, 'ROB-442 root deployment regression tests');
         self::assertStringContainsString('systemd-analyze verify', $rootDeployment);
-        self::assertStringContainsString('scripts/ops/systemd/fh-app-log-retention.service', $rootDeployment);
-        self::assertStringContainsString('scripts/ops/systemd/fh-app-log-retention.timer', $rootDeployment);
         self::assertStringContainsString('scripts/ops/systemd/fh-session-retention.service', $rootDeployment);
         self::assertStringContainsString('scripts/ops/systemd/fh-session-retention.timer', $rootDeployment);
         self::assertStringContainsString('scripts/ops/systemd/fh-dump-producer-admission.service', $rootDeployment);
@@ -93,7 +91,6 @@ class CiWorkflowContractTest extends TestCase
             $rootDeployment,
         );
         self::assertStringContainsString('tests/Unit/Scripts/BackupSetProducerRootTest.php', $rootDeployment);
-        self::assertStringContainsString('tests/Unit/Scripts/AppLogRetentionRootTest.php', $rootDeployment);
         self::assertStringContainsString('tests/Unit/Scripts/PinDeployTimingRootTest.php', $rootDeployment);
         self::assertStringContainsString('tests/Unit/Scripts/PublishReleasePairRootTest.php', $rootDeployment);
         self::assertStringContainsString('tests/Unit/Scripts/LegacyReleaseHoldRootTest.php', $rootDeployment);

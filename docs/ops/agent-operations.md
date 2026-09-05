@@ -209,10 +209,8 @@ Disk, memory, or swap pressure:
   `docs/ops/production-release-archive-dump-retention.md`.
 - For native journal rotation, aggregate inspection, and approved manual cleanup,
   see `docs/ops/production-journald-retention.md`.
-- Use `prod_app_log_retention.sh` for the separate ROB-452 60-day daily
-  CodeIgniter log class. The default is aggregate read-only inspection; it does
-  not touch release-gate, CI, ops, or diagnostic evidence. See
-  `docs/ops/production-app-log-retention.md`.
+- For aggregate daily application-log inspection and approved manual cleanup,
+  see `docs/ops/production-app-log-retention.md`.
 - Avoid broad cleanup commands. Identify the path or service causing growth.
 - Do not delete backup, release, or Kuma data paths without explicit approval.
 

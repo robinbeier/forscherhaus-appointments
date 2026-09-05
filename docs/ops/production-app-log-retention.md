@@ -1,90 +1,52 @@
-# Production Application-Log Retention
+# Production Application-Log Maintenance
 
-ROB-452 defines a conservative retention policy for the daily CodeIgniter
-application logs. Repository delivery does not install or enable the timer and
-does not authorize a production command.
+Keep error monitoring and the existing disk-space warning. Daily application
+logs do not need a repository-owned cleanup helper, timer, or success marker.
+This repository does not impose automatic 60-day deletion. Unlike journald,
+the application does not inherit systemd's native journal size limits.
 
-## Closed Retention Class
+## Inspect before deciding
 
-The only deletable class is a regular, single-link `www-data:www-data` `0644`
-file named `log-YYYY-MM-DD.php` directly below
-`/var/www/html/easyappointments/storage/logs`. Eligibility uses the stable file
-modification time, not the filename: a file is eligible at or beyond 60 days
-(5,184,000 seconds). The helper takes a nonblocking exclusive file lock and
-rechecks identity and age immediately before unlinking.
+Start with `bash scripts/ops/prod_doctor.sh` and
+`bash scripts/ops/prod_cleanup_inventory.sh`. The inventory reports the log
+root size; it does not decide that all files there may be deleted.
 
-The following classes are retained and never traversed or deleted:
+If disk pressure warrants further inspection, use the approved SSH target in
+[agent-operations.md](agent-operations.md). Read only file metadata and report
+aggregate counts and sizes by age for regular top-level `log-YYYY-MM-DD.php`
+files under `/var/www/html/easyappointments/storage/logs`. Distinguish these
+from diagnostic reports and nested directories; never print log contents.
+File modification age is an observation, not proof that history is disposable.
 
-- `release-gate/`, `ci/`, and `ops/` evidence directories;
-- `.htaccess` and `index.html`;
-- the four fixed dashboard/provider PDF diagnostic files.
+## Manual cleanup when needed
 
-Any other name, symlink, special file, hard link, owner, mode, size, directory
-identity, or protected-class drift blocks the complete pass. App logs larger
-than 128 MiB also require review rather than automatic deletion. This contract
-does not clean Journald, Apache logs, backups, sessions, databases, deploy
-timing, uploads, cache, or any nested evidence.
+1. Confirm host health, free space, and the category responsible for growth.
+   Check whether old daily logs are large enough to justify cleanup.
+2. Preserve records needed for current incidents. Agree on the exact daily-log
+   selection and obtain explicit approval before deleting anything. A historic
+   60-day threshold is not standing deletion authority.
+3. Recheck the selected regular files' location, type, age, and identity before
+   deletion. Exclude today's log, changed or unexpected objects, and all nested
+   directories. Do not use a recursive deletion of the log root.
+4. Compare aggregate sizes afterwards and run
+   `bash scripts/ops/prod_validate_after_change.sh`.
 
-## Bounds and Output
+Retain `release-gate/`, `ci/`, `ops/`, access-control files, and dashboard/provider
+PDF diagnostic reports. Ordinary error detection through `kuma_push_app_logs.sh`
+and its log-classification library remains unchanged. Deleted log history has
+no in-place rollback; preserve needed evidence first.
 
-One pass deletes at most 1,000 files and at most 512 MiB. If more eligible data
-remains, the result is `partial`, no success marker is published, and a later
-pass is required. Output is one canonical aggregate JSON record containing
-counts, byte totals, status, and fixed policy values. It never contains a
-filename, log line, customer datum, path selected from a directory entry, or
-secret.
+If repeat inspections show meaningful sustained growth, first investigate its
+cause, then consider the simplest suitable retention mechanism.
 
-Execute mode holds the private state-directory lock and the shared production
-change lock. A deploy, recovery, or other cooperating production mutation
-therefore makes the pass fail closed. A complete pass atomically publishes the
-root-owned `0600` marker `/var/lib/fh-app-log-retention/last-success.json`.
+## Existing installations
 
-The systemd service is root only to unlink `www-data` files and publish its
-protected marker. Its capability boundary is exactly `CAP_DAC_OVERRIDE`;
-ambient capabilities are empty and writable paths are restricted to the log
-root, state directory, and shared lock file.
+On the host checked on 2026-09-05, the retired helper, service, timer, and success
+marker were absent; its optional retention monitor was disabled. Repository
+removal does not uninstall anything on another host.
 
-## Repository Validation
-
-The operator wrapper is read-only by default:
-
-```bash
-bash scripts/ops/prod_app_log_retention.sh
-```
-
-Live deletion is a distinct command and remains unauthorized by merge:
-
-```bash
-bash scripts/ops/prod_app_log_retention.sh \
-  --execute \
-  --confirm-live-write ROB-452
-```
-
-The Linux root gate exercises the fixed production roots, exact 60-day
-boundary, protected classes, locks, identity/type/owner/mode drift, byte and
-file caps, aggregate output, marker publication, replay, and service capability
-boundary.
-
-## Separate Production Rollout
-
-These steps are documentation for a later, separately approved operation:
-
-1. Install `app_log_retention_v1.py` as root-owned `0755`
-   `/usr/local/libexec/fh-app-log-retention-v1`; never run the deploy-tree copy.
-2. Install the service and timer as root-owned `0644`, then run
-   `systemd-analyze verify` without enabling either unit.
-3. Run the wrapper in default read-only mode and retain only its aggregate JSON.
-4. Confirm that the protected count covers the expected static, diagnostic,
-   and evidence classes and that no pass is blocked or capped.
-5. Obtain a new explicit production live-write approval before the first
-   `--execute` pass.
-6. Re-run the normal production doctor and cleanup inventory, then inspect only
-   the aggregate marker status.
-7. Obtain a separate activation approval before enabling the timer and its
-   disabled-by-default monitor.
-
-Deletion has no in-place rollback. A wrong or unclassified entry is therefore
-a hard pre-delete stop; recovery of a legitimately deleted daily log would be a
-separate backup/incident procedure, not an automatic rollback. To stop future
-runs, disable and stop the timer. Removing units, helper, or marker is also a
-separate production change and must not delete any remaining app logs.
+The immutable Kuma v1 bundle remains byte-identical, including its old,
+disabled-by-default app-log-retention branch. Do not enable that branch after
+retiring the helper. If another host already uses it, retain its live helper
+until its monitoring and scheduled cleanup are separately addressed. The
+ordinary app-error and host-resource monitors remain available.
