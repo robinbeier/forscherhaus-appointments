@@ -16,10 +16,9 @@ enforcement goal, or claim an improvement.
   through `completed_at`.
 - Statistics: median and nearest-rank p75. A comparable baseline needs at least
   five samples; the standard window contains seven.
-- Workload contract v14 starts at cohort epoch `2026-08-23T22:12:15Z`, when the
-  blocking Linux-root matrix added systemd verification for the ROB-483
-  dump-producer admission desired-state units.
-  Runs before this instant are excluded as
+- Workload contract v15 starts at cohort epoch `2026-09-05T09:58:02Z`, when the
+  phpstan-application job switched from the containerized Composer action to the
+  Composer tool installed by setup-php. Runs before this instant are excluded as
   `workload_contract_mismatch` even when their deep-runtime flags happen to
   match.
 - Selection is fail-closed: a run is comparable only when its complete profile
@@ -40,9 +39,9 @@ and fully observed phase rankings in
 
 ## Versioned Workload Contract
 
-Workload contract v14 pins the canonicalized definitions of every job in
+Workload contract v15 pins the canonicalized definitions of every job in
 `.github/workflows/ci.yml` to
-`sha256:c1f97cc53c979adc37760e5fa7ea8c469da1cb5d0da32fb8cdb3ff7401ada974`.
+`sha256:b721265006c4bd73e64bdc013d9f85b34fab0b25cc034be2223612e7d258f991`.
 The workflow contract test also requires every job to have an explicit expected
 `success` or `skipped` conclusion in the comparison profile. This covers the
 always-active `build-test`, JavaScript lint, PHPStan, typed request DTO, and both

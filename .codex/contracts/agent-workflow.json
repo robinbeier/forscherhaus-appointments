@@ -498,7 +498,7 @@
             "workflow_execution_envelope": "b00690b770e9cc3b3223dec8bbeb2f46db76443642fb7ddadf3fb8237ebb7f99",
             "changes": "c8cf92dad576b88662c08d394a763d56e595e58aa87de2b021cec8d8ef424a65",
             "build-test": "45788327f8b649ea5fce541761d7b4cf013dde2a9c50bb8169d50f03ce2fa5b2",
-            "phpstan-application": "4234ce0b646e5de64081c41446abf75432faec8ec30639f7a1c7271c1ae86db7",
+            "phpstan-application": "d7113a83e101a1d61620ceb1917a7fbc40bdf662f689a7ca321d99d43cc7920c",
             "js-lint-changed": "2be15a8595f42a9b076782789b1fe5c1386bd19e1abc4b59b936762950436305",
             "architecture-ownership-map": "7311eb7f2a7972b4eaebb9d1a69903517789f8c4ced4ee93483a283c99080cbc",
             "architecture-boundaries": "00625dfc8a980b19c6347413721c10cb57abd73d80f2e4ce5cccf80e8e05333f",
