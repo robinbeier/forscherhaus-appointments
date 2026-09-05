@@ -550,7 +550,6 @@ class AgentWorkflowContractTest extends TestCase
                 'coverage-shard-integration',
                 'coverage-shard-unit',
                 'deep-check-bootstrap',
-                'deep-check-seed-snapshot',
                 'deep-runtime-suite',
                 'integration-smoke',
                 'js-lint-changed',
@@ -567,7 +566,7 @@ class AgentWorkflowContractTest extends TestCase
             $ci['blocking_jobs'],
             static fn(array $job): bool => ($job['kind'] ?? null) === 'fingerprinted_execution',
         );
-        self::assertCount(17, $fingerprintedJobs);
+        self::assertCount(16, $fingerprintedJobs);
         $expectedFingerprintComponents = array_merge(['workflow_execution_envelope'], array_keys($fingerprintedJobs));
         $actualFingerprintComponents = array_keys($ci['blocking_execution_fingerprints']);
         sort($expectedFingerprintComponents, SORT_STRING);

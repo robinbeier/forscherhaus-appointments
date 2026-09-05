@@ -49,7 +49,7 @@ final class ExactHeadMergegateCliTest extends TestCase
 
         self::assertSame($blocking, $classified);
         self::assertCount(7, $policy['required_checks']);
-        self::assertCount(12, $policy['conditional_checks']);
+        self::assertCount(11, $policy['conditional_checks']);
         self::assertSame(
             ['correctness_security', 'design_maintainability', 'tests_regression_flake'],
             $policy['required_review_lenses'],

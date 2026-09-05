@@ -157,11 +157,6 @@ class CiPathFilterMatrixTest extends TestCase
         $workflow = file_get_contents($this->workflowPath());
         self::assertNotFalse($workflow);
 
-        $seedSnapshotJob = $this->extractJobBlock($workflow, 'deep-check-seed-snapshot', 'deep-runtime-suite');
-        self::assertStringNotContainsString('Setup Node.js', $seedSnapshotJob);
-        self::assertStringNotContainsString('Build runtime JS assets', $seedSnapshotJob);
-        self::assertStringNotContainsString('npx gulp scripts', $seedSnapshotJob);
-
         $deepRuntimeJob = $this->extractJobBlock($workflow, 'deep-runtime-suite', 'coverage-shard-unit');
         self::assertStringContainsString(
             "if: needs.changes.outputs.deep_runtime_asset_build_required == 'true' || needs.changes.outputs.integration_smoke == 'true'",
