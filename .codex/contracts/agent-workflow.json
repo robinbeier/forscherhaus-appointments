@@ -496,8 +496,8 @@
         "advisory_jobs": ["heavy-job-duration-trends", "pdf-renderer-latency"],
         "blocking_execution_fingerprints": {
             "workflow_execution_envelope": "b00690b770e9cc3b3223dec8bbeb2f46db76443642fb7ddadf3fb8237ebb7f99",
-            "changes": "c8cf92dad576b88662c08d394a763d56e595e58aa87de2b021cec8d8ef424a65",
-            "build-test": "1fa97a36f269df71ea7a106bfd8545a9532ace0ef3475980ce77a62bbeb0f8d3",
+            "changes": "5be3a9484b83f6d5d3bc5131fb2180c5f969f0cee4882734b5c7129cf182a78b",
+            "build-test": "cf7bed09de59b1d91ced6804d2057e2f47bd3f26b8f5c87f42d304f64cd8a585",
             "phpstan-application": "d7113a83e101a1d61620ceb1917a7fbc40bdf662f689a7ca321d99d43cc7920c",
             "js-lint-changed": "2be15a8595f42a9b076782789b1fe5c1386bd19e1abc4b59b936762950436305",
             "architecture-ownership-map": "7311eb7f2a7972b4eaebb9d1a69903517789f8c4ced4ee93483a283c99080cbc",
