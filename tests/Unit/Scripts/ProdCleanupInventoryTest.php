@@ -180,6 +180,141 @@ final class ProdCleanupInventoryTest extends TestCase
         }
     }
 
+    public static function completedRunCases(): array
+    {
+        return [
+            'failed before update' => [70, '2020-01-01 00:00:01 UTC', 'yes'],
+            'passed after update' => [0, '2020-01-03 00:00:01 UTC', 'no'],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('completedRunCases')]
+    public function testInventoryReportsReleaseRetentionStatusAndFreshnessAsAggregates(
+        int $exitStatus,
+        string $exitTime,
+        string $updated,
+    ): void {
+        $workspace = sys_get_temp_dir() . '/prod-cleanup-inventory-retention-' . bin2hex(random_bytes(8));
+        $stubBin = $workspace . '/bin';
+        $webRoot = $workspace . '/web';
+        $appRoot = $webRoot . '/easyappointments';
+        $helper = $workspace . '/release-retention-helper';
+
+        mkdir($stubBin, 0777, true);
+        mkdir($appRoot, 0777, true);
+
+        try {
+            $this->writeSshStub($stubBin);
+            $this->writeSystemctlStub(
+                $stubBin,
+                "Result=success\nExecMainStatus={$exitStatus}\nExecMainExitTimestamp={$exitTime}\n",
+                "2026-09-06 04:00:00 UTC\n",
+            );
+            file_put_contents($helper, "#!/usr/bin/env bash\nexit 0\n");
+            chmod($helper, 0755);
+            touch($helper, strtotime('2020-01-02 00:00:00 UTC'));
+            file_put_contents($appRoot . '/_RELEASE', "ea_current 2026-06-04T15:23:36Z\n");
+
+            $result = $this->runCommand(
+                ['bash', 'scripts/ops/prod_cleanup_inventory.sh', '--prod-ssh-target', 'prod.example'],
+                $this->repoRoot(),
+                [
+                    'PATH' => $stubBin . PATH_SEPARATOR . (getenv('PATH') ?: ''),
+                    'CLEANUP_WEB_ROOT' => $webRoot,
+                    'CLEANUP_APP_ROOT' => $appRoot,
+                    'CLEANUP_RELEASE_RETENTION_HELPER' => $helper,
+                    'CLEANUP_RELEASE_RETENTION_SERVICE' => 'fixture-retention.service',
+                    'CLEANUP_RELEASE_RETENTION_TIMER' => 'fixture-retention.timer',
+                ],
+            );
+
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            self::assertStringContainsString('release_retention.last_exit_status=' . $exitStatus, $result['stdout']);
+            self::assertStringContainsString('release_retention.next_run_utc=2026-09-06T04:00:00Z', $result['stdout']);
+            self::assertStringContainsString(
+                'release_retention.helper_updated_since_last_run=' . $updated,
+                $result['stdout'],
+            );
+            self::assertStringContainsString('deletion_performed=no', $result['stdout']);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public static function unknownRunCases(): array
+    {
+        return [
+            'malformed' => ["ExecMainStatus=not-an-integer\nExecMainExitTimestamp=n/a\n", "bad\nsecond-line\n"],
+            'never run' => ["ExecMainStatus=0\nExecMainExitTimestamp=\n", "n/a\n"],
+            'missing' => ['', ''],
+            'invalid single line' => ["ExecMainStatus=0\nExecMainExitTimestamp=invalid\n", 'private-invalid-text'],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('unknownRunCases')]
+    public function testInventoryFallsBackToUnknownForMissingOrMalformedReleaseRetentionStatus(
+        string $serviceOutput,
+        string $timerOutput,
+    ): void {
+        $workspace = sys_get_temp_dir() . '/prod-cleanup-inventory-retention-unknown-' . bin2hex(random_bytes(8));
+        $stubBin = $workspace . '/bin';
+        $webRoot = $workspace . '/web';
+        $appRoot = $webRoot . '/easyappointments';
+
+        mkdir($stubBin, 0777, true);
+        mkdir($appRoot, 0777, true);
+
+        try {
+            $this->writeSshStub($stubBin);
+            $this->writeSystemctlStub($stubBin, $serviceOutput, $timerOutput);
+            file_put_contents($appRoot . '/_RELEASE', "ea_current 2026-06-04T15:23:36Z\n");
+
+            $result = $this->runCommand(
+                ['bash', 'scripts/ops/prod_cleanup_inventory.sh', '--prod-ssh-target', 'prod.example'],
+                $this->repoRoot(),
+                [
+                    'PATH' => $stubBin . PATH_SEPARATOR . (getenv('PATH') ?: ''),
+                    'CLEANUP_WEB_ROOT' => $webRoot,
+                    'CLEANUP_APP_ROOT' => $appRoot,
+                    'CLEANUP_RELEASE_RETENTION_SERVICE' => 'fixture-retention.service',
+                    'CLEANUP_RELEASE_RETENTION_TIMER' => 'fixture-retention.timer',
+                ],
+            );
+
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            self::assertStringContainsString('release_retention.last_exit_status=unknown', $result['stdout']);
+            self::assertStringContainsString('release_retention.next_run_utc=unknown', $result['stdout']);
+            self::assertStringContainsString(
+                'release_retention.helper_updated_since_last_run=unknown',
+                $result['stdout'],
+            );
+            self::assertStringNotContainsString('second-line', $result['stdout'] . $result['stderr']);
+            self::assertStringNotContainsString('private-invalid-text', $result['stdout'] . $result['stderr']);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    private function writeSystemctlStub(string $stubBin, string $serviceOutput, string $timerOutput): void
+    {
+        file_put_contents(
+            $stubBin . '/systemctl',
+            "#!/usr/bin/env bash\n" .
+                "case \"\$*\" in\n" .
+                "  *show*fixture-retention.service*) printf '%s' " .
+                escapeshellarg($serviceOutput) .
+                ";;\n" .
+                "  *show*fixture-retention.timer*) printf '%s' " .
+                escapeshellarg($timerOutput) .
+                ";;\n" .
+                "  is-enabled*) printf 'enabled\\n';;\n" .
+                "  is-active*) printf 'active\\n';;\n" .
+                "  *) exit 1;;\n" .
+                "esac\n",
+        );
+        chmod($stubBin . '/systemctl', 0755);
+    }
+
     private function writeSshStub(string $stubBin): void
     {
         file_put_contents(
