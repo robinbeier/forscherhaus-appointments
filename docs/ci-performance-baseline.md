@@ -16,10 +16,9 @@ enforcement goal, or claim an improvement.
   through `completed_at`.
 - Statistics: median and nearest-rank p75. A comparable baseline needs at least
   five samples; the standard window contains seven.
-- Workload contract v15 starts at cohort epoch `2026-09-05T10:27:42Z`, when the
-  five measured Composer jobs (`build-test`, `phpstan-application`,
-  `typed-request-dto`, `typed-request-contracts`, and
-  `architecture-boundaries`) use the Composer tool installed by setup-php.
+- Workload contract v16 starts at cohort epoch `2026-09-05T10:52:45Z`, when the
+  unit coverage shard stopped repeating the 133 tooling test files already
+  executed by the main PHPUnit suite.
   Runs before this instant are excluded as `workload_contract_mismatch` even
   when their deep-runtime flags happen to match.
 - Selection is fail-closed: a run is comparable only when its complete profile
@@ -40,7 +39,7 @@ and fully observed phase rankings in
 
 ## Versioned Workload Contract
 
-Workload contract v15 pins the canonicalized definitions of every job in
+Workload contract v16 pins the canonicalized definitions of every job in
 `.github/workflows/ci.yml` to
 `sha256:2c964c74d39c48a61b6adab057aca3c27c19509fc152e4b40de7b04484ae7771`.
 The workflow contract test also requires every job to have an explicit expected
@@ -54,6 +53,26 @@ and workflow contract test fail closed. The maintainer must review the complete
 workload and deliberately increment `workload_contract.version`, move
 `cohort_epoch_utc`, and update `workflow_jobs_sha256`. Moving the epoch restarts
 the cohort; values from an earlier workload contract remain diagnostic only.
+
+## Coverage Execution Comparison
+
+Workload contract v16 removes 133 repeated `tests/Unit/Scripts` files from the
+unit coverage shard. The general PHPUnit run still executes all main tests, and
+the application coverage source and covered statement set remain unchanged.
+
+| Suite | Before | After | Notes |
+| --- | ---: | ---: | --- |
+| Main PHPUnit (`phpunit.xml`) | 199 files | 199 files | all retained |
+| Unit coverage shard | 142 files | 9 files | request DTO tests retained |
+| Integration coverage shard | 50 files | 50 files | includes 5 integration tests |
+| Main tests absent from coverage shards | 12 files | 12 files | retained for the general suite |
+
+The GitHub artifact comparison for run
+[33961076120](https://github.com/robinbeier/forscherhaus-appointments/actions/runs/33961076120)
+and the Docker candidate both report 411 covered application statements, with
+zero statements lost or added. The candidate executed 55 tests and 155
+assertions in 0.164s; this is local evidence only and is not a cross-machine
+speed claim. The workflow definition hash is unchanged.
 
 ## Profile Fingerprint
 
