@@ -17,6 +17,15 @@ docker compose -p fh-hotfix up -d
 Without a unique project name, services can accidentally mix mounts across
 worktrees (for example `nginx` from one path and `php-fpm`/`mysql` from another).
 
+## PHP extension scope
+
+The development/test image omits the unused PECL extensions `csv`, `event`,
+`inotify` and `redis`. Application code and Composer requirements do not use
+them; sessions and application caches use files. Normal PHP CSV functions
+remain available, and Symfony's PHP event dispatcher does not require the
+PECL `event` extension. Add extensions only for an actual application or test
+requirement.
+
 ## Shared PHP images for local checks
 
 The local pre-PR scripts and managed commit hook keep separate Compose project
