@@ -123,17 +123,61 @@ ci_docker_init_compose() {
     if [[ "${EA_LOCAL_CI_PORTLESS_COMPOSE:-1}" == "1" && -f "$local_ci_compose_override" ]]; then
         CI_DOCKER_COMPOSE_CMD+=(-f docker-compose.yml -f "$local_ci_compose_override")
     fi
+
+    # Share only a supported local build, never a caller-supplied image.
+    # Compose v1 retains its existing project-scoped image behavior.
+    CI_DOCKER_PHP_FPM_IMAGE=""
+    if [[ "${CI_DOCKER_COMPOSE_CMD[1]}" == "compose" && "${EA_LOCAL_CI_PORTLESS_COMPOSE:-1}" == "1" && -f "$local_ci_compose_override" ]]; then
+        local image_platform
+        ci_docker_require_cmd python3 "$log_prefix"
+        image_platform="${DOCKER_DEFAULT_PLATFORM:-}"
+        if [[ -z "$image_platform" ]]; then
+            image_platform="$(docker info --format '{{.OSType}}/{{.Architecture}}')" || return
+        fi
+        CI_DOCKER_PHP_FPM_IMAGE="$("${CI_DOCKER_COMPOSE_CMD[@]}" config --format json | \
+            python3 scripts/ci/local_php_image_key.py --platform "$image_platform")" || return
+        export CI_DOCKER_PHP_FPM_IMAGE
+        if [[ -n "$CI_DOCKER_PHP_FPM_IMAGE" ]]; then
+            CI_DOCKER_COMPOSE_CMD+=(-f docker/compose.ci-image.yml)
+        fi
+    fi
 }
 
 ci_docker_compose() {
     local log_prefix="${CI_DOCKER_LOG_PREFIX:-ci-docker}"
-    ci_docker_init_compose "$log_prefix"
+    ci_docker_init_compose "$log_prefix" || return
+    if [[ "${1:-}" == "build" && -n "${CI_DOCKER_PHP_FPM_IMAGE:-}" ]]; then
+        local option
+        for option in "$@"; do
+            case "$option" in
+                --build-arg|--build-arg=*|--ssh|--ssh=*)
+                    # Ad-hoc build inputs are not part of the resolved Compose key.
+                    # Build under the project name rather than overwrite a shared tag.
+                    CI_DOCKER_COMPOSE_CMD=("${CI_DOCKER_COMPOSE_CMD[@]:0:${#CI_DOCKER_COMPOSE_CMD[@]}-2}")
+                    CI_DOCKER_PHP_FPM_IMAGE=""
+                    "${CI_DOCKER_COMPOSE_CMD[@]}" "$@"
+                    return
+                    ;;
+            esac
+        done
+    fi
     "${CI_DOCKER_COMPOSE_CMD[@]}" "$@"
 }
 
 ci_docker_build_php_fpm_if_inputs_changed() {
     local base_ref="${1:?base ref is required}"
     local log_prefix="${2:-ci-docker}"
+
+    ci_docker_init_compose "$log_prefix" || return
+    if [[ -n "${CI_DOCKER_PHP_FPM_IMAGE:-}" ]]; then
+        if docker image inspect "$CI_DOCKER_PHP_FPM_IMAGE" >/dev/null 2>&1; then
+            echo "[$log_prefix] Reusing local PHP image $CI_DOCKER_PHP_FPM_IMAGE."
+            return 0
+        fi
+        echo "[$log_prefix] Building local PHP image for these runtime inputs."
+        ci_docker_compose build php-fpm
+        return
+    fi
 
     if ! ci_docker_php_fpm_inputs_changed "$base_ref"; then
         return 0
