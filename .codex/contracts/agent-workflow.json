@@ -493,10 +493,10 @@
         "workflow": ".github/workflows/ci.yml",
         "blocking_failure_control_policy": "strict-v1",
         "job_classification_policy": "explicit-v1",
-        "advisory_jobs": ["heavy-job-duration-trends", "pdf-renderer-latency"],
+        "advisory_jobs": ["pdf-renderer-latency"],
         "blocking_execution_fingerprints": {
             "workflow_execution_envelope": "b00690b770e9cc3b3223dec8bbeb2f46db76443642fb7ddadf3fb8237ebb7f99",
-            "changes": "5be3a9484b83f6d5d3bc5131fb2180c5f969f0cee4882734b5c7129cf182a78b",
+            "changes": "260267dfcbdc0c4bf4d03b3adf03bdf46e6c637b58cdd5d9eb60489f887deb6a",
             "build-test": "cf7bed09de59b1d91ced6804d2057e2f47bd3f26b8f5c87f42d304f64cd8a585",
             "phpstan-application": "d7113a83e101a1d61620ceb1917a7fbc40bdf662f689a7ca321d99d43cc7920c",
             "js-lint-changed": "2be15a8595f42a9b076782789b1fe5c1386bd19e1abc4b59b936762950436305",

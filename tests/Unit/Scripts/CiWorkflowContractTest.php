@@ -123,35 +123,6 @@ class CiWorkflowContractTest extends TestCase
         );
     }
 
-    public function testHeavyJobDurationTrendsStaysInsideTheExistingAdvisorySignalJob(): void
-    {
-        $job = $this->workflowJob('heavy-job-duration-trends');
-        $steps = $this->namedSteps($job);
-        $condition = (string) ($job['if'] ?? '');
-
-        self::assertStringContainsString("github.event_name == 'push'", $condition);
-        self::assertStringContainsString("github.ref == 'refs/heads/main'", $condition);
-        foreach ($steps as $step) {
-            self::assertArrayNotHasKey('continue-on-error', $step);
-        }
-
-        $requiredOrder = ['Upload heavy job trend artifacts', 'Diagnostics (heavy job trend report)'];
-        $stepNames = array_keys($steps);
-        self::assertSame(
-            $requiredOrder,
-            array_values(
-                array_filter($stepNames, static fn(string $name): bool => in_array($name, $requiredOrder, true)),
-            ),
-        );
-
-        $upload = $steps['Upload heavy job trend artifacts'];
-        self::assertSame('actions/upload-artifact@v7', $upload['uses'] ?? null);
-        self::assertSame(
-            ['storage/logs/ci/heavy-job-duration-trends-latest.json'],
-            array_values(array_filter(array_map('trim', explode("\n", (string) ($upload['with']['path'] ?? ''))))),
-        );
-    }
-
     public function testDeepRuntimeWorkloadProfileInputsStayExplicitInTheWorkflow(): void
     {
         $steps = $this->namedSteps($this->workflowJob('deep-runtime-suite'));

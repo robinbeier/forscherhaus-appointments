@@ -222,8 +222,7 @@ CI note:
   `typed-request-contracts`, `api-contract-openapi`,
   `write-contract-booking`, `write-contract-api`,
   `booking-controller-flows`, and `coverage-delta` are blocking.
-- `heavy-job-duration-trends` and `pdf-renderer-latency` are non-blocking
-  signal jobs.
+- `pdf-renderer-latency` is a non-blocking signal job.
 - Test selection and direct CI timing comparisons are described in
   [CI Test Execution](docs/ci-test-execution.md).
 - Full job wiring lives in `.github/workflows/ci.yml`; the compact local

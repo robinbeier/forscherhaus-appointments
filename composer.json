@@ -77,7 +77,6 @@
         "check:agent-harness-readiness": "php scripts/ci/check_agent_harness_readiness.php --output-json=storage/logs/ci/agent-harness-readiness-latest.json",
         "check:exact-head-mergegate": "php scripts/ci/check_exact_head_mergegate.php",
         "check:harness-report-dates": "php scripts/ci/check_harness_report_dates.php --output-json=storage/logs/ci/harness-report-date-sanity-latest.json",
-        "check:heavy-job-duration-trends": "php scripts/ci/check_heavy_job_duration_trends.php --output-json=storage/logs/ci/heavy-job-duration-trends-latest.json",
         "check:pdf-renderer-latency": "php scripts/ci/check_pdf_renderer_latency.php --output-json=storage/logs/ci/pdf-renderer-latency-latest.json",
         "check:request-contract-adoption": "php scripts/ci/check_request_contract_adoption.php",
         "check:typed-request-contracts": [
