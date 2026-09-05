@@ -1,8 +1,7 @@
 """Python consumer for the language-neutral ownership path-rule contract.
 
-The trusted PHP lane validator and the Python CI/documentation consumers use
-different runtimes. Both therefore execute the same exact contract fixture at
-startup instead of maintaining untested independent semantics.
+CI and documentation consumers share this engine and its canonical matching
+cases instead of maintaining independent path-rule semantics.
 """
 
 from __future__ import annotations

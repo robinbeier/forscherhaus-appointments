@@ -25,11 +25,6 @@
                 "path": "scripts/agent/run_readonly_reviewer.sh",
                 "mode": "0500",
                 "environment_profile": "reviewer"
-            },
-            "parallel": {
-                "path": "scripts/agent/check_parallel_work_contract.sh",
-                "mode": "0500",
-                "environment_profile": "parallel"
             }
         }
     },
@@ -247,73 +242,6 @@
             ]
         }
     },
-    "parallel_work": {
-        "local_implementation_only": true,
-        "requires_common_base_sha": true,
-        "requires_disjoint_ownership": true,
-        "max_local_writer_lanes": 2,
-        "writer_role": "implementation_worker",
-        "external_mutations_remain_serial": true,
-        "requires_semantic_independence_attestation": true,
-        "validator_invocation": "scripts/agent/trusted_base_launcher.sh",
-        "validator_payload_path": "scripts/agent/check_parallel_work_contract.sh",
-        "validator_trust_anchor": "external_system_git_materialized_declared_base_launcher_then_private_declared_base_payload",
-        "validator_launcher_materialization_guard": "required_external_exact_blob_path_and_marker",
-        "validator_bootstrap_paths": [
-            ".codex/contracts/agent-workflow.json",
-            "scripts/agent/trusted_base_launcher.sh",
-            "scripts/agent/check_parallel_work_contract.sh",
-            "scripts/agent/lib/trusted_base_payload_runtime.sh",
-            "scripts/agent/lib/trusted_base_bootstrap_contract.py",
-            "scripts/agent/check_parallel_work_contract.php",
-            "scripts/agent/verify_trusted_php_runtime.py",
-            "scripts/agent/lib/trusted_runtime_primitives.py",
-            "scripts/agent/lib/ParallelWorkContract.php",
-            "scripts/agent/lib/OwnershipPathRuleEngineClient.php",
-            "scripts/agent/lib/ParallelWorkOwnershipContract.php",
-            "scripts/agent/lib/ParallelWorkPolicyContract.php",
-            "scripts/agent/lib/RepoPath.php",
-            "scripts/ci/ownership_path_rules.py",
-            ".codex/contracts/ownership-path-rules.json"
-        ],
-        "canonical_base_ref": "refs/remotes/origin/main",
-        "canonical_base_remote_url": "https://github.com/robinbeier/forscherhaus-appointments.git",
-        "canonical_base_policy": "live_pinned_public_remote_main_and_matching_tracking_ref",
-        "canonical_base_remote_transport": "unauthenticated_read_only_ls_remote_clean_environment",
-        "admission_requires_clean_exact_base_checkout": true,
-        "admission_executes_only_declared_base_blobs": true,
-        "admission_binds_base_before_source_execution": true,
-        "requires_post_implementation_verification": true,
-        "requires_clean_post_commit_verification": true,
-        "dirty_precommit_status": "provisional_pass",
-        "clean_integration_status": "pass",
-        "php_runtime_configuration": "exact_base_attested_binary_and_dynamic_closure_ignore_ambient_ini",
-        "shell_bootstrap": "root_owned_system_git_before_clean_bash_and_attested_php",
-        "shell_environment_allowlist": ["PATH", "TMPDIR", "LANG", "LC_ALL"],
-        "ownership_map": "docs/maps/component_ownership_map.json",
-        "ownership_map_schema_version": 3,
-        "ownership_rule_format": "explicit_path_and_match_objects",
-        "ownership_rule_contract": ".codex/contracts/ownership-path-rules.json",
-        "primary_owned_path_rules": [
-            {"path": ".codex/agents/reviewer-correctness.toml", "match": "exact_file"},
-            {"path": ".codex/agents/reviewer-design.toml", "match": "exact_file"},
-            {"path": ".codex/agents/reviewer-tests.toml", "match": "exact_file"},
-            {"path": ".codex/agents/implementation-worker.toml", "match": "exact_file"},
-            {"path": ".codex/config.toml", "match": "exact_file"},
-            {"path": ".codex/contracts", "match": "directory"},
-            {"path": ".codex/skills/land", "match": "directory"},
-            {"path": ".codex/skills/push", "match": "directory"},
-            {"path": ".github/workflows", "match": "directory"},
-            {"path": "AGENTS.md", "match": "exact_file"},
-            {"path": "WORKFLOW.md", "match": "exact_file"},
-            {"path": "code_review.md", "match": "exact_file"},
-            {"path": "docs/maps/component_ownership_map.json", "match": "exact_file"},
-            {"path": "scripts/agent", "match": "directory"},
-            {"path": "scripts/ci/ownership_path_rules.py", "match": "exact_file"},
-            {"path": "scripts/ci/exact_head_mergegate.php", "match": "exact_file"},
-            {"path": "scripts/ci/lib/ExactHeadMergegate.php", "match": "exact_file"}
-        ]
-    },
     "land": {
         "requires_exact_head": true,
         "merge_command": "gh pr merge --merge --match-head-commit <current_head_sha>",
@@ -423,7 +351,7 @@
         "docs/optional-agent-review.md": {
             "contract_reference": ".codex/contracts/agent-workflow.json",
             "required_sections": {
-                "## Controlled Parallel Work": [
+                "## Trusted reviewer bootstrap": [
                     "Do not replace this with an ambient `git",
                     "Exactly one primary remains the external single writer",
                     "A merge invalidates the base of every remaining lane"

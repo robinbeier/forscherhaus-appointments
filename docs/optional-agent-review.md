@@ -13,57 +13,21 @@ The machine settings in `authority.reviewer`, `trusted_base_bootstrap`, and
 `land.exact_head_mergegate` describe this optional subsystem; `review` and the
 other `land` fields describe the normal path.
 
-For controlled parallel lanes, use the existing admission protocol below.
+For controlled parallel implementation, use the ownership guidance in `WORKFLOW.md`.
 This is independent of whether the final review uses the standard path.
 Relative repository paths in the command and contract text are repository-root
 paths. Review-tool implementation changes can receive a standard independent
 review; producing sealed-tool evidence still requires its bootstrap boundary.
 
-## Controlled Parallel Work
+## Trusted reviewer bootstrap
 
-Parallel work means local implementation only. It is opt-in for explicitly
-approved, independently verifiable lanes; normal PR publication, Linear
-mutation, integration, attestation, and landing remain serial.
-Only version-controlled lane changes are candidates for ownership admission
-and landing. Ignored local dependencies or configuration never become merge
-evidence; the Primary integrates committed lane heads and repeats validation
-from that committed state.
-
-The machine-readable contract and validator are the implementation authority:
-`.codex/contracts/agent-workflow.json`,
-`scripts/agent/trusted_base_launcher.sh`, and the validator payload
-`scripts/agent/check_parallel_work_contract.sh`. They bind the live canonical
-main, exact common base, clean validator checkout, explicit disjoint
-`directory`/`exact_file` ownership, semantic-independence attestation, component
-approvals, primary-reserved paths, and at most two implementation-worker lanes.
-The Primary privately materializes the launcher with fixed system Git from the
-already verified declared base, verifies its exact blob and non-executable tree
-mode, and only then starts it in clean Bash. The launcher in turn privately
-reads the `trusted_base_bootstrap` manifest from that exact base, then
-materializes and verifies its declared shared runtime and payload before any
-checkout code can execute. It starts the attested shared runtime directly;
-that runtime dispatches only the separately attested, manifest-bound payload,
-independently validates the same manifest, and owns clean Git/Python plus
-declared-path materialization for both agent-harness payloads.
-Both launcher and shared runtime also require their actual Bash source path to
-match the absolute materialized path supplied by the outer trusted boundary;
-an environment variable naming a different pristine copy cannot authorize the
-bytes that are being executed.
-Direct execution of any checked-out bootstrap script is forbidden and fails
-closed. The validator verifies provisional pre-commit ownership and clean
-post-commit integration evidence. One exact-base Python engine owns ownership
-path normalization, validation, matching, and overlap semantics for the lane
-validator plus Python CI/documentation consumers. PHP consumes only its
-strictly validated JSON result. The language-neutral match, overlap, and
-invalid-rule cases live in `.codex/contracts/ownership-path-rules.json`;
-callers may not silently normalize supplied ownership candidates. Do not
-reproduce the bootstrap command in other docs or duplicate validator internals;
-use this canonical command and the machine contract.
-Do not replace this with an ambient `git show` or a checked-out wrapper. The
-machine contract owns the fixed system-Git bootstrap and payload selection.
+This optional reviewer uses the exact-base launcher and verified payload
+materialization described below. Do not replace this with an ambient `git show`
+or a checked-out wrapper. Normal implementation delegation and its
+ownership limits remain in [WORKFLOW.md](../WORKFLOW.md).
 
 The canonical Primary-owned invocation shape is below. Supply an absolute
-repository root, its verified 40-character base, one allowlisted payload name,
+repository root, its verified 40-character base, the `reviewer` payload name,
 and only that payload's documented arguments. The outer command is static host
 code: complete materialization and blob verification must succeed before any
 repository-selected Bash can run.
@@ -97,11 +61,11 @@ repository-selected Bash can run.
   [[ "$(git_read hash-object --no-filters "$launcher_path")" == "$launcher_blob" ]]
   /bin/chmod 0500 "$launcher_path"
   /usr/bin/env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin TMPDIR=/tmp LANG=C LC_ALL=C TRUSTED_BASE_MATERIALIZED=1 TRUSTED_BASE_LAUNCHER_SOURCE_PATH="$launcher_path" /bin/bash --noprofile --norc "$launcher_path" --repo-root="$repo_root" --base-sha="$base_sha" --payload="$payload" -- "$@"
-' trusted-base-launcher /absolute/repository <base-sha> <reviewer-or-parallel> <payload-options>
+' trusted-base-launcher /absolute/repository <base-sha> reviewer <payload-options>
 ```
 
-Both agent-harness entry points begin with the same exact-base system-Git
-launcher, discard caller startup configuration, and use isolated
+The reviewer entry point begins with the same exact-base system-Git
+launcher, discards caller startup configuration, and uses isolated
 `/usr/bin/python3` before any PHP runs.
 The launcher first materializes the fixed bootstrap-contract parser as an
 exact regular blob from that base. Launcher and shared runtime invoke that same
@@ -122,12 +86,7 @@ closure are all exact-base-bound. Both macOS runtimes use that bounded archive
 path; they are downloaded without ambient proxy or credential state, verified
 before extraction, and never executed from the archive. Platforms absent from
 both runtime-source maps and the closure-pin map are deliberately unsupported.
-Ambient `PATH` never grants interpreter authority. The centralized ownership
-matcher is also Primary-owned because it defines shared lane and CI semantics.
-Worker ownership and Primary reservations both use the same explicit
-`path`/`match` objects; exact files are never inferred to be directories. PHP is
-only the fail-closed process adapter for the one exact-base Python matcher and
-contains no second normalization, match, or overlap implementation.
+Ambient `PATH` never grants interpreter authority.
 
 The exact-base JSON contract is the sole declarative configuration authority
 for reviewer profiles, runtime pins, disabled features, and trusted paths. PHP
@@ -249,10 +208,7 @@ The JSON machine contract is the only hand-edited reviewer-policy authority.
 Generated PHP policy and runtime-attestation files are deterministic
 change-control projections refreshed by their repository generators, not
 additional policy sources. Exact equality is intentional: a runtime-boundary
-change must be explicit and generator-checked. Likewise, the parallel-work
-validator materializes and verifies the single `validator_bootstrap_paths`
-list declared by that contract instead of maintaining a validator-side path
-copy.
+change must be explicit and generator-checked.
 Consult `.codex/contracts/agent-workflow.json`,
 `scripts/agent/trusted_base_launcher.sh`, and the reviewer payload for those
 implementation details.
