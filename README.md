@@ -192,9 +192,9 @@ bash ./scripts/cleanup_local_artifacts.sh --with-deps
 ```
 
 Hook note: `./scripts/setup-worktree.sh` installs managed `.git/hooks/pre-commit`
-and `.git/hooks/pre-push` hooks. The managed `pre-commit` keeps PHP-related
-commits on the same deterministic MySQL/bootstrap path as `pre_pr_quick.sh`,
-while the managed `pre-push` runs `pre_pr_quick.sh`. Use
+and `.git/hooks/pre-push` hooks. The managed `pre-commit` runs fast formatting,
+syntax, and changed-frontend checks; the managed `pre-push` runs
+`pre_pr_quick.sh`, including the PHPUnit suite. Use
 `./scripts/install-git-hooks.sh` to refresh an existing clone, or
 `FORCE_HOOK_INSTALL=1 ./scripts/install-git-hooks.sh` to replace older custom
 hooks intentionally. Linux root/host tests use the explicit Docker Desktop
