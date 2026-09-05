@@ -91,10 +91,11 @@ restore-verified dump sets use the separate ROB-453 contract in
 The default wrapper remains read-only; this inventory and a green dry-run do
 not authorize its execute mode or systemd activation.
 
-Daily CodeIgniter `log-YYYY-MM-DD.php` files use the separate ROB-452 contract
-in [`production-app-log-retention.md`](production-app-log-retention.md). Its
-60-day class excludes every nested evidence directory and fixed diagnostic
-artifact; neither this inventory nor repository merge authorizes deletion.
+Daily CodeIgniter `log-YYYY-MM-DD.php` files can be inspected separately when
+space is constrained; see [application-log maintenance](production-app-log-retention.md).
+The log-root size includes diagnostic evidence and does not imply deletion
+eligibility. Preserve nested evidence and diagnostic reports; cleanup requires
+an explicit selection and approval.
 
 ## Stop Conditions
 

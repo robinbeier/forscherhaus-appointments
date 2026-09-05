@@ -93,10 +93,8 @@ Script inventory:
   is not sidecar execute approval.
 - For native journal rotation and occasional approved manual cleanup, see
   [`docs/ops/production-journald-retention.md`](../../docs/ops/production-journald-retention.md).
-- `prod_app_log_retention.sh` inspects the closed 60-day CodeIgniter daily-log
-  class and requires a separate exact confirmation before a bounded pass. It
-  never traverses release-gate, CI, ops, or diagnostic evidence; see
-  [`docs/ops/production-app-log-retention.md`](../../docs/ops/production-app-log-retention.md).
+- For daily application-log inspection and occasional approved manual cleanup,
+  see [`docs/ops/production-app-log-retention.md`](../../docs/ops/production-app-log-retention.md).
 - `kuma_push_ops_jobs.sh` monitors restore-verification marker freshness
 - `kuma_push_backup_creation.sh` monitors backup-creation marker freshness
 - `kuma_push_php_fpm_logs.sh` monitors recent PHP-FPM journal errors

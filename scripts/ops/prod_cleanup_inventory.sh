@@ -62,8 +62,6 @@ SESSION_RETENTION_TIMER="${CLEANUP_SESSION_RETENTION_TIMER:-fh-session-retention
 RELEASE_RETENTION_HELPER="${CLEANUP_RELEASE_RETENTION_HELPER:-/usr/local/libexec/fh-release-archive-dump-retention-v1}"
 RELEASE_RETENTION_TIMER="${CLEANUP_RELEASE_RETENTION_TIMER:-fh-release-archive-dump-retention.timer}"
 RELEASE_RETENTION_SERVICE="${CLEANUP_RELEASE_RETENTION_SERVICE:-fh-release-archive-dump-retention.service}"
-APP_LOG_RETENTION_HELPER="${CLEANUP_APP_LOG_RETENTION_HELPER:-/usr/local/libexec/fh-app-log-retention-v1}"
-APP_LOG_RETENTION_TIMER="${CLEANUP_APP_LOG_RETENTION_TIMER:-fh-app-log-retention.timer}"
 
 section() {
     printf '\n[%s]\n' "$1"
@@ -522,27 +520,6 @@ fi
 kv release_retention.last_exit_status "$release_last_exit_status"
 kv release_retention.next_run_utc "$release_next_run_utc"
 kv release_retention.helper_updated_since_last_run "$release_helper_updated_since_last_run"
-
-section app_log_retention
-if command -v systemctl >/dev/null 2>&1; then
-    kv app_log_retention.timer_enabled "$(systemctl is-enabled "$APP_LOG_RETENTION_TIMER" 2>/dev/null || printf 'unknown')"
-    kv app_log_retention.timer_active "$(systemctl is-active "$APP_LOG_RETENTION_TIMER" 2>/dev/null || printf 'unknown')"
-else
-    kv app_log_retention.timer_enabled unavailable
-    kv app_log_retention.timer_active unavailable
-fi
-app_log_marker_status=unavailable
-app_log_marker_age_seconds=unknown
-if [[ -x "$APP_LOG_RETENTION_HELPER" ]]; then
-    app_log_marker_json="$($APP_LOG_RETENTION_HELPER marker-status 129600 2>/dev/null || true)"
-    parsed_app_log_marker="$(printf '%s' "$app_log_marker_json" | sed -n 's/^.*"age_seconds":\([^,}]*\).*"status":"\([a-z_]*\)".*$/\2|\1/p')"
-    if [[ "$parsed_app_log_marker" == *'|'* ]]; then
-        app_log_marker_status="${parsed_app_log_marker%%|*}"
-        app_log_marker_age_seconds="${parsed_app_log_marker#*|}"
-    fi
-fi
-kv app_log_retention.marker_status "$app_log_marker_status"
-kv app_log_retention.marker_age_seconds "$app_log_marker_age_seconds"
 
 section cleanup_candidates
 kv cleanup_candidate.prev_release_dirs "$(candidate_for_prev_dirs "$prev_dirs")"
