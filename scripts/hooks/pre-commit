@@ -59,8 +59,8 @@ ensure_stack_started() {
         return
     fi
 
-    ci_docker_compose up -d --no-deps php-fpm >/dev/null
     STACK_STARTED=1
+    ci_docker_compose up -d --no-deps php-fpm >/dev/null
 }
 
 cleanup_stack() {

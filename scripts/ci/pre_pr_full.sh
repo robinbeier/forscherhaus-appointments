@@ -101,6 +101,11 @@ git_ci_refresh_base_ref_if_safe "$BASE_REF" "pre-pr-full"
 echo_section "Run quick pre-PR gate"
 SKIP_LOCAL_DEPS_BOOTSTRAP=1 PRE_PR_BASE_REF="$BASE_REF" PRE_PR_PHPSTAN_APPLICATION_SCRIPT="$PHPSTAN_APPLICATION_SCRIPT" bash ./scripts/ci/pre_pr_quick.sh
 
+# The quick gate owns and cleans up its own stack. Install the full-gate trap
+# before the first compose command that follows it, while still avoiding a
+# down call when a pre-runtime prerequisite fails.
+trap cleanup_stack EXIT
+
 echo_section "PHPStan static-analysis gate"
 ci_docker_compose run --rm php-fpm composer "$PHPSTAN_APPLICATION_SCRIPT"
 ci_docker_compose run --rm php-fpm composer "$PHPSTAN_REQUEST_CONTRACTS_L1_SCRIPT"
@@ -124,7 +129,6 @@ GITHUB_EVENT_NAME=pull_request GITHUB_BASE_REF="$BASE_REF" bash scripts/ci/run_d
 GITHUB_EVENT_NAME=pull_request GITHUB_BASE_REF="$BASE_REF" python3 scripts/ci/check_component_boundaries.py
 
 echo_section "Start integration stack"
-trap cleanup_stack EXIT
 INTEGRATION_SMOKE_INCLUDE_LDAP=0
 STACK_SERVICES=(mysql php-fpm nginx)
 if pre_pr_full_should_include_ldap_guardrail; then
