@@ -165,14 +165,35 @@ class CiWorkflowContractTest extends TestCase
         $job = $this->workflowJob('coverage-shard-integration');
         self::assertSame(['changes', 'deep-check-bootstrap'], $job['needs'] ?? null);
         $steps = $this->namedSteps($job);
+        foreach ($steps as $step) {
+            self::assertArrayNotHasKey('continue-on-error', $step);
+        }
+        $setupPhp = $steps['Setup PHP'];
+        self::assertSame('shivammathur/setup-php@v2', $setupPhp['uses'] ?? null);
+        self::assertSame('8.4.1', $setupPhp['with']['php-version'] ?? null);
+        self::assertSame('xdebug', $setupPhp['with']['coverage'] ?? null);
+        self::assertSame('gd', $setupPhp['with']['extensions'] ?? null);
+        self::assertSame('composer:v2', $setupPhp['with']['tools'] ?? null);
         self::assertArrayNotHasKey('Download deterministic seed snapshot artifact', $steps);
         self::assertArrayNotHasKey('Import deterministic seed snapshot', $steps);
 
         $stepNames = array_keys($steps);
+        $prepare = $this->stepRun($steps, 'Prepare root test configuration');
+        self::assertStringContainsString('test ! -e config.php', $prepare);
+        self::assertStringContainsString('install -m 0600 config-sample.php config.php', $prepare);
+        self::assertStringContainsString(
+            'sed -i "s/const DB_HOST = \'mysql\';/const DB_HOST = \'127.0.0.1\';/" config.php',
+            $prepare,
+        );
+        self::assertStringContainsString('grep -Fq "const DB_HOST = \'127.0.0.1\';" config.php', $prepare);
+        self::assertSame('docker compose up -d mysql', $this->stepRun($steps, 'Start coverage shard services'));
+        $prepareIndex = array_search('Prepare root test configuration', $stepNames, true);
         $readinessIndex = array_search('Wait for MySQL readiness', $stepNames, true);
         $installIndex = array_search('Install deterministic seed instance', $stepNames, true);
+        self::assertIsInt($prepareIndex);
         self::assertIsInt($readinessIndex);
         self::assertIsInt($installIndex);
+        self::assertLessThan($installIndex, $prepareIndex);
         self::assertGreaterThan($readinessIndex, $installIndex);
         $testIndex = array_search('Run coverage shard (integration)', $stepNames, true);
         self::assertIsInt($testIndex);
@@ -182,12 +203,16 @@ class CiWorkflowContractTest extends TestCase
 
         $install = $this->stepRun($steps, 'Install deterministic seed instance');
         self::assertStringContainsString('for attempt in 1 2 3; do', $install);
-        self::assertStringContainsString(
-            'if docker compose exec -T php-fpm php index.php console install; then',
-            $install,
-        );
+        self::assertStringContainsString('if php index.php console install; then', $install);
         self::assertStringContainsString('console install failed after 3 attempts.', $install);
         self::assertStringContainsString('exit 1', $install);
+
+        $coverage = $this->stepRun($steps, 'Run coverage shard (integration)');
+        self::assertSame('composer test:coverage:integration-shard', $coverage);
+
+        $diagnostics = $this->stepRun($steps, 'Diagnostics (failure logs)');
+        self::assertStringContainsString('php -v || true', $diagnostics);
+        self::assertStringContainsString('docker compose logs --no-color --timestamps mysql || true', $diagnostics);
     }
 
     /**

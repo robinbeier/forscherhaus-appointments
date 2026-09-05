@@ -24,21 +24,24 @@ is tested by `tests/Unit/Scripts/CiPathFilterMatrixTest.php`.
 
 ## Integration coverage preparation
 
-The integration coverage shard needs PHP with Xdebug and a seeded MySQL
-instance. It installs that instance directly in its own job with
-`php index.php console install`, using the existing bounded retry loop.
-Installation failure still stops the job before the tests; diagnostics and
-unconditional Compose cleanup remain in place.
+The integration coverage shard runs PHP with Xdebug directly on the GitHub
+runner, as the main test job already does. Only MySQL runs in Compose. Its
+local `config.php` points to `127.0.0.1`; the repository sample remains unchanged
+for normal Docker development.
 
-The separate seed-snapshot job and its export, upload, download and import
-are removed: integration coverage was their only consumer. The same migrations
-and seed routine now run where the database is used. Test selection, coverage
-commands and thresholds are unchanged; no test is replaced by a setup check.
-Shared Composer dependencies still come from `deep-check-bootstrap`.
+After database readiness, `php index.php console install` creates the seeded
+instance using the existing bounded retry loop. Installation failure stops
+the job before coverage runs. Diagnostics and unconditional Compose cleanup
+remain in place. Shared Composer dependencies come from `deep-check-bootstrap`.
 
-This removes one complete PHP/MySQL environment setup and the snapshot
-handoff. The remaining PHP container build is unchanged; use actual GitHub
-runs to assess the resulting elapsed-time improvement.
+The selected suite needs neither a PHP-FPM web server nor a browser. PDF and
+health controller unit tests use test doubles for network calls. The separate
+deep runtime and browser checks retain their Docker environment. Test selection,
+coverage commands and thresholds are unchanged.
+
+The former seed-snapshot handoff and the coverage job's PHP container build
+are both unnecessary for this path. Use actual GitHub runs to compare elapsed
+time and covered statement lines; local full validation still uses Docker.
 
 ## Local quick and full checks
 

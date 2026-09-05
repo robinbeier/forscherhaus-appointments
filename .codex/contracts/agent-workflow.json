@@ -434,7 +434,7 @@
             "deep-check-bootstrap": "28092b98e7676f35338cde15c7781c92b782fa8941fcc74559a28eff3b63f21f",
             "deep-runtime-suite": "18fdb6d1f9861a456e69bf27f0c7bcd205ee255d6c83bb341d4eef97b74b30a8",
             "coverage-shard-unit": "86c089bdc0a9c907c8ababc2d48515db82f619f44a59951eb1ba6283c2fe060c",
-            "coverage-shard-integration": "f676834eb9a4ce7025aa8ba91a18109696c4628af9c3cd101b71937b50474241",
+            "coverage-shard-integration": "204a25e29a29e29c7a2b4b93b868336651f888f9663a7dd612a0e5460a9cb031",
             "api-contract-openapi": "6e224d3eec1b26fa2eb1e4c3d62f45524253a5e5468cff7e029f9d8b4e2ce069",
             "booking-controller-flows": "cc7be7cb392f2e57805c331b68019a719996bc4fcc32f744ac6461b0e64b3b69",
             "coverage-delta": "16fe2e04d53fe11b5c1e0c2f6d8724582dc1d891cb229d67343f04d9c9310915",

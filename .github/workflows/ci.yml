@@ -877,6 +877,13 @@ jobs:
     steps:
       - name: Git clone
         uses: actions/checkout@v6
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4.1"
+          coverage: xdebug
+          extensions: gd
+          tools: composer:v2
       - name: Download deep-check dependencies artifact
         uses: actions/download-artifact@v8
         with:
@@ -887,17 +894,20 @@ jobs:
           tar -xzf .ci-artifacts/deep-check-deps.tar.gz
           test -d vendor
           test -f vendor/autoload.php
+      - name: Prepare root test configuration
+        run: |
+          test ! -e config.php
+          install -m 0600 config-sample.php config.php
+          sed -i "s/const DB_HOST = 'mysql';/const DB_HOST = '127.0.0.1';/" config.php
+          grep -Fq "const DB_HOST = '127.0.0.1';" config.php
       - name: Start coverage shard services
-        env:
-          EA_SKIP_NPM_BOOTSTRAP: "1"
-          EA_SKIP_ASSET_BUILD_BOOTSTRAP: "1"
-        run: docker compose up -d mysql php-fpm
+        run: docker compose up -d mysql
       - name: Wait for MySQL readiness
         run: bash scripts/ci/wait_for_mysql_readiness.sh
       - name: Install deterministic seed instance
         run: |
           for attempt in 1 2 3; do
-            if docker compose exec -T php-fpm php index.php console install; then
+            if php index.php console install; then
               exit 0
             fi
             echo "::warning::console install failed on attempt ${attempt}; retrying in 3s." >&2
@@ -906,7 +916,7 @@ jobs:
           echo "::error::console install failed after 3 attempts." >&2
           exit 1
       - name: Run coverage shard (integration)
-        run: docker compose exec -T php-fpm composer test:coverage:integration-shard
+        run: composer test:coverage:integration-shard
       - name: Upload coverage shard integration artifacts
         if: always()
         uses: actions/upload-artifact@v7
@@ -919,8 +929,9 @@ jobs:
       - name: Diagnostics (failure logs)
         if: failure()
         run: |
+          php -v || true
           docker compose ps || true
-          docker compose logs --no-color --timestamps mysql php-fpm || true
+          docker compose logs --no-color --timestamps mysql || true
       - name: Cleanup coverage shard services
         if: always()
         run: docker compose down -v --remove-orphans
