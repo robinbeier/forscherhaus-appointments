@@ -19,6 +19,25 @@ main-suite failure handling, database setup and cleanup, root deployment
 checks, and explicit deterministic integration-test settings. Path selection
 is tested by `tests/Unit/Scripts/CiPathFilterMatrixTest.php`.
 
+## Local quick and full checks
+
+`pre_pr_full.sh` runs `pre_pr_quick.sh` first and stops if it fails. The quick
+check owns the application PHPStan run, so the full check does not repeat it.
+`PRE_PR_PHPSTAN_APPLICATION_SCRIPT` still selects the command for both entry
+points; the full check forwards it to the quick check.
+
+| Check | Quick alone | Full |
+| --- | --- | --- |
+| Application PHPStan | Once | Once, through quick |
+| Request DTO checks | Included | Included through quick |
+| Broader request-contract checks | Not included | Included after quick |
+| Deep integration and optional coverage | Not included | Included |
+
+Request DTO and request-contract suites overlap but have different scopes.
+The full and changed-file architecture checks also have distinct reporting
+and scope semantics; they remain separate. Each stage keeps its existing
+Docker cleanup, including failure handling.
+
 ## Comparing CI duration
 
 Use GitHub Actions job and step timestamps for a specific before/after
