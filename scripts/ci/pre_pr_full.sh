@@ -106,8 +106,7 @@ SKIP_LOCAL_DEPS_BOOTSTRAP=1 PRE_PR_BASE_REF="$BASE_REF" PRE_PR_PHPSTAN_APPLICATI
 # down call when a pre-runtime prerequisite fails.
 trap cleanup_stack EXIT
 
-echo_section "PHPStan static-analysis gate"
-ci_docker_compose run --rm php-fpm composer "$PHPSTAN_APPLICATION_SCRIPT"
+echo_section "Request contract static-analysis gate"
 ci_docker_compose run --rm php-fpm composer "$PHPSTAN_REQUEST_CONTRACTS_L1_SCRIPT"
 ci_docker_compose run --rm php-fpm composer test:request-contracts
 ci_docker_compose run --rm php-fpm php scripts/ci/check_request_contract_adoption.php
