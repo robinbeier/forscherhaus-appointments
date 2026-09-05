@@ -705,13 +705,14 @@ function createBookingSelectionHarness(options = {}) {
                     setDateTimePickerValue(unusedTarget, value) {
                         if (rejectDateSelection) {
                             rejectDateSelection = false;
+                            date.value = null;
                             return;
                         }
 
                         date.value = moment(value).format('YYYY-MM-DD');
                     },
                     getDateTimePickerValue() {
-                        return date.value ? new Date(date.value) : new Date('2026-09-01');
+                        return date.value ? new Date(date.value) : undefined;
                     },
                     initializeDatePicker(target, options) {
                         datePickerOptions = options;
@@ -1921,7 +1922,7 @@ test('ordinary date selection preserves the pending month refresh debounce', () 
     assert.equal(harness.unavailableCalls, initialUnavailableCalls + 1);
 });
 
-test('preparation rejects when the requested date was not accepted by the date picker', async () => {
+test('preparation rejects when the date picker clears a rejected date', async () => {
     const harness = createBookingSelectionHarness();
     harness.rejectNextDateSelection();
 
