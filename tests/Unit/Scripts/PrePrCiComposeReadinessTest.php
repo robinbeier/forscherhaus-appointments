@@ -39,17 +39,11 @@ class PrePrCiComposeReadinessTest extends TestCase
         );
     }
 
-    public function testSharedSeedInstallHelperKeepsDefaultRetryBudgetForOtherCallers(): void
+    public function testSharedSeedInstallHelperKeepsDefaultRetryBudget(): void
     {
         $helper = $this->readScript('scripts/ci/docker_compose_helpers.sh');
-        $hook = $this->readScript('scripts/hooks/pre-commit');
 
         self::assertStringContainsString('local max_attempts="${CI_DOCKER_INSTALL_SEED_MAX_ATTEMPTS:-3}"', $helper);
-        self::assertStringNotContainsString('CI_DOCKER_INSTALL_SEED_MAX_ATTEMPTS=5', $hook);
-        self::assertStringContainsString(
-            'ci_docker_install_seed_instance "pre-commit" run --rm php-fpm php index.php console install',
-            $hook,
-        );
     }
 
     private function readScript(string $relativePath): string

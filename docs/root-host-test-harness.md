@@ -1,7 +1,7 @@
 # Root/Host Test Harness
 
 This document defines the supported environment contract for the Linux
-root/host PHPUnit tests that are included in the managed local hooks and in the
+root/host PHPUnit tests that are included in the managed local pre-push check and in the
 GitHub Actions `build-test` job. It changes only test-harness classification;
 it does not change a production helper, production trust boundary, or rollout
 authority.
@@ -10,7 +10,7 @@ authority.
 
 ### Local Docker Desktop
 
-The supported local path is the managed `pre-commit`/`pre-push` flow on a host
+The supported local path is the managed `pre-push` flow on a host
 with a reachable Docker Desktop daemon. The general PHPUnit suite runs as root
 inside the repository's `php-fpm` container.
 
