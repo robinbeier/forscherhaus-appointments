@@ -8,8 +8,8 @@ return [
     'percentile_method' => 'nearest_rank',
     'workload_contract' => [
         'version' => 15,
-        'cohort_epoch_utc' => '2026-09-05T09:58:02Z',
-        'workflow_jobs_sha256' => 'sha256:b721265006c4bd73e64bdc013d9f85b34fab0b25cc034be2223612e7d258f991',
+        'cohort_epoch_utc' => '2026-09-05T10:27:42Z',
+        'workflow_jobs_sha256' => 'sha256:2c964c74d39c48a61b6adab057aca3c27c19509fc152e4b40de7b04484ae7771',
     ],
     'required_success_jobs' => [
         'changes',
