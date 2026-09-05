@@ -22,12 +22,13 @@ This file stays intentionally short. It is a map, not a second runbook.
 | Agent runtime and issue-to-merge state model | `WORKFLOW.md` | Single source for active agent behavior. |
 | Machine-readable cross-document workflow invariants | `.codex/contracts/agent-workflow.json` | Structured exact-head, review, public-write, evidence, and blocking-job contract. |
 | Model-aware implementation delegation | `WORKFLOW.md`, `.codex/agents/implementation-worker.toml` | Primary-agent authority plus the pinned Luna worker boundary. |
-| Controlled parallel implementation | `WORKFLOW.md`, `.codex/contracts/agent-workflow.json`, `.codex/contracts/ownership-path-rules.json`, `scripts/agent/trusted_base_launcher.sh`, `scripts/agent/lib/trusted_base_bootstrap_contract.py`, `scripts/agent/lib/trusted_base_payload_runtime.sh`, `scripts/agent/check_parallel_work_contract.sh`, `scripts/agent/lib/OwnershipPathRuleEngineClient.php`, `scripts/agent/verify_trusted_php_runtime.py`, `scripts/agent/lib/trusted_runtime_primitives.py` | Fixed-system-Git materialization and blob verification before any checkout code, one exact-base bootstrap-manifest parser invoked at two attestation points, direct attested-runtime payload dispatch, live-main-bound admission, exact interpreter closure, and one canonical versioned exact-base Python path-rule engine behind a fail-closed local PHP client for at most two disjoint local worker lanes; primary-only external mutation and serial integration/landing. |
-| External sealed-bundle final reviewers | `code_review.md`, `.codex/contracts/agent-workflow.json`, `scripts/agent/generate_reviewer_policy_snapshot.php`, `scripts/agent/generate_reviewer_runtime_attestation.php`, `scripts/agent/trusted_base_launcher.sh`, `scripts/agent/lib/trusted_base_bootstrap_contract.py`, `scripts/agent/lib/trusted_base_payload_runtime.sh`, `scripts/agent/run_readonly_reviewer.sh`, `scripts/agent/verify_trusted_php_runtime.py`, `scripts/agent/lib/trusted_runtime_primitives.py`, `scripts/agent/lib/ReadonlyReviewBundle.php`, `scripts/agent/lib/ReadonlyReviewerModelPolicy.php`, `scripts/agent/lib/ReadonlyReviewOutput.php`, `scripts/agent/lib/readonly_reviewer_*_runtime.sh` | Fixed-system-Git exact-base materialization, one exact-base bootstrap parser reused by launcher and runtime without dropping either check, direct attested-runtime dispatch of the private exact-base payload, one declarative reviewer-policy authority with separately generated deterministic snapshot and complete code-side attestation, exact-head deterministic zero-context text patch, separated bundle/model/output contracts, attested helper and Codex runtimes, outer Seatbelt plus Codex read-only isolation, model-free non-review diagnostic, pinned no-tool review, and privacy-safe fail-closed output; no worktree, credentials, connectors, delegation, or external writes. |
+| Controlled parallel implementation | `WORKFLOW.md`, `docs/optional-agent-review.md` | Existing opt-in lane admission; primary-owned integration and publication. |
+| Optional legacy sealed reviewers | `docs/optional-agent-review.md`, `.codex/contracts/agent-workflow.json` | Explicit opt-in only; no separate CLI or bootstrap prerequisite for standard review. |
 | Compact guardrails and command entry points | `AGENTS.md` | Cross-topic entry point without duplicating specialist docs. |
 | Core pre-PR path | `scripts/ci/pre_pr_quick.sh`, `scripts/ci/pre_pr_full.sh` | Actual executable gate logic. |
 | CI gate semantics and job wiring | `.github/workflows/ci.yml` | Ground truth for job triggers, blocking status, and artifacts. |
-| Read-only exact-head landing decision | `docs/exact-head-mergegate.md`, `scripts/ci/check_exact_head_mergegate.php` | Canonical PR/SHA inputs, exhaustive blocking-check policy, final-review attestation, sanitized report, and fail-closed exit codes. |
+| Standard review and landing | `WORKFLOW.md`, `code_review.md` | One independent reviewer, risk-based specialists, current blocking CI, and authorized merge of the reviewed head. |
+| Optional legacy mergegate | `docs/exact-head-mergegate.md`, `scripts/ci/check_exact_head_mergegate.php` | Existing opt-in attestation verifier; not required by the standard path. |
 | Local/CI root-host test prerequisites | `docs/root-host-test-harness.md` | Docker Desktop skip boundaries, required Linux-root failures, and security invariants. |
 | CI performance measurement and baseline | `docs/ci-performance-baseline.md` | Versioned workload epoch, timing definitions, exclusions, and post-epoch cohort status. |
 | Observability runtime ownership | `docs/observability.md` | Runtime split between release gates, Kuma, and Sentry. |
@@ -57,13 +58,13 @@ This file stays intentionally short. It is a map, not a second runbook.
   - `bash ./scripts/ci/pre_pr_quick.sh`
 - Full local review-ready gate; not merge authorization:
   - `PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh`
-- Exact-head landing evidence:
-  - follow `WORKFLOW.md` and `docs/exact-head-mergegate.md`; after blocking
-    CI and the required final reviews target the same unchanged current PR
-    head, run:
-    `composer check:exact-head-mergegate -- --pr=<number-or-canonical-url> --reviewed-sha=<40-character-sha>`
-  - only its exit `0` permits the move to `Ready to Merge`; the command is
-    read-only and never supplies merge or production authority
+- Standard review and landing:
+  - follow `WORKFLOW.md`: record independent review for the current PR head,
+    check applicable blocking CI and unresolved findings, and merge only with
+    user authorization and `--match-head-commit`
+  - no separate CLI login, sealed runner, or attestation command is required
+- Optional legacy tooling:
+  - `docs/optional-agent-review.md` and `docs/exact-head-mergegate.md`
 - Harness readiness score:
   - `composer check:agent-harness-readiness`
   - The machine contract owns the supported CI-condition tokens and binds

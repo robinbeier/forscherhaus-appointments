@@ -7,9 +7,9 @@ description: Drive an open PR from merge prep through merge by syncing the branc
 
 # Land
 
-Use this skill when the PR head is already exact-head review-clean and should
-be shepherded through the repository mergegate, `Ready to Merge`, and the
-actual merge.
+Use this skill only when merging is authorized. Follow the standard independent
+review path in `WORKFLOW.md`; the optional legacy attestation tool is not a
+prerequisite for landing.
 
 ## Goals
 
@@ -33,7 +33,7 @@ contract.
    [$pull](../pull/SKILL.md), then push the result.
     - Any push after `Ready to Merge` immediately invalidates the landing
       evidence. Move the Linear issue back to `In Review`, rerun exact-head CI
-      and the required final reviews on the new head, and restore
+      and an independent review of the delta and affected paths on the new head, and restore
       `Ready to Merge` only after that evidence is green again.
 4. Start or resume [$babysit-pr](../babysit-pr/SKILL.md) and keep it running
    until one of these is true:
@@ -45,21 +45,19 @@ contract.
     - move the Linear issue to `Rework` with [$linear](../linear/SKILL.md)
     - update the workpad
     - fix the code, commit, and push; after any fix/commit/push, return the
-      issue to `In Review` and rerun exact-head CI plus all required final
-      reviews on the new head before restoring `Ready to Merge`
+      issue to `In Review` and rerun exact-head CI and update independent review for the new head
+      after checking the delta and affected paths before restoring `Ready to Merge`
     - return to the watcher only after that new-head evidence is available
 6. Once the PR is green, review-clean, and mergeable:
-    - publish a new, unedited privacy-safe final-review attestation with the
-      current formal-review and inline-review-comment watermarks plus the
-      formal-review payload digest described in `docs/exact-head-mergegate.md`
-    - run
-      `composer check:exact-head-mergegate -- --pr=<number-or-canonical-url> --reviewed-sha=<current_head_sha>`
-    - require its bounded PR-identity and repeated CI-and-review evidence
-      observations to remain unchanged through the final read; run it from the
-      exact reviewed `HEAD` with the contract and mergegate files clean
-    - only after exit `0`, move the Linear issue to `Ready to Merge`
-    - confirm the current PR head still matches that exact reviewed,
-      CI-green, mergegate-approved head
+    - read the current PR head, applicable blocking CI results, and review feedback
+    - require a review summary for that head from an independent reviewer;
+      include scope, outcome, and any risk-based specialist or substitution
+    - do not accept missing, pending, failed, or unexpectedly skipped blocking checks
+    - ensure substantive findings are fixed or rejected with a concrete rationale;
+      unresolved blocking reviews prevent landing
+    - confirm that the user authorized merging, not merely PR creation
+    - move an associated Linear issue to `Ready to Merge`
+    - keep the verified SHA for the compare-and-swap merge below
 7. Merge it explicitly:
     - `gh pr merge --merge --match-head-commit <current_head_sha>`
     - do not force `--delete-branch` from inside the worker worktree; local
@@ -74,8 +72,9 @@ contract.
 ## Guardrails
 
 - Do not enable auto-merge just to wait silently.
-- Do not merge with unresolved review feedback.
+- Do not merge with unresolved substantive review findings.
+- Broaden a delta review when scope or risk changed; record the new reviewed SHA.
 - Do not merge a later head than the one that was reviewed and passed
-  blocking CI and the exact-head mergegate.
+  blocking CI.
 - If the watcher surfaces a real blocker, stop and report it clearly.
 - Keep the workpad compact and do not duplicate the PR URL there.

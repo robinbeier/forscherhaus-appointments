@@ -95,134 +95,33 @@ Use the reviewer roles with this split:
 - `pr_explorer`, `reviewer_tests`, and `reviewer_design` are bounded support reviewers that should return distilled evidence for the parent reviewer to synthesize.
 - An `implementation_worker` must never be the sole reviewer of its own diff; preserve an independent reviewer role and primary-agent synthesis.
 
-Authority-, secret-, identity-, transaction-, and concurrency-sensitive diffs
-require three independent final reviews on the same unchanged exact head:
+The default is one independent reviewer covering all four topics above.
+Use a read-only reviewer available in the current environment or a human who
+did not implement the change. Provide the relevant surrounding code and tests;
+do not restrict a normal review to isolated added lines. Reviewer instructions
+are not operating-system isolation: preserve the runtime's read-only controls
+and never give a reviewer credentials, production data, or publishing authority.
 
-- `reviewer_correctness` for correctness and security
-- `reviewer_design` for architecture and maintainability
-- `reviewer_tests` for regression coverage and flake risk
+For authority, personal-data, migration, concurrency, or production risks, add
+specialist review when the general reviewer cannot adequately assess the risk.
+Explain that choice in the PR instead of requiring a fixed number of lenses.
+The primary synthesizes the result and remains responsible for landing.
 
-Invoke final lenses through the fixed-system-Git exact-base protocol in
-`scripts/agent/trusted_base_launcher.sh`, using the trusted base described in
-`WORKFLOW.md`; never execute either checked-out harness script. The launcher
-resolves the shared runtime and reviewer payload only from the exact-base
-`trusted_base_bootstrap` manifest and materializes both only after the base
-boundary is established. A fixed, exact-base-materialized bootstrap parser is
-the single implementation of that manifest contract; launcher and runtime call
-it at independent attestation points. The launcher starts that attested runtime
-directly; the runtime dispatches only the separately attested payload,
-revalidates the same manifest, retains an intentionally independent structural
-cross-check as a security floor, and owns clean Git/Python plus exact-base declared
-path materialization for reviewer and parallel-work payloads. The declared
-launcher and runtime environment paths must equal their actual Bash source
-paths; a pristine path supplied alongside different executed bytes fails
-closed. The declared
-reviewer payload remains `scripts/agent/run_readonly_reviewer.sh`. The runner and
-`.codex/contracts/agent-workflow.json` own live-main/exact-merge-base binding,
-deterministic SHA-256 bundle construction, and trusted-path selection. Do not
-duplicate its bootstrap and materialization internals here. The contract pins
-the official 0.145.0 release digest.
-The machine contract owns runtime pins, disabled reviewer tools, output schema,
-and trusted paths; its deterministic committed reviewer-policy snapshot must
-pass `php scripts/agent/generate_reviewer_policy_snapshot.php --check`. That
-snapshot generator never mutates runtime code. The separate
-`php scripts/agent/generate_reviewer_runtime_attestation.php --check` command
-guards a dedicated generated code-side attestation artifact over every reviewer
-policy field without rewriting runtime enforcement code, while explicit
-security floors remain independently enforced; changes to either generator are
-themselves bootstrap-reviewed. Bundle
-construction, model/prompt policy, and output
-validation are separate modules. Structural output rules come from the
-exact-base schema; exact Base/Head/lens/path and privacy are additional semantic
-checks. The runner orchestrates separately materialized exact-base
-bundle and isolated-runtime libraries for deterministic SHA-256 serialization,
-macOS Seatbelt default-deny isolation, canaries, and bounded privacy-safe
-output. The sealed bundle is the sole review input. It carries only a
-zero-context UTF-8 patch, changed paths, deterministic manifest, and allowlisted
-trusted base policy; full base/head blobs and binary payloads are rejected, and
-unchanged hunk context including section headings is stripped before the model
-call. The original worktree, `.git`,
-user configuration, connectors, delegation, credentials, and external writes
-remain unavailable. Non-macOS execution fails closed. The host
-login authenticates only the authorized model request and cannot be refreshed by
-the harness. On pinned CLI 0.145.0, debug preflights use the clean synthetic
-`HOME`/`CODEX_HOME` and sealed working directory because all three
-config-isolation flags are rejected by the debug ABI; the final exec requires
-all three.
-Consult the contract and runner for implementation details.
-Before any PHP helper executes, a root-owned clean bootstrap and isolated
-system Python use the policy/CLI entry point in
-`scripts/agent/verify_trusted_php_runtime.py` and the separately scoped
-file/archive/ELF/dependency primitives in
-`scripts/agent/lib/trusted_runtime_primitives.py` to attest the PHP binary plus
-its dynamic dependency closure against an exact per-platform pin in the
-exact-base contract. Fixed host closures must
-also be entirely system-owned; missing pins and ambient, user-owned, or drifted
-runtimes fail closed. An admitted platform may instead materialize the single
-runtime member from an exact URL and archive/member digest into its private
-control directory. macOS dependencies are inspected without execution; pinned
-Linux archives must parse as the expected static ELF architecture with no
-interpreter or needed library, so user-owned code is never passed to `ldd`.
-That path rejects extra archive members and non-system dynamic dependencies,
-and it still must match the exact aggregate closure pin before PHP executes.
+Record the reviewed commit, scope, findings or `no findings`, and any specialist
+review or reviewer substitution. After a push, independently review the delta
+and affected paths and update the summary to the new head. Broaden that review
+if scope or risk changed. Group actionable findings into a correction pass;
+non-blocking suggestions must not restart a completed review cycle.
 
-The selected Codex release is copied into the private control directory,
-rehashed, and inspected without execution. Its exact system-only dynamic
-dependency closure must match the per-platform contract pin before the first
-`codex` invocation. Any non-system dependency or broad package-manager library
-allowance fails closed.
-
-The initial trust-root introduction and changes to runtime-loaded
-`.codex/config.toml`, any `AGENTS.md`, or any bootstrap, role, schema, isolation,
-runtime, or policy-context path declared by the exact-base reviewer contract
-require a separately enforced external read-only bootstrap review. The runner
-derives that fail-closed set from the base contract and refuses those cases
-instead of allowing a head to review its own authority boundary. The model call
-remains inside both the outer Seatbelt profile and Codex `read-only` sandboxing
-with approval mode `never`.
-
-The Primary can use `--diagnostic-bootstrap-only`, without `--codex-bin`, to
-exercise the same exact-base launcher, attested PHP bootstrap, and real macOS
-Seatbelt allow/deny boundary without a model call. It never writes a user-home
-canary and reports `review_evidence: false`; it is diagnostic evidence only and
-never substitutes for a required reviewer lens.
-
-Any later push invalidates those final reviews and requires exact-head review
-again.
-
-The read-only exact-head mergegate does not replace reviewer judgment. After
-the three final reviews are finding-free, the primary agent records one
-new, unedited, owner-authored, privacy-safe attestation for their unchanged
-head as described in `docs/exact-head-mergegate.md`. The gate checks that
-attestation, exact review-activity watermarks plus a privacy-safe formal-review
-payload digest, blocking CI, mergeability, and two identical bounded CI-and-
-review evidence observations. PR identity is observed before, between, and
-after those observations; all three reads must remain equal. The gate must run
-from the exact reviewed `HEAD` with its contract and implementation unchanged.
-A still-active `CHANGES_REQUESTED` review, watermark or payload drift, edited
-inline feedback, newer trusted review feedback, or a newer invalid attestation
-marker invalidates the attestation; close or resolve the finding and publish a
-fresh attestation comment before rerunning the gate.
-
-The attestation is an accountable owner assertion, not cryptographic proof of
-agent execution. The repository-local gate is designed to prevent accidental
-or stale landing evidence; a malicious repository owner is outside its threat
-model because that owner can already bypass the local process and merge
-directly. Recording reviews that did not run remains a process violation.
-
-The mergegate's lens source is explicitly
-`review.sensitive_change_lenses` in
-`.codex/contracts/agent-workflow.json`, so review taxonomy changes are
-contract changes and cannot silently drift from the landing policy.
-
-Default reviewer depth should match the change:
-
-- For small scoped product/UI changes, start with `pr_explorer` plus `reviewer_correctness`.
-- Add `reviewer_tests` only when validation adequacy is genuinely uncertain for the changed behavior.
-- Add `reviewer_design` only when the diff materially affects long-lived seams, architecture, or reuse boundaries.
-- Apply the mandatory three-lens rule above instead of these defaults for
-  security-sensitive write and authority changes.
-- Use `docs_researcher` only when framework, library, platform, or external API assumptions matter.
+No separate CLI login or external bootstrap review is required for standard
+review, including changes to review-tool code or policy. If a reviewer is
+unavailable, use another available independent reviewer or a human; keep the
+PR open if no independent review can be obtained. The sealed runner and the
+attestation mergegate are optional legacy tooling described in
+[optional agent tooling](docs/optional-agent-review.md), not prerequisites.
+Current blocking CI, resolved substantive findings, an updated independent
+review summary, and explicit merge authorization are still required by
+[WORKFLOW.md](WORKFLOW.md#pr-and-review-expectations).
 
 When a change depends on framework, library, or external API behavior, verify the assumption against primary documentation instead of guessing.
 

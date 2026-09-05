@@ -326,7 +326,7 @@
             "pr_revalidation": "before_between_and_after_bounded_evidence_observations",
             "ci_evidence_revalidation": "two_identical_bounded_observations",
             "review_evidence_revalidation": "two_identical_bounded_observations",
-            "review_lens_source": "review.sensitive_change_lenses",
+            "review_lens_source": "land.exact_head_mergegate.required_review_lenses",
             "workflow_parser": {
                 "isolation": "php_no_ini_scoped_autoloader",
                 "package_path": "vendor/symfony/yaml",
@@ -376,12 +376,21 @@
                 "activity_watermarks": ["review_id", "review_comment_id", "review_payload_digest"],
                 "trusted_author_associations": ["OWNER"],
                 "blocking_feedback_author_associations": ["OWNER", "MEMBER", "COLLABORATOR"]
-            }
-        }
+            },
+            "required_review_lenses": ["correctness_security", "design_maintainability", "tests_regression_flake"]
+        },
+        "requires_independent_review": true,
+        "requires_current_blocking_ci": true,
+        "requires_exact_head_mergegate": false
     },
     "review": {
-        "sensitive_changes_require_independent_final_reviews": true,
-        "sensitive_change_lenses": ["correctness_security", "design_maintainability", "tests_regression_flake"]
+        "mode": "standard",
+        "minimum_independent_reviewers": 1,
+        "specialist_review": "risk_based",
+        "execution": "available_read_only_reviewer_or_human",
+        "requires_sealed_runner": false,
+        "requires_external_bootstrap_review": false,
+        "summary_binds_reviewed_head": true
     },
     "public_write": {
         "caller_supplied_values_create_authority": false,
@@ -398,20 +407,26 @@
         "WORKFLOW.md": {
             "contract_reference": ".codex/contracts/agent-workflow.json",
             "required_sections": {
-                "## Controlled Parallel Work": [
-                    "Parallel work means local implementation only",
-                    "Do not replace this with an ambient `git",
-                    "Exactly one primary remains the external single writer",
-                    "A merge invalidates the base of every remaining lane"
-                ],
+                "## Controlled Parallel Work": ["Parallel work means local implementation only"],
                 "### 3. Validate locally": [
-                    "blocking GitHub CI plus final reviews on the unchanged exact PR head establish"
+                    "blocking GitHub CI plus independent review on the unchanged exact PR head establish"
                 ],
                 "### 5. Rework loop": ["Every push after review or CI evidence was collected invalidates that landing"],
                 "## PR and Review Expectations": [
-                    "changes require a third independent lens:",
-                    "Final reviews and blocking CI must all target the current unchanged exact PR",
-                    "An exit `0` is required before `Ready to Merge`"
+                    "The standard path requires one independent reviewer",
+                    "Standard review does not require a separate Codex CLI login",
+                    "all applicable blocking CI checks",
+                    "the user has authorized merging"
+                ]
+            }
+        },
+        "docs/optional-agent-review.md": {
+            "contract_reference": ".codex/contracts/agent-workflow.json",
+            "required_sections": {
+                "## Controlled Parallel Work": [
+                    "Do not replace this with an ambient `git",
+                    "Exactly one primary remains the external single writer",
+                    "A merge invalidates the base of every remaining lane"
                 ]
             }
         },
@@ -419,11 +434,9 @@
             "contract_reference": ".codex/contracts/agent-workflow.json",
             "required_sections": {
                 "## Review Process": [
-                    "scripts/agent/run_readonly_reviewer.sh",
-                    "official 0.145.0 release digest",
-                    "require three independent final reviews on the same unchanged exact head",
-                    "Any later push invalidates those final reviews and requires exact-head review",
-                    "The read-only exact-head mergegate does not replace reviewer judgment."
+                    "The default is one independent reviewer",
+                    "Record the reviewed commit",
+                    "No separate CLI login or external bootstrap review is required"
                 ]
             }
         },
@@ -464,19 +477,14 @@
         ".github/pull_request_template.md": {
             "contract_reference": ".codex/contracts/agent-workflow.json",
             "required_sections": {
-                "## Reviewer A (Bugs/Regression/Security/Edge Cases)": [
-                    "- [ ] Keine offensichtliche Security-Regression"
-                ],
-                "## Reviewer B (Architektur/Lesbarkeit/Wartbarkeit)": ["- [ ] Architekturgrenzen und Struktur passen"],
-                "## Reviewer C (Tests/Regression/Flake-Risiko)": [
-                    "- [ ] Nullmutation und Side-Effect-Grenzen bei Ablehnung geprueft"
-                ],
+                "## Independent Review": ["- Reviewed commit:", "- Result and handled findings:"],
                 "## Merge Readiness": [
                     "- [ ] Blocking CI ist gruen",
-                    "- [ ] Keine offenen Review-Findings",
-                    "- [ ] PR-Head, CI-Head und final reviewter Head sind identisch",
+                    "- [ ] Keine offenen blockierenden Review-Findings",
+                    "- [ ] Unabhaengige Review fuer den aktuellen Head ist dokumentiert",
+                    "- [ ] PR-Head, CI-Head und reviewter Head sind identisch",
                     "- [ ] PR ist mergeable",
-                    "- [ ] Read-only Exact-Head-Mergegate ist fuer diesen unveraenderten Head gruen"
+                    "- [ ] Merge ist vom Nutzer autorisiert"
                 ]
             }
         }
@@ -584,7 +592,9 @@
                 "timeout_minutes": 35,
                 "condition": {
                     "all": [
-                        {"call": "always"},
+                        {
+                            "call": "always"
+                        },
                         {
                             "equals": ["needs.changes.outputs.write_contract_booking", "true"]
                         },
@@ -630,7 +640,9 @@
                 "timeout_minutes": 35,
                 "condition": {
                     "all": [
-                        {"call": "always"},
+                        {
+                            "call": "always"
+                        },
                         {
                             "equals": ["needs.changes.outputs.write_contract_api", "true"]
                         },

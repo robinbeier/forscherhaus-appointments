@@ -34,37 +34,25 @@ PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh
 
 <!-- Offene Folgearbeiten mit Issue-Referenzen -->
 
-## Reviewer A (Bugs/Regression/Security/Edge Cases)
+## Independent Review
 
-- [ ] Laufzeitverhalten gegen Erwartung geprueft
-- [ ] Edge Cases und Fehlerpfade geprueft
-- [ ] Keine offensichtliche Security-Regression
-- [ ] Findings dokumentiert oder explizit: keine Findings
+<!-- Eine unabhaengige Review deckt Korrektheit, Sicherheit, Tests und
+Wartbarkeit ab. Keine feste Zahl von Spezialreviews; WORKFLOW.md gilt. -->
 
-## Reviewer B (Architektur/Lesbarkeit/Wartbarkeit)
-
-- [ ] Architekturgrenzen und Struktur passen
-- [ ] Code ist nachvollziehbar und wartbar
-- [ ] Findings dokumentiert oder explizit: keine Findings
-
-## Reviewer C (Tests/Regression/Flake-Risiko)
-
-<!-- Pflicht fuer Authority-, Secret-, Identitaets-, Transaktions- und
-Concurrency-Aenderungen; sonst N/A mit kurzer Begruendung. -->
-
-- [ ] Positive, negative und Race-Pfade angemessen abgedeckt
-- [ ] Nullmutation und Side-Effect-Grenzen bei Ablehnung geprueft
-- [ ] Flake-Risiko und Aussagekraft der ausgefuehrten Tests geprueft
-- [ ] Findings dokumentiert, explizit keine Findings oder begruendet N/A
+- Reviewed commit:
+- Reviewer and scope:
+- Result and handled findings:
+- Specialist review or reviewer substitution: <!-- Begruendung oder nicht erforderlich -->
 
 ## Merge Readiness
 
 - [ ] Blocking CI ist gruen
-- [ ] Keine offenen Review-Findings
-- [ ] PR-Head, CI-Head und final reviewter Head sind identisch
+- [ ] Keine offenen blockierenden Review-Findings
+- [ ] Unabhaengige Review fuer den aktuellen Head ist dokumentiert
+- [ ] PR-Head, CI-Head und reviewter Head sind identisch
 - [ ] PR ist mergeable
-- [ ] Read-only Exact-Head-Mergegate ist fuer diesen unveraenderten Head gruen
 - [ ] Noetige Docs/Migrationshinweise sind enthalten
+- [ ] Merge ist vom Nutzer autorisiert
 
 ## Workflow References
 

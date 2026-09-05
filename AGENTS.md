@@ -32,6 +32,14 @@ Purpose: durable repo instructions for Codex. Keep this file short; long or topi
   Git, Linear, merge, and production authority; `WORKFLOW.md` is canonical for
   runtime and model details.
 
+## Review Default
+
+- Use one independent read-only reviewer with enough code context; add a
+  specialist when the actual risk warrants one. Follow `code_review.md`.
+- Standard review and PR creation do not require a separate CLI login,
+  sealed reviewer, or external bootstrap. Keep current blocking CI and
+  reviewed-head checks; `WORKFLOW.md` defines landing and authorization.
+
 ## Default Path
 
 Start here for most review-ready changes:

@@ -69,6 +69,59 @@ final class ExactHeadMergegateCliTest extends TestCase
         self::assertNotContains('Command/LintCommand.php', $policy['workflow_yaml_runtime_files']);
     }
 
+    public function testLegacyMergegateReadsRequiredLensesFromItsOwnPolicySection(): void
+    {
+        $root = dirname(__DIR__, 3);
+        $contract = json_decode(
+            (string) file_get_contents($root . '/.codex/contracts/agent-workflow.json'),
+            true,
+            128,
+            JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($contract);
+        $contract['land']['exact_head_mergegate']['required_review_lenses'] = ['legacy_lens'];
+        unset($contract['review']);
+
+        $policy = decodeExactHeadMergegatePolicy(json_encode($contract, JSON_THROW_ON_ERROR));
+
+        self::assertSame(['legacy_lens'], $policy['required_review_lenses']);
+    }
+
+    public function testLegacyMergegateRejectsMissingNestedLensesWithoutGlobalFallback(): void
+    {
+        $root = dirname(__DIR__, 3);
+        $contract = json_decode(
+            (string) file_get_contents($root . '/.codex/contracts/agent-workflow.json'),
+            true,
+            128,
+            JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($contract);
+        unset($contract['land']['exact_head_mergegate']['required_review_lenses']);
+        $contract['review']['sensitive_change_lenses'] = ['legacy_global_lens'];
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Exact-head mergegate contract contains an invalid list.');
+        decodeExactHeadMergegatePolicy(json_encode($contract, JSON_THROW_ON_ERROR));
+    }
+
+    public function testLegacyMergegateRejectsAnIncorrectLensSourceDeclaration(): void
+    {
+        $root = dirname(__DIR__, 3);
+        $contract = json_decode(
+            (string) file_get_contents($root . '/.codex/contracts/agent-workflow.json'),
+            true,
+            128,
+            JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($contract);
+        $contract['land']['exact_head_mergegate']['review_lens_source'] = 'review.sensitive_change_lenses';
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Exact-head mergegate contract is malformed.');
+        decodeExactHeadMergegatePolicy(json_encode($contract, JSON_THROW_ON_ERROR));
+    }
+
     public function testIsolatedWorkflowParserPinsYamlRuntimeIgnoresAmbientClassAndUsesPortableDigits(): void
     {
         $root = dirname(__DIR__, 3);

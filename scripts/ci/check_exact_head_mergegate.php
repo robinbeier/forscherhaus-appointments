@@ -603,7 +603,6 @@ function decodeExactHeadMergegatePolicy(string $contents): array
     }
 
     $mergegate = $contract['land']['exact_head_mergegate'] ?? null;
-    $review = $contract['review'] ?? null;
     $ci = $contract['ci'] ?? null;
     if (
         !is_array($mergegate) ||
@@ -611,8 +610,7 @@ function decodeExactHeadMergegatePolicy(string $contents): array
         ($mergegate['pr_revalidation'] ?? null) !== 'before_between_and_after_bounded_evidence_observations' ||
         ($mergegate['ci_evidence_revalidation'] ?? null) !== 'two_identical_bounded_observations' ||
         ($mergegate['review_evidence_revalidation'] ?? null) !== 'two_identical_bounded_observations' ||
-        ($mergegate['review_lens_source'] ?? null) !== 'review.sensitive_change_lenses' ||
-        !is_array($review) ||
+        ($mergegate['review_lens_source'] ?? null) !== 'land.exact_head_mergegate.required_review_lenses' ||
         !is_array($ci) ||
         !is_array($mergegate['review_attestation'] ?? null) ||
         !is_array($mergegate['workflow_parser'] ?? null) ||
@@ -674,7 +672,7 @@ function decodeExactHeadMergegatePolicy(string $contents): array
         'workflow_name' => requireExactHeadMergegatePolicyString($mergegate, 'workflow_name'),
         'required_checks' => $requiredChecks,
         'conditional_checks' => $conditionalChecks,
-        'required_review_lenses' => normalizeExactHeadMergegateStringList($review['sensitive_change_lenses'] ?? null),
+        'required_review_lenses' => normalizeExactHeadMergegateStringList($mergegate['required_review_lenses'] ?? null),
         'trusted_associations' => normalizeExactHeadMergegateStringList(
             $attestation['trusted_author_associations'] ?? null,
         ),
