@@ -1,9 +1,10 @@
 # Production Journal Maintenance
 
 Use systemd's built-in journal rotation and the existing host disk-space alert.
-There is no repository-owned journal helper, scheduled vacuum, or separate
-journal-retention monitor. The repository does not impose a 1 GiB / 30-day
-policy. Merging this documentation does not change production configuration.
+There is no repository-owned journal helper or scheduled vacuum. The immutable
+Kuma v1 bundle retains its old, disabled-by-default journal monitor branch for
+compatibility; do not enable it after retiring the helper. The repository does
+not impose a 1 GiB / 30-day policy. Merging this documentation does not change production configuration.
 
 ## Inspect before deciding
 
@@ -51,8 +52,9 @@ setting before introducing another tool or scheduled job.
 ## Existing installations
 
 The retired helper was not installed and its optional monitor was disabled on
-the checked production host on 2026-09-05. A repository update does not remove
-host-local files or refresh the separately installed Kuma runtime bundle.
+the checked production host on 2026-09-05. The Kuma v1 bundle remains
+byte-identical so existing installations still validate against its manifest. A repository update does not remove host-local
+files.
 If another host has the old helper, managed drop-in, or journal monitor enabled,
-review that installation before updating its monitoring runtime. Keep the
-ordinary disk, memory, load, and other retention checks.
+review that installation separately; do not remove its live helper while the
+old monitor depends on it. Keep the ordinary disk, memory, load, and other retention checks.
