@@ -602,10 +602,7 @@ class AgentWorkflowContractTest extends TestCase
         self::assertFalse($contract['evidence_privacy']['allow_personal_data'] ?? null);
         self::assertSame('strict-v1', $contract['ci']['blocking_failure_control_policy'] ?? null);
         self::assertSame('explicit-v1', $contract['ci']['job_classification_policy'] ?? null);
-        self::assertSame(
-            ['heavy-job-duration-trends', 'pdf-renderer-latency'],
-            $contract['ci']['advisory_jobs'] ?? null,
-        );
+        self::assertSame(['pdf-renderer-latency'], $contract['ci']['advisory_jobs'] ?? null);
         self::assertArrayNotHasKey('unclassified_job_policy', $contract['ci']);
         self::assertArrayNotHasKey('blocking_failure_controls', $contract['ci']);
         self::assertArrayNotHasKey('blocking_execution_sha256', $contract['ci']);

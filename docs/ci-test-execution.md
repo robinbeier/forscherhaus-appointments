@@ -45,9 +45,9 @@ comparison. Record both run links and the changed workload. A shorter parallel
 job does not necessarily shorten the overall workflow by the same amount.
 Do not describe two runs as an established statistical baseline.
 
-The automatic versioned timing-cohort report has been removed. CI changes no
-longer require a timing epoch or an all-job timing fingerprint update. The
-separate execution checks and advisory heavy-job duration report remain.
+Automatic timing-cohort and heavy-job duration trend reports have been removed.
+CI changes require no timing epoch, all-job timing fingerprint update or
+maintained duration thresholds. Execution checks remain in place.
 
 For the coverage-selection change in PR #400, the unit coverage step took
 6m45s in [run 33961076120](https://github.com/robinbeier/forscherhaus-appointments/actions/runs/33961076120)
