@@ -2,6 +2,9 @@
 
 `.github/workflows/ci.yml` defines job triggers and blocking behavior.
 
+For booking journeys and their concrete protection, see the
+[booking test map](booking-test-map.md).
+
 ## Main tests and coverage
 
 - `phpunit.xml` runs the main unit suite, including CI and operations tooling

@@ -22,73 +22,7 @@ class ParentCascadeBufferCleanupTest extends TestCase
         $this->servicesModel = $CI->services_model;
     }
 
-    public function test_deleting_customer_removes_linked_buffer_blocks(): void
-    {
-        $provider_id = $this->findProviderId();
-
-        if ($provider_id === null) {
-            $this->markTestSkipped('No provider record available for customer delete cascade test.');
-        }
-
-        $customer_id = $this->createCustomer();
-        $service_id = $this->createService();
-        $appointment_ids = [];
-
-        try {
-            $appointment_id = $this->createParentAppointment($provider_id, $customer_id, $service_id);
-            $buffer_block_id = $this->createBufferBlock($provider_id, $appointment_id);
-            $appointment_ids = [$appointment_id, $buffer_block_id];
-
-            $this->assertTrue($this->recordExists('appointments', $appointment_id));
-            $this->assertTrue($this->recordExists('appointments', $buffer_block_id));
-
-            $this->customersModel->delete($customer_id);
-
-            $this->assertFalse($this->recordExists('users', $customer_id));
-            $this->assertFalse($this->recordExists('appointments', $appointment_id));
-            $this->assertFalse($this->recordExists('appointments', $buffer_block_id));
-            $appointment_ids = [];
-        } finally {
-            $this->forceDeleteRecords('appointments', $appointment_ids);
-            $this->forceDeleteRecords('services', [$service_id]);
-            $this->forceDeleteRecords('users', [$customer_id]);
-        }
-    }
-
-    public function test_deleting_service_removes_linked_buffer_blocks(): void
-    {
-        $provider_id = $this->findProviderId();
-
-        if ($provider_id === null) {
-            $this->markTestSkipped('No provider record available for service delete cascade test.');
-        }
-
-        $customer_id = $this->createCustomer();
-        $service_id = $this->createService();
-        $appointment_ids = [];
-
-        try {
-            $appointment_id = $this->createParentAppointment($provider_id, $customer_id, $service_id);
-            $buffer_block_id = $this->createBufferBlock($provider_id, $appointment_id);
-            $appointment_ids = [$appointment_id, $buffer_block_id];
-
-            $this->assertTrue($this->recordExists('appointments', $appointment_id));
-            $this->assertTrue($this->recordExists('appointments', $buffer_block_id));
-
-            $this->servicesModel->delete($service_id);
-
-            $this->assertFalse($this->recordExists('services', $service_id));
-            $this->assertFalse($this->recordExists('appointments', $appointment_id));
-            $this->assertFalse($this->recordExists('appointments', $buffer_block_id));
-            $appointment_ids = [];
-        } finally {
-            $this->forceDeleteRecords('appointments', $appointment_ids);
-            $this->forceDeleteRecords('services', [$service_id]);
-            $this->forceDeleteRecords('users', [$customer_id]);
-        }
-    }
-
-    public function test_deleting_customer_keeps_other_customers_buffer_blocks(): void
+    public function test_deleting_customer_removes_own_appointments_and_buffers_and_keeps_others(): void
     {
         $provider_id = $this->findProviderId();
 
@@ -108,6 +42,11 @@ class ParentCascadeBufferCleanupTest extends TestCase
             $other_buffer_block_id = $this->createBufferBlock($provider_id, $other_appointment_id);
             $appointment_ids = [$appointment_id, $buffer_block_id, $other_appointment_id, $other_buffer_block_id];
 
+            $this->assertTrue($this->recordExists('appointments', $appointment_id));
+            $this->assertTrue($this->recordExists('appointments', $buffer_block_id));
+            $this->assertTrue($this->recordExists('appointments', $other_appointment_id));
+            $this->assertTrue($this->recordExists('appointments', $other_buffer_block_id));
+
             $this->customersModel->delete($customer_id);
 
             $this->assertFalse($this->recordExists('users', $customer_id));
@@ -122,7 +61,7 @@ class ParentCascadeBufferCleanupTest extends TestCase
         }
     }
 
-    public function test_deleting_service_keeps_other_services_buffer_blocks(): void
+    public function test_deleting_service_removes_own_appointments_and_buffers_and_keeps_others(): void
     {
         $provider_id = $this->findProviderId();
 
@@ -141,6 +80,11 @@ class ParentCascadeBufferCleanupTest extends TestCase
             $other_appointment_id = $this->createParentAppointment($provider_id, $customer_id, $other_service_id);
             $other_buffer_block_id = $this->createBufferBlock($provider_id, $other_appointment_id);
             $appointment_ids = [$appointment_id, $buffer_block_id, $other_appointment_id, $other_buffer_block_id];
+
+            $this->assertTrue($this->recordExists('appointments', $appointment_id));
+            $this->assertTrue($this->recordExists('appointments', $buffer_block_id));
+            $this->assertTrue($this->recordExists('appointments', $other_appointment_id));
+            $this->assertTrue($this->recordExists('appointments', $other_buffer_block_id));
 
             $this->servicesModel->delete($service_id);
 
@@ -279,10 +223,7 @@ class ParentCascadeBufferCleanupTest extends TestCase
 
         $CI = &get_instance();
 
-        return $CI->db
-            ->from($table)
-            ->where('id', $id)
-            ->count_all_results() > 0;
+        return $CI->db->from($table)->where('id', $id)->count_all_results() > 0;
     }
 
     /**
