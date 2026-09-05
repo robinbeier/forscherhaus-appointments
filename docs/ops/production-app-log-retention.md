@@ -39,14 +39,15 @@ no in-place rollback; preserve needed evidence first.
 If repeat inspections show meaningful sustained growth, first investigate its
 cause, then consider the simplest suitable retention mechanism.
 
-## Existing installations
+## Production scope
 
-On the host checked on 2026-09-05, the retired helper, service, timer, and success
-marker were absent; its optional retention monitor was disabled. Repository
-removal does not uninstall anything on another host.
+This project operates exactly one production server. On that server, the
+read-only check on 2026-09-05 confirmed that the retired helper, service, timer,
+and success marker were absent and the optional retention monitor was disabled.
+There is no installed app-log cleanup automation to decommission as part of
+this removal. Repository merge does not perform production changes.
 
 The immutable Kuma v1 bundle remains byte-identical, including its old,
 disabled-by-default app-log-retention branch. Do not enable that branch after
-retiring the helper. If another host already uses it, retain its live helper
-until its monitoring and scheduled cleanup are separately addressed. The
-ordinary app-error and host-resource monitors remain available.
+retiring the helper. The ordinary app-error and host-resource monitors remain
+available. Updating the monitoring bundle is deferred separately.
