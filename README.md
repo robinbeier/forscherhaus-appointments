@@ -202,6 +202,11 @@ skip versus required GitHub Actions failure contract documented in
 [Root/Host Test Harness](docs/root-host-test-harness.md); local skips never
 replace the required native-Linux CI proof.
 
+Local checks attempt to clean up their Compose project on normal shell exit,
+including failed service starts and early full-gate failures. Hard process kills
+or an unavailable Docker daemon can still leave resources behind; images and
+build cache are retained. This is not a cleanup of other projects.
+
 CI note:
 
 - CI is changed-file gated and deep docker-compose jobs only run for relevant
