@@ -28,7 +28,7 @@
             "source": "scripts/ops/kuma_push_host_resources.sh",
             "install": "scripts/ops/kuma_push_host_resources.sh",
             "role": "entrypoint",
-            "sha256": "abb4693849b27170f83db30c5891bd329c182595a54e81c2ecc27eb069570440"
+            "sha256": "7a469dd6fa90c94a29e1fcf115073dbedd4edcbd93ce8beb5507612db60c7eb9"
         },
         {
             "source": "scripts/ops/kuma_push_host_services.sh",
