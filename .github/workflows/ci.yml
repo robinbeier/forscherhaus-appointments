@@ -137,8 +137,6 @@ jobs:
               - 'scripts/ci/check_coverage_delta.php'
               - 'scripts/ci/merge_coverage_shards.php'
               - 'scripts/ci/wait_for_mysql_readiness.sh'
-              - 'scripts/ci/export_deep_seed_snapshot.sh'
-              - 'scripts/ci/import_deep_seed_snapshot.sh'
               - 'scripts/ci/lib/CheckSelection.php'
               - 'scripts/ci/lib/DeterministicFixtureFactory.php'
               - 'scripts/ci/lib/WriteContractCleanupRegistry.php'
@@ -197,8 +195,6 @@ jobs:
               - 'scripts/ci/check_coverage_delta.php'
               - 'scripts/ci/merge_coverage_shards.php'
               - 'scripts/ci/wait_for_mysql_readiness.sh'
-              - 'scripts/ci/export_deep_seed_snapshot.sh'
-              - 'scripts/ci/import_deep_seed_snapshot.sh'
               - 'scripts/ci/config/coverage_delta_policy.php'
               - 'tests/bootstrap.php'
               - 'tests/bootstrap.coverage-unit.php'
@@ -645,68 +641,6 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  deep-check-seed-snapshot:
-    needs:
-      - changes
-      - deep-check-bootstrap
-    if: >
-      needs.changes.outputs.coverage_required == 'true' &&
-      (
-        github.event_name == 'push' ||
-        (github.event_name == 'pull_request' && github.event.pull_request.draft == false)
-      )
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    steps:
-      - name: Git clone
-        uses: actions/checkout@v6
-      - name: Download deep-check dependencies artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: deep-check-deps
-          path: .ci-artifacts
-      - name: Restore deep-check dependencies
-        run: |
-          tar -xzf .ci-artifacts/deep-check-deps.tar.gz
-          test -d vendor
-          test -f vendor/autoload.php
-      - name: Start seed snapshot services
-        env:
-          EA_SKIP_NPM_BOOTSTRAP: "1"
-          EA_SKIP_ASSET_BUILD_BOOTSTRAP: "1"
-        run: docker compose up -d mysql php-fpm
-      - name: Wait for MySQL readiness
-        run: bash scripts/ci/wait_for_mysql_readiness.sh
-      - name: Install deterministic seed instance
-        run: |
-          for attempt in 1 2 3; do
-            if docker compose exec -T php-fpm php index.php console install; then
-              exit 0
-            fi
-            echo "::warning::console install failed on attempt ${attempt}; retrying in 3s." >&2
-            sleep 3
-          done
-          echo "::error::console install failed after 3 attempts." >&2
-          exit 1
-      - name: Export deterministic seed snapshot
-        run: bash scripts/ci/export_deep_seed_snapshot.sh .ci-artifacts/deep-check-seed.sql.gz
-      - name: Upload deterministic seed snapshot artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: deep-check-seed-snapshot
-          path: .ci-artifacts/deep-check-seed.sql.gz
-          if-no-files-found: error
-          retention-days: 1
-      - name: Diagnostics (failure logs)
-        if: failure()
-        run: |
-          docker compose ps || true
-          docker compose logs --no-color --timestamps mysql php-fpm || true
-      - name: Cleanup seed snapshot services
-        if: always()
-        run: docker compose down -v --remove-orphans
-
   deep-runtime-suite:
     needs:
       - changes
@@ -931,7 +865,6 @@ jobs:
     needs:
       - changes
       - deep-check-bootstrap
-      - deep-check-seed-snapshot
     if: >
       needs.changes.outputs.coverage_required == 'true' &&
       (
@@ -949,11 +882,6 @@ jobs:
         with:
           name: deep-check-deps
           path: .ci-artifacts
-      - name: Download deterministic seed snapshot artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: deep-check-seed-snapshot
-          path: .ci-artifacts
       - name: Restore deep-check dependencies
         run: |
           tar -xzf .ci-artifacts/deep-check-deps.tar.gz
@@ -966,8 +894,17 @@ jobs:
         run: docker compose up -d mysql php-fpm
       - name: Wait for MySQL readiness
         run: bash scripts/ci/wait_for_mysql_readiness.sh
-      - name: Import deterministic seed snapshot
-        run: bash scripts/ci/import_deep_seed_snapshot.sh .ci-artifacts/deep-check-seed.sql.gz
+      - name: Install deterministic seed instance
+        run: |
+          for attempt in 1 2 3; do
+            if docker compose exec -T php-fpm php index.php console install; then
+              exit 0
+            fi
+            echo "::warning::console install failed on attempt ${attempt}; retrying in 3s." >&2
+            sleep 3
+          done
+          echo "::error::console install failed after 3 attempts." >&2
+          exit 1
       - name: Run coverage shard (integration)
         run: docker compose exec -T php-fpm composer test:coverage:integration-shard
       - name: Upload coverage shard integration artifacts

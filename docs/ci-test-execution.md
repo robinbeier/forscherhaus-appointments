@@ -22,6 +22,24 @@ main-suite failure handling, database setup and cleanup, root deployment
 checks, and explicit deterministic integration-test settings. Path selection
 is tested by `tests/Unit/Scripts/CiPathFilterMatrixTest.php`.
 
+## Integration coverage preparation
+
+The integration coverage shard needs PHP with Xdebug and a seeded MySQL
+instance. It installs that instance directly in its own job with
+`php index.php console install`, using the existing bounded retry loop.
+Installation failure still stops the job before the tests; diagnostics and
+unconditional Compose cleanup remain in place.
+
+The separate seed-snapshot job and its export, upload, download and import
+are removed: integration coverage was their only consumer. The same migrations
+and seed routine now run where the database is used. Test selection, coverage
+commands and thresholds are unchanged; no test is replaced by a setup check.
+Shared Composer dependencies still come from `deep-check-bootstrap`.
+
+This removes one complete PHP/MySQL environment setup and the snapshot
+handoff. The remaining PHP container build is unchanged; use actual GitHub
+runs to assess the resulting elapsed-time improvement.
+
 ## Local quick and full checks
 
 `pre_pr_full.sh` runs `pre_pr_quick.sh` first and stops if it fails. The quick

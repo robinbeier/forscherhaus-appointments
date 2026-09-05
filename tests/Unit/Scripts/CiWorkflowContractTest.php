@@ -160,6 +160,36 @@ class CiWorkflowContractTest extends TestCase
         }
     }
 
+    public function testCoverageIntegrationInitializesItsOwnDatabaseAfterReadiness(): void
+    {
+        $job = $this->workflowJob('coverage-shard-integration');
+        self::assertSame(['changes', 'deep-check-bootstrap'], $job['needs'] ?? null);
+        $steps = $this->namedSteps($job);
+        self::assertArrayNotHasKey('Download deterministic seed snapshot artifact', $steps);
+        self::assertArrayNotHasKey('Import deterministic seed snapshot', $steps);
+
+        $stepNames = array_keys($steps);
+        $readinessIndex = array_search('Wait for MySQL readiness', $stepNames, true);
+        $installIndex = array_search('Install deterministic seed instance', $stepNames, true);
+        self::assertIsInt($readinessIndex);
+        self::assertIsInt($installIndex);
+        self::assertGreaterThan($readinessIndex, $installIndex);
+        $testIndex = array_search('Run coverage shard (integration)', $stepNames, true);
+        self::assertIsInt($testIndex);
+        self::assertGreaterThan($installIndex, $testIndex);
+        self::assertSame('always()', $steps['Cleanup coverage shard services']['if'] ?? null);
+        self::assertArrayNotHasKey('continue-on-error', $steps['Install deterministic seed instance']);
+
+        $install = $this->stepRun($steps, 'Install deterministic seed instance');
+        self::assertStringContainsString('for attempt in 1 2 3; do', $install);
+        self::assertStringContainsString(
+            'if docker compose exec -T php-fpm php index.php console install; then',
+            $install,
+        );
+        self::assertStringContainsString('console install failed after 3 attempts.', $install);
+        self::assertStringContainsString('exit 1', $install);
+    }
+
     /**
      * @return array<string, mixed>
      */
