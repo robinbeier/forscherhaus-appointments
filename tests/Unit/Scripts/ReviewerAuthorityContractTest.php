@@ -542,8 +542,8 @@ class ReviewerAuthorityContractTest extends TestCase
     {
         foreach (['reviewer-correctness.toml', 'reviewer-design.toml', 'reviewer-tests.toml'] as $filename) {
             $role = (string) file_get_contents($this->repoRoot . '/.codex/agents/' . $filename);
-            self::assertStringContainsString('.codex/contracts/agent-workflow.json', $role, $filename);
-            self::assertStringContainsString('scripts/agent/trusted_base_launcher.sh', $role, $filename);
+            self::assertStringContainsString('sandbox_mode = "read-only"', $role, $filename);
+            self::assertStringContainsString('WORKFLOW.md and code_review.md', $role, $filename);
             self::assertStringContainsString('Do not delegate or mutate files, Git, GitHub', $role, $filename);
             self::assertStringContainsString('Return findings only to the primary', $role, $filename);
         }
