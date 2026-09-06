@@ -43,6 +43,12 @@ Composer dependencies. Their analysis, unit tests, and adoption checks do not
 consume generated frontend assets. `build-test` installs its JavaScript test
 dependencies without building assets. Only browser checks prepare runtime assets.
 
+The changed-JavaScript lint job checks its Git diff before setting up Node or
+installing packages. If no maintained JavaScript source changed, it finishes
+without dependency installation. When needed, `npm ci --ignore-scripts` installs
+ESLint without generating frontend assets. The same selector drives the check
+and lint modes; a failed diff fails the job instead of reporting no changes.
+
 ## Integration coverage preparation
 
 The integration coverage shard runs PHP with Xdebug directly on the GitHub
