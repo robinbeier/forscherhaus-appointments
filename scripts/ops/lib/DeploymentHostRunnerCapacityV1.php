@@ -13,23 +13,37 @@ require_once __DIR__ . '/ProtectedPredeployObservationProvider.php';
 interface HostRunnerCapacityHelper
 {
     /** @return array<string,mixed> */
-    public function observe(string $runId, string $releaseId, string $rendererMode): array;
+    public function observe(string $runId, string $releaseId): array;
 }
 
 final class HelperBackedHostRunnerCapacityHelper implements HostRunnerCapacityHelper
 {
     private const COMMAND_PREFIX = [
-        '/usr/bin/env', '-i', 'LANG=C', 'LC_ALL=C', 'PATH=/usr/sbin:/usr/bin:/sbin:/bin',
-        '/usr/bin/python3', '-I', '-B', __DIR__ . '/../libexec/deployment_host_runner_fs_v1.py',
-        'observe-capacity', '/var/lib/fh-deploy-orchestrator',
+        '/usr/bin/env',
+        '-i',
+        'LANG=C',
+        'LC_ALL=C',
+        'PATH=/usr/sbin:/usr/bin:/sbin:/bin',
+        '/usr/bin/python3',
+        '-I',
+        '-B',
+        __DIR__ . '/../libexec/deployment_host_runner_fs_v1.py',
+        'observe-capacity',
+        '/var/lib/fh-deploy-orchestrator',
     ];
 
-    public function observe(string $runId, string $releaseId, string $rendererMode): array
+    public function observe(string $runId, string $releaseId): array
     {
         $pipes = [];
         $process = proc_open(
-            [...self::COMMAND_PREFIX, $runId, $releaseId, $rendererMode],
-            [['file', '/dev/null', 'r'], ['pipe', 'w'], ['file', '/dev/null', 'w'], 198 => ['file', '/dev/null', 'r'], 199 => ['file', '/dev/null', 'r']],
+            [...self::COMMAND_PREFIX, $runId, $releaseId],
+            [
+                ['file', '/dev/null', 'r'],
+                ['pipe', 'w'],
+                ['file', '/dev/null', 'w'],
+                198 => ['file', '/dev/null', 'r'],
+                199 => ['file', '/dev/null', 'r'],
+            ],
             $pipes,
             null,
             [],
@@ -68,17 +82,32 @@ final class HelperBackedHostRunnerCapacityHelper implements HostRunnerCapacityHe
             throw new RuntimeException('capacity authority helper response is invalid');
         }
         $keys = [
-            'block_size', 'blocks', 'blocks_available', 'component_devices', 'filesystem_device',
-            'inodes', 'inodes_available', 'live_storage_allocated_bytes', 'live_storage_inode_count',
-            'live_storage_logical_bytes', 'policy_bytes_base64',
+            'block_size',
+            'blocks',
+            'blocks_available',
+            'component_devices',
+            'filesystem_device',
+            'inodes',
+            'inodes_available',
+            'live_storage_allocated_bytes',
+            'live_storage_inode_count',
+            'live_storage_logical_bytes',
         ];
         if (!is_array($record) || array_is_list($record) || array_keys($record) !== $keys) {
             throw new RuntimeException('capacity authority helper response is invalid');
         }
-        foreach ([
-            'block_size', 'blocks', 'filesystem_device', 'inodes', 'live_storage_allocated_bytes',
-            'live_storage_inode_count', 'live_storage_logical_bytes',
-        ] as $field) {
+        foreach (
+            [
+                'block_size',
+                'blocks',
+                'filesystem_device',
+                'inodes',
+                'live_storage_allocated_bytes',
+                'live_storage_inode_count',
+                'live_storage_logical_bytes',
+            ]
+            as $field
+        ) {
             if (!is_int($record[$field]) || $record[$field] <= 0) {
                 throw new RuntimeException('capacity authority helper measurement is invalid');
             }
@@ -89,8 +118,15 @@ final class HelperBackedHostRunnerCapacityHelper implements HostRunnerCapacityHe
             }
         }
         $deviceKeys = [
-            'artifact', 'dump_pin', 'live_storage', 'release_root', 'renderer_state',
-            'restore_scratch', 'stage', 'state_root', 'temp',
+            'artifact',
+            'dump_pin',
+            'live_storage',
+            'release_root',
+            'renderer_state',
+            'restore_scratch',
+            'stage',
+            'state_root',
+            'temp',
         ];
         if (!is_array($record['component_devices']) || array_keys($record['component_devices']) !== $deviceKeys) {
             throw new RuntimeException('capacity authority helper devices are invalid');
@@ -100,60 +136,83 @@ final class HelperBackedHostRunnerCapacityHelper implements HostRunnerCapacityHe
                 throw new RuntimeException('capacity authority helper devices disagree');
             }
         }
-        if (!is_string($record['policy_bytes_base64'])) {
-            throw new RuntimeException('capacity authority helper policy is invalid');
-        }
-        $policy = base64_decode($record['policy_bytes_base64'], true);
-        if (!is_string($policy) || strlen($policy) > DeploymentEvidenceAuthorityV1::MAX_FILE_BYTES) {
-            throw new RuntimeException('capacity authority helper policy is invalid');
-        }
-        $record['policy_bytes'] = $policy;
-        unset($record['policy_bytes_base64']);
         return $record;
     }
 }
 
 final class ProtectedHostCapacityCollector
 {
-    public function __construct(private readonly HostRunnerCapacityHelper $helper = new HelperBackedHostRunnerCapacityHelper()) {}
+    public function __construct(
+        private readonly HostRunnerCapacityHelper $helper = new HelperBackedHostRunnerCapacityHelper(),
+    ) {}
 
     public function collect(
         string $runId,
         string $intentSha256,
         string $releaseId,
         string $expectedCommit,
-        string $rendererMode,
         BuildVerifiedSourcesV1 $build,
         DumpObservationV1 $dump,
     ): CapacityObservationV1 {
         if (
-            $dump->attestationBytes === null || $dump->pinnedAttestationSha256 === null ||
-            $dump->dumpSha256 === null || $dump->stableDumpSizeBytes === null || $dump->observedAtUtc === null
+            $dump->attestationBytes === null ||
+            $dump->pinnedAttestationSha256 === null ||
+            $dump->dumpSha256 === null ||
+            $dump->stableDumpSizeBytes === null ||
+            $dump->observedAtUtc === null
         ) {
             return self::invalidObservation();
         }
         try {
-            $raw = $this->helper->observe($runId, $releaseId, $rendererMode);
-            $renderer = DeploymentEvidenceAuthorityV1::rendererCapacityBounds($raw['policy_bytes'], $rendererMode);
+            $raw = $this->helper->observe($runId, $releaseId);
             $sources = new CapacityVerifiedSourcesV1(
-                $raw['filesystem_device'], $raw['block_size'], $raw['blocks'], $raw['blocks_available'],
-                $raw['inodes'], $raw['inodes_available'], $build,
-                $dump->attestationBytes, $dump->pinnedAttestationSha256, $dump->dumpSha256,
-                $dump->stableDumpSizeBytes, $dump->observedAtUtc,
-                $raw['live_storage_allocated_bytes'], $raw['live_storage_logical_bytes'],
-                $raw['live_storage_inode_count'], $renderer['bytes'], $renderer['inodes'],
+                $raw['filesystem_device'],
+                $raw['block_size'],
+                $raw['blocks'],
+                $raw['blocks_available'],
+                $raw['inodes'],
+                $raw['inodes_available'],
+                $build,
+                $dump->attestationBytes,
+                $dump->pinnedAttestationSha256,
+                $dump->dumpSha256,
+                $dump->stableDumpSizeBytes,
+                $dump->observedAtUtc,
+                $raw['live_storage_allocated_bytes'],
+                $raw['live_storage_logical_bytes'],
+                $raw['live_storage_inode_count'],
+                0,
+                0,
                 $raw['component_devices'],
             );
             $capacity = DeploymentEvidenceAuthorityV1::capacityFromVerifiedAuthorities(
-                $sources->filesystemDevice, $sources->blockSize, $sources->blocks, $sources->blocksAvailable,
-                $sources->inodes, $sources->inodesAvailable,
-                $build->provenanceBytes, $build->authorizedProvenanceSha256, $releaseId, $expectedCommit,
-                $build->stageFileCount, $build->stageInodeCount, $build->stageUnpackedBytes, $build->tempScratchBytes,
-                $sources->attestationBytes, $sources->attestationSha256, $runId, $intentSha256,
-                $sources->dumpSha256, $sources->dumpSizeBytes, $sources->observedAtUtc,
-                $sources->liveStorageAllocatedBytes, $sources->liveStorageLogicalBytes,
-                $sources->liveStorageInodeCount, $sources->rendererInstallBytes,
-                $sources->rendererInstallInodeCount, $sources->componentDevices,
+                $sources->filesystemDevice,
+                $sources->blockSize,
+                $sources->blocks,
+                $sources->blocksAvailable,
+                $sources->inodes,
+                $sources->inodesAvailable,
+                $build->provenanceBytes,
+                $build->authorizedProvenanceSha256,
+                $releaseId,
+                $expectedCommit,
+                $build->stageFileCount,
+                $build->stageInodeCount,
+                $build->stageUnpackedBytes,
+                $build->tempScratchBytes,
+                $sources->attestationBytes,
+                $sources->attestationSha256,
+                $runId,
+                $intentSha256,
+                $sources->dumpSha256,
+                $sources->dumpSizeBytes,
+                $sources->observedAtUtc,
+                $sources->liveStorageAllocatedBytes,
+                $sources->liveStorageLogicalBytes,
+                $sources->liveStorageInodeCount,
+                $sources->rendererInstallBytes,
+                $sources->rendererInstallInodeCount,
+                $sources->componentDevices,
             );
         } catch (RuntimeException) {
             return self::invalidObservation();

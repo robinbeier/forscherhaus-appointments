@@ -90,7 +90,11 @@ install Node/npm packages or create Puppeteer caches on the host. No renderer
 mode or state-directory option is needed. Remove the former
 `--renderer-deploy-mode external` and `--renderer-state-dir` options from saved
 commands when updating deployment tools. New runner execution inputs omit
-`renderer_deploy_mode`; previously pinned inputs must not be reused for a new run.
+`renderer_deploy_mode`. Before upgrading installed tools, complete/reconcile old
+runs with the old matching toolset and move completed runs out of the active
+tree using the [contract upgrade procedure](deployment-run-v1.md#one-time-upgrade-after-traffic-check-removal).
+Do not replace helpers while any old run or active claim remains unresolved;
+previously pinned inputs must not be reused for a new run.
 
 `deploy_ea.sh` performs these safety checks before switching traffic:
 

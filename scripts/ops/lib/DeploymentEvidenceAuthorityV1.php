@@ -22,9 +22,7 @@ final class DeploymentEvidenceAuthorityV1
     public const CHILD_OBSERVATION_SCHEMA = 'deployment_child_observation.v1';
     public const ORCHESTRATOR_START_SCHEMA = 'deployment_orchestrator_start.v1';
     public const PREDEPLOY_ASSEMBLY_SCHEMA = 'deployment_predeploy_evidence_assembly.v1';
-    public const RENDERER_CAPACITY_POLICY_SCHEMA = 'deployment_renderer_capacity_policy.v1';
     public const DUMP_ATTESTATION_ROOT = '/var/lib/fh-deploy-evidence/dump-attestations';
-    public const RENDERER_CAPACITY_POLICY_PATH = '/etc/fh/deployment-renderer-capacity-v1.json';
     public const MAX_FILE_BYTES = 4_096;
     public const MAX_DUMP_COMPRESSED_BYTES = 17_179_869_184;
     public const MAX_DUMP_UNCOMPRESSED_BYTES = 68_719_476_736;
@@ -60,29 +58,6 @@ final class DeploymentEvidenceAuthorityV1
     {
         self::assertSha256($dumpSha256, 'dump sha256');
         return self::DUMP_ATTESTATION_ROOT . '/' . $dumpSha256 . '.json';
-    }
-
-    /** @return array{bytes:int,inodes:int} */
-    public static function rendererCapacityBounds(string $policyBytes, string $rendererMode): array
-    {
-        $record = self::decodeCanonical($policyBytes, self::MAX_FILE_BYTES);
-        self::assertExactKeys($record, ['schema', 'external', 'host'], 'renderer capacity policy');
-        if ($record['schema'] !== self::RENDERER_CAPACITY_POLICY_SCHEMA) {
-            throw new RuntimeException('renderer capacity policy schema is invalid');
-        }
-        foreach (['external', 'host'] as $mode) {
-            self::assertObject($record[$mode], 'renderer capacity policy ' . $mode);
-            self::assertExactKeys($record[$mode], ['bytes', 'inodes'], 'renderer capacity policy ' . $mode);
-        }
-        if ($record['external']['bytes'] !== 0 || $record['external']['inodes'] !== 0) {
-            throw new RuntimeException('external renderer capacity must be exactly zero');
-        }
-        self::assertPositiveInt($record['host']['bytes'], 'host renderer capacity bytes');
-        self::assertPositiveInt($record['host']['inodes'], 'host renderer capacity inodes');
-        if (!in_array($rendererMode, ['host', 'external'], true)) {
-            throw new RuntimeException('renderer capacity mode is invalid');
-        }
-        return $record[$rendererMode];
     }
 
     /** @return array<string,mixed> */

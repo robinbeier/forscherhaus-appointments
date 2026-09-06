@@ -42,7 +42,19 @@ validates and has the same hash. Same Run-ID plus changed intent is exit `75`
 
 ### One-time upgrade after traffic-check removal
 
-Old completed runs still contain the removed intent fields and journal state.
+This procedure also applies when upgrading from the former host-renderer
+execution input containing `renderer_deploy_mode`. That old input is not
+accepted by the new closed contract, even though its v1 schema name is unchanged.
+Before replacing any tools, stop submitting new runs and use the **old matching
+runner and helpers** to finish or reconcile every nonterminal run and clear its
+terminal active claim. A stopped runner process alone is not sufficient. If a
+run cannot be safely completed or recovered, postpone the tooling upgrade;
+never delete its claim or edit its pinned input to make the upgrade pass.
+Then archive the completed runs using the locked procedure below, install the
+matching new toolset together, and start with new run IDs and inputs. Use a fresh
+archive destination for each contract upgrade.
+
+Old completed runs can contain removed intent fields, renderer inputs, and journal state.
 The dump producer checks every directory in `runs/`, so finishing active runs
 and choosing a new run ID alone is insufficient. Before replacing **any** of
 the installed helpers or their sibling contract, move the verified completed
@@ -80,7 +92,7 @@ except FileNotFoundError:
     print('No historical runs to move.')
 else:
     os.close(runs)
-    archive = '/root/fh-deployment-runs-before-traffic-removal'
+    archive = '/root/fh-deployment-runs-before-renderer-input-removal'
     os.mkdir(archive, 0o700)  # Existing destination aborts; never overwrite it.
     destination = old.open_absolute_directory(archive, 0o700)
     os.rename('runs', 'runs', src_dir_fd=root, dst_dir_fd=destination)

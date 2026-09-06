@@ -32,12 +32,11 @@ final class DeploymentHostRunnerCapacityV1Test extends TestCase
             self::INTENT,
             self::RELEASE,
             self::COMMIT,
-            'external',
             $build,
             $dump,
         );
 
-        self::assertSame([[self::RUN_ID, self::RELEASE, 'external']], $helper->calls);
+        self::assertSame([[self::RUN_ID, self::RELEASE]], $helper->calls);
         self::assertNotNull($result->verifiedSources);
         self::assertSame(100, $result->verifiedSources->liveStorageAllocatedBytes);
         self::assertSame(10_000, $result->verifiedSources->liveStorageLogicalBytes);
@@ -52,7 +51,7 @@ final class DeploymentHostRunnerCapacityV1Test extends TestCase
         [$build, $dump] = $this->authorities();
         $result = (new ProtectedHostCapacityCollector(
             new CapacityHelperFake($this->rawCapacity(20_000, 10_000)),
-        ))->collect(self::RUN_ID, self::INTENT, self::RELEASE, self::COMMIT, 'external', $build, $dump);
+        ))->collect(self::RUN_ID, self::INTENT, self::RELEASE, self::COMMIT, $build, $dump);
 
         self::assertNotNull($result->verifiedSources);
         self::assertSame(41_000 + 536_870_912, $this->derive($result->verifiedSources)['projected_required_bytes']);
@@ -69,7 +68,6 @@ final class DeploymentHostRunnerCapacityV1Test extends TestCase
             self::INTENT,
             self::RELEASE,
             self::COMMIT,
-            'external',
             $build,
             $missing,
         );
@@ -83,7 +81,6 @@ final class DeploymentHostRunnerCapacityV1Test extends TestCase
             self::INTENT,
             self::RELEASE,
             self::COMMIT,
-            'external',
             $build,
             $completeDump,
         );
@@ -165,11 +162,6 @@ final class DeploymentHostRunnerCapacityV1Test extends TestCase
     /** @return array<string,mixed> */
     private function rawCapacity(int $allocated, int $logical): array
     {
-        $policy = DeploymentEvidenceAuthorityV1::encodeFile([
-            'schema' => DeploymentEvidenceAuthorityV1::RENDERER_CAPACITY_POLICY_SCHEMA,
-            'external' => ['bytes' => 0, 'inodes' => 0],
-            'host' => ['bytes' => 1_000_000, 'inodes' => 1_000],
-        ]);
         $devices = array_fill_keys(
             [
                 'artifact',
@@ -195,7 +187,6 @@ final class DeploymentHostRunnerCapacityV1Test extends TestCase
             'live_storage_allocated_bytes' => $allocated,
             'live_storage_inode_count' => 8,
             'live_storage_logical_bytes' => $logical,
-            'policy_bytes' => $policy,
         ];
     }
 
@@ -237,15 +228,15 @@ final class DeploymentHostRunnerCapacityV1Test extends TestCase
 
 final class CapacityHelperFake implements HostRunnerCapacityHelper
 {
-    /** @var list<array{string,string,string}> */
+    /** @var list<array{string,string}> */
     public array $calls = [];
 
     /** @param ?array<string,mixed> $value */
     public function __construct(private readonly ?array $value) {}
 
-    public function observe(string $runId, string $releaseId, string $rendererMode): array
+    public function observe(string $runId, string $releaseId): array
     {
-        $this->calls[] = [$runId, $releaseId, $rendererMode];
+        $this->calls[] = [$runId, $releaseId];
         return $this->value ?? throw new RuntimeException('unavailable');
     }
 }

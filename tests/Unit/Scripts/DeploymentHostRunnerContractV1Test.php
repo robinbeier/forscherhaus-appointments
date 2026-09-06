@@ -109,6 +109,11 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
     public static function invalidExecutionInputProvider(): iterable
     {
         $valid = self::staticDeployExecutionInput();
+        foreach (['host', 'external'] as $legacyMode) {
+            yield 'old pinned renderer input ' . $legacyMode => [
+                [...$valid, 'parameters' => [...$valid['parameters'], 'renderer_deploy_mode' => $legacyMode]],
+            ];
+        }
         yield 'executable' => [$valid + ['executable' => '/bin/sh']];
         yield 'argv' => [$valid + ['arguments' => ['-c', 'touch /tmp/marker']]];
         yield 'environment' => [$valid + ['environment' => ['TOKEN' => 'secret']]];

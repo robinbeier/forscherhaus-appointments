@@ -147,16 +147,10 @@ The archive-derived stage bounds and this live-storage footprint are added
 before the capacity decision, so `stage_inode_count` represents the complete
 projected stage after that copy. Later artifact observations cannot reduce
 either bound.
-Renderer capacity comes only from the root-maintained canonical policy at
-`/etc/fh/deployment-renderer-capacity-v1.json`. Its closed
-`deployment_renderer_capacity_policy.v1` object contains exact `host` and
-`external` objects with `bytes` and `inodes`. The external values must be
-exactly `0/0`; host values must both be positive conservative upper bounds for
-`npm ci --omit=dev`, including the staged `node_modules` tree plus npm and
-Puppeteer state caches. The deployment runner selects `external` for the Docker-backed renderer;
-the numeric limits still come only from this protected policy.
-Host renderer targets must share the measured filesystem and are included
-before the capacity verdict.
+The Docker-backed PDF renderer performs no host package installation during
+application deployment. Its installation allowance is therefore zero; the
+separate renderer-capacity policy file and mode selection are no longer read.
+All other capacity measurements and safety margins remain unchanged.
 The Core collector resolves those names only to fixed host targets: the
 protected state/run directory for state and the pinned dump, `/root/releases`
 for the release and artifact, `/var/www/html` for the stage and deploy

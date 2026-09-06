@@ -57,53 +57,6 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
         self::assertSame(1, $rejected);
     }
 
-    public function testRendererCapacityComesFromClosedRootPolicy(): void
-    {
-        $policyBytes = DeploymentEvidenceAuthorityV1::encodeFile([
-            'schema' => DeploymentEvidenceAuthorityV1::RENDERER_CAPACITY_POLICY_SCHEMA,
-            'external' => ['bytes' => 0, 'inodes' => 0],
-            'host' => ['bytes' => 700_000_000, 'inodes' => 7_000],
-        ]);
-
-        self::assertSame(
-            ['bytes' => 700_000_000, 'inodes' => 7_000],
-            DeploymentEvidenceAuthorityV1::rendererCapacityBounds($policyBytes, 'host'),
-        );
-        self::assertSame(
-            ['bytes' => 0, 'inodes' => 0],
-            DeploymentEvidenceAuthorityV1::rendererCapacityBounds($policyBytes, 'external'),
-        );
-        self::assertSame(
-            '/etc/fh/deployment-renderer-capacity-v1.json',
-            DeploymentEvidenceAuthorityV1::RENDERER_CAPACITY_POLICY_PATH,
-        );
-    }
-
-    #[DataProvider('invalidRendererCapacityPolicyProvider')]
-    public function testInvalidRendererCapacityPolicyIsRejected(array $policy, string $mode): void
-    {
-        $this->expectException(RuntimeException::class);
-        DeploymentEvidenceAuthorityV1::rendererCapacityBounds(
-            DeploymentEvidenceAuthorityV1::encodeFile($policy),
-            $mode,
-        );
-    }
-
-    public static function invalidRendererCapacityPolicyProvider(): iterable
-    {
-        $valid = [
-            'schema' => DeploymentEvidenceAuthorityV1::RENDERER_CAPACITY_POLICY_SCHEMA,
-            'external' => ['bytes' => 0, 'inodes' => 0],
-            'host' => ['bytes' => 700_000_000, 'inodes' => 7_000],
-        ];
-        yield 'external bytes are nonzero' => [[...$valid, 'external' => ['bytes' => 1, 'inodes' => 0]], 'external'];
-        yield 'external inodes are nonzero' => [[...$valid, 'external' => ['bytes' => 0, 'inodes' => 1]], 'external'];
-        yield 'host bytes are zero' => [[...$valid, 'host' => ['bytes' => 0, 'inodes' => 7_000]], 'host'];
-        yield 'host inodes are zero' => [[...$valid, 'host' => ['bytes' => 700_000_000, 'inodes' => 0]], 'host'];
-        yield 'unknown mode' => [$valid, 'caller-selected'];
-        yield 'extra key' => [[...$valid, 'caller_limit' => 1], 'host'];
-    }
-
     public function testAuthorizedProvenanceBindsExactCanonicalSidecarAndArtifact(): void
     {
         $provenance = $this->provenance();
