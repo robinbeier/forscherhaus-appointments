@@ -61,7 +61,7 @@ This file stays intentionally short. It is a map, not a second runbook.
     check applicable blocking CI and unresolved findings, and merge only with
     user authorization and `--match-head-commit`
   - no separate CLI login or attestation command is required
-- Harness readiness score:
+- Harness consistency checks:
   - `composer check:agent-harness-readiness`
   - The machine contract owns the supported CI-condition tokens and binds
     critical cross-document clauses to named Markdown sections; the checker
@@ -92,14 +92,14 @@ This file stays intentionally short. It is a map, not a second runbook.
 ## Scheduled Hygiene
 
 - Scheduled lightweight hygiene lives in `.github/workflows/hygiene.yml`.
-- `agent-harness-readiness-latest.json` is the machine-readable scorecard; use it
-  for the current readiness snapshot, not older narrative docs alone.
+- `agent-harness-readiness-latest.json` lists the current consistency checks
+  and their pass/fail results. The Markdown summary names failed checks;
+  there is no weighted score or target grade.
 - `harness-report-date-sanity-latest.json` verifies that dated readiness/audit
   artifacts are not future-dated or internally mismatched.
 - Reaction model:
   - `pass`: the harness signals and supporting docs are internally consistent.
-  - `fail`: fix the listed drift or date violations before trusting the score as
-    the current repo state.
+  - `fail`: fix the listed drift or date violations.
 
 ## Editing Rules
 

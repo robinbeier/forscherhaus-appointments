@@ -989,13 +989,12 @@ class AgentHarnessReadinessTest extends TestCase
 
         $policyPath = $this->tmpDir . '/policy.php';
         $policy = [
-            'target_score' => 4.5,
             'dimensions' => [
-                'steering_sources' => ['label' => 'Steering sources', 'weight' => 20],
-                'blocking_gates' => ['label' => 'Blocking gates', 'weight' => 30],
-                'generated_topology' => ['label' => 'Generated topology', 'weight' => 20],
-                'report_sanity' => ['label' => 'Report sanity', 'weight' => 15],
-                'scheduled_hygiene' => ['label' => 'Scheduled hygiene', 'weight' => 15],
+                'steering_sources' => ['label' => 'Steering sources'],
+                'blocking_gates' => ['label' => 'Blocking gates'],
+                'generated_topology' => ['label' => 'Generated topology'],
+                'report_sanity' => ['label' => 'Report sanity'],
+                'scheduled_hygiene' => ['label' => 'Scheduled hygiene'],
             ],
             'required_sources' => [],
             'generated_topology_commands' => [],
@@ -1045,6 +1044,10 @@ class AgentHarnessReadinessTest extends TestCase
         );
 
         self::assertSame('fail', $report['status']);
+        self::assertStringContainsString(
+            'blocking_execution_fingerprint_workflow_execution_envelope',
+            renderAgentHarnessReadinessSummary($report),
+        );
         $blockingGates = array_values(
             array_filter(
                 $report['dimensions'],

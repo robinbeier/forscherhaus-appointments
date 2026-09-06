@@ -19,11 +19,10 @@ function runAgentHarnessReadinessCli(array $argv): int
 {
     $config = agentHarnessReadinessDefaultConfig();
     $report = [
-        'schema_version' => 1,
+        'schema_version' => 2,
         'status' => 'error',
         'generated_at_utc' => gmdate('c'),
         'policy_file' => $config['policy'],
-        'target_score' => null,
         'overall' => null,
         'dimensions' => [],
         'messages' => [],
@@ -50,7 +49,6 @@ function runAgentHarnessReadinessCli(array $argv): int
         $report = array_merge($report, $evaluation, [
             'generated_at_utc' => gmdate('c'),
             'policy_file' => $config['policy'],
-            'target_score' => $policy['target_score'],
         ]);
 
         $summary = renderAgentHarnessReadinessSummary($report);
@@ -59,24 +57,13 @@ function runAgentHarnessReadinessCli(array $argv): int
         }
 
         if ($report['status'] === 'pass') {
-            fwrite(
-                STDOUT,
-                sprintf(
-                    '[PASS] agent-harness-readiness score %.2f/5.00 meets target %.2f.',
-                    $report['overall']['score'],
-                    $policy['target_score'],
-                ) . PHP_EOL,
-            );
+            fwrite(STDOUT, '[PASS] agent-harness-readiness: all checks passed.' . PHP_EOL);
             $exitCode = AGENT_HARNESS_READINESS_EXIT_SUCCESS;
         } else {
-            fwrite(
-                STDERR,
-                sprintf(
-                    '[FAIL] agent-harness-readiness score %.2f/5.00 is below target %.2f or contains failed checks.',
-                    $report['overall']['score'],
-                    $policy['target_score'],
-                ) . PHP_EOL,
-            );
+            fwrite(STDERR, '[FAIL] agent-harness-readiness: one or more checks failed.' . PHP_EOL);
+            foreach ($report['messages'] as $message) {
+                fwrite(STDERR, '[FAIL] ' . $message . PHP_EOL);
+            }
             $exitCode = AGENT_HARNESS_READINESS_EXIT_POLICY_FAILURE;
         }
     } catch (Throwable $e) {
@@ -206,7 +193,7 @@ function parseAgentHarnessReadinessCliOptions(array $argv, array &$config): void
  * @param array<string, mixed> $policy
  * @return array{
  *   status:string,
- *   overall:array{points:float,max_points:float,score:float,target_score:float},
+ *   overall:array{status:string,failed_checks:int,total_checks:int},
  *   dimensions:array<int, array<string, mixed>>,
  *   messages:array<int, string>
  * }
@@ -218,7 +205,7 @@ function evaluateAgentHarnessReadiness(
     int $reportDateMaxFutureDays,
 ): array {
     $workflowContract = agentHarnessReadinessLoadWorkflowContract($root . '/.codex/contracts/agent-workflow.json');
-    $steeringDimension = agentHarnessReadinessScoreDimension(
+    $steeringDimension = agentHarnessReadinessGroupChecks(
         $policy,
         'steering_sources',
         array_merge(
@@ -266,15 +253,15 @@ function evaluateAgentHarnessReadiness(
             $blockingFailureControlPolicy,
         ),
     );
-    $blockingGatesDimension = agentHarnessReadinessScoreDimension($policy, 'blocking_gates', $blockingGateChecks);
+    $blockingGatesDimension = agentHarnessReadinessGroupChecks($policy, 'blocking_gates', $blockingGateChecks);
 
-    $generatedTopologyDimension = agentHarnessReadinessScoreDimension(
+    $generatedTopologyDimension = agentHarnessReadinessGroupChecks(
         $policy,
         'generated_topology',
         agentHarnessReadinessEvaluateGeneratedTopology($root, $policy['generated_topology_commands']),
     );
 
-    $reportSanityDimension = agentHarnessReadinessScoreDimension(
+    $reportSanityDimension = agentHarnessReadinessGroupChecks(
         $policy,
         'report_sanity',
         agentHarnessReadinessEvaluateReportSanity($root, $today, $reportDateMaxFutureDays),
@@ -283,7 +270,7 @@ function evaluateAgentHarnessReadiness(
     $hygieneWorkflow = agentHarnessReadinessLoadWorkflowYaml(
         $root . '/' . ltrim((string) $policy['hygiene_workflow']['path'], '/'),
     );
-    $scheduledHygieneDimension = agentHarnessReadinessScoreDimension(
+    $scheduledHygieneDimension = agentHarnessReadinessGroupChecks(
         $policy,
         'scheduled_hygiene',
         agentHarnessReadinessEvaluateHygieneWorkflow($hygieneWorkflow, $policy['hygiene_workflow']),
@@ -297,43 +284,41 @@ function evaluateAgentHarnessReadiness(
         $scheduledHygieneDimension,
     ];
 
-    $totalPoints = 0.0;
-    $maxPoints = 0.0;
     $failedChecks = 0;
+    $totalChecks = 0;
 
     foreach ($dimensions as $dimension) {
-        $totalPoints += $dimension['points'];
-        $maxPoints += $dimension['max_points'];
-
         foreach ($dimension['checks'] as $check) {
+            $totalChecks++;
             if (($check['status'] ?? 'fail') !== 'pass') {
                 $failedChecks++;
             }
         }
     }
 
-    $score = $maxPoints > 0.0 ? round(($totalPoints / $maxPoints) * 5.0, 2) : 0.0;
     $messages = [];
-    if ($failedChecks > 0) {
-        $messages[] = sprintf(
-            'Fix %d failing readiness checks before treating the repo as harness-stable.',
-            $failedChecks,
-        );
-    }
-
-    if ($score < (float) $policy['target_score']) {
-        $messages[] = sprintf('Overall score %.2f/5.00 is below target %.2f.', $score, $policy['target_score']);
-    } else {
-        $messages[] = sprintf('Overall score %.2f/5.00 meets target %.2f.', $score, $policy['target_score']);
+    $messages[] =
+        $failedChecks === 0
+            ? sprintf('All %d readiness checks passed.', $totalChecks)
+            : sprintf('%d of %d readiness checks failed.', $failedChecks, $totalChecks);
+    foreach ($dimensions as $dimension) {
+        foreach ($dimension['checks'] as $check) {
+            if (($check['status'] ?? 'fail') !== 'pass') {
+                $messages[] = sprintf(
+                    '%s: %s',
+                    (string) ($check['id'] ?? 'unknown'),
+                    (string) ($check['message'] ?? 'Check failed.'),
+                );
+            }
+        }
     }
 
     return [
-        'status' => $failedChecks === 0 && $score >= (float) $policy['target_score'] ? 'pass' : 'fail',
+        'status' => $failedChecks === 0 ? 'pass' : 'fail',
         'overall' => [
-            'points' => round($totalPoints, 2),
-            'max_points' => round($maxPoints, 2),
-            'score' => $score,
-            'target_score' => (float) $policy['target_score'],
+            'status' => $failedChecks === 0 ? 'pass' : 'fail',
+            'failed_checks' => $failedChecks,
+            'total_checks' => $totalChecks,
         ],
         'dimensions' => $dimensions,
         'messages' => $messages,
@@ -1591,30 +1576,25 @@ function agentHarnessReadinessEvaluateHygieneWorkflow(array $workflow, array $po
  * @param array<int, array<string, mixed>> $checks
  * @return array<string, mixed>
  */
-function agentHarnessReadinessScoreDimension(array $policy, string $dimensionId, array $checks): array
+function agentHarnessReadinessGroupChecks(array $policy, string $dimensionId, array $checks): array
 {
     $definition = $policy['dimensions'][$dimensionId] ?? null;
     if (!is_array($definition)) {
         throw new InvalidArgumentException('Unknown readiness dimension: ' . $dimensionId);
     }
 
-    $maxPoints = (float) ($definition['weight'] ?? 0.0);
-    $passedChecks = 0;
+    $failedChecks = 0;
     foreach ($checks as $check) {
         if (($check['status'] ?? 'fail') === 'pass') {
-            $passedChecks++;
+            continue;
         }
+        $failedChecks++;
     }
-
-    $points = $checks === [] ? 0.0 : round(($passedChecks / count($checks)) * $maxPoints, 2);
 
     return [
         'id' => $dimensionId,
         'label' => (string) ($definition['label'] ?? $dimensionId),
-        'status' => $passedChecks === count($checks) ? 'pass' : 'fail',
-        'points' => $points,
-        'max_points' => $maxPoints,
-        'score' => $maxPoints > 0.0 ? round(($points / $maxPoints) * 5.0, 2) : 0.0,
+        'status' => $failedChecks === 0 ? 'pass' : 'fail',
         'checks' => $checks,
     ];
 }
@@ -1854,13 +1834,13 @@ function renderAgentHarnessReadinessSummary(array $report): string
         '',
         sprintf('- Status: `%s`', (string) ($report['status'] ?? 'error')),
         sprintf(
-            '- Overall score: `%.2f / 5.00` (target `%.2f`)',
-            (float) ($overall['score'] ?? 0.0),
-            (float) ($overall['target_score'] ?? 0.0),
+            '- Checks: `%d failed / %d total`',
+            (int) ($overall['failed_checks'] ?? 0),
+            (int) ($overall['total_checks'] ?? 0),
         ),
         '',
-        '| Dimension | Score | Status |',
-        '| --- | ---: | --- |',
+        '| Dimension | Status |',
+        '| --- | --- |',
     ];
 
     foreach ((array) ($report['dimensions'] ?? []) as $dimension) {
@@ -1869,9 +1849,8 @@ function renderAgentHarnessReadinessSummary(array $report): string
         }
 
         $lines[] = sprintf(
-            '| %s | %.2f | %s |',
+            '| %s | %s |',
             (string) ($dimension['label'] ?? 'Unknown'),
-            (float) ($dimension['score'] ?? 0.0),
             (string) ($dimension['status'] ?? 'error'),
         );
     }

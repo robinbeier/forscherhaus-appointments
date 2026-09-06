@@ -3,27 +3,21 @@
 declare(strict_types=1);
 
 return [
-    'target_score' => 4.5,
     'dimensions' => [
         'steering_sources' => [
             'label' => 'Steering sources',
-            'weight' => 20,
         ],
         'blocking_gates' => [
             'label' => 'Blocking gates',
-            'weight' => 30,
         ],
         'generated_topology' => [
             'label' => 'Generated topology',
-            'weight' => 20,
         ],
         'report_sanity' => [
             'label' => 'Report sanity',
-            'weight' => 15,
         ],
         'scheduled_hygiene' => [
             'label' => 'Scheduled hygiene',
-            'weight' => 15,
         ],
     ],
     'required_sources' => [
