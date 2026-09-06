@@ -136,21 +136,6 @@ accepted only as exact bounded root-owned mode-0600 bytes. A missing, unsafe,
 or contradictory observation normalizes to failed/invalid dump evidence and
 cannot proceed to capacity or reservation.
 
-The traffic producer publishes the exact canonical report to
-`runs/<run-id>/traffic-gate-report.json` while the Host Runner holds both the
-global and per-run locks. This immutable run-local leaf is the sole traffic
-report authority; arbitrary report paths and caller-selected report digests are
-not accepted.
-The production collector always requests a 90-second deploy window. It stages
-the producer output under a nonce leaf in the already protected run directory,
-accepts only producer exits `0`, `20`, or `21`, and atomically publishes with
-no replacement followed by file and directory fsync. A first publication must
-place the observed window inside the helper's independently captured start and
-finish times and cover at least 90 seconds. An exact immutable replay may
-attach its original window. The PHP boundary recomputes the producer
-fingerprint and catalog version from the fixed producer/catalog sources before
-and after helper execution; any drift rejects the observation.
-
 Capacity uses one `statvfs` snapshot of the target filesystem (`f_frsize`,
 `f_bavail`, `f_files`, and `f_favail`) and an exact named device map for state,
 release, artifact, dump, live storage, renderer state, stage, restore scratch,
@@ -203,8 +188,8 @@ the inode decision together with the byte and percentage checks.
 
 The contract assembles predeploy evidence only through one
 `ProtectedPredeployObservationProvider`. It receives the immutable deployment
-Run-ID, intent SHA, expected release ID, expected commit and traffic mode separately. Provider
-methods are invoked exactly in the order expected commit, traffic, dump,
+Run-ID, intent SHA, expected release ID, and expected commit separately. Provider
+methods are invoked exactly in the order expected commit, dump,
 capacity, artifact; the first failed or invalid observation prevents every
 later method call. The provider returns closed raw-observation value objects,
 never evidence sections, statuses, `verified` claims, or exception text.

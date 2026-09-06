@@ -1100,7 +1100,7 @@ final class DeploymentHostRunnerV1Test extends TestCase
         self::assertSame('deploy_running', $claim['state']);
         self::assertSame(substr_count($durable['events_bytes'], "\n"), $claim['sequence']);
         self::assertSame(hash('sha256', $durable['events_bytes']), $claim['events_sha256']);
-        self::assertSame('2026-08-12T10:00:10Z', $claim['claimed_at_utc']);
+        self::assertSame('2026-08-12T10:00:09Z', $claim['claimed_at_utc']);
         $state = DeploymentHostRunnerContractV1::decodeState(
             $storage->files['runs/' . self::fixtureRunId() . '/state.json'],
         );
@@ -2202,7 +2202,6 @@ final class DeploymentHostRunnerV1Test extends TestCase
                     '2026-08-12T10:00:00Z',
                     $request['expected_commit'],
                     $request['release_id'],
-                    $request['traffic_mode'],
                 ),
             ),
         ];
@@ -2303,7 +2302,7 @@ final class DeploymentHostRunnerV1Test extends TestCase
         $priorState['deploy']['unit_launch_sha256'] = null;
         $priorState['deploy']['unit_manager_boot_id'] = null;
         $priorState['deploy']['unit_state'] = 'not_created';
-        $priorState['updated_at_utc'] = '2026-08-12T10:00:10Z';
+        $priorState['updated_at_utc'] = '2026-08-12T10:00:09Z';
 
         return [
             'run_id' => $runId,
@@ -2326,7 +2325,6 @@ final class DeploymentHostRunnerV1Test extends TestCase
                 '2026-08-12T10:00:00Z',
                 $request['expected_commit'],
                 $request['release_id'],
-                $request['traffic_mode'],
             ),
         ) . "\n";
     }
@@ -2599,36 +2597,11 @@ final class DeploymentHostRunnerV1Test extends TestCase
     private function passedPredeploySections(array $request): array
     {
         $sha = str_repeat('b', 64);
-        $counts = array_fill_keys(\Ops\DeploymentContractV1::TRAFFIC_COUNT_KEYS, 0);
-        $counts['documented_health'] = 1;
-        $counts['lines_seen'] = 1;
-        $counts['lines_in_window'] = 1;
-        $counts['total'] = 1;
         return [
             'expected_commit' => [
                 'expected' => $request['expected_commit'],
                 'observed' => $request['expected_commit'],
                 'verified' => true,
-            ],
-            'traffic_gate' => [
-                'status' => 'passed',
-                'report_sha256' => $sha,
-                'schema' => 'traffic_gate.v1',
-                'producer_sha256' => $sha,
-                'policy_version' => 'traffic_gate_policy.v1',
-                'catalog_version' => '2026-08-09.1',
-                'purpose' => 'deploy',
-                'mode' => 'normal',
-                'window_start_epoch' => 1,
-                'window_end_epoch' => 91,
-                'window_seconds' => 90,
-                'log_set_sha256' => $sha,
-                'rotation_complete' => true,
-                'parse_complete' => true,
-                'evidence_complete' => true,
-                'decision' => 'allow',
-                'exit_code' => 0,
-                'counts' => $counts,
             ],
             'dump' => [
                 'status' => 'passed',

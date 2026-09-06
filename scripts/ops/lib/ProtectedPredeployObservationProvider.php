@@ -7,7 +7,6 @@ namespace Ops;
 interface ProtectedPredeployObservationProvider
 {
     public function expectedCommit(): ExpectedCommitObservationV1;
-    public function traffic(): TrafficObservationV1;
     public function dump(): DumpObservationV1;
     public function capacity(): CapacityObservationV1;
     public function artifact(): ArtifactObservationV1;
@@ -16,18 +15,6 @@ interface ProtectedPredeployObservationProvider
 final readonly class ExpectedCommitObservationV1
 {
     public function __construct(public string $provenanceBytes, public string $pinnedProvenanceSha256) {}
-}
-
-final readonly class TrafficObservationV1
-{
-    public function __construct(
-        public ?string $pinnedReportBytes,
-        public ?string $pinnedReportSha256,
-        public string $expectedProducerSha256,
-        public string $expectedCatalogVersion,
-        public int $windowStartEpoch,
-        public int $windowEndEpoch,
-    ) {}
 }
 
 final readonly class DumpObservationV1

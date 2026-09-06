@@ -60,11 +60,11 @@ STATE_KEYS = {'active_action', 'deploy', 'events_sha256', 'evidence_sha256', 'in
               'rollback', 'run_id', 'schema', 'sequence', 'state', 'terminal', 'updated_at_utc'}
 INTENT_KEYS = {'artifact_expectation', 'deploy_invocation_count', 'dump_policy', 'exit_code',
                'expected_commit', 'intent_sha256', 'reason', 'record_type', 'recorded_at_utc',
-               'release_id', 'run_id', 'schema', 'sequence', 'state', 'traffic_mode'}
+               'release_id', 'run_id', 'schema', 'sequence', 'state'}
 TRANSITION_KEYS = {'deploy_invocation_count', 'exit_code', 'intent_sha256', 'previous_state', 'reason',
                    'record_type', 'recorded_at_utc', 'run_id', 'schema', 'sequence', 'state'}
 PROGRESS_STATES = ('planned', 'built', 'uploaded', 'accepted', 'lock_acquired',
-                   'expected_commit_verified', 'traffic_gate_passed', 'dump_verified', 'capacity_passed',
+                   'expected_commit_verified', 'dump_verified', 'capacity_passed',
                    'artifact_verified', 'deploy_running', 'post_gates_running', 'succeeded')
 DEPLOY_STATE_KEYS = {'execution_input_sha256', 'invocation_count', 'observed_exit_code', 'receipt_sha256',
                      'request_sha256', 'unit_invocation_id', 'unit_launch_sha256', 'unit_manager_boot_id',
@@ -72,12 +72,12 @@ DEPLOY_STATE_KEYS = {'execution_input_sha256', 'invocation_count', 'observed_exi
 ROLLBACK_STATE_KEYS = DEPLOY_STATE_KEYS - {'receipt_sha256'} | {'verdict'}
 POST_GATE_STATE_KEYS = {'deploy_report_sha256', 'deploy_submission_count', 'deploy_verdict',
                         'rollback_report_sha256', 'rollback_submission_count', 'rollback_verdict'}
-EXIT_REASONS = {'ok': 0, 'traffic_hard_stop': 20, 'traffic_evidence_invalid': 21,
+EXIT_REASONS = {'ok': 0,
                 'dump_verification_failed': 22, 'capacity_gate_failed': 23,
                 'artifact_verification_failed': 24, 'expected_commit_mismatch': 25, 'deploy_failed': 30,
                 'rollback_failed': 31, 'switch_recovery_required': 32, 'contract_invalid': 70,
                 'state_conflict': 75, 'interrupted': 143}
-STATE_EXITS = {'succeeded': {0}, 'failed_before_write': {20, 21, 22, 23, 24, 25, 70, 75, 143},
+STATE_EXITS = {'succeeded': {0}, 'failed_before_write': {22, 23, 24, 25, 70, 75, 143},
                'failed_pre_switch': {30, 143}, 'failed_switch_recovery_required': {32},
                'failed_post_switch_rollback_succeeded': {30},
                'failed_post_switch_rollback_failed': {31}, 'manual_recovery_required': {31, 70, 143}}
@@ -930,7 +930,7 @@ def trusted_executable(path):
 def activity_count():
     patterns = (
         re.compile(r'(^|/)(?:deploy_ea\.sh|deployment_host_runner_v1\.php|zero_surprise_replay\.php)(?:\s|$)'),
-        re.compile(r'(^|/)(?:prod_(?:customers|provider)_ui_smoke\.sh|traffic_gate_v1\.php)(?:\s|$)'),
+        re.compile(r'(^|/)prod_(?:customers|provider)_ui_smoke\.sh(?:\s|$)'),
         re.compile(r'(^|/)(?:mysqldump|mariadb-dump|backup_easyappointments\.sh|backup_ea\.sh|ea_restore_verify_latest\.sh|backup_set_producer_v1\.py|fh-backup-set-producer-v1|fh-backup-set-producer-supervisor-v1|prod_backup_set_producer\.sh|import_prod_backup\.sh)(?:\s|$)'),
         re.compile(r'(^|/)(?:prod_(?:session|build_cache|release_archive_dump)_retention\.sh)(?:\s|$)'),
     )
@@ -1037,14 +1037,13 @@ def validate_run_journal(events, run_id):
             first.get('record_type') != 'intent' or first.get('run_id') != run_id or first.get('sequence') != 1 or
             first.get('state') != 'planned' or first.get('deploy_invocation_count') != 0 or
             first.get('exit_code') != 0 or first.get('reason') != 'ok' or
-            first.get('traffic_mode') not in {'normal', 'no-business-traffic'} or
             first.get('dump_policy') != 'fresh_verified_under_240m' or
             first.get('artifact_expectation') != 'build_from_expected_commit' or
             not isinstance(first.get('expected_commit'), str) or re.fullmatch(r'[0-9a-f]{40}', first['expected_commit']) is None or
             not isinstance(first.get('release_id'), str) or re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,127}', first['release_id']) is None):
         reject(75)
     fields = {key: first[key] for key in ('artifact_expectation', 'dump_policy', 'expected_commit',
-                                          'release_id', 'traffic_mode')}
+                                          'release_id')}
     intent = hashlib.sha256(canonical(fields)[:-1]).hexdigest()
     if first.get('intent_sha256') != intent:
         reject(75)
@@ -1093,9 +1092,7 @@ def validate_run_journal(events, run_id):
         exit_code = record.get('exit_code')
         if EXIT_REASONS.get(reason) != exit_code or exit_code not in STATE_EXITS.get(state, {0}):
             reject(75)
-        required = {'traffic_hard_stop': 'expected_commit_verified',
-                    'traffic_evidence_invalid': 'expected_commit_verified',
-                    'dump_verification_failed': 'traffic_gate_passed',
+        required = {'dump_verification_failed': 'expected_commit_verified',
                     'capacity_gate_failed': 'dump_verified',
                     'artifact_verification_failed': 'capacity_passed',
                     'expected_commit_mismatch': 'lock_acquired'}.get(reason)

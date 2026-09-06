@@ -22,7 +22,7 @@ live-write operation.
 
 The execute path also takes the private retention-directory lock, the shared
 production-change lock, and rejects observable deploy, recovery, dump, replay,
-traffic-gate, or UI-smoke activity. Ambiguous paths, owners, modes, hard links,
+or UI-smoke activity. Ambiguous paths, owners, modes, hard links,
 types, identities, activity, or marker state fail closed.
 
 The systemd service runs as root because the session files are `www-data:0600`
@@ -62,7 +62,7 @@ locking, cutoff, cap, marker, and replay behavior.
 
 The following is an ordered future runbook, not merge authorization:
 
-1. Confirm no deploy, dump, restore, replay, traffic gate, smoke, or other
+1. Confirm no deploy, dump, restore, replay, smoke, or other
    cleanup is active. Run the standard read-only doctor and cleanup inventory.
 2. Install `scripts/ops/libexec/session_retention_v1.py` as the regular,
    single-link, root-owned `0555` file

@@ -21,7 +21,7 @@ This map defines component boundaries, path ownership scope, and dependency edge
 | `integrations-sync` | Integrations & Sync | auth-session, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 17 | 3 |
 | `api-v1` | REST API v1 | auth-session, integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 5 | 3 |
 | `shared-core` | Shared Core | None | 7 | 3 |
-| `platform-quality-tooling` | Platform, CI, Release Gates | api-v1, booking-public, dashboard-exports, installation-bootstrap, people-services-admin, settings-compliance, shared-core | 27 | 16 |
+| `platform-quality-tooling` | Platform, CI, Release Gates | api-v1, booking-public, dashboard-exports, installation-bootstrap, people-services-admin, settings-compliance, shared-core | 23 | 14 |
 
 ## Component Details
 
@@ -377,18 +377,14 @@ Path rules:
 - `deploy_ea.sh` (exact_file)
 - `scripts/ci` (directory)
 - `scripts/ops/customers_ui_smoke_principals.sh` (exact_file)
-- `scripts/ops/config/traffic_gate_catalog.v1.json` (exact_file)
 - `scripts/ops/lib/DeployResultV1.php` (exact_file)
 - `scripts/ops/lib/DeploymentContractV1.php` (exact_file)
 - `scripts/ops/lib/DeploymentHostRunnerContractV1.php` (exact_file)
-- `scripts/ops/lib/TrafficGateV1.php` (exact_file)
 - `scripts/ops/prod_customers_ui_smoke.sh` (exact_file)
 - `scripts/ops/libexec/zero_surprise_image_cleanup_v1.py` (exact_file)
-- `scripts/ops/prod_traffic_gate.sh` (exact_file)
 - `scripts/ops/prod_provider_ui_smoke.sh` (exact_file)
 - `scripts/ops/prod_zero_surprise_image_cleanup.sh` (exact_file)
 - `scripts/ops/provider_ui_smoke_principal.sh` (exact_file)
-- `scripts/ops/traffic_gate_v1.php` (exact_file)
 - `scripts/ops/validate_deployment_contract_v1.php` (exact_file)
 - `scripts/release-gate` (directory)
 - `.github/workflows/ci.yml` (exact_file)
@@ -405,10 +401,8 @@ Key files:
 - `deploy_ea.sh`
 - `scripts/ci/dashboard_integration_smoke.php`
 - `scripts/ops/lib/DeployResultV1.php`
-- `scripts/ops/lib/TrafficGateV1.php`
 - `scripts/ops/lib/DeploymentContractV1.php`
 - `scripts/ops/lib/DeploymentHostRunnerContractV1.php`
-- `scripts/ops/prod_traffic_gate.sh`
 - `scripts/ops/prod_zero_surprise_image_cleanup.sh`
 - `scripts/ops/validate_deployment_contract_v1.php`
 - `scripts/release-gate/dashboard_release_gate.php`

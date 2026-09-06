@@ -188,7 +188,6 @@ final class DeploymentContractV1Test extends TestCase
             '2026-08-10T04:00:00Z',
             self::COMMIT,
             'ea_changed',
-            'normal',
         );
 
         $this->expectException(RuntimeException::class);
@@ -204,7 +203,6 @@ final class DeploymentContractV1Test extends TestCase
             '2026-08-10T04:00:00Z',
             self::COMMIT,
             'ea_contract',
-            'normal',
         );
 
         $this->expectException(RuntimeException::class);
@@ -219,7 +217,6 @@ final class DeploymentContractV1Test extends TestCase
             [
                 ['expected_commit', str_repeat('c', 40)],
                 ['release_id', 'ea_other'],
-                ['traffic_mode', 'no-business-traffic'],
                 ['dump_policy', 'other'],
                 ['artifact_expectation', 'other'],
             ]
@@ -232,7 +229,6 @@ final class DeploymentContractV1Test extends TestCase
                 DeploymentContractV1::canonicalSha256([
                     'expected_commit' => $changed['expected_commit'],
                     'release_id' => $changed['release_id'],
-                    'traffic_mode' => $changed['traffic_mode'],
                     'dump_policy' => $changed['dump_policy'],
                     'artifact_expectation' => $changed['artifact_expectation'],
                 ]),
@@ -312,9 +308,7 @@ final class DeploymentContractV1Test extends TestCase
     /** @return iterable<string,array{string,string,int,int,string}> */
     public static function terminalResultProvider(): iterable
     {
-        yield 'traffic' => ['expected_commit_verified', 'failed_before_write', 0, 20, 'traffic_hard_stop'];
-        yield 'evidence' => ['expected_commit_verified', 'failed_before_write', 0, 21, 'traffic_evidence_invalid'];
-        yield 'dump' => ['traffic_gate_passed', 'failed_before_write', 0, 22, 'dump_verification_failed'];
+        yield 'dump' => ['expected_commit_verified', 'failed_before_write', 0, 22, 'dump_verification_failed'];
         yield 'capacity' => ['dump_verified', 'failed_before_write', 0, 23, 'capacity_gate_failed'];
         yield 'artifact' => ['capacity_passed', 'failed_before_write', 0, 24, 'artifact_verification_failed'];
         yield 'commit' => ['lock_acquired', 'failed_before_write', 0, 25, 'expected_commit_mismatch'];
@@ -475,492 +469,10 @@ final class DeploymentContractV1Test extends TestCase
         DeploymentContractV1::validateRunLines($lines);
     }
 
-    public function testTrafficEvidenceContainsOnlyShaAndNormalizedCore(): void
-    {
-        $evidence = $this->validEvidence($this->successfulRunLines());
-        $traffic = $evidence['traffic_gate'];
-
-        self::assertArrayNotHasKey('raw_report', $traffic);
-        self::assertArrayNotHasKey('snapshot', $traffic);
-        self::assertArrayNotHasKey('path', $traffic);
-        self::assertSame(DeploymentContractV1::TRAFFIC_COUNT_KEYS, array_keys($traffic['counts']));
-        DeploymentContractV1::validateEvidence($evidence);
-    }
-
-    #[DataProvider('invalidTrafficMutationProvider')]
-    public function testTrafficCoreFailsClosed(string $field, mixed $value): void
-    {
-        $evidence = $this->validEvidence($this->successfulRunLines());
-        if (str_starts_with($field, 'counts.')) {
-            $evidence['traffic_gate']['counts'][substr($field, 7)] = $value;
-        } else {
-            $evidence['traffic_gate'][$field] = $value;
-        }
-
-        $this->expectException(RuntimeException::class);
-        DeploymentContractV1::validateEvidence($evidence);
-    }
-
-    /** @return iterable<string,array{string,mixed}> */
-    public static function invalidTrafficMutationProvider(): iterable
-    {
-        yield 'purpose' => ['purpose', 'customers-ui-smoke'];
-        yield 'policy' => ['policy_version', 'old'];
-        yield 'wrong type' => ['counts.lines_seen', '1'];
-        yield 'negative' => ['counts.lines_seen', -1];
-        yield 'class sum' => ['counts.public_read', 1];
-        yield 'window arithmetic' => ['window_seconds', 89];
-        yield 'false completeness' => ['parse_complete', false];
-        yield 'decision mismatch' => ['decision', 'hard_stop'];
-        yield 'raw sha malformed' => ['report_sha256', 'ABC'];
-    }
-
-    #[DataProvider('impossibleTrafficCompletenessProvider')]
-    public function testTrafficCompletenessIsDerivedFromProducerCounts(string $count, int $value): void
-    {
-        $lines = $this->runThrough('expected_commit_verified');
-        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
-        $evidence = $this->failedBeforeWriteEvidence($lines, 20, 'traffic_hard_stop');
-        $evidence['traffic_gate']['counts'][$count] = $value;
-        if ($count === 'parse_errors') {
-            $evidence['traffic_gate']['counts']['lines_seen'] = 2;
-        }
-
-        $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('completeness');
-        DeploymentContractV1::validateBundle($lines, $evidence);
-    }
-
-    /** @return iterable<string,array{string,int}> */
-    public static function impossibleTrafficCompletenessProvider(): iterable
-    {
-        yield 'parse errors contradict parse complete' => ['parse_errors', 1];
-        yield 'rotation error contradicts rotation complete' => ['rotation_errors', 1];
-    }
-
-    #[DataProvider('unknownTrafficOverlayProvider')]
-    public function testUnknownTrafficOverlayCannotExceedUnclassified(string $overlay): void
-    {
-        $lines = $this->runThrough('expected_commit_verified');
-        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
-        $evidence = $this->failedBeforeWriteEvidence($lines, 20, 'traffic_hard_stop');
-        $evidence['traffic_gate']['counts']['documented_health'] = 1;
-        $evidence['traffic_gate']['counts']['business_or_authenticated'] = 0;
-        $evidence['traffic_gate']['counts'][$overlay] = 1;
-
-        $this->expectException(RuntimeException::class);
-        DeploymentContractV1::validateBundle($lines, $evidence);
-    }
-
-    /** @return iterable<string,array{string}> */
-    public static function unknownTrafficOverlayProvider(): iterable
-    {
-        yield 'unknown source' => ['source_unknown'];
-        yield 'unknown method' => ['method_unknown'];
-        yield 'unknown target' => ['target_unknown'];
-    }
-
-    #[DataProvider('unknownTrafficOverlayProvider')]
-    public function testUnknownTrafficOverlayCanEqualUnclassified(string $overlay): void
-    {
-        $lines = $this->runThrough('expected_commit_verified');
-        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
-        $evidence = $this->failedBeforeWriteEvidence($lines, 20, 'traffic_hard_stop');
-        $evidence['traffic_gate']['counts']['business_or_authenticated'] = 0;
-        $evidence['traffic_gate']['counts']['unclassified'] = 1;
-        $evidence['traffic_gate']['counts'][$overlay] = 1;
-        if ($overlay === 'method_unknown') {
-            $evidence['traffic_gate']['counts']['business_or_authenticated'] = 1;
-            $evidence['traffic_gate']['counts']['total'] = 2;
-            $evidence['traffic_gate']['counts']['lines_seen'] = 2;
-            $evidence['traffic_gate']['counts']['lines_in_window'] = 2;
-            $evidence['traffic_gate']['counts']['write'] = 1;
-        }
-
-        self::assertSame('failed_before_write', DeploymentContractV1::validateBundle($lines, $evidence)['state']);
-    }
-
-    public function testUnknownMethodCannotExceedWriteTraffic(): void
-    {
-        $lines = $this->runThrough('expected_commit_verified');
-        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
-        $evidence = $this->failedBeforeWriteEvidence($lines, 20, 'traffic_hard_stop');
-        $evidence['traffic_gate']['counts']['business_or_authenticated'] = 0;
-        $evidence['traffic_gate']['counts']['unclassified'] = 1;
-        $evidence['traffic_gate']['counts']['method_unknown'] = 1;
-
-        $this->expectException(RuntimeException::class);
-        DeploymentContractV1::validateBundle($lines, $evidence);
-    }
-
-    public function testUnknownMethodWriteCanBeContainedByOneUnclassifiedLine(): void
-    {
-        $lines = $this->runThrough('expected_commit_verified');
-        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
-        $evidence = $this->failedBeforeWriteEvidence($lines, 20, 'traffic_hard_stop');
-        $evidence['traffic_gate']['counts']['business_or_authenticated'] = 0;
-        $evidence['traffic_gate']['counts']['unclassified'] = 1;
-        $evidence['traffic_gate']['counts']['method_unknown'] = 1;
-        $evidence['traffic_gate']['counts']['write'] = 1;
-
-        self::assertSame('failed_before_write', DeploymentContractV1::validateBundle($lines, $evidence)['state']);
-    }
-
-    public function testUnknownTargetAndSensitiveCustomerTrafficCannotShareOneLine(): void
-    {
-        $lines = $this->runThrough('expected_commit_verified');
-        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
-        $evidence = $this->failedBeforeWriteEvidence($lines, 20, 'traffic_hard_stop');
-        $evidence['traffic_gate']['counts']['business_or_authenticated'] = 0;
-        $evidence['traffic_gate']['counts']['unclassified'] = 1;
-        $evidence['traffic_gate']['counts']['target_unknown'] = 1;
-        $evidence['traffic_gate']['counts']['customers_or_sensitive'] = 1;
-
-        $this->expectException(RuntimeException::class);
-        DeploymentContractV1::validateBundle($lines, $evidence);
-    }
-
-    public function testUnknownTargetAndSensitiveCustomerTrafficCanFitTwoLines(): void
-    {
-        $lines = $this->runThrough('expected_commit_verified');
-        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
-        $evidence = $this->failedBeforeWriteEvidence($lines, 20, 'traffic_hard_stop');
-        $evidence['traffic_gate']['counts']['unclassified'] = 1;
-        $evidence['traffic_gate']['counts']['target_unknown'] = 1;
-        $evidence['traffic_gate']['counts']['customers_or_sensitive'] = 1;
-        $evidence['traffic_gate']['counts']['total'] = 2;
-        $evidence['traffic_gate']['counts']['lines_seen'] = 2;
-        $evidence['traffic_gate']['counts']['lines_in_window'] = 2;
-
-        self::assertSame('failed_before_write', DeploymentContractV1::validateBundle($lines, $evidence)['state']);
-    }
-
-    public function testScannerUnknownTargetAndSensitiveTrafficCannotOccupyTwoClassLines(): void
-    {
-        $lines = $this->runThrough('expected_commit_verified');
-        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
-        $evidence = $this->failedBeforeWriteEvidence($lines, 20, 'traffic_hard_stop');
-        $evidence['traffic_gate']['counts']['unclassified'] = 1;
-        $evidence['traffic_gate']['counts']['scanner_success'] = 1;
-        $evidence['traffic_gate']['counts']['target_unknown'] = 1;
-        $evidence['traffic_gate']['counts']['customers_or_sensitive'] = 1;
-        $evidence['traffic_gate']['counts']['total'] = 2;
-        $evidence['traffic_gate']['counts']['lines_seen'] = 2;
-        $evidence['traffic_gate']['counts']['lines_in_window'] = 2;
-
-        $this->expectException(RuntimeException::class);
-        DeploymentContractV1::validateBundle($lines, $evidence);
-    }
-
-    public function testScannerUnknownTargetAndSensitiveTrafficCanFitThreeClassLines(): void
-    {
-        $lines = $this->runThrough('expected_commit_verified');
-        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
-        $evidence = $this->failedBeforeWriteEvidence($lines, 20, 'traffic_hard_stop');
-        $evidence['traffic_gate']['counts']['business_or_authenticated'] = 2;
-        $evidence['traffic_gate']['counts']['unclassified'] = 1;
-        $evidence['traffic_gate']['counts']['scanner_success'] = 1;
-        $evidence['traffic_gate']['counts']['target_unknown'] = 1;
-        $evidence['traffic_gate']['counts']['customers_or_sensitive'] = 1;
-        $evidence['traffic_gate']['counts']['total'] = 3;
-        $evidence['traffic_gate']['counts']['lines_seen'] = 3;
-        $evidence['traffic_gate']['counts']['lines_in_window'] = 3;
-
-        self::assertSame('failed_before_write', DeploymentContractV1::validateBundle($lines, $evidence)['state']);
-    }
-
-    public function testUnclassifiedTrafficCannotExceedCombinedUnknownOverlays(): void
-    {
-        $lines = $this->runThrough('expected_commit_verified');
-        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
-        $evidence = $this->failedBeforeWriteEvidence($lines, 20, 'traffic_hard_stop');
-        $evidence['traffic_gate']['counts']['business_or_authenticated'] = 0;
-        $evidence['traffic_gate']['counts']['unclassified'] = 1;
-
-        $this->expectException(RuntimeException::class);
-        DeploymentContractV1::validateBundle($lines, $evidence);
-    }
-
-    #[DataProvider('invalidTrafficReportProvider')]
-    public function testTrafficEvidenceInvalidCanRepresentUnavailableOrMalformedReport(?string $reportSha256): void
-    {
-        $lines = $this->runThrough('expected_commit_verified');
-        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 21, 'traffic_evidence_invalid'));
-        $evidence = $this->failedBeforeWriteEvidence($lines, 21, 'traffic_evidence_invalid');
-        $evidence['traffic_gate'] = $this->invalidTrafficReportEvidence($evidence['traffic_gate'], $reportSha256);
-
-        self::assertSame('failed_before_write', DeploymentContractV1::validateBundle($lines, $evidence)['state']);
-    }
-
-    /** @return iterable<string,array{?string}> */
-    public static function invalidTrafficReportProvider(): iterable
-    {
-        yield 'unavailable report' => [null];
-        yield 'malformed report bytes retained by hash' => [self::SHA];
-    }
-
-    #[DataProvider('invalidTrafficReportContradictionProvider')]
-    public function testTrafficEvidenceInvalidRejectsPartialOrContradictoryReportCore(string $field, mixed $value): void
-    {
-        $lines = $this->runThrough('expected_commit_verified');
-        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 21, 'traffic_evidence_invalid'));
-        $evidence = $this->failedBeforeWriteEvidence($lines, 21, 'traffic_evidence_invalid');
-        $evidence['traffic_gate'] = $this->invalidTrafficReportEvidence($evidence['traffic_gate'], null);
-        $evidence['traffic_gate'][$field] = $value;
-
-        $this->expectException(RuntimeException::class);
-        DeploymentContractV1::validateBundle($lines, $evidence);
-    }
-
-    /** @return iterable<string,array{string,mixed}> */
-    public static function invalidTrafficReportContradictionProvider(): iterable
-    {
-        yield 'malformed report hash' => ['report_sha256', 'not-a-sha'];
-        yield 'wrong producer exit' => ['exit_code', 20];
-        yield 'schema' => ['schema', 'traffic_gate.v1'];
-        yield 'producer hash' => ['producer_sha256', self::SHA];
-        yield 'policy version' => ['policy_version', 'traffic_gate_policy.v1'];
-        yield 'catalog version' => ['catalog_version', '2026-08-09.1'];
-        yield 'purpose' => ['purpose', 'deploy'];
-        yield 'mode' => ['mode', 'normal'];
-        yield 'window start' => ['window_start_epoch', 1];
-        yield 'window end' => ['window_end_epoch', 2];
-        yield 'window seconds' => ['window_seconds', 1];
-        yield 'log set hash' => ['log_set_sha256', self::SHA];
-        yield 'rotation completeness' => ['rotation_complete', false];
-        yield 'parse completeness' => ['parse_complete', false];
-        yield 'evidence completeness' => ['evidence_complete', false];
-        yield 'decision' => ['decision', 'invalid'];
-        yield 'partial counts' => ['counts', ['documented_health' => 0]];
-    }
-
-    #[DataProvider('trafficOutcomeWithoutCoreProvider')]
-    public function testObservedTrafficOutcomeStillRequiresFullCore(string $status, int $exitCode): void
-    {
-        $lines = $status === 'passed' ? $this->successfulRunLines() : $this->runThrough('expected_commit_verified');
-        if ($status === 'failed') {
-            $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
-        }
-        $evidence =
-            $status === 'passed'
-                ? $this->validEvidence($lines)
-                : $this->failedBeforeWriteEvidence($lines, 20, 'traffic_hard_stop');
-        $evidence['traffic_gate'] = $this->invalidTrafficReportEvidence($evidence['traffic_gate'], self::SHA);
-        $evidence['traffic_gate']['status'] = $status;
-        $evidence['traffic_gate']['exit_code'] = $exitCode;
-
-        $this->expectException(RuntimeException::class);
-        DeploymentContractV1::validateBundle($lines, $evidence);
-    }
-
-    /** @return iterable<string,array{string,int}> */
-    public static function trafficOutcomeWithoutCoreProvider(): iterable
-    {
-        yield 'passed without core' => ['passed', 0];
-        yield 'hard stop without core' => ['failed', 20];
-    }
-
-    #[DataProvider('hazardousTrafficOverlayProvider')]
-    public function testHazardousTrafficOverlayCannotExceedUnsafeClasses(string $overlay): void
-    {
-        $lines = $this->runThrough('expected_commit_verified');
-        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
-        $evidence = $this->failedBeforeWriteEvidence($lines, 20, 'traffic_hard_stop');
-        $evidence['traffic_gate']['counts']['documented_health'] = 1;
-        $evidence['traffic_gate']['counts']['business_or_authenticated'] = 0;
-        $evidence['traffic_gate']['counts'][$overlay] = 1;
-
-        $this->expectException(RuntimeException::class);
-        DeploymentContractV1::validateBundle($lines, $evidence);
-    }
-
-    /** @return iterable<string,array{string}> */
-    public static function hazardousTrafficOverlayProvider(): iterable
-    {
-        yield 'write' => ['write'];
-        yield 'server error' => ['status_5xx'];
-        yield 'authenticated' => ['authenticated'];
-        yield 'customers or sensitive' => ['customers_or_sensitive'];
-        yield 'scanner success' => ['scanner_success'];
-    }
-
-    #[DataProvider('hazardousTrafficOverlayProvider')]
-    public function testHazardousTrafficOverlayCanMatchBusinessClass(string $overlay): void
-    {
-        $lines = $this->runThrough('expected_commit_verified');
-        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
-        $evidence = $this->failedBeforeWriteEvidence($lines, 20, 'traffic_hard_stop');
-        $evidence['traffic_gate']['counts'][$overlay] = 1;
-
-        self::assertSame('failed_before_write', DeploymentContractV1::validateBundle($lines, $evidence)['state']);
-    }
-
-    public function testScannerSuccessCannotExceedBusinessTraffic(): void
-    {
-        $lines = $this->runThrough('expected_commit_verified');
-        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
-        $evidence = $this->failedBeforeWriteEvidence($lines, 20, 'traffic_hard_stop');
-        $evidence['traffic_gate']['counts']['business_or_authenticated'] = 0;
-        $evidence['traffic_gate']['counts']['unclassified'] = 1;
-        $evidence['traffic_gate']['counts']['source_unknown'] = 1;
-        $evidence['traffic_gate']['counts']['scanner_success'] = 1;
-
-        $this->expectException(RuntimeException::class);
-        DeploymentContractV1::validateBundle($lines, $evidence);
-    }
-
-    #[DataProvider('nonScannerHazardOverlayProvider')]
-    public function testScannerSuccessIsDisjointFromOtherHazardOverlays(string $overlay): void
-    {
-        $lines = $this->runThrough('expected_commit_verified');
-        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
-        $evidence = $this->failedBeforeWriteEvidence($lines, 20, 'traffic_hard_stop');
-        $evidence['traffic_gate']['counts']['scanner_success'] = 1;
-        $evidence['traffic_gate']['counts'][$overlay] = 1;
-
-        $this->expectException(RuntimeException::class);
-        DeploymentContractV1::validateBundle($lines, $evidence);
-    }
-
-    #[DataProvider('nonScannerHazardOverlayProvider')]
-    public function testScannerAndHazardOverlayCanFitTwoBusinessLines(string $overlay): void
-    {
-        $lines = $this->runThrough('expected_commit_verified');
-        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
-        $evidence = $this->failedBeforeWriteEvidence($lines, 20, 'traffic_hard_stop');
-        $evidence['traffic_gate']['counts']['business_or_authenticated'] = 2;
-        $evidence['traffic_gate']['counts']['total'] = 2;
-        $evidence['traffic_gate']['counts']['lines_seen'] = 2;
-        $evidence['traffic_gate']['counts']['lines_in_window'] = 2;
-        $evidence['traffic_gate']['counts']['scanner_success'] = 1;
-        $evidence['traffic_gate']['counts'][$overlay] = 1;
-
-        self::assertSame('failed_before_write', DeploymentContractV1::validateBundle($lines, $evidence)['state']);
-    }
-
-    /** @return iterable<string,array{string}> */
-    public static function nonScannerHazardOverlayProvider(): iterable
-    {
-        yield 'server error' => ['status_5xx'];
-        yield 'write' => ['write'];
-        yield 'authenticated' => ['authenticated'];
-        yield 'customers or sensitive' => ['customers_or_sensitive'];
-    }
-
-    public function testOverlappingHazardOverlaysDoNotRequireExtraBusinessLines(): void
-    {
-        $lines = $this->runThrough('expected_commit_verified');
-        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
-        $evidence = $this->failedBeforeWriteEvidence($lines, 20, 'traffic_hard_stop');
-        foreach (['status_5xx', 'write', 'authenticated', 'customers_or_sensitive'] as $overlay) {
-            $evidence['traffic_gate']['counts'][$overlay] = 1;
-        }
-
-        self::assertSame('failed_before_write', DeploymentContractV1::validateBundle($lines, $evidence)['state']);
-    }
-
-    public function testTrafficParsedAndFailedLinesCannotOverlapSourceLines(): void
-    {
-        $lines = $this->runThrough('expected_commit_verified');
-        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 21, 'traffic_evidence_invalid'));
-        $evidence = $this->failedBeforeWriteEvidence($lines, 21, 'traffic_evidence_invalid');
-        $evidence['traffic_gate']['counts']['lines_seen'] = 1;
-        $evidence['traffic_gate']['counts']['parse_errors'] = 1;
-
-        $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('count bounds');
-        DeploymentContractV1::validateBundle($lines, $evidence);
-    }
-
-    #[DataProvider('impossibleTrafficCountBoundProvider')]
-    public function testTrafficProducerCountBoundsAreEnforced(
-        int $exitCode,
-        string $reason,
-        array $countOverrides,
-        array $coreOverrides,
-    ): void {
-        $lines = $this->runThrough('expected_commit_verified');
-        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, $exitCode, $reason));
-        $evidence = $this->failedBeforeWriteEvidence($lines, $exitCode, $reason);
-        $evidence['traffic_gate']['counts'] = array_replace($evidence['traffic_gate']['counts'], $countOverrides);
-        $evidence['traffic_gate'] = array_replace($evidence['traffic_gate'], $coreOverrides);
-
-        $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('count bounds');
-        DeploymentContractV1::validateBundle($lines, $evidence);
-    }
-
-    /** @return iterable<string,array{int,string,array<string,int>,array<string,mixed>}> */
-    public static function impossibleTrafficCountBoundProvider(): iterable
-    {
-        yield 'window exceeds seen lines' => [
-            20,
-            'traffic_hard_stop',
-            ['documented_health' => 1, 'total' => 2, 'lines_in_window' => 2],
-            [],
-        ];
-        yield 'pre-window completion exceeds window' => [20, 'traffic_hard_stop', ['pre_window_completion' => 2], []];
-        yield 'more than one rotation error' => [
-            21,
-            'traffic_evidence_invalid',
-            ['rotation_errors' => 2],
-            ['rotation_complete' => false],
-        ];
-    }
-
-    public function testTrafficUnknownFieldAndFullReportInjectionAreRejected(): void
-    {
-        $evidence = $this->validEvidence($this->successfulRunLines());
-        $evidence['traffic_gate']['future_raw_path'] = '/secret';
-
-        $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('unexpected fields');
-        DeploymentContractV1::validateEvidence($evidence);
-    }
-
-    public function testTrafficCatalogVersionMustMatchProducerGrammar(): void
-    {
-        $evidence = $this->validEvidence($this->successfulRunLines());
-        $evidence['traffic_gate']['catalog_version'] = 'x';
-
-        $this->expectException(RuntimeException::class);
-        DeploymentContractV1::validateEvidence($evidence);
-    }
-
-    public function testEvidenceRejectsTrafficModeThatDiffersFromIntent(): void
-    {
-        $lines = $this->successfulRunLines();
-        $evidence = $this->validEvidence($lines);
-        $evidence['traffic_gate']['mode'] = 'no-business-traffic';
-
-        $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('bound traffic mode');
-        DeploymentContractV1::validateBundle($lines, $evidence);
-    }
-
-    #[DataProvider('missingClaimedFailureEvidenceProvider')]
-    public function testFailedBeforeWriteRequiresEvidenceForTheClaimedGate(
-        string $from,
-        int $exitCode,
-        string $reason,
-        string $missingSection,
-    ): void {
-        $lines = $this->runThrough($from);
-        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, $exitCode, $reason));
-        $evidence = $this->failedBeforeWriteEvidence($lines, $exitCode, $reason);
-        $evidence[$missingSection] = $this->notObservedSection($evidence[$missingSection]);
-
-        $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('failure evidence');
-        DeploymentContractV1::validateBundle($lines, $evidence);
-    }
-
     /** @return iterable<string,array{string,int,string,string}> */
     public static function missingClaimedFailureEvidenceProvider(): iterable
     {
-        yield 'traffic hard stop' => ['expected_commit_verified', 20, 'traffic_hard_stop', 'traffic_gate'];
-        yield 'traffic invalid' => ['expected_commit_verified', 21, 'traffic_evidence_invalid', 'traffic_gate'];
-        yield 'dump' => ['traffic_gate_passed', 22, 'dump_verification_failed', 'dump'];
+        yield 'dump' => ['expected_commit_verified', 22, 'dump_verification_failed', 'dump'];
         yield 'capacity' => ['dump_verified', 23, 'capacity_gate_failed', 'capacity'];
         yield 'artifact' => ['capacity_passed', 24, 'artifact_verification_failed', 'artifact'];
     }
@@ -978,9 +490,7 @@ final class DeploymentContractV1Test extends TestCase
     /** @return iterable<string,array{string,int,string}> */
     public static function claimedFailureEvidenceProvider(): iterable
     {
-        yield 'traffic hard stop' => ['expected_commit_verified', 20, 'traffic_hard_stop'];
-        yield 'traffic invalid' => ['expected_commit_verified', 21, 'traffic_evidence_invalid'];
-        yield 'dump' => ['traffic_gate_passed', 22, 'dump_verification_failed'];
+        yield 'dump' => ['expected_commit_verified', 22, 'dump_verification_failed'];
         yield 'capacity' => ['dump_verified', 23, 'capacity_gate_failed'];
         yield 'artifact' => ['capacity_passed', 24, 'artifact_verification_failed'];
         yield 'commit' => ['lock_acquired', 25, 'expected_commit_mismatch'];
@@ -1009,19 +519,6 @@ final class DeploymentContractV1Test extends TestCase
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('beyond the last verified deployment state');
         DeploymentContractV1::validateBundle($lines, $evidence);
-    }
-
-    public function testGenericContractFailureCannotAlsoClaimInvalidTrafficEvidence(): void
-    {
-        $lines = $this->runThrough('planned');
-        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 70, 'contract_invalid'));
-        $evidence = $this->failedBeforeWriteEvidence($lines, 70, 'contract_invalid');
-        $evidence['expected_commit']['observed'] = null;
-        $evidence['expected_commit']['verified'] = false;
-        $evidence['traffic_gate'] = $this->invalidTrafficReportEvidence($evidence['traffic_gate'], null);
-
-        $this->expectException(RuntimeException::class);
-        DeploymentContractV1::validateEvidence($evidence);
     }
 
     public function testExpectedCommitMismatchRequiresAnObservedDifferentCommit(): void
@@ -1970,7 +1467,7 @@ final class DeploymentContractV1Test extends TestCase
 
     public function testFailedDumpCanRepresentUnverifiedSha(): void
     {
-        $lines = $this->runThrough('traffic_gate_passed');
+        $lines = $this->runThrough('expected_commit_verified');
         $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 22, 'dump_verification_failed'));
         $evidence = $this->failedBeforeWriteEvidence($lines, 22, 'dump_verification_failed');
         $evidence['dump']['age_seconds'] = 60;
@@ -2015,7 +1512,7 @@ final class DeploymentContractV1Test extends TestCase
     #[DataProvider('validInvalidDumpEvidenceProvider')]
     public function testDumpVerificationFailureCanRepresentUnavailableMeasurements(array $observed): void
     {
-        $lines = $this->runThrough('traffic_gate_passed');
+        $lines = $this->runThrough('expected_commit_verified');
         $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 22, 'dump_verification_failed'));
         $evidence = $this->failedBeforeWriteEvidence($lines, 22, 'dump_verification_failed');
         $evidence['dump'] = array_replace($this->invalidDumpEvidence($evidence['dump']), $observed);
@@ -2033,7 +1530,7 @@ final class DeploymentContractV1Test extends TestCase
     #[DataProvider('invalidDumpEvidenceShapeProvider')]
     public function testInvalidDumpEvidenceRejectsMalformedOrCompleteMeasurements(array $observed): void
     {
-        $lines = $this->runThrough('traffic_gate_passed');
+        $lines = $this->runThrough('expected_commit_verified');
         $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 22, 'dump_verification_failed'));
         $evidence = $this->failedBeforeWriteEvidence($lines, 22, 'dump_verification_failed');
         $evidence['dump'] = array_replace($this->invalidDumpEvidence($evidence['dump']), $observed);
@@ -2531,7 +2028,7 @@ final class DeploymentContractV1Test extends TestCase
     {
         yield 'start equals first journal record' => ['2026-08-10T04:00:00Z', '2026-08-10T04:00:30Z', 30_000];
         yield 'start encloses first journal record' => ['2026-08-10T03:59:59Z', '2026-08-10T04:00:30Z', 31_000];
-        yield 'finish equals terminal journal record' => ['2026-08-10T04:00:00Z', '2026-08-10T04:00:12Z', 12_000];
+        yield 'finish equals terminal journal record' => ['2026-08-10T04:00:00Z', '2026-08-10T04:00:11Z', 11_000];
         yield 'finish equals evidence capture' => ['2026-08-10T04:00:00Z', '2026-08-10T04:01:00Z', 60_000];
     }
 
@@ -2557,7 +2054,7 @@ final class DeploymentContractV1Test extends TestCase
     public static function invalidOrchestratorLifecycleProvider(): iterable
     {
         yield 'start follows first journal record' => ['2026-08-10T04:00:01Z', '2026-08-10T04:00:30Z', 29_000];
-        yield 'finish precedes terminal journal record' => ['2026-08-10T03:59:59Z', '2026-08-10T04:00:11Z', 12_000];
+        yield 'finish precedes terminal journal record' => ['2026-08-10T03:59:59Z', '2026-08-10T04:00:10Z', 11_000];
         yield 'finish follows evidence capture' => ['2026-08-10T03:59:59Z', '2026-08-10T04:01:01Z', 62_000];
         yield 'both timestamps follow evidence capture by years' => [
             '2027-08-10T04:00:00Z',
@@ -2572,8 +2069,8 @@ final class DeploymentContractV1Test extends TestCase
     public function testFailedBeforeWriteAcceptsPredeployEvidence(): void
     {
         $lines = $this->runThrough('expected_commit_verified');
-        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
-        $evidence = $this->failedBeforeWriteEvidence($lines, 20, 'traffic_hard_stop');
+        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 22, 'dump_verification_failed'));
+        $evidence = $this->failedBeforeWriteEvidence($lines, 22, 'dump_verification_failed');
 
         self::assertSame('failed_before_write', DeploymentContractV1::validateBundle($lines, $evidence)['state']);
     }
@@ -2609,7 +2106,6 @@ final class DeploymentContractV1Test extends TestCase
             '2026-08-10T04:00:00Z',
             self::COMMIT,
             'ea_contract',
-            'normal',
         );
     }
 
@@ -2691,38 +2187,12 @@ final class DeploymentContractV1Test extends TestCase
     private function validEvidence(array $lines): array
     {
         $intent = json_decode($lines[0], true, 64, JSON_THROW_ON_ERROR);
-        $counts = array_fill_keys(DeploymentContractV1::TRAFFIC_COUNT_KEYS, 0);
-        $counts['documented_health'] = 1;
-        $counts['total'] = 1;
-        $counts['lines_seen'] = 1;
-        $counts['lines_in_window'] = 1;
-
         return [
             'schema' => DeploymentContractV1::EVIDENCE_SCHEMA,
             'run_id' => self::RUN_ID,
             'intent_sha256' => $intent['intent_sha256'],
             'captured_at_utc' => '2026-08-10T04:01:00Z',
             'expected_commit' => ['expected' => self::COMMIT, 'observed' => self::COMMIT, 'verified' => true],
-            'traffic_gate' => [
-                'status' => 'passed',
-                'report_sha256' => self::SHA,
-                'schema' => 'traffic_gate.v1',
-                'producer_sha256' => self::SHA,
-                'policy_version' => 'traffic_gate_policy.v1',
-                'catalog_version' => '2026-08-09.1',
-                'purpose' => 'deploy',
-                'mode' => 'normal',
-                'window_start_epoch' => 1786334400,
-                'window_end_epoch' => 1786334490,
-                'window_seconds' => 90,
-                'log_set_sha256' => self::SHA,
-                'rotation_complete' => true,
-                'parse_complete' => true,
-                'evidence_complete' => true,
-                'decision' => 'allow',
-                'exit_code' => 0,
-                'counts' => $counts,
-            ],
             'dump' => [
                 'status' => 'passed',
                 'policy' => DeploymentContractV1::DUMP_POLICY,
@@ -2798,43 +2268,17 @@ final class DeploymentContractV1Test extends TestCase
         $evidence['post_gates'] = $this->notObservedSection($evidence['post_gates']);
         $evidence['result'] = ['state' => 'failed_before_write', 'exit_code' => $exitCode, 'reason' => $reason];
 
-        foreach (['traffic_gate', 'dump', 'capacity', 'artifact'] as $section) {
+        foreach (['dump', 'capacity', 'artifact'] as $section) {
             $evidence[$section] = $this->notObservedSection($evidence[$section]);
         }
 
-        if (in_array($reason, ['traffic_hard_stop', 'traffic_evidence_invalid'], true)) {
-            $evidence['traffic_gate'] = $this->validEvidence($lines)['traffic_gate'];
-            if ($reason === 'traffic_hard_stop') {
-                $evidence['traffic_gate']['counts']['documented_health'] = 0;
-                $evidence['traffic_gate']['counts']['business_or_authenticated'] = 1;
-                $evidence['traffic_gate']['decision'] = 'hard_stop';
-                $evidence['traffic_gate']['exit_code'] = 20;
-            } else {
-                $evidence['traffic_gate']['counts']['lines_seen'] = 2;
-                $evidence['traffic_gate']['counts']['parse_errors'] = 1;
-                $evidence['traffic_gate']['parse_complete'] = false;
-                $evidence['traffic_gate']['evidence_complete'] = false;
-                $evidence['traffic_gate']['decision'] = 'invalid';
-                $evidence['traffic_gate']['exit_code'] = 21;
-            }
-            $evidence['traffic_gate']['status'] = 'failed';
-        }
-        if (
-            in_array(
-                $reason,
-                ['dump_verification_failed', 'capacity_gate_failed', 'artifact_verification_failed'],
-                true,
-            )
-        ) {
-            $evidence['traffic_gate'] = $this->validEvidence($lines)['traffic_gate'];
-        }
-        if (in_array($reason, ['capacity_gate_failed', 'artifact_verification_failed'], true)) {
-            $evidence['dump'] = $this->validEvidence($lines)['dump'];
-        }
         if ($reason === 'dump_verification_failed') {
             $evidence['dump'] = $this->validEvidence($lines)['dump'];
             $evidence['dump']['age_seconds'] = 14400;
             $evidence['dump']['status'] = 'failed';
+        }
+        if (in_array($reason, ['capacity_gate_failed', 'artifact_verification_failed'], true)) {
+            $evidence['dump'] = $this->validEvidence($lines)['dump'];
         }
         if ($reason === 'capacity_gate_failed') {
             $evidence['capacity'] = $this->validEvidence($lines)['capacity'];
@@ -3006,17 +2450,6 @@ final class DeploymentContractV1Test extends TestCase
     }
 
     /** @param array<string,mixed> $section @return array<string,mixed> */
-    private function invalidTrafficReportEvidence(array $section, ?string $reportSha256): array
-    {
-        $section = $this->notObservedSection($section);
-        $section['status'] = 'invalid';
-        $section['report_sha256'] = $reportSha256;
-        $section['exit_code'] = 21;
-
-        return $section;
-    }
-
-    /** @param list<string> $arguments @return array{int,string,string} */
     private function runCli(array $arguments): array
     {
         $command = [

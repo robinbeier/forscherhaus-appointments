@@ -15,13 +15,11 @@ require_once __DIR__ . '/ProtectedPredeployObservationProvider.php';
  */
 interface HostRunnerProtectedObservationSource
 {
-    public function buildProvenance(string $runId, string $releaseId, string $authorizedSha256): ExpectedCommitObservationV1;
-
-    public function traffic(
+    public function buildProvenance(
         string $runId,
-        string $intentSha256,
-        string $mode,
-    ): TrafficObservationV1;
+        string $releaseId,
+        string $authorizedSha256,
+    ): ExpectedCommitObservationV1;
 
     /** @param array<string,mixed> $dumpReference */
     public function dump(string $runId, string $intentSha256, array $dumpReference): DumpObservationV1;
@@ -79,19 +77,9 @@ final class ProtectedHostPredeployObservationProvider implements ProtectedPredep
         return $value;
     }
 
-    public function traffic(): TrafficObservationV1
-    {
-        $this->expectGate(1, 'traffic_gate');
-        return $this->source->traffic(
-            $this->request['run_id'],
-            $this->request['intent_sha256'],
-            $this->request['traffic_mode'],
-        );
-    }
-
     public function dump(): DumpObservationV1
     {
-        $this->expectGate(2, 'dump');
+        $this->expectGate(1, 'dump');
         $value = $this->source->dump(
             $this->request['run_id'],
             $this->request['intent_sha256'],
@@ -109,7 +97,7 @@ final class ProtectedHostPredeployObservationProvider implements ProtectedPredep
 
     public function capacity(): CapacityObservationV1
     {
-        $this->expectGate(3, 'capacity');
+        $this->expectGate(2, 'capacity');
         if ($this->provenance === null || $this->dumpObservation === null) {
             throw new RuntimeException('capacity observation lacks its prior protected authorities');
         }
@@ -139,7 +127,7 @@ final class ProtectedHostPredeployObservationProvider implements ProtectedPredep
 
     public function artifact(): ArtifactObservationV1
     {
-        $this->expectGate(4, 'artifact');
+        $this->expectGate(3, 'artifact');
         if ($this->provenance === null || $this->capacityObservation === null) {
             throw new RuntimeException('artifact observation lacks its prior protected authorities');
         }

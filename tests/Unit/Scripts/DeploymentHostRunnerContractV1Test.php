@@ -782,7 +782,6 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         yield 'bad run id' => [['run_id' => '../run']];
         yield 'bad commit' => [['expected_commit' => str_repeat('g', 40)]];
         yield 'bad release' => [['release_id' => '--unsafe']];
-        yield 'bad traffic mode' => [['traffic_mode' => 'guess']];
         yield 'mutable dump policy' => [['dump_policy' => 'latest']];
         yield 'mutable artifact policy' => [['artifact_expectation' => 'uploaded']];
         yield 'changed intent hash' => [['release_id' => 'ea_changed']];
@@ -1875,7 +1874,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             'run_id' => self::RUN_ID,
             'intent_sha256' => self::INTENT_SHA,
             'state' => 'deploy_running',
-            'sequence' => 11,
+            'sequence' => 10,
             'events_sha256' => self::SHA,
             'claimed_at_utc' => '2026-08-11T13:00:00Z',
         ];
@@ -2774,8 +2773,6 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         ];
         $terminalReasons = [
             'deploy' => [
-                'traffic_hard_stop',
-                'traffic_evidence_invalid',
                 'dump_verification_failed',
                 'capacity_gate_failed',
                 'artifact_verification_failed',
@@ -3399,7 +3396,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             'run_id' => self::RUN_ID,
             'intent_sha256' => self::INTENT_SHA,
             'state' => 'deploy_running',
-            'sequence' => 11,
+            'sequence' => 10,
             'events_sha256' => self::SHA,
             'claimed_at_utc' => '2026-08-11T13:00:00Z',
         ];
@@ -4423,7 +4420,6 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             '2026-08-11T13:00:00Z',
             str_repeat('c', 40),
             'ea_20260811',
-            'normal',
         );
 
         return [
@@ -4431,7 +4427,6 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             'run_id' => $intent['run_id'],
             'expected_commit' => $intent['expected_commit'],
             'release_id' => $intent['release_id'],
-            'traffic_mode' => $intent['traffic_mode'],
             'dump_policy' => $intent['dump_policy'],
             'artifact_expectation' => $intent['artifact_expectation'],
             'intent_sha256' => $intent['intent_sha256'],
@@ -4700,7 +4695,6 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             '2026-08-11T13:00:00Z',
             str_repeat('c', 40),
             'ea_20260811',
-            'normal',
         );
         $lines = [DeploymentContractV1::canonicalJson($intent)];
         if ($target === 'planned') {
@@ -4983,12 +4977,6 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
     {
         $intent = json_decode($lines[0], true, 32, JSON_THROW_ON_ERROR);
         self::assertIsArray($intent);
-        $counts = array_fill_keys(DeploymentContractV1::TRAFFIC_COUNT_KEYS, 0);
-        $counts['documented_health'] = 1;
-        $counts['total'] = 1;
-        $counts['lines_seen'] = 1;
-        $counts['lines_in_window'] = 1;
-
         return [
             'schema' => DeploymentContractV1::EVIDENCE_SCHEMA,
             'run_id' => self::RUN_ID,
@@ -4998,26 +4986,6 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
                 'expected' => str_repeat('c', 40),
                 'observed' => str_repeat('c', 40),
                 'verified' => true,
-            ],
-            'traffic_gate' => [
-                'status' => 'passed',
-                'report_sha256' => self::SHA,
-                'schema' => 'traffic_gate.v1',
-                'producer_sha256' => self::SHA,
-                'policy_version' => 'traffic_gate_policy.v1',
-                'catalog_version' => '2026-08-09.1',
-                'purpose' => 'deploy',
-                'mode' => 'normal',
-                'window_start_epoch' => 1786453110,
-                'window_end_epoch' => 1786453200,
-                'window_seconds' => 90,
-                'log_set_sha256' => self::SHA,
-                'rotation_complete' => true,
-                'parse_complete' => true,
-                'evidence_complete' => true,
-                'decision' => 'allow',
-                'exit_code' => 0,
-                'counts' => $counts,
             ],
             'dump' => [
                 'status' => 'passed',
@@ -5177,7 +5145,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             'run_id' => self::RUN_ID,
             'intent_sha256' => self::INTENT_SHA,
             'state' => 'deploy_running',
-            'sequence' => 11,
+            'sequence' => 10,
             'events_sha256' => self::SHA,
             'active_action' => 'deploy',
             'deploy' => [

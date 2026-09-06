@@ -15,7 +15,6 @@ use Ops\CapacityVerifiedSourcesV1;
 use Ops\DumpObservationV1;
 use Ops\ExpectedCommitObservationV1;
 use Ops\ProtectedPredeployObservationProvider;
-use Ops\TrafficObservationV1;
 use Ops\DeployResultV1;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -39,20 +38,13 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             '/var/lib/fh-deploy-evidence/dump-attestations/' . self::SHA . '.json',
             DeploymentEvidenceAuthorityV1::dumpAttestationPath(self::SHA),
         );
-        self::assertSame(
-            'runs/' . self::RUN_ID . '/traffic-gate-report.json',
-            DeploymentEvidenceAuthorityV1::trafficReportRelativePath(self::RUN_ID),
-        );
     }
 
     public function testInvalidAuthorityPathInputsAreRejected(): void
     {
         $rejected = 0;
         foreach (
-            [
-                fn(): string => DeploymentEvidenceAuthorityV1::dumpAttestationPath(strtoupper(self::SHA)),
-                fn(): string => DeploymentEvidenceAuthorityV1::trafficReportRelativePath('not-a-run-id'),
-            ]
+            [fn(): string => DeploymentEvidenceAuthorityV1::dumpAttestationPath(strtoupper(self::SHA))]
             as $derive
         ) {
             try {
@@ -62,7 +54,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                 ++$rejected;
             }
         }
-        self::assertSame(2, $rejected);
+        self::assertSame(1, $rejected);
     }
 
     public function testRendererCapacityComesFromClosedRootPolicy(): void
@@ -266,23 +258,13 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
 
     public function testProtectedStaleOrChangedDumpReturnsExit22ButContradictorySizeFailsClosed(): void
     {
-        $trafficBytes = $this->trafficReportBytes('allow', 0);
-        $traffic = new TrafficObservationV1(
-            $trafficBytes,
-            hash('sha256', $trafficBytes),
-            self::SHA,
-            '2026-08-09.1',
-            1,
-            91,
-        );
         $attestationBytes = DeploymentEvidenceAuthorityV1::encodeFile($this->dumpAttestation());
         $cases = [
             'stale' => [self::SHA, 1_000_000, '2026-08-12T16:00:00Z', 14_400, true],
             'changed bytes' => [str_repeat('c', 64), 999_999, '2026-08-12T12:30:00Z', 1_800, false],
         ];
         foreach ($cases as $name => [$dumpSha, $dumpSize, $observedAt, $age, $shaVerified]) {
-            $provider = $this->passedProviderWithTraffic(
-                $traffic,
+            $provider = $this->passedProvider(
                 new DumpObservationV1(
                     $attestationBytes,
                     hash('sha256', $attestationBytes),
@@ -301,20 +283,18 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                 self::SHA,
                 self::RELEASE_ID,
                 self::COMMIT,
-                'normal',
             );
             self::assertSame(22, $assembly['exit_code'], $name);
             self::assertSame('failed', $assembly['sections']['dump']['status'], $name);
             self::assertSame($age, $assembly['sections']['dump']['age_seconds'], $name);
             self::assertSame($dumpSha, $assembly['sections']['dump']['sha256'], $name);
             self::assertSame($shaVerified, $assembly['sections']['dump']['sha256_verified'], $name);
-            self::assertSame(['expected_commit', 'traffic_gate', 'dump'], $provider->ledger, $name);
+            self::assertSame(['expected_commit', 'dump'], $provider->ledger, $name);
         }
 
         $this->expectException(RuntimeException::class);
         DeploymentEvidenceAuthorityV1::collectPredeployEvidence(
-            $this->passedProviderWithTraffic(
-                $traffic,
+            $this->passedProvider(
                 new DumpObservationV1(
                     $attestationBytes,
                     hash('sha256', $attestationBytes),
@@ -331,7 +311,6 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             self::SHA,
             self::RELEASE_ID,
             self::COMMIT,
-            'normal',
         );
     }
 
@@ -753,26 +732,6 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
         );
     }
 
-    public function testPinnedTrafficReportAndAllVerifiedCollectorsAssemblePassedPredeployEvidence(): void
-    {
-        $trafficBytes = $this->trafficReportBytes('allow', 0);
-        $traffic = DeploymentEvidenceAuthorityV1::verifyAndDeriveTrafficEvidence(
-            $trafficBytes,
-            hash('sha256', $trafficBytes),
-            self::RUN_ID,
-            self::SHA,
-            'normal',
-            self::SHA,
-            '2026-08-09.1',
-            1,
-            91,
-        );
-        $provenanceBytes = DeploymentEvidenceAuthorityV1::encodeFile($this->provenance());
-        $attestationBytes = DeploymentEvidenceAuthorityV1::encodeFile($this->dumpAttestation());
-        self::assertSame('traffic_gate', $traffic->gate());
-        self::assertSame(hash('sha256', $trafficBytes), $traffic->section()['report_sha256']);
-    }
-
     public function testRawSectionArraysCannotEnterTheVerifiedAssembler(): void
     {
         $method = new \ReflectionMethod(DeploymentEvidenceAuthorityV1::class, 'assemblePredeployEvidence');
@@ -807,10 +766,6 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
         $ledger = [];
         $provenanceBytes = DeploymentEvidenceAuthorityV1::encodeFile($this->provenance());
         $attestationBytes = DeploymentEvidenceAuthorityV1::encodeFile($this->dumpAttestation());
-        $trafficBytes = $this->trafficReportBytes(
-            $failedGate === 'traffic_gate' && !$invalid ? 'hard_stop' : 'allow',
-            $failedGate === 'traffic_gate' && !$invalid ? 20 : 0,
-        );
         $dumpFailure = [
             'status' => $invalid ? 'invalid' : 'failed',
             'policy' => 'fresh_verified_under_240m',
@@ -845,10 +800,6 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             'artifact_script_sha256' => self::SHA,
             'verified' => $invalid ? null : true,
         ];
-        $trafficInvalid = $this->notObservedTraffic();
-        $trafficInvalid['status'] = 'invalid';
-        $trafficInvalid['report_sha256'] = self::SHA;
-        $trafficInvalid['exit_code'] = 21;
 
         $commitCandidate = $provenanceBytes;
         if ($failedGate === 'expected_commit') {
@@ -872,14 +823,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
         );
         $provider = new TestProtectedPredeployProvider(
             new ExpectedCommitObservationV1($commitCandidate, hash('sha256', $commitCandidate)),
-            new TrafficObservationV1(
-                $failedGate === 'traffic_gate' && $invalid ? "malformed\n" : $trafficBytes,
-                hash('sha256', $failedGate === 'traffic_gate' && $invalid ? "malformed\n" : $trafficBytes),
-                self::SHA,
-                '2026-08-09.1',
-                1,
-                91,
-            ),
+
             $failedGate === 'dump'
                 ? new DumpObservationV1(
                     null,
@@ -967,12 +911,11 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             self::SHA,
             self::RELEASE_ID,
             self::COMMIT,
-            'normal',
         );
         $ledger = $provider->ledger;
         self::assertSame($expectedExit, $assembly['exit_code']);
         self::assertSame($expectedReason, $assembly['reason']);
-        $order = ['expected_commit', 'traffic_gate', 'dump', 'capacity', 'artifact'];
+        $order = ['expected_commit', 'dump', 'capacity', 'artifact'];
         $expectedLedger =
             $failedGate === 'none' ? $order : array_slice($order, 0, array_search($failedGate, $order, true) + 1);
         self::assertSame($expectedLedger, $ledger);
@@ -983,11 +926,6 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                 self::assertSame(str_repeat('c', 40), $section['observed']);
             } else {
                 self::assertSame($invalid ? 'invalid' : 'failed', $section['status']);
-            }
-            if ($failedGate === 'traffic_gate' && $invalid) {
-                self::assertSame(hash('sha256', "malformed\n"), $section['report_sha256']);
-                self::assertSame(21, $section['exit_code']);
-                self::assertNull($section['counts']);
             }
             if ($failedGate === 'dump') {
                 self::assertSame(60, $section['age_seconds']);
@@ -1023,8 +961,6 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
     {
         yield 'passed' => ['none', false, 0, 'ok'];
         yield 'commit mismatch' => ['expected_commit', false, 25, 'expected_commit_mismatch'];
-        yield 'traffic hard stop' => ['traffic_gate', false, 20, 'traffic_hard_stop'];
-        yield 'traffic invalid' => ['traffic_gate', true, 21, 'traffic_evidence_invalid'];
         yield 'dump failed' => ['dump', false, 22, 'dump_verification_failed'];
         yield 'dump invalid' => ['dump', true, 22, 'dump_verification_failed'];
         yield 'capacity failed' => ['capacity', false, 23, 'capacity_gate_failed'];
@@ -1037,15 +973,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
     {
         $provenanceBytes = DeploymentEvidenceAuthorityV1::encodeFile($this->provenance());
         $attestationBytes = DeploymentEvidenceAuthorityV1::encodeFile($this->dumpAttestation());
-        $provider = $this->passedProviderWithTraffic(
-            new TrafficObservationV1(
-                $this->trafficReportBytes('allow', 0),
-                hash('sha256', $this->trafficReportBytes('allow', 0)),
-                self::SHA,
-                '2026-08-09.1',
-                1,
-                91,
-            ),
+        $provider = $this->passedProvider(
             capacity: new CapacityObservationV1(
                 new CapacityVerifiedSourcesV1(
                     1,
@@ -1085,7 +1013,6 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             self::SHA,
             self::RELEASE_ID,
             self::COMMIT,
-            'normal',
         );
         $capacity = $assembly['sections']['capacity'];
         self::assertSame(23, $assembly['exit_code']);
@@ -1103,161 +1030,8 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
         );
     }
 
-    public function testTrafficPinModeAndCanonicalBytesCannotBeSubstituted(): void
-    {
-        $bytes = $this->trafficReportBytes('allow', 0);
-        foreach (
-            [
-                [$bytes . ' ', hash('sha256', $bytes . ' '), 'normal'],
-                [$bytes, str_repeat('c', 64), 'normal'],
-                [$bytes, hash('sha256', $bytes), 'no-business-traffic'],
-            ]
-            as [$candidate, $sha, $mode]
-        ) {
-            try {
-                DeploymentEvidenceAuthorityV1::verifyAndDeriveTrafficEvidence(
-                    $candidate,
-                    $sha,
-                    self::RUN_ID,
-                    self::SHA,
-                    $mode,
-                    self::SHA,
-                    '2026-08-09.1',
-                    1,
-                    91,
-                );
-                self::fail('Expected traffic authority substitution rejection.');
-            } catch (RuntimeException) {
-                self::addToAssertionCount(1);
-            }
-        }
-
-        $report = json_decode(substr($bytes, 0, -1), true, 64, JSON_THROW_ON_ERROR);
-        $report['future_field'] = 'forbidden';
-        ksort($report);
-        $withExtraKey = json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n";
-        try {
-            DeploymentEvidenceAuthorityV1::verifyAndDeriveTrafficEvidence(
-                $withExtraKey,
-                hash('sha256', $withExtraKey),
-                self::RUN_ID,
-                self::SHA,
-                'normal',
-                self::SHA,
-                '2026-08-09.1',
-                1,
-                91,
-            );
-            self::fail('Traffic report with an extra top-level key was accepted.');
-        } catch (RuntimeException) {
-            self::addToAssertionCount(1);
-        }
-    }
-
-    public function testProviderNormalizesParseableTrafficEvidenceFailuresToExit21(): void
-    {
-        $base = json_decode(substr($this->trafficReportBytes('allow', 0), 0, -1), true, 64, JSON_THROW_ON_ERROR);
-        $cases = [];
-        $withExtra = $base;
-        $withExtra['future_field'] = 'forbidden';
-        $cases['closed schema'] = $withExtra;
-        $inconsistent = $base;
-        $inconsistent['parse_complete'] = false;
-        $cases['inconsistent core'] = $inconsistent;
-
-        foreach ($cases as $name => $report) {
-            ksort($report);
-            $bytes = json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n";
-            $provider = $this->passedProviderWithTraffic(
-                new TrafficObservationV1($bytes, hash('sha256', $bytes), self::SHA, '2026-08-09.1', 1, 91),
-            );
-            $assembly = DeploymentEvidenceAuthorityV1::collectPredeployEvidence(
-                $provider,
-                self::RUN_ID,
-                self::SHA,
-                self::RELEASE_ID,
-                self::COMMIT,
-                'normal',
-            );
-            self::assertSame(21, $assembly['exit_code'], $name);
-            self::assertSame(hash('sha256', $bytes), $assembly['sections']['traffic_gate']['report_sha256']);
-            self::assertSame(['expected_commit', 'traffic_gate'], $provider->ledger);
-            $bundle = $this->failedBeforeWriteBundle($assembly);
-            self::assertSame(
-                'failed_before_write',
-                DeploymentContractV1::validateBundle($bundle['lines'], $bundle['evidence'])['state'],
-            );
-        }
-    }
-
-    public function testProviderNormalizesTrafficIntentBindingMismatchesToExit21(): void
-    {
-        $bytes = $this->trafficReportBytes('allow', 0);
-        $cases = [
-            'mode' => [self::SHA, '2026-08-09.1', 1, 91, 'no-business-traffic'],
-            'producer' => [str_repeat('c', 64), '2026-08-09.1', 1, 91, 'normal'],
-            'catalog' => [self::SHA, '2026-08-09.2', 1, 91, 'normal'],
-            'window' => [self::SHA, '2026-08-09.1', 2, 91, 'normal'],
-        ];
-        foreach ($cases as $name => [$producer, $catalog, $windowStart, $windowEnd, $mode]) {
-            $provider = $this->passedProviderWithTraffic(
-                new TrafficObservationV1($bytes, hash('sha256', $bytes), $producer, $catalog, $windowStart, $windowEnd),
-            );
-            $assembly = DeploymentEvidenceAuthorityV1::collectPredeployEvidence(
-                $provider,
-                self::RUN_ID,
-                self::SHA,
-                self::RELEASE_ID,
-                self::COMMIT,
-                $mode,
-            );
-            self::assertSame(21, $assembly['exit_code'], $name);
-            self::assertSame('invalid', $assembly['sections']['traffic_gate']['status'], $name);
-            self::assertSame(hash('sha256', $bytes), $assembly['sections']['traffic_gate']['report_sha256'], $name);
-            self::assertSame(['expected_commit', 'traffic_gate'], $provider->ledger, $name);
-        }
-    }
-
-    public function testTrafficAbsenceCannotInventAPinnedDigest(): void
-    {
-        $provider = $this->passedProviderWithTraffic(
-            new TrafficObservationV1(null, null, self::SHA, '2026-08-09.1', 1, 91),
-        );
-        $assembly = DeploymentEvidenceAuthorityV1::collectPredeployEvidence(
-            $provider,
-            self::RUN_ID,
-            self::SHA,
-            self::RELEASE_ID,
-            self::COMMIT,
-            'normal',
-        );
-        self::assertSame(21, $assembly['exit_code']);
-        self::assertNull($assembly['sections']['traffic_gate']['report_sha256']);
-
-        $this->expectException(RuntimeException::class);
-        DeploymentEvidenceAuthorityV1::collectPredeployEvidence(
-            $this->passedProviderWithTraffic(
-                new TrafficObservationV1(null, self::SHA, self::SHA, '2026-08-09.1', 1, 91),
-            ),
-            self::RUN_ID,
-            self::SHA,
-            self::RELEASE_ID,
-            self::COMMIT,
-            'normal',
-        );
-    }
-
     public function testProtectedObservationSourceModesRejectContradictionsAndPartialTuples(): void
     {
-        $trafficBytes = $this->trafficReportBytes('allow', 0);
-        $traffic = new TrafficObservationV1(
-            $trafficBytes,
-            hash('sha256', $trafficBytes),
-            self::SHA,
-            '2026-08-09.1',
-            1,
-            91,
-        );
         $provenanceBytes = DeploymentEvidenceAuthorityV1::encodeFile($this->provenance());
         $build = $this->buildSources($provenanceBytes);
         $attestationBytes = DeploymentEvidenceAuthorityV1::encodeFile($this->dumpAttestation());
@@ -1283,8 +1057,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
         );
         $cases = [
             'dump conflicting modes' => [
-                $this->passedProviderWithTraffic(
-                    $traffic,
+                $this->passedProvider(
                     new DumpObservationV1(
                         $attestationBytes,
                         hash('sha256', $attestationBytes),
@@ -1297,11 +1070,10 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                         true,
                     ),
                 ),
-                ['expected_commit', 'traffic_gate', 'dump'],
+                ['expected_commit', 'dump'],
             ],
             'dump partial protected tuple' => [
-                $this->passedProviderWithTraffic(
-                    $traffic,
+                $this->passedProvider(
                     new DumpObservationV1(
                         $attestationBytes,
                         null,
@@ -1314,11 +1086,10 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                         null,
                     ),
                 ),
-                ['expected_commit', 'traffic_gate', 'dump'],
+                ['expected_commit', 'dump'],
             ],
             'capacity conflicting modes' => [
-                $this->passedProviderWithTraffic(
-                    $traffic,
+                $this->passedProvider(
                     capacity: new CapacityObservationV1(
                         $capacitySources,
                         1,
@@ -1332,14 +1103,11 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                         null,
                     ),
                 ),
-                ['expected_commit', 'traffic_gate', 'dump', 'capacity'],
+                ['expected_commit', 'dump', 'capacity'],
             ],
             'artifact conflicting modes' => [
-                $this->passedProviderWithTraffic(
-                    $traffic,
-                    artifact: new ArtifactObservationV1($build, self::SHA, null, null, null, null),
-                ),
-                ['expected_commit', 'traffic_gate', 'dump', 'capacity', 'artifact'],
+                $this->passedProvider(artifact: new ArtifactObservationV1($build, self::SHA, null, null, null, null)),
+                ['expected_commit', 'dump', 'capacity', 'artifact'],
             ],
         ];
         foreach ($cases as $name => [$provider, $expectedLedger]) {
@@ -1350,7 +1118,6 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                     self::SHA,
                     self::RELEASE_ID,
                     self::COMMIT,
-                    'normal',
                 );
                 self::fail($name . ' was accepted.');
             } catch (RuntimeException) {
@@ -1361,10 +1128,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
 
     public function testRequestedReleaseCannotBeSubstitutedByAnotherValidProvenance(): void
     {
-        $trafficBytes = $this->trafficReportBytes('allow', 0);
-        $provider = $this->passedProviderWithTraffic(
-            new TrafficObservationV1($trafficBytes, hash('sha256', $trafficBytes), self::SHA, '2026-08-09.1', 1, 91),
-        );
+        $provider = $this->passedProvider();
 
         try {
             DeploymentEvidenceAuthorityV1::collectPredeployEvidence(
@@ -1373,7 +1137,6 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                 self::SHA,
                 'ea_20260812_1201',
                 self::COMMIT,
-                'normal',
             );
             self::fail('A different valid release provenance was accepted for the requested release.');
         } catch (RuntimeException $exception) {
@@ -1384,15 +1147,6 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
 
     public function testCapacityAndArtifactMustReuseThePrecedingProtectedSources(): void
     {
-        $trafficBytes = $this->trafficReportBytes('allow', 0);
-        $traffic = new TrafficObservationV1(
-            $trafficBytes,
-            hash('sha256', $trafficBytes),
-            self::SHA,
-            '2026-08-09.1',
-            1,
-            91,
-        );
         $provenanceBytes = DeploymentEvidenceAuthorityV1::encodeFile($this->provenance());
         $alternate = $this->provenance();
         $alternate['archive']['size_bytes'] = 123457;
@@ -1451,16 +1205,13 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             null,
         );
         $cases = [
-            'capacity provenance substitution' => $this->passedProviderWithTraffic(
-                $traffic,
+            'capacity provenance substitution' => $this->passedProvider(
                 capacity: $capacity($alternateBuild, $attestationBytes, 1_000_000),
             ),
-            'capacity dump substitution' => $this->passedProviderWithTraffic(
-                $traffic,
+            'capacity dump substitution' => $this->passedProvider(
                 capacity: $capacity($baseBuild, $alternateAttestationBytes, 999_999),
             ),
-            'artifact provenance substitution' => $this->passedProviderWithTraffic(
-                $traffic,
+            'artifact provenance substitution' => $this->passedProvider(
                 artifact: new ArtifactObservationV1($alternateBuild, null, null, null, null, null),
             ),
         ];
@@ -1472,7 +1223,6 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                     self::SHA,
                     self::RELEASE_ID,
                     self::COMMIT,
-                    'normal',
                 );
                 self::fail($name . ' was accepted');
             } catch (RuntimeException $exception) {
@@ -1483,15 +1233,6 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
 
     public function testArchiveSizeAndDigestDriftBecomesArtifactFailureWithoutAcceptingContradictorySize(): void
     {
-        $trafficBytes = $this->trafficReportBytes('allow', 0);
-        $traffic = new TrafficObservationV1(
-            $trafficBytes,
-            hash('sha256', $trafficBytes),
-            self::SHA,
-            '2026-08-09.1',
-            1,
-            91,
-        );
         $provenanceBytes = DeploymentEvidenceAuthorityV1::encodeFile($this->provenance());
         $drifted = new BuildVerifiedSourcesV1(
             $provenanceBytes,
@@ -1507,15 +1248,11 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             800_000_000,
         );
         $assembly = DeploymentEvidenceAuthorityV1::collectPredeployEvidence(
-            $this->passedProviderWithTraffic(
-                $traffic,
-                artifact: new ArtifactObservationV1($drifted, null, null, null, null, null),
-            ),
+            $this->passedProvider(artifact: new ArtifactObservationV1($drifted, null, null, null, null, null)),
             self::RUN_ID,
             self::SHA,
             self::RELEASE_ID,
             self::COMMIT,
-            'normal',
         );
         self::assertSame(24, $assembly['exit_code']);
         self::assertSame('failed', $assembly['sections']['artifact']['status']);
@@ -1537,15 +1274,11 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
         );
         $this->expectException(RuntimeException::class);
         DeploymentEvidenceAuthorityV1::collectPredeployEvidence(
-            $this->passedProviderWithTraffic(
-                $traffic,
-                artifact: new ArtifactObservationV1($contradictory, null, null, null, null, null),
-            ),
+            $this->passedProvider(artifact: new ArtifactObservationV1($contradictory, null, null, null, null, null)),
             self::RUN_ID,
             self::SHA,
             self::RELEASE_ID,
             self::COMMIT,
-            'normal',
         );
     }
 
@@ -1754,94 +1487,9 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
         ];
     }
 
-    private function trafficReportBytes(string $decision, int $exitCode): string
-    {
-        $counts = array_fill_keys(
-            [
-                'documented_health',
-                'documented_periodic_ops',
-                'public_read',
-                'denied_external',
-                'business_or_authenticated',
-                'unclassified',
-                'status_5xx',
-                'write',
-                'authenticated',
-                'customers_or_sensitive',
-                'scanner_success',
-                'source_unknown',
-                'method_unknown',
-                'target_unknown',
-                'pre_window_completion',
-                'lines_seen',
-                'lines_in_window',
-                'parse_errors',
-                'rotation_errors',
-                'total',
-            ],
-            0,
-        );
-        $counts['documented_health'] = 1;
-        $counts['lines_seen'] = 1;
-        $counts['lines_in_window'] = 1;
-        $counts['total'] = 1;
-        if ($decision === 'hard_stop') {
-            $counts['documented_health'] = 0;
-            $counts['public_read'] = 1;
-        }
-        return json_encode(
-            [
-                'schema' => 'traffic_gate.v1',
-                'producer_sha256' => self::SHA,
-                'policy_version' => 'traffic_gate_policy.v1',
-                'catalog_version' => '2026-08-09.1',
-                'purpose' => 'deploy',
-                'mode' => 'normal',
-                'window_start_epoch' => 1,
-                'window_end_epoch' => 91,
-                'window_seconds' => 90,
-                'log_set_sha256' => self::SHA,
-                'rotation_complete' => true,
-                'parse_complete' => true,
-                'evidence_complete' => true,
-                'decision' => $decision,
-                'exit_code' => $exitCode,
-                'counts' => $counts,
-            ],
-            JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
-        ) . "\n";
-    }
-
     /** @return array<string,mixed> */
-    private function notObservedTraffic(): array
-    {
-        $keys = [
-            'status',
-            'report_sha256',
-            'schema',
-            'producer_sha256',
-            'policy_version',
-            'catalog_version',
-            'purpose',
-            'mode',
-            'window_start_epoch',
-            'window_end_epoch',
-            'window_seconds',
-            'log_set_sha256',
-            'rotation_complete',
-            'parse_complete',
-            'evidence_complete',
-            'decision',
-            'exit_code',
-            'counts',
-        ];
-        $section = array_fill_keys($keys, null);
-        $section['status'] = 'not_observed';
-        return $section;
-    }
 
-    private function passedProviderWithTraffic(
-        TrafficObservationV1 $traffic,
+    private function passedProvider(
         ?DumpObservationV1 $dump = null,
         ?CapacityObservationV1 $capacity = null,
         ?ArtifactObservationV1 $artifact = null,
@@ -1851,7 +1499,6 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
         $build = $this->buildSources($provenanceBytes);
         return new TestProtectedPredeployProvider(
             new ExpectedCommitObservationV1($provenanceBytes, hash('sha256', $provenanceBytes)),
-            $traffic,
             $dump ??
                 new DumpObservationV1(
                     $attestationBytes,
@@ -1928,19 +1575,17 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             '2026-08-12T12:00:00Z',
             self::COMMIT,
             'ea_20260812_1200',
-            'normal',
         );
         $lines = [DeploymentContractV1::canonicalJson($intent)];
         $states = ['built', 'uploaded', 'accepted', 'lock_acquired'];
         $lastVerified = match ($assembly['reason']) {
             'expected_commit_mismatch' => 'lock_acquired',
-            'traffic_hard_stop', 'traffic_evidence_invalid' => 'expected_commit_verified',
-            'dump_verification_failed' => 'traffic_gate_passed',
+            'dump_verification_failed' => 'expected_commit_verified',
             'capacity_gate_failed' => 'dump_verified',
             'artifact_verification_failed' => 'capacity_passed',
             default => throw new RuntimeException('unexpected predeploy assembly reason'),
         };
-        foreach (['expected_commit_verified', 'traffic_gate_passed', 'dump_verified', 'capacity_passed'] as $state) {
+        foreach (['expected_commit_verified', 'dump_verified', 'capacity_passed'] as $state) {
             if ($states[array_key_last($states)] === $lastVerified) {
                 break;
             }
@@ -2033,7 +1678,6 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             '2026-08-12T12:00:00Z',
             self::COMMIT,
             'ea_20260812_1200',
-            'normal',
         );
         $lines = [DeploymentContractV1::canonicalJson($intent)];
         $previous = 'planned';
@@ -2043,7 +1687,6 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             'accepted',
             'lock_acquired',
             'expected_commit_verified',
-            'traffic_gate_passed',
             'dump_verified',
             'capacity_passed',
             'artifact_verified',
@@ -2052,7 +1695,7 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             'succeeded',
         ];
         foreach ($states as $index => $state) {
-            $count = $index >= 9 ? 1 : 0;
+            $count = $index >= 8 ? 1 : 0;
             $lines[] = DeploymentContractV1::canonicalJson([
                 'schema' => DeploymentContractV1::RUN_SCHEMA,
                 'record_type' => 'transition',
@@ -2135,7 +1778,6 @@ final class TestProtectedPredeployProvider implements ProtectedPredeployObservat
     /** @param list<string> $ledger */
     public function __construct(
         private readonly ExpectedCommitObservationV1 $expectedCommitObservation,
-        private readonly TrafficObservationV1 $trafficObservation,
         private readonly DumpObservationV1 $dumpObservation,
         private readonly CapacityObservationV1 $capacityObservation,
         private readonly ArtifactObservationV1 $artifactObservation,
@@ -2148,12 +1790,6 @@ final class TestProtectedPredeployProvider implements ProtectedPredeployObservat
     {
         $this->ledger[] = 'expected_commit';
         return $this->expectedCommitObservation;
-    }
-
-    public function traffic(): TrafficObservationV1
-    {
-        $this->ledger[] = 'traffic_gate';
-        return $this->trafficObservation;
     }
 
     public function dump(): DumpObservationV1

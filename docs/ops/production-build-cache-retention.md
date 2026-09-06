@@ -65,7 +65,7 @@ match the preflight snapshot.
 Do not execute when:
 
 - `prod_doctor.sh` or the read-only cleanup inventory is unhealthy or unclear;
-- a deploy, rollback, Zero-Surprise replay, UI smoke, traffic gate, dump,
+- a deploy, rollback, Zero-Surprise replay, UI smoke, dump,
   backup, or Docker/BuildKit build is active or expected to start;
 - another retention process owns the cleanup lock;
 - Docker does not support the fixed age and storage-reservation flags;

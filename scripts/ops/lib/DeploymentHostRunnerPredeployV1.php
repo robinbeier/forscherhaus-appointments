@@ -76,7 +76,6 @@ final class HostRunnerPredeployOrchestrator
             $start['started_at_utc'],
             $request['expected_commit'],
             $request['release_id'],
-            $request['traffic_mode'],
         );
         if (!hash_equals($intent['intent_sha256'], $intentSha256)) {
             throw new RuntimeException('deploy request does not bind the canonical intent');
@@ -98,7 +97,6 @@ final class HostRunnerPredeployOrchestrator
                 $intentSha256,
                 $request['release_id'],
                 $request['expected_commit'],
-                $request['traffic_mode'],
             );
             $assemblyBytes = DeploymentEvidenceAuthorityV1::encodeFile($assembly);
             $this->storage->pin($prefix . 'predeploy-evidence.json', $assemblyBytes, 65_536);
@@ -107,20 +105,13 @@ final class HostRunnerPredeployOrchestrator
         }
 
         $baseStates = ['built', 'uploaded', 'accepted', 'lock_acquired'];
-        $verifiedStates = [
-            'expected_commit_verified',
-            'traffic_gate_passed',
-            'dump_verified',
-            'capacity_passed',
-            'artifact_verified',
-        ];
+        $verifiedStates = ['expected_commit_verified', 'dump_verified', 'capacity_passed', 'artifact_verified'];
         $lastVerified =
             $assembly['status'] === 'passed'
                 ? 'artifact_verified'
                 : match ($assembly['reason']) {
                     'expected_commit_mismatch' => 'lock_acquired',
-                    'traffic_hard_stop', 'traffic_evidence_invalid' => 'expected_commit_verified',
-                    'dump_verification_failed' => 'traffic_gate_passed',
+                    'dump_verification_failed' => 'expected_commit_verified',
                     'capacity_gate_failed' => 'dump_verified',
                     'artifact_verification_failed' => 'capacity_passed',
                     default => throw new RuntimeException('predeploy authority returned an unsupported result'),
@@ -180,7 +171,6 @@ final class HostRunnerPredeployOrchestrator
                 $evidence['result']['exit_code'] !== $assembly['exit_code'] ||
                 $evidence['result']['reason'] !== $assembly['reason'] ||
                 $evidence['expected_commit'] != $assembly['sections']['expected_commit'] ||
-                $evidence['traffic_gate'] != $assembly['sections']['traffic_gate'] ||
                 $evidence['dump'] != $assembly['sections']['dump'] ||
                 $evidence['capacity'] != $assembly['sections']['capacity'] ||
                 $evidence['artifact'] != $assembly['sections']['artifact'] ||

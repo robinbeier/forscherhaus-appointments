@@ -357,7 +357,6 @@ final class DeploymentHostRunnerAdmissionV1Test extends TestCase
                     '2026-08-12T12:00:00Z',
                     $request['expected_commit'],
                     $request['release_id'],
-                    $request['traffic_mode'],
                 ),
             ),
         ];
@@ -369,7 +368,6 @@ final class DeploymentHostRunnerAdmissionV1Test extends TestCase
                 'accepted',
                 'lock_acquired',
                 'expected_commit_verified',
-                'traffic_gate_passed',
                 'dump_verified',
                 'capacity_passed',
                 'artifact_verified',

@@ -887,7 +887,6 @@ class LegacyReleaseProvenanceV1Test(unittest.TestCase):
             'dump_policy': 'fresh_verified_under_240m',
             'expected_commit': commit,
             'release_id': release_id,
-            'traffic_mode': 'normal',
         }
         intent = {
             **fields,

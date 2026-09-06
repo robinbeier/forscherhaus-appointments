@@ -32,7 +32,6 @@ MAX_REFERENCE_DUMP = 17_179_869_184
 FIXED_ERROR = b"host-runner storage rejected\n"
 LOCK_FDS = (198, 199)
 MAX_CHILD_OUTPUT = 65_536
-MAX_TRAFFIC_REPORT = 262_144
 MAX_RELEASE_UNPACKED = 68_719_476_736
 RELEASE_BLOCK = 4096
 RELEASE_TEMP_SCRATCH = 67_108_864
@@ -93,14 +92,14 @@ def validate_storage_scope(root: str, relative: str, operation: str) -> None:
     fixed = {"active-run.json"}
     run_leaf = re.fullmatch(
         r'runs/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})/'
-        r'(run\.lock|intent\.json|orchestrator-start\.json|orchestrator-finish\.json|predeploy-evidence\.json|traffic-gate-report\.json|request\.json|recovery-request\.json|execution-input\.json|recovery-execution-input\.json|state\.json|events\.jsonl|evidence\.json|operator-events\.jsonl|deploy-result\.json|deploy-child-observation\.json|deploy-post-gate-report\.json|rollback-post-gate-report\.json|deploy-script\.sh|rollback-script\.sh|deploy-systemd-launch\.json|deploy-unit-binding\.json|deploy-unit-observation\.json|rollback-systemd-launch\.json|rollback-unit-binding\.json|rollback-unit-observation\.json)',
+        r'(run\.lock|intent\.json|orchestrator-start\.json|orchestrator-finish\.json|predeploy-evidence\.json|request\.json|recovery-request\.json|execution-input\.json|recovery-execution-input\.json|state\.json|events\.jsonl|evidence\.json|operator-events\.jsonl|deploy-result\.json|deploy-child-observation\.json|deploy-post-gate-report\.json|rollback-post-gate-report\.json|deploy-script\.sh|rollback-script\.sh|deploy-systemd-launch\.json|deploy-unit-binding\.json|deploy-unit-observation\.json|rollback-systemd-launch\.json|rollback-unit-binding\.json|rollback-unit-observation\.json)',
         relative,
     )
     if relative not in fixed and run_leaf is None:
         reject()
     leaf = relative.rsplit('/', 1)[-1]
     immutable = {
-        'intent.json', 'orchestrator-start.json', 'orchestrator-finish.json', 'predeploy-evidence.json', 'traffic-gate-report.json',
+        'intent.json', 'orchestrator-start.json', 'orchestrator-finish.json', 'predeploy-evidence.json',
         'request.json', 'recovery-request.json', 'execution-input.json', 'recovery-execution-input.json', 'deploy-result.json',
         'deploy-child-observation.json',
         'deploy-post-gate-report.json', 'rollback-post-gate-report.json',
@@ -1524,128 +1523,6 @@ def controller_fd_probe() -> int:
     return 0
 
 
-def traffic_response(status: str, report: bytes | None, started_epoch: int, finished_epoch: int) -> bytes:
-    value = {
-        'bytes_base64': None if report is None else base64.b64encode(report).decode('ascii'),
-        'finished_epoch': finished_epoch,
-        'sha256': None if report is None else hashlib.sha256(report).hexdigest(),
-        'started_epoch': started_epoch,
-        'status': status,
-    }
-    return (json.dumps(value, sort_keys=True, separators=(',', ':')) + '\n').encode('ascii')
-
-
-def collect_traffic(root: str, run_id: str, mode: str) -> bytes:
-    test_root = re.fullmatch(r'/root/fh-host-runner-core-[0-9a-f]{16}', root) is not None
-    if (root != STATE_ROOT and not test_root) or mode not in ('normal', 'no-business-traffic'):
-        reject()
-    validate_run_id(run_id)
-    relative = 'runs/' + run_id + '/traffic-gate-report.json'
-    if not test_root:
-        validate_storage_scope(root, relative, 'pin')
-    parent, leaf = open_parent(root, relative)
-    temporary_pattern = re.compile(r'^\.traffic-gate-report\.json\.collect-[0-9a-f]{32}$')
-    temporary: str | None = None
-    started_epoch = int(time.time())
-    try:
-        try:
-            existing = bounded_read_at(parent, leaf, MAX_TRAFFIC_REPORT, optional=True)
-        except FileNotFoundError:
-            existing = None
-        if existing is not None:
-            return traffic_response('attached', existing, started_epoch, int(time.time()))
-        if test_root:
-            reject()
-
-        orphans = [entry for entry in os.listdir(parent) if temporary_pattern.fullmatch(entry)]
-        if len(orphans) > 8:
-            reject()
-        for orphan in orphans:
-            metadata = os.stat(orphan, dir_fd=parent, follow_symlinks=False)
-            validate_regular(metadata)
-            if metadata.st_size > MAX_TRAFFIC_REPORT:
-                reject()
-            os.unlink(orphan, dir_fd=parent)
-        if orphans:
-            os.fsync(parent)
-
-        temporary = '.traffic-gate-report.json.collect-' + secrets.token_hex(16)
-        output_path = STATE_ROOT + '/runs/' + run_id + '/' + temporary
-        script = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'prod_traffic_gate.sh'))
-        expected_script = os.path.abspath(os.path.join(os.path.dirname(__file__), '..')) + '/prod_traffic_gate.sh'
-        if script != expected_script:
-            reject()
-        environment = dict(CONTROLLER_ENVIRONMENT)
-        environment['TRAFFIC_GATE_PHP_BIN'] = '/usr/bin/php'
-        process = subprocess.Popen(
-            [
-                '/bin/bash', script,
-                '--purpose', 'deploy',
-                '--mode', mode,
-                '--window-seconds', '90',
-                '--output-json', output_path,
-            ],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=environment,
-            close_fds=True,
-            start_new_session=True,
-        )
-        stdout, stderr = bounded_communicate(process, 120)
-        finished_epoch = int(time.time())
-        if process.returncode not in (0, 20, 21) or len(stdout) > MAX_CHILD_OUTPUT or len(stderr) > MAX_CHILD_OUTPUT:
-            reject()
-        report = bounded_read_at(parent, temporary, MAX_TRAFFIC_REPORT, optional=True)
-        if report is None or report == b'':
-            if report == b'':
-                os.unlink(temporary, dir_fd=parent)
-                temporary = None
-                os.fsync(parent)
-            if process.returncode != 21:
-                reject()
-            return traffic_response('not_observed', None, started_epoch, finished_epoch)
-
-        if process.returncode in (0, 20):
-            try:
-                decoded = json.loads(report.decode('utf-8'))
-            except (UnicodeDecodeError, json.JSONDecodeError):
-                reject()
-            if not isinstance(decoded, dict) or decoded.get('exit_code') != process.returncode:
-                reject()
-        try:
-            rename_noreplace(parent, temporary, leaf)
-            temporary = None
-            status = 'pinned'
-        except Conflict:
-            existing = bounded_read_at(parent, leaf, MAX_TRAFFIC_REPORT)
-            if existing != report:
-                raise
-            os.unlink(temporary, dir_fd=parent)
-            temporary = None
-            status = 'attached'
-        final = bounded_read_at(parent, leaf, MAX_TRAFFIC_REPORT)
-        if final != report:
-            reject()
-        descriptor = os.open(leaf, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=parent)
-        try:
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
-        os.fsync(parent)
-        return traffic_response(status, report, started_epoch, finished_epoch)
-    finally:
-        if temporary is not None:
-            try:
-                metadata = os.stat(temporary, dir_fd=parent, follow_symlinks=False)
-                validate_regular(metadata)
-                os.unlink(temporary, dir_fd=parent)
-                os.fsync(parent)
-            except FileNotFoundError:
-                pass
-        os.close(parent)
-
-
 def observe_dump(root: str, run_id: str, leaf: str, expected_sha256: str) -> bytes:
     test_root = re.fullmatch(r'/root/fh-host-runner-core-[0-9a-f]{16}', root) is not None
     if (root != STATE_ROOT and not test_root) or re.fullmatch(r'[0-9a-f]{64}', expected_sha256) is None:
@@ -2146,9 +2023,6 @@ def main(arguments: list[str]) -> int:
         return controller_fd_probe()
     if len(arguments) == 5 and arguments[1] == 'validate-storage-scope':
         return validate_storage_scope_probe(arguments[2], arguments[3], arguments[4])
-    if len(arguments) == 5 and arguments[1] == 'collect-traffic':
-        sys.stdout.buffer.write(collect_traffic(arguments[2], arguments[3], arguments[4]))
-        return 0
     if len(arguments) == 6 and arguments[1] == 'observe-dump':
         sys.stdout.buffer.write(observe_dump(arguments[2], arguments[3], arguments[4], arguments[5]))
         return 0

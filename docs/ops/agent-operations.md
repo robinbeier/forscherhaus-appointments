@@ -24,10 +24,10 @@ a short pointer file for emergency orientation.
    Never print DB rows, Push URLs, tokens, passwords, `config.php`, Kuma DB
    contents, health-token values, or `/etc/fh` file contents.
 
-Before a deploy or Customers UI smoke, use the shared passive contract in
-`docs/traffic-gate-v1.md`. It must complete before caller-owned HTTP probes or
-production mutations. A green local/CI implementation does not activate the
-gate on the production host.
+The operator decides when a deploy or Customers UI smoke may run. Explicit
+operator approval is the timing decision; access-log classification and active
+HTTP connections do not veto it. Keep functional validation, concurrency locks,
+and rollback checks.
 
 Default target:
 
@@ -51,7 +51,6 @@ Current accepted baseline:
 - Active app path: `/var/www/html/easyappointments`
 - Release archive path: `/root/releases`
 - Host-local protected inputs: `/etc/fh`, `/etc/fh/healthz.token`,
-  `/etc/fh/traffic-gate-monitor-sources.v1.json`, and
   `/root/backups/uptime-kuma-push.env`
 - Core services: `apache2`, `php8.5-fpm`, `mariadb`, `docker`, `fail2ban`,
   `cron`, `unattended-upgrades`, `fh-pdf-renderer`
@@ -68,8 +67,6 @@ Log and signal sources:
 - PDF renderer journal: `fh-pdf-renderer`
 - Cron journal: `cron`
 - Kuma data: `/var/lib/uptime-kuma-data`
-- Traffic-gate source evidence: exact Apache-visible monitor addresses in the
-  root-protected runtime catalog; never print its contents or infer a subnet
 
 ## Commands
 

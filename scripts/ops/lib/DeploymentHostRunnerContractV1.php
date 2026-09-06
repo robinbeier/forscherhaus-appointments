@@ -45,7 +45,6 @@ final class DeploymentHostRunnerContractV1
         'run_id',
         'expected_commit',
         'release_id',
-        'traffic_mode',
         'dump_policy',
         'artifact_expectation',
         'intent_sha256',
@@ -258,7 +257,6 @@ final class DeploymentHostRunnerContractV1
         'accepted',
         'lock_acquired',
         'expected_commit_verified',
-        'traffic_gate_passed',
         'dump_verified',
         'capacity_passed',
         'artifact_verified',
@@ -301,8 +299,6 @@ final class DeploymentHostRunnerContractV1
         'interrupted',
         'post_gate_failed',
         'ok',
-        'traffic_hard_stop',
-        'traffic_evidence_invalid',
         'dump_verification_failed',
         'capacity_gate_failed',
         'artifact_verification_failed',
@@ -324,7 +320,6 @@ final class DeploymentHostRunnerContractV1
             self::INTENT_VALIDATION_TIMESTAMP,
             self::assertString($request['expected_commit'], 'expected_commit'),
             self::assertString($request['release_id'], 'release_id'),
-            self::assertString($request['traffic_mode'], 'traffic_mode'),
             self::assertString($request['dump_policy'], 'dump_policy'),
             self::assertString($request['artifact_expectation'], 'artifact_expectation'),
         );
@@ -794,7 +789,6 @@ final class DeploymentHostRunnerContractV1
             self::INTENT_VALIDATION_TIMESTAMP,
             $request['expected_commit'],
             $request['release_id'],
-            $request['traffic_mode'],
             $request['dump_policy'],
             $request['artifact_expectation'],
         );
@@ -1224,7 +1218,6 @@ final class DeploymentHostRunnerContractV1
             'accepted',
             'lock_acquired',
             'expected_commit_verified',
-            'traffic_gate_passed',
             'dump_verified',
             'capacity_passed',
             'artifact_verified'
@@ -1622,8 +1615,6 @@ final class DeploymentHostRunnerContractV1
     {
         $allowed = match ($action) {
             'deploy' => [
-                'traffic_hard_stop',
-                'traffic_evidence_invalid',
                 'dump_verification_failed',
                 'capacity_gate_failed',
                 'artifact_verification_failed',

@@ -24,7 +24,6 @@ final class DeploymentContractV1
         'accepted',
         'lock_acquired',
         'expected_commit_verified',
-        'traffic_gate_passed',
         'dump_verified',
         'capacity_passed',
         'artifact_verified',
@@ -46,8 +45,6 @@ final class DeploymentContractV1
 
     public const EXIT_REASONS = [
         'ok' => 0,
-        'traffic_hard_stop' => 20,
-        'traffic_evidence_invalid' => 21,
         'dump_verification_failed' => 22,
         'capacity_gate_failed' => 23,
         'artifact_verification_failed' => 24,
@@ -60,29 +57,6 @@ final class DeploymentContractV1
         'interrupted' => 143,
     ];
 
-    public const TRAFFIC_COUNT_KEYS = [
-        'documented_health',
-        'documented_periodic_ops',
-        'denied_external',
-        'public_read',
-        'business_or_authenticated',
-        'unclassified',
-        'total',
-        'lines_seen',
-        'lines_in_window',
-        'parse_errors',
-        'source_unknown',
-        'method_unknown',
-        'target_unknown',
-        'status_5xx',
-        'write',
-        'authenticated',
-        'customers_or_sensitive',
-        'scanner_success',
-        'pre_window_completion',
-        'rotation_errors',
-    ];
-
     private const INTENT_KEYS = [
         'schema',
         'record_type',
@@ -93,7 +67,6 @@ final class DeploymentContractV1
         'deploy_invocation_count',
         'expected_commit',
         'release_id',
-        'traffic_mode',
         'dump_policy',
         'artifact_expectation',
         'intent_sha256',
@@ -121,7 +94,6 @@ final class DeploymentContractV1
         'intent_sha256',
         'captured_at_utc',
         'expected_commit',
-        'traffic_gate',
         'dump',
         'capacity',
         'artifact',
@@ -138,14 +110,12 @@ final class DeploymentContractV1
         string $recordedAtUtc,
         string $expectedCommit,
         string $releaseId,
-        string $trafficMode,
         string $dumpPolicy = self::DUMP_POLICY,
         string $artifactExpectation = self::ARTIFACT_EXPECTATION,
     ): array {
         $fields = [
             'expected_commit' => $expectedCommit,
             'release_id' => $releaseId,
-            'traffic_mode' => $trafficMode,
             'dump_policy' => $dumpPolicy,
             'artifact_expectation' => $artifactExpectation,
         ];
@@ -181,7 +151,6 @@ final class DeploymentContractV1
         self::assertSame($record['deploy_invocation_count'], 0, 'intent deploy_invocation_count');
         self::assertCommit($record['expected_commit'], 'expected_commit');
         self::assertReleaseId($record['release_id']);
-        self::assertEnum($record['traffic_mode'], ['normal', 'no-business-traffic'], 'traffic_mode');
         self::assertSame($record['dump_policy'], self::DUMP_POLICY, 'dump_policy');
         self::assertSame($record['artifact_expectation'], self::ARTIFACT_EXPECTATION, 'artifact_expectation');
         self::assertSha256($record['intent_sha256'], 'intent_sha256');
@@ -191,7 +160,6 @@ final class DeploymentContractV1
         $expected = self::canonicalSha256([
             'expected_commit' => $record['expected_commit'],
             'release_id' => $record['release_id'],
-            'traffic_mode' => $record['traffic_mode'],
             'dump_policy' => $record['dump_policy'],
             'artifact_expectation' => $record['artifact_expectation'],
         ]);
@@ -299,7 +267,6 @@ final class DeploymentContractV1
         self::assertSha256($evidence['intent_sha256'], 'intent_sha256');
         self::assertUtc($evidence['captured_at_utc'], 'captured_at_utc');
         self::validateExpectedCommitEvidence($evidence['expected_commit']);
-        self::validateTrafficEvidence($evidence['traffic_gate']);
         self::validateDumpEvidence($evidence['dump']);
         self::validateCapacityEvidence($evidence['capacity']);
         self::validateArtifactEvidence($evidence['artifact']);
@@ -330,7 +297,7 @@ final class DeploymentContractV1
     }
 
     /**
-     * Validate the five ordered pre-deploy evidence sections without accepting
+     * Validate the four ordered pre-deploy evidence sections without accepting
      * them as a terminal bundle. Authority collectors use this at their closed
      * assembly boundary; callers cannot use it to turn a failed section into a
      * passed one because each section is still fully recomputed below.
@@ -341,11 +308,10 @@ final class DeploymentContractV1
     {
         self::assertExactKeys(
             $sections,
-            ['expected_commit', 'traffic_gate', 'dump', 'capacity', 'artifact'],
+            ['expected_commit', 'dump', 'capacity', 'artifact'],
             'predeploy evidence sections',
         );
         self::validateExpectedCommitEvidence($sections['expected_commit']);
-        self::validateTrafficEvidence($sections['traffic_gate']);
         self::validateDumpEvidence($sections['dump']);
         self::validateCapacityEvidence($sections['capacity']);
         self::validateArtifactEvidence($sections['artifact']);
@@ -369,9 +335,6 @@ final class DeploymentContractV1
 
         $intent = json_decode($runLines[0], true, 64, JSON_THROW_ON_ERROR);
         self::assertSame($evidence['expected_commit']['expected'], $intent['expected_commit'], 'bound expected_commit');
-        if (in_array($evidence['traffic_gate']['status'], ['passed', 'failed'], true)) {
-            self::assertSame($evidence['traffic_gate']['mode'], $intent['traffic_mode'], 'bound traffic mode');
-        }
         if ($evidence['dump']['status'] !== 'not_observed') {
             self::assertSame($evidence['dump']['policy'], $intent['dump_policy'], 'bound dump policy');
         }
@@ -574,8 +537,7 @@ final class DeploymentContractV1
     private static function requiredPreviousStateForFailureReason(string $reason): ?string
     {
         return match ($reason) {
-            'traffic_hard_stop', 'traffic_evidence_invalid' => 'expected_commit_verified',
-            'dump_verification_failed' => 'traffic_gate_passed',
+            'dump_verification_failed' => 'expected_commit_verified',
             'capacity_gate_failed' => 'dump_verified',
             'artifact_verification_failed' => 'capacity_passed',
             'expected_commit_mismatch' => 'lock_acquired',
@@ -667,17 +629,10 @@ final class DeploymentContractV1
     private static function assertFailedBeforeWriteEvidence(string $reason, array $evidence): void
     {
         $expectedStatuses = match ($reason) {
-            'traffic_hard_stop', 'traffic_evidence_invalid' => [
-                true,
-                'failed',
-                'not_observed',
-                'not_observed',
-                'not_observed',
-            ],
-            'dump_verification_failed' => [true, 'passed', 'failed', 'not_observed', 'not_observed'],
-            'capacity_gate_failed' => [true, 'passed', 'passed', 'failed', 'not_observed'],
-            'artifact_verification_failed' => [true, 'passed', 'passed', 'passed', 'failed'],
-            'expected_commit_mismatch' => [false, 'not_observed', 'not_observed', 'not_observed', 'not_observed'],
+            'dump_verification_failed' => [true, 'failed', 'not_observed', 'not_observed'],
+            'capacity_gate_failed' => [true, 'passed', 'failed', 'not_observed'],
+            'artifact_verification_failed' => [true, 'passed', 'passed', 'failed'],
+            'expected_commit_mismatch' => [false, 'not_observed', 'not_observed', 'not_observed'],
             'contract_invalid', 'state_conflict', 'interrupted' => null,
             default => throw new RuntimeException('failed-before-write reason is unknown'),
         };
@@ -691,7 +646,7 @@ final class DeploymentContractV1
             }
         }
         if ($expectedStatuses === null) {
-            foreach (['traffic_gate', 'dump', 'capacity', 'artifact'] as $section) {
+            foreach (['dump', 'capacity', 'artifact'] as $section) {
                 if (in_array($evidence[$section]['status'], ['failed', 'invalid'], true)) {
                     throw new RuntimeException(
                         'generic pre-write failure evidence cannot claim a different gate failure',
@@ -701,10 +656,6 @@ final class DeploymentContractV1
             return;
         }
 
-        $trafficStatus = $evidence['traffic_gate']['status'];
-        if ($reason === 'traffic_evidence_invalid' && $trafficStatus === 'invalid') {
-            $trafficStatus = 'failed';
-        }
         $dumpStatus = $evidence['dump']['status'];
         if ($reason === 'dump_verification_failed' && $dumpStatus === 'invalid') {
             $dumpStatus = 'failed';
@@ -717,28 +668,9 @@ final class DeploymentContractV1
         if ($reason === 'artifact_verification_failed' && $artifactStatus === 'invalid') {
             $artifactStatus = 'failed';
         }
-        $actualStatuses = [
-            $evidence['expected_commit']['verified'],
-            $trafficStatus,
-            $dumpStatus,
-            $capacityStatus,
-            $artifactStatus,
-        ];
+        $actualStatuses = [$evidence['expected_commit']['verified'], $dumpStatus, $capacityStatus, $artifactStatus];
         if ($actualStatuses !== $expectedStatuses) {
             throw new RuntimeException('failed-before-write result lacks matching failure evidence');
-        }
-        if (
-            ($reason === 'traffic_hard_stop' &&
-                ($evidence['traffic_gate']['decision'] !== 'hard_stop' ||
-                    $evidence['traffic_gate']['exit_code'] !== 20)) ||
-            ($reason === 'traffic_evidence_invalid' &&
-                (($evidence['traffic_gate']['status'] === 'failed' &&
-                    ($evidence['traffic_gate']['decision'] !== 'invalid' ||
-                        $evidence['traffic_gate']['exit_code'] !== 21)) ||
-                    ($evidence['traffic_gate']['status'] === 'invalid' &&
-                        $evidence['traffic_gate']['exit_code'] !== 21)))
-        ) {
-            throw new RuntimeException('traffic failure evidence does not match its public result');
         }
     }
 
@@ -747,12 +679,11 @@ final class DeploymentContractV1
     {
         $statuses = [
             $evidence['expected_commit']['verified'],
-            $evidence['traffic_gate']['status'],
             $evidence['dump']['status'],
             $evidence['capacity']['status'],
             $evidence['artifact']['status'],
         ];
-        if ($statuses !== [true, 'passed', 'passed', 'passed', 'passed']) {
+        if ($statuses !== [true, 'passed', 'passed', 'passed']) {
             throw new RuntimeException('terminal evidence requires every pre-deploy gate to pass');
         }
     }
@@ -858,7 +789,6 @@ final class DeploymentContractV1
         }
         $requiredPassed = [
             'expected_commit_verified' => $evidence['expected_commit']['verified'] === true,
-            'traffic_gate_passed' => $evidence['traffic_gate']['status'] === 'passed',
             'dump_verified' => $evidence['dump']['status'] === 'passed',
             'capacity_passed' => $evidence['capacity']['status'] === 'passed',
             'artifact_verified' => $evidence['artifact']['status'] === 'passed',
@@ -886,7 +816,6 @@ final class DeploymentContractV1
                 continue;
             }
             $section = match ($state) {
-                'traffic_gate_passed' => 'traffic_gate',
                 'dump_verified' => 'dump',
                 'capacity_passed' => 'capacity',
                 'artifact_verified' => 'artifact',
@@ -895,209 +824,6 @@ final class DeploymentContractV1
             if ($evidence[$section]['status'] !== 'not_observed') {
                 throw new RuntimeException('failure evidence claims success beyond the last verified deployment state');
             }
-        }
-    }
-
-    private static function validateTrafficEvidence(mixed $section): void
-    {
-        self::assertObject($section, 'traffic_gate');
-        $keys = [
-            'status',
-            'report_sha256',
-            'schema',
-            'producer_sha256',
-            'policy_version',
-            'catalog_version',
-            'purpose',
-            'mode',
-            'window_start_epoch',
-            'window_end_epoch',
-            'window_seconds',
-            'log_set_sha256',
-            'rotation_complete',
-            'parse_complete',
-            'evidence_complete',
-            'decision',
-            'exit_code',
-            'counts',
-        ];
-        self::assertExactKeys($section, $keys, 'traffic_gate');
-        self::assertEnum($section['status'], ['not_observed', 'passed', 'failed', 'invalid'], 'traffic_gate.status');
-        if ($section['status'] === 'not_observed') {
-            self::assertAllNullExcept($section, ['status'], 'traffic_gate');
-            return;
-        }
-        if ($section['status'] === 'invalid') {
-            if ($section['report_sha256'] !== null) {
-                self::assertSha256($section['report_sha256'], 'traffic_gate.report_sha256');
-            }
-            self::assertSame($section['exit_code'], 21, 'traffic_gate.exit_code');
-            self::assertAllNullExcept($section, ['status', 'report_sha256', 'exit_code'], 'traffic_gate');
-            return;
-        }
-        self::assertSha256($section['report_sha256'], 'traffic_gate.report_sha256');
-        self::assertSame($section['schema'], 'traffic_gate.v1', 'traffic_gate.schema');
-        self::assertSha256($section['producer_sha256'], 'traffic_gate.producer_sha256');
-        self::assertSame($section['policy_version'], 'traffic_gate_policy.v1', 'traffic_gate.policy_version');
-        self::assertVersion($section['catalog_version'], 'traffic_gate.catalog_version');
-        self::assertSame($section['purpose'], 'deploy', 'traffic_gate.purpose');
-        self::assertEnum($section['mode'], ['normal', 'no-business-traffic'], 'traffic_gate.mode');
-        foreach (['window_start_epoch', 'window_end_epoch', 'window_seconds'] as $field) {
-            self::assertNonNegativeInteger($section[$field], 'traffic_gate.' . $field);
-        }
-        if (
-            $section['window_start_epoch'] === 0 ||
-            $section['window_end_epoch'] < $section['window_start_epoch'] ||
-            $section['window_seconds'] !== $section['window_end_epoch'] - $section['window_start_epoch']
-        ) {
-            throw new RuntimeException('traffic gate window is inconsistent');
-        }
-        self::assertSha256($section['log_set_sha256'], 'traffic_gate.log_set_sha256');
-        foreach (['rotation_complete', 'parse_complete', 'evidence_complete'] as $field) {
-            self::assertBoolean($section[$field], 'traffic_gate.' . $field);
-        }
-        self::assertEnum($section['decision'], ['allow', 'advisory', 'hard_stop', 'invalid'], 'traffic_gate.decision');
-        if (!is_int($section['exit_code']) || !in_array($section['exit_code'], [0, 20, 21], true)) {
-            throw new RuntimeException('traffic_gate.exit_code is invalid');
-        }
-        self::assertObject($section['counts'], 'traffic_gate.counts');
-        self::assertExactKeys($section['counts'], self::TRAFFIC_COUNT_KEYS, 'traffic_gate.counts');
-        foreach (self::TRAFFIC_COUNT_KEYS as $field) {
-            self::assertNonNegativeInteger($section['counts'][$field], 'traffic_gate.counts.' . $field);
-        }
-        $classTotal = 0;
-        foreach (array_slice(self::TRAFFIC_COUNT_KEYS, 0, 6) as $field) {
-            $classTotal += $section['counts'][$field];
-        }
-        if (
-            $classTotal !== $section['counts']['lines_in_window'] ||
-            $section['counts']['total'] !== $section['counts']['lines_in_window']
-        ) {
-            throw new RuntimeException('traffic gate aggregate counts are inconsistent');
-        }
-        if (
-            $section['counts']['lines_in_window'] > $section['counts']['lines_seen'] ||
-            $section['counts']['parse_errors'] > $section['counts']['lines_seen'] ||
-            $section['counts']['parse_errors'] + $section['counts']['lines_in_window'] >
-                $section['counts']['lines_seen'] ||
-            $section['counts']['pre_window_completion'] > $section['counts']['lines_in_window'] ||
-            !in_array($section['counts']['rotation_errors'], [0, 1], true)
-        ) {
-            throw new RuntimeException('traffic gate count bounds are inconsistent');
-        }
-        foreach (
-            [
-                'source_unknown',
-                'method_unknown',
-                'target_unknown',
-                'status_5xx',
-                'write',
-                'authenticated',
-                'customers_or_sensitive',
-                'scanner_success',
-                'pre_window_completion',
-            ]
-            as $overlay
-        ) {
-            if ($section['counts'][$overlay] > $section['counts']['lines_in_window']) {
-                throw new RuntimeException('traffic gate overlay count exceeds the observation window');
-            }
-        }
-        foreach (['source_unknown', 'method_unknown', 'target_unknown'] as $unknownOverlay) {
-            if ($section['counts'][$unknownOverlay] > $section['counts']['unclassified']) {
-                throw new RuntimeException('traffic gate unknown overlay exceeds the unclassified count');
-            }
-        }
-        $unknownOverlayCount =
-            $section['counts']['source_unknown'] +
-            $section['counts']['method_unknown'] +
-            $section['counts']['target_unknown'];
-        if ($section['counts']['unclassified'] > $unknownOverlayCount) {
-            throw new RuntimeException('traffic gate unclassified count lacks an unknown overlay');
-        }
-        if ($section['counts']['method_unknown'] > $section['counts']['write']) {
-            throw new RuntimeException('traffic gate unknown method lacks the required write overlay');
-        }
-        $unsafeClassCount = $section['counts']['business_or_authenticated'] + $section['counts']['unclassified'];
-        foreach (['status_5xx', 'write', 'authenticated', 'customers_or_sensitive'] as $overlay) {
-            if ($section['counts'][$overlay] > $unsafeClassCount) {
-                throw new RuntimeException('traffic gate hazardous overlay exceeds the unsafe traffic classes');
-            }
-        }
-        if ($section['counts']['scanner_success'] > $section['counts']['business_or_authenticated']) {
-            throw new RuntimeException('traffic gate scanner success exceeds the business traffic class');
-        }
-        $largestHazardOverlay = max(
-            $section['counts']['status_5xx'],
-            $section['counts']['write'],
-            $section['counts']['authenticated'],
-            $section['counts']['customers_or_sensitive'],
-        );
-        $minimumBusinessHazardRows = max(0, $largestHazardOverlay - $section['counts']['unclassified']);
-        if (
-            $section['counts']['scanner_success'] + $minimumBusinessHazardRows >
-            $section['counts']['business_or_authenticated']
-        ) {
-            throw new RuntimeException('traffic gate scanner success overlaps hazardous business traffic');
-        }
-        if (
-            $section['counts']['target_unknown'] + $section['counts']['customers_or_sensitive'] >
-            $section['counts']['unclassified'] + $section['counts']['business_or_authenticated']
-        ) {
-            throw new RuntimeException('traffic gate unknown target overlaps sensitive traffic');
-        }
-        if (
-            $section['counts']['scanner_success'] +
-                $section['counts']['target_unknown'] +
-                $section['counts']['customers_or_sensitive'] >
-            $section['counts']['unclassified'] + $section['counts']['business_or_authenticated']
-        ) {
-            throw new RuntimeException('traffic gate scanner, unknown target, and sensitive traffic overlap');
-        }
-        $rotationComplete = $section['counts']['rotation_errors'] === 0;
-        $parseComplete = $section['counts']['parse_errors'] === 0 && $section['counts']['lines_seen'] > 0;
-        $evidenceComplete = $rotationComplete && $parseComplete;
-        if (
-            $section['rotation_complete'] !== $rotationComplete ||
-            $section['parse_complete'] !== $parseComplete ||
-            $section['evidence_complete'] !== $evidenceComplete
-        ) {
-            throw new RuntimeException('traffic gate completeness contradicts normalized counts');
-        }
-        $hardStop =
-            $section['counts']['business_or_authenticated'] > 0 ||
-            $section['counts']['unclassified'] > 0 ||
-            $section['counts']['status_5xx'] > 0 ||
-            $section['counts']['write'] > 0 ||
-            $section['counts']['authenticated'] > 0 ||
-            $section['counts']['customers_or_sensitive'] > 0 ||
-            $section['counts']['scanner_success'] > 0 ||
-            $section['counts']['source_unknown'] > 0 ||
-            $section['counts']['method_unknown'] > 0 ||
-            $section['counts']['target_unknown'] > 0 ||
-            $section['counts']['pre_window_completion'] > 0 ||
-            ($section['mode'] === 'normal' && $section['counts']['public_read'] > 0);
-        [$expectedDecision, $expectedExit] = !$evidenceComplete
-            ? ['invalid', 21]
-            : ($hardStop
-                ? ['hard_stop', 20]
-                : ($section['counts']['public_read'] > 0 || $section['counts']['denied_external'] > 0
-                    ? ['advisory', 0]
-                    : ['allow', 0]));
-        if ($section['decision'] !== $expectedDecision || $section['exit_code'] !== $expectedExit) {
-            throw new RuntimeException('traffic gate decision is inconsistent with normalized counts');
-        }
-        $passed =
-            $evidenceComplete &&
-            $rotationComplete &&
-            $parseComplete &&
-            $section['counts']['rotation_errors'] === 0 &&
-            $section['counts']['parse_errors'] === 0 &&
-            $section['counts']['lines_seen'] > 0 &&
-            in_array($section['decision'], ['allow', 'advisory'], true) &&
-            $section['exit_code'] === 0;
-        if (($section['status'] === 'passed') !== $passed) {
-            throw new RuntimeException('traffic gate status does not match its normalized core');
         }
     }
 
