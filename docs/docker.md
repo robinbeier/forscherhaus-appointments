@@ -206,6 +206,24 @@ rm -rf /private/tmp/fh-php85-smoke-mysql
 
 The headless Chrome sidecar that renders PDFs is exposed via the `pdf-renderer` service (`http://localhost:3003`). When you run the PHP stack outside of Docker, make sure the application can reach the sidecar by setting the runtime environment variable `PDF_RENDERER_URL=http://127.0.0.1:3003`; inside the Compose network the default `http://pdf-renderer:3000` endpoint is used automatically. If the request path runs through Apache `mod_php`, set `PDF_RENDERER_URL` and the Sentry variables (`SENTRY_DSN`, optional tracing/server-name flags) in Apache as well, because PHP-FPM-only env wiring will not reach those requests. HTML debug dumps for dashboard PDF exports are disabled by default and can be enabled temporarily with `PDF_RENDERER_DEBUG_DUMP=true`.
 
+
+The renderer image uses `node:24-bookworm-slim` and installs only the Chrome
+revision selected by `pdf-renderer/package-lock.json`. Automatic Puppeteer
+browser downloads are disabled during `npm ci`; the explicit Chrome install
+also installs its Debian runtime dependencies. The build retains the configured
+DejaVu, Liberation and Noto fonts, discards package caches, and runs as the
+unprivileged `node` user with `PUPPETEER_CACHE_DIR=/home/node/.cache/puppeteer`.
+Update the lockfile to update Puppeteer and its matching browser together.
+
+Chromium remains the rendering engine because the existing exports use CSS
+Grid/Flexbox and JavaScript-assisted shared logos. A switch to a non-browser
+engine would require template and output validation beyond an image cleanup.
+The booking confirmation PDF uses its separate client-side export path.
+Validate renderer changes with `docker compose exec -T pdf-renderer npm test`
+and representative application exports; check fonts, pagination, and landscape
+output as well as successful HTTP responses. Repository changes do not replace
+the production renderer until a separately approved rebuild/deployment.
+
 Baikal, a self-hosted CalDAV server used to develop the CalDAV syncing integration is available on `http://localhost:8100` (credentials are `admin` / `admin`). 
 
 While activating CalDAV sync with the local Docker-based Baikal, you will need to first create a new Baikal user and then the credentials you defined along with the http://baikal/dav.php URL

@@ -1,30 +1,29 @@
-FROM ghcr.io/puppeteer/puppeteer:24.38.0
+FROM node:24-bookworm-slim
 
-USER root
+ENV PUPPETEER_CACHE_DIR=/home/node/.cache/puppeteer
 
 WORKDIR /app
 
-RUN mkdir -p /app && chown -R pptruser:pptruser /app
+COPY --chown=node:node package.json package-lock.json* ./
 
-RUN apt-get update || true
-RUN apt-get install -y --no-install-recommends \
+RUN PUPPETEER_SKIP_DOWNLOAD=true npm ci --omit=dev \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        curl \
         fontconfig \
         fonts-dejavu \
         fonts-liberation \
         fonts-noto-core \
         fonts-noto-color-emoji \
-    || true
+    && npx puppeteer browsers install chrome --install-deps \
+    && mkdir -p "$PUPPETEER_CACHE_DIR" \
+    && chown -R node:node "$PUPPETEER_CACHE_DIR" \
+    && npm cache clean --force \
+    && rm -rf /var/lib/apt/lists/*
 
-COPY package.json package-lock.json* ./
-RUN npm ci --omit=dev || npm install --omit=dev
-# Install the browser revision required by the locked Puppeteer package.
-RUN PUPPETEER_CACHE_DIR=/home/pptruser/.cache/puppeteer npx puppeteer browsers install chrome
+COPY --chown=node:node server.js server.test.js ./
 
-COPY server.js server.test.js ./
-
-RUN chown -R pptruser:pptruser /app
-
-USER pptruser
+USER node
 
 EXPOSE 3000
 
