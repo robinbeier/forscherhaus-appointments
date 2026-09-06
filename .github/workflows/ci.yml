@@ -318,6 +318,8 @@ jobs:
     steps:
       - name: Git clone
         uses: actions/checkout@v6
+      - name: Start build-test database
+        run: docker compose up -d mysql
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
@@ -346,8 +348,6 @@ jobs:
           install -m 0600 config-sample.php config.php
           sed -i "s/const DB_HOST = 'mysql';/const DB_HOST = '127.0.0.1';/" config.php
           grep -Fq "const DB_HOST = '127.0.0.1';" config.php
-      - name: Start build-test database
-        run: docker compose up -d mysql
       - name: Wait for build-test MySQL readiness
         run: bash scripts/ci/wait_for_mysql_readiness.sh
       - name: Install deterministic build-test instance
