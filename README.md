@@ -136,7 +136,7 @@ This prevents mixed container mounts across worktrees.
 - [Installation guide](docs/installation-guide.md)
 - [Docker guide](docs/docker.md)
 - [Observability guide](docs/observability.md)
-- [Production legacy session-mode normalization](docs/ops/production-session-mode-normalization.md)
+- [Production session retention](docs/ops/production-session-retention.md)
 - [Console commands](docs/console.md)
 - [REST API](docs/rest-api.md)
 - [Google Calendar sync](docs/google-calendar-sync.md)

@@ -22,12 +22,6 @@ contract, use `docs/deployment-run-v1.md`, `lib/DeployResultV1.php`, and
 `validate_deployment_contract_v1.php`. This contract slice does not install a
 host runner or activate production behavior.
 
-For the one-time ROB-464 legacy session-mode repair boundary, use
-`docs/ops/production-session-mode-normalization.md`. It defines the
-dry-run/execute split, the exact live confirmation token, fail-closed stop
-rules, and the required post-normalization ROB-440 dry-run without authorizing
-production execution by merge alone.
-
 Use `scripts/ops/uptime-kuma-push.env.example` as the host-local env template.
 The immutable root runtime, canonical `/etc/cron.d` file and migration contract
 are documented in
