@@ -22,6 +22,13 @@ main-suite failure handling, database setup and cleanup, root deployment
 checks, and explicit deterministic integration-test settings. Path selection
 is tested by `tests/Unit/Scripts/CiPathFilterMatrixTest.php`.
 
+## PHP-only job preparation
+
+The application PHPStan, request DTO, and request-contract jobs install only
+Composer dependencies. Their analysis, unit tests, and adoption checks do not
+consume generated frontend assets. `build-test` retains the full frontend
+compile, while browser/runtime jobs keep the asset preparation they need.
+
 ## Integration coverage preparation
 
 The integration coverage shard runs PHP with Xdebug directly on the GitHub

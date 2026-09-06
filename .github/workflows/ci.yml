@@ -476,15 +476,6 @@ jobs:
     steps:
       - name: Git clone
         uses: actions/checkout@v6
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-          cache: npm
-      - name: Frontend compile
-        run: |
-          npm ci --no-audit --no-fund
-          npx gulp compile
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
@@ -508,15 +499,6 @@ jobs:
     steps:
       - name: Git clone
         uses: actions/checkout@v6
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-          cache: npm
-      - name: Frontend compile
-        run: |
-          npm ci --no-audit --no-fund
-          npx gulp compile
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
@@ -552,15 +534,6 @@ jobs:
     steps:
       - name: Git clone
         uses: actions/checkout@v6
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-          cache: npm
-      - name: Install npm dependencies
-        run: npm ci --no-audit --no-fund
-      - name: Frontend compile
-        run: npx gulp compile
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
