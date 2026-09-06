@@ -124,7 +124,12 @@ Linux capabilities) produce a specific skip before any mutation. Do not add
 host Docker access merely to eliminate a skip. An available but unsafe
 resource or a failed test remains a failure.
 
-GitHub's blocking `build-test` job runs
+GitHub's blocking `build-test` job installs frontend test dependencies with
+`npm ci --ignore-scripts`: its PHP and JavaScript source tests use no generated
+frontend assets. Node and the packages remain available for the Booking WebMCP
+runtime test. Browser and release workflows prepare their own runtime assets.
+
+The same job runs
 [`scripts/ci/run_root_deployment_regressions.sh`](../scripts/ci/run_root_deployment_regressions.sh)
 with `FH_ROOT_HOST_TESTS_REQUIRED=1`: missing prerequisites fail there. A local
 skip does not replace that CI check. Keep the test list in that script and the
