@@ -32,4 +32,12 @@ install_managed_hook() {
 }
 
 install_managed_hook "pre-commit" "managed-by-forscherhaus-precommit"
-install_managed_hook "pre-push" "managed-by-forscherhaus-prepush"
+# Retire only our old automatic push checks; user-owned hooks stay untouched.
+old_pre_push="$HOOKS_DIR/pre-push"
+if [[ -f "$old_pre_push" && ! -L "$old_pre_push" ]] &&
+    grep -Fxq '# managed-by-forscherhaus-prepush' "$old_pre_push"; then
+    rm -- "$old_pre_push"
+    echo "[hooks] Removed retired managed pre-push hook."
+elif [[ -e "$old_pre_push" || -L "$old_pre_push" ]]; then
+    echo "[hooks] Existing custom pre-push hook detected; leaving it untouched."
+fi

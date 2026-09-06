@@ -109,20 +109,36 @@ Alternative command in the same container context:
 docker compose run --rm php-fpm sh -lc 'APP_ENV=testing php vendor/bin/phpunit'
 ```
 
-The managed local hooks also discover Linux root/host tests through this
-general suite. Docker Desktop does not grant the PHP container host-Docker
-authority or POSIX ownership semantics merely for those tests. Unsupported
-host-only prerequisites are classified before mutation as narrow skips, while
-the GitHub Actions Linux-root profile requires every prerequisite and fails on
-absence. See [Root/Host Test Harness](root-host-test-harness.md) for the exact
-binary, socket, daemon, signal, ownership, and capability contract.
-
 Inside the Compose network, `DB_HOST='mysql'` resolves through Docker DNS to the `mysql` service.
 When running PHP directly on the host, MySQL is reachable via `localhost:3306`, but only if your
 `config.php` uses a host-resolvable DB host (for example `127.0.0.1` or `localhost`).
 
 Warning: Running host-side `composer test` while `DB_HOST='mysql'` is configured will fail with a
 `php_network_getaddresses: getaddrinfo for mysql failed` error.
+
+### Linux root/host tests
+
+The explicit test commands above include server-operation tests. On Docker
+Desktop, missing host-only prerequisites (Docker access, POSIX ownership or
+Linux capabilities) produce a specific skip before any mutation. Do not add
+host Docker access merely to eliminate a skip. An available but unsafe
+resource or a failed test remains a failure.
+
+GitHub's blocking `build-test` job runs
+[`scripts/ci/run_root_deployment_regressions.sh`](../scripts/ci/run_root_deployment_regressions.sh)
+with `FH_ROOT_HOST_TESTS_REQUIRED=1`: missing prerequisites fail there. A local
+skip does not replace that CI check. Keep the test list in that script and the
+prerequisite checks in
+[`RootHostTestPrerequisites.php`](../tests/Support/RootHostTestPrerequisites.php).
+The Linux-root script belongs on the disposable CI host, never production.
+
+For focused local diagnosis:
+
+```bash
+docker compose run --rm --no-deps php-fpm \
+  php vendor/bin/phpunit --no-configuration --bootstrap vendor/autoload.php \
+  tests/Unit/Scripts/RootHostTestPrerequisitesTest.php
+```
 
 ## PHP 8.5 Preview Smoke
 
