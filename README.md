@@ -40,6 +40,9 @@ docker compose run --rm php-fpm composer test
 npm run build
 ```
 
+`npm run build` compiles frontend assets only. Production release archives are
+created with `build_release.sh`; see [Deployment](docs/deployment.md).
+
 ## Harness Guide
 
 Need the shortest route to the right steering source?
