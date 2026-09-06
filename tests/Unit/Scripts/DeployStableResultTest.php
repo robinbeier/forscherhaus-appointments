@@ -254,52 +254,6 @@ final class DeployStableResultTest extends TestCase
         }
     }
 
-    public function testTimingActivePostSwitchFailureReportsVerifiedRollbackSummary(): void
-    {
-        $result = $this->runShell(
-            $this->switchHarness(
-                <<<'BASH'
-                deploy_timing_init deploy 0 preparation_artifact
-                mv() { return 0; }
-                rollback_after_failure() {
-                  deploy_timing_finish failed rollback_succeeded 30
-                  deploy_result_exit 30
-                }
-                perform_atomic_switch
-                false
-                BASH
-                ,
-            ),
-        );
-
-        self::assertSame(30, $result['exit_code'], $result['stderr']);
-        self::assertStringContainsString('"outcome":"rollback_succeeded"', $result['stdout']);
-        self::assertStringContainsString('"exit_code":30', $result['stdout']);
-    }
-
-    public function testTimingActivePostSwitchFailureReportsUnverifiableRollbackSummary(): void
-    {
-        $result = $this->runShell(
-            $this->switchHarness(
-                <<<'BASH'
-                deploy_timing_init deploy 0 preparation_artifact
-                mv() { return 0; }
-                rollback_after_failure() {
-                  deploy_timing_finish failed rollback_failed 31
-                  deploy_result_exit 31
-                }
-                perform_atomic_switch
-                false
-                BASH
-                ,
-            ),
-        );
-
-        self::assertSame(31, $result['exit_code'], $result['stderr']);
-        self::assertStringContainsString('"outcome":"rollback_failed"', $result['stdout']);
-        self::assertStringContainsString('"exit_code":31', $result['stdout']);
-    }
-
     public function testDryRunNeverEntersLiveSwitchPhaseOrCallsMove(): void
     {
         $result = $this->runShell(
@@ -344,7 +298,7 @@ final class DeployStableResultTest extends TestCase
         self::assertSame(2, substr_count($result['stdout'], "move\n"));
     }
 
-    public function testSignalAfterSuccessfulTimingFinishDoesNotRollbackCompletedDeploy(): void
+    public function testSignalAfterSuccessfulFinalizationDoesNotRollbackCompletedDeploy(): void
     {
         $result = $this->runShell(
             <<<'BASH'
@@ -352,13 +306,13 @@ final class DeployStableResultTest extends TestCase
             deploy_result_trap_install
             DRYRUN=0
             DEPLOY_RESULT_PHASE=switch_complete
-            deploy_timing_finish() { trap - EXIT; }
-            deploy_result_after_timing_finish() { printf 'success-boundary\n'; kill -TERM $$; }
+
+            deploy_result_after_finalize() { printf 'success-boundary\n'; kill -TERM $$; }
             rollback_after_failure() {
               printf 'unexpected-rollback\n'
               deploy_result_exit 31
             }
-            deploy_result_finish_with_timing 0 ok succeeded
+            deploy_result_finish 0
             BASH
             ,
         );
@@ -401,41 +355,6 @@ final class DeployStableResultTest extends TestCase
         self::assertStringNotContainsString('unexpected-rollback', $result['stdout']);
     }
 
-    public function testSignalAfterSuccessfulTimingPhaseWriteDoesNotDuplicatePhase(): void
-    {
-        $result = $this->runShell($this->successfulRealTimingSignalHarness('phase_after_write'));
-
-        self::assertSame(0, $result['exit_code'], $result['stderr']);
-        self::assertSame(1, substr_count($result['stdout'], "timing-phase-boundary\n"));
-        self::assertSame(1, substr_count($result['stdout'], '"event":"phase"'));
-        self::assertSame(1, substr_count($result['stdout'], '"event":"summary"'));
-        self::assertStringContainsString('"outcome":"succeeded"', $result['stdout']);
-        self::assertStringContainsString('"exit_code":0', $result['stdout']);
-        self::assertStringNotContainsString('"outcome":"failed_post_switch"', $result['stdout']);
-    }
-
-    public function testSignalBeforeSuccessfulTimingSummaryWriteDoesNotLoseSummary(): void
-    {
-        $result = $this->runShell($this->successfulRealTimingSignalHarness('summary_before_write'));
-
-        self::assertSame(0, $result['exit_code'], $result['stderr']);
-        self::assertSame(1, substr_count($result['stdout'], "timing-summary-boundary\n"));
-        self::assertSame(1, substr_count($result['stdout'], '"event":"summary"'));
-        self::assertStringContainsString('"outcome":"succeeded"', $result['stdout']);
-        self::assertStringContainsString('"exit_code":0', $result['stdout']);
-    }
-
-    public function testSignalAfterSuccessfulTimingSummaryWriteDoesNotDuplicateSummary(): void
-    {
-        $result = $this->runShell($this->successfulRealTimingSignalHarness('summary_after_write'));
-
-        self::assertSame(0, $result['exit_code'], $result['stderr']);
-        self::assertSame(1, substr_count($result['stdout'], "timing-summary-boundary\n"));
-        self::assertSame(1, substr_count($result['stdout'], '"event":"summary"'));
-        self::assertStringContainsString('"outcome":"succeeded"', $result['stdout']);
-        self::assertStringContainsString('"exit_code":0', $result['stdout']);
-    }
-
     public function testExistingRollbackSuccessAndFailureExitsRemainStable(): void
     {
         $success = $this->runShell($this->rollbackHarness(true));
@@ -470,23 +389,6 @@ final class DeployStableResultTest extends TestCase
         self::assertSame(1, substr_count($result['stdout'], "summary-boundary\n"));
     }
 
-    public function testRealTimingSummaryRemainsBoundToRollbackResultWhenSignalArrivesBeforeExit(): void
-    {
-        foreach (
-            [[true, 30, 'rollback_succeeded'], [false, 31, 'rollback_failed']]
-            as [$rollbackSucceeds, $expectedExitCode, $expectedOutcome]
-        ) {
-            $result = $this->runShell($this->rollbackWithRealTimingAndSignalHarness($rollbackSucceeds));
-
-            self::assertSame($expectedExitCode, $result['exit_code'], $result['stderr']);
-            self::assertSame(1, substr_count($result['stdout'], "signal-boundary\n"));
-            self::assertSame(1, substr_count($result['stdout'], '"event":"summary"'));
-            self::assertStringContainsString('"outcome":"' . $expectedOutcome . '"', $result['stdout']);
-            self::assertStringContainsString('"exit_code":' . $expectedExitCode, $result['stdout']);
-            self::assertStringNotContainsString('"outcome":"failed_pre_switch"', $result['stdout']);
-        }
-    }
-
     public function testSignalDuringDirectAutomaticRollbackDoesNotStartSecondRollback(): void
     {
         $result = $this->runShell(
@@ -501,8 +403,8 @@ final class DeployStableResultTest extends TestCase
             CURRENT_SCRIPT_PATH=/fixed/deploy_ea.sh
             ZERO_SURPRISE_CANARY_REPORT=''
             DEPLOY_RESULT_PHASE=switch_complete
-            deploy_timing_begin_rollback() { printf 'rollback-start\n'; }
-            deploy_timing_finish() { :; }
+
+
             emit_zero_surprise_incident() { :; }
             reload_services() { :; }
             restart_renderer_service() { return 0; }
@@ -522,33 +424,7 @@ final class DeployStableResultTest extends TestCase
         );
 
         self::assertSame(31, $result['exit_code'], $result['stderr']);
-        self::assertSame(1, substr_count($result['stdout'], "rollback-start\n"));
         self::assertSame(1, substr_count($result['stdout'], "runtime-config-rollback-finished\n"));
-    }
-
-    public function testRealTimingDoesNotReplaceRecoverySignalHandlers(): void
-    {
-        foreach (['HUP', 'INT', 'QUIT', 'TERM'] as $signal) {
-            $result = $this->runShell($this->realTimingRecoverySignalHarness($signal, false));
-
-            self::assertSame(31, $result['exit_code'], $signal . ': ' . $result['stderr']);
-            self::assertSame(1, substr_count($result['stdout'], "real-timing-recovery-finished\n"), $signal);
-            self::assertSame(1, substr_count($result['stdout'], '"event":"summary"'), $signal);
-            self::assertStringContainsString('"outcome":"rollback_failed"', $result['stdout'], $signal);
-        }
-    }
-
-    public function testDeferredRealTimingSignalsDoNotPreemptRecovery(): void
-    {
-        foreach (['HUP', 'INT', 'QUIT', 'TERM'] as $signal) {
-            $result = $this->runShell($this->realTimingRecoverySignalHarness($signal, true));
-
-            self::assertSame(31, $result['exit_code'], $signal . ': ' . $result['stderr']);
-            self::assertSame(1, substr_count($result['stdout'], "rollback-timing-write-boundary\n"), $signal);
-            self::assertSame(1, substr_count($result['stdout'], "real-timing-recovery-finished\n"), $signal);
-            self::assertSame(1, substr_count($result['stdout'], '"event":"summary"'), $signal);
-            self::assertStringContainsString('"outcome":"rollback_failed"', $result['stdout'], $signal);
-        }
     }
 
     public function testSigtermRemainsTheContractInterruptionExit(): void
@@ -589,7 +465,7 @@ final class DeployStableResultTest extends TestCase
         }
     }
 
-    public function testPreSwitchSignalsDuringTimingExitRemainStableDeployFailed(): void
+    public function testPreSwitchSignalsDuringFinalizationRemainStableDeployFailed(): void
     {
         foreach (['HUP', 'INT', 'QUIT'] as $signal) {
             $result = $this->runShell(
@@ -603,7 +479,7 @@ final class DeployStableResultTest extends TestCase
                     deploy_result_reconcile_switch_phase() {
                       if [[ "$injected" == "0" ]]; then
                         injected=1
-                        printf 'timing-exit-boundary\n'
+                        printf 'finalization-boundary\n'
                         kill -SIGNAL_NAME $$
                       fi
                     }
@@ -614,35 +490,7 @@ final class DeployStableResultTest extends TestCase
             );
 
             self::assertSame(30, $result['exit_code'], $signal . ': ' . $result['stderr']);
-            self::assertSame(1, substr_count($result['stdout'], "timing-exit-boundary\n"), $signal);
-        }
-    }
-
-    public function testPreSwitchSignalsDuringFailedTimingPhaseStillCommitSummary(): void
-    {
-        foreach (['HUP', 'INT', 'QUIT', 'TERM'] as $signal) {
-            $result = $this->runShell($this->failedRealTimingSignalHarness($signal, 'phase'));
-
-            self::assertSame(30, $result['exit_code'], $signal . ': ' . $result['stderr']);
-            self::assertSame(1, substr_count($result['stdout'], "failed-timing-phase-boundary\n"), $signal);
-            self::assertSame(1, substr_count($result['stdout'], '"event":"phase"'), $signal);
-            self::assertSame(1, substr_count($result['stdout'], '"event":"summary"'), $signal);
-            self::assertStringContainsString('"outcome":"failed_pre_switch"', $result['stdout'], $signal);
-            self::assertStringContainsString('"exit_code":30', $result['stdout'], $signal);
-        }
-    }
-
-    public function testPreSwitchSignalsDuringFailedTimingSummaryPreserveStableExit(): void
-    {
-        foreach (['HUP', 'INT', 'QUIT', 'TERM'] as $signal) {
-            $result = $this->runShell($this->failedRealTimingSignalHarness($signal, 'summary'));
-
-            self::assertSame(30, $result['exit_code'], $signal . ': ' . $result['stderr']);
-            self::assertSame(1, substr_count($result['stdout'], "failed-timing-summary-boundary\n"), $signal);
-            self::assertSame(1, substr_count($result['stdout'], '"event":"phase"'), $signal);
-            self::assertSame(1, substr_count($result['stdout'], '"event":"summary"'), $signal);
-            self::assertStringContainsString('"outcome":"failed_pre_switch"', $result['stdout'], $signal);
-            self::assertStringContainsString('"exit_code":30', $result['stdout'], $signal);
+            self::assertSame(1, substr_count($result['stdout'], "finalization-boundary\n"), $signal);
         }
     }
 
@@ -819,12 +667,12 @@ final class DeployStableResultTest extends TestCase
 
     private function rollbackHarness(
         bool $succeeds,
-        bool $signalAfterTimingFinish = false,
+        bool $signalAfterFinalize = false,
         bool $signalDuringIncident = false,
         bool $signalDuringSummary = false,
     ): string {
         $rollbackResult = $succeeds ? 'return 0' : 'return 1';
-        $timingFinish = $signalAfterTimingFinish ? 'trap - EXIT; kill -TERM $$' : 'trap - EXIT';
+        $afterFinalize = $signalAfterFinalize ? 'trap - EXIT; kill -TERM $$' : 'trap - EXIT';
         $incident = $signalDuringIncident ? "printf 'incident-boundary\\n'; kill -TERM \$\$" : ':';
         $summary = $signalDuringSummary
             ? "echo() { if [[ \"\$*\" == '[!] Deployment failed; rollback result summary' ]]; then builtin printf 'summary-boundary\\n'; kill -TERM \$\$; fi; builtin echo \"\$@\"; }"
@@ -841,8 +689,8 @@ final class DeployStableResultTest extends TestCase
         CURRENT_SCRIPT_PATH=/fixed/deploy_ea.sh
         ZERO_SURPRISE_CANARY_REPORT=''
         DEPLOY_RESULT_PHASE=switch_complete
-        deploy_timing_begin_rollback() { :; }
-        deploy_timing_finish() { {$timingFinish}; }
+
+        deploy_result_after_finalize() { {$afterFinalize}; }
         emit_zero_surprise_incident() { {$incident}; }
         reload_services() { :; }
         restart_renderer_service() { return 0; }
@@ -852,182 +700,6 @@ final class DeployStableResultTest extends TestCase
         {$summary}
         rollback_after_failure 'redacted failure'
         BASH;
-    }
-
-    private function rollbackWithRealTimingAndSignalHarness(bool $succeeds): string
-    {
-        $rollbackResult = $succeeds ? 'return 0' : 'return 1';
-
-        return str_replace(
-            'ROLLBACK_RESULT',
-            $rollbackResult,
-            <<<'BASH'
-            source ./deploy_ea.sh
-            deploy_result_trap_install
-            DRYRUN=0
-            APP=/fixed/active
-            PREV=/fixed/previous
-            REL=ea_contract
-            WEBUSER=www-data
-            CURRENT_SCRIPT_PATH=/fixed/deploy_ea.sh
-            ZERO_SURPRISE_CANARY_REPORT=''
-            deploy_monotonic_ms() { printf '1000\n'; }
-            deploy_timing_new_run_id() { printf '00000000-0000-4000-8000-000000000001\n'; }
-            emit_zero_surprise_incident() { :; }
-            reload_services() { :; }
-            restart_renderer_service() { return 0; }
-            probe_renderer_health() { return 0; }
-            probe_deep_health_contract() { return 0; }
-            bash() { ROLLBACK_RESULT; }
-            deploy_result_after_timing_finish() { printf 'signal-boundary\n'; kill -TERM $$; }
-            deploy_timing_init deploy 0 postdeploy_validation
-            rollback_after_failure 'redacted failure'
-            BASH
-            ,
-        );
-    }
-
-    private function realTimingRecoverySignalHarness(string $signal, bool $duringTimingWrite): string
-    {
-        $timingInjection = $duringTimingWrite
-            ? <<<'BASH'
-            deploy_timing_emit_record() {
-              builtin printf '%s\n' "$1"
-              if [[ "$1" == *'"event":"phase"'* && "${signal_sent:-0}" == "0" ]]; then
-                signal_sent=1
-                printf 'rollback-timing-write-boundary\n'
-                kill -SIGNAL $$
-              fi
-            }
-            BASH
-            : '';
-        $rollbackSignal = $duringTimingWrite
-            ? ''
-            : <<<'BASH'
-              if [[ "${signal_sent:-0}" == "0" ]]; then
-                signal_sent=1
-                kill -SIGNAL $$
-              fi
-            BASH;
-
-        return str_replace(
-            ['__TIMING_INJECTION__', '__ROLLBACK_SIGNAL__', 'SIGNAL'],
-            [$timingInjection, $rollbackSignal, $signal],
-            <<<'BASH'
-            source ./deploy_ea.sh
-            deploy_result_trap_install
-            DRYRUN=0
-            APP=/fixed/active
-            PREV=/fixed/previous
-            REL=ea_contract
-            WEBUSER=www-data
-            CURRENT_SCRIPT_PATH=/fixed/deploy_ea.sh
-            ZERO_SURPRISE_CANARY_REPORT=''
-            DEPLOY_RESULT_PHASE=switch_complete
-            deploy_monotonic_ms() { printf '1000\n'; }
-            deploy_timing_new_run_id() { printf '00000000-0000-4000-8000-000000000001\n'; }
-            emit_zero_surprise_incident() { :; }
-            reload_services() { :; }
-            restart_renderer_service() { return 0; }
-            probe_renderer_health() { return 0; }
-            probe_deep_health_contract() { return 0; }
-            bash() {
-            __ROLLBACK_SIGNAL__
-              printf 'real-timing-recovery-finished\n'
-              return 0
-            }
-            __TIMING_INJECTION__
-            deploy_timing_init deploy 0 postdeploy_validation
-            rollback_after_failure 'redacted failure'
-            BASH
-            ,
-        );
-    }
-
-    private function failedRealTimingSignalHarness(string $signal, string $event): string
-    {
-        return str_replace(
-            ['__SIGNAL__', '__EVENT__'],
-            [$signal, $event],
-            <<<'BASH'
-            source ./deploy_ea.sh
-            deploy_result_trap_install
-            DRYRUN=0
-            injected=0
-            deploy_monotonic_ms() { printf '1000\n'; }
-            deploy_timing_new_run_id() { printf '00000000-0000-4000-8000-000000000001\n'; }
-            deploy_timing_emit_record() {
-              builtin printf '%s\n' "$1"
-              if [[ "$1" == *'"event":"__EVENT__"'* && "$injected" == "0" ]]; then
-                injected=1
-                printf 'failed-timing-__EVENT__-boundary\n'
-                kill -__SIGNAL__ $$
-              fi
-            }
-            deploy_timing_init deploy 0 preparation_artifact
-            false
-            BASH
-            ,
-        );
-    }
-
-    private function successfulRealTimingSignalHarness(string $boundary): string
-    {
-        $injection = match ($boundary) {
-            'phase_after_write' => <<<'BASH'
-            deploy_timing_emit_record() {
-              builtin printf '%s\n' "$1"
-              if [[ "$1" == *'"event":"phase"'* && "$injected" == "0" ]]; then
-                injected=1
-                printf 'timing-phase-boundary\n'
-                kill -TERM $$
-              fi
-            }
-            BASH,
-            'summary_before_write' => <<<'BASH'
-            deploy_timing_emit_record() {
-              if [[ "$1" == *'"event":"summary"'* && "$injected" == "0" ]]; then
-                injected=1
-                printf 'timing-summary-boundary\n'
-                kill -TERM $$
-              fi
-              builtin printf '%s\n' "$1"
-            }
-            BASH,
-            'summary_after_write' => <<<'BASH'
-            deploy_timing_emit_record() {
-              builtin printf '%s\n' "$1"
-              if [[ "$1" == *'"event":"summary"'* && "$injected" == "0" ]]; then
-                injected=1
-                printf 'timing-summary-boundary\n'
-                kill -TERM $$
-              fi
-            }
-            BASH,
-            default => throw new \InvalidArgumentException('Unknown timing signal boundary.'),
-        };
-
-        return str_replace(
-            '__INJECTION__',
-            $injection,
-            <<<'BASH'
-            source ./deploy_ea.sh
-            deploy_result_trap_install
-            DRYRUN=0
-            DEPLOY_RESULT_PHASE=switch_complete
-            injected=0
-            deploy_monotonic_ms() { printf '1000\n'; }
-            deploy_timing_new_run_id() { printf '00000000-0000-4000-8000-000000000001\n'; }
-            rollback_after_failure() {
-              printf 'unexpected-rollback\n'
-              deploy_result_exit 31
-            }
-            __INJECTION__
-            deploy_timing_init deploy 0 postdeploy_validation
-            deploy_result_finish_with_timing 0 ok succeeded
-            BASH
-            ,
-        );
     }
 
     /** @return array{stdout:string,stderr:string,exit_code:int} */

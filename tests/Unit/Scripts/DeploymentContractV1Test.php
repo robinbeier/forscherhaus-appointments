@@ -2143,7 +2143,8 @@ final class DeploymentContractV1Test extends TestCase
                 'projected_required_inodes',
                 'observed_percent',
                 'projected_percent',
-            ] as $field
+            ]
+            as $field
         ) {
             yield 'wrong ' . $field . ' type' => [[$field => '1']];
             yield 'negative ' . $field => [[$field => -1]];
@@ -2456,22 +2457,6 @@ final class DeploymentContractV1Test extends TestCase
         }
     }
 
-    public function testOuterWallClockNeverReplacesOrMixesDeployTiming(): void
-    {
-        $evidence = $this->validEvidence($this->successfulRunLines());
-
-        self::assertSame(
-            ['status', 'authoritative_sha256', 'run_id', 'total_ms'],
-            array_keys($evidence['deploy_timing']),
-        );
-        self::assertSame(
-            ['started_at_utc', 'finished_at_utc', 'wall_clock_ms'],
-            array_keys($evidence['orchestrator_timing']),
-        );
-        self::assertNotSame($evidence['deploy_timing']['total_ms'], $evidence['orchestrator_timing']['wall_clock_ms']);
-        self::assertNotSame($evidence['run_id'], $evidence['deploy_timing']['run_id']);
-    }
-
     #[DataProvider('validOrchestratorTimingProvider')]
     public function testOrchestratorWallClockAcceptsSecondPrecisionBounds(
         string $startedAtUtc,
@@ -2582,68 +2567,9 @@ final class DeploymentContractV1Test extends TestCase
         yield 'both timestamps precede first journal record' => ['2026-08-10T03:59:58Z', '2026-08-10T03:59:59Z', 1_000];
     }
 
-    public function testTimingObservabilityGapDoesNotRewriteSuccessfulDeployOutcome(): void
-    {
-        $evidence = $this->validEvidence($this->successfulRunLines());
-        $evidence['deploy_timing'] = [
-            'status' => 'not_observed',
-            'authoritative_sha256' => null,
-            'run_id' => null,
-            'total_ms' => null,
-        ];
-
-        DeploymentContractV1::validateEvidence($evidence);
-        self::assertSame('succeeded', $evidence['result']['state']);
-    }
-
-    public function testInvalidTimingEvidenceKeepsHashWithoutInventingParsedFields(): void
-    {
-        $evidence = $this->validEvidence($this->successfulRunLines());
-        $evidence['deploy_timing'] = [
-            'status' => 'invalid',
-            'authoritative_sha256' => self::SHA,
-            'run_id' => null,
-            'total_ms' => null,
-        ];
-
-        DeploymentContractV1::validateEvidence($evidence);
-        self::assertSame('succeeded', $evidence['result']['state']);
-    }
-
-    #[DataProvider('observedDeployTimingWithoutInvocationProvider')]
-    public function testFailedBeforeWriteRejectsObservedDeployTiming(array $deployTiming): void
-    {
-        $lines = $this->runThrough('expected_commit_verified');
-        $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
-        $evidence = $this->failedBeforeWriteEvidence($lines, 20, 'traffic_hard_stop');
-        $evidence['deploy_timing'] = $deployTiming;
-
-        $this->expectException(RuntimeException::class);
-        DeploymentContractV1::validateBundle($lines, $evidence);
-    }
-
     /** @return iterable<string,array{array<string,mixed>}> */
-    public static function observedDeployTimingWithoutInvocationProvider(): iterable
-    {
-        yield 'valid timing' => [
-            [
-                'status' => 'valid',
-                'authoritative_sha256' => self::SHA,
-                'run_id' => self::TIMING_RUN_ID,
-                'total_ms' => 124_020,
-            ],
-        ];
-        yield 'invalid timing' => [
-            [
-                'status' => 'invalid',
-                'authoritative_sha256' => self::SHA,
-                'run_id' => null,
-                'total_ms' => null,
-            ],
-        ];
-    }
 
-    public function testFailedBeforeWriteAcceptsUnobservedDeployTiming(): void
+    public function testFailedBeforeWriteAcceptsPredeployEvidence(): void
     {
         $lines = $this->runThrough('expected_commit_verified');
         $lines[] = $this->encode($this->transition($lines, 'failed_before_write', 0, 20, 'traffic_hard_stop'));
@@ -2850,12 +2776,6 @@ final class DeploymentContractV1Test extends TestCase
                 'dormant_clean_passed' => true,
                 'passed' => true,
             ],
-            'deploy_timing' => [
-                'status' => 'valid',
-                'authoritative_sha256' => self::SHA,
-                'run_id' => self::TIMING_RUN_ID,
-                'total_ms' => 124020,
-            ],
             'orchestrator_timing' => [
                 'started_at_utc' => '2026-08-10T04:00:00Z',
                 'finished_at_utc' => '2026-08-10T04:01:00Z',
@@ -2876,7 +2796,6 @@ final class DeploymentContractV1Test extends TestCase
             'rollback_outcome' => 'not_applicable',
         ];
         $evidence['post_gates'] = $this->notObservedSection($evidence['post_gates']);
-        $evidence['deploy_timing'] = $this->notObservedSection($evidence['deploy_timing']);
         $evidence['result'] = ['state' => 'failed_before_write', 'exit_code' => $exitCode, 'reason' => $reason];
 
         foreach (['traffic_gate', 'dump', 'capacity', 'artifact'] as $section) {
@@ -2977,7 +2896,6 @@ final class DeploymentContractV1Test extends TestCase
             $evidence['post_gates']['passed'] = false;
             $evidence['post_gates']['status'] = 'failed';
         }
-        $evidence['deploy_timing'] = $this->notObservedSection($evidence['deploy_timing']);
         $evidence['result'] = ['state' => $state, 'exit_code' => $publicExit, 'reason' => $reason];
 
         return $evidence;

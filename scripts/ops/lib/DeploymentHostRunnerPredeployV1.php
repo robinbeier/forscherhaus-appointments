@@ -443,12 +443,6 @@ final class HostRunnerPredeployOrchestrator
                 'verified' => null,
             ],
             'post_gates' => $postGates,
-            'deploy_timing' => [
-                'status' => 'not_observed',
-                'authoritative_sha256' => null,
-                'run_id' => null,
-                'total_ms' => null,
-            ],
             'orchestrator_timing' => $timing,
             'result' => [
                 'state' => 'failed_before_write',

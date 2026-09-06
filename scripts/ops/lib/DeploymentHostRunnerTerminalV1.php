@@ -5,100 +5,9 @@ declare(strict_types=1);
 namespace Ops;
 
 use RuntimeException;
-use Throwable;
 
-require_once __DIR__ . '/DeployTimingSampleValidator.php';
 require_once __DIR__ . '/DeploymentEvidenceAuthorityV1.php';
 require_once __DIR__ . '/DeploymentHostRunnerPredeployV1.php';
-
-interface HostRunnerTimingPin
-{
-    /** @return array{status:string,bytes:string,sha256:?string} */
-    public function pin(string $timingRunId, string $runId): array;
-}
-
-final class HelperBackedHostRunnerTimingPin implements HostRunnerTimingPin
-{
-    private const COMMAND_PREFIX = [
-        '/usr/bin/env',
-        '-i',
-        'LANG=C',
-        'LC_ALL=C',
-        'PATH=/usr/sbin:/usr/bin:/sbin:/bin',
-        '/usr/bin/python3',
-        '-I',
-        '-B',
-        __DIR__ . '/../libexec/pin_deploy_timing_v1.py',
-    ];
-
-    public function pin(string $timingRunId, string $runId): array
-    {
-        $pipes = [];
-        $process = proc_open(
-            [...self::COMMAND_PREFIX, $timingRunId, $runId],
-            [
-                ['file', '/dev/null', 'r'],
-                ['pipe', 'w'],
-                ['file', '/dev/null', 'w'],
-                198 => ['file', '/dev/null', 'r'],
-                199 => ['file', '/dev/null', 'r'],
-            ],
-            $pipes,
-            null,
-            [],
-        );
-        if (!is_resource($process)) {
-            throw new RuntimeException('deploy timing pin helper is unavailable');
-        }
-        stream_set_blocking($pipes[1], false);
-        $stdout = '';
-        $deadline = microtime(true) + 10.0;
-        $status = proc_get_status($process);
-        while ($status['running'] && microtime(true) < $deadline) {
-            $stdout .= (string) stream_get_contents($pipes[1]);
-            if (strlen($stdout) > 1_500_000) {
-                proc_terminate($process, 9);
-                break;
-            }
-            usleep(10_000);
-            $status = proc_get_status($process);
-        }
-        $stdout .= (string) stream_get_contents($pipes[1]);
-        if ($status['running']) {
-            proc_terminate($process, 9);
-        }
-        fclose($pipes[1]);
-        $exit = proc_close($process);
-        if ($exit === -1) {
-            $exit = $status['exitcode'];
-        }
-        if ($exit !== 0 || strlen($stdout) > 1_500_000) {
-            throw new RuntimeException('deploy timing pin helper rejected the source');
-        }
-        $decoded = json_decode($stdout, true, 16, JSON_THROW_ON_ERROR);
-        if (
-            !is_array($decoded) ||
-            array_keys($decoded) !== ['bytes_base64', 'sha256', 'status'] ||
-            !in_array($decoded['status'], ['not_observed', 'pinned', 'attached'], true)
-        ) {
-            throw new RuntimeException('deploy timing pin response is invalid');
-        }
-        if ($decoded['status'] === 'not_observed') {
-            if ($decoded['bytes_base64'] !== null || $decoded['sha256'] !== null) {
-                throw new RuntimeException('missing deploy timing pin invented authority');
-            }
-            return ['status' => 'not_observed', 'bytes' => '', 'sha256' => null];
-        }
-        if (!is_string($decoded['bytes_base64']) || !is_string($decoded['sha256'])) {
-            throw new RuntimeException('deploy timing pin response lacks bytes');
-        }
-        $bytes = base64_decode($decoded['bytes_base64'], true);
-        if (!is_string($bytes) || !hash_equals($decoded['sha256'], hash('sha256', $bytes))) {
-            throw new RuntimeException('deploy timing pin response contradicts exact bytes');
-        }
-        return ['status' => $decoded['status'], 'bytes' => $bytes, 'sha256' => $decoded['sha256']];
-    }
-}
 
 interface HostRunnerTerminalizer
 {
@@ -122,7 +31,6 @@ final class HostRunnerTerminalPersistence implements HostRunnerTerminalizer
     public function __construct(
         private readonly HostRunnerStorage $storage,
         private readonly HostRunnerOrchestratorClock $clock = new SystemHostRunnerOrchestratorClock(),
-        private readonly HostRunnerTimingPin $timingPin = new HelperBackedHostRunnerTimingPin(),
     ) {}
 
     /**
@@ -204,8 +112,7 @@ final class HostRunnerTerminalPersistence implements HostRunnerTerminalizer
             !hash_equals($state['intent_sha256'], $launch['intent_sha256']) ||
             !in_array($state['deploy']['unit_state'], ['exited', 'failed'], true) ||
             $state['deploy']['observed_exit_code'] !== $receipt['exit_code'] ||
-            $state['deploy']['unit_invocation_id'] === null ||
-            $launch['timing_run_id'] === null
+            $state['deploy']['unit_invocation_id'] === null
         ) {
             throw new RuntimeException('terminal deploy authority is inconsistent');
         }
@@ -246,15 +153,12 @@ final class HostRunnerTerminalPersistence implements HostRunnerTerminalizer
         );
         $existingEvidenceBytes = $this->storage->read($prefix . 'evidence.json', 1_048_576);
 
-        $timing = $this->timingPin->pin($launch['timing_run_id'], $runId);
-        $timingSection = $this->timingSection($timing, $launch['timing_run_id']);
         $finish = $this->loadOrPinFinish($prefix, $runId);
         $observedAtUtc = $finish['finished_at_utc'];
         $childObservation = [
             'schema' => DeploymentEvidenceAuthorityV1::CHILD_OBSERVATION_SCHEMA,
             'run_id' => $runId,
             'intent_sha256' => $state['intent_sha256'],
-            'timing' => $timingSection,
             'receipt_sha256' => hash('sha256', $receiptBytes),
             'artifact_sha256' => $predeploy['sections']['artifact']['remote_sha256'],
             'unit_launch_sha256' => hash('sha256', $launchBytes),
@@ -268,9 +172,7 @@ final class HostRunnerTerminalPersistence implements HostRunnerTerminalizer
             $childObservationBytes,
             $runId,
             $state['intent_sha256'],
-            $launch['timing_run_id'],
             $receiptBytes,
-            $timing['bytes'],
             $predeploy['sections']['artifact']['remote_sha256'],
             hash('sha256', $launchBytes),
             $state['deploy']['unit_manager_boot_id'],
@@ -340,7 +242,6 @@ final class HostRunnerTerminalPersistence implements HostRunnerTerminalizer
                 'verified' => null,
             ],
             'post_gates' => $postGates,
-            'deploy_timing' => $timingSection,
             'orchestrator_timing' => $orchestratorTiming,
             'result' => ['state' => $terminalStateName, 'exit_code' => $terminalExit, 'reason' => $terminalReason],
         ];
@@ -511,12 +412,6 @@ final class HostRunnerTerminalPersistence implements HostRunnerTerminalizer
                 'verified' => null,
             ],
             'post_gates' => $this->notObservedPostGates(),
-            'deploy_timing' => [
-                'status' => 'not_observed',
-                'authoritative_sha256' => null,
-                'run_id' => null,
-                'total_ms' => null,
-            ],
             'orchestrator_timing' => $orchestratorTiming,
             'result' => ['state' => 'manual_recovery_required', 'exit_code' => $exitCode, 'reason' => $reason],
         ];
@@ -685,8 +580,7 @@ final class HostRunnerTerminalPersistence implements HostRunnerTerminalizer
             $deployReport['post_gates']['status'] !== 'failed' ||
             !hash_equals($state['post_gates']['deploy_report_sha256'], hash('sha256', $deployReportBytes)) ||
             $state['post_gates']['deploy_verdict'] !== 'failed' ||
-            !in_array($state['rollback']['verdict'], ['succeeded', 'failed'], true) ||
-            $deployLaunch['timing_run_id'] === null
+            !in_array($state['rollback']['verdict'], ['succeeded', 'failed'], true)
         ) {
             throw new RuntimeException('terminal rollback authority is inconsistent');
         }
@@ -719,15 +613,12 @@ final class HostRunnerTerminalPersistence implements HostRunnerTerminalizer
             throw new RuntimeException('terminal rollback lacks passed predeploy evidence');
         }
         DeploymentContractV1::validatePredeploySections($predeploy['sections']);
-        $timing = $this->timingPin->pin($deployLaunch['timing_run_id'], $runId);
-        $timingSection = $this->timingSection($timing, $deployLaunch['timing_run_id']);
         $finish = $this->loadOrPinFinish($prefix, $runId);
         $observedAtUtc = $finish['finished_at_utc'];
         $childObservation = [
             'schema' => DeploymentEvidenceAuthorityV1::CHILD_OBSERVATION_SCHEMA,
             'run_id' => $runId,
             'intent_sha256' => $state['intent_sha256'],
-            'timing' => $timingSection,
             'receipt_sha256' => hash('sha256', $receiptBytes),
             'artifact_sha256' => $predeploy['sections']['artifact']['remote_sha256'],
             'unit_launch_sha256' => hash('sha256', $deployLaunchBytes),
@@ -741,9 +632,7 @@ final class HostRunnerTerminalPersistence implements HostRunnerTerminalizer
             $childObservationBytes,
             $runId,
             $state['intent_sha256'],
-            $deployLaunch['timing_run_id'],
             $receiptBytes,
-            $timing['bytes'],
             $predeploy['sections']['artifact']['remote_sha256'],
             hash('sha256', $deployLaunchBytes),
             $state['deploy']['unit_manager_boot_id'],
@@ -817,7 +706,6 @@ final class HostRunnerTerminalPersistence implements HostRunnerTerminalizer
                 'verified' => $rollbackPassed,
             ],
             'post_gates' => $deployReport['post_gates'],
-            'deploy_timing' => $timingSection,
             'orchestrator_timing' => $orchestratorTiming,
             'result' => ['state' => $terminalStateName, 'exit_code' => $terminalExit, 'reason' => $terminalReason],
         ];
@@ -932,8 +820,7 @@ final class HostRunnerTerminalPersistence implements HostRunnerTerminalizer
         if (
             $receipt['outcome'] !== 'succeeded' ||
             $receipt['exit_code'] !== 0 ||
-            !hash_equals($state['deploy']['receipt_sha256'], hash('sha256', $receiptBytes)) ||
-            $deployLaunch['timing_run_id'] === null
+            !hash_equals($state['deploy']['receipt_sha256'], hash('sha256', $receiptBytes))
         ) {
             throw new RuntimeException('unverifiable rollback lacks a completed deploy authority');
         }
@@ -950,8 +837,6 @@ final class HostRunnerTerminalPersistence implements HostRunnerTerminalizer
         }
         DeploymentContractV1::validatePredeploySections($predeploy['sections']);
 
-        $timing = $this->timingPin->pin($deployLaunch['timing_run_id'], $runId);
-        $timingSection = $this->timingSection($timing, $deployLaunch['timing_run_id']);
         $finish = $this->loadOrPinFinish($prefix, $runId);
         $recordedAtUtc = $finish['finished_at_utc'];
         $start = json_decode($startBytes, true, 16, JSON_THROW_ON_ERROR);
@@ -1014,7 +899,6 @@ final class HostRunnerTerminalPersistence implements HostRunnerTerminalizer
                 'verified' => null,
             ],
             'post_gates' => $deployReport['post_gates'],
-            'deploy_timing' => $timingSection,
             'orchestrator_timing' => $orchestratorTiming,
             'result' => ['state' => 'manual_recovery_required', 'exit_code' => 143, 'reason' => 'interrupted'],
         ];
@@ -1107,33 +991,6 @@ final class HostRunnerTerminalPersistence implements HostRunnerTerminalizer
             default => throw new RuntimeException('deploy receipt outcome cannot be terminalized'),
         };
         return [$terminalState, $receipt['exit_code'], $reason, $this->notObservedPostGates()];
-    }
-
-    /** @param array{status:string,bytes:string,sha256:?string} $pin @return array<string,mixed> */
-    private function timingSection(array $pin, string $timingRunId): array
-    {
-        if ($pin['status'] === 'not_observed') {
-            return ['status' => 'not_observed', 'authoritative_sha256' => null, 'run_id' => null, 'total_ms' => null];
-        }
-        try {
-            $timing = DeployTimingSampleValidator::validateBytes($pin['bytes']);
-            if ($timing['run_id'] !== $timingRunId) {
-                throw new RuntimeException('deploy timing run identity is invalid');
-            }
-            return [
-                'status' => 'valid',
-                'authoritative_sha256' => $pin['sha256'],
-                'run_id' => $timing['run_id'],
-                'total_ms' => $timing['total_ms'],
-            ];
-        } catch (Throwable) {
-            return [
-                'status' => 'invalid',
-                'authoritative_sha256' => $pin['sha256'],
-                'run_id' => null,
-                'total_ms' => null,
-            ];
-        }
     }
 
     /** @return array<string,mixed> */

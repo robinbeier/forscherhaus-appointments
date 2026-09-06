@@ -22,6 +22,10 @@ repo checkout -> release archive -> upload -> staged extract -> predeploy gates 
 - `docs/release-gate-provider-ui-smoke.md` documents the separately authorized,
   on-demand postdeploy browser smoke with a synthetic provider lease.
 
+Current rollout note: when no deployment is active, update the host runner and
+`deploy_ea.sh` as one coordinated rollout. No compatibility promise is made for
+old timing bundles.
+
 ## Build
 
 Build from a clean, validated repository checkout:
@@ -140,93 +144,24 @@ Normal deploy execution exposes a stable result seam for the host-side caller:
 
 For a machine-readable result candidate, the root caller passes
 `--result-file` with an exact absolute path beneath an existing canonical
-root-owned mode-`0700` directory and must also pass
-`--timing-run-id FRESH_UUIDV4`. The Host Runner generates this timing UUID
-internally, binds it into the launch record and argv hash, and never accepts it
-from the coordinator request. A direct root invocation must generate a fresh
-UUIDv4 and ensure that `/var/lib/fh-deploy-timing/<uuid>.jsonl` is absent. The
-result leaf must not exist; stale regular files,
-symlinks, hardlinks, unsafe ancestors, and noncanonical paths are hard stops and
-are never normalized or overwritten. The terminal `deploy_result.v1` receipt
+root-owned mode-`0700` directory. The result leaf must not exist; stale regular
+files, symlinks, hardlinks, unsafe ancestors, and noncanonical paths are hard
+stops and are never normalized or overwritten. The terminal `deploy_result.v1` receipt
 contains only the closed keys `schema`, `outcome`, and `exit_code`, uses the six
 fixed outcome/exit bindings documented in `docs/deployment-run-v1.md`, and is
 published once through file fsync, atomic no-replace publication, and
 parent-directory fsync. Receipt write, fsync, publication, or final identity
 failure returns abnormal exit `74`, which is not a valid receipt outcome pair.
-The observational `deploy_timing.v1` summary continues to describe the actual
-deploy action and its original exit/outcome; it does not relabel that action as
-exit `74`.
 The later Host Runner accepts bytes only after independently observing the
 terminal child result and proving its exact exit/outcome match under the global
 and per-run locks; it then persists the exact receipt-byte SHA-256 in durable
 runner state. Missing, invalid, mismatched, exit-`74`, killed, or unknown results
-remain unknown and require manual recovery without respawn. Receipt bytes,
-timing, and output are not standalone verdict oracles. `--result-file` is not
+remain unknown and require manual recovery without respawn. Receipt bytes and
+output are not standalone verdict oracles. `--result-file` is not
 available in dry-run mode. Without it, existing deploy exits are unchanged.
 
 An otherwise unhandled failure after a completed switch enters the same
-automatic rollback path before returning `30` or `31`. The independent safety
-phase that selects these exits is not derived from `deploy_timing.v1`; timing
-remains observational and fail-open.
-
-## Deploy Timing Baseline
-
-`deploy_ea.sh` emits one machine-readable line per completed timing phase and
-one terminal summary. Each line starts with `DEPLOY_TIMING ` followed by a JSON
-object using schema `deploy_timing.v1`. These stdout lines are observational,
-not authoritative: wrappers, SSH capture, or log forwarding may duplicate them.
-For a real root-run deploy, the authoritative secret-free source is the unique
-`/var/lib/fh-deploy-timing/<run_id>.jsonl` file. The directory is root-owned mode
-`0700`; each run file is root-owned mode `0600` with one hardlink. An existing
-directory must already satisfy this contract and is never normalized by the
-deploy. Only a missing canonical target beneath a root-controlled ancestor
-chain is created. Durations come from a monotonic clock; production Linux reads
-`/proc/uptime` without starting a subprocess. The PHP `hrtime()` fallback exists
-for non-Linux local rehearsal only.
-
-The measured end-to-end boundary starts after the deploy invocation and trusted
-log stream have been accepted. It ends at success, pre-switch failure,
-post-switch failure, or rollback completion. Off-host archive build and upload
-are outside this host-side measurement. The stable deploy phases are:
-
-| Phase | Included work |
-| --- | --- |
-| `preparation_artifact` | Archive checks, prerequisites, staged extraction, artifact validation, and host/stage deploy-script drift check. |
-| `predeploy` | Breakglass validation when applicable, isolated stage runtime preparation, zero-surprise replay, and report validation. |
-| `permissions_stage` | Live config/storage staging, renderer dependency preparation, final generic permissions, and fail-closed stage/live runtime-config contracts. |
-| `switch` | Atomic live-to-previous and stage-to-live directory switch. |
-| `postdeploy_validation` | Active/previous permission checks, renderer restart/health, deep health, live canary, release marker, reloads, and the non-blocking localhost check. |
-| `rollback` | Automatic or manual rollback switch, permission contracts, renderer recovery, and health validation. This phase is recorded only when rollback runs. |
-
-Every record contains the same random UUIDv4 `run_id` and a sequence starting at
-`1`. Phase events contain only fixed schema/sequence/mode/phase/status values,
-monotonic `duration_ms`/`elapsed_ms`, and the `dry_run` boolean. Summary events
-add only a fixed outcome, numeric exit code, and `total_ms`. They deliberately
-omit release IDs, URLs, paths, credentials, config contents, customer data, and
-free-form error text. Validate the authoritative file before baseline use:
-
-```bash
-php scripts/ops/validate_deploy_timing_sample.php \
-  --file=/var/lib/fh-deploy-timing/<run_id>.jsonl
-```
-
-The validator fails closed unless the protected source contains one run with
-sequences `1` through `6`, all five successful core phases in order, and exactly
-one successful summary. The JSONL may omit its final newline or contain exactly
-one; internal or additional trailing blank records are invalid. Missing,
-duplicate, mixed-run, out-of-order, dry-run, or unexpected-field records
-invalidate the complete sample. Each phase duration
-must fit inside its monotonic `elapsed_ms` window. The validator derives the
-unattributed interval as `total_ms - sum(duration_ms)` and permits at most
-`30 ms`, the highest clock-read seam observed across accepted baseline samples
-1 through 4 (`0`, `10`, `20`, and `30 ms`). A larger difference is not repaired
-or inferred; it invalidates the sample. Do not reconstruct or deduplicate a
-sample from stdout or the surrounding sensitive operator log.
-
-Timing is strictly observational: clock or output-write failures disable or drop
-telemetry records but never change deploy, validation, rollback, or exit status.
-An unavailable or invalid authoritative source makes the run unusable for the
-baseline; it does not weaken or alter deploy gates.
+automatic rollback path before returning `30` or `31`.
 
 Storage transfer runs `rsync` directly without a separate detail-statistics
 stream or recursive file/byte counting. Every non-zero `rsync` exit remains a
@@ -238,27 +173,6 @@ release cannot move into place, the `switch` phase fails and the summary outcome
 is `failed_switch_recovery_required`. This distinct state is neither reported as
 a pre-switch failure nor treated as a successful atomic switch; existing manual
 recovery and rollback controls remain authoritative.
-
-Baseline collection requires at least five later, successful, representative
-production deploys under a separate live approval. Keep a measurement only when
-all of the following are comparable:
-
-1. schema `deploy_timing.v1`, the same renderer deploy mode, and the same enabled
-   Zero-Surprise/canary gates;
-2. the normal artifact-based production path on the same host class, without
-   concurrent maintenance known to distort the run;
-3. `dry_run=false`, outcome `succeeded`, exit code `0`, and all five core phases
-   present exactly once in the documented order;
-4. the root-protected authoritative JSONL passes
-   `validate_deploy_timing_sample.php` without reconstruction or deduplication,
-   while any rollback or failed run is kept as diagnostic evidence but excluded
-   from the successful baseline set.
-
-After five comparable samples, calculate the median `total_ms` and each phase
-median, retain the individual samples and collection conditions, and review
-obvious environmental outliers without silently deleting them. ROB-447 remains
-blocked until that evidence exists; this instrumentation does not set an
-optimization target or claim an improvement.
 
 ## Rollback Model
 

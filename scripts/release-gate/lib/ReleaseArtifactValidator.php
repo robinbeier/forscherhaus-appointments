@@ -148,7 +148,6 @@ final class ReleaseArtifactValidator
             'scripts/ops/config/traffic_gate_catalog.v1.json',
             'scripts/ops/lib/TrafficGateV1.php',
             'scripts/ops/lib/prod_common.sh',
-            'scripts/ops/validate_deploy_timing_sample.php',
             'scripts/ops/customers_ui_smoke_principals.sh',
             'scripts/ops/prod_customers_ui_smoke.sh',
             'scripts/ops/prod_traffic_gate.sh',

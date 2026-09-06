@@ -74,279 +74,15 @@ DEPLOY_RESULT_RECEIPT_TEST_FAILURE_POINT=""
 # Intentionally reset: only sourced regression tests may coordinate publishers.
 DEPLOY_RESULT_RECEIPT_TEST_BARRIER_PATH=""
 
-DEPLOY_TIMING_SCHEMA="deploy_timing.v1"
-DEPLOY_TIMING_ACTIVE=0
-DEPLOY_TIMING_SUMMARY_EMITTED=0
-DEPLOY_TIMING_SWITCH_STATE="not_started"
-DEPLOY_TIMING_MODE=""
-DEPLOY_TIMING_DRY_RUN="false"
-DEPLOY_TIMING_PHASE=""
-DEPLOY_TIMING_START_MS=0
-DEPLOY_TIMING_PHASE_START_MS=0
-DEPLOY_TIMING_RUN_ID=""
-DEPLOY_TIMING_REQUESTED_RUN_ID=""
-DEPLOY_TIMING_SEQUENCE=0
-DEPLOY_TIMING_AUTHORITATIVE_ENABLED=0
-DEPLOY_TIMING_AUTHORITATIVE_ACTIVE=0
-DEPLOY_TIMING_DURABLE=0
-DEPLOY_TIMING_DIR="${FH_DEPLOY_TIMING_DIR:-/var/lib/fh-deploy-timing}"
-DEPLOY_TIMING_FILE=""
-DEPLOY_TIMING_DEFERRED_SIGNAL_EXIT_CODE=""
-DEPLOY_TIMING_EXIT_FINALIZATION_ACTIVE=0
+DEPLOY_RESULT_EXIT_FINALIZATION_ACTIVE=0
 
 SYSTEMCTL_BASE=(/bin/systemctl)
-
-deploy_monotonic_ms() {
-  local uptime
-  local seconds
-  local fraction
-
-  if [[ -r /proc/uptime ]]; then
-    IFS=' ' read -r uptime _ < /proc/uptime
-    if [[ "$uptime" =~ ^([0-9]+)\.([0-9]+)$ ]]; then
-      seconds="${BASH_REMATCH[1]}"
-      fraction="${BASH_REMATCH[2]}000"
-      printf '%d\n' "$((10#$seconds * 1000 + 10#${fraction:0:3}))"
-      return 0
-    fi
-  fi
-
-  if command -v php >/dev/null 2>&1; then
-    php -r 'echo intdiv(hrtime(true), 1000000), PHP_EOL;'
-    return $?
-  fi
-
-  echo "[!] Monotonic deploy timing requires readable /proc/uptime or PHP hrtime()." >&2
-  return 1
-}
-
-deploy_timing_now_ms() {
-  local now
-
-  if ! now="$(deploy_monotonic_ms 2>/dev/null)" || [[ ! "$now" =~ ^[0-9]+$ ]]; then
-    return 1
-  fi
-
-  printf '%s\n' "$now"
-  return 0
-}
-
-deploy_timing_new_run_id() {
-  local run_id
-
-  if [[ -r /proc/sys/kernel/random/uuid ]]; then
-    IFS= read -r run_id < /proc/sys/kernel/random/uuid
-  elif command -v php >/dev/null 2>&1; then
-    run_id="$(php -r '$bytes = random_bytes(16); $bytes[6] = chr((ord($bytes[6]) & 0x0f) | 0x40); $bytes[8] = chr((ord($bytes[8]) & 0x3f) | 0x80); $hex = bin2hex($bytes); printf("%s-%s-%s-%s-%s", substr($hex, 0, 8), substr($hex, 8, 4), substr($hex, 12, 4), substr($hex, 16, 4), substr($hex, 20));' 2>/dev/null)" \
-      || return 1
-  else
-    return 1
-  fi
-
-  [[ "$run_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]] \
-    || return 1
-  printf '%s\n' "$run_id"
-}
-
-deploy_timing_validate_root_controlled_directory_chain() {
-  local directory="$1"
-  local cursor
-  local mode
-  local owner
-
-  cursor="$directory"
-  while true; do
-    [[ -d "$cursor" && ! -L "$cursor" ]] || return 1
-    owner="$(stat -c '%u' -- "$cursor" 2>/dev/null)" || return 1
-    mode="$(stat -c '%a' -- "$cursor" 2>/dev/null)" || return 1
-    [[ "$owner" == "0" ]] || return 1
-    (( (8#$mode & 0022) == 0 )) || return 1
-    [[ "$cursor" == "/" ]] && break
-    cursor="$(dirname "$cursor")"
-  done
-}
-
-deploy_timing_validate_root_protected_directory() {
-  local directory="$1"
-  local canonical
-  local mode
-
-  [[ "$directory" == /* && "$directory" != "/" && -d "$directory" && ! -L "$directory" ]] || return 1
-  canonical="$(realpath -e -- "$directory" 2>/dev/null)" || return 1
-  [[ "$canonical" == "$directory" ]] || return 1
-  mode="$(stat -c '%a' -- "$directory" 2>/dev/null)" || return 1
-  [[ "$mode" == "700" ]] || return 1
-  deploy_timing_validate_root_controlled_directory_chain "$directory"
-}
-
-deploy_timing_validate_missing_root_protected_directory_target() {
-  local directory="$1"
-  local canonical
-  local parent
-  local canonical_parent
-
-  [[ "$directory" == /* && "$directory" != "/" && ! -e "$directory" && ! -L "$directory" ]] || return 1
-  canonical="$(realpath -m -- "$directory" 2>/dev/null)" || return 1
-  [[ "$canonical" == "$directory" ]] || return 1
-  parent="$(dirname "$directory")"
-  canonical_parent="$(realpath -e -- "$parent" 2>/dev/null)" || return 1
-  [[ "$canonical_parent" == "$parent" ]] || return 1
-  deploy_timing_validate_root_controlled_directory_chain "$parent"
-}
-
-deploy_timing_prepare_authoritative_source() {
-  local directory="${DEPLOY_TIMING_DIR%/}"
-  local file
-  local file_mode
-  local file_owner
-  local file_links
-
-  DEPLOY_TIMING_AUTHORITATIVE_ACTIVE=0
-  DEPLOY_TIMING_FILE=""
-  [[ "${DEPLOY_TIMING_AUTHORITATIVE_ENABLED:-0}" == "1" ]] || return 0
-  [[ "$DEPLOY_TIMING_DRY_RUN" == "false" && "$EUID" -eq 0 ]] || return 0
-  [[ "$directory" == /* && "$directory" != "/" ]] || return 1
-
-  if [[ -e "$directory" || -L "$directory" ]]; then
-    deploy_timing_validate_root_protected_directory "$directory" || return 1
-  else
-    deploy_timing_validate_missing_root_protected_directory_target "$directory" || return 1
-    (umask 077; mkdir --mode=0700 -- "$directory") || return 1
-    deploy_timing_validate_root_protected_directory "$directory" || return 1
-  fi
-
-  file="$directory/${DEPLOY_TIMING_RUN_ID}.jsonl"
-  (umask 077; set -o noclobber; : > "$file") 2>/dev/null || return 1
-  chown root:root -- "$file" || return 1
-  chmod 0600 -- "$file" || return 1
-
-  [[ -f "$file" && ! -L "$file" ]] || return 1
-  file_owner="$(stat -c '%u' -- "$file" 2>/dev/null)" || return 1
-  file_mode="$(stat -c '%a' -- "$file" 2>/dev/null)" || return 1
-  file_links="$(stat -c '%h' -- "$file" 2>/dev/null)" || return 1
-  [[ "$file_owner" == "0" && "$file_mode" == "600" && "$file_links" == "1" ]] || return 1
-
-  DEPLOY_TIMING_DIR="$directory"
-  DEPLOY_TIMING_FILE="$file"
-  DEPLOY_TIMING_AUTHORITATIVE_ACTIVE=1
-  return 0
-}
-
-deploy_timing_emit_record() {
-  local record="$1"
-
-  if [[ "${DEPLOY_TIMING_AUTHORITATIVE_ACTIVE:-0}" == "1" ]]; then
-    if ! builtin printf '%s\n' "$record" >> "$DEPLOY_TIMING_FILE"; then
-      DEPLOY_TIMING_AUTHORITATIVE_ACTIVE=0
-    fi
-  fi
-
-  printf 'DEPLOY_TIMING %s\n' "$record" || true
-  return 0
-}
-
-deploy_timing_fsync_authoritative_source() {
-  local file="${DEPLOY_TIMING_FILE:-}"
-
-  [[ "${DEPLOY_TIMING_AUTHORITATIVE_ACTIVE:-0}" == "1" && -n "$file" ]] || return 1
-  /usr/bin/python3 -I -B - "$file" <<'PY'
-import os
-import re
-import stat
-import sys
-
-try:
-    path = sys.argv[1] if len(sys.argv) == 2 else ''
-    if not path.startswith('/') or os.path.normpath(path) != path:
-        raise OSError('invalid timing authority')
-    components = path[1:].split('/')
-    if len(components) < 2 or any(component in ('', '.', '..') for component in components):
-        raise OSError('invalid timing authority')
-    leaf = components.pop()
-    if not re.fullmatch(r'[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.jsonl', leaf):
-        raise OSError('invalid timing authority')
-    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW
-    directory_identity = lambda s: (s.st_dev, s.st_ino, stat.S_IMODE(s.st_mode), s.st_uid, s.st_nlink)
-    opened_directories = []
-    root = os.open('/', flags)
-    directory_fds = [root]
-    try:
-        root_stat = os.fstat(root)
-        if not stat.S_ISDIR(root_stat.st_mode) or root_stat.st_uid != 0 or stat.S_IMODE(root_stat.st_mode) & 0o022:
-            raise OSError('unsafe timing ancestor')
-        parent = root
-        for index, component in enumerate(components):
-            before = os.stat(component, dir_fd=parent, follow_symlinks=False)
-            current = os.open(component, flags, dir_fd=parent)
-            directory_fds.append(current)
-            opened = os.fstat(current)
-            if directory_identity(before) != directory_identity(opened):
-                raise OSError('timing ancestor identity changed')
-            mode = stat.S_IMODE(opened.st_mode)
-            if not stat.S_ISDIR(opened.st_mode) or opened.st_uid != 0 or mode & 0o022:
-                raise OSError('unsafe timing ancestor')
-            if index == len(components) - 1 and mode != 0o700:
-                raise OSError('unsafe timing directory')
-            opened_directories.append((parent, component, current, directory_identity(opened)))
-            parent = current
-        directory = parent
-        before = os.stat(leaf, dir_fd=directory, follow_symlinks=False)
-        file_fd = os.open(leaf, os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
-        try:
-            opened = os.fstat(file_fd)
-            identity = lambda s: (s.st_dev, s.st_ino, stat.S_IMODE(s.st_mode), s.st_uid, s.st_nlink, s.st_size, s.st_mtime_ns, s.st_ctime_ns)
-            if identity(before) != identity(opened):
-                raise OSError('identity changed')
-            if not stat.S_ISREG(opened.st_mode) or opened.st_uid != 0 or stat.S_IMODE(opened.st_mode) != 0o600 or opened.st_nlink != 1:
-                raise OSError('unsafe timing file')
-            os.fsync(file_fd)
-            after = os.fstat(file_fd)
-            post = os.stat(leaf, dir_fd=directory, follow_symlinks=False)
-            if identity(opened) != identity(after) or identity(after) != identity(post):
-                raise OSError('timing file changed')
-            os.fsync(directory)
-            os.fsync(opened_directories[-1][0])
-            for parent_fd, component, opened_fd, expected in opened_directories:
-                opened_now = os.fstat(opened_fd)
-                linked_now = os.stat(component, dir_fd=parent_fd, follow_symlinks=False)
-                if directory_identity(opened_now) != expected or directory_identity(linked_now) != expected:
-                    raise OSError('timing ancestor changed')
-        finally:
-            os.close(file_fd)
-    finally:
-        for fd in reversed(directory_fds):
-            os.close(fd)
-except (OSError, ValueError, TypeError):
-    raise SystemExit(1)
-PY
-  local fsync_status=$?
-  return "$fsync_status"
-}
-
-deploy_timing_disable() {
-  DEPLOY_TIMING_ACTIVE=0
-  DEPLOY_TIMING_SUMMARY_EMITTED=0
-  DEPLOY_TIMING_PHASE=""
-  DEPLOY_TIMING_AUTHORITATIVE_ACTIVE=0
-  DEPLOY_TIMING_DURABLE=0
-  return 0
-}
 
 deploy_result_set_switch_phase() {
   local phase="$1"
 
   DEPLOY_RESULT_PHASE="$phase"
-  case "$phase" in
-    before_switch|switch_first_move_pending)
-      DEPLOY_TIMING_SWITCH_STATE="not_started"
-      ;;
-    switch_partial|switch_second_move_pending)
-      DEPLOY_TIMING_SWITCH_STATE="partial"
-      ;;
-    switch_complete)
-      DEPLOY_TIMING_SWITCH_STATE="complete"
-      ;;
-  esac
+
 }
 
 deploy_result_path_exists() {
@@ -910,7 +646,7 @@ deploy_result_normalize_exit_code() {
 deploy_result_on_signal() {
   local signal_exit_code="${1:-143}"
 
-  if [[ "${DEPLOY_TIMING_EXIT_FINALIZATION_ACTIVE:-0}" == "1" \
+  if [[ "${DEPLOY_RESULT_EXIT_FINALIZATION_ACTIVE:-0}" == "1" \
     || "${DEPLOY_RESULT_RECEIPT_FINALIZATION_ACTIVE:-0}" == "1" ]]; then
     return 0
   fi
@@ -959,215 +695,36 @@ deploy_result_trap_install() {
   DEPLOY_RESULT_FINAL_OUTCOME=""
   DEPLOY_RESULT_ACTION_EXIT_CODE=""
   DEPLOY_RESULT_ACTION_OUTCOME=""
-  trap deploy_timing_on_exit EXIT
+  trap deploy_result_on_exit EXIT
   trap 'deploy_result_on_signal 129' HUP
   trap 'deploy_result_on_signal 130' INT
   trap 'deploy_result_on_signal 131' QUIT
   trap 'deploy_result_on_signal 143' TERM
 }
 
-deploy_timing_defer_signals() {
-  DEPLOY_TIMING_DEFERRED_SIGNAL_EXIT_CODE=""
-  trap 'DEPLOY_TIMING_DEFERRED_SIGNAL_EXIT_CODE=129' HUP
-  trap 'DEPLOY_TIMING_DEFERRED_SIGNAL_EXIT_CODE=130' INT
-  trap 'DEPLOY_TIMING_DEFERRED_SIGNAL_EXIT_CODE=131' QUIT
-  trap 'DEPLOY_TIMING_DEFERRED_SIGNAL_EXIT_CODE=143' TERM
-}
-
-deploy_timing_restore_signals() {
-  if [[ "${DEPLOY_RESULT_ROLLBACK_ACTIVE:-0}" == "1" ]]; then
-    deploy_result_recovery_signal_traps_install
-    return 0
-  fi
-
-  trap 'deploy_result_on_signal 129' HUP
-  trap 'deploy_result_on_signal 130' INT
-  trap 'deploy_result_on_signal 131' QUIT
-  trap 'deploy_result_on_signal 143' TERM
-}
-
-deploy_timing_handle_deferred_signal() {
-  local signal_exit_code="${DEPLOY_TIMING_DEFERRED_SIGNAL_EXIT_CODE:-}"
-
-  DEPLOY_TIMING_DEFERRED_SIGNAL_EXIT_CODE=""
-  [[ -n "$signal_exit_code" ]] || return 0
-  if [[ "${DEPLOY_RESULT_ROLLBACK_ACTIVE:-0}" == "1" ]]; then
-    deploy_result_on_recovery_signal "$signal_exit_code"
-    return 0
-  fi
-  deploy_result_on_signal "$signal_exit_code"
-}
-
-emit_deploy_timing_phase() {
-  local phase="$1"
-  local status="$2"
-  local duration_ms="$3"
-  local elapsed_ms="$4"
-  local record
-
-  DEPLOY_TIMING_SEQUENCE="$((DEPLOY_TIMING_SEQUENCE + 1))"
-  builtin printf -v record '{"schema":"%s","run_id":"%s","sequence":%d,"event":"phase","mode":"%s","phase":"%s","status":"%s","duration_ms":%d,"elapsed_ms":%d,"dry_run":%s}' \
-    "$DEPLOY_TIMING_SCHEMA" \
-    "$DEPLOY_TIMING_RUN_ID" \
-    "$DEPLOY_TIMING_SEQUENCE" \
-    "$DEPLOY_TIMING_MODE" \
-    "$phase" \
-    "$status" \
-    "$duration_ms" \
-    "$elapsed_ms" \
-    "$DEPLOY_TIMING_DRY_RUN"
-  deploy_timing_emit_record "$record"
-}
-
-emit_deploy_timing_summary() {
-  local outcome="$1"
-  local exit_code="$2"
-  local total_ms="$3"
-  local record
-
-  DEPLOY_TIMING_SEQUENCE="$((DEPLOY_TIMING_SEQUENCE + 1))"
-  builtin printf -v record '{"schema":"%s","run_id":"%s","sequence":%d,"event":"summary","mode":"%s","outcome":"%s","exit_code":%d,"total_ms":%d,"dry_run":%s}' \
-    "$DEPLOY_TIMING_SCHEMA" \
-    "$DEPLOY_TIMING_RUN_ID" \
-    "$DEPLOY_TIMING_SEQUENCE" \
-    "$DEPLOY_TIMING_MODE" \
-    "$outcome" \
-    "$exit_code" \
-    "$total_ms" \
-    "$DEPLOY_TIMING_DRY_RUN"
-  deploy_timing_emit_record "$record"
-}
-
-deploy_timing_complete_phase() {
-  local status="$1"
-  local now
-  local duration_ms
-  local elapsed_ms
-
-  [[ "${DEPLOY_TIMING_ACTIVE:-0}" == "1" && -n "${DEPLOY_TIMING_PHASE:-}" ]] || return 0
-
-  if ! now="$(deploy_timing_now_ms)" || [[ ! "$now" =~ ^[0-9]+$ ]]; then
-    deploy_timing_disable
-    return 0
-  fi
-  if [[ ! "${DEPLOY_TIMING_PHASE_START_MS:-}" =~ ^[0-9]+$ \
-    || ! "${DEPLOY_TIMING_START_MS:-}" =~ ^[0-9]+$ ]]; then
-    deploy_timing_disable
-    return 0
-  fi
-
-  duration_ms="$((10#$now - 10#$DEPLOY_TIMING_PHASE_START_MS))"
-  elapsed_ms="$((10#$now - 10#$DEPLOY_TIMING_START_MS))"
-  (( duration_ms >= 0 )) || duration_ms=0
-  (( elapsed_ms >= 0 )) || elapsed_ms=0
-
-  deploy_timing_defer_signals
-  emit_deploy_timing_phase "$DEPLOY_TIMING_PHASE" "$status" "$duration_ms" "$elapsed_ms" || true
-  DEPLOY_TIMING_PHASE=""
-  deploy_timing_restore_signals
-  deploy_timing_handle_deferred_signal
+deploy_result_after_finalize() {
   return 0
 }
 
-deploy_timing_transition() {
-  local next_phase="$1"
-
-  [[ "${DEPLOY_TIMING_ACTIVE:-0}" == "1" ]] || return 0
-
-  deploy_timing_complete_phase ok || true
-  [[ "${DEPLOY_TIMING_ACTIVE:-0}" == "1" ]] || return 0
-  if ! DEPLOY_TIMING_PHASE_START_MS="$(deploy_timing_now_ms)" \
-    || [[ ! "$DEPLOY_TIMING_PHASE_START_MS" =~ ^[0-9]+$ ]]; then
-    deploy_timing_disable
-    return 0
-  fi
-  DEPLOY_TIMING_PHASE="$next_phase"
-  return 0
-}
-
-deploy_timing_begin_rollback() {
-  [[ "${DEPLOY_TIMING_ACTIVE:-0}" == "1" ]] || return 0
-
-  deploy_timing_complete_phase failed || true
-  [[ "${DEPLOY_TIMING_ACTIVE:-0}" == "1" ]] || return 0
-  if ! DEPLOY_TIMING_PHASE_START_MS="$(deploy_timing_now_ms)" \
-    || [[ ! "$DEPLOY_TIMING_PHASE_START_MS" =~ ^[0-9]+$ ]]; then
-    deploy_timing_disable
-    return 0
-  fi
-  DEPLOY_TIMING_PHASE="rollback"
-  return 0
-}
-
-deploy_timing_finish() {
-  local phase_status="$1"
-  local outcome="$2"
-  local exit_code="$3"
-  local now
-  local total_ms
-
-  [[ "${DEPLOY_TIMING_ACTIVE:-0}" == "1" ]] || return 0
-
-  deploy_timing_complete_phase "$phase_status" || true
-  [[ "${DEPLOY_TIMING_ACTIVE:-0}" == "1" ]] || return 0
-  if ! now="$(deploy_timing_now_ms)" || [[ ! "$now" =~ ^[0-9]+$ ]]; then
-    deploy_timing_disable
-    return 0
-  fi
-  if [[ ! "${DEPLOY_TIMING_START_MS:-}" =~ ^[0-9]+$ ]]; then
-    deploy_timing_disable
-    return 0
-  fi
-
-  total_ms="$((10#$now - 10#$DEPLOY_TIMING_START_MS))"
-  (( total_ms >= 0 )) || total_ms=0
-  deploy_timing_defer_signals
-  emit_deploy_timing_summary "$outcome" "$exit_code" "$total_ms" || true
-
-  DEPLOY_TIMING_DURABLE=0
-  if deploy_timing_fsync_authoritative_source; then
-    DEPLOY_TIMING_DURABLE=1
-  else
-    DEPLOY_TIMING_AUTHORITATIVE_ACTIVE=0
-  fi
-
-  DEPLOY_TIMING_SUMMARY_EMITTED=1
-  DEPLOY_TIMING_ACTIVE=0
-  trap - EXIT
-  deploy_timing_restore_signals
-  deploy_timing_handle_deferred_signal
-  return 0
-}
-
-deploy_result_after_timing_finish() {
-  return 0
-}
-
-deploy_result_finish_with_timing() {
+deploy_result_finish() {
   local exit_code="$1"
-  local phase_status="$2"
-  local outcome="$3"
 
   if ! deploy_result_finalize "$exit_code"; then
     if [[ "${DEPLOY_RESULT_FINAL_EXIT_CODE:-}" == "$EXIT_RESULT_PUBLICATION_FAILED" ]]; then
-      deploy_timing_finish "$phase_status" "$outcome" "$exit_code"
       deploy_result_exit "$EXIT_RESULT_PUBLICATION_FAILED"
     fi
     return 1
   fi
-  deploy_timing_finish "$phase_status" "$outcome" "$exit_code"
-  deploy_result_after_timing_finish || true
+  trap - EXIT
+  deploy_result_after_finalize || true
   deploy_result_exit "$exit_code"
 }
 
-deploy_timing_on_exit() {
+deploy_result_on_exit() {
   local raw_exit_code="$?"
   local exit_code
-  local timing_exit_code
-  local outcome="failed_pre_switch"
-  local phase_status="failed"
 
-  DEPLOY_TIMING_EXIT_FINALIZATION_ACTIVE=1
+  DEPLOY_RESULT_EXIT_FINALIZATION_ACTIVE=1
   deploy_result_reconcile_switch_phase
   if [[
     "$raw_exit_code" != "0" &&
@@ -1177,7 +734,7 @@ deploy_timing_on_exit() {
     "${DRYRUN:-0}" != "1"
   ]]; then
     DEPLOY_RESULT_ROLLBACK_ACTIVE=1
-    trap deploy_timing_on_exit EXIT
+    trap deploy_result_on_exit EXIT
     rollback_after_failure "unhandled post-switch failure"
     deploy_result_exit "$EXIT_ROLLBACK_FAILED"
   fi
@@ -1186,98 +743,8 @@ deploy_timing_on_exit() {
   if ! deploy_result_finalize "$exit_code"; then
     exit_code="$(deploy_result_normalize_exit_code "$exit_code")"
   fi
-  if [[ "${DEPLOY_TIMING_ACTIVE:-0}" == "1" && "${DEPLOY_TIMING_SUMMARY_EMITTED:-0}" == "0" ]]; then
-    timing_exit_code="$exit_code"
-    if [[
-      "${DEPLOY_RESULT_FINAL_EXIT_CODE:-}" == "$EXIT_RESULT_PUBLICATION_FAILED" &&
-      -n "${DEPLOY_RESULT_ACTION_EXIT_CODE:-}"
-    ]]; then
-      timing_exit_code="$DEPLOY_RESULT_ACTION_EXIT_CODE"
-      case "${DEPLOY_RESULT_ACTION_OUTCOME:-}" in
-        succeeded)
-          outcome="succeeded"
-          phase_status="ok"
-          ;;
-        failed_pre_switch|interrupted_pre_switch)
-          outcome="failed_pre_switch"
-          ;;
-        switch_recovery_required)
-          outcome="failed_switch_recovery_required"
-          ;;
-        internal_rollback_succeeded)
-          outcome="rollback_succeeded"
-          phase_status="ok"
-          ;;
-        rollback_failed_or_unverifiable)
-          outcome="rollback_failed"
-          ;;
-      esac
-    else
-      case "${DEPLOY_RESULT_PHASE:-before_switch}" in
-        switch_partial)
-          outcome="failed_switch_recovery_required"
-          ;;
-        switch_complete)
-          outcome="failed_post_switch"
-          ;;
-      esac
-      if [[ "${DEPLOY_RESULT_FINAL_EXIT_CODE:-}" == "0" ]]; then
-        outcome="succeeded"
-        phase_status="ok"
-      elif [[ "${DEPLOY_RESULT_ROLLBACK_ACTIVE:-0}" == "1" ]]; then
-        if [[ "${DEPLOY_RESULT_FINAL_EXIT_CODE:-}" == "$EXIT_ROLLBACK_SUCCESS" ]]; then
-          outcome="rollback_succeeded"
-          phase_status="ok"
-        else
-          outcome="rollback_failed"
-        fi
-      fi
-    fi
-    deploy_timing_finish "$phase_status" "$outcome" "$timing_exit_code" || true
-  fi
-
   trap - EXIT
   exit "$exit_code"
-}
-
-deploy_timing_init() {
-  local mode="$1"
-  local dry_run="$2"
-  local initial_phase="$3"
-  local now
-  local run_id
-
-  if ! now="$(deploy_monotonic_ms)" || [[ ! "$now" =~ ^[0-9]+$ ]]; then
-    deploy_timing_disable
-    return 0
-  fi
-  if [[ -n "${DEPLOY_TIMING_REQUESTED_RUN_ID:-}" ]]; then
-    [[ "$DEPLOY_TIMING_REQUESTED_RUN_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]] || return 1
-    run_id="$DEPLOY_TIMING_REQUESTED_RUN_ID"
-  elif ! run_id="$(deploy_timing_new_run_id)"; then
-    deploy_timing_disable
-    return 0
-  fi
-  DEPLOY_TIMING_MODE="$mode"
-  if [[ "$dry_run" == "1" ]]; then
-    DEPLOY_TIMING_DRY_RUN="true"
-  else
-    DEPLOY_TIMING_DRY_RUN="false"
-  fi
-  DEPLOY_TIMING_PHASE="$initial_phase"
-  DEPLOY_TIMING_START_MS="$now"
-  DEPLOY_TIMING_PHASE_START_MS="$now"
-  DEPLOY_TIMING_RUN_ID="$run_id"
-  DEPLOY_TIMING_SEQUENCE=0
-  DEPLOY_TIMING_ACTIVE=1
-  DEPLOY_TIMING_SUMMARY_EMITTED=0
-  DEPLOY_TIMING_SWITCH_STATE="not_started"
-  if ! deploy_timing_prepare_authoritative_source; then
-    DEPLOY_TIMING_AUTHORITATIVE_ACTIVE=0
-    echo "[!] Authoritative deploy timing source unavailable; this run is invalid for baseline use." >&2
-  fi
-  trap deploy_timing_on_exit EXIT
-  return 0
 }
 
 sync_storage_payload() {
@@ -1373,7 +840,6 @@ Core options:
   --user WEBUSER               Web user for ownership/actions     [default: www-data]
   --reload LIST                Services to reload (CSV)           [default: apache2,<detected php-fpm>]
   --result-file PATH           Publish durable deploy_result.v1 candidate
-  --timing-run-id UUID         Runner-chosen deploy timing identity
   --dry-run                    Print actions only
   --no-mark                    Skip writing _RELEASE marker
 
@@ -2160,7 +1626,7 @@ perform_atomic_switch() {
   if [[ "$DRYRUN" -eq 1 ]]; then
     echo "[DRY-RUN] mv '$APP' '$PREV'"
     echo "[DRY-RUN] mv '$STAGE_ROOT' '$APP'"
-    DEPLOY_TIMING_SWITCH_STATE="complete"
+
     return 0
   fi
 
@@ -2758,7 +2224,6 @@ rollback_after_failure() {
   local incident_report=""
   local incident_report_root="$APP"
 
-  deploy_timing_begin_rollback
 
   if [[ -e "$failed_path" ]]; then
     failed_path="${failed_base}_$(date -u +%Y%m%d_%H%M%S)"
@@ -2774,7 +2239,7 @@ rollback_after_failure() {
   if [[ "$DRYRUN" -eq 1 ]]; then
     echo "[DRY-RUN] bash '$CURRENT_SCRIPT_PATH' --runtime-config-rollback --active '$APP' --previous '$PREV' --failed '$failed_path' --runtime-user '$WEBUSER'"
     echo "[DRY-RUN] restart renderer + validate renderer/deep health"
-    deploy_result_finish_with_timing "$EXIT_ROLLBACK_SUCCESS" ok rollback_succeeded
+    deploy_result_finish "$EXIT_ROLLBACK_SUCCESS"
   fi
 
   config_result="ok"
@@ -2839,7 +2304,7 @@ rollback_after_failure() {
       "$incident_report_root" \
       || true
     echo "[!] Rollback succeeded, deployment remains failed." || true
-    deploy_result_finish_with_timing "$EXIT_ROLLBACK_SUCCESS" ok rollback_succeeded
+    deploy_result_finish "$EXIT_ROLLBACK_SUCCESS"
   fi
 
   if [[ "$reason" == "zero-surprise canary failed" ]]; then
@@ -2855,7 +2320,7 @@ rollback_after_failure() {
     "$incident_report_root" \
     || true
   echo "[!] Rollback failed or unverifiable. Manual intervention required." || true
-  deploy_result_finish_with_timing "$EXIT_ROLLBACK_FAILED" failed rollback_failed
+  deploy_result_finish "$EXIT_ROLLBACK_FAILED"
 }
 
 verify_post_switch_runtime_config_contracts() {
@@ -2879,14 +2344,12 @@ case "${1:-}" in
     ;;
   --runtime-config-rollback)
     shift
-    deploy_timing_init manual_rollback 0 rollback \
-      || die "[!] Could not initialize monotonic rollback timing."
     runtime_config_rollback_cli "$@" || {
       rollback_exit_code="$?"
-      deploy_timing_finish failed manual_rollback_failed "$rollback_exit_code"
+
       exit "$rollback_exit_code"
     }
-    deploy_timing_finish ok manual_rollback_succeeded 0
+
     exit 0
     ;;
 esac
@@ -2901,7 +2364,6 @@ while [[ $# -gt 0 ]]; do
     --user) WEBUSER="$2"; shift 2;;
     --reload) RELOAD_SERVICES="$2"; shift 2;;
     --result-file) DEPLOY_RESULT_RECEIPT_PATH="$2"; shift 2;;
-    --timing-run-id) DEPLOY_TIMING_REQUESTED_RUN_ID="$2"; shift 2;;
     --dry-run) DRYRUN=1; shift 1;;
     --no-mark) MARK_RELEASE=0; shift 1;;
     --renderer-service) RENDERER_SERVICE="$2"; shift 2;;
@@ -2929,9 +2391,6 @@ done
 
 if [[ -n "$DEPLOY_RESULT_RECEIPT_PATH" && "$DRYRUN" -eq 1 ]]; then
   die "[!] --result-file cannot be used with --dry-run."
-fi
-if [[ -n "$DEPLOY_RESULT_RECEIPT_PATH" && ! "$DEPLOY_TIMING_REQUESTED_RUN_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]; then
-  die "[!] --timing-run-id is required with --result-file and must be a UUIDv4."
 fi
 deploy_result_receipt_prepare || die "[!] Refusing unsafe deploy result target."
 
@@ -3010,9 +2469,6 @@ else
   exec > >(tee -a "$LOG") 2>&1
 fi
 
-DEPLOY_TIMING_AUTHORITATIVE_ENABLED=1
-deploy_timing_init deploy "$DRYRUN" preparation_artifact \
-  || die "[!] Could not initialize monotonic deploy timing."
 
 echo "[i] Deploy Easy!Appointments"
 echo "    Release              : $REL"
@@ -3094,14 +2550,12 @@ fi
 
 validate_stage_release_artifact
 validate_deploy_script_drift
-deploy_timing_transition predeploy
 validate_breakglass_policy || die "[!] Zero-surprise breakglass policy validation failed."
 prepare_predeploy_stage_permissions \
   || die "[!] Predeploy stage permissions failed. Aborting before atomic switch."
 run_zero_surprise_predeploy_gate \
   || die "[!] Zero-surprise pre-deploy gate failed. Aborting before atomic switch."
 
-deploy_timing_transition permissions_stage
 
 run_shell "cp '$APP/config.php' '$STAGE_ROOT/config.php'"
 run_shell "mkdir -p '$STAGE_ROOT/storage'"
@@ -3117,9 +2571,7 @@ normalize_stage_permissions \
 verify_pre_switch_runtime_config_contracts \
   || die "[!] Runtime config permission contract failed. Aborting before atomic switch."
 
-deploy_timing_transition switch
 perform_atomic_switch
-deploy_timing_transition postdeploy_validation
 
 verify_post_switch_runtime_config_contracts
 
@@ -3168,4 +2620,4 @@ echo "Rollback (manual fallback):"
 MANUAL_FAILED_PATH="${APP}_failed_${REL}"
 echo "  bash '$CURRENT_SCRIPT_PATH' --runtime-config-rollback --active '$APP' --previous '$PREV' --failed '$MANUAL_FAILED_PATH' --runtime-user '$WEBUSER'"
 
-deploy_result_finish_with_timing 0 ok succeeded
+deploy_result_finish 0

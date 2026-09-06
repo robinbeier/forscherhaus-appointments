@@ -30,9 +30,7 @@ host configuration before relying on these defaults. See the upstream
 ## Manual cleanup when needed
 
 1. Check host health and journal size. Confirm that the records needed for any
-   current incident have been preserved; deployment timing evidence lives
-   separately under `/var/lib/fh-deploy-timing` (see
-   [agent-operations.md](agent-operations.md)).
+   current incident have been preserved.
 2. Agree on the journal history that may be discarded and obtain explicit
    approval for that deletion. A size target does not guarantee a minimum
    number of days of history.

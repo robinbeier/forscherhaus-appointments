@@ -454,15 +454,13 @@ final class DeployResultReceiptStorageTest extends TestCase
         self::assertSame([], glob($this->protectedDirectory . '/.deploy-result.*.tmp') ?: []);
     }
 
-    #[DataProvider('publicationFailureTimingProvider')]
-    public function testPublicationFailurePreservesObservedDeployTiming(
+    #[DataProvider('publicationFailureProvider')]
+    public function testPublicationFailureKeepsPublicationFailureExit(
         int $deployExit,
         string $phase,
         int $rollbackActive,
-        string $phaseStatus,
-        string $timingOutcome,
     ): void {
-        $target = $this->protectedDirectory . '/timing.json';
+        $target = $this->protectedDirectory . '/publication.json';
         $result = $this->runShell(
             <<<'BASH'
             source ./deploy_ea.sh
@@ -472,27 +470,24 @@ final class DeployResultReceiptStorageTest extends TestCase
             DEPLOY_RESULT_RECEIPT_TEST_FAILURE_POINT=parent_fsync
             deploy_result_receipt_prepare
             deploy_result_trap_install
-            deploy_timing_init deploy 0 receipt_test
-            deploy_result_finish_with_timing "$4" "$5" "$6"
+
+            deploy_result_finish "$4"
             BASH
             ,
-            [$target, $phase, (string) $rollbackActive, (string) $deployExit, $phaseStatus, $timingOutcome],
+            [$target, $phase, (string) $rollbackActive, (string) $deployExit],
         );
 
         self::assertSame(74, $result['exit_code'], $result['stderr']);
-        self::assertStringContainsString('"outcome":"' . $timingOutcome . '"', $result['stdout']);
-        self::assertStringContainsString('"exit_code":' . $deployExit, $result['stdout']);
-        self::assertStringNotContainsString('"exit_code":74', $result['stdout']);
     }
 
-    /** @return iterable<string,array{int,string,int,string,string}> */
-    public static function publicationFailureTimingProvider(): iterable
+    /** @return iterable<string,array{int,string,int}> */
+    public static function publicationFailureProvider(): iterable
     {
-        yield 'success' => [0, 'switch_complete', 0, 'ok', 'succeeded'];
-        yield 'pre-switch failure' => [30, 'before_switch', 0, 'failed', 'failed_pre_switch'];
-        yield 'partial switch' => [32, 'switch_partial', 0, 'failed', 'failed_switch_recovery_required'];
-        yield 'rollback success' => [30, 'switch_complete', 1, 'ok', 'rollback_succeeded'];
-        yield 'rollback failure' => [31, 'switch_complete', 1, 'failed', 'rollback_failed'];
+        yield 'success' => [0, 'switch_complete', 0];
+        yield 'pre-switch failure' => [30, 'before_switch', 0];
+        yield 'partial switch' => [32, 'switch_partial', 0];
+        yield 'rollback success' => [30, 'switch_complete', 1];
+        yield 'rollback failure' => [31, 'switch_complete', 1];
     }
 
     public function testRollbackIncidentIsEmittedBeforeReceiptPublicationFailure(): void
@@ -512,7 +507,7 @@ final class DeployResultReceiptStorageTest extends TestCase
             CURRENT_SCRIPT_PATH=/root/deploy_ea.sh
             deploy_result_receipt_prepare
             deploy_result_trap_install
-            deploy_timing_begin_rollback() { :; }
+
             bash() { return 0; }
             restart_renderer_service() { return 0; }
             probe_renderer_health() { return 0; }
@@ -545,7 +540,7 @@ final class DeployResultReceiptStorageTest extends TestCase
             CURRENT_SCRIPT_PATH=/root/deploy_ea.sh
             deploy_result_receipt_prepare
             deploy_result_trap_install
-            deploy_timing_begin_rollback() { :; }
+
             bash() { return 0; }
             restart_renderer_service() { return 0; }
             probe_renderer_health() { return 0; }
@@ -584,7 +579,7 @@ final class DeployResultReceiptStorageTest extends TestCase
             CURRENT_SCRIPT_PATH=/root/deploy_ea.sh
             deploy_result_receipt_prepare
             deploy_result_trap_install
-            deploy_timing_begin_rollback() { :; }
+
             bash() { builtin printf 'rollback-invoked\n' >> "$rollback_sentinel"; }
             restart_renderer_service() { return 0; }
             probe_renderer_health() { return 0; }
@@ -614,10 +609,8 @@ final class DeployResultReceiptStorageTest extends TestCase
     }
 
     #[DataProvider('exitTrapPublicationFailureProvider')]
-    public function testExitTrapPreservesObservedTimingWhenPublicationFails(
+    public function testExitTrapPreservesFailureExitAndRollbackCountWhenPublicationFails(
         string $body,
-        string $expectedOutcome,
-        int $expectedActionExit,
         int $expectedRollbackCount,
     ): void {
         $target = $this->protectedDirectory . '/exit-trap.json';
@@ -628,7 +621,7 @@ final class DeployResultReceiptStorageTest extends TestCase
             DEPLOY_RESULT_RECEIPT_TEST_FAILURE_POINT=parent_fsync
             deploy_result_receipt_prepare
             deploy_result_trap_install
-            deploy_timing_init deploy 0 receipt_exit_trap
+
             eval "$2"
             BASH
             ,
@@ -636,75 +629,48 @@ final class DeployResultReceiptStorageTest extends TestCase
         );
 
         self::assertSame(74, $result['exit_code'], $result['stderr']);
-        self::assertStringContainsString('"outcome":"' . $expectedOutcome . '"', $result['stdout']);
-        self::assertStringContainsString('"exit_code":' . $expectedActionExit, $result['stdout']);
         self::assertSame($expectedRollbackCount, substr_count($result['stdout'], "rollback-start\n"));
     }
 
-    /** @return iterable<string,array{string,string,int,int}> */
+    /** @return iterable<string,array{string,int}> */
     public static function exitTrapPublicationFailureProvider(): iterable
     {
         yield 'production success finalization before epilogue' => [
-            <<<'BASH'
-            DEPLOY_RESULT_PHASE=switch_complete
-            deploy_result_finalize 0
-            BASH
-            ,
-            'succeeded',
-            0,
+            'DEPLOY_RESULT_PHASE=switch_complete
+deploy_result_finalize 0',
             0,
         ];
         yield 'production verified rollback finalization before reporting' => [
-            <<<'BASH'
-            DEPLOY_RESULT_PHASE=switch_complete
-            DEPLOY_RESULT_ROLLBACK_ACTIVE=1
-            builtin printf 'rollback-start\n'
-            deploy_result_finalize 30
-            BASH
-            ,
-            'rollback_succeeded',
-            30,
+            'DEPLOY_RESULT_PHASE=switch_complete
+DEPLOY_RESULT_ROLLBACK_ACTIVE=1
+builtin printf \'rollback-start\\n\'
+deploy_result_finalize 30',
             1,
         ];
-        yield 'unhandled pre-switch failure' => ['false', 'failed_pre_switch', 30, 0];
+        yield 'unhandled pre-switch failure' => ['false', 0];
         yield 'unhandled partial-switch failure' => [
-            <<<'BASH'
-            DEPLOY_RESULT_PHASE=switch_partial
-            false
-            BASH
-            ,
-            'failed_switch_recovery_required',
-            32,
+            'DEPLOY_RESULT_PHASE=switch_partial
+false',
             0,
         ];
         yield 'unhandled post-switch failure with verified rollback' => [
-            <<<'BASH'
-            DEPLOY_RESULT_PHASE=switch_complete
-            rollback_after_failure() {
-              builtin printf 'rollback-start\n'
-              DEPLOY_RESULT_ROLLBACK_ACTIVE=1
-              deploy_result_finish_with_timing 30 ok rollback_succeeded
-            }
-            false
-            BASH
-            ,
-            'rollback_succeeded',
-            30,
+            'DEPLOY_RESULT_PHASE=switch_complete
+rollback_after_failure() {
+  builtin printf \'rollback-start\\n\'
+  DEPLOY_RESULT_ROLLBACK_ACTIVE=1
+  deploy_result_finish 30
+}
+false',
             1,
         ];
         yield 'unhandled post-switch failure with unverifiable rollback' => [
-            <<<'BASH'
-            DEPLOY_RESULT_PHASE=switch_complete
-            rollback_after_failure() {
-              builtin printf 'rollback-start\n'
-              DEPLOY_RESULT_ROLLBACK_ACTIVE=1
-              deploy_result_finish_with_timing 31 failed rollback_failed
-            }
-            false
-            BASH
-            ,
-            'rollback_failed',
-            31,
+            'DEPLOY_RESULT_PHASE=switch_complete
+rollback_after_failure() {
+  builtin printf \'rollback-start\\n\'
+  DEPLOY_RESULT_ROLLBACK_ACTIVE=1
+  deploy_result_finish 31
+}
+false',
             1,
         ];
     }
@@ -881,14 +847,7 @@ final class DeployResultReceiptStorageTest extends TestCase
         self::assertSame(6, file_put_contents($target, 'marker'));
         self::assertTrue(chmod($target, 0600));
 
-        $result = $this->runCommand([
-            'bash',
-            'deploy_ea.sh',
-            '--result-file',
-            $target,
-            '--timing-run-id',
-            '128f6f52-4c87-4d4e-8b19-6a66e6e1af25',
-        ]);
+        $result = $this->runCommand(['bash', 'deploy_ea.sh', '--result-file', $target]);
 
         self::assertSame(30, $result['exit_code']);
         self::assertStringNotContainsString($target, $result['stdout'] . $result['stderr']);
