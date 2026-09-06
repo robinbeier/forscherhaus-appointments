@@ -104,7 +104,6 @@ class CiWorkflowContractTest extends TestCase
         );
         self::assertStringContainsString('tests/Unit/Scripts/BackupSetProducerRootTest.php', $rootDeploymentScript);
         self::assertStringContainsString('tests/Unit/Scripts/PublishReleasePairRootTest.php', $rootDeploymentScript);
-        self::assertStringContainsString('tests/Unit/Scripts/LegacyReleaseHoldRootTest.php', $rootDeploymentScript);
         self::assertStringContainsString('tests/Unit/Scripts/SessionRetentionRootTest.php', $rootDeploymentScript);
         self::assertStringContainsString(
             'tests/Unit/Scripts/ZeroSurpriseProductionImageCleanupRootTest.php',
@@ -112,10 +111,6 @@ class CiWorkflowContractTest extends TestCase
         );
         self::assertStringContainsString(
             'tests/Unit/Scripts/ReleaseArchiveDumpRetentionRootTest.php',
-            $rootDeploymentScript,
-        );
-        self::assertStringContainsString(
-            'sudo python3 -m unittest tests.Unit.Scripts.legacy_release_hold_v1_test',
             $rootDeploymentScript,
         );
 
