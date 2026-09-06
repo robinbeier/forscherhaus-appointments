@@ -51,8 +51,13 @@ class CiWorkflowContractTest extends TestCase
         }
 
         $requiredOrder = [
-            'Prepare root test configuration',
+            'Git clone',
             'Start build-test database',
+            'Setup Node.js',
+            'Install frontend test dependencies',
+            'Setup PHP',
+            'Install dependencies',
+            'Prepare root test configuration',
             'Wait for build-test MySQL readiness',
             'Install deterministic build-test instance',
             'PHPUnit Tests',
