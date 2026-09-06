@@ -43,28 +43,23 @@ fi
 
 require_cmd git
 require_cmd python3
-require_cmd npm
 require_cmd node
 bash ./scripts/ci/require_node_minimum.sh "$ROOT_NODE_MINIMUM_VERSION" "pre-pr-quick"
 ensure_local_config
 
 echo_section "Frontend dependency consistency"
-# Normalize a copy to catch additions and removals without changing the worktree.
-(
-    dependency_check_dir="$(mktemp -d)"
-    trap 'rm -rf "$dependency_check_dir"' EXIT
-    cp package.json package-lock.json "$dependency_check_dir/"
-    if [[ -f .npmrc ]]; then
-        cp .npmrc "$dependency_check_dir/"
-    fi
-    # npm ci accepts some stale lock entries after dependency removals.
-    cd "$dependency_check_dir"
-    npm install --package-lock-only --ignore-scripts --no-audit --no-fund --offline
-    if ! cmp -s package-lock.json "$ROOT_DIR/package-lock.json"; then
-        echo "[pre-pr-quick] Frontend lockfile is out of date. Run npm install to update dependencies and commit the matching lockfile." >&2
-        exit 1
-    fi
-)
+# Compare declarations, not npm-version-specific serialization or package metadata.
+node <<'NODE'
+const fs = require('node:fs');
+const { isDeepStrictEqual } = require('node:util');
+const manifest = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+const locked = JSON.parse(fs.readFileSync('package-lock.json', 'utf8')).packages?.[''];
+const fields = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'];
+if (!locked || fields.some((field) => !isDeepStrictEqual(manifest[field] ?? {}, locked[field] ?? {}))) {
+    console.error('[pre-pr-quick] Frontend dependency declarations differ from the lockfile. Run npm install and commit the matching package.json and package-lock.json.');
+    process.exit(1);
+}
+NODE
 
 # Keep changed-file checks deterministic against current base branch state.
 git_ci_refresh_base_ref_if_safe "$BASE_REF" "pre-pr-quick"
