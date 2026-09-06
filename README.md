@@ -194,14 +194,17 @@ explicitly only when you are fine reinstalling them afterwards:
 bash ./scripts/cleanup_local_artifacts.sh --with-deps
 ```
 
-Hook note: `./scripts/setup-worktree.sh` installs managed `.git/hooks/pre-commit`
-and `.git/hooks/pre-push` hooks. The managed `pre-commit` runs fast formatting,
-syntax, and changed-frontend checks; the managed `pre-push` runs
-`pre_pr_quick.sh`, including the PHPUnit suite. Use
-`./scripts/install-git-hooks.sh` to refresh an existing clone, or
-`FORCE_HOOK_INSTALL=1 ./scripts/install-git-hooks.sh` to replace older custom
-hooks intentionally. Linux root/host tests use the explicit Docker Desktop
-skip versus required GitHub Actions failure contract documented in
+Hook note: `./scripts/setup-worktree.sh` installs the managed `.git/hooks/pre-commit`
+hook. The managed `pre-commit` runs fast formatting, syntax, and
+changed-frontend checks. The installer removes the old repository-managed
+`pre-push` hook while preserving custom hooks. Run
+`./scripts/install-git-hooks.sh` once in an existing clone to remove its old
+managed push hook. Invoke
+`bash ./scripts/ci/pre_pr_quick.sh` or
+`PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh` explicitly according to
+[WORKFLOW.md](WORKFLOW.md#3-validate-locally); pushing does not rerun them.
+Linux root/host tests use the explicit Docker Desktop skip versus required
+GitHub Actions failure contract documented in
 [Root/Host Test Harness](docs/root-host-test-harness.md); local skips never
 replace the required native-Linux CI proof.
 

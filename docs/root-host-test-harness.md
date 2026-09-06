@@ -1,8 +1,8 @@
 # Root/Host Test Harness
 
 This document defines the supported environment contract for the Linux
-root/host PHPUnit tests that are included in the managed local pre-push check and in the
-GitHub Actions `build-test` job. It changes only test-harness classification;
+root/host PHPUnit tests that are run manually during local pre-PR checks and in
+the GitHub Actions `build-test` job. It changes only test-harness classification;
 it does not change a production helper, production trust boundary, or rollout
 authority.
 
@@ -10,8 +10,8 @@ authority.
 
 ### Local Docker Desktop
 
-The supported local path is the managed `pre-push` flow on a host
-with a reachable Docker Desktop daemon. The general PHPUnit suite runs as root
+The supported local path is an explicit pre-PR command on a host with a
+reachable Docker Desktop daemon. The general PHPUnit suite runs as root
 inside the repository's `php-fpm` container.
 
 That container intentionally does not receive the host Docker socket or a
@@ -85,12 +85,13 @@ assertion, or replace a real daemon operation with a stub.
 
 ## Validation
 
-Managed local gates:
+Explicit local pre-PR validation:
 
 ```bash
-git commit
-git push
+PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh
 ```
+
+The managed pre-commit hook provides fast checks; `git push` does not run tests.
 
 Focused diagnosis without changing the classification profile:
 
@@ -100,7 +101,7 @@ docker compose run --rm --no-deps php-fpm \
   tests/Unit/Scripts/RootHostTestPrerequisitesTest.php
 ```
 
-Do not use `SKIP_PRECOMMIT=1` or `SKIP_PREPUSH=1` to bypass a failed
+Do not use `SKIP_PRECOMMIT=1` to bypass a failed
 prerequisite. Fix the supported host setup or investigate the reported
 classification. Repository delivery, local green hooks, and green CI do not
 authorize SSH, installation, cleanup, retention, service/timer activation, or
