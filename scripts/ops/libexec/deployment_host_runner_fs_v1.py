@@ -93,7 +93,7 @@ def validate_storage_scope(root: str, relative: str, operation: str) -> None:
     fixed = {"active-run.json"}
     run_leaf = re.fullmatch(
         r'runs/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})/'
-        r'(run\.lock|intent\.json|orchestrator-start\.json|orchestrator-finish\.json|predeploy-evidence\.json|traffic-gate-report\.json|request\.json|recovery-request\.json|execution-input\.json|recovery-execution-input\.json|state\.json|events\.jsonl|evidence\.json|operator-events\.jsonl|deploy-result\.json|deploy-child-observation\.json|deploy-timing\.jsonl|deploy-post-gate-report\.json|rollback-post-gate-report\.json|deploy-script\.sh|rollback-script\.sh|deploy-systemd-launch\.json|deploy-unit-binding\.json|deploy-unit-observation\.json|rollback-systemd-launch\.json|rollback-unit-binding\.json|rollback-unit-observation\.json)',
+        r'(run\.lock|intent\.json|orchestrator-start\.json|orchestrator-finish\.json|predeploy-evidence\.json|traffic-gate-report\.json|request\.json|recovery-request\.json|execution-input\.json|recovery-execution-input\.json|state\.json|events\.jsonl|evidence\.json|operator-events\.jsonl|deploy-result\.json|deploy-child-observation\.json|deploy-post-gate-report\.json|rollback-post-gate-report\.json|deploy-script\.sh|rollback-script\.sh|deploy-systemd-launch\.json|deploy-unit-binding\.json|deploy-unit-observation\.json|rollback-systemd-launch\.json|rollback-unit-binding\.json|rollback-unit-observation\.json)',
         relative,
     )
     if relative not in fixed and run_leaf is None:
@@ -102,7 +102,7 @@ def validate_storage_scope(root: str, relative: str, operation: str) -> None:
     immutable = {
         'intent.json', 'orchestrator-start.json', 'orchestrator-finish.json', 'predeploy-evidence.json', 'traffic-gate-report.json',
         'request.json', 'recovery-request.json', 'execution-input.json', 'recovery-execution-input.json', 'deploy-result.json',
-        'deploy-child-observation.json', 'deploy-timing.jsonl',
+        'deploy-child-observation.json',
         'deploy-post-gate-report.json', 'rollback-post-gate-report.json',
         'deploy-script.sh', 'rollback-script.sh',
         'deploy-systemd-launch.json', 'deploy-unit-binding.json',
@@ -1372,33 +1372,28 @@ def validate_controller_argv(argv: object) -> list[str]:
             if re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,127}', release) is None or tail[6] != '/var/www/html/.fh-failed-' + unit_run_id:
                 reject()
         else:
-            option_names = ['--rel', '--renderer-deploy-mode', '--timing-run-id', '--healthz-token-file', '--zero-surprise-dump-file', '--zero-surprise-predeploy-credentials-file', '--zero-surprise-canary-credentials-file', '--zero-surprise-incident-webhook-file', '--result-file']
-            if len(tail) != 18 or tail[::2] != option_names or tail[3] not in ('host', 'external'):
+            option_names = ['--rel', '--renderer-deploy-mode', '--healthz-token-file', '--zero-surprise-dump-file', '--zero-surprise-predeploy-credentials-file', '--zero-surprise-canary-credentials-file', '--zero-surprise-incident-webhook-file', '--result-file']
+            if len(tail) != 16 or tail[::2] != option_names or tail[3] not in ('host', 'external'):
                 reject()
             if re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,127}', tail[1]) is None:
-                reject()
-            if (
-                re.fullmatch(r'[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}', tail[5]) is None or
-                tail[5] == unit_run_id
-            ):
                 reject()
             if tail[-1] != '/var/lib/fh-deploy-orchestrator/runs/' + unit_run_id + '/deploy-result.json':
                 reject()
             expected_ref_paths = [
                 '/var/lib/fh-deploy-orchestrator/runs/' + unit_run_id + '/deploy-ref-healthz-token',
-                tail[9],
+                tail[7],
                 '/var/lib/fh-deploy-orchestrator/runs/' + unit_run_id + '/deploy-ref-predeploy-credentials',
                 '/var/lib/fh-deploy-orchestrator/runs/' + unit_run_id + '/deploy-ref-canary-credentials',
                 '/var/lib/fh-deploy-orchestrator/runs/' + unit_run_id + '/deploy-ref-incident-webhook',
             ]
-            if tail[9] not in (
+            if tail[7] not in (
                 '/var/lib/fh-deploy-orchestrator/runs/' + unit_run_id + '/deploy-ref-zero-surprise-dump.sql',
                 '/var/lib/fh-deploy-orchestrator/runs/' + unit_run_id + '/deploy-ref-zero-surprise-dump.sql.gz',
             ):
                 reject()
-            if tail[7:16:2] != expected_ref_paths:
+            if tail[5:14:2] != expected_ref_paths:
                 reject()
-            for path in tail[7::2]:
+            for path in tail[5::2]:
                 if not canonical_absolute_path(path):
                     reject()
     else:

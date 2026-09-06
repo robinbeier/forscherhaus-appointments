@@ -6,7 +6,6 @@ namespace Tests\Unit\Scripts;
 
 use Ops\DeploymentEvidenceAuthorityV1;
 use Ops\DeploymentContractV1;
-use Ops\DeployTimingSampleValidator;
 use Ops\DeploymentEvidenceAuthorityV1Issuer;
 use Ops\VerifiedPredeployGateV1;
 use Ops\ArtifactObservationV1;
@@ -24,14 +23,12 @@ use RuntimeException;
 
 require_once __DIR__ . '/../../../scripts/ops/lib/DeploymentEvidenceAuthorityV1.php';
 require_once __DIR__ . '/../../../scripts/ops/lib/DeploymentContractV1.php';
-require_once __DIR__ . '/../../../scripts/ops/lib/DeployTimingSampleValidator.php';
 require_once __DIR__ . '/../../../scripts/ops/lib/ProtectedPredeployObservationProvider.php';
 require_once __DIR__ . '/../../../scripts/ops/lib/DeployResultV1.php';
 
 final class DeploymentEvidenceAuthorityV1Test extends TestCase
 {
     private const RUN_ID = '018f6f52-4c87-4d4e-8b19-6a66e6e1af25';
-    private const TIMING_RUN_ID = '128f6f52-4c87-4d4e-8b19-6a66e6e1af25';
     private const RELEASE_ID = 'ea_20260812_1200';
     private const COMMIT = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
     private const SHA = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
@@ -1552,33 +1549,17 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
         );
     }
 
-    public function testAuthoritativeTimingRequiresCanonicalFinalLineFeed(): void
-    {
-        $bytes = $this->timingBytes(0);
-        self::assertSame(6, DeployTimingSampleValidator::validateBytes($bytes)['records']);
-
-        foreach ([substr($bytes, 0, -1), $bytes . "\n"] as $nonCanonical) {
-            try {
-                DeployTimingSampleValidator::validateBytes($nonCanonical);
-                self::fail('Non-canonical timing bytes were accepted.');
-            } catch (RuntimeException) {
-                self::addToAssertionCount(1);
-            }
-        }
-    }
-
-    public function testChildObservationBindsReceiptTimingAndArtifactIdentity(): void
+    public function testChildObservationBindsReceiptAndArtifactIdentity(): void
     {
         $receiptBytes = DeployResultV1::canonicalJson(DeployResultV1::create('succeeded', 0));
-        $timingBytes = $this->timingBytes(0);
-        $observation = $this->childObservation(hash('sha256', $receiptBytes), hash('sha256', $timingBytes));
+        $observation = $this->childObservation(hash('sha256', $receiptBytes));
         $decoded = DeploymentEvidenceAuthorityV1::decodeChildObservation(
             DeploymentEvidenceAuthorityV1::encodeFile($observation),
             self::RUN_ID,
             self::SHA,
-            self::TIMING_RUN_ID,
+
             $receiptBytes,
-            $timingBytes,
+
             self::SHA,
             self::SHA,
             'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -1593,11 +1574,10 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
         );
     }
 
-    public function testChildObservationRejectsIndependentTimingOrReceiptSubstitution(): void
+    public function testChildObservationRejectsIndependentReceiptOrArtifactSubstitution(): void
     {
         $receiptBytes = DeployResultV1::canonicalJson(DeployResultV1::create('succeeded', 0));
-        $timingBytes = $this->timingBytes(0);
-        $observation = $this->childObservation(hash('sha256', $receiptBytes), hash('sha256', $timingBytes));
+        $observation = $this->childObservation(hash('sha256', $receiptBytes));
         foreach (['receipt_sha256', 'artifact_sha256'] as $field) {
             $changed = $observation;
             $changed[$field] = str_repeat('c', 64);
@@ -1606,9 +1586,9 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                     DeploymentEvidenceAuthorityV1::encodeFile($changed),
                     self::RUN_ID,
                     self::SHA,
-                    self::TIMING_RUN_ID,
+
                     $receiptBytes,
-                    $timingBytes,
+
                     self::SHA,
                     self::SHA,
                     'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -1621,93 +1601,6 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                 self::addToAssertionCount(1);
             }
         }
-        $changed = $observation;
-        $changed['timing']['authoritative_sha256'] = str_repeat('c', 64);
-        $this->expectException(RuntimeException::class);
-        DeploymentEvidenceAuthorityV1::decodeChildObservation(
-            DeploymentEvidenceAuthorityV1::encodeFile($changed),
-            self::RUN_ID,
-            self::SHA,
-            self::TIMING_RUN_ID,
-            $receiptBytes,
-            $timingBytes,
-            self::SHA,
-            self::SHA,
-            'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-            str_repeat('d', 32),
-            0,
-            '2026-08-12T12:31:00Z',
-        );
-    }
-
-    public function testChildObservationAcceptsMissingOrInvalidTimingWithoutChangingReceiptVerdict(): void
-    {
-        $receiptBytes = DeployResultV1::canonicalJson(DeployResultV1::create('succeeded', 0));
-        foreach (
-            [
-                [
-                    '',
-                    ['status' => 'not_observed', 'authoritative_sha256' => null, 'run_id' => null, 'total_ms' => null],
-                ],
-                [
-                    "not-json\n",
-                    [
-                        'status' => 'invalid',
-                        'authoritative_sha256' => hash('sha256', "not-json\n"),
-                        'run_id' => null,
-                        'total_ms' => null,
-                    ],
-                ],
-            ]
-            as [$timingBytes, $timing]
-        ) {
-            $observation = $this->childObservation(hash('sha256', $receiptBytes), self::SHA);
-            $observation['timing'] = $timing;
-            $decoded = DeploymentEvidenceAuthorityV1::decodeChildObservation(
-                DeploymentEvidenceAuthorityV1::encodeFile($observation),
-                self::RUN_ID,
-                self::SHA,
-                self::TIMING_RUN_ID,
-                $receiptBytes,
-                $timingBytes,
-                self::SHA,
-                self::SHA,
-                'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-                str_repeat('d', 32),
-                0,
-                '2026-08-12T12:31:00Z',
-            );
-            self::assertSame($timing['status'], $decoded['timing']['status']);
-        }
-    }
-
-    public function testInvalidTimingCannotInventParsedIdentityOrTotal(): void
-    {
-        $receiptBytes = DeployResultV1::canonicalJson(DeployResultV1::create('succeeded', 0));
-        $timingBytes = "not-json\n";
-        $observation = $this->childObservation(hash('sha256', $receiptBytes), self::SHA);
-        $observation['timing'] = [
-            'status' => 'invalid',
-            'authoritative_sha256' => hash('sha256', $timingBytes),
-            'run_id' => self::TIMING_RUN_ID,
-            'total_ms' => 1,
-        ];
-
-        $this->expectException(RuntimeException::class);
-        DeploymentEvidenceAuthorityV1::decodeChildObservation(
-            DeploymentEvidenceAuthorityV1::encodeFile($observation),
-            self::RUN_ID,
-            self::SHA,
-            self::TIMING_RUN_ID,
-            $receiptBytes,
-            $timingBytes,
-            self::SHA,
-            self::SHA,
-            'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-            str_repeat('d', 32),
-            0,
-            '2026-08-12T12:31:00Z',
-        );
     }
 
     public function testOrchestratorTimingRequiresSameBootForTerminalSuccess(): void
@@ -1758,17 +1651,16 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
     public function testBootAuthoritiesRejectZeroOrNonRfcUuid(): void
     {
         $receiptBytes = DeployResultV1::canonicalJson(DeployResultV1::create('succeeded', 0));
-        $timingBytes = $this->timingBytes(0);
-        $observation = $this->childObservation(hash('sha256', $receiptBytes), hash('sha256', $timingBytes));
+        $observation = $this->childObservation(hash('sha256', $receiptBytes));
         $observation['manager_boot_id'] = '00000000-0000-0000-0000-000000000000';
         try {
             DeploymentEvidenceAuthorityV1::decodeChildObservation(
                 DeploymentEvidenceAuthorityV1::encodeFile($observation),
                 self::RUN_ID,
                 self::SHA,
-                self::TIMING_RUN_ID,
+
                 $receiptBytes,
-                $timingBytes,
+
                 self::SHA,
                 self::SHA,
                 $observation['manager_boot_id'],
@@ -1846,18 +1738,12 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
     }
 
     /** @return array<string,mixed> */
-    private function childObservation(string $receiptSha, string $timingSha): array
+    private function childObservation(string $receiptSha): array
     {
         return [
             'schema' => DeploymentEvidenceAuthorityV1::CHILD_OBSERVATION_SCHEMA,
             'run_id' => self::RUN_ID,
             'intent_sha256' => self::SHA,
-            'timing' => [
-                'status' => 'valid',
-                'authoritative_sha256' => $timingSha,
-                'run_id' => self::TIMING_RUN_ID,
-                'total_ms' => 60,
-            ],
             'receipt_sha256' => $receiptSha,
             'artifact_sha256' => self::SHA,
             'unit_launch_sha256' => self::SHA,
@@ -1866,46 +1752,6 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
             'exit_code' => 0,
             'observed_at_utc' => '2026-08-12T12:31:00Z',
         ];
-    }
-
-    private function timingBytes(int $exitCode): string
-    {
-        $lines = [];
-        foreach (
-            ['preparation_artifact', 'predeploy', 'permissions_stage', 'switch', 'postdeploy_validation']
-            as $index => $phase
-        ) {
-            $lines[] = json_encode(
-                [
-                    'schema' => 'deploy_timing.v1',
-                    'run_id' => self::TIMING_RUN_ID,
-                    'sequence' => $index + 1,
-                    'event' => 'phase',
-                    'mode' => 'deploy',
-                    'phase' => $phase,
-                    'status' => 'ok',
-                    'duration_ms' => 10,
-                    'elapsed_ms' => ($index + 1) * 10,
-                    'dry_run' => false,
-                ],
-                JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
-            );
-        }
-        $lines[] = json_encode(
-            [
-                'schema' => 'deploy_timing.v1',
-                'run_id' => self::TIMING_RUN_ID,
-                'sequence' => 6,
-                'event' => 'summary',
-                'mode' => 'deploy',
-                'outcome' => 'succeeded',
-                'exit_code' => $exitCode,
-                'total_ms' => 60,
-                'dry_run' => false,
-            ],
-            JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
-        );
-        return implode("\n", $lines) . "\n";
     }
 
     private function trafficReportBytes(string $decision, int $exitCode): string
@@ -2165,12 +2011,6 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                     'verified' => null,
                 ],
                 'post_gates' => $postGates,
-                'deploy_timing' => [
-                    'status' => 'not_observed',
-                    'authoritative_sha256' => null,
-                    'run_id' => null,
-                    'total_ms' => null,
-                ],
                 'orchestrator_timing' => [
                     'started_at_utc' => '2026-08-12T11:59:59Z',
                     'finished_at_utc' => '2026-08-12T12:00:10Z',
@@ -2259,12 +2099,6 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                     'scanner_passed' => true,
                     'dormant_clean_passed' => true,
                     'passed' => true,
-                ],
-                'deploy_timing' => [
-                    'status' => 'not_observed',
-                    'authoritative_sha256' => null,
-                    'run_id' => null,
-                    'total_ms' => null,
                 ],
                 'orchestrator_timing' => [
                     'started_at_utc' => '2026-08-12T11:59:59Z',

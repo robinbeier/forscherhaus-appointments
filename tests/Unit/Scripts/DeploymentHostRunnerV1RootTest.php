@@ -465,7 +465,13 @@ final class DeploymentHostRunnerV1RootTest extends TestCase
         self::assertTrue(chmod($this->root . '/deploy_ea.sh', 0755));
         $archivePath = $this->root . '/' . $release . '.tar.gz';
         $tar = $this->runCommand([
-            '/bin/tar', '-czf', $archivePath, '-C', $stage, 'deploy_ea.sh', 'nested/deeper/file',
+            '/bin/tar',
+            '-czf',
+            $archivePath,
+            '-C',
+            $stage,
+            'deploy_ea.sh',
+            'nested/deeper/file',
         ]);
         self::assertSame(0, $tar['exit_code'], $tar['stderr']);
         self::assertTrue(chmod($archivePath, 0600));
@@ -957,12 +963,8 @@ final class DeploymentHostRunnerV1RootTest extends TestCase
                 '/var/lib/fh-deploy-orchestrator/runs/' . self::OTHER_RUN_ID . '/deploy-result.json',
         ]);
         $renderer = array_search('--renderer-deploy-mode', $deployArgv, true);
-        $timing = array_search('--timing-run-id', $deployArgv, true);
         self::assertIsInt($renderer);
-        self::assertIsInt($timing);
         $mutations['undocumented docker renderer'] = array_replace($deployArgv, [$renderer + 1 => 'docker']);
-        $mutations['invalid timing run'] = array_replace($deployArgv, [$timing + 1 => 'not-a-uuid']);
-        $mutations['orchestrator timing run'] = array_replace($deployArgv, [$timing + 1 => self::RUN_ID]);
 
         foreach ($mutations as $name => $mutated) {
             self::assertSame(70, $this->validateControllerArgv($mutated), $name);

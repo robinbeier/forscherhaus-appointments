@@ -1610,12 +1610,9 @@ final class DeploymentHostRunnerV1Test extends TestCase
         $storage = $this->successfulPassedPostGateStorage();
         $prefix = 'runs/' . self::fixtureRunId() . '/';
         $clock = new FixedTerminalClock();
-        $timing = new NotObservedTimingPin();
         $storage->operations = [];
 
-        $response = (new \Ops\HostRunnerTerminalPersistence($storage, $clock, $timing))->terminalizeDeploy(
-            self::fixtureRunId(),
-        );
+        $response = (new \Ops\HostRunnerTerminalPersistence($storage, $clock))->terminalizeDeploy(self::fixtureRunId());
 
         self::assertSame('terminal', $response['disposition']);
         self::assertSame('succeeded', $response['state']);
@@ -1634,30 +1631,24 @@ final class DeploymentHostRunnerV1Test extends TestCase
         );
         self::assertSame(hash('sha256', $storage->files[$prefix . 'evidence.json']), $terminalState['evidence_sha256']);
         self::assertSame(1, $clock->nowCalls);
-        self::assertSame(1, $timing->calls);
         self::assertSame(['claim-refresh', 'clear-exact'], array_column(array_slice($storage->operations, -2), 0));
 
         $operations = $storage->operations;
-        $replay = (new \Ops\HostRunnerTerminalPersistence($storage, $clock, $timing))->terminalizeDeploy(
-            self::fixtureRunId(),
-        );
+        $replay = (new \Ops\HostRunnerTerminalPersistence($storage, $clock))->terminalizeDeploy(self::fixtureRunId());
         self::assertSame($response, $replay);
         self::assertSame($operations, $storage->operations);
         self::assertSame(1, $clock->nowCalls);
-        self::assertSame(1, $timing->calls);
 
-        $replayedFromDurableBundle = (new \Ops\HostRunnerTerminalPersistence(
-            $storage,
-            $clock,
-            $timing,
-        ))->resumeTerminal(self::fixtureRunId());
+        $replayedFromDurableBundle = (new \Ops\HostRunnerTerminalPersistence($storage, $clock))->resumeTerminal(
+            self::fixtureRunId(),
+        );
         self::assertSame($response, $replayedFromDurableBundle);
         self::assertSame($operations, $storage->operations);
 
         $evidenceBytes = $storage->files[$prefix . 'evidence.json'];
         $storage->files[$prefix . 'evidence.json'] = $evidenceBytes . "\n";
         try {
-            (new \Ops\HostRunnerTerminalPersistence($storage, $clock, $timing))->resumeTerminal(self::fixtureRunId());
+            (new \Ops\HostRunnerTerminalPersistence($storage, $clock))->resumeTerminal(self::fixtureRunId());
             self::fail('terminal replay must reject mutated evidence bytes');
         } catch (RuntimeException) {
             self::assertTrue(true);
@@ -1669,11 +1660,7 @@ final class DeploymentHostRunnerV1Test extends TestCase
         $storage = $this->failedStoppedDeployStorage('failed_pre_switch', 30);
         $prefix = 'runs/' . self::fixtureRunId() . '/';
         unset($storage->files[$prefix . 'deploy-result.json']);
-        $terminal = new \Ops\HostRunnerTerminalPersistence(
-            $storage,
-            new FixedTerminalClock(),
-            new NotObservedTimingPin(),
-        );
+        $terminal = new \Ops\HostRunnerTerminalPersistence($storage, new FixedTerminalClock());
 
         $response = $terminal->terminalizeUnverifiableDeploy(self::fixtureRunId());
 
@@ -1707,11 +1694,9 @@ final class DeploymentHostRunnerV1Test extends TestCase
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('requires a stopped or absent reservation');
         try {
-            (new \Ops\HostRunnerTerminalPersistence(
-                $storage,
-                new FixedTerminalClock(),
-                new NotObservedTimingPin(),
-            ))->terminalizeUnverifiableDeploy(self::fixtureRunId());
+            (new \Ops\HostRunnerTerminalPersistence($storage, new FixedTerminalClock()))->terminalizeUnverifiableDeploy(
+                self::fixtureRunId(),
+            );
         } finally {
             self::assertSame($before, $storage->files);
             self::assertSame([], $storage->operations);
@@ -1751,11 +1736,9 @@ final class DeploymentHostRunnerV1Test extends TestCase
         $source = $this->successfulPassedPostGateStorage();
         $initial = $source->files;
         $activeClaim = $initial['active-run.json'];
-        (new \Ops\HostRunnerTerminalPersistence(
-            $source,
-            new FixedTerminalClock(),
-            new NotObservedTimingPin(),
-        ))->terminalizeDeploy(self::fixtureRunId());
+        (new \Ops\HostRunnerTerminalPersistence($source, new FixedTerminalClock()))->terminalizeDeploy(
+            self::fixtureRunId(),
+        );
         $terminal = $source->files;
 
         $prefixes = [
@@ -1779,16 +1762,14 @@ final class DeploymentHostRunnerV1Test extends TestCase
             }
             $storage->files['active-run.json'] = $activeClaim;
             $clock = new FixedTerminalClock();
-            $timing = new NotObservedTimingPin();
 
-            $response = (new \Ops\HostRunnerTerminalPersistence($storage, $clock, $timing))->terminalizeDeploy(
+            $response = (new \Ops\HostRunnerTerminalPersistence($storage, $clock))->terminalizeDeploy(
                 self::fixtureRunId(),
             );
 
             self::assertSame('succeeded', $response['state'], $name);
             self::assertSame($terminal, $storage->files, $name);
             self::assertSame(0, $clock->nowCalls, $name);
-            self::assertSame($name === 'state' ? 0 : 1, $timing->calls, $name);
         }
     }
 
@@ -1802,11 +1783,9 @@ final class DeploymentHostRunnerV1Test extends TestCase
         $storage = $this->failedStoppedDeployStorage($outcome, $exitCode);
         $prefix = 'runs/' . self::fixtureRunId() . '/';
 
-        $response = (new \Ops\HostRunnerTerminalPersistence(
-            $storage,
-            new FixedTerminalClock(),
-            new NotObservedTimingPin(),
-        ))->terminalizeDeploy(self::fixtureRunId());
+        $response = (new \Ops\HostRunnerTerminalPersistence($storage, new FixedTerminalClock()))->terminalizeDeploy(
+            self::fixtureRunId(),
+        );
 
         self::assertSame($expectedState, $response['state']);
         self::assertSame($exitCode, $response['result_exit_code']);
@@ -1858,11 +1837,9 @@ final class DeploymentHostRunnerV1Test extends TestCase
         $storage = $this->completedRollbackStorage($reportPassed);
         $prefix = 'runs/' . self::fixtureRunId() . '/';
 
-        $response = (new \Ops\HostRunnerTerminalPersistence(
-            $storage,
-            new FixedTerminalClock(),
-            new NotObservedTimingPin(),
-        ))->terminalizeRollback(self::fixtureRunId());
+        $response = (new \Ops\HostRunnerTerminalPersistence($storage, new FixedTerminalClock()))->terminalizeRollback(
+            self::fixtureRunId(),
+        );
 
         self::assertSame('recovery', $response['action']);
         self::assertSame($expectedState, $response['state']);
@@ -1893,11 +1870,9 @@ final class DeploymentHostRunnerV1Test extends TestCase
         $storage = $this->completedRollbackStorage(false, 31);
         $prefix = 'runs/' . self::fixtureRunId() . '/';
 
-        $response = (new \Ops\HostRunnerTerminalPersistence(
-            $storage,
-            new FixedTerminalClock(),
-            new NotObservedTimingPin(),
-        ))->terminalizeRollback(self::fixtureRunId());
+        $response = (new \Ops\HostRunnerTerminalPersistence($storage, new FixedTerminalClock()))->terminalizeRollback(
+            self::fixtureRunId(),
+        );
 
         self::assertSame('terminal', $response['disposition']);
         self::assertSame('recovery', $response['action']);
@@ -1923,11 +1898,7 @@ final class DeploymentHostRunnerV1Test extends TestCase
             'manager_boot_id' => null,
         ]);
         $initial = $storage->files;
-        $terminal = new \Ops\HostRunnerTerminalPersistence(
-            $storage,
-            new FixedTerminalClock(),
-            new NotObservedTimingPin(),
-        );
+        $terminal = new \Ops\HostRunnerTerminalPersistence($storage, new FixedTerminalClock());
 
         $response = $terminal->terminalizeRollback(self::fixtureRunId());
 
@@ -1964,7 +1935,6 @@ final class DeploymentHostRunnerV1Test extends TestCase
         $recovered = (new \Ops\HostRunnerTerminalPersistence(
             $journalAhead,
             new FixedTerminalClock(),
-            new NotObservedTimingPin(),
         ))->terminalizeRollback(self::fixtureRunId());
 
         self::assertSame($response, $recovered);
@@ -1979,11 +1949,9 @@ final class DeploymentHostRunnerV1Test extends TestCase
         $source = $this->completedRollbackStorage(true);
         $initial = $source->files;
         $activeClaim = $initial['active-run.json'];
-        (new \Ops\HostRunnerTerminalPersistence(
-            $source,
-            new FixedTerminalClock(),
-            new NotObservedTimingPin(),
-        ))->terminalizeRollback(self::fixtureRunId());
+        (new \Ops\HostRunnerTerminalPersistence($source, new FixedTerminalClock()))->terminalizeRollback(
+            self::fixtureRunId(),
+        );
         $terminal = $source->files;
         foreach (
             [
@@ -2013,14 +1981,12 @@ final class DeploymentHostRunnerV1Test extends TestCase
             }
             $storage->files['active-run.json'] = $activeClaim;
             $clock = new FixedTerminalClock();
-            $timing = new NotObservedTimingPin();
-            $response = (new \Ops\HostRunnerTerminalPersistence($storage, $clock, $timing))->terminalizeRollback(
+            $response = (new \Ops\HostRunnerTerminalPersistence($storage, $clock))->terminalizeRollback(
                 self::fixtureRunId(),
             );
             self::assertSame('failed_post_switch_rollback_succeeded', $response['state'], $name);
             self::assertSame($terminal, $storage->files, $name);
             self::assertSame(0, $clock->nowCalls, $name);
-            self::assertSame($name === 'state' ? 0 : 1, $timing->calls, $name);
         }
     }
 
@@ -2902,16 +2868,6 @@ final class FixedTerminalClock implements \Ops\HostRunnerOrchestratorClock
     public function monotonicNs(): int
     {
         return 21_000_000_000;
-    }
-}
-
-final class NotObservedTimingPin implements \Ops\HostRunnerTimingPin
-{
-    public int $calls = 0;
-    public function pin(string $timingRunId, string $runId): array
-    {
-        $this->calls++;
-        return ['status' => 'not_observed', 'bytes' => '', 'sha256' => null];
     }
 }
 

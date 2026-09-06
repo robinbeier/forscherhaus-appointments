@@ -193,7 +193,7 @@ bytes and both observed and projected used percentages must be below 85. Free
 inodes must cover the authenticated archive-stage and live-storage inode
 counts, the independently observed restored-datadir inode count, and a fixed
 64-inode allowance for the
-runner's bounded archive, pin, state, receipt, timing, and temporary leaves.
+runner's bounded archive, pin, state, receipt, and temporary leaves.
 The closed capacity evidence retains all five inode inputs (`available_inodes`,
 `stage_inode_count`, `restore_inode_count`, `inode_headroom`, and
 `projected_required_inodes`), and the terminal contract independently derives
@@ -216,31 +216,6 @@ helper results and the independently observed statvfs/unit/clock facts defined
 here. Coordinator request data cannot implement the provider, select its file
 paths, or supply its pin digests. The test provider exists only under the test
 namespace and proves call order and failure retention.
-
-## Timing and child outcome
-
-The runner creates a timing UUID inside `deployment_host_systemd_launch.v1`;
-the coordinator cannot select it. The fixed deploy argv contains
-`--timing-run-id UUID`, and the launch/argv hashes bind it. `deploy_ea.sh`
-creates the corresponding root-protected file with no clobber. Its child-side
-fsync is best-effort telemetry hardening only: `DEPLOY_TIMING_DURABLE` is
-process-local and never evidence authority.
-
-After the unit has stopped, the runner is the sole timing classifier. It reads
-the fixed timing leaf through a bounded stable-FD helper, pins and fsyncs the
-exact bytes and parent directory, then calls `DeployTimingSampleValidator`
-`validateBytes()`. `validateFile()` remains a diagnostic CLI API and must never
-be used as Host Runner authority. Missing or invalid timing stays
-`not_observed` or `invalid` and cannot change an exact canonical receipt plus an
-independently observed normal unit exit.
-
-The pin helper holds an exclusive lock on the protected run-directory file
-descriptor while it reconciles recognized private temp leaves and publishes or
-attaches `deploy-timing.jsonl`. Concurrent identical attempts therefore yield
-exactly one `pinned` and one `attached` result; neither may remove the other's
-live temp. Unknown leaves remain corruption rather than cleanup candidates.
-The Linux-root CI matrix covers missing, replay, conflict, unsafe metadata,
-size boundaries, stale-temp recovery and concurrent publication.
 
 Orchestrator timing starts durably before the intent. On the same boot,
 monotonic time supplies the duration for successful and failed terminals. A

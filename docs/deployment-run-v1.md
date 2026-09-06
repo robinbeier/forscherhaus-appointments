@@ -135,13 +135,9 @@ The future runner must normalize them into this table.
 
 ## Deploy child result candidate
 
-When normal deploy is invoked with `--result-file ABSOLUTE_PATH`, it must also
-receive `--timing-run-id FRESH_UUIDV4`. The Host Runner generates the timing
-UUID internally and binds it into the launch record, fixed argv, and argv hash;
-the coordinator cannot choose it. A direct root invocation must generate a
-fresh UUIDv4 and ensure the corresponding
-`/var/lib/fh-deploy-timing/<uuid>.jsonl` leaf is absent. `deploy_ea.sh` then
-publishes one closed, secret-free `deploy_result.v1` receipt candidate.
+When normal deploy is invoked with `--result-file ABSOLUTE_PATH`,
+`deploy_ea.sh` publishes one closed, secret-free `deploy_result.v1` receipt
+candidate.
 The object has exactly `schema`, `outcome`, and `exit_code`; it contains no
 timing, paths, commands, hosts, output, or free text. Its fixed bindings are:
 
@@ -173,8 +169,8 @@ match against a canonical trusted receipt. It then binds the exact receipt-byte
 SHA-256 into its own atomically persisted and fsynced state. Missing, malformed,
 untrusted, mismatched, killed, exit-`74`, or otherwise unknown child results
 remain `unknown`/`null`, require manual recovery, and never authorize a respawn.
-The receipt alone is not authoritative. `deploy_timing.v1`, stdout, stderr, and
-process timing are never result oracles. Dry-run does not publish a receipt and
+The receipt alone is not authoritative. Stdout and stderr are never result
+oracles. Dry-run does not publish a receipt and
 rejects `--result-file`.
 
 ## Evidence contract
@@ -199,8 +195,6 @@ Its sections are:
 - a separate at-most-once dedicated post-gate rollback reservation and verdict;
 - independent post-gates including Kuma raw `13/13`, runtime config, services,
   endpoints, logs, scanner, and dormant/clean;
-- a reference to the authoritative `deploy_timing.v1` file by SHA and its own
-  timing Run-ID;
 - outer orchestrator start/end/wall-clock values in a separate section;
 - the terminal state and stable exit/reason pair.
 
@@ -246,22 +240,13 @@ both absent or both valid with healthy not exceeding total. At least one check
 must remain unobserved. The same transition uses `passed` or `failed` when all
 checks completed before terminal persistence; no other failure transition may
 claim passed post-gates, and no other terminal state or reason accepts
-incomplete post-gates. Timing remains
-observational as defined in `docs/deployment.md`: missing or invalid
-`deploy_timing.v1` evidence is visible but cannot rewrite a safe deploy outcome.
-Invalid timing bytes retain their authoritative SHA while an unavailable parsed
-timing Run-ID or total remains `null`; `valid` timing requires both values. The
-outer wall clock never replaces, extends, or mixes with the five-phase
-`deploy_timing.v1` baseline. Its milliseconds must agree with the independently
+incomplete post-gates. The outer wall clock must agree with the independently
 stored second-precision UTC interval: for `delta_ms` derived from the two UTC
 timestamps, the accepted range is
 `max(0, delta_ms - 999) <= wall_clock_ms <= delta_ms + 999`.
 The outer interval must enclose the journal lifecycle: its start is no later
 than the immutable intent record, its finish is no earlier than the terminal
 record, and that finish is no later than evidence capture.
-Runs that fail before reserving the deploy invocation must retain
-`deploy_timing` as `not_observed`.
-
 Capacity and artifact collection failures use the same fail-closed distinction:
 `invalid` retains the fixed ceiling or artifact expectation and every available
 strictly typed measurement, while unavailable measurements, hashes, or the

@@ -298,11 +298,7 @@ final class DeploymentEvidenceAuthorityV1
         string $createdAtUtc,
         string $observedAtUtc,
     ): array {
-        $record = self::decodePinnedDumpAttestation(
-            $bytes,
-            hash('sha256', $bytes),
-            $observedAtUtc,
-        );
+        $record = self::decodePinnedDumpAttestation($bytes, hash('sha256', $bytes), $observedAtUtc);
         self::assertSame($record['dump']['sha256'], $dumpSha256, 'dump attestation stable bytes');
         self::assertSame($record['dump']['size_bytes'], $dumpSizeBytes, 'dump attestation stable size');
         self::assertSame($record['dump']['created_at_utc'], $createdAtUtc, 'dump created_at authority');
@@ -1874,9 +1870,7 @@ final class DeploymentEvidenceAuthorityV1
         string $bytes,
         string $runId,
         string $intentSha256,
-        string $timingRunId,
         string $receiptBytes,
-        string $timingBytes,
         string $artifactSha256,
         string $unitLaunchSha256,
         string $managerBootId,
@@ -1891,7 +1885,6 @@ final class DeploymentEvidenceAuthorityV1
                 'schema',
                 'run_id',
                 'intent_sha256',
-                'timing',
                 'receipt_sha256',
                 'artifact_sha256',
                 'unit_launch_sha256',
@@ -1911,54 +1904,7 @@ final class DeploymentEvidenceAuthorityV1
             self::assertSha256($record[$field], 'child observation ' . $field);
         }
         require_once __DIR__ . '/DeployResultV1.php';
-        require_once __DIR__ . '/DeployTimingSampleValidator.php';
         $receipt = DeployResultV1::decode($receiptBytes);
-        self::assertObject($record['timing'], 'child observation timing');
-        self::assertExactKeys(
-            $record['timing'],
-            ['status', 'authoritative_sha256', 'run_id', 'total_ms'],
-            'child observation timing',
-        );
-        $timing = null;
-        if ($timingBytes === '') {
-            if (
-                $record['timing']['status'] !== 'not_observed' ||
-                $record['timing']['authoritative_sha256'] !== null ||
-                $record['timing']['run_id'] !== null ||
-                $record['timing']['total_ms'] !== null
-            ) {
-                throw new RuntimeException('missing timing must remain not_observed');
-            }
-        } else {
-            self::assertSha256($record['timing']['authoritative_sha256'], 'child timing authoritative sha256');
-            if ($record['timing']['total_ms'] !== null) {
-                self::assertNonNegativeInt($record['timing']['total_ms'], 'child timing total');
-            }
-            if (!hash_equals($record['timing']['authoritative_sha256'], hash('sha256', $timingBytes))) {
-                throw new RuntimeException('child timing bytes contradict observation');
-            }
-            try {
-                $timing = DeployTimingSampleValidator::validateBytes($timingBytes);
-            } catch (RuntimeException) {
-                if (
-                    $record['timing']['status'] !== 'invalid' ||
-                    $record['timing']['run_id'] !== null ||
-                    $record['timing']['total_ms'] !== null
-                ) {
-                    throw new RuntimeException('invalid timing observation is malformed');
-                }
-            }
-            if ($timing !== null) {
-                if (
-                    $record['timing']['status'] !== 'valid' ||
-                    $record['timing']['run_id'] !== $timingRunId ||
-                    $record['timing']['run_id'] !== $timing['run_id'] ||
-                    $record['timing']['total_ms'] !== $timing['total_ms']
-                ) {
-                    throw new RuntimeException('valid child timing observation is inconsistent');
-                }
-            }
-        }
         if (
             !hash_equals($record['receipt_sha256'], hash('sha256', $receiptBytes)) ||
             !hash_equals($record['artifact_sha256'], $artifactSha256) ||
@@ -1979,8 +1925,7 @@ final class DeploymentEvidenceAuthorityV1
         self::assertNonNegativeInt($record['exit_code'], 'child exit code');
         if (
             $record['exit_code'] !== $independentlyObservedExitCode ||
-            $receipt['exit_code'] !== $independentlyObservedExitCode ||
-            ($timing !== null && $timing['exit_code'] !== $independentlyObservedExitCode)
+            $receipt['exit_code'] !== $independentlyObservedExitCode
         ) {
             throw new RuntimeException('child observation contradicts independently observed normal exit');
         }

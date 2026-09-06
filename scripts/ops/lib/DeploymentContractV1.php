@@ -128,7 +128,6 @@ final class DeploymentContractV1
         'deploy',
         'rollback',
         'post_gates',
-        'deploy_timing',
         'orchestrator_timing',
         'result',
     ];
@@ -307,7 +306,6 @@ final class DeploymentContractV1
         self::validateDeployEvidence($evidence['deploy']);
         self::validateRollbackEvidence($evidence['rollback']);
         self::validatePostGateEvidence($evidence['post_gates']);
-        self::validateDeployTimingEvidence($evidence['deploy_timing']);
         self::validateOrchestratorTiming($evidence['orchestrator_timing']);
 
         self::assertObject($evidence['result'], 'result');
@@ -329,12 +327,6 @@ final class DeploymentContractV1
             $evidence['rollback'],
         );
         self::assertTerminalEvidenceConsistency($evidence);
-        if (
-            $evidence['deploy_timing']['status'] !== 'not_observed' &&
-            $evidence['deploy_timing']['run_id'] === $evidence['run_id']
-        ) {
-            throw new RuntimeException('deploy timing Run-ID must remain separate from the orchestrator Run-ID');
-        }
     }
 
     /**
@@ -644,7 +636,6 @@ final class DeploymentContractV1
         if ($state === 'failed_before_write') {
             self::assertFailedBeforeWriteEvidence($reason, $evidence);
             self::assertSame($evidence['post_gates']['status'], 'not_observed', 'pre-write post-gate evidence');
-            self::assertSame($evidence['deploy_timing']['status'], 'not_observed', 'pre-write deploy timing evidence');
             return;
         }
 
@@ -1267,7 +1258,8 @@ final class DeploymentContractV1
                 'projected_required_inodes',
                 'observed_percent',
                 'projected_percent',
-            ] as $field
+            ]
+            as $field
         ) {
             self::assertNonNegativeInteger($section[$field], 'capacity.' . $field);
         }
@@ -1590,29 +1582,6 @@ final class DeploymentContractV1
         if ($section['passed'] !== $passed || ($section['status'] === 'passed') !== $passed) {
             throw new RuntimeException('post-gate summary or status is inconsistent');
         }
-    }
-
-    private static function validateDeployTimingEvidence(mixed $section): void
-    {
-        self::assertObject($section, 'deploy_timing');
-        self::assertExactKeys($section, ['status', 'authoritative_sha256', 'run_id', 'total_ms'], 'deploy_timing');
-        self::assertEnum($section['status'], ['not_observed', 'valid', 'invalid'], 'deploy_timing.status');
-        if ($section['status'] === 'not_observed') {
-            self::assertAllNullExcept($section, ['status'], 'deploy_timing');
-            return;
-        }
-        self::assertSha256($section['authoritative_sha256'], 'deploy_timing.authoritative_sha256');
-        if ($section['status'] === 'invalid') {
-            if ($section['run_id'] !== null) {
-                self::assertUuidV4($section['run_id'], 'deploy_timing.run_id');
-            }
-            if ($section['total_ms'] !== null) {
-                self::assertNonNegativeInteger($section['total_ms'], 'deploy_timing.total_ms');
-            }
-            return;
-        }
-        self::assertUuidV4($section['run_id'], 'deploy_timing.run_id');
-        self::assertNonNegativeInteger($section['total_ms'], 'deploy_timing.total_ms');
     }
 
     private static function validateOrchestratorTiming(mixed $section): void

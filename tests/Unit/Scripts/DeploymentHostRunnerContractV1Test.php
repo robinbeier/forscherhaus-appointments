@@ -80,8 +80,6 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
                 'ea_20260811',
                 '--renderer-deploy-mode',
                 'host',
-                '--timing-run-id',
-                '128f6f52-4c87-4d4e-8b19-6a66e6e1af25',
                 '--healthz-token-file',
                 '/var/lib/fh-deploy-orchestrator/runs/' . self::RUN_ID . '/deploy-ref-healthz-token',
                 '--zero-surprise-dump-file',
@@ -95,12 +93,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
                 '--result-file',
                 '/var/lib/fh-deploy-orchestrator/runs/' . self::RUN_ID . '/deploy-result.json',
             ],
-            DeploymentHostRunnerContractV1::executionArgv(
-                $input,
-                $this->deployRequest(),
-                null,
-                '128f6f52-4c87-4d4e-8b19-6a66e6e1af25',
-            ),
+            DeploymentHostRunnerContractV1::executionArgv($input, $this->deployRequest(), null),
         );
     }
 
@@ -2208,7 +2201,6 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             $this->deployExecutionInput(),
             $this->deployRequest(),
             null,
-            $launch['timing_run_id'],
         );
         $description =
             'fh-deployment-host-runner-v1-' . hash('sha256', "deployment_host_systemd_description.v1\0" . $launchSha);
@@ -5084,12 +5076,6 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
                 'scanner_passed' => true,
                 'dormant_clean_passed' => true,
                 'passed' => true,
-            ],
-            'deploy_timing' => [
-                'status' => 'not_observed',
-                'authoritative_sha256' => null,
-                'run_id' => null,
-                'total_ms' => null,
             ],
             'orchestrator_timing' => [
                 'started_at_utc' => '2026-08-11T13:00:00Z',
