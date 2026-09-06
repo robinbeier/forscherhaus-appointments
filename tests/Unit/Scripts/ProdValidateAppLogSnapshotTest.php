@@ -353,9 +353,9 @@ final class ProdValidateAppLogSnapshotTest extends TestCase
             #!/usr/bin/env bash
             query="${*: -1}"
             if [[ "$query" == *"COUNT(*) FROM monitor"* ]]; then
-                printf '13\n'
+                printf '12\n'
             else
-                printf '13\n'
+                printf '12\n'
             fi
             BASH
             ,

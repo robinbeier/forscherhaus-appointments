@@ -2,6 +2,10 @@
 
 Date: 2026-05-20
 
+This is the historical design proposal from that date. For the maintained
+monitor catalog and operating instructions, use [Uptime Kuma Operations](../uptime-kuma.md).
+The standalone PDF dependency monitor has since been consolidated into Deep Health.
+
 This concept is intentionally built around the existing stack: Uptime Kuma,
 Sentry, app health endpoints, release gates, logs, and repo-owned ops scripts.
 No new monitoring platform is recommended at this stage.

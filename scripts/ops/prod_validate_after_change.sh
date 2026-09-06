@@ -419,13 +419,16 @@ fi
 
 section kuma
 if [[ -r /var/lib/uptime-kuma-data/kuma.db ]] && command -v sqlite3 >/dev/null 2>&1; then
-    expected_active_monitors=13
+    expected_active_monitors=12
+    expected_active_monitor_ids='1,2,4,5,6,7,9,10,11,12,13,14'
     active="$(sqlite3 /var/lib/uptime-kuma-data/kuma.db 'SELECT COUNT(*) FROM monitor WHERE active = 1;' 2>/dev/null || printf query_failed)"
+    matched_ids="$(sqlite3 /var/lib/uptime-kuma-data/kuma.db "SELECT COUNT(*) FROM monitor WHERE active = 1 AND id IN (${expected_active_monitor_ids});" 2>/dev/null || printf query_failed)"
     green="$(sqlite3 /var/lib/uptime-kuma-data/kuma.db "SELECT SUM(CASE WHEN latest_status = 1 THEN 1 ELSE 0 END) FROM (SELECT m.id, COALESCE((SELECT h.status FROM heartbeat h WHERE h.monitor_id = m.id ORDER BY h.time DESC LIMIT 1), -1) latest_status FROM monitor m WHERE m.active = 1);" 2>/dev/null || printf query_failed)"
     printf 'kuma.active_monitors=%s\n' "$active"
+    printf 'kuma.expected_active_ids=%s\n' "$matched_ids"
     printf 'kuma.green_latest=%s\n' "$green"
-    if [[ "$active" != "$expected_active_monitors" || "$green" != "$expected_active_monitors" ]]; then
-        printf 'FAIL kuma expected %s active and %s green\n' "$expected_active_monitors" "$expected_active_monitors" >&2
+    if [[ "$active" != "$expected_active_monitors" || "$matched_ids" != "$expected_active_monitors" || "$green" != "$expected_active_monitors" ]]; then
+        printf 'FAIL kuma expected %s active IDs (%s) and %s green\n' "$expected_active_monitors" "$expected_active_monitor_ids" "$expected_active_monitors" >&2
         failures=$((failures + 1))
     fi
 else

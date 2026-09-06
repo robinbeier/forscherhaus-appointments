@@ -35,8 +35,8 @@ Deep-health monitor boundary:
 
 - `/health` is public shallow health.
 - `/index.php/healthz` is token-protected deep health.
-- The `App - Health Deep` and `App - PDF Renderer` Kuma JSON monitors require
-  an `X-Health-Token` header value configured only in Kuma or host-local files.
+- The `App - Health Deep` Kuma JSON monitor includes the PDF dependency and
+  requires an `X-Health-Token` header configured only in Kuma or host-local files.
 - The desired-state YAML names that required header but must never contain the
   real value.
 - A `401` from `/index.php/healthz` means the first audit target is the

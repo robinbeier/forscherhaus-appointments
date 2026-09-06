@@ -1297,8 +1297,8 @@ final class DeploymentContractV1
             self::assertBoolean($section[$field], 'post_gates.' . $field);
         }
         $passed =
-            $section['kuma_healthy_count'] === 13 &&
-            $section['kuma_total_count'] === 13 &&
+            $section['kuma_healthy_count'] === 12 &&
+            $section['kuma_total_count'] === 12 &&
             $section['runtime_config_passed'] &&
             $section['services_passed'] &&
             $section['endpoints_passed'] &&

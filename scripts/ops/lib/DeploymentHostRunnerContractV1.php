@@ -597,7 +597,7 @@ final class DeploymentHostRunnerContractV1
                 throw new RuntimeException('post-gate counts are invalid');
             }
         }
-        if ($postGates['kuma_total_count'] !== 13 || $postGates['kuma_healthy_count'] > 13) {
+        if ($postGates['kuma_total_count'] !== 12 || $postGates['kuma_healthy_count'] > 12) {
             throw new RuntimeException('post-gate Kuma observation is invalid');
         }
         foreach (array_slice(self::POST_GATE_KEYS, 3) as $field) {
@@ -605,7 +605,7 @@ final class DeploymentHostRunnerContractV1
                 throw new RuntimeException('post-gate booleans are invalid');
             }
         }
-        $passed = $postGates['kuma_healthy_count'] === 13;
+        $passed = $postGates['kuma_healthy_count'] === 12;
         foreach (array_slice(self::POST_GATE_KEYS, 3, -1) as $field) {
             $passed = $passed && $postGates[$field];
         }
