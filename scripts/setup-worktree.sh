@@ -37,9 +37,6 @@ chmod -R a+rwX storage
 # Install backend/frontend dependencies.
 bash ./scripts/ci/ensure_local_deps.sh --force
 
-# Populate assets/vendor from node_modules (needed by gulp workflows).
-npx gulp vendor
-
 # Install the managed pre-commit hook; pre-PR checks remain explicit commands.
 bash ./scripts/install-git-hooks.sh
 

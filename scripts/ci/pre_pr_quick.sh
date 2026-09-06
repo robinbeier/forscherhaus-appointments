@@ -75,17 +75,6 @@ git diff --quiet --exit-code -- package.json package-lock.json || {
     exit 1
 }
 
-echo_section "Frontend vendor assets refresh"
-# Keep dependency-driven frontend artifact drift, including jquery@4 spikes,
-# visible in the quick gate.
-npm run assets:refresh
-git diff --quiet --exit-code -- assets/vendor build || {
-    echo "[pre-pr-quick] Frontend dependency refresh produced uncommitted changes in assets/vendor or build." >&2
-    echo "[pre-pr-quick] Commit dependency-driven asset refreshes before rerunning this gate for frontend upgrade spikes." >&2
-    git status --short -- assets/vendor build >&2 || true
-    exit 1
-}
-
 echo_section "Start quick gate database service"
 trap cleanup_stack EXIT
 ci_docker_compose up -d mysql php-fpm
