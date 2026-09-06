@@ -19,12 +19,14 @@ worktrees (for example `nginx` from one path and `php-fpm`/`mysql` from another)
 
 ## PHP extension scope
 
-The development/test image omits the unused PECL extensions `csv`, `event`,
-`inotify` and `redis`. Application code and Composer requirements do not use
-them; sessions and application caches use files. Normal PHP CSV functions
-remain available, and Symfony's PHP event dispatcher does not require the
-PECL `event` extension. Add extensions only for an actual application or test
-requirement.
+The development/test image omits the unused PHP extensions `odbc` and `soap`,
+along with the unused PECL extensions `csv`, `event`, `inotify` and `redis`.
+Application code and Composer requirements do not use them; the active database
+configuration uses MySQLi, while CodeIgniter's optional upstream ODBC adapters
+remain available in `system/` for installations that explicitly need them.
+Sessions and application caches use files. Normal PHP CSV functions remain
+available, and Symfony's PHP event dispatcher does not require the PECL `event`
+extension. Add extensions only for an actual application or test requirement.
 
 ## Shared PHP images for local checks
 
