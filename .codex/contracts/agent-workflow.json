@@ -290,7 +290,8 @@
                 "write-contract-booking",
                 "write-contract-api",
                 "booking-controller-flows",
-                "integration-smoke"
+                "integration-smoke",
+                "pdf-renderer-tests"
             ],
             "review_attestation": {
                 "marker": "exact-head-review-attestation:v2",
@@ -420,10 +421,10 @@
         "workflow": ".github/workflows/ci.yml",
         "blocking_failure_control_policy": "strict-v1",
         "job_classification_policy": "explicit-v1",
-        "advisory_jobs": ["pdf-renderer-latency"],
+        "advisory_jobs": [],
         "blocking_execution_fingerprints": {
             "workflow_execution_envelope": "b00690b770e9cc3b3223dec8bbeb2f46db76443642fb7ddadf3fb8237ebb7f99",
-            "changes": "3a5a8ff24ba6c520bb167016d1ede485e1fa01acb8db3888d020810fad436bc3",
+            "changes": "ef44556ee847d1b97ead5303f57d445543c51a5d2497ab8356dfe9d6c17bd1b8",
             "build-test": "4b080f846f944571776939404ad009d23a691f62214e1f48b2a5bae55cf790f4",
             "phpstan-application": "d7113a83e101a1d61620ceb1917a7fbc40bdf662f689a7ca321d99d43cc7920c",
             "js-lint-changed": "2be15a8595f42a9b076782789b1fe5c1386bd19e1abc4b59b936762950436305",
@@ -438,7 +439,8 @@
             "api-contract-openapi": "6e224d3eec1b26fa2eb1e4c3d62f45524253a5e5468cff7e029f9d8b4e2ce069",
             "booking-controller-flows": "cc7be7cb392f2e57805c331b68019a719996bc4fcc32f744ac6461b0e64b3b69",
             "coverage-delta": "16fe2e04d53fe11b5c1e0c2f6d8724582dc1d891cb229d67343f04d9c9310915",
-            "integration-smoke": "17de4f0907f27bed9f71f40547041109e8877d8f9ba2643821372dd2cf56b88a"
+            "integration-smoke": "17de4f0907f27bed9f71f40547041109e8877d8f9ba2643821372dd2cf56b88a",
+            "pdf-renderer-tests": "f1eaead4ec5726c94d67dab088268f7394e9c1d902f60feffa5783184ae4646c"
         },
         "condition_grammar": {
             "version": 1,
@@ -605,6 +607,9 @@
                 ]
             },
             "integration-smoke": {
+                "kind": "fingerprinted_execution"
+            },
+            "pdf-renderer-tests": {
                 "kind": "fingerprinted_execution"
             }
         }

@@ -95,7 +95,7 @@ final class ExactHeadMergegateTest extends TestCase
         $snapshot['comments'] = [$this->attestationComment()];
         $snapshot['workflow_runs'][0]['conclusion'] = 'failure';
         $snapshot['check_runs'][] = [
-            'name' => 'pdf-renderer-latency',
+            'name' => 'example-advisory-job',
             'check_suite_id' => 202,
             'head_sha' => self::SHA,
             'status' => 'completed',

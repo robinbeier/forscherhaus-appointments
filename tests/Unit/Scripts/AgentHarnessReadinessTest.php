@@ -380,7 +380,7 @@ class AgentHarnessReadinessTest extends TestCase
         $workflow = [
             'jobs' => [
                 'coverage-delta' => [],
-                'pdf-renderer-latency' => [],
+                'example-advisory-job' => [],
                 'new-job' => [],
             ],
         ];
@@ -388,7 +388,7 @@ class AgentHarnessReadinessTest extends TestCase
         $checks = agentHarnessReadinessEvaluateClassifiedJobInventory(
             $workflow,
             ['coverage-delta'],
-            ['pdf-renderer-latency'],
+            ['example-advisory-job'],
         );
 
         self::assertSame('fail', $checks[0]['status']);
@@ -399,7 +399,7 @@ class AgentHarnessReadinessTest extends TestCase
         $checks = agentHarnessReadinessEvaluateClassifiedJobInventory(
             $workflow,
             ['coverage-delta', 'write-contract-api'],
-            ['pdf-renderer-latency'],
+            ['example-advisory-job'],
         );
 
         self::assertSame('fail', $checks[0]['status']);
@@ -411,14 +411,14 @@ class AgentHarnessReadinessTest extends TestCase
         $workflow = [
             'jobs' => [
                 'coverage-delta' => [],
-                'pdf-renderer-latency' => [],
+                'example-advisory-job' => [],
             ],
         ];
 
         $checks = agentHarnessReadinessEvaluateClassifiedJobInventory(
             $workflow,
             ['coverage-delta'],
-            ['pdf-renderer-latency'],
+            ['example-advisory-job'],
         );
 
         self::assertSame('pass', $checks[0]['status']);
