@@ -56,7 +56,6 @@ final class DeploymentHostRunnerContractV1
 
     private const DEPLOY_EXECUTION_PARAMETER_KEYS = [
         'release_id',
-        'renderer_deploy_mode',
         'artifact_provenance_sha256',
         'healthz_token',
         'zero_surprise_dump',
@@ -372,9 +371,8 @@ final class DeploymentHostRunnerContractV1
         }
         self::assertExactKeys($input['parameters'], self::DEPLOY_EXECUTION_PARAMETER_KEYS, 'deploy parameters');
         self::assertReleaseId($input['parameters']['release_id']);
-        self::assertEnum($input['parameters']['renderer_deploy_mode'], ['host', 'external'], 'renderer mode');
         self::assertSha256($input['parameters']['artifact_provenance_sha256'], 'artifact_provenance_sha256');
-        foreach (array_slice(self::DEPLOY_EXECUTION_PARAMETER_KEYS, 3) as $field) {
+        foreach (array_keys(self::PINNED_DEPLOY_REFERENCE_LEAVES) as $field) {
             self::assertProtectedFileReference($input['parameters'][$field], $field);
         }
         if (
@@ -539,8 +537,6 @@ final class DeploymentHostRunnerContractV1
             ...$argv,
             '--rel',
             $parameters['release_id'],
-            '--renderer-deploy-mode',
-            $parameters['renderer_deploy_mode'],
             '--healthz-token-file',
             $pinnedReference('healthz_token'),
             '--zero-surprise-dump-file',

@@ -153,8 +153,8 @@ Renderer capacity comes only from the root-maintained canonical policy at
 `external` objects with `bytes` and `inodes`. The external values must be
 exactly `0/0`; host values must both be positive conservative upper bounds for
 `npm ci --omit=dev`, including the staged `node_modules` tree plus npm and
-Puppeteer state caches. The selected mode comes from the already-pinned
-execution input, while the numeric limits come only from this protected policy.
+Puppeteer state caches. The deployment runner selects `external` for the Docker-backed renderer;
+the numeric limits still come only from this protected policy.
 Host renderer targets must share the measured filesystem and are included
 before the capacity verdict.
 The Core collector resolves those names only to fixed host targets: the

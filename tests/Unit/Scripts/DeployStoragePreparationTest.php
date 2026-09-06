@@ -227,28 +227,27 @@ final class DeployStoragePreparationTest extends TestCase
         }
     }
 
-    public function testRendererPreparationCannotMaskAnEarlyCommandFailure(): void
+    public function testDockerRendererKeepsHostPreparationOutOfDeploymentPath(): void
     {
-        $script = <<<'BASH'
-        set -Eeuo pipefail
-        source "$1"
-        DRYRUN=1
-        RENDERER_DEPLOY_MODE=host
-        STAGE_ROOT=/stage
-        prepare_renderer_state_dir() { return 23; }
-        install_renderer_dependencies() { printf 'MASKED_FAILURE\n'; return 0; }
-        set +e
-        prepare_stage_renderer_dependencies
-        result="$?"
-        set -e
-        printf 'RESULT=%s\n' "$result"
-        BASH;
+        $source = (string) file_get_contents($this->root . '/deploy_ea.sh');
+        self::assertStringNotContainsString('RENDERER_DEPLOY_MODE', $source);
+        self::assertStringNotContainsString('RENDERER_STATE_DIR', $source);
+        self::assertStringNotContainsString('prepare_renderer_state_dir', $source);
+        self::assertStringNotContainsString('install_renderer_dependencies', $source);
+        self::assertStringNotContainsString('require_command node', $source);
+        self::assertStringNotContainsString('require_command npm', $source);
+        self::assertStringContainsString('restart_renderer_service', $source);
+        self::assertStringContainsString('probe_renderer_health', $source);
+        self::assertStringContainsString('probe_deep_health_contract', $source);
 
-        $result = $this->runCommand(['bash', '-c', $script, 'bash', dirname(__DIR__, 3) . '/deploy_ea.sh']);
-
-        self::assertSame(0, $result['exit_code'], $result['stderr']);
-        self::assertStringContainsString('RESULT=23', $result['stdout']);
-        self::assertStringNotContainsString('MASKED_FAILURE', $result['stdout']);
+        $sync = strpos($source, "\nsync_live_storage_to_stage \\\n");
+        $permissions = strpos($source, "\nnormalize_stage_permissions \\\n");
+        $switch = strpos($source, "\nperform_atomic_switch\n");
+        self::assertIsInt($sync);
+        self::assertIsInt($permissions);
+        self::assertIsInt($switch);
+        self::assertLessThan($switch, $permissions);
+        self::assertLessThan($permissions, $sync);
     }
 
     private function runRealStagePermissionsFailure(string $stage, string $credentials): array

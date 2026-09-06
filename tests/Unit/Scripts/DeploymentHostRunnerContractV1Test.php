@@ -78,8 +78,6 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
                 '/var/lib/fh-deploy-orchestrator/runs/' . self::RUN_ID . '/deploy-script.sh',
                 '--rel',
                 'ea_20260811',
-                '--renderer-deploy-mode',
-                'host',
                 '--healthz-token-file',
                 '/var/lib/fh-deploy-orchestrator/runs/' . self::RUN_ID . '/deploy-ref-healthz-token',
                 '--zero-surprise-dump-file',
@@ -168,7 +166,7 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
     {
         $input = $this->deployExecutionInput();
         $encoded = DeploymentHostRunnerContractV1::encodeExecutionInput($input);
-        $input['parameters']['renderer_deploy_mode'] = 'external';
+        $input['parameters']['healthz_token']['sha256'] = str_repeat('c', 64);
 
         $this->expectException(RuntimeException::class);
         DeploymentHostRunnerContractV1::executionInputPinDisposition(
@@ -4454,7 +4452,6 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             'action' => 'deploy',
             'parameters' => [
                 'release_id' => 'ea_20260811',
-                'renderer_deploy_mode' => 'host',
                 'artifact_provenance_sha256' => self::SHA,
                 'healthz_token' => $file('/etc/fh/healthz.token'),
                 'zero_surprise_dump' => $file('/root/backups/predeploy.sql.gz'),

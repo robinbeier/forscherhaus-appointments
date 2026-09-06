@@ -86,7 +86,7 @@ final class SystemHostRunnerProtectedObservationSource implements HostRunnerProt
             $intentSha256,
             $input['parameters']['release_id'],
             $this->expectedCommit,
-            $input['parameters']['renderer_deploy_mode'],
+            'external',
             $this->buildAuthority->verifiedSources,
             $dump,
         );

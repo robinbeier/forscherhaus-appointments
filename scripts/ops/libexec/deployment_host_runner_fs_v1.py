@@ -1371,8 +1371,8 @@ def validate_controller_argv(argv: object) -> list[str]:
             if re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,127}', release) is None or tail[6] != '/var/www/html/.fh-failed-' + unit_run_id:
                 reject()
         else:
-            option_names = ['--rel', '--renderer-deploy-mode', '--healthz-token-file', '--zero-surprise-dump-file', '--zero-surprise-predeploy-credentials-file', '--zero-surprise-canary-credentials-file', '--zero-surprise-incident-webhook-file', '--result-file']
-            if len(tail) != 16 or tail[::2] != option_names or tail[3] not in ('host', 'external'):
+            option_names = ['--rel', '--healthz-token-file', '--zero-surprise-dump-file', '--zero-surprise-predeploy-credentials-file', '--zero-surprise-canary-credentials-file', '--zero-surprise-incident-webhook-file', '--result-file']
+            if len(tail) != 14 or tail[::2] != option_names:
                 reject()
             if re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,127}', tail[1]) is None:
                 reject()
@@ -1380,19 +1380,19 @@ def validate_controller_argv(argv: object) -> list[str]:
                 reject()
             expected_ref_paths = [
                 '/var/lib/fh-deploy-orchestrator/runs/' + unit_run_id + '/deploy-ref-healthz-token',
-                tail[7],
+                tail[5],
                 '/var/lib/fh-deploy-orchestrator/runs/' + unit_run_id + '/deploy-ref-predeploy-credentials',
                 '/var/lib/fh-deploy-orchestrator/runs/' + unit_run_id + '/deploy-ref-canary-credentials',
                 '/var/lib/fh-deploy-orchestrator/runs/' + unit_run_id + '/deploy-ref-incident-webhook',
             ]
-            if tail[7] not in (
+            if tail[5] not in (
                 '/var/lib/fh-deploy-orchestrator/runs/' + unit_run_id + '/deploy-ref-zero-surprise-dump.sql',
                 '/var/lib/fh-deploy-orchestrator/runs/' + unit_run_id + '/deploy-ref-zero-surprise-dump.sql.gz',
             ):
                 reject()
-            if tail[5:14:2] != expected_ref_paths:
+            if tail[3:12:2] != expected_ref_paths:
                 reject()
-            for path in tail[5::2]:
+            for path in tail[3::2]:
                 if not canonical_absolute_path(path):
                     reject()
     else:
