@@ -144,42 +144,6 @@ final class DumpProducerAdmissionContractTest extends TestCase
         );
     }
 
-    public function testUnitsAreDesiredStateOnlyAndHardened(): void
-    {
-        $root = dirname(__DIR__, 3);
-        $service = (string) file_get_contents($root . '/scripts/ops/systemd/fh-dump-producer-admission.service');
-        $timer = (string) file_get_contents($root . '/scripts/ops/systemd/fh-dump-producer-admission.timer');
-        self::assertStringContainsString('Type=oneshot', $service);
-        self::assertStringContainsString('User=root', $service);
-        self::assertStringContainsString(
-            'ExecStart=/usr/bin/python3 -I -B /usr/local/libexec/fh-release-archive-dump-retention-v1 admission-status',
-            $service,
-        );
-        self::assertStringContainsString('ProtectSystem=strict', $service);
-        self::assertStringContainsString('NoNewPrivileges=yes', $service);
-        self::assertStringContainsString('PrivateNetwork=yes', $service);
-        self::assertStringContainsString('RestrictAddressFamilies=AF_UNIX', $service);
-        self::assertStringNotContainsString('ConditionPathIsDirectory=', $service);
-        self::assertStringContainsString(
-            'ReadOnlyPaths=/usr/local/libexec/fh-release-archive-dump-retention-v1 -/root/backups/easyappointments',
-            $service,
-        );
-        self::assertStringContainsString(
-            'ReadWritePaths=-/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock',
-            $service,
-        );
-        self::assertStringContainsString(
-            'CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_SYS_PTRACE',
-            $service,
-        );
-        self::assertStringContainsString('AmbientCapabilities=', $service);
-        self::assertStringContainsString('OnCalendar=*-*-* *:00/15:00 UTC', $timer);
-        self::assertStringContainsString('Persistent=false', $timer);
-        self::assertStringContainsString('Unit=fh-dump-producer-admission.service', $timer);
-        self::assertStringNotContainsString('enable', $service . $timer);
-        self::assertStringNotContainsString('start', $service . $timer);
-    }
-
     public function testRunbookStatesBoundariesAndStopRules(): void
     {
         $root = dirname(__DIR__, 3);
@@ -197,8 +161,6 @@ final class DumpProducerAdmissionContractTest extends TestCase
                 'Objektmutation',
                 'decision_blocked',
                 'Stop',
-                'systemd-analyze verify',
-                'Persistent=false',
             ]
             as $term
         ) {

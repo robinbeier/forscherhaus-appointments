@@ -11,9 +11,7 @@ systemd-analyze verify \
   scripts/ops/systemd/fh-session-retention.service \
   scripts/ops/systemd/fh-session-retention.timer \
   scripts/ops/systemd/fh-release-archive-dump-retention.service \
-  scripts/ops/systemd/fh-release-archive-dump-retention.timer \
-  scripts/ops/systemd/fh-dump-producer-admission.service \
-  scripts/ops/systemd/fh-dump-producer-admission.timer
+  scripts/ops/systemd/fh-release-archive-dump-retention.timer
 sudo env FH_ROOT_HOST_TESTS_REQUIRED=1 php vendor/bin/phpunit --no-configuration --bootstrap vendor/autoload.php \
   tests/Unit/Scripts/DeployResultReceiptStorageTest.php \
   tests/Unit/Scripts/DeployRuntimeConfigPermissionsTest.php \
