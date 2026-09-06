@@ -103,3 +103,12 @@ recoverable:
 Do not delete or rewrite session files, the marker, or the shared production
 lock while investigating. Never replace this policy with a broad `find -delete`
 or probabilistic PHP session GC.
+
+## Session file permissions
+
+The application file-session driver sets mode `0600` for newly created session
+files. Retention continues to reject sessions with unsafe permissions. The
+one-time repair path for historical `0644` session files has been retired after
+a read-only production scan found no remaining legacy files. Unexpected modes
+are investigated as a creation or configuration problem; routine retention does
+not change session permissions.
