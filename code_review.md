@@ -113,12 +113,10 @@ and affected paths and update the summary to the new head. Broaden that review
 if scope or risk changed. Group actionable findings into a correction pass;
 non-blocking suggestions must not restart a completed review cycle.
 
-No separate CLI login or external bootstrap review is required for standard
+No separate CLI login is required for standard
 review, including changes to review-tool code or policy. If a reviewer is
 unavailable, use another available independent reviewer or a human; keep the
-PR open if no independent review can be obtained. The sealed reviewer and
-trusted bootstrap are optional tooling described in
-[optional agent tooling](docs/optional-agent-review.md), not prerequisites.
+PR open if no independent review can be obtained.
 Current blocking CI, resolved substantive findings, an updated independent
 review summary, and explicit merge authorization are still required by
 [WORKFLOW.md](WORKFLOW.md#pr-and-review-expectations).

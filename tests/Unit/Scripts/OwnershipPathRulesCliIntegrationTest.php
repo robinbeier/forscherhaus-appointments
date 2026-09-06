@@ -48,7 +48,7 @@ final class OwnershipPathRulesCliIntegrationTest extends TestCase
         self::assertTrue(mkdir($root, 0700, true));
         $mapPath = $root . '/ownership.json';
         $codeownersPath = $root . '/CODEOWNERS';
-        $changedPath = 'tests/Unit/Scripts/ReadonlyReviewBundleTest.php';
+        $changedPath = 'tests/Unit/Scripts/AgentWorkflowContractTest.php';
 
         $directoryMap = [
             'schema_version' => 3,
@@ -77,7 +77,7 @@ final class OwnershipPathRulesCliIntegrationTest extends TestCase
                     'primary_handle' => '@neighbor-owner',
                     'secondary_handle' => '@neighbor-reviewer',
                     'path_rules' => [
-                        ['path' => 'tests/Unit/Scripts/ReadonlyReviewBundleTest.php.bak', 'match' => 'exact_file'],
+                        ['path' => 'tests/Unit/Scripts/AgentWorkflowContractTest.php.bak', 'match' => 'exact_file'],
                     ],
                     'depends_on' => [],
                 ],
@@ -107,10 +107,10 @@ final class OwnershipPathRulesCliIntegrationTest extends TestCase
             $codeowners = file_get_contents($codeownersPath);
             self::assertIsString($codeowners);
             self::assertStringContainsString(
-                '/tests/Unit/Scripts/ReadonlyReviewBundleTest.php @exact-owner @exact-reviewer',
+                '/tests/Unit/Scripts/AgentWorkflowContractTest.php @exact-owner @exact-reviewer',
                 $codeowners,
             );
-            self::assertStringNotContainsString('/tests/Unit/Scripts/ReadonlyReviewBundleTest.php/**', $codeowners);
+            self::assertStringNotContainsString('/tests/Unit/Scripts/AgentWorkflowContractTest.php/**', $codeowners);
 
             file_put_contents($mapPath, json_encode($directoryMap, JSON_THROW_ON_ERROR));
             $this->runCommand([

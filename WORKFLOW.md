@@ -286,15 +286,12 @@ or production operations create a risk the general review cannot adequately
 assess. Record the reason and scope in the PR. No fixed three-reviewer quota
 applies. Reviewers report to the primary and do not edit files or publish.
 
-Standard review does not require a separate Codex CLI login, sealed runner,
-Seatbelt sandbox, external bootstrap review, or exact-head attestation command.
+Standard review does not require a separate Codex CLI login or attestation
+command.
 If the chosen review tool is unavailable, use another available independent
 reviewer or a human and record the substitution. If none is available, leave
 the PR open with review pending; never invent review evidence. The same standard
 path applies when this repository's workflow or review tools are changed.
-The legacy tools remain opt-in under
-[optional agent tooling](docs/optional-agent-review.md); their own execution
-checks remain intact, but they do not gate the standard path.
 
 Before `Ready to Merge`, the primary checks:
 
@@ -312,8 +309,8 @@ Read the current PR head, CI results, and review feedback immediately before
 landing. Use the compare-and-swap command
 `gh pr merge --merge --match-head-commit <current_head_sha>` so a later push
 cannot silently change the code being merged. A successful local gate alone
-is not merge permission. No new owner attestation or local mergegate command
-is required for this standard path. Verify the merge and updated `origin/main`
+is not merge permission. No additional landing command is required for this
+standard path. Verify the merge and updated `origin/main`
 before marking an associated issue `Done`.
 
 ## Working Within the Agreed Scope

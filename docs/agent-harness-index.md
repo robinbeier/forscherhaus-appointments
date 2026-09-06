@@ -23,7 +23,6 @@ This file stays intentionally short. It is a map, not a second runbook.
 | Machine-readable cross-document workflow invariants | `.codex/contracts/agent-workflow.json` | Structured exact-head, review, public-write, evidence, and blocking-job contract. |
 | Model-aware implementation delegation | `WORKFLOW.md`, `.codex/agents/implementation-worker.toml` | Primary-agent authority plus the pinned Luna worker boundary. |
 | Controlled parallel implementation | `WORKFLOW.md` | Explicit disjoint local ownership with primary-owned integration and publication. |
-| Optional legacy sealed reviewers | `docs/optional-agent-review.md`, `.codex/contracts/agent-workflow.json` | Explicit opt-in only; no separate CLI or bootstrap prerequisite for standard review. |
 | Compact guardrails and command entry points | `AGENTS.md` | Cross-topic entry point without duplicating specialist docs. |
 | Core pre-PR path | `scripts/ci/pre_pr_quick.sh`, `scripts/ci/pre_pr_full.sh` | Actual executable gate logic. |
 | CI gate semantics and job wiring | `.github/workflows/ci.yml` | Ground truth for job triggers, blocking status, and artifacts. |
@@ -61,9 +60,7 @@ This file stays intentionally short. It is a map, not a second runbook.
   - follow `WORKFLOW.md`: record independent review for the current PR head,
     check applicable blocking CI and unresolved findings, and merge only with
     user authorization and `--match-head-commit`
-  - no separate CLI login, sealed runner, or attestation command is required
-- Optional sealed reviewer and trusted bootstrap tooling:
-  - `docs/optional-agent-review.md`
+  - no separate CLI login or attestation command is required
 - Harness readiness score:
   - `composer check:agent-harness-readiness`
   - The machine contract owns the supported CI-condition tokens and binds
