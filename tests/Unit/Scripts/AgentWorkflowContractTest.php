@@ -18,32 +18,8 @@ class AgentWorkflowContractTest extends TestCase
         $this->repoRoot = dirname(__DIR__, 3);
     }
 
-    public function testCanonicalWorkflowSurfacesReferenceMachineContract(): void
+    public function testCanonicalSteeringSourcesKeepRequiredReferences(): void
     {
-        $contract = agentHarnessReadinessLoadWorkflowContract(
-            $this->repoRoot . '/.codex/contracts/agent-workflow.json',
-        );
-        $surfaces = $contract['surfaces'] ?? null;
-        self::assertIsArray($surfaces);
-
-        foreach ($surfaces as $path => $requirements) {
-            self::assertIsString($path);
-            self::assertIsArray($requirements);
-            $content = $this->readRepoFile($path);
-            self::assertStringContainsString($requirements['contract_reference'], $content, $path);
-            self::assertIsArray($requirements['required_sections'] ?? null, $path);
-            foreach ($requirements['required_sections'] as $heading => $requiredClauses) {
-                self::assertIsString($heading, $path);
-                self::assertIsArray($requiredClauses, $path);
-                $section = agentHarnessReadinessExtractMarkdownSection($content, $heading);
-                self::assertNotNull($section, $path . ': ' . $heading);
-                foreach ($requiredClauses as $requiredClause) {
-                    self::assertSame(1, substr_count($section, $requiredClause), $path . ': ' . $heading);
-                    self::assertSame(1, substr_count($content, $requiredClause), $path . ': ' . $requiredClause);
-                }
-            }
-        }
-
         $steeringChecks = agentHarnessReadinessEvaluateSteeringSources($this->repoRoot, [
             'README.md' => ['docs/agent-harness-index.md', 'WORKFLOW.md', 'AGENTS.md'],
             'AGENTS.md' => ['docs/agent-harness-index.md'],

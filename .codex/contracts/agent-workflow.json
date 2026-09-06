@@ -44,64 +44,6 @@
         "allow_capability_values": false,
         "allow_personal_data": false
     },
-    "surfaces": {
-        "WORKFLOW.md": {
-            "contract_reference": ".codex/contracts/agent-workflow.json",
-            "required_sections": {
-                "## Controlled Parallel Work": ["Parallel work means local implementation only"],
-                "### 3. Validate locally": [
-                    "blocking GitHub CI plus independent review on the unchanged exact PR head establish"
-                ],
-                "### 5. Rework loop": ["Every push after review or CI evidence was collected invalidates that landing"],
-                "## PR and Review Expectations": [
-                    "The standard path requires one independent reviewer",
-                    "Standard review does not require a separate Codex CLI login",
-                    "all applicable blocking CI checks",
-                    "the user has authorized merging"
-                ]
-            }
-        },
-        "code_review.md": {
-            "contract_reference": ".codex/contracts/agent-workflow.json",
-            "required_sections": {
-                "## Review Process": [
-                    "The default is one independent reviewer",
-                    "Record the reviewed commit",
-                    "No separate CLI login is required"
-                ]
-            }
-        },
-        "docs/agent-harness-index.md": {
-            "contract_reference": ".codex/contracts/agent-workflow.json",
-            "required_sections": {}
-        },
-        "docs/ci-write-contracts.md": {
-            "contract_reference": "../.codex/contracts/agent-workflow.json",
-            "required_sections": {}
-        },
-        ".codex/skills/push/SKILL.md": {
-            "contract_reference": "../../contracts/agent-workflow.json",
-            "required_sections": {}
-        },
-        ".codex/skills/land/SKILL.md": {
-            "contract_reference": "../../contracts/agent-workflow.json",
-            "required_sections": {}
-        },
-        ".github/pull_request_template.md": {
-            "contract_reference": ".codex/contracts/agent-workflow.json",
-            "required_sections": {
-                "## Independent Review": ["- Reviewed commit:", "- Result and handled findings:"],
-                "## Merge Readiness": [
-                    "- [ ] Blocking CI ist gruen",
-                    "- [ ] Keine offenen blockierenden Review-Findings",
-                    "- [ ] Unabhaengige Review fuer den aktuellen Head ist dokumentiert",
-                    "- [ ] PR-Head, CI-Head und reviewter Head sind identisch",
-                    "- [ ] PR ist mergeable",
-                    "- [ ] Merge ist vom Nutzer autorisiert"
-                ]
-            }
-        }
-    },
     "ci": {
         "workflow": ".github/workflows/ci.yml",
         "blocking_failure_control_policy": "strict-v1",

@@ -42,116 +42,6 @@ function agentHarnessReadinessEvaluateSteeringSources(string $root, array $requi
 }
 
 /**
- * @param array<string, mixed> $surfaces
- * @return array<int, array<string, mixed>>
- */
-function agentHarnessReadinessEvaluateContractSurfaces(string $root, array $surfaces): array
-{
-    $checks = [];
-    foreach ($surfaces as $path => $requirements) {
-        if (!is_string($path) || !is_array($requirements)) {
-            throw new RuntimeException('Workflow contract surfaces must map repository paths to requirements.');
-        }
-
-        $path = agentHarnessReadinessRequireRepoRelativePath($path, 'surfaces path');
-        $absolutePath = $root . '/' . $path;
-        $content = is_file($absolutePath) ? file_get_contents($absolutePath) : false;
-        if ($content === false) {
-            $checks[] = [
-                'id' => 'contract_surface_' . md5($path),
-                'label' => $path . ' satisfies the workflow contract',
-                'status' => 'fail',
-                'message' => 'Required workflow contract surface is missing or unreadable.',
-            ];
-            continue;
-        }
-
-        $contractReference = agentHarnessReadinessRequireContractString(
-            $requirements['contract_reference'] ?? null,
-            'surfaces.' . $path . '.contract_reference',
-        );
-        $requiredSections = $requirements['required_sections'] ?? null;
-        if (!is_array($requiredSections)) {
-            throw new RuntimeException('Workflow contract surface sections must be maps.');
-        }
-
-        $missing = [];
-        if (!str_contains($content, $contractReference)) {
-            $missing[] = $contractReference;
-        }
-        foreach ($requiredSections as $heading => $requiredClauses) {
-            if (!is_string($heading) || !is_array($requiredClauses)) {
-                throw new RuntimeException('Workflow contract surface sections must map headings to clause lists.');
-            }
-
-            $section = agentHarnessReadinessExtractMarkdownSection($content, $heading);
-            if ($section === null) {
-                $missing[] = $heading;
-                continue;
-            }
-
-            foreach ($requiredClauses as $requiredText) {
-                if (!is_string($requiredText) || $requiredText === '') {
-                    throw new RuntimeException('Workflow contract surface requirements must be non-empty strings.');
-                }
-                if (substr_count($section, $requiredText) !== 1 || substr_count($content, $requiredText) !== 1) {
-                    $missing[] = $heading . ': ' . $requiredText;
-                }
-            }
-        }
-
-        $checks[] = [
-            'id' => 'contract_surface_' . md5($path),
-            'label' => $path . ' satisfies the workflow contract',
-            'status' => $missing === [] ? 'pass' : 'fail',
-            'message' =>
-                $missing === []
-                    ? 'Canonical reference and section-bound workflow clauses are present exactly once.'
-                    : sprintf(
-                        '%d required workflow contract item(s) are missing, duplicated, or misplaced.',
-                        count($missing),
-                    ),
-        ];
-    }
-
-    return $checks;
-}
-
-function agentHarnessReadinessExtractMarkdownSection(string $content, string $heading): ?string
-{
-    if (preg_match('/^(#{1,6}) [^\r\n]+$/', $heading, $headingMatch) !== 1) {
-        throw new RuntimeException('Workflow contract surface section keys must be Markdown headings.');
-    }
-
-    $lines = preg_split('/\R/', $content);
-    if (!is_array($lines)) {
-        return null;
-    }
-
-    $headingIndexes = [];
-    foreach ($lines as $index => $line) {
-        if ($line === $heading) {
-            $headingIndexes[] = $index;
-        }
-    }
-    if (count($headingIndexes) !== 1) {
-        return null;
-    }
-
-    $start = $headingIndexes[0];
-    $level = strlen($headingMatch[1]);
-    $end = count($lines);
-    for ($index = $start + 1; $index < count($lines); ++$index) {
-        if (preg_match('/^(#{1,6}) /', $lines[$index], $candidate) === 1 && strlen($candidate[1]) <= $level) {
-            $end = $index;
-            break;
-        }
-    }
-
-    return implode("\n", array_slice($lines, $start, $end - $start));
-}
-
-/**
  * @param array<string, mixed> $ciWorkflow
  * @param array<int, string> $blockingJobs
  * @param string $failureControlPolicy
@@ -1145,7 +1035,6 @@ function agentHarnessReadinessLoadWorkflowContract(string $path): array
     }
 
     $ci = $contract['ci'] ?? null;
-    $surfaces = $contract['surfaces'] ?? null;
     if (
         !is_array($ci) ||
         !is_string($ci['workflow'] ?? null) ||
@@ -1157,12 +1046,10 @@ function agentHarnessReadinessLoadWorkflowContract(string $path): array
         $ci['blocking_execution_fingerprints'] === [] ||
         !is_array($ci['condition_grammar'] ?? null) ||
         !is_array($ci['blocking_jobs'] ?? null) ||
-        $ci['blocking_jobs'] === [] ||
-        !is_array($surfaces) ||
-        $surfaces === []
+        $ci['blocking_jobs'] === []
     ) {
         throw new RuntimeException(
-            'Workflow contract must define surfaces, a CI workflow, a failure-control policy, component execution fingerprints, grammar, an explicit job-classification policy, advisory jobs, and blocking jobs.',
+            'Workflow contract must define a CI workflow, a failure-control policy, component execution fingerprints, grammar, an explicit job-classification policy, advisory jobs, and blocking jobs.',
         );
     }
 

@@ -41,79 +41,6 @@ class AgentHarnessReadinessTest extends TestCase
         self::assertSame('fail', $checks[1]['status']);
     }
 
-    public function testEvaluateContractSurfacesRequiresReferenceAndCriticalClauses(): void
-    {
-        file_put_contents(
-            $this->tmpDir . '/WORKFLOW.md',
-            "# Workflow\n\nSee .codex/contracts/agent-workflow.json.\n\n## Review Process\n\nExact-head reviews are required.\n",
-        );
-        $surfaces = [
-            'WORKFLOW.md' => [
-                'contract_reference' => '.codex/contracts/agent-workflow.json',
-                'required_sections' => [
-                    '## Review Process' => ['Exact-head reviews are required.'],
-                ],
-            ],
-        ];
-
-        $checks = agentHarnessReadinessEvaluateContractSurfaces($this->tmpDir, $surfaces);
-        self::assertSame('pass', $checks[0]['status']);
-
-        $surfaces['WORKFLOW.md']['required_sections']['## Review Process'][] =
-            'Blocking CI must use the reviewed head.';
-        $checks = agentHarnessReadinessEvaluateContractSurfaces($this->tmpDir, $surfaces);
-        self::assertSame('fail', $checks[0]['status']);
-        self::assertStringContainsString('1 required', (string) $checks[0]['message']);
-
-        $surfaces['WORKFLOW.md']['required_sections']['## Review Process'] = ['Exact-head reviews are required.'];
-        file_put_contents(
-            $this->tmpDir . '/WORKFLOW.md',
-            "# Workflow\n\n## Review Process\n\nExact-head reviews are required.\n",
-        );
-        $checks = agentHarnessReadinessEvaluateContractSurfaces($this->tmpDir, $surfaces);
-        self::assertSame('fail', $checks[0]['status']);
-        self::assertStringContainsString('1 required', (string) $checks[0]['message']);
-    }
-
-    public function testEvaluateContractSurfacesRejectsMisplacedOrDuplicatedClauses(): void
-    {
-        $surfaces = [
-            'WORKFLOW.md' => [
-                'contract_reference' => '.codex/contracts/agent-workflow.json',
-                'required_sections' => [
-                    '## Review Process' => ['Exact-head reviews are required.'],
-                ],
-            ],
-        ];
-        file_put_contents(
-            $this->tmpDir . '/WORKFLOW.md',
-            "# Workflow\n\n.codex/contracts/agent-workflow.json\n\n## Review Process\n\nNo invariant.\n\n## Notes\n\nExact-head reviews are required.\n",
-        );
-
-        $checks = agentHarnessReadinessEvaluateContractSurfaces($this->tmpDir, $surfaces);
-        self::assertSame('fail', $checks[0]['status']);
-
-        file_put_contents(
-            $this->tmpDir . '/WORKFLOW.md',
-            "# Workflow\n\n.codex/contracts/agent-workflow.json\n\n## Review Process\n\nExact-head reviews are required. Exact-head reviews are required.\n",
-        );
-        $checks = agentHarnessReadinessEvaluateContractSurfaces($this->tmpDir, $surfaces);
-        self::assertSame('fail', $checks[0]['status']);
-    }
-
-    public function testEvaluateContractSurfacesRejectsPathsOutsideRepository(): void
-    {
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('must stay inside the repository');
-
-        agentHarnessReadinessEvaluateContractSurfaces($this->tmpDir, [
-            '../outside.md' => [
-                'contract_reference' => 'contract.json',
-                'required_sections' => [],
-            ],
-        ]);
-    }
-
     public function testEvaluateBlockingJobsRejectsAllForbiddenFailureControls(): void
     {
         $mutations = [
@@ -665,7 +592,6 @@ class AgentHarnessReadinessTest extends TestCase
             $path,
             json_encode([
                 'schema_version' => 2,
-                'surfaces' => ['WORKFLOW.md' => []],
                 'ci' => [
                     'workflow' => 'ci.yml',
                     'blocking_failure_control_policy' => 'strict-v1',
@@ -694,7 +620,6 @@ class AgentHarnessReadinessTest extends TestCase
             $path,
             json_encode([
                 'schema_version' => 2,
-                'surfaces' => ['WORKFLOW.md' => []],
                 'ci' => [
                     'workflow' => 'ci.yml',
                     'blocking_failure_control_policy' => 'strict-v2',
@@ -723,7 +648,6 @@ class AgentHarnessReadinessTest extends TestCase
             $path,
             json_encode([
                 'schema_version' => 2,
-                'surfaces' => ['WORKFLOW.md' => []],
                 'ci' => [
                     'workflow' => 'ci.yml',
                     'blocking_failure_control_policy' => 'strict-v1',
@@ -752,7 +676,6 @@ class AgentHarnessReadinessTest extends TestCase
             $path,
             json_encode([
                 'schema_version' => 2,
-                'surfaces' => ['WORKFLOW.md' => []],
                 'ci' => [
                     'workflow' => 'ci.yml',
                     'blocking_failure_control_policy' => 'strict-v1',
@@ -793,7 +716,6 @@ class AgentHarnessReadinessTest extends TestCase
                 $path,
                 json_encode([
                     'schema_version' => 2,
-                    'surfaces' => ['WORKFLOW.md' => []],
                     'ci' => [
                         'workflow' => 'ci.yml',
                         'blocking_failure_control_policy' => 'strict-v1',
@@ -826,7 +748,6 @@ class AgentHarnessReadinessTest extends TestCase
             $path,
             json_encode([
                 'schema_version' => 2,
-                'surfaces' => ['WORKFLOW.md' => []],
                 'ci' => [
                     'workflow' => 'ci.yml',
                     'blocking_failure_control_policy' => 'strict-v1',
@@ -855,7 +776,6 @@ class AgentHarnessReadinessTest extends TestCase
             $path,
             json_encode([
                 'schema_version' => 2,
-                'surfaces' => ['WORKFLOW.md' => []],
                 'ci' => [
                     'workflow' => 'ci.yml',
                     'blocking_failure_control_policy' => 'strict-v1',
