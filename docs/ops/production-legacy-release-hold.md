@@ -6,21 +6,15 @@ It makes no provenance claim and does not create or modify archives or
 provenance sidecars. The canonical file is root-owned mode `0600`, single-link,
 at `/etc/fh/legacy-release-hold.v1.json`.
 
-The helper has a read-only default inspection mode. Provisioning is accepted
-only as the exact argument vector `provision ROB-470-HOLD`; the operator wrapper
-requires `--provision --confirm-live-write ROB-470-HOLD`. Both fixed markers and
-both archives are completely preflighted before the global production lock and
-publication lock are crossed. Archive metadata is streamed under bounded tar
-entry, member, inode, and unpacked-byte limits. Only bounded helper-owned nonce
-temps under `/etc/fh` may be created or removed, and an existing identical hold is
-left untouched.
+The one-time provisioning helper has been retired from the repository. The
+single production server already has the completed hold; it is not recreated
+for deployments or routine cleanup. Keep the existing record with the protected
+host configuration, including when restoring that host. Removing the helper
+is not authorization to remove or rewrite the record or its archives.
 
-Provisioning performs an initial aggregate preflight, acquires and verifies the
-global production lock followed by `.release-pair.lock`, then repeats the
-complete marker/archive/hold preflight under both locks before the first
-mutation. Publication uses directory-FD anchored Linux `renameat2` with
-`RENAME_NOREPLACE`; the attached file is re-opened and verified as root-owned,
-`0600`, single-link bytes before the directory fsync.
+The retention helper reads and validates the hold directly; it does not import
+or invoke the retired provisioning helper. Its inspection remains available
+through `prod_release_archive_dump_retention.sh` in the default read-only mode.
 
 Retention treats an exact held archive as `legacy_unverifiable_hold`. It is
 permanently protected, including after marker rotation, and never appears in a
@@ -32,8 +26,9 @@ or caller-supplied identity is accepted.
 For every held archive, retention re-hashes and re-runs the same bounded safe
 Tar contract on one stable file descriptor. The live capacity bounds must match
 the canonical hold exactly before they can influence the capacity projection.
+The retained scanner tests in
+`tests/Unit/Scripts/release_archive_dump_retention_v1_test.py` cover malformed
+Tar entries and capacity accounting and run with the root deployment regressions.
 
-Repository delivery, tests, CI, and merge do not authorize installation,
-provisioning, retention execution, timer activation, or any other production
-action. This repository work does not authorize installation. Those require
-separate explicit approvals.
+Repository cleanup does not remove any installed host file or authorize
+retention execution, timer changes, or other production mutations.
