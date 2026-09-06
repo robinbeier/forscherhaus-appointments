@@ -127,14 +127,14 @@ command -v node >/dev/null 2>&1 || {
 
 echo "[i] Refresh frontend release assets"
 if [[ "$DRYRUN" -eq 0 ]]; then
-  npm run assets:refresh
+  npm run build
   git diff --quiet --exit-code -- assets/css assets/js assets/vendor || {
     echo "[!] Frontend asset refresh changed tracked source inputs in assets/css, assets/js, or assets/vendor." >&2
     git status --short -- assets/css assets/js assets/vendor >&2 || true
     exit 1
   }
 else
-  echo "[DRY-RUN] Würde npm run assets:refresh ausführen"
+  echo "[DRY-RUN] Würde npm run build ausführen"
   echo "[DRY-RUN] Würde sicherstellen, dass assets/css, assets/js und assets/vendor danach keinen Diff haben"
 fi
 

@@ -52,7 +52,7 @@ For the current production host upload path:
 
 The builder:
 
-- refreshes frontend release assets with `npm run assets:refresh`
+- refreshes frontend release assets with `npm run build`
 - fails if generated frontend assets drift
 - derives the exhaustive generated-runtime manifest from the exact committed
   JS/SCSS source tree and the closed vendor-output contract, then copies and
