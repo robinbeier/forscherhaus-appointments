@@ -183,6 +183,17 @@ class CiWorkflowContractTest extends TestCase
     public function testDeepRuntimeWorkloadProfileInputsStayExplicitInTheWorkflow(): void
     {
         $steps = $this->namedSteps($this->workflowJob('deep-runtime-suite'));
+        $stepNames = array_keys($steps);
+        $serviceIndex = array_search('Start deep runtime services', $stepNames, true);
+        $setupIndex = array_search('Setup PHP', $stepNames, true);
+        $readinessIndex = array_search('Wait for MySQL readiness', $stepNames, true);
+        $seedIndex = array_search('Install deterministic seed instance', $stepNames, true);
+        self::assertIsInt($serviceIndex);
+        self::assertIsInt($setupIndex);
+        self::assertIsInt($readinessIndex);
+        self::assertIsInt($seedIndex);
+        self::assertLessThan($setupIndex, $serviceIndex);
+        self::assertLessThan($seedIndex, $readinessIndex);
         $installBrowser = $this->stepRun($steps, 'Install Playwright smoke browser');
         $deepRuntime = $this->stepRun($steps, 'Run deep runtime suite');
 
@@ -259,6 +270,11 @@ class CiWorkflowContractTest extends TestCase
         $testIndex = array_search('Run coverage shard (integration)', $stepNames, true);
         self::assertIsInt($testIndex);
         self::assertGreaterThan($installIndex, $testIndex);
+        $serviceIndex = array_search('Start coverage shard services', $stepNames, true);
+        $setupIndex = array_search('Setup PHP', $stepNames, true);
+        self::assertIsInt($serviceIndex);
+        self::assertIsInt($setupIndex);
+        self::assertLessThan($setupIndex, $serviceIndex);
         self::assertSame('always()', $steps['Cleanup coverage shard services']['if'] ?? null);
         self::assertArrayNotHasKey('continue-on-error', $steps['Install deterministic seed instance']);
 

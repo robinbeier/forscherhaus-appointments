@@ -553,6 +553,30 @@ jobs:
     steps:
       - name: Git clone
         uses: actions/checkout@v6
+      - name: Resolve LDAP guardrail scope
+        id: ldap_guardrail
+        run: |
+          include_ldap="false"
+
+          if [[ "${{ needs.changes.outputs.integration_smoke }}" == "true" ]]; then
+            if [[ "${{ github.event_name }}" == "push" || "${{ needs.changes.outputs.ldap_guardrail_required }}" == "true" ]]; then
+              include_ldap="true"
+            fi
+          fi
+
+          {
+            echo "include_ldap=${include_ldap}"
+          } >> "$GITHUB_OUTPUT"
+      - name: Start deep runtime services
+        run: |
+          services=(mysql)
+
+          if [[ "${{ steps.ldap_guardrail.outputs.include_ldap }}" == "true" ]]; then
+            services+=(openldap)
+            echo "127.0.0.1 openldap" | sudo tee -a /etc/hosts >/dev/null
+          fi
+
+          docker compose up -d "${services[@]}"
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
@@ -612,30 +636,6 @@ jobs:
           {
             echo "requested=$(IFS=,; echo "${suites[*]}")"
           } >> "$GITHUB_OUTPUT"
-      - name: Resolve LDAP guardrail scope
-        id: ldap_guardrail
-        run: |
-          include_ldap="false"
-
-          if [[ "${{ needs.changes.outputs.integration_smoke }}" == "true" ]]; then
-            if [[ "${{ github.event_name }}" == "push" || "${{ needs.changes.outputs.ldap_guardrail_required }}" == "true" ]]; then
-              include_ldap="true"
-            fi
-          fi
-
-          {
-            echo "include_ldap=${include_ldap}"
-          } >> "$GITHUB_OUTPUT"
-      - name: Start deep runtime services
-        run: |
-          services=(mysql)
-
-          if [[ "${{ steps.ldap_guardrail.outputs.include_ldap }}" == "true" ]]; then
-            services+=(openldap)
-            echo "127.0.0.1 openldap" | sudo tee -a /etc/hosts >/dev/null
-          fi
-
-          docker compose up -d "${services[@]}"
       - name: Wait for MySQL readiness
         run: bash scripts/ci/wait_for_mysql_readiness.sh
       - name: Install deterministic seed instance
@@ -783,6 +783,8 @@ jobs:
     steps:
       - name: Git clone
         uses: actions/checkout@v6
+      - name: Start coverage shard services
+        run: docker compose up -d mysql
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
@@ -798,8 +800,6 @@ jobs:
           install -m 0600 config-sample.php config.php
           sed -i "s/const DB_HOST = 'mysql';/const DB_HOST = '127.0.0.1';/" config.php
           grep -Fq "const DB_HOST = '127.0.0.1';" config.php
-      - name: Start coverage shard services
-        run: docker compose up -d mysql
       - name: Wait for MySQL readiness
         run: bash scripts/ci/wait_for_mysql_readiness.sh
       - name: Install deterministic seed instance
