@@ -122,6 +122,11 @@ GitHub's `deep-runtime-suite` runs PHP and the browser directly on the disposabl
 runner. MySQL and, when requested, OpenLDAP remain Docker services. A loopback-only
 PHP test server with four workers serves the existing HTTP and browser checks;
 the job no longer builds the full PHP development image or starts nginx.
+Frontend dependencies and generated assets are prepared only when
+`integration_smoke` requests the browser check. Installation uses
+`npm ci --ignore-scripts`; one explicit `npm run assets:refresh` then prepares
+vendor files, application JavaScript and styles. API and controller suites alone
+need no frontend build.
 The job retains the same suites, LDAP checks and browser evidence. Server logs
 are included in the suite artifact, and cleanup stops the test server and services.
 

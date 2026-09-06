@@ -143,10 +143,6 @@ class CiPathFilterMatrixTest extends TestCase
 
         self::assertStringContainsString("needs.changes.outputs.request_contracts_required == 'true'", $workflow);
         self::assertStringContainsString("needs.changes.outputs.deep_bootstrap_required == 'true'", $workflow);
-        self::assertStringContainsString(
-            'deep_runtime_asset_build_required: ${{ steps.filter.outputs.integration_smoke }}',
-            $workflow,
-        );
         self::assertStringContainsString("needs.changes.outputs.coverage_required == 'true'", $workflow);
         self::assertStringContainsString("needs.changes.outputs.pdf_renderer_tests_required == 'true'", $workflow);
         self::assertStringNotContainsString("needs.changes.outputs.deep_required == 'true'", $workflow);
@@ -158,23 +154,14 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertNotFalse($workflow);
 
         $deepRuntimeJob = $this->extractJobBlock($workflow, 'deep-runtime-suite', 'coverage-shard-unit');
-        self::assertStringContainsString(
-            "if: needs.changes.outputs.deep_runtime_asset_build_required == 'true' || needs.changes.outputs.integration_smoke == 'true'",
-            $deepRuntimeJob,
-        );
-        self::assertSame(
-            2,
-            substr_count(
-                $deepRuntimeJob,
-                "if: needs.changes.outputs.deep_runtime_asset_build_required == 'true' || needs.changes.outputs.integration_smoke == 'true'",
-            ),
-        );
-        self::assertStringContainsString('Build runtime JS assets', $deepRuntimeJob);
-        self::assertStringContainsString(
-            "if: needs.changes.outputs.deep_runtime_asset_build_required == 'true'\n        run: npx gulp scripts",
-            $deepRuntimeJob,
-        );
-        self::assertStringContainsString('npx gulp scripts', $deepRuntimeJob);
+        $job = \Symfony\Component\Yaml\Yaml::parse($workflow)['jobs']['deep-runtime-suite'];
+        $steps = array_column($job['steps'], null, 'name');
+        foreach (['Setup Node.js', 'Install Node.js dependencies', 'Build runtime assets'] as $name) {
+            self::assertSame("needs.changes.outputs.integration_smoke == 'true'", $steps[$name]['if'], $name);
+        }
+        self::assertSame('npm ci --ignore-scripts --no-audit --no-fund', $steps['Install Node.js dependencies']['run']);
+        self::assertSame('npm run assets:refresh', $steps['Build runtime assets']['run']);
+        self::assertStringNotContainsString('npx gulp scripts', $deepRuntimeJob);
     }
 
     public function testPdfRendererTestsFilterStaysScopedToPdfRendererAndGuardFiles(): void
@@ -297,10 +284,7 @@ class CiPathFilterMatrixTest extends TestCase
 
         $deepRuntimeJob = $this->extractJobBlock($workflow, 'deep-runtime-suite', 'coverage-shard-unit');
 
-        self::assertStringContainsString(
-            "if: needs.changes.outputs.deep_runtime_asset_build_required == 'true' || needs.changes.outputs.integration_smoke == 'true'",
-            $deepRuntimeJob,
-        );
+        self::assertStringContainsString("if: needs.changes.outputs.integration_smoke == 'true'", $deepRuntimeJob);
         self::assertStringContainsString(
             'bash scripts/release-gate/playwright/playwright_cli.sh install-browser',
             $deepRuntimeJob,

@@ -26,7 +26,6 @@ jobs:
     outputs:
       request_contracts_required: ${{ steps.filter.outputs.request_contracts_required }}
       deep_bootstrap_required: ${{ steps.filter.outputs.deep_bootstrap_required }}
-      deep_runtime_asset_build_required: ${{ steps.filter.outputs.integration_smoke }}
       coverage_required: ${{ steps.filter.outputs.coverage_required }}
       pdf_renderer_tests_required: ${{ steps.filter.outputs.pdf_renderer_tests_required }}
       api_contract: ${{ steps.filter.outputs.api_contract }}
@@ -640,17 +639,17 @@ jobs:
           extensions: curl,gd,intl,ldap,mbstring,mysqli,pdo,pdo_mysql,sockets,xml,zip,exif,sqlite3,gettext,bcmath
           tools: composer:v2
       - name: Setup Node.js
-        if: needs.changes.outputs.deep_runtime_asset_build_required == 'true' || needs.changes.outputs.integration_smoke == 'true'
+        if: needs.changes.outputs.integration_smoke == 'true'
         uses: actions/setup-node@v6
         with:
           node-version: '24'
           cache: npm
       - name: Install Node.js dependencies
-        if: needs.changes.outputs.deep_runtime_asset_build_required == 'true' || needs.changes.outputs.integration_smoke == 'true'
-        run: npm ci --no-audit --no-fund
-      - name: Build runtime JS assets
-        if: needs.changes.outputs.deep_runtime_asset_build_required == 'true'
-        run: npx gulp scripts
+        if: needs.changes.outputs.integration_smoke == 'true'
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Build runtime assets
+        if: needs.changes.outputs.integration_smoke == 'true'
+        run: npm run assets:refresh
       - name: Download deep-check dependencies artifact
         uses: actions/download-artifact@v8
         with:
