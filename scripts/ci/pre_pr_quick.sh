@@ -49,7 +49,7 @@ bash ./scripts/ci/require_node_minimum.sh "$ROOT_NODE_MINIMUM_VERSION" "pre-pr-q
 ensure_local_config
 
 echo_section "Frontend dependency consistency"
-# Validate the committed dependency pair without installing or running postinstall.
+# Normalize a copy to catch additions and removals without changing the worktree.
 (
     dependency_check_dir="$(mktemp -d)"
     trap 'rm -rf "$dependency_check_dir"' EXIT
@@ -57,9 +57,13 @@ echo_section "Frontend dependency consistency"
     if [[ -f .npmrc ]]; then
         cp .npmrc "$dependency_check_dir/"
     fi
-    # Isolate npm's internal node_modules metadata writes, even during dry runs.
+    # npm ci accepts some stale lock entries after dependency removals.
     cd "$dependency_check_dir"
-    npm ci --dry-run --ignore-scripts --no-audit --no-fund --offline
+    npm install --package-lock-only --ignore-scripts --no-audit --no-fund --offline
+    if ! cmp -s package-lock.json "$ROOT_DIR/package-lock.json"; then
+        echo "[pre-pr-quick] Frontend lockfile is out of date. Run npm install to update dependencies and commit the matching lockfile." >&2
+        exit 1
+    fi
 )
 
 # Keep changed-file checks deterministic against current base branch state.
