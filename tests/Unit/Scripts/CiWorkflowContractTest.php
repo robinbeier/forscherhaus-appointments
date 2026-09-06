@@ -141,12 +141,19 @@ class CiWorkflowContractTest extends TestCase
         $deepRuntime = $this->stepRun($steps, 'Run deep runtime suite');
 
         self::assertStringContainsString(
-            '-e PLAYWRIGHT_RUNTIME_PACKAGE=playwright@1.59.0-alpha-1771104257000',
+            'bash scripts/release-gate/playwright/playwright_cli.sh install-browser',
             $installBrowser,
+        );
+        self::assertSame(
+            'playwright@1.59.0-alpha-1771104257000',
+            $steps['Install Playwright smoke browser']['env']['PLAYWRIGHT_RUNTIME_PACKAGE'] ?? null,
+        );
+        self::assertSame(
+            'chromium',
+            $steps['Install Playwright smoke browser']['env']['PLAYWRIGHT_MCP_BROWSER'] ?? null,
         );
         foreach (
             [
-                '-e PLAYWRIGHT_RUNTIME_PACKAGE=playwright@1.59.0-alpha-1771104257000',
                 '--booking-search-days=14',
                 '--retry-count=1',
                 '--start-date=2026-01-01',
@@ -157,6 +164,11 @@ class CiWorkflowContractTest extends TestCase
         ) {
             self::assertStringContainsString($profileInput, $deepRuntime);
         }
+        self::assertSame(
+            'playwright@1.59.0-alpha-1771104257000',
+            $steps['Run deep runtime suite']['env']['PLAYWRIGHT_RUNTIME_PACKAGE'] ?? null,
+        );
+        self::assertSame('chromium', $steps['Run deep runtime suite']['env']['PLAYWRIGHT_MCP_BROWSER'] ?? null);
     }
 
     public function testCoverageIntegrationInitializesItsOwnDatabaseAfterReadiness(): void
