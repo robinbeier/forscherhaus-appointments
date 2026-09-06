@@ -8,6 +8,7 @@ use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\RootHostTestPrerequisites;
 
+#[Group('root-deployment')]
 final class DeploymentDumpAttestationProducerV1RootTest extends TestCase
 {
     private string $root;

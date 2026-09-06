@@ -9,7 +9,7 @@ use Symfony\Component\Yaml\Yaml;
 
 class CiWorkflowContractTest extends TestCase
 {
-    public function testBuildTestRunsGeneralSuiteFailClosedBeforeRootDeploymentTests(): void
+    public function testGeneralAndRootSuitesRunIndependentlyAndFailClosed(): void
     {
         $job = $this->workflowJob('build-test');
         $steps = $this->namedSteps($job);
@@ -25,7 +25,6 @@ class CiWorkflowContractTest extends TestCase
             'Wait for build-test MySQL readiness',
             'Install deterministic build-test instance',
             'PHPUnit Tests',
-            'ROB-442 root deployment regression tests',
             'Diagnostics (build-test database)',
             'Cleanup build-test database',
         ];
@@ -71,7 +70,24 @@ class CiWorkflowContractTest extends TestCase
             $general,
         );
 
-        $rootDeployment = $this->stepRun($steps, 'ROB-442 root deployment regression tests');
+        self::assertStringContainsString('--exclude-group root-deployment', $general);
+        $rootJob = $this->workflowJob('root-deployment-tests');
+        self::assertArrayNotHasKey('needs', $rootJob);
+        self::assertArrayNotHasKey('if', $rootJob);
+        self::assertArrayNotHasKey('continue-on-error', $rootJob);
+        $rootSteps = $this->namedSteps($rootJob);
+        foreach ($rootSteps as $step) {
+            self::assertArrayNotHasKey('continue-on-error', $step);
+        }
+        self::assertSame(
+            ['Git clone', 'Setup PHP', 'Install dependencies', 'Root deployment regression tests'],
+            array_keys($rootSteps),
+        );
+        self::assertSame(
+            'composer install --no-interaction --no-progress',
+            $this->stepRun($rootSteps, 'Install dependencies'),
+        );
+        $rootDeployment = $this->stepRun($rootSteps, 'Root deployment regression tests');
         self::assertSame('bash scripts/ci/run_root_deployment_regressions.sh', $rootDeployment);
         $rootDeploymentScript = (string) file_get_contents(
             __DIR__ . '/../../../scripts/ci/run_root_deployment_regressions.sh',

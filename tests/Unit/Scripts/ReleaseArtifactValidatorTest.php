@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Scripts;
 
+use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use ReleaseGate\ReleaseArtifactValidator;
 
 require_once __DIR__ . '/../../../scripts/release-gate/lib/ReleaseArtifactValidator.php';
 
+#[Group('root-deployment')]
 final class ReleaseArtifactValidatorTest extends TestCase
 {
     public function testMissingDirectoryPathsReturnsEmptyForCompleteArtifactTree(): void

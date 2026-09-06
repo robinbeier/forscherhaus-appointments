@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit\Scripts;
 
 use PHPUnit\Framework\TestCase;
+use PHPUnit\Framework\Attributes\Group;
 use Ops\DeploymentHostRunnerContractV1;
 use Ops\DeploymentHostRunnerV1;
 use Ops\HelperBackedHostRunnerSystemAdapter;
@@ -15,6 +16,7 @@ require_once __DIR__ . '/../../../scripts/ops/lib/DeployResultV1.php';
 require_once __DIR__ . '/../../../scripts/ops/lib/DeploymentHostRunnerContractV1.php';
 require_once __DIR__ . '/../../../scripts/ops/lib/DeploymentHostRunnerV1.php';
 
+#[Group('root-deployment')]
 final class DeploymentHostRunnerV1RootTest extends TestCase
 {
     private const RUN_ID = '018f6f52-4c87-4d4e-8b19-6a66e6e1af25';

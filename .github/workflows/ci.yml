@@ -366,14 +366,13 @@ jobs:
           mkdir -p storage/logs/ci
           if ! APP_ENV=testing php -d memory_limit=512M vendor/bin/phpunit \
               --configuration phpunit.xml \
+              --exclude-group root-deployment \
               --fail-on-empty-test-suite \
               | tee storage/logs/ci/phpunit-general.log; then
             echo "::error::The general PHPUnit suite failed." >&2
             exit 1
           fi
           grep -Eq '^(OK \([1-9][0-9]* tests?,|Tests: [1-9][0-9]*,)' storage/logs/ci/phpunit-general.log
-      - name: ROB-442 root deployment regression tests
-        run: bash scripts/ci/run_root_deployment_regressions.sh
       - name: Diagnostics (build-test database)
         if: failure()
         run: |
@@ -382,6 +381,24 @@ jobs:
       - name: Cleanup build-test database
         if: always()
         run: docker compose down -v --remove-orphans
+
+  root-deployment-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Git clone
+        uses: actions/checkout@v6
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4.1"
+          coverage: none
+          extensions: gd
+          tools: composer:v2
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress
+      - name: Root deployment regression tests
+        run: bash scripts/ci/run_root_deployment_regressions.sh
 
   js-lint-changed:
     runs-on: ubuntu-latest
