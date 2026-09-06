@@ -12,14 +12,12 @@
 const babel = require('gulp-babel');
 const changedModule = require('gulp-changed');
 const cached = require('gulp-cached');
-const childProcess = require('child_process');
 const css = require('gulp-clean-css');
 const fs = require('fs-extra');
 const gulp = require('gulp');
 const plumber = require('gulp-plumber');
 const rename = require('gulp-rename');
 const sass = require('gulp-sass')(require('sass'));
-const zip = require('zip-dir');
 
 // const debug = require('gulp-debug');
 
@@ -31,67 +29,6 @@ function getDeleteSync() {
     // `del` >= 8 is ESM-only, so keep the existing CommonJS gulpfile and load it lazily.
     deleteSyncPromise ??= import('del').then((mod) => mod.deleteSync ?? mod.sync ?? mod.default?.sync);
     return deleteSyncPromise;
-}
-
-function archive(done) {
-    getDeleteSync()
-        .then((deleteSync) => {
-            const filename = 'easyappointments-0.0.0.zip';
-
-            fs.removeSync('build');
-            fs.removeSync(filename);
-
-            fs.mkdirsSync('build');
-            fs.copySync('application', 'build/application');
-            fs.copySync('assets', 'build/assets');
-            fs.copySync('system', 'build/system');
-
-            fs.ensureDirSync('build/storage/backups');
-            fs.copySync('storage/backups/.htaccess', 'build/storage/backups/.htaccess');
-            fs.copySync('storage/backups/index.html', 'build/storage/backups/index.html');
-
-            fs.ensureDirSync('build/storage/cache');
-            fs.copySync('storage/cache/index.html', 'build/storage/cache/index.html');
-            fs.copySync('storage/cache/.htaccess', 'build/storage/cache/.htaccess');
-
-            fs.ensureDirSync('build/storage/logs');
-            fs.copySync('storage/logs/.htaccess', 'build/storage/logs/.htaccess');
-            fs.copySync('storage/logs/index.html', 'build/storage/logs/index.html');
-
-            fs.ensureDirSync('build/storage/sessions');
-            fs.copySync('storage/sessions/.htaccess', 'build/storage/sessions/.htaccess');
-            fs.copySync('storage/sessions/index.html', 'build/storage/sessions/index.html');
-
-            fs.ensureDirSync('build/storage/uploads');
-            fs.copySync('storage/uploads/index.html', 'build/storage/uploads/index.html');
-
-            fs.copySync('index.php', 'build/index.php');
-            fs.copySync('patch.php', 'build/patch.php');
-            fs.copySync('composer.json', 'build/composer.json');
-            fs.copySync('composer.lock', 'build/composer.lock');
-            fs.copySync('config-sample.php', 'build/config-sample.php');
-            fs.copySync('CHANGELOG.md', 'build/CHANGELOG.md');
-            fs.copySync('README.md', 'build/README.md');
-            fs.copySync('LICENSE', 'build/LICENSE');
-
-            childProcess.execSync(
-                'cd build && composer install --no-interaction --no-dev --no-scripts --optimize-autoloader',
-            );
-
-            fs.removeSync('build/composer.lock');
-            deleteSync('**/.DS_Store');
-            deleteSync('build/**/.git');
-
-            zip('build', {saveTo: filename}, function (error) {
-                if (error) {
-                    done(error);
-                    return;
-                }
-
-                done();
-            });
-        })
-        .catch(done);
 }
 
 function clean(done) {
@@ -236,5 +173,5 @@ exports.scripts = gulp.series(scripts);
 exports.styles = gulp.series(styles);
 exports.compile = gulp.series(clean, vendor, scripts, styles);
 exports.dev = gulp.series(clean, vendor, scripts, styles, watch);
-exports.build = gulp.series(clean, vendor, scripts, styles, archive);
+exports.build = exports.compile;
 exports.default = exports.dev;

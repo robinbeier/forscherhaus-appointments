@@ -1,6 +1,8 @@
 # Deployment
 
 This repository uses artifact-based deployment as the preferred production path.
+`build_release.sh` creates the production release archive. `npm run build` only
+compiles frontend assets and does not create a separate ZIP release.
 Do not deploy production by editing files in-place or by turning the production
 application directory into the Git checkout.
 
