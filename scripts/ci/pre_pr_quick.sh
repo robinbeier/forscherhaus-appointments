@@ -43,23 +43,10 @@ fi
 
 require_cmd git
 require_cmd python3
+require_cmd npm
 require_cmd node
 bash ./scripts/ci/require_node_minimum.sh "$ROOT_NODE_MINIMUM_VERSION" "pre-pr-quick"
 ensure_local_config
-
-echo_section "Frontend dependency consistency"
-# Compare declarations, not npm-version-specific serialization or package metadata.
-node <<'NODE'
-const fs = require('node:fs');
-const { isDeepStrictEqual } = require('node:util');
-const manifest = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-const locked = JSON.parse(fs.readFileSync('package-lock.json', 'utf8')).packages?.[''];
-const fields = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'];
-if (!locked || fields.some((field) => !isDeepStrictEqual(manifest[field] ?? {}, locked[field] ?? {}))) {
-    console.error('[pre-pr-quick] Frontend dependency declarations differ from the lockfile. Run npm install and commit the matching package.json and package-lock.json.');
-    process.exit(1);
-}
-NODE
 
 # Keep changed-file checks deterministic against current base branch state.
 git_ci_refresh_base_ref_if_safe "$BASE_REF" "pre-pr-quick"
@@ -67,6 +54,26 @@ ci_docker_build_php_fpm_if_inputs_changed "$BASE_REF" "pre-pr-quick"
 
 echo_section "Changed-file JS lint"
 GITHUB_EVENT_NAME=pull_request GITHUB_BASE_REF="$BASE_REF" ./scripts/ci/js-lint-changed.sh
+
+# Frontend dependency spikes, including jquery@4 trials and prior package
+# bumps, can change generated bundles or the resolved lockfile without
+# touching app source files.
+echo_section "Frontend lockfile sync"
+# Run dependency spikes from a committed baseline so the quick gate only flags
+# fresh drift introduced by the lockfile refresh itself.
+git diff --quiet --exit-code -- package.json package-lock.json || {
+    echo "[pre-pr-quick] Frontend dependency files are already dirty." >&2
+    echo "[pre-pr-quick] Commit the refreshed package.json/package-lock.json baseline before rerunning this gate for dependency spikes." >&2
+    git status --short -- package.json package-lock.json >&2 || true
+    exit 1
+}
+npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+git diff --quiet --exit-code -- package.json package-lock.json || {
+    echo "[pre-pr-quick] Frontend dependency sync produced uncommitted changes in package.json/package-lock.json." >&2
+    echo "[pre-pr-quick] Commit the refreshed lockfile baseline before rerunning this gate for dependency spikes." >&2
+    git status --short -- package.json package-lock.json >&2 || true
+    exit 1
+}
 
 echo_section "Start quick gate database service"
 trap cleanup_stack EXIT

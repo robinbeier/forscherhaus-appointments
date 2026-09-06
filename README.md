@@ -169,10 +169,9 @@ startup time. In that case, rerun the full gate with
 
 Use `bash ./scripts/ci/pre_pr_quick.sh` for source checks without rebuilding
 frontend files once dependencies are installed. The full gate builds assets
-once before its browser checks. Both gates compare the direct dependency
-names and version specifications in the manifest and lockfile. This detects
-additions, removals, and changed version requirements without depending on npm's
-metadata or JSON formatting. The check only reads these files. After editing frontend dependencies in `package.json`,
+once before its browser checks. The existing lockfile sync remains in both
+gates: it requires committed dependency files and stops if npm's lockfile
+refresh changes them. After editing frontend dependencies in `package.json`,
 run `npm install`, review the updated lockfile, and commit both files. Use
 `npm ci` to install an already matching committed lockfile; both installation
 commands also prepare assets through postinstall. For interactive UI work, use
