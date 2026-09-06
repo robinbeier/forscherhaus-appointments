@@ -26,8 +26,8 @@ is tested by `tests/Unit/Scripts/CiPathFilterMatrixTest.php`.
 
 The application PHPStan, request DTO, and request-contract jobs install only
 Composer dependencies. Their analysis, unit tests, and adoption checks do not
-consume generated frontend assets. `build-test` retains the full frontend
-compile, while browser/runtime jobs keep the asset preparation they need.
+consume generated frontend assets. `build-test` installs its JavaScript test
+dependencies without building assets. Only browser checks prepare runtime assets.
 
 ## Integration coverage preparation
 
@@ -39,11 +39,15 @@ for normal Docker development.
 After database readiness, `php index.php console install` creates the seeded
 instance using the existing bounded retry loop. Installation failure stops
 the job before coverage runs. Diagnostics and unconditional Compose cleanup
-remain in place. Shared Composer dependencies come from `deep-check-bootstrap`.
+remain in place. Each PHP job installs its own locked Composer dependencies
+after setting up PHP. There is no shared dependency-build job or vendor archive
+to upload, wait for, download and unpack. Coverage result artifacts still pass
+between the coverage shards and their merge job.
 
 The selected suite needs neither a PHP-FPM web server nor a browser. PDF and
 health controller unit tests use test doubles for network calls. The separate
-deep runtime and browser checks retain their Docker environment. Test selection,
+deep runtime and browser checks use the host PHP test server described in
+[the Docker guide](docker.md#github-integration-runtime). Test selection,
 coverage commands and thresholds are unchanged.
 
 The former seed-snapshot handoff and the coverage job's PHP container build
