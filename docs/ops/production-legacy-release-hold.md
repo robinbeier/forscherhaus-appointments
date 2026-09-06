@@ -2,7 +2,11 @@
 
 `legacy_release_hold.v1` is a permanent, host-local safety record for the two
 legacy Current/Rollback archives that cannot be assigned a historical commit.
-It makes no provenance claim and does not create or modify archives or
+Historical provenance is not reconstructed for these archives; the existing
+hold is their protection mechanism. New releases continue to receive provenance
+through the normal build path.
+
+The hold makes no provenance claim and does not create or modify archives or
 provenance sidecars. The canonical file is root-owned mode `0600`, single-link,
 at `/etc/fh/legacy-release-hold.v1.json`.
 

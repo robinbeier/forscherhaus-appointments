@@ -200,12 +200,10 @@ Disk, memory, or swap pressure:
 
 Legacy current/rollback archives lack canonical provenance:
 
-- Read `docs/ops/production-legacy-release-provenance.md` before any action.
-- Use `prod_legacy_release_provenance.sh` only for the fixed, host-authorized
-  two-target aggregate inspection. Its separately confirmed execute mode may
-  publish only the two canonical no-replace sidecars and helper-owned temps.
-- Repository delivery, helper installation, authorization provisioning,
-  read-only inspection, execute, and rollback are separate authority gates.
+- Keep their existing hold record and archive protection as described in
+  `docs/ops/production-legacy-release-hold.md`.
+- Do not reconstruct historical provenance. New release artifacts continue to
+  receive provenance through the normal build path.
 
 Certbot or TLS issue:
 
