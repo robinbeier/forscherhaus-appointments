@@ -80,9 +80,6 @@ run_in_env() {
 
 trap cleanup_stack EXIT
 
-[[ -d vendor ]] || die "Composer dependencies missing (vendor/ not found). Run './scripts/setup-worktree.sh'."
-[[ -d node_modules ]] || die "Node dependencies missing (node_modules/ not found). Run './scripts/setup-worktree.sh'."
-
 require_cmd git
 
 echo_section "Check forbidden files"
@@ -117,6 +114,10 @@ for file in "${staged_files[@]}"; do
             ;;
     esac
 done
+
+if [[ "${#prettier_files[@]}" -gt 0 || "${frontend_related}" == true ]]; then
+    [[ -d node_modules ]] || die "Node dependencies missing (node_modules/ not found). Run './scripts/setup-worktree.sh'."
+fi
 
 if [[ "${#prettier_files[@]}" -gt 0 ]]; then
     echo_section "Run prettier checks"
