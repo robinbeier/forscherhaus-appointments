@@ -50,10 +50,10 @@ from a scan. The existing `decision_blocked` tree remains unchanged.
 
 ## Separate approvals
 
-The repository approval covers only these registry, wrapper, unit, test, and
+The repository approval covers only these registry, wrapper, test, and
 runbook files. Installation approval is a separate root-controlled action for
-the reviewed binaries and units. Read-only observation approval covers
-`admission-status` and this disabled desired-state timer. Monitoring approval
+the reviewed binaries. Read-only observation approval covers
+`admission-status`. Monitoring approval
 is separate and may consume aggregate status only. Object-mutation approval
 is separate again; this slice grants none and cannot delete, rename, repair,
 publish, enable, or start anything.
@@ -83,35 +83,25 @@ path enforces that pending state as a retryable gate before it removes any
 release, archive, or dump candidate. Existing crash-recovery cleanup of a
 trusted marker temp remains a separately accounted recovery mutation.
 
-The units describe desired state only. A separately approved installation may
-place them and validate them without activation:
+## On-demand observation
+
+Use the read-only operator wrapper when an admission diagnosis is needed:
 
 ```bash
-sudo /usr/bin/install -o root -g root -m 0644 \
-  scripts/ops/systemd/fh-dump-producer-admission.service \
-  /etc/systemd/system/fh-dump-producer-admission.service
-sudo /usr/bin/install -o root -g root -m 0644 \
-  scripts/ops/systemd/fh-dump-producer-admission.timer \
-  /etc/systemd/system/fh-dump-producer-admission.timer
-sudo /usr/bin/systemd-analyze verify \
-  /etc/systemd/system/fh-dump-producer-admission.service \
-  /etc/systemd/system/fh-dump-producer-admission.timer
-sudo /usr/bin/systemctl daemon-reload
-/usr/bin/systemctl is-enabled fh-dump-producer-admission.timer
-/usr/bin/systemctl is-active fh-dump-producer-admission.timer
+bash scripts/ops/prod_dump_producer_admission.sh
 ```
 
-The required post-install state is `disabled` and `inactive`; the service must
-also be inactive. Repository delivery and installation do not activate the
-units.
-The timer is `Persistent=false` and runs at least every fifteen minutes, so no
-delayed catch-up read is implied.
+The cleanup inventory also consumes the aggregate admission status. Regular
+retention uses the same backup-set validation before considering deletion.
+The unused scheduled observer has been retired from the repository; no separate
+periodic admission scan is required. This repository change does not uninstall
+or activate any existing production unit.
 
 ## Complete operating cycle
 
 1. A reviewer checks the exact registry bytes and the installed binary,
    supervisor, runbook, and manifest schemas against the approved source.
-2. During a revalidated quiet interval, the read-only wrapper or service
+2. During a revalidated quiet interval, the read-only wrapper
    acquires the existing global lock only as required by the observation
    helper and requests aggregate `admission-status`.
 3. The observer validates identity, registry, manifest, restore-attestation
@@ -120,9 +110,8 @@ delayed catch-up read is implied.
 4. The operator records only the aggregate result and separately decides
    whether any future installation, monitoring, or object mutation should be
    proposed. No such decision is implied by a passing observation.
-5. Repeat the read-only status across at least one complete backup and normal
-   operating cycle. A stable pass is observation evidence only; it does not
-   classify or authorize mutation of the retained `decision_blocked` tree.
+5. A passing on-demand observation does not classify or authorize mutation of
+   the retained `decision_blocked` tree.
 
 ## Stop rules and rollback boundary
 

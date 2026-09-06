@@ -82,11 +82,6 @@ class CiWorkflowContractTest extends TestCase
         self::assertStringContainsString('scripts/ops/systemd/fh-session-retention.service', $rootDeploymentScript);
         self::assertStringContainsString('scripts/ops/systemd/fh-session-retention.timer', $rootDeploymentScript);
         self::assertStringContainsString(
-            'scripts/ops/systemd/fh-dump-producer-admission.service',
-            $rootDeploymentScript,
-        );
-        self::assertStringContainsString('scripts/ops/systemd/fh-dump-producer-admission.timer', $rootDeploymentScript);
-        self::assertStringContainsString(
             'sudo env FH_ROOT_HOST_TESTS_REQUIRED=1 php vendor/bin/phpunit',
             $rootDeploymentScript,
         );
