@@ -242,7 +242,7 @@ def open_lock(parent, leaf, create=False):
 def activity_count():
     patterns = (
         re.compile(r'(^|/)(?:deploy_ea\.sh|deployment_host_runner_v1\.php|zero_surprise_replay\.php)(?:\s|$)'),
-        re.compile(r'(^|/)(?:prod_(?:customers|provider)_ui_smoke\.sh|traffic_gate_v1\.php)(?:\s|$)'),
+        re.compile(r'(^|/)prod_(?:customers|provider)_ui_smoke\.sh(?:\s|$)'),
         re.compile(r'(^|/)(?:mysqldump|mariadb-dump|backup_easyappointments\.sh|backup_ea\.sh|ea_restore_verify_latest\.sh|fh-backup-set-producer-supervisor-v1|import_prod_backup\.sh)(?:\s|$)'),
         re.compile(r'(^|/)(?:prod_(?:session|build_cache|release_archive_dump)_retention\.sh)(?:\s|$)'),
     )

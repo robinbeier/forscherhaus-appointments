@@ -33,7 +33,7 @@ left untouched.
 Execute mode holds the existing private retention-directory lock and the shared
 production-change lock. It repeats the ROB-440 activity checks before and after
 the full preflight and during a large pass. Deploy, recovery, dump, replay,
-traffic-gate, Provider/Customers smoke, or another cleanup therefore blocks the
+Provider/Customers smoke, or another cleanup therefore blocks the
 operation.
 
 The recurring ROB-440 service remains unchanged and capability-bounded to
@@ -69,7 +69,7 @@ retention marker or its temporary files.
 
 These steps describe a later operation and are not merge authorization:
 
-1. Confirm no deploy, recovery, dump, restore, replay, traffic gate, smoke, or
+1. Confirm no deploy, recovery, dump, restore, replay, smoke, or
    other production mutation is active. Run the standard read-only doctor and
    cleanup inventory.
 2. Install the updated helper as the protected host copy. Never execute the

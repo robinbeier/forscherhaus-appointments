@@ -19,7 +19,6 @@ use Ops\HostRunnerProtectedObservationSource;
 use Ops\HostRunnerStorage;
 use Ops\ProtectedHostPredeployObservationProvider;
 use Ops\ProtectedPredeployObservationProvider;
-use Ops\TrafficObservationV1;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
 
@@ -50,16 +49,15 @@ final class DeploymentHostRunnerPredeployV1Test extends TestCase
             $request['intent_sha256'],
             $request['release_id'],
             $request['expected_commit'],
-            $request['traffic_mode'],
         );
 
         self::assertSame('passed', $assembly['status']);
-        self::assertSame(['expected_commit', 'traffic_gate', 'dump', 'capacity', 'artifact'], $source->ledger);
+        self::assertSame(['expected_commit', 'dump', 'capacity', 'artifact'], $source->ledger);
         self::assertSame($input['parameters']['artifact_provenance_sha256'], $source->authorizedProvenanceSha256);
         self::assertSame($input['parameters']['zero_surprise_dump'], $source->dumpReference);
     }
 
-    public function testProductionProviderRejectsProvenanceDigestSubstitutionBeforeTraffic(): void
+    public function testProductionProviderRejectsProvenanceDigestSubstitutionBeforeDump(): void
     {
         $request = DeploymentHostRunnerContractV1::decodeDeployRequest(
             (string) file_get_contents(__DIR__ . '/../../Fixtures/deployment-host-runner-v1/deploy-request.json'),
@@ -78,7 +76,6 @@ final class DeploymentHostRunnerPredeployV1Test extends TestCase
                 $request['intent_sha256'],
                 $request['release_id'],
                 $request['expected_commit'],
-                $request['traffic_mode'],
             );
         } finally {
             self::assertSame(['expected_commit'], $source->ledger);
@@ -104,7 +101,7 @@ final class DeploymentHostRunnerPredeployV1Test extends TestCase
 
         self::assertSame('attach_pre_deploy', $response['disposition']);
         self::assertSame('artifact_verified', $response['state']);
-        self::assertSame(['expected_commit', 'traffic_gate', 'dump', 'capacity', 'artifact'], $provider->ledger);
+        self::assertSame(['expected_commit', 'dump', 'capacity', 'artifact'], $provider->ledger);
         $prefix = 'runs/' . $request['run_id'] . '/';
         self::assertArrayHasKey($prefix . 'predeploy-evidence.json', $storage->files);
         self::assertArrayNotHasKey($prefix . 'evidence.json', $storage->files);
@@ -294,14 +291,6 @@ final class DeploymentHostRunnerPredeployV1Test extends TestCase
         );
         return new PassedPredeployProvider(
             new ExpectedCommitObservationV1($provenanceBytes, hash('sha256', $provenanceBytes)),
-            new TrafficObservationV1(
-                $this->trafficReportBytes(),
-                hash('sha256', $this->trafficReportBytes()),
-                $sha,
-                '2026-08-09.1',
-                1,
-                91,
-            ),
             new DumpObservationV1(
                 $attestationBytes,
                 hash('sha256', $attestationBytes),
@@ -348,61 +337,6 @@ final class DeploymentHostRunnerPredeployV1Test extends TestCase
         );
     }
 
-    private function trafficReportBytes(): string
-    {
-        $counts = array_fill_keys(
-            [
-                'documented_health',
-                'documented_periodic_ops',
-                'public_read',
-                'denied_external',
-                'business_or_authenticated',
-                'unclassified',
-                'status_5xx',
-                'write',
-                'authenticated',
-                'customers_or_sensitive',
-                'scanner_success',
-                'source_unknown',
-                'method_unknown',
-                'target_unknown',
-                'pre_window_completion',
-                'lines_seen',
-                'lines_in_window',
-                'parse_errors',
-                'rotation_errors',
-                'total',
-            ],
-            0,
-        );
-        $counts['documented_health'] = 1;
-        $counts['lines_seen'] = 1;
-        $counts['lines_in_window'] = 1;
-        $counts['total'] = 1;
-        return json_encode(
-            [
-                'schema' => 'traffic_gate.v1',
-                'producer_sha256' => str_repeat('b', 64),
-                'policy_version' => 'traffic_gate_policy.v1',
-                'catalog_version' => '2026-08-09.1',
-                'purpose' => 'deploy',
-                'mode' => 'normal',
-                'window_start_epoch' => 1,
-                'window_end_epoch' => 91,
-                'window_seconds' => 90,
-                'log_set_sha256' => str_repeat('b', 64),
-                'rotation_complete' => true,
-                'parse_complete' => true,
-                'evidence_complete' => true,
-                'decision' => 'allow',
-                'exit_code' => 0,
-                'counts' => $counts,
-            ],
-            JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
-        ) . "\n";
-    }
-
-    /** @return array<string,int> */
     private function capacityDevices(int $device): array
     {
         return array_fill_keys(
@@ -429,7 +363,6 @@ final class PassedPredeployProvider implements ProtectedPredeployObservationProv
 
     public function __construct(
         private readonly ExpectedCommitObservationV1 $expected,
-        private readonly TrafficObservationV1 $trafficValue,
         private readonly DumpObservationV1 $dumpValue,
         private readonly CapacityObservationV1 $capacityValue,
         private readonly ArtifactObservationV1 $artifactValue,
@@ -439,11 +372,6 @@ final class PassedPredeployProvider implements ProtectedPredeployObservationProv
     {
         $this->ledger[] = 'expected_commit';
         return $this->expected;
-    }
-    public function traffic(): TrafficObservationV1
-    {
-        $this->ledger[] = 'traffic_gate';
-        return $this->trafficValue;
     }
     public function dump(): DumpObservationV1
     {
@@ -480,12 +408,6 @@ final class DelegatingProtectedObservationSource implements HostRunnerProtectedO
         $this->ledger[] = 'expected_commit';
         $this->authorizedProvenanceSha256 = $authorizedSha256;
         return $this->delegate->expectedCommit();
-    }
-
-    public function traffic(string $runId, string $intentSha256, string $mode): TrafficObservationV1
-    {
-        $this->ledger[] = 'traffic_gate';
-        return $this->delegate->traffic();
     }
 
     public function dump(string $runId, string $intentSha256, array $dumpReference): DumpObservationV1
@@ -530,10 +452,6 @@ final class ExpectedCommitOnlyProvider implements ProtectedPredeployObservationP
         return new ExpectedCommitObservationV1($this->provenanceBytes, hash('sha256', $this->provenanceBytes));
     }
 
-    public function traffic(): TrafficObservationV1
-    {
-        throw new RuntimeException('traffic must not run');
-    }
     public function dump(): DumpObservationV1
     {
         throw new RuntimeException('dump must not run');

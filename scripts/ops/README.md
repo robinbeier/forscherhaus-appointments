@@ -17,10 +17,6 @@ For the on-demand, no-customer-data Customers UI role smoke, use
 `docs/release-gate-customers-ui-smoke.md`. It is likewise operator-side and
 never belongs in Kuma or cron.
 
-For the shared passive Deploy/Customers traffic decision, use
-`docs/traffic-gate-v1.md` and `prod_traffic_gate.sh`. The gate reads the full
-current/rotated Apache log set and emits only versioned aggregate evidence.
-
 For the pure ROB-455 deploy intent, lifecycle, child-result receipt, and evidence
 contract, use `docs/deployment-run-v1.md`, `lib/DeployResultV1.php`, and
 `validate_deployment_contract_v1.php`. This contract slice does not install a
@@ -124,10 +120,7 @@ Script inventory:
   Customers role principals
 - `prod_customers_ui_smoke.sh` runs their operator-side Customers view/search
   smoke with no customer fixture and independent ten-minute cleanup
-- `prod_traffic_gate.sh` produces the shared passive `traffic_gate.v1` decision
-  before caller-owned probes or mutations; it requires a root-protected exact
-  monitor-source catalog and fails closed on missing source or active-request
-  boundary evidence
+
 - `validate_deployment_contract_v1.php` validates canonical local
   `deployment_run.v1` JSONL plus closed `deployment_evidence.v1` JSON without
   invoking a deploy or trusting a production path; the evidence keeps the

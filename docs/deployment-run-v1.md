@@ -31,7 +31,6 @@ The immutable intent contains:
 
 - the full expected 40-hex commit;
 - a bounded release ID;
-- the explicitly selected traffic mode;
 - `fresh_verified_under_240m` dump policy;
 - `build_from_expected_commit` artifact expectation.
 
@@ -40,6 +39,11 @@ The Run-ID is kept alongside that hash rather than folded into it. Reattaching
 to an existing Run-ID is permitted only when the candidate intent independently
 validates and has the same hash. Same Run-ID plus changed intent is exit `75`
 (`state_conflict`); a new attempt needs a new authorization and Run-ID.
+
+Existing run records from before removal of the traffic check are not accepted
+by this contract. Finish any active run before updating the host tooling, update
+the related helpers together, and use a new run ID for the next deployment.
+Historical records do not need conversion.
 
 ## State journal
 
@@ -54,7 +58,7 @@ The success path is strictly monotonic:
 
 ```text
 planned -> built -> uploaded -> accepted -> lock_acquired
-  -> expected_commit_verified -> traffic_gate_passed -> dump_verified
+  -> expected_commit_verified -> dump_verified
   -> capacity_passed -> artifact_verified -> deploy_running
   -> post_gates_running -> succeeded
 ```
@@ -109,8 +113,6 @@ The public contract uses only stable pairs:
 | Exit | Reason | Meaning |
 | ---: | --- | --- |
 | `0` | `ok` | progress, attachment, or success |
-| `20` | `traffic_hard_stop` | complete traffic evidence blocks the run |
-| `21` | `traffic_evidence_invalid` | traffic evidence is incomplete or invalid |
 | `22` | `dump_verification_failed` | dump freshness, gzip, SHA, or restore gate failed |
 | `23` | `capacity_gate_failed` | capacity evidence failed |
 | `24` | `artifact_verification_failed` | artifact or host-script evidence failed |
@@ -184,7 +186,6 @@ stdout, stderr, exception text, credentials, or raw logs.
 Its sections are:
 
 - expected and observed commit plus exact verification result;
-- traffic-gate reference and normalized core;
 - dump age/SHA plus explicit checksum-, gzip-, and restore-verification evidence;
 - capacity available/projected bytes and inodes, the authenticated staged inode
   count, independently observed restored-datadir inode count, fixed 64-inode
@@ -211,7 +212,7 @@ known `failed_pre_switch` terminal, exit `143`, and rollback `not_run`. A
 missing, unreadable, or pre-digest dump failure uses `invalid`:
 the known policy and 14,400-second ceiling remain fixed, observed values keep
 their strict types, unavailable measurements stay `null`, and at least one
-measurement must remain unavailable. A terminal failure with exit `20` through
+measurement must remain unavailable. A terminal failure with exit `22` through
 `25` requires the claimed gate's failed evidence plus passed evidence for every
 earlier verified gate;
 the journal's last verified state must agree. Evidence `captured_at_utc` cannot
@@ -254,65 +255,6 @@ artifact verification result remain `null`. A complete observation uses
 `passed` or `failed`; `invalid` cannot claim success or verification and cannot
 substantiate a different terminal reason.
 
-## Traffic-gate consumption
-
-The later runner must read one unique `traffic_gate.v1` report file once into a
-bounded buffer. It hashes those exact bytes, including their final newline, and
-decodes the normalized core from the same buffer. It must never hash, reopen,
-or re-encode a path as equivalent evidence. Compact stdout and pretty file
-serialization are different byte sources.
-
-Deploy evidence stores only:
-
-- exact report SHA-256;
-- `schema`, producer/policy/catalog versions, purpose, mode, and window bounds;
-- `log_set_sha256`;
-- rotation/parse/evidence completeness;
-- decision and exit;
-- the exact 20 aggregate count fields from the merged `traffic_gate.v1`.
-
-It must not embed the report, raw traffic, a path, or a second snapshot.
-`purpose` is `deploy`; mode must equal the immutable intent; the canonical
-cutoff is `window_end_epoch`; the catalog version matches the producer grammar
-`YYYY-MM-DD.N`. Counts and the decision are recomputed by the contract
-validator. Only complete `allow` or `advisory` evidence with exit `0` can
-precede invocation reservation. Freshness and requested-window checks are the
-responsibility of the later runner because they depend on its invocation time;
-they may not be weakened by attaching to an old Run-ID.
-
-If the producer returns exit `21` without a parseable published report, traffic
-status is `invalid`. Every report-derived core field remains `null`; an exact
-raw-byte SHA-256 may be retained only when malformed bytes were actually read.
-No-report evidence keeps that hash `null`. This is distinct from
-`not_observed`, while a parseable report with an incomplete derived core retains
-the full normalized fields and status `failed`. Partial or mixed cores are never
-accepted.
-
-Completeness is also derived, never trusted: rotation completeness follows
-`rotation_errors`, parse completeness requires zero parse errors plus at least
-one parsed line, and evidence completeness is the conjunction of both. Parsed
-window lines and parse errors are disjoint producer outcomes, so their sum
-cannot exceed `lines_seen`. Unknown source, method, and target overlays are
-each bounded by the `unclassified` traffic class that the producer assigns.
-Conversely, every unclassified line must be backed by at least one of those
-unknown overlays in the aggregate evidence.
-The `status_5xx`, `write`, `authenticated`,
-`customers_or_sensitive` overlays are each bounded by the combined
-`business_or_authenticated` and `unclassified` classes that can carry them.
-`scanner_success` is bounded by `business_or_authenticated` alone because
-unknown-field rows return as unclassified before scanner classification.
-Scanner-success, target-unknown, and customer/sensitive overlays must also fit
-into distinct eligible business or unclassified rows in aggregate.
-
-Dump evidence passes only when it is strictly under 240 minutes old and its
-checksum, gzip, and restore verification flags are all true. Capacity passes
-only when available bytes cover projected required bytes,
-observed and projected usage are both below the fixed `85` percent ceiling, and
-the projection does not move backwards. The stored `passed` value and status
-must equal that derived result. Post-gate `passed` is likewise the exact
-conjunction of Kuma `13/13` and every named boolean gate; the healthy monitor
-count can never exceed the total.
-
 ## Future root state trust boundary
 
 The reserved host state root is:
@@ -348,8 +290,8 @@ contract freezes their future boundary; it does not install or execute the
 runner.
 
 `deployment_host_runner_request.v1` contains exactly `schema`, `run_id`,
-`expected_commit`, `release_id`, `traffic_mode`, the fixed `dump_policy` and
-`artifact_expectation` values, and the existing `intent_sha256` over those five
+`expected_commit`, `release_id`, the fixed `dump_policy` and
+`artifact_expectation` values, and the existing `intent_sha256` over those four
 immutable intent fields. It is the request form of the immutable
 `deployment_run.v1` intent. It never contains sequence, timestamps, states,
 reservation counts, results, commands, arguments, paths, hosts, receipts,
@@ -562,8 +504,7 @@ The exact reason enum is `none`, `same_intent`, `state_conflict`,
 `contract_invalid`, `unit_running`,
 `unit_exited`, `unit_failed`, `unit_killed`, `unit_missing`, `receipt_valid`,
 `receipt_missing`, `receipt_invalid`, `receipt_mismatch`, `child_exit_74`,
-`interrupted`, `post_gate_failed`, `ok`, `traffic_hard_stop`,
-`traffic_evidence_invalid`, `dump_verification_failed`,
+`interrupted`, `post_gate_failed`, `ok`, `dump_verification_failed`,
 `capacity_gate_failed`, `artifact_verification_failed`,
 `expected_commit_mismatch`, `deploy_failed`, `rollback_failed`,
 `switch_recovery_required`, or `manual_recovery_required`.
@@ -590,7 +531,7 @@ or identity-mismatched input therefore creates no run-local state.
 
 The supervisor keeps an action-specific bounded outer deadline while holding
 both locks. Deploy allows 6300 seconds so the sequential protected build,
-traffic, dump, capacity, reference-pin, preflight, and admission deadlines can
+dump, capacity, reference-pin, preflight, and admission deadlines can
 all complete; the other production actions retain a 2400-second bound. The
 test-only lock probe remains limited to three seconds.
 

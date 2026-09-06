@@ -10,8 +10,6 @@ use JsonException;
 use RuntimeException;
 use WeakMap;
 
-final class TrafficEvidenceInvalidV1 extends RuntimeException {}
-
 final class DeploymentEvidenceAuthorityV1
 {
     /** @var WeakMap<VerifiedPredeployGateV1,string>|null */
@@ -62,12 +60,6 @@ final class DeploymentEvidenceAuthorityV1
     {
         self::assertSha256($dumpSha256, 'dump sha256');
         return self::DUMP_ATTESTATION_ROOT . '/' . $dumpSha256 . '.json';
-    }
-
-    public static function trafficReportRelativePath(string $runId): string
-    {
-        self::assertUuidV4($runId, 'traffic report run_id');
-        return 'runs/' . $runId . '/traffic-gate-report.json';
     }
 
     /** @return array{bytes:int,inodes:int} */
@@ -895,176 +887,25 @@ final class DeploymentEvidenceAuthorityV1
     }
 
     /** @return array<string,mixed> */
-    public static function verifyAndDeriveTrafficEvidence(
-        string $reportBytes,
-        string $pinnedReportSha256,
-        string $expectedRunId,
-        string $expectedIntentSha256,
-        string $expectedMode,
-        string $expectedProducerSha256,
-        string $expectedCatalogVersion,
-        int $expectedWindowStartEpoch,
-        int $expectedWindowEndEpoch,
-    ): VerifiedPredeployGateV1 {
-        require_once __DIR__ . '/VerifiedPredeployGateV1.php';
-        self::assertUuidV4($expectedRunId, 'traffic authority run_id');
-        self::assertSha256($expectedIntentSha256, 'traffic authority intent_sha256');
-        self::assertSha256($expectedProducerSha256, 'traffic authority producer_sha256');
-        if (
-            preg_match('/^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[1-9][0-9]*$/D', $expectedCatalogVersion) !== 1 ||
-            $expectedWindowStartEpoch <= 0 ||
-            $expectedWindowEndEpoch <= $expectedWindowStartEpoch
-        ) {
-            throw new RuntimeException('traffic authority requested window is invalid');
-        }
-        self::assertSha256($pinnedReportSha256, 'pinned traffic report sha256');
-        if (!hash_equals($pinnedReportSha256, hash('sha256', $reportBytes))) {
-            throw new RuntimeException('traffic report bytes do not match pinned authority');
-        }
-        if (
-            $reportBytes === '' ||
-            strlen($reportBytes) > 262_144 ||
-            !str_ends_with($reportBytes, "\n") ||
-            str_contains($reportBytes, "\0") ||
-            str_contains($reportBytes, "\r")
-        ) {
-            throw new TrafficEvidenceInvalidV1('traffic report bytes are invalid');
-        }
-        try {
-            $report = json_decode(substr($reportBytes, 0, -1), true, 64, JSON_THROW_ON_ERROR);
-            $canonical = json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n";
-        } catch (JsonException) {
-            throw new TrafficEvidenceInvalidV1('traffic report JSON is invalid');
-        }
-        try {
-            self::assertObject($report, 'traffic report');
-            self::assertExactKeys(
-                $report,
-                [
-                    'schema',
-                    'producer_sha256',
-                    'policy_version',
-                    'catalog_version',
-                    'purpose',
-                    'mode',
-                    'window_start_epoch',
-                    'window_end_epoch',
-                    'window_seconds',
-                    'log_set_sha256',
-                    'rotation_complete',
-                    'parse_complete',
-                    'evidence_complete',
-                    'decision',
-                    'exit_code',
-                    'counts',
-                ],
-                'traffic report',
-            );
-        } catch (RuntimeException $error) {
-            throw new TrafficEvidenceInvalidV1('traffic report schema is invalid', previous: $error);
-        }
-        if (!hash_equals($reportBytes, $canonical)) {
-            throw new TrafficEvidenceInvalidV1('traffic report bytes are not canonical producer output');
-        }
-        if (!in_array($expectedMode, ['normal', 'no-business-traffic'], true)) {
-            throw new RuntimeException('traffic report expected mode is invalid');
-        }
-        $section = ['status' => ($report['exit_code'] ?? null) === 0 ? 'passed' : 'failed'];
-        $section['report_sha256'] = $pinnedReportSha256;
-        foreach (
-            [
-                'schema',
-                'producer_sha256',
-                'policy_version',
-                'catalog_version',
-                'purpose',
-                'mode',
-                'window_start_epoch',
-                'window_end_epoch',
-                'window_seconds',
-                'log_set_sha256',
-                'rotation_complete',
-                'parse_complete',
-                'evidence_complete',
-                'decision',
-                'exit_code',
-                'counts',
-            ]
-            as $field
-        ) {
-            $section[$field] = $report[$field] ?? null;
-        }
-        if (
-            ($section['purpose'] ?? null) !== 'deploy' ||
-            ($section['mode'] ?? null) !== $expectedMode ||
-            ($section['producer_sha256'] ?? null) !== $expectedProducerSha256 ||
-            ($section['catalog_version'] ?? null) !== $expectedCatalogVersion ||
-            ($section['window_start_epoch'] ?? null) !== $expectedWindowStartEpoch ||
-            ($section['window_end_epoch'] ?? null) !== $expectedWindowEndEpoch
-        ) {
-            throw new TrafficEvidenceInvalidV1('traffic report does not bind the deployment intent');
-        }
-        require_once __DIR__ . '/DeploymentContractV1.php';
-        try {
-            DeploymentContractV1::validatePredeploySections([
-                'expected_commit' => self::notObservedExpectedCommit(),
-                'traffic_gate' => $section,
-                'dump' => self::notObservedDump(),
-                'capacity' => self::notObservedCapacity(),
-                'artifact' => self::notObservedArtifact(),
-            ]);
-        } catch (RuntimeException $error) {
-            throw new TrafficEvidenceInvalidV1('traffic report core is invalid', previous: $error);
-        }
-        return self::issueGate('traffic_gate', $expectedRunId, $expectedIntentSha256, $section);
-    }
-
-    /**
-     * Freeze the ordered pre-deploy result. Every supplied section has already
-     * been produced by one of this class's source-bound collectors. This method
-     * validates the complete section semantics again, selects the first
-     * non-passing gate, and discards every later observation.
-     *
-     * @param array<string,mixed> $expectedCommit
-     * @param array<string,mixed> $traffic
-     * @param array<string,mixed> $dump
-     * @param array<string,mixed> $capacity
-     * @param array<string,mixed> $artifact
-     * @return array<string,mixed>
-     */
+    /** @return array<string,mixed> */
     private static function assemblePredeployEvidence(
         array $expectedCommit,
-        array $traffic,
         array $dump,
         array $capacity,
         array $artifact,
     ): array {
         require_once __DIR__ . '/DeploymentContractV1.php';
-        $sections = compact('expectedCommit', 'traffic', 'dump', 'capacity', 'artifact');
         $sections = [
-            'expected_commit' => $sections['expectedCommit'],
-            'traffic_gate' => $sections['traffic'],
-            'dump' => $sections['dump'],
-            'capacity' => $sections['capacity'],
-            'artifact' => $sections['artifact'],
+            'expected_commit' => $expectedCommit,
+            'dump' => $dump,
+            'capacity' => $capacity,
+            'artifact' => $artifact,
         ];
         DeploymentContractV1::validatePredeploySections($sections);
-
         $reason = null;
         $exitCode = 0;
         if ($sections['expected_commit']['verified'] !== true) {
             [$reason, $exitCode] = ['expected_commit_mismatch', 25];
-            $sections['traffic_gate'] = self::notObservedTraffic();
-            $sections['dump'] = self::notObservedDump();
-            $sections['capacity'] = self::notObservedCapacity();
-            $sections['artifact'] = self::notObservedArtifact();
-        } elseif ($sections['traffic_gate']['status'] !== 'passed') {
-            [$reason, $exitCode] =
-                $sections['traffic_gate']['status'] === 'invalid'
-                    ? ['traffic_evidence_invalid', 21]
-                    : (($sections['traffic_gate']['exit_code'] ?? null) === 20
-                        ? ['traffic_hard_stop', 20]
-                        : ['traffic_evidence_invalid', 21]);
             $sections['dump'] = self::notObservedDump();
             $sections['capacity'] = self::notObservedCapacity();
             $sections['artifact'] = self::notObservedArtifact();
@@ -1145,13 +986,12 @@ final class DeploymentEvidenceAuthorityV1
         string $intentSha256,
         array $section,
     ): VerifiedPredeployGateV1 {
-        if (!in_array($gate, ['traffic_gate', 'dump', 'capacity', 'artifact'], true)) {
+        if (!in_array($gate, ['dump', 'capacity', 'artifact'], true)) {
             throw new RuntimeException('internal failed gate name is invalid');
         }
         require_once __DIR__ . '/DeploymentContractV1.php';
         $sections = [
             'expected_commit' => self::notObservedExpectedCommit(),
-            'traffic_gate' => self::notObservedTraffic(),
             'dump' => self::notObservedDump(),
             'capacity' => self::notObservedCapacity(),
             'artifact' => self::notObservedArtifact(),
@@ -1162,33 +1002,6 @@ final class DeploymentEvidenceAuthorityV1
             throw new RuntimeException('internal failed gate must retain failed or invalid status');
         }
         return self::issueGate($gate, $runId, $intentSha256, $section);
-    }
-
-    private static function observeMissingTrafficGate(
-        string $runId,
-        string $intentSha256,
-        ?string $pinnedReportSha256,
-    ): VerifiedPredeployGateV1 {
-        if ($pinnedReportSha256 !== null) {
-            self::assertSha256($pinnedReportSha256, 'missing traffic pinned sha256');
-        }
-        $section = self::notObservedTraffic();
-        $section['status'] = 'invalid';
-        $section['report_sha256'] = $pinnedReportSha256;
-        $section['exit_code'] = 21;
-        return self::observeInternalGateFailure('traffic_gate', $runId, $intentSha256, $section);
-    }
-
-    private static function observeInvalidTrafficFromPinnedBytes(
-        string $runId,
-        string $intentSha256,
-        ?string $pinnedReportBytes,
-    ): VerifiedPredeployGateV1 {
-        return self::observeMissingTrafficGate(
-            $runId,
-            $intentSha256,
-            $pinnedReportBytes === null ? null : hash('sha256', $pinnedReportBytes),
-        );
     }
 
     /** @param array<string,mixed> $stableDumpObservation */
@@ -1379,7 +1192,6 @@ final class DeploymentEvidenceAuthorityV1
         string $intentSha256,
         string $expectedReleaseId,
         string $expectedCommit,
-        string $expectedTrafficMode,
     ): array {
         require_once __DIR__ . '/ProtectedPredeployObservationProvider.php';
         self::assertUuidV4($runId, 'predeploy provider run_id');
@@ -1410,41 +1222,6 @@ final class DeploymentEvidenceAuthorityV1
                 );
                 $boundProvenanceSha256 = $observation->pinnedProvenanceSha256;
                 return $result;
-            },
-            'traffic_gate' => static function () use (
-                $provider,
-                $runId,
-                $intentSha256,
-                $expectedTrafficMode,
-            ): VerifiedPredeployGateV1 {
-                $observation = $provider->traffic();
-                if ($observation->pinnedReportBytes === null) {
-                    if ($observation->pinnedReportSha256 !== null) {
-                        throw new RuntimeException('traffic observation cannot claim a hash without pinned bytes');
-                    }
-                    return self::observeMissingTrafficGate($runId, $intentSha256, null);
-                }
-                if (
-                    $observation->pinnedReportSha256 === null ||
-                    !hash_equals($observation->pinnedReportSha256, hash('sha256', $observation->pinnedReportBytes))
-                ) {
-                    throw new RuntimeException('traffic protected pin contradicts observed bytes');
-                }
-                try {
-                    return self::verifyAndDeriveTrafficEvidence(
-                        $observation->pinnedReportBytes,
-                        $observation->pinnedReportSha256,
-                        $runId,
-                        $intentSha256,
-                        $expectedTrafficMode,
-                        $observation->expectedProducerSha256,
-                        $observation->expectedCatalogVersion,
-                        $observation->windowStartEpoch,
-                        $observation->windowEndEpoch,
-                    );
-                } catch (TrafficEvidenceInvalidV1) {
-                    return self::observeMissingTrafficGate($runId, $intentSha256, $observation->pinnedReportSha256);
-                }
             },
             'dump' => static function () use (
                 $provider,
@@ -1671,14 +1448,12 @@ final class DeploymentEvidenceAuthorityV1
         }
         $sections = [
             'expected_commit' => $collected['expected_commit'],
-            'traffic_gate' => $collected['traffic_gate'] ?? self::notObservedTraffic(),
             'dump' => $collected['dump'] ?? self::notObservedDump(),
             'capacity' => $collected['capacity'] ?? self::notObservedCapacity(),
             'artifact' => $collected['artifact'] ?? self::notObservedArtifact(),
         ];
         return self::assemblePredeployEvidence(
             $sections['expected_commit'],
-            $sections['traffic_gate'],
             $sections['dump'],
             $sections['capacity'],
             $sections['artifact'],
@@ -1698,14 +1473,13 @@ final class DeploymentEvidenceAuthorityV1
         if (
             array_keys($record) !== ['exit_code', 'reason', 'schema', 'sections', 'status'] ||
             !is_array($record['sections'] ?? null) ||
-            array_keys($record['sections']) !== ['artifact', 'capacity', 'dump', 'expected_commit', 'traffic_gate']
+            array_keys($record['sections']) !== ['artifact', 'capacity', 'dump', 'expected_commit']
         ) {
             throw new RuntimeException('pinned predeploy assembly shape is invalid');
         }
         $sections = $record['sections'];
         $expected = self::assemblePredeployEvidence(
             $sections['expected_commit'],
-            $sections['traffic_gate'],
             $sections['dump'],
             $sections['capacity'],
             $sections['artifact'],
@@ -1714,35 +1488,6 @@ final class DeploymentEvidenceAuthorityV1
             throw new RuntimeException('pinned predeploy assembly contradicts its gate sections');
         }
         return $expected;
-    }
-
-    private static function assembleVerifiedPredeployEvidence(
-        VerifiedPredeployGateV1 $build,
-        VerifiedPredeployGateV1 $traffic,
-        VerifiedPredeployGateV1 $dump,
-        VerifiedPredeployGateV1 $capacity,
-    ): array {
-        require_once __DIR__ . '/VerifiedPredeployGateV1.php';
-        $values = [$build, $traffic, $dump, $capacity];
-        $expectedGates = ['build', 'traffic_gate', 'dump', 'capacity'];
-        foreach ($values as $index => $value) {
-            self::assertIssuedGate($value);
-            if ($value->gate() !== $expectedGates[$index]) {
-                throw new RuntimeException('predeploy verified gate order is invalid');
-            }
-            if ($value->runId() !== $build->runId() || !hash_equals($value->intentSha256(), $build->intentSha256())) {
-                throw new RuntimeException('predeploy verified gates do not bind one run and intent');
-            }
-        }
-        $buildSections = $build->section();
-        self::assertExactKeys($buildSections, ['expected_commit', 'artifact'], 'verified build sections');
-        return self::assemblePredeployEvidence(
-            $buildSections['expected_commit'],
-            $traffic->section(),
-            $dump->section(),
-            $capacity->section(),
-            $buildSections['artifact'],
-        );
     }
 
     /** @param array<string,mixed> $section */
@@ -1781,31 +1526,6 @@ final class DeploymentEvidenceAuthorityV1
     private static function notObservedExpectedCommit(): array
     {
         return ['expected' => str_repeat('0', 40), 'observed' => null, 'verified' => false];
-    }
-
-    /** @return array<string,mixed> */
-    private static function notObservedTraffic(): array
-    {
-        return self::nullSection([
-            'status',
-            'report_sha256',
-            'schema',
-            'producer_sha256',
-            'policy_version',
-            'catalog_version',
-            'purpose',
-            'mode',
-            'window_start_epoch',
-            'window_end_epoch',
-            'window_seconds',
-            'log_set_sha256',
-            'rotation_complete',
-            'parse_complete',
-            'evidence_complete',
-            'decision',
-            'exit_code',
-            'counts',
-        ]);
     }
 
     /** @return array<string,mixed> */

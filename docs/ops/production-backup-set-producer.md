@@ -60,7 +60,7 @@ Additional whitespace and malformed control lines remain rejected.
 
 The helper first acquires the exact shared production-change lock and a private
 backup-producer lock. Active or unreconciled deployment, restore, replay,
-traffic, smoke, backup or retention work returns retryable exit `75`. Unknown
+smoke, backup or retention work returns retryable exit `75`. Unknown
 identity or unsafe filesystem state returns `70`.
 
 Dump and metadata bytes are built under a private same-filesystem nonce

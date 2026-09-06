@@ -580,7 +580,7 @@ final class DeploymentDumpAttestationProducerV1Test extends TestCase
         spec = importlib.util.spec_from_file_location('rob465_helper', sys.argv[1])
         module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
         run_id = '018f6f52-4c87-4d4e-8b19-6a66e6e1af25'
-        fields = {'expected_commit':'a'*40,'release_id':'release-1','traffic_mode':'normal',
+        fields = {'expected_commit':'a'*40,'release_id':'release-1',
                   'dump_policy':'fresh_verified_under_240m','artifact_expectation':'build_from_expected_commit'}
         intent = hashlib.sha256(module.canonical(fields)[:-1]).hexdigest()
         records = [{'schema':'deployment_run.v1','record_type':'intent','run_id':run_id,'sequence':1,

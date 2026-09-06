@@ -880,10 +880,6 @@
           "match": "exact_file"
         },
         {
-          "path": "scripts/ops/config/traffic_gate_catalog.v1.json",
-          "match": "exact_file"
-        },
-        {
           "path": "scripts/ops/lib/DeployResultV1.php",
           "match": "exact_file"
         },
@@ -896,19 +892,11 @@
           "match": "exact_file"
         },
         {
-          "path": "scripts/ops/lib/TrafficGateV1.php",
-          "match": "exact_file"
-        },
-        {
           "path": "scripts/ops/prod_customers_ui_smoke.sh",
           "match": "exact_file"
         },
         {
           "path": "scripts/ops/libexec/zero_surprise_image_cleanup_v1.py",
-          "match": "exact_file"
-        },
-        {
-          "path": "scripts/ops/prod_traffic_gate.sh",
           "match": "exact_file"
         },
         {
@@ -921,10 +909,6 @@
         },
         {
           "path": "scripts/ops/provider_ui_smoke_principal.sh",
-          "match": "exact_file"
-        },
-        {
-          "path": "scripts/ops/traffic_gate_v1.php",
           "match": "exact_file"
         },
         {
@@ -964,10 +948,8 @@
         "deploy_ea.sh",
         "scripts/ci/dashboard_integration_smoke.php",
         "scripts/ops/lib/DeployResultV1.php",
-        "scripts/ops/lib/TrafficGateV1.php",
         "scripts/ops/lib/DeploymentContractV1.php",
         "scripts/ops/lib/DeploymentHostRunnerContractV1.php",
-        "scripts/ops/prod_traffic_gate.sh",
         "scripts/ops/prod_zero_surprise_image_cleanup.sh",
         "scripts/ops/validate_deployment_contract_v1.php",
         "scripts/release-gate/dashboard_release_gate.php",

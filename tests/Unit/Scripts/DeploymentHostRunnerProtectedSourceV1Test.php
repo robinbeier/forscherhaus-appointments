@@ -10,13 +10,10 @@ use Ops\HostRunnerBuildHelper;
 use Ops\HostRunnerCapacityHelper;
 use Ops\HostRunnerDumpHelper;
 use Ops\HostRunnerStorage;
-use Ops\HostRunnerTrafficHelper;
-use Ops\HostRunnerTrafficMetadata;
 use Ops\ProtectedHostBuildCollector;
 use Ops\ProtectedHostCapacityCollector;
 use Ops\ProtectedHostDumpCollector;
 use Ops\ProtectedHostPredeployObservationProvider;
-use Ops\ProtectedHostTrafficCollector;
 use Ops\SystemHostRunnerProtectedObservationSource;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
@@ -89,8 +86,6 @@ final class DeploymentHostRunnerProtectedSourceV1Test extends TestCase
             'temp_scratch_bytes' => 4_000,
             'provenance_bytes' => $provenance,
         ]);
-        $trafficHelper = new SourceTrafficHelperFake($this->trafficReport($request['traffic_mode']));
-        $trafficMetadata = new SourceTrafficMetadataFake();
         $dumpHelper = new SourceDumpHelperFake([
             'status' => 'observed',
             'attestation_bytes' => $attestation,
@@ -104,7 +99,6 @@ final class DeploymentHostRunnerProtectedSourceV1Test extends TestCase
             $request['expected_commit'],
             $storage,
             new ProtectedHostBuildCollector($buildHelper),
-            new ProtectedHostTrafficCollector($trafficHelper, $trafficMetadata),
             new ProtectedHostDumpCollector($storage, $dumpHelper),
             new ProtectedHostCapacityCollector($capacityHelper),
         );
@@ -116,70 +110,16 @@ final class DeploymentHostRunnerProtectedSourceV1Test extends TestCase
             $request['intent_sha256'],
             $request['release_id'],
             $request['expected_commit'],
-            $request['traffic_mode'],
         );
 
         self::assertSame('passed', $assembly['status']);
         self::assertSame(0, $assembly['exit_code']);
         self::assertSame([[$request['release_id'], hash('sha256', $provenance)]], $buildHelper->calls);
-        self::assertSame([[$request['run_id'], $request['traffic_mode']]], $trafficHelper->calls);
         self::assertSame([[$request['run_id'], 'deploy-ref-zero-surprise-dump.sql.gz', $dumpSha]], $dumpHelper->calls);
         self::assertSame([[$request['run_id'], $request['release_id'], 'host']], $capacityHelper->calls);
         self::assertSame(1, $storage->pinCount);
         self::assertSame('passed', $assembly['sections']['capacity']['status']);
         self::assertSame('passed', $assembly['sections']['artifact']['status']);
-    }
-
-    private function trafficReport(string $mode): string
-    {
-        $counts = array_fill_keys(
-            [
-                'documented_health',
-                'documented_periodic_ops',
-                'public_read',
-                'denied_external',
-                'business_or_authenticated',
-                'unclassified',
-                'status_5xx',
-                'write',
-                'authenticated',
-                'customers_or_sensitive',
-                'scanner_success',
-                'source_unknown',
-                'method_unknown',
-                'target_unknown',
-                'pre_window_completion',
-                'lines_seen',
-                'lines_in_window',
-                'parse_errors',
-                'rotation_errors',
-                'total',
-            ],
-            0,
-        );
-        $counts['documented_health'] = 1;
-        $counts['lines_seen'] = $counts['lines_in_window'] = $counts['total'] = 1;
-        return json_encode(
-            [
-                'schema' => 'traffic_gate.v1',
-                'producer_sha256' => str_repeat('9', 64),
-                'policy_version' => 'traffic_gate_policy.v1',
-                'catalog_version' => '2026-08-09.1',
-                'purpose' => 'deploy',
-                'mode' => $mode,
-                'window_start_epoch' => 100,
-                'window_end_epoch' => 190,
-                'window_seconds' => 90,
-                'log_set_sha256' => str_repeat('8', 64),
-                'rotation_complete' => true,
-                'parse_complete' => true,
-                'evidence_complete' => true,
-                'decision' => 'allow',
-                'exit_code' => 0,
-                'counts' => $counts,
-            ],
-            JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
-        ) . "\n";
     }
 
     /** @return array<string,mixed> */
@@ -228,31 +168,6 @@ final class SourceBuildHelperFake implements HostRunnerBuildHelper
     {
         $this->calls[] = [$releaseId, $authorizedSha256];
         return $this->value;
-    }
-}
-
-final class SourceTrafficHelperFake implements HostRunnerTrafficHelper
-{
-    public array $calls = [];
-    public function __construct(private readonly string $bytes) {}
-    public function collect(string $runId, string $mode): array
-    {
-        $this->calls[] = [$runId, $mode];
-        return [
-            'status' => 'pinned',
-            'bytes' => $this->bytes,
-            'sha256' => hash('sha256', $this->bytes),
-            'started_epoch' => 99,
-            'finished_epoch' => 191,
-        ];
-    }
-}
-
-final class SourceTrafficMetadataFake implements HostRunnerTrafficMetadata
-{
-    public function current(): array
-    {
-        return ['producer_sha256' => str_repeat('9', 64), 'catalog_version' => '2026-08-09.1'];
     }
 }
 

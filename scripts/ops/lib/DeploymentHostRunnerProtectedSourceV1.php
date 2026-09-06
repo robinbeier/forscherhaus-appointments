@@ -10,7 +10,6 @@ require_once __DIR__ . '/DeploymentHostRunnerBuildV1.php';
 require_once __DIR__ . '/DeploymentHostRunnerCapacityV1.php';
 require_once __DIR__ . '/DeploymentHostRunnerDumpV1.php';
 require_once __DIR__ . '/DeploymentHostRunnerEvidenceProviderV1.php';
-require_once __DIR__ . '/DeploymentHostRunnerTrafficV1.php';
 
 /**
  * Concrete protected source used by the Host Runner. It composes only fixed
@@ -19,7 +18,6 @@ require_once __DIR__ . '/DeploymentHostRunnerTrafficV1.php';
 final class SystemHostRunnerProtectedObservationSource implements HostRunnerProtectedObservationSource
 {
     private readonly ProtectedHostBuildCollector $buildCollector;
-    private readonly ProtectedHostTrafficCollector $trafficCollector;
     private readonly ProtectedHostDumpCollector $dumpCollector;
     private readonly ProtectedHostCapacityCollector $capacityCollector;
     private ?HostRunnerBuildAuthorityV1 $buildAuthority = null;
@@ -31,7 +29,6 @@ final class SystemHostRunnerProtectedObservationSource implements HostRunnerProt
         private readonly string $expectedCommit,
         HostRunnerStorage $storage,
         ?ProtectedHostBuildCollector $buildCollector = null,
-        ?ProtectedHostTrafficCollector $trafficCollector = null,
         ?ProtectedHostDumpCollector $dumpCollector = null,
         ?ProtectedHostCapacityCollector $capacityCollector = null,
     ) {
@@ -39,25 +36,21 @@ final class SystemHostRunnerProtectedObservationSource implements HostRunnerProt
             throw new RuntimeException('protected source expected commit is invalid');
         }
         $this->buildCollector = $buildCollector ?? new ProtectedHostBuildCollector();
-        $this->trafficCollector = $trafficCollector ?? new ProtectedHostTrafficCollector();
         $this->dumpCollector = $dumpCollector ?? new ProtectedHostDumpCollector($storage);
         $this->capacityCollector = $capacityCollector ?? new ProtectedHostCapacityCollector();
     }
 
-    public function buildProvenance(string $runId, string $releaseId, string $authorizedSha256): ExpectedCommitObservationV1
-    {
+    public function buildProvenance(
+        string $runId,
+        string $releaseId,
+        string $authorizedSha256,
+    ): ExpectedCommitObservationV1 {
         $this->bindRun($runId);
         if ($this->buildAuthority !== null) {
             throw new RuntimeException('protected build authority was requested twice');
         }
         $this->buildAuthority = $this->buildCollector->collect($releaseId, $authorizedSha256);
         return $this->buildAuthority->expectedCommit;
-    }
-
-    public function traffic(string $runId, string $intentSha256, string $mode): TrafficObservationV1
-    {
-        $this->bindRunAndIntent($runId, $intentSha256);
-        return $this->trafficCollector->collect($runId, $mode);
     }
 
     public function dump(string $runId, string $intentSha256, array $dumpReference): DumpObservationV1
@@ -80,7 +73,10 @@ final class SystemHostRunnerProtectedObservationSource implements HostRunnerProt
         }
         if (
             !hash_equals($this->buildAuthority->expectedCommit->provenanceBytes, $provenance->provenanceBytes) ||
-            !hash_equals($this->buildAuthority->expectedCommit->pinnedProvenanceSha256, $provenance->pinnedProvenanceSha256) ||
+            !hash_equals(
+                $this->buildAuthority->expectedCommit->pinnedProvenanceSha256,
+                $provenance->pinnedProvenanceSha256,
+            ) ||
             $this->dumpAuthority !== $dump
         ) {
             throw new RuntimeException('capacity substitutes a prior protected source authority');
@@ -104,10 +100,14 @@ final class SystemHostRunnerProtectedObservationSource implements HostRunnerProt
     ): ArtifactObservationV1 {
         $this->bindRunAndIntent($runId, $intentSha256);
         if (
-            $this->buildAuthority === null || $capacity->verifiedSources === null ||
+            $this->buildAuthority === null ||
+            $capacity->verifiedSources === null ||
             $capacity->verifiedSources->build !== $this->buildAuthority->verifiedSources ||
             !hash_equals($provenance->provenanceBytes, $this->buildAuthority->expectedCommit->provenanceBytes) ||
-            !hash_equals($provenance->pinnedProvenanceSha256, $this->buildAuthority->expectedCommit->pinnedProvenanceSha256)
+            !hash_equals(
+                $provenance->pinnedProvenanceSha256,
+                $this->buildAuthority->expectedCommit->pinnedProvenanceSha256,
+            )
         ) {
             throw new RuntimeException('artifact lacks its exact protected build authority');
         }
