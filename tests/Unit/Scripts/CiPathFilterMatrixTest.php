@@ -14,7 +14,6 @@ class CiPathFilterMatrixTest extends TestCase
         $matches = $this->applyFilters(['scripts/ci/check_coverage_delta.php']);
 
         self::assertTrue($matches['coverage_required']);
-        self::assertTrue($matches['deep_bootstrap_required']);
         self::assertFalse($matches['pdf_renderer_tests_required']);
         self::assertFalse($matches['request_contracts_required']);
         self::assertFalse($matches['api_contract']);
@@ -31,7 +30,6 @@ class CiPathFilterMatrixTest extends TestCase
 
         self::assertTrue($matches['request_contracts_required']);
         self::assertFalse($matches['coverage_required']);
-        self::assertFalse($matches['deep_bootstrap_required']);
         self::assertFalse($matches['pdf_renderer_tests_required']);
         self::assertFalse($matches['api_contract']);
         self::assertFalse($matches['booking_flows']);
@@ -46,7 +44,6 @@ class CiPathFilterMatrixTest extends TestCase
         $matches = $this->applyFilters(['tests/Unit/Scripts/CiPathFilterMatrixTest.php']);
 
         self::assertFalse($matches['request_contracts_required']);
-        self::assertFalse($matches['deep_bootstrap_required']);
         self::assertFalse($matches['coverage_required']);
         self::assertFalse($matches['pdf_renderer_tests_required']);
         self::assertFalse($matches['api_contract']);
@@ -62,7 +59,6 @@ class CiPathFilterMatrixTest extends TestCase
         $matches = $this->applyFilters(['application/controllers/Booking.php']);
 
         self::assertTrue($matches['request_contracts_required']);
-        self::assertTrue($matches['deep_bootstrap_required']);
         self::assertTrue($matches['coverage_required']);
         self::assertFalse($matches['pdf_renderer_tests_required']);
         self::assertFalse($matches['api_contract']);
@@ -78,7 +74,6 @@ class CiPathFilterMatrixTest extends TestCase
         $matches = $this->applyFilters(['.github/workflows/ci.yml']);
 
         self::assertTrue($matches['request_contracts_required']);
-        self::assertTrue($matches['deep_bootstrap_required']);
         self::assertTrue($matches['coverage_required']);
         self::assertTrue($matches['pdf_renderer_tests_required']);
         self::assertTrue($matches['api_contract']);
@@ -89,12 +84,11 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertTrue($matches['write_contract_api']);
     }
 
-    public function testBookingFlowsConfigChangeStillTriggersBootstrapProducer(): void
+    public function testBookingFlowsConfigChangeStillTriggersBookingFlowJob(): void
     {
         $matches = $this->applyFilters(['phpunit.booking-flows.xml']);
 
         self::assertFalse($matches['request_contracts_required']);
-        self::assertTrue($matches['deep_bootstrap_required']);
         self::assertFalse($matches['coverage_required']);
         self::assertFalse($matches['pdf_renderer_tests_required']);
         self::assertFalse($matches['api_contract']);
@@ -110,7 +104,6 @@ class CiPathFilterMatrixTest extends TestCase
         $matches = $this->applyFilters(['application/models/Settings_model.php']);
 
         self::assertTrue($matches['request_contracts_required']);
-        self::assertTrue($matches['deep_bootstrap_required']);
         self::assertTrue($matches['coverage_required']);
         self::assertFalse($matches['pdf_renderer_tests_required']);
         self::assertTrue($matches['api_contract']);
@@ -142,7 +135,6 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertNotFalse($workflow);
 
         self::assertStringContainsString("needs.changes.outputs.request_contracts_required == 'true'", $workflow);
-        self::assertStringContainsString("needs.changes.outputs.deep_bootstrap_required == 'true'", $workflow);
         self::assertStringContainsString("needs.changes.outputs.coverage_required == 'true'", $workflow);
         self::assertStringContainsString("needs.changes.outputs.pdf_renderer_tests_required == 'true'", $workflow);
         self::assertStringNotContainsString("needs.changes.outputs.deep_required == 'true'", $workflow);
@@ -169,7 +161,6 @@ class CiPathFilterMatrixTest extends TestCase
         $matches = $this->applyFilters(['pdf-renderer/server.js']);
 
         self::assertFalse($matches['request_contracts_required']);
-        self::assertFalse($matches['deep_bootstrap_required']);
         self::assertFalse($matches['coverage_required']);
         self::assertTrue($matches['pdf_renderer_tests_required']);
         self::assertFalse($matches['api_contract']);
@@ -185,7 +176,6 @@ class CiPathFilterMatrixTest extends TestCase
         $matches = $this->applyFilters(['docker-compose.yml']);
 
         self::assertFalse($matches['request_contracts_required']);
-        self::assertFalse($matches['deep_bootstrap_required']);
         self::assertFalse($matches['coverage_required']);
         self::assertTrue($matches['pdf_renderer_tests_required']);
         self::assertFalse($matches['api_contract']);
@@ -242,8 +232,6 @@ class CiPathFilterMatrixTest extends TestCase
             'docs/uptime-kuma.md',
             'scripts/ops/uptime-kuma.monitors.yml',
         ]);
-
-        self::assertTrue($matches['deep_bootstrap_required']);
         self::assertTrue($matches['coverage_required']);
         self::assertTrue($matches['api_contract']);
         self::assertFalse($matches['integration_smoke']);
@@ -252,8 +240,6 @@ class CiPathFilterMatrixTest extends TestCase
     public function testMariaDbRestoreComposeDoesNotTriggerIntegrationSmoke(): void
     {
         $matches = $this->applyFilters(['docker/compose.mariadb-restore.yml']);
-
-        self::assertTrue($matches['deep_bootstrap_required']);
         self::assertTrue($matches['coverage_required']);
         self::assertTrue($matches['api_contract']);
         self::assertFalse($matches['integration_smoke']);
@@ -309,7 +295,6 @@ class CiPathFilterMatrixTest extends TestCase
         $matches = $this->applyFilters(['scripts/ci/dashboard_integration_smoke.php']);
 
         self::assertFalse($matches['request_contracts_required']);
-        self::assertTrue($matches['deep_bootstrap_required']);
         self::assertFalse($matches['coverage_required']);
         self::assertFalse($matches['pdf_renderer_tests_required']);
         self::assertFalse($matches['api_contract']);
@@ -320,12 +305,11 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertFalse($matches['write_contract_api']);
     }
 
-    public function testBrowserRuntimeEvidenceLibraryChangeTriggersIntegrationSmokeAndBootstrap(): void
+    public function testBrowserRuntimeEvidenceLibraryChangeTriggersIntegrationSmoke(): void
     {
         $matches = $this->applyFilters(['scripts/ci/lib/BrowserRuntimeEvidence.php']);
 
         self::assertFalse($matches['request_contracts_required']);
-        self::assertTrue($matches['deep_bootstrap_required']);
         self::assertFalse($matches['coverage_required']);
         self::assertFalse($matches['pdf_renderer_tests_required']);
         self::assertFalse($matches['api_contract']);
@@ -336,12 +320,11 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertFalse($matches['write_contract_api']);
     }
 
-    public function testDashboardSummaryBrowserCheckLibraryChangeTriggersIntegrationSmokeAndBootstrap(): void
+    public function testDashboardSummaryBrowserCheckLibraryChangeTriggersIntegrationSmoke(): void
     {
         $matches = $this->applyFilters(['scripts/ci/lib/DashboardSummaryBrowserCheck.php']);
 
         self::assertFalse($matches['request_contracts_required']);
-        self::assertTrue($matches['deep_bootstrap_required']);
         self::assertFalse($matches['coverage_required']);
         self::assertFalse($matches['pdf_renderer_tests_required']);
         self::assertFalse($matches['api_contract']);
@@ -352,12 +335,11 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertFalse($matches['write_contract_api']);
     }
 
-    public function testGitHelpersChangeTriggersIntegrationSmokeAndBootstrap(): void
+    public function testGitHelpersChangeTriggersIntegrationSmoke(): void
     {
         $matches = $this->applyFilters(['scripts/ci/git_helpers.sh']);
 
         self::assertFalse($matches['request_contracts_required']);
-        self::assertTrue($matches['deep_bootstrap_required']);
         self::assertFalse($matches['coverage_required']);
         self::assertFalse($matches['pdf_renderer_tests_required']);
         self::assertFalse($matches['api_contract']);
@@ -368,12 +350,11 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertFalse($matches['write_contract_api']);
     }
 
-    public function testDockerComposeHelpersChangeTriggersIntegrationSmokeAndBootstrap(): void
+    public function testDockerComposeHelpersChangeTriggersIntegrationSmoke(): void
     {
         $matches = $this->applyFilters(['scripts/ci/docker_compose_helpers.sh']);
 
         self::assertFalse($matches['request_contracts_required']);
-        self::assertTrue($matches['deep_bootstrap_required']);
         self::assertFalse($matches['coverage_required']);
         self::assertFalse($matches['pdf_renderer_tests_required']);
         self::assertFalse($matches['api_contract']);
@@ -389,7 +370,6 @@ class CiPathFilterMatrixTest extends TestCase
         $matches = $this->applyFilters(['application/config/constants.php']);
 
         self::assertFalse($matches['request_contracts_required']);
-        self::assertTrue($matches['deep_bootstrap_required']);
         self::assertTrue($matches['coverage_required']);
         self::assertFalse($matches['pdf_renderer_tests_required']);
         self::assertFalse($matches['api_contract']);
@@ -405,7 +385,6 @@ class CiPathFilterMatrixTest extends TestCase
         $matches = $this->applyFilters(['application/helpers/setting_helper.php']);
 
         self::assertFalse($matches['request_contracts_required']);
-        self::assertTrue($matches['deep_bootstrap_required']);
         self::assertTrue($matches['coverage_required']);
         self::assertFalse($matches['pdf_renderer_tests_required']);
         self::assertFalse($matches['api_contract']);
@@ -421,7 +400,6 @@ class CiPathFilterMatrixTest extends TestCase
         $matches = $this->applyFilters(['application/helpers/permission_helper.php']);
 
         self::assertFalse($matches['request_contracts_required']);
-        self::assertTrue($matches['deep_bootstrap_required']);
         self::assertTrue($matches['coverage_required']);
         self::assertFalse($matches['pdf_renderer_tests_required']);
         self::assertFalse($matches['api_contract']);
@@ -437,7 +415,6 @@ class CiPathFilterMatrixTest extends TestCase
         $matches = $this->applyFilters(['scripts/ci/lib/CheckSelection.php']);
 
         self::assertFalse($matches['request_contracts_required']);
-        self::assertTrue($matches['deep_bootstrap_required']);
         self::assertFalse($matches['coverage_required']);
         self::assertFalse($matches['pdf_renderer_tests_required']);
         self::assertFalse($matches['api_contract']);
@@ -453,7 +430,6 @@ class CiPathFilterMatrixTest extends TestCase
         $matches = $this->applyFilters(['application/libraries/Integrations_request_dto_factory.php']);
 
         self::assertTrue($matches['request_contracts_required']);
-        self::assertTrue($matches['deep_bootstrap_required']);
         self::assertTrue($matches['coverage_required']);
         self::assertFalse($matches['pdf_renderer_tests_required']);
         self::assertFalse($matches['api_contract']);
@@ -469,7 +445,6 @@ class CiPathFilterMatrixTest extends TestCase
         $matches = $this->applyFilters(['application/libraries/Auth_request_dto_factory.php']);
 
         self::assertTrue($matches['request_contracts_required']);
-        self::assertTrue($matches['deep_bootstrap_required']);
         self::assertTrue($matches['coverage_required']);
         self::assertFalse($matches['pdf_renderer_tests_required']);
         self::assertFalse($matches['api_contract']);
@@ -485,7 +460,6 @@ class CiPathFilterMatrixTest extends TestCase
         $matches = $this->applyFilters(['application/libraries/Accounts.php']);
 
         self::assertTrue($matches['request_contracts_required']);
-        self::assertTrue($matches['deep_bootstrap_required']);
         self::assertTrue($matches['coverage_required']);
         self::assertFalse($matches['pdf_renderer_tests_required']);
         self::assertFalse($matches['api_contract']);
@@ -568,7 +542,6 @@ class CiPathFilterMatrixTest extends TestCase
         }
 
         self::assertArrayHasKey('request_contracts_required', $filters);
-        self::assertArrayHasKey('deep_bootstrap_required', $filters);
         self::assertArrayHasKey('coverage_required', $filters);
         self::assertArrayHasKey('pdf_renderer_tests_required', $filters);
         self::assertArrayHasKey('ldap_guardrail_required', $filters);

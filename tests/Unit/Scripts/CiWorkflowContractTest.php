@@ -174,7 +174,7 @@ class CiWorkflowContractTest extends TestCase
     public function testCoverageIntegrationInitializesItsOwnDatabaseAfterReadiness(): void
     {
         $job = $this->workflowJob('coverage-shard-integration');
-        self::assertSame(['changes', 'deep-check-bootstrap'], $job['needs'] ?? null);
+        self::assertSame(['changes'], $job['needs'] ?? null);
         $steps = $this->namedSteps($job);
         foreach ($steps as $step) {
             self::assertArrayNotHasKey('continue-on-error', $step);
@@ -185,6 +185,10 @@ class CiWorkflowContractTest extends TestCase
         self::assertSame('xdebug', $setupPhp['with']['coverage'] ?? null);
         self::assertSame('gd', $setupPhp['with']['extensions'] ?? null);
         self::assertSame('composer:v2', $setupPhp['with']['tools'] ?? null);
+        self::assertSame(
+            'composer install --no-interaction --no-progress',
+            $this->stepRun($steps, 'Install Composer dependencies'),
+        );
         self::assertArrayNotHasKey('Download deterministic seed snapshot artifact', $steps);
         self::assertArrayNotHasKey('Import deterministic seed snapshot', $steps);
 

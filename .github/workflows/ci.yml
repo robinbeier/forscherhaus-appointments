@@ -25,7 +25,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       request_contracts_required: ${{ steps.filter.outputs.request_contracts_required }}
-      deep_bootstrap_required: ${{ steps.filter.outputs.deep_bootstrap_required }}
       coverage_required: ${{ steps.filter.outputs.coverage_required }}
       pdf_renderer_tests_required: ${{ steps.filter.outputs.pdf_renderer_tests_required }}
       api_contract: ${{ steps.filter.outputs.api_contract }}
@@ -117,68 +116,6 @@ jobs:
               - 'composer.json'
               - 'composer.lock'
               - 'phpunit.request-contracts.xml'
-              - '.github/workflows/ci.yml'
-            deep_bootstrap_required:
-              - 'application/**'
-              - 'config/**'
-              - 'database/**'
-              - 'docker/**'
-              - 'scripts/ci/run_deep_runtime_suite.php'
-              - 'scripts/ci/assert_deep_runtime_suite.php'
-              - 'scripts/ci/api_openapi_contract_smoke.php'
-              - 'scripts/ci/booking_write_contract_smoke.php'
-              - 'scripts/ci/api_openapi_write_contract_smoke.php'
-              - 'scripts/ci/dashboard_integration_smoke.php'
-              - 'scripts/ci/git_helpers.sh'
-              - 'scripts/ci/docker_compose_helpers.sh'
-              - 'scripts/ci/lib/BrowserRuntimeEvidence.php'
-              - 'scripts/ci/lib/DashboardSummaryBrowserCheck.php'
-              - 'scripts/ci/check_coverage_delta.php'
-              - 'scripts/ci/merge_coverage_shards.php'
-              - 'scripts/ci/wait_for_mysql_readiness.sh'
-              - 'scripts/ci/lib/CheckSelection.php'
-              - 'scripts/ci/lib/DeterministicFixtureFactory.php'
-              - 'scripts/ci/lib/WriteContractCleanupRegistry.php'
-              - 'scripts/ci/lib/FlakeRetry.php'
-              - 'scripts/ci/lib/OpenApiContractValidator.php'
-              - 'scripts/ci/config/api_openapi_contract_matrix.php'
-              - 'scripts/ci/config/api_openapi_write_contract_matrix.php'
-              - 'scripts/ci/config/coverage_delta_policy.php'
-              - 'scripts/release-gate/**'
-              - 'tests/bootstrap.php'
-              - 'tests/bootstrap.coverage-unit.php'
-              - 'tests/Unit/Controllers/**'
-              - 'tests/Unit/Helper/**'
-              - 'tests/Unit/Migrations/**'
-              - 'tests/Unit/Models/**'
-              - 'tests/Unit/Views/**'
-              - 'tests/Unit/Libraries/AvailabilityBufferTest.php'
-              - 'tests/Unit/Libraries/DashboardHeatmapTest.php'
-              - 'tests/Unit/Libraries/DashboardMetricsTest.php'
-              - 'tests/Unit/Libraries/IcsFileTest.php'
-              - 'tests/Unit/Libraries/PdfRendererTest.php'
-              - 'tests/Unit/Libraries/ProviderUtilizationTest.php'
-              - 'tests/Unit/Libraries/RequestNormalizerTest.php'
-              - 'tests/Unit/Libraries/BookingRequestDtoFactoryTest.php'
-              - 'tests/Unit/Libraries/DashboardRequestDtoFactoryTest.php'
-              - 'tests/Unit/Libraries/ApiRequestDtoFactoryTest.php'
-              - 'tests/Unit/Libraries/AuthRequestDtoFactoryTest.php'
-              - 'tests/Unit/Libraries/BackofficeRequestDtoFactoryTest.php'
-              - 'tests/Unit/Libraries/CalendarRequestDtoFactoryTest.php'
-              - 'tests/Unit/Libraries/IntegrationsRequestDtoFactoryTest.php'
-              - 'tests/Unit/Libraries/ApiRequestDtoFactoryWriteTest.php'
-              - 'tests/Integration/Controllers/BookingControllerFlowTest.php'
-              - 'tests/Integration/Controllers/BookingCancellationControllerFlowTest.php'
-              - 'tests/Integration/Controllers/BookingReadAvailabilityControllerFlowTest.php'
-              - 'tests/Integration/Controllers/CalendarAtomicSaveTest.php'
-              - 'tests/Integration/Controllers/ApiReadControllerFlowTest.php'
-              - 'composer.json'
-              - 'composer.lock'
-              - 'phpunit.booking-flows.xml'
-              - 'phpunit.coverage.unit.xml'
-              - 'phpunit.coverage.integration.xml'
-              - 'index.php'
-              - 'openapi.yml'
               - '.github/workflows/ci.yml'
             coverage_required:
               - 'application/controllers/**'
@@ -569,50 +506,9 @@ jobs:
           cat storage/logs/ci/request-contract-adoption-latest.json || true
           cat storage/logs/ci/phpstan-request-contracts-l2.raw || true
 
-  deep-check-bootstrap:
-    needs:
-      - changes
-    if: >
-      needs.changes.outputs.deep_bootstrap_required == 'true' &&
-      (
-        github.event_name == 'push' ||
-        (github.event_name == 'pull_request' && github.event.pull_request.draft == false)
-      )
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    steps:
-      - name: Git clone
-        uses: actions/checkout@v6
-      - name: Cache Composer downloads
-        uses: actions/cache@v5
-        with:
-          path: ~/.composer/cache/files
-          key: composer-cache-${{ runner.os }}-${{ hashFiles('composer.lock') }}
-          restore-keys: |
-            composer-cache-${{ runner.os }}-
-      - name: Install dependencies
-        uses: php-actions/composer@v6
-        with:
-          php_version: 8.4
-          php_extensions: gd
-          version: 2
-      - name: Archive deep-check dependencies
-        run: |
-          mkdir -p .ci-artifacts
-          tar -czf .ci-artifacts/deep-check-deps.tar.gz vendor
-      - name: Upload deep-check dependencies artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: deep-check-deps
-          path: .ci-artifacts/deep-check-deps.tar.gz
-          if-no-files-found: error
-          retention-days: 1
-
   deep-runtime-suite:
     needs:
       - changes
-      - deep-check-bootstrap
     if: >
       (
         needs.changes.outputs.api_contract == 'true' ||
@@ -638,6 +534,8 @@ jobs:
           coverage: none
           extensions: curl,gd,intl,ldap,mbstring,mysqli,pdo,pdo_mysql,sockets,xml,zip,exif,sqlite3,gettext,bcmath
           tools: composer:v2
+      - name: Install Composer dependencies
+        run: composer install --no-interaction --no-progress
       - name: Setup Node.js
         if: needs.changes.outputs.integration_smoke == 'true'
         uses: actions/setup-node@v6
@@ -650,16 +548,6 @@ jobs:
       - name: Build runtime assets
         if: needs.changes.outputs.integration_smoke == 'true'
         run: npm run assets:refresh
-      - name: Download deep-check dependencies artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: deep-check-deps
-          path: .ci-artifacts
-      - name: Restore deep-check dependencies
-        run: |
-          tar -xzf .ci-artifacts/deep-check-deps.tar.gz
-          test -d vendor
-          test -f vendor/autoload.php
       - name: Prepare deep runtime suite artifact directory
         run: |
           rm -rf storage/logs/ci/deep-runtime-suite
@@ -816,7 +704,6 @@ jobs:
   coverage-shard-unit:
     needs:
       - changes
-      - deep-check-bootstrap
     if: >
       needs.changes.outputs.coverage_required == 'true' &&
       (
@@ -835,16 +722,9 @@ jobs:
           php-version: "8.4.1"
           coverage: xdebug
           extensions: gd
-      - name: Download deep-check dependencies artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: deep-check-deps
-          path: .ci-artifacts
-      - name: Restore deep-check dependencies
-        run: |
-          tar -xzf .ci-artifacts/deep-check-deps.tar.gz
-          test -d vendor
-          test -f vendor/autoload.php
+          tools: composer:v2
+      - name: Install Composer dependencies
+        run: composer install --no-interaction --no-progress
       - name: Run coverage shard (unit)
         run: composer test:coverage:unit-shard
       - name: Upload coverage shard unit artifacts
@@ -865,7 +745,6 @@ jobs:
   coverage-shard-integration:
     needs:
       - changes
-      - deep-check-bootstrap
     if: >
       needs.changes.outputs.coverage_required == 'true' &&
       (
@@ -885,16 +764,8 @@ jobs:
           coverage: xdebug
           extensions: gd
           tools: composer:v2
-      - name: Download deep-check dependencies artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: deep-check-deps
-          path: .ci-artifacts
-      - name: Restore deep-check dependencies
-        run: |
-          tar -xzf .ci-artifacts/deep-check-deps.tar.gz
-          test -d vendor
-          test -f vendor/autoload.php
+      - name: Install Composer dependencies
+        run: composer install --no-interaction --no-progress
       - name: Prepare root test configuration
         run: |
           test ! -e config.php
@@ -940,7 +811,6 @@ jobs:
   coverage-delta:
     needs:
       - changes
-      - deep-check-bootstrap
       - coverage-shard-unit
       - coverage-shard-integration
     # Keep push/main signal and run on non-draft PRs when deep checks are relevant.
@@ -956,21 +826,15 @@ jobs:
     steps:
       - name: Git clone
         uses: actions/checkout@v6
-      - name: Download deep-check dependencies artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: deep-check-deps
-          path: .ci-artifacts
-      - name: Restore deep-check dependencies
-        run: |
-          tar -xzf .ci-artifacts/deep-check-deps.tar.gz
-          test -d vendor
-          test -f vendor/autoload.php
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: "8.4.1"
           coverage: none
+          extensions: gd
+          tools: composer:v2
+      - name: Install Composer dependencies
+        run: composer install --no-interaction --no-progress
       - name: Download coverage shard unit artifacts
         uses: actions/download-artifact@v8
         with:
