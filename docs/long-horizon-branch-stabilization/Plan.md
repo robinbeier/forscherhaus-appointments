@@ -165,7 +165,6 @@ Optional focused checks if files touched by the removal require them:
 
 ```bash
 composer test
-composer check:agent-harness-readiness
 ```
 
 Stop-and-fix:

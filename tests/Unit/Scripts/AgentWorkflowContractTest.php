@@ -6,7 +6,7 @@ namespace Tests\Unit\Scripts;
 
 use PHPUnit\Framework\TestCase;
 
-require_once __DIR__ . '/../../../scripts/ci/check_agent_harness_readiness.php';
+require_once __DIR__ . '/../../../scripts/ci/lib/WorkflowContractChecks.php';
 
 class AgentWorkflowContractTest extends TestCase
 {
@@ -18,28 +18,20 @@ class AgentWorkflowContractTest extends TestCase
         $this->repoRoot = dirname(__DIR__, 3);
     }
 
-    public function testCanonicalWorkflowSurfacesReferenceMachineContract(): void
+    public function testCanonicalSteeringSourcesKeepRequiredReferences(): void
     {
-        $contract = $this->readRepoJson('.codex/contracts/agent-workflow.json');
-        $surfaces = $contract['surfaces'] ?? null;
-        self::assertIsArray($surfaces);
-
-        foreach ($surfaces as $path => $requirements) {
-            self::assertIsString($path);
-            self::assertIsArray($requirements);
-            $content = $this->readRepoFile($path);
-            self::assertStringContainsString($requirements['contract_reference'], $content, $path);
-            self::assertIsArray($requirements['required_sections'] ?? null, $path);
-            foreach ($requirements['required_sections'] as $heading => $requiredClauses) {
-                self::assertIsString($heading, $path);
-                self::assertIsArray($requiredClauses, $path);
-                $section = agentHarnessReadinessExtractMarkdownSection($content, $heading);
-                self::assertNotNull($section, $path . ': ' . $heading);
-                foreach ($requiredClauses as $requiredClause) {
-                    self::assertSame(1, substr_count($section, $requiredClause), $path . ': ' . $heading);
-                    self::assertSame(1, substr_count($content, $requiredClause), $path . ': ' . $requiredClause);
-                }
-            }
+        $steeringChecks = agentHarnessReadinessEvaluateSteeringSources($this->repoRoot, [
+            'README.md' => ['docs/agent-harness-index.md', 'WORKFLOW.md', 'AGENTS.md'],
+            'AGENTS.md' => ['docs/agent-harness-index.md'],
+            'WORKFLOW.md' => ['docs/agent-harness-index.md'],
+            'docs/agent-harness-index.md' => [
+                '.github/workflows/ci.yml',
+                'docs/architecture-map.md',
+                'docs/ownership-map.md',
+            ],
+        ]);
+        foreach ($steeringChecks as $check) {
+            self::assertSame('pass', $check['status'], $check['id'] . ': ' . ($check['message'] ?? ''));
         }
     }
 
@@ -230,10 +222,6 @@ class AgentWorkflowContractTest extends TestCase
         foreach ($checks as $check) {
             self::assertSame('pass', $check['status'], $check['id'] . ': ' . ($check['message'] ?? ''));
         }
-
-        $policy = require $this->repoRoot . '/scripts/ci/config/agent_harness_readiness_policy.php';
-        self::assertIsArray($policy);
-        self::assertArrayNotHasKey('blocking_jobs', $policy);
     }
 
     public function testHarnessEntryPointsAndGeneratedCachesStayAligned(): void

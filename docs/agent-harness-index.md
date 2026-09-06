@@ -20,7 +20,7 @@ This file stays intentionally short. It is a map, not a second runbook.
 | --- | --- | --- |
 | Local onboarding and quickstart | `README.md` | Operator-first entry point. |
 | Agent runtime and issue-to-merge state model | `WORKFLOW.md` | Single source for active agent behavior. |
-| Machine-readable cross-document workflow invariants | `.codex/contracts/agent-workflow.json` | Structured exact-head, review, public-write, evidence, and blocking-job contract. |
+| Machine-readable workflow and CI invariants | `.codex/contracts/agent-workflow.json` | Structured exact-head, review, public-write, evidence, and blocking-job contract. |
 | Model-aware implementation delegation | `WORKFLOW.md`, `.codex/agents/implementation-worker.toml` | Primary-agent authority plus the pinned Luna worker boundary. |
 | Controlled parallel implementation | `WORKFLOW.md` | Explicit disjoint local ownership with primary-owned integration and publication. |
 | Compact guardrails and command entry points | `AGENTS.md` | Cross-topic entry point without duplicating specialist docs. |
@@ -61,12 +61,13 @@ This file stays intentionally short. It is a map, not a second runbook.
     check applicable blocking CI and unresolved findings, and merge only with
     user authorization and `--match-head-commit`
   - no separate CLI login or attestation command is required
-- Harness readiness score:
-  - `composer check:agent-harness-readiness`
-  - The machine contract owns the supported CI-condition tokens and binds
-    critical cross-document clauses to named Markdown sections; the checker
-    fails closed on invalid grammar, missing sections, misplaced clauses, or
-    duplicate clauses.
+- Workflow consistency checks run with `composer test`:
+  - `AgentWorkflowContractTest` checks the current repository;
+    `AgentHarnessReadinessTest` covers the shared helper in
+    `scripts/ci/lib/WorkflowContractChecks.php`.
+  - Canonical steering-document references remain checked.
+  - The machine contract owns the supported CI-condition tokens; the checker
+    fails closed on invalid grammar.
   - The workflow execution envelope and every `fingerprinted_execution` job
     have separate canonical fingerprints, so drift reports identify the
     affected component. Display-only job/step names and order-insensitive
@@ -79,8 +80,6 @@ This file stays intentionally short. It is a map, not a second runbook.
     `continue-on-error` fail closed. Every workflow job must be classified
     exactly once as blocking or advisory; advisory jobs remain outside
     blocking execution checks, while missing or unclassified jobs fail closed.
-- Report date sanity:
-  - `composer check:harness-report-dates`
 - Scope-specific checks:
   - root/host prerequisite contract: `docs/root-host-test-harness.md`
   - write-path contracts: `docs/ci-write-contracts.md`
@@ -89,18 +88,6 @@ This file stays intentionally short. It is a map, not a second runbook.
   - production Customers UI smoke: `docs/release-gate-customers-ui-smoke.md`
   - architecture boundaries entry points: `AGENTS.md`
 
-## Scheduled Hygiene
-
-- Scheduled lightweight hygiene lives in `.github/workflows/hygiene.yml`.
-- `agent-harness-readiness-latest.json` is the machine-readable scorecard; use it
-  for the current readiness snapshot, not older narrative docs alone.
-- `harness-report-date-sanity-latest.json` verifies that dated readiness/audit
-  artifacts are not future-dated or internally mismatched.
-- Reaction model:
-  - `pass`: the harness signals and supporting docs are internally consistent.
-  - `fail`: fix the listed drift or date violations before trusting the score as
-    the current repo state.
-
 ## Editing Rules
 
 - Change `README.md` when operator onboarding, quickstart, or local service
@@ -108,7 +95,7 @@ This file stays intentionally short. It is a map, not a second runbook.
 - Change `WORKFLOW.md` when the agent state machine, workpad policy, or
   ticket-to-merge or model-aware delegation behavior changes.
 - Change `.codex/contracts/agent-workflow.json` when a machine-checked
-  cross-document workflow invariant changes.
+  workflow or CI invariant changes.
 - Change `AGENTS.md` when compact repo guardrails or command entry points
   change.
 - Change `.github/workflows/ci.yml` when CI truth changes; then update
