@@ -290,7 +290,7 @@ class CiPathFilterMatrixTest extends TestCase
         }
     }
 
-    public function testDeepRuntimeWorkflowUsesContainerChromiumForPlaywrightSmoke(): void
+    public function testDeepRuntimeWorkflowUsesHostChromeForPlaywrightSmoke(): void
     {
         $workflow = file_get_contents($this->workflowPath());
         self::assertNotFalse($workflow);
@@ -305,17 +305,18 @@ class CiPathFilterMatrixTest extends TestCase
             'bash scripts/release-gate/playwright/playwright_cli.sh install-browser',
             $deepRuntimeJob,
         );
-        self::assertStringContainsString('-e PLAYWRIGHT_MCP_BROWSER=chromium', $deepRuntimeJob);
-        self::assertStringContainsString('-e PLAYWRIGHT_MCP_EXECUTABLE_PATH=/usr/bin/chromium', $deepRuntimeJob);
+        self::assertStringContainsString('command -v google-chrome', $deepRuntimeJob);
+        self::assertStringContainsString('PLAYWRIGHT_MCP_BROWSER: chromium', $deepRuntimeJob);
+        self::assertStringContainsString('PLAYWRIGHT_MCP_EXECUTABLE_PATH=$chrome_path', $deepRuntimeJob);
         self::assertStringContainsString(
-            '-e PLAYWRIGHT_MCP_READY_DIR=/var/www/html/storage/logs/ci/deep-runtime-suite/playwright-ready',
+            'PLAYWRIGHT_MCP_READY_DIR: storage/logs/ci/deep-runtime-suite/playwright-ready',
             $deepRuntimeJob,
         );
         self::assertStringContainsString(
-            '-e PLAYWRIGHT_RUNTIME_PACKAGE=playwright@1.59.0-alpha-1771104257000',
+            'PLAYWRIGHT_RUNTIME_PACKAGE: playwright@1.59.0-alpha-1771104257000',
             $deepRuntimeJob,
         );
-        self::assertStringContainsString('-e PLAYWRIGHT_USE_LOCAL_BINS=1', $deepRuntimeJob);
+        self::assertStringContainsString('PLAYWRIGHT_USE_LOCAL_BINS: "1"', $deepRuntimeJob);
         self::assertStringContainsString('--integration-smoke-browser-bootstrap-timeout=900', $deepRuntimeJob);
     }
 

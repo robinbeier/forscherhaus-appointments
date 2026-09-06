@@ -632,6 +632,13 @@ jobs:
     steps:
       - name: Git clone
         uses: actions/checkout@v6
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4.1"
+          coverage: none
+          extensions: curl,gd,intl,ldap,mbstring,mysqli,pdo,pdo_mysql,sockets,xml,zip,exif,sqlite3,gettext,bcmath
+          tools: composer:v2
       - name: Setup Node.js
         if: needs.changes.outputs.deep_runtime_asset_build_required == 'true' || needs.changes.outputs.integration_smoke == 'true'
         uses: actions/setup-node@v6
@@ -707,14 +714,12 @@ jobs:
             echo "include_ldap=${include_ldap}"
           } >> "$GITHUB_OUTPUT"
       - name: Start deep runtime services
-        env:
-          EA_SKIP_NPM_BOOTSTRAP: "1"
-          EA_SKIP_ASSET_BUILD_BOOTSTRAP: "1"
         run: |
-          services=(mysql php-fpm nginx)
+          services=(mysql)
 
           if [[ "${{ steps.ldap_guardrail.outputs.include_ldap }}" == "true" ]]; then
             services+=(openldap)
+            echo "127.0.0.1 openldap" | sudo tee -a /etc/hosts >/dev/null
           fi
 
           docker compose up -d "${services[@]}"
@@ -722,8 +727,14 @@ jobs:
         run: bash scripts/ci/wait_for_mysql_readiness.sh
       - name: Install deterministic seed instance
         run: |
+          test ! -e config.php
+          install -m 0600 config-sample.php config.php
+          sed -i "s/const BASE_URL = 'http:\/\/localhost';/const BASE_URL = 'http:\/\/127.0.0.1:8080';/" config.php
+          sed -i "s/const DB_HOST = 'mysql';/const DB_HOST = '127.0.0.1';/" config.php
+          grep -Fq "const BASE_URL = 'http://127.0.0.1:8080';" config.php
+          grep -Fq "const DB_HOST = '127.0.0.1';" config.php
           for attempt in 1 2 3; do
-            if docker compose exec -T php-fpm php index.php console install; then
+            if php index.php console install; then
               exit 0
             fi
             echo "::warning::console install failed on attempt ${attempt}; retrying in 3s." >&2
@@ -731,32 +742,49 @@ jobs:
           done
           echo "::error::console install failed after 3 attempts." >&2
           exit 1
+      - name: Start deep runtime HTTP server
+        if: needs.changes.outputs.api_contract == 'true' || needs.changes.outputs.write_contract_booking == 'true' || needs.changes.outputs.write_contract_api == 'true' || needs.changes.outputs.integration_smoke == 'true'
+        run: |
+          mkdir -p storage/logs/ci/deep-runtime-suite
+          export PHP_CLI_SERVER_WORKERS=4
+          setsid php -S 127.0.0.1:8080 -t . > storage/logs/ci/deep-runtime-suite/php-server.log 2>&1 &
+          echo $! > storage/logs/ci/deep-runtime-suite/php-server.pid
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if curl --fail --silent --show-error http://127.0.0.1:8080/index.php/login >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat storage/logs/ci/deep-runtime-suite/php-server.log
+          exit 1
+      - name: Resolve system Chrome executable
+        if: needs.changes.outputs.integration_smoke == 'true'
+        run: |
+          chrome_path="$(command -v google-chrome)"
+          test -n "$chrome_path"
+          test -x "$chrome_path"
+          echo "PLAYWRIGHT_MCP_EXECUTABLE_PATH=$chrome_path" >> "$GITHUB_ENV"
       - name: Install Playwright smoke browser
         if: needs.changes.outputs.integration_smoke == 'true'
-        run: >
-          docker compose exec
-          -e PLAYWRIGHT_MCP_BROWSER=chromium
-          -e PLAYWRIGHT_MCP_EXECUTABLE_PATH=/usr/bin/chromium
-          -e PLAYWRIGHT_INSTALL_MODE=browser-only
-          -e PLAYWRIGHT_MCP_READY_DIR=/var/www/html/storage/logs/ci/deep-runtime-suite/playwright-ready
-          -e PLAYWRIGHT_RUNTIME_PACKAGE=playwright@1.59.0-alpha-1771104257000
-          -e PLAYWRIGHT_USE_LOCAL_BINS=1
-          -T php-fpm
-          bash scripts/release-gate/playwright/playwright_cli.sh install-browser
+        env:
+          PLAYWRIGHT_MCP_BROWSER: chromium
+          PLAYWRIGHT_INSTALL_MODE: browser-only
+          PLAYWRIGHT_MCP_READY_DIR: storage/logs/ci/deep-runtime-suite/playwright-ready
+          PLAYWRIGHT_RUNTIME_PACKAGE: playwright@1.59.0-alpha-1771104257000
+          PLAYWRIGHT_USE_LOCAL_BINS: "1"
+        run: bash scripts/release-gate/playwright/playwright_cli.sh install-browser
       - name: Run deep runtime suite
+        env:
+          PLAYWRIGHT_MCP_BROWSER: chromium
+          PLAYWRIGHT_INSTALL_MODE: browser-only
+          PLAYWRIGHT_MCP_READY_DIR: storage/logs/ci/deep-runtime-suite/playwright-ready
+          PLAYWRIGHT_RUNTIME_PACKAGE: playwright@1.59.0-alpha-1771104257000
+          PLAYWRIGHT_USE_LOCAL_BINS: "1"
         run: >
-          docker compose exec
-          -e PLAYWRIGHT_MCP_BROWSER=chromium
-          -e PLAYWRIGHT_MCP_EXECUTABLE_PATH=/usr/bin/chromium
-          -e PLAYWRIGHT_INSTALL_MODE=browser-only
-          -e PLAYWRIGHT_MCP_READY_DIR=/var/www/html/storage/logs/ci/deep-runtime-suite/playwright-ready
-          -e PLAYWRIGHT_RUNTIME_PACKAGE=playwright@1.59.0-alpha-1771104257000
-          -e PLAYWRIGHT_USE_LOCAL_BINS=1
-          -T php-fpm
           php scripts/ci/run_deep_runtime_suite.php
           --suites=${{ steps.suites.outputs.requested }}
-          --base-url=http://nginx --index-page=index.php
-          --openapi-spec=/var/www/html/openapi.yml
+          --base-url=http://127.0.0.1:8080 --index-page=index.php
+          --openapi-spec=openapi.yml
           --username=administrator --password=administrator
           --booking-search-days=14 --retry-count=1
           --start-date=2026-01-01 --end-date=2026-01-31
@@ -775,11 +803,16 @@ jobs:
         if: failure()
         run: |
           docker compose ps || true
-          docker compose logs --no-color --timestamps mysql php-fpm nginx || true
+          docker compose logs --no-color --timestamps mysql openldap || true
+          cat storage/logs/ci/deep-runtime-suite/php-server.log || true
           cat storage/logs/ci/deep-runtime-suite/manifest.json || true
       - name: Cleanup deep runtime services
         if: always()
-        run: docker compose down -v --remove-orphans
+        run: |
+          if [[ -f storage/logs/ci/deep-runtime-suite/php-server.pid ]]; then
+            kill -- "-$(cat storage/logs/ci/deep-runtime-suite/php-server.pid)" 2>/dev/null || true
+          fi
+          docker compose down -v --remove-orphans
 
   coverage-shard-unit:
     needs:

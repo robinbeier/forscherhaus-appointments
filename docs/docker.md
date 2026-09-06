@@ -116,6 +116,19 @@ When running PHP directly on the host, MySQL is reachable via `localhost:3306`, 
 Warning: Running host-side `composer test` while `DB_HOST='mysql'` is configured will fail with a
 `php_network_getaddresses: getaddrinfo for mysql failed` error.
 
+### GitHub integration runtime
+
+GitHub's `deep-runtime-suite` runs PHP and the browser directly on the disposable
+runner. MySQL and, when requested, OpenLDAP remain Docker services. A loopback-only
+PHP test server with four workers serves the existing HTTP and browser checks;
+the job no longer builds the full PHP development image or starts nginx.
+The job retains the same suites, LDAP checks and browser evidence. Server logs
+are included in the suite artifact, and cleanup stops the test server and services.
+
+This checks application behavior, not nginx/FastCGI configuration. The full local
+pre-PR gate continues to exercise the Docker PHP-FPM/nginx stack. This CI setup
+is not a production serving configuration.
+
 ### Linux root/host tests
 
 The explicit test commands above include server-operation tests. On Docker
