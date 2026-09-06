@@ -74,8 +74,8 @@ gh pr view --json state,url,number 2>/dev/null || true
   delta and affected paths; broaden review if scope or risk changed.
 - Keep the PR linked on the Linear issue itself; do not duplicate the PR URL in
   the workpad.
-- Follow the standard review path in WORKFLOW.md. No separate CLI login,
-  sealed review, or owner attestation is required to publish or review a PR.
+- Follow the standard review path in WORKFLOW.md. No separate CLI login is
+  required to publish or review a PR.
 - Creating a PR does not authorize merging it.
 - If the correct diff is already present and validated, stop exploring and
   publish it instead of reopening analysis.

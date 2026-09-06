@@ -36,8 +36,8 @@ Purpose: durable repo instructions for Codex. Keep this file short; long or topi
 
 - Use one independent read-only reviewer with enough code context; add a
   specialist when the actual risk warrants one. Follow `code_review.md`.
-- Standard review and PR creation do not require a separate CLI login,
-  sealed reviewer, or external bootstrap. Keep current blocking CI and
+- Standard review and PR creation do not require a separate CLI login or
+  bootstrap. Keep current blocking CI and
   reviewed-head checks; `WORKFLOW.md` defines landing and authorization.
 
 ## Default Path
