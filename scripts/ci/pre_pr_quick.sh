@@ -48,6 +48,20 @@ require_cmd node
 bash ./scripts/ci/require_node_minimum.sh "$ROOT_NODE_MINIMUM_VERSION" "pre-pr-quick"
 ensure_local_config
 
+echo_section "Frontend dependency consistency"
+# Validate the committed dependency pair without installing or running postinstall.
+(
+    dependency_check_dir="$(mktemp -d)"
+    trap 'rm -rf "$dependency_check_dir"' EXIT
+    cp package.json package-lock.json "$dependency_check_dir/"
+    if [[ -f .npmrc ]]; then
+        cp .npmrc "$dependency_check_dir/"
+    fi
+    # Isolate npm's internal node_modules metadata writes, even during dry runs.
+    cd "$dependency_check_dir"
+    npm ci --dry-run --ignore-scripts --no-audit --no-fund --offline
+)
+
 # Keep changed-file checks deterministic against current base branch state.
 git_ci_refresh_base_ref_if_safe "$BASE_REF" "pre-pr-quick"
 ci_docker_build_php_fpm_if_inputs_changed "$BASE_REF" "pre-pr-quick"

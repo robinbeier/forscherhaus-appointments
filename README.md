@@ -169,7 +169,9 @@ startup time. In that case, rerun the full gate with
 
 Use `bash ./scripts/ci/pre_pr_quick.sh` for source checks without rebuilding
 frontend files once dependencies are installed. The full gate builds assets
-once before its browser checks. Neither gate rewrites the package lockfile;
+once before its browser checks. Both gates use an offline npm dry run to check
+that the dependency manifest and lockfile agree, without installing packages
+or rebuilding assets. Neither gate rewrites the package lockfile;
 after changing frontend dependencies, run `npm ci` to install the committed
 lockfile (its postinstall also prepares assets). For interactive UI work, use
 `npm run build` after frontend changes.
