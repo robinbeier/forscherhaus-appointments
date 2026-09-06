@@ -28,7 +28,7 @@ jobs:
       deep_bootstrap_required: ${{ steps.filter.outputs.deep_bootstrap_required }}
       deep_runtime_asset_build_required: ${{ steps.filter.outputs.integration_smoke }}
       coverage_required: ${{ steps.filter.outputs.coverage_required }}
-      pdf_renderer_latency_required: ${{ steps.filter.outputs.pdf_renderer_latency_required }}
+      pdf_renderer_tests_required: ${{ steps.filter.outputs.pdf_renderer_tests_required }}
       api_contract: ${{ steps.filter.outputs.api_contract }}
       booking_flows: ${{ steps.filter.outputs.booking_flows }}
       integration_smoke: ${{ steps.filter.outputs.integration_smoke }}
@@ -229,16 +229,13 @@ jobs:
               - 'phpunit.coverage.integration.xml'
               - 'index.php'
               - '.github/workflows/ci.yml'
-            pdf_renderer_latency_required:
+            pdf_renderer_tests_required:
               - 'application/controllers/Dashboard_export.php'
               - 'application/libraries/Pdf_renderer.php'
               - 'application/views/exports/dashboard_teacher_pdf.php'
               - 'pdf-renderer/**'
               - 'docker-compose.yml'
-              - 'scripts/ci/check_pdf_renderer_latency.php'
-              - 'scripts/ci/config/pdf_renderer_latency_policy.php'
               - 'scripts/release-gate/dashboard_release_gate.php'
-              - 'tests/Unit/Scripts/PdfRendererLatencyGateTest.php'
               - 'tests/Unit/Views/DashboardTeacherPdfViewTest.php'
               - '.github/workflows/ci.yml'
             api_contract:
@@ -1013,12 +1010,12 @@ jobs:
           cat storage/logs/ci/coverage-merge-latest.json || true
           cat storage/logs/ci/coverage-delta-latest.json || true
 
-  pdf-renderer-latency:
+  pdf-renderer-tests:
     needs:
       - changes
     if: >
       always() &&
-      needs.changes.outputs.pdf_renderer_latency_required == 'true' &&
+      needs.changes.outputs.pdf_renderer_tests_required == 'true' &&
       (
         github.event_name == 'push' ||
         (github.event_name == 'pull_request' && github.event.pull_request.draft == false)
@@ -1045,29 +1042,6 @@ jobs:
           exit 1
       - name: Run PDF renderer regression tests
         run: docker compose exec -T pdf-renderer npm test
-      - name: Evaluate PDF renderer latency
-        run: |
-          status=0
-          php scripts/ci/check_pdf_renderer_latency.php \
-            --base-url=http://localhost:3003 \
-            --output-json=storage/logs/ci/pdf-renderer-latency-latest.json \
-            || status=$?
-
-          if [ "$status" -eq 1 ]; then
-            echo "::warning::pdf-renderer latency is above the advisory threshold."
-          elif [ "$status" -ne 0 ]; then
-            exit "$status"
-          fi
-      - name: Upload PDF renderer latency artifacts
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: pdf-renderer-latency-artifacts
-          path: storage/logs/ci/pdf-renderer-latency-latest.json
-          if-no-files-found: warn
-      - name: Diagnostics (PDF renderer latency report)
-        if: always()
-        run: cat storage/logs/ci/pdf-renderer-latency-latest.json || true
       - name: Tear down PDF renderer service
         if: always()
         run: docker compose down --remove-orphans

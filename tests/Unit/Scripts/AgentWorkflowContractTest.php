@@ -491,7 +491,7 @@ class AgentWorkflowContractTest extends TestCase
         self::assertFalse($contract['evidence_privacy']['allow_personal_data'] ?? null);
         self::assertSame('strict-v1', $contract['ci']['blocking_failure_control_policy'] ?? null);
         self::assertSame('explicit-v1', $contract['ci']['job_classification_policy'] ?? null);
-        self::assertSame(['pdf-renderer-latency'], $contract['ci']['advisory_jobs'] ?? null);
+        self::assertSame([], $contract['ci']['advisory_jobs'] ?? null);
         self::assertArrayNotHasKey('unclassified_job_policy', $contract['ci']);
         self::assertArrayNotHasKey('blocking_failure_controls', $contract['ci']);
         self::assertArrayNotHasKey('blocking_execution_sha256', $contract['ci']);
@@ -553,6 +553,7 @@ class AgentWorkflowContractTest extends TestCase
                 'deep-runtime-suite',
                 'integration-smoke',
                 'js-lint-changed',
+                'pdf-renderer-tests',
                 'phpstan-application',
                 'typed-request-contracts',
                 'typed-request-dto',
@@ -566,7 +567,7 @@ class AgentWorkflowContractTest extends TestCase
             $ci['blocking_jobs'],
             static fn(array $job): bool => ($job['kind'] ?? null) === 'fingerprinted_execution',
         );
-        self::assertCount(16, $fingerprintedJobs);
+        self::assertCount(17, $fingerprintedJobs);
         $expectedFingerprintComponents = array_merge(['workflow_execution_envelope'], array_keys($fingerprintedJobs));
         $actualFingerprintComponents = array_keys($ci['blocking_execution_fingerprints']);
         sort($expectedFingerprintComponents, SORT_STRING);

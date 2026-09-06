@@ -629,7 +629,10 @@ function decodeExactHeadMergegatePolicy(string $contents): array
         throw new RuntimeException('Exact-head mergegate check classification does not own every blocking job.');
     }
 
-    $advisoryJobs = normalizeExactHeadMergegateStringList($ci['advisory_jobs'] ?? null);
+    $advisoryJobs =
+        ($ci['advisory_jobs'] ?? null) === []
+            ? []
+            : normalizeExactHeadMergegateStringList($ci['advisory_jobs'] ?? null);
     if (array_intersect($classifiedChecks, $advisoryJobs) !== []) {
         throw new RuntimeException('Exact-head mergegate classifies an advisory job as blocking.');
     }
