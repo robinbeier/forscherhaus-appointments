@@ -73,7 +73,6 @@
         "build": "npx gulp build",
         "docs": "npx gulp docs",
         "lint:js": "eslint \"assets/js/**/*.js\" --max-warnings=0",
-        "assets:refresh": "npx gulp vendor && npx gulp scripts && npx gulp styles",
         "postinstall": "node scripts/postinstall-assets.js"
     }
 }

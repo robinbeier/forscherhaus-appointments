@@ -128,7 +128,7 @@ GITHUB_EVENT_NAME=pull_request GITHUB_BASE_REF="$BASE_REF" bash scripts/ci/run_d
 GITHUB_EVENT_NAME=pull_request GITHUB_BASE_REF="$BASE_REF" python3 scripts/ci/check_component_boundaries.py
 
 echo_section "Refresh frontend assets"
-npm run assets:refresh
+npm run build
 
 echo_section "Start integration stack"
 INTEGRATION_SMOKE_INCLUDE_LDAP=0

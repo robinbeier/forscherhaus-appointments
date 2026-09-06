@@ -13,4 +13,4 @@ if (isProductionInstall) {
     process.exit(0);
 }
 
-execSync('npm run assets:refresh', {stdio: 'inherit'});
+execSync('npm run build', {stdio: 'inherit'});

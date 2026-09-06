@@ -597,7 +597,7 @@ jobs:
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Build runtime assets
         if: needs.changes.outputs.integration_smoke == 'true'
-        run: npm run assets:refresh
+        run: npm run build
       - name: Prepare deep runtime suite artifact directory
         run: |
           rm -rf storage/logs/ci/deep-runtime-suite
