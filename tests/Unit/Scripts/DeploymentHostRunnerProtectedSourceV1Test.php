@@ -116,7 +116,7 @@ final class DeploymentHostRunnerProtectedSourceV1Test extends TestCase
         self::assertSame(0, $assembly['exit_code']);
         self::assertSame([[$request['release_id'], hash('sha256', $provenance)]], $buildHelper->calls);
         self::assertSame([[$request['run_id'], 'deploy-ref-zero-surprise-dump.sql.gz', $dumpSha]], $dumpHelper->calls);
-        self::assertSame([[$request['run_id'], $request['release_id'], 'external']], $capacityHelper->calls);
+        self::assertSame([[$request['run_id'], $request['release_id']]], $capacityHelper->calls);
         self::assertSame(1, $storage->pinCount);
         self::assertSame('passed', $assembly['sections']['capacity']['status']);
         self::assertSame('passed', $assembly['sections']['artifact']['status']);
@@ -139,11 +139,6 @@ final class DeploymentHostRunnerProtectedSourceV1Test extends TestCase
             ],
             7,
         );
-        $policy = DeploymentEvidenceAuthorityV1::encodeFile([
-            'schema' => DeploymentEvidenceAuthorityV1::RENDERER_CAPACITY_POLICY_SCHEMA,
-            'external' => ['bytes' => 0, 'inodes' => 0],
-            'host' => ['bytes' => 1_000_000, 'inodes' => 1_000],
-        ]);
         return [
             'block_size' => 4096,
             'blocks' => 1_000_000,
@@ -155,7 +150,6 @@ final class DeploymentHostRunnerProtectedSourceV1Test extends TestCase
             'live_storage_allocated_bytes' => 10_000,
             'live_storage_inode_count' => 8,
             'live_storage_logical_bytes' => 20_000,
-            'policy_bytes' => $policy,
         ];
     }
 }
@@ -186,9 +180,9 @@ final class SourceCapacityHelperFake implements HostRunnerCapacityHelper
 {
     public array $calls = [];
     public function __construct(private readonly array $value) {}
-    public function observe(string $runId, string $releaseId, string $rendererMode): array
+    public function observe(string $runId, string $releaseId): array
     {
-        $this->calls[] = [$runId, $releaseId, $rendererMode];
+        $this->calls[] = [$runId, $releaseId];
         return $this->value;
     }
 }

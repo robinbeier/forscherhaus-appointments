@@ -528,29 +528,13 @@ final class DeploymentHostRunnerV1RootTest extends TestCase
         self::assertSame(1, fwrite($sparse, 'x'));
         self::assertTrue(fclose($sparse));
         self::assertTrue(chmod($this->root . '/live-storage/nested/sparse.bin', 0600));
-        $policy =
-            json_encode(
-                [
-                    'external' => ['bytes' => 0, 'inodes' => 0],
-                    'host' => ['bytes' => 1_000_000, 'inodes' => 1_000],
-                    'schema' => 'deployment_renderer_capacity_policy.v1',
-                ],
-                JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
-            ) . "\n";
-        self::assertSame(
-            strlen($policy),
-            file_put_contents($this->root . '/deployment-renderer-capacity-v1.json', $policy),
-        );
-        self::assertTrue(chmod($this->root . '/deployment-renderer-capacity-v1.json', 0600));
-
-        $result = $this->runHelper(['observe-capacity', $this->root, self::RUN_ID, 'ea_20260812', 'external']);
+        $result = $this->runHelper(['observe-capacity', $this->root, self::RUN_ID, 'ea_20260812']);
 
         self::assertSame(0, $result['exit_code'], $result['stderr']);
         $decoded = json_decode($result['stdout'], true, 16, JSON_THROW_ON_ERROR);
         self::assertSame(1_048_576, $decoded['live_storage_logical_bytes']);
         self::assertGreaterThan(0, $decoded['live_storage_allocated_bytes']);
         self::assertSame(3, $decoded['live_storage_inode_count']);
-        self::assertSame(base64_encode($policy), $decoded['policy_bytes_base64']);
         self::assertSame(
             array_fill_keys(
                 [

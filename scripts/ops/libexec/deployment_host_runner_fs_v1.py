@@ -1907,12 +1907,12 @@ def observe_regular_tree(root: int) -> tuple[int, int, int]:
     return allocated, logical, inodes
 
 
-def observe_capacity(authority_root: str, run_id: str, release_id: str, renderer_mode: str) -> bytes:
+def observe_capacity(authority_root: str, run_id: str, release_id: str) -> bytes:
     test_root = re.fullmatch(r'/root/fh-host-runner-core-[0-9a-f]{16}', authority_root) is not None
     if authority_root != STATE_ROOT and not test_root:
         reject()
     validate_run_id(run_id)
-    if re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,127}', release_id) is None or renderer_mode not in ('host', 'external'):
+    if re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,127}', release_id) is None:
         reject()
     if test_root:
         paths = {
@@ -1926,7 +1926,6 @@ def observe_capacity(authority_root: str, run_id: str, release_id: str, renderer
             'state_root': authority_root,
             'temp': authority_root + '/target',
         }
-        policy_root = authority_root
         writable_tails = {key: 0 for key in CAPACITY_DEVICE_KEYS}
     else:
         paths = {
@@ -1934,16 +1933,14 @@ def observe_capacity(authority_root: str, run_id: str, release_id: str, renderer
             'dump_pin': STATE_ROOT + '/runs/' + run_id,
             'live_storage': '/var/www/html/easyappointments/storage',
             'release_root': '/root/releases',
-            'renderer_state': '/var/lib/fh-pdf-renderer' if renderer_mode == 'host' else '/var/lib',
+            'renderer_state': '/var/lib',
             'restore_scratch': '/var/lib/docker' if os.path.isdir('/var/lib/docker') else '/var/lib',
             'stage': '/var/www/html',
             'state_root': STATE_ROOT,
             'temp': '/var/www/html',
         }
-        policy_root = '/etc/fh'
         writable_tails = {key: 0 for key in CAPACITY_DEVICE_KEYS}
         writable_tails['live_storage'] = 2
-        writable_tails['renderer_state'] = 1 if renderer_mode == 'host' else 0
 
     descriptors: dict[str, int] = {}
     try:
@@ -1964,11 +1961,6 @@ def observe_capacity(authority_root: str, run_id: str, release_id: str, renderer
         live_allocated, live_logical, live_inodes = observe_regular_tree(descriptors['live_storage'])
         if live_allocated <= 0 or live_logical <= 0 or live_inodes <= 0:
             reject()
-        policy_parent = open_system_read_root(policy_root)
-        try:
-            policy = bounded_read_at(policy_parent, 'deployment-renderer-capacity-v1.json', 4096)
-        finally:
-            os.close(policy_parent)
     finally:
         for descriptor in descriptors.values():
             os.close(descriptor)
@@ -1984,7 +1976,6 @@ def observe_capacity(authority_root: str, run_id: str, release_id: str, renderer
         'live_storage_allocated_bytes': live_allocated,
         'live_storage_inode_count': live_inodes,
         'live_storage_logical_bytes': live_logical,
-        'policy_bytes_base64': base64.b64encode(policy).decode('ascii'),
     }
     return (json.dumps(value, sort_keys=True, separators=(',', ':')) + '\n').encode('ascii')
 
@@ -2032,8 +2023,8 @@ def main(arguments: list[str]) -> int:
     if len(arguments) == 3 and arguments[1] == 'read-host-deploy-script':
         sys.stdout.buffer.write(read_host_deploy_script(arguments[2]))
         return 0
-    if len(arguments) == 6 and arguments[1] == 'observe-capacity':
-        sys.stdout.buffer.write(observe_capacity(arguments[2], arguments[3], arguments[4], arguments[5]))
+    if len(arguments) == 5 and arguments[1] == 'observe-capacity':
+        sys.stdout.buffer.write(observe_capacity(arguments[2], arguments[3], arguments[4]))
         return 0
     if len(arguments) == 4 and arguments[1] == 'prepare-run':
         prepare_run(arguments[2], arguments[3])
