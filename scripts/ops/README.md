@@ -77,16 +77,6 @@ Script inventory:
 - `prod_verify_latest_deployment_dump.sh` resolves that producer's protected
   handoff on the host and runs one ROB-461 restore-attestation pass only with
   its separate exact live confirmation; no set ID crosses the wrapper.
-- `prod_legacy_release_provenance.sh` inspects the two fixed host-authorized
-  current/rollback legacy archives by default and invokes only the installed
-  ROB-468 root helper. Its separately confirmed execute mode can publish only
-  canonical no-replace provenance sidecars and helper-owned temps; see
-  [`docs/ops/production-legacy-release-provenance.md`](../../docs/ops/production-legacy-release-provenance.md).
-  `--inspect-authorization` is read-only; the separately confirmed
-  `--provision-authorization` gate may create only the missing fixed
-  host-local authorization from validated marker/archive/deployment-run
-  authority, or clean only exact helper-owned stale authorization temps, and
-  is not sidecar execute approval.
 - For native journal rotation and occasional approved manual cleanup, see
   [`docs/ops/production-journald-retention.md`](../../docs/ops/production-journald-retention.md).
 - For daily application-log inspection and occasional approved manual cleanup,
@@ -342,16 +332,3 @@ Closed production backup sets:
   separately controlled production operations; merge activates nothing.
 - The production sequence, atomic set contract and ROB-461 two-set gate live
   in `docs/ops/production-backup-set-producer.md`.
-
-Legacy release provenance:
-
-- The repository helper source is
-  `scripts/ops/libexec/legacy_release_provenance_v1.py`; a future separately
-  approved installation places it root-owned mode `0555` at
-  `/usr/local/libexec/fh-legacy-release-provenance-v1`.
-- Its only authorization is the canonical host-local root-owned mode `0600`
-  `/etc/fh/legacy-release-provenance-authorization.v1.json`. No authorization
-  value or target selector crosses the wrapper.
-- Repository delivery and merge do not install or run the helper. The closed
-  authorization, inspection, execution, and rollback boundary lives in
-  `docs/ops/production-legacy-release-provenance.md`.
