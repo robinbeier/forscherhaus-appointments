@@ -9,6 +9,37 @@ use Symfony\Component\Yaml\Yaml;
 
 class CiWorkflowContractTest extends TestCase
 {
+    public function testJavaScriptLintSelectsChangesBeforeInstallingDependencies(): void
+    {
+        $steps = $this->namedSteps($this->workflowJob('js-lint-changed'));
+        self::assertSame(
+            [
+                'Git clone',
+                'Check changed JS files',
+                'Setup Node.js',
+                'Install npm dependencies',
+                'ESLint changed JS files',
+            ],
+            array_keys($steps),
+        );
+        self::assertSame('js_changes', $steps['Check changed JS files']['id']);
+        self::assertArrayNotHasKey('if', $steps['Check changed JS files']);
+        self::assertSame(
+            './scripts/ci/js-lint-changed.sh --check-only',
+            $this->stepRun($steps, 'Check changed JS files'),
+        );
+        foreach (['Setup Node.js', 'Install npm dependencies', 'ESLint changed JS files'] as $name) {
+            self::assertSame("steps.js_changes.outputs.has_changes == 'true'", $steps[$name]['if']);
+            self::assertArrayNotHasKey('continue-on-error', $steps[$name]);
+        }
+        self::assertSame(
+            'npm ci --ignore-scripts --no-audit --no-fund',
+            $this->stepRun($steps, 'Install npm dependencies'),
+        );
+        self::assertSame($steps['Check changed JS files']['env'], $steps['ESLint changed JS files']['env']);
+        self::assertSame('./scripts/ci/js-lint-changed.sh', $this->stepRun($steps, 'ESLint changed JS files'));
+    }
+
     public function testGeneralAndRootSuitesRunIndependentlyAndFailClosed(): void
     {
         $job = $this->workflowJob('build-test');

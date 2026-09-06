@@ -2,6 +2,19 @@
 
 set -euo pipefail
 
+mode="lint"
+if [[ "$#" -gt 1 ]]; then
+    echo "Usage: $0 [--check-only]" >&2
+    exit 2
+fi
+if [[ "$#" -eq 1 ]]; then
+    if [[ "$1" != "--check-only" ]]; then
+        echo "Usage: $0 [--check-only]" >&2
+        exit 2
+    fi
+    mode="check"
+fi
+
 ROOT_DIR="$(git rev-parse --show-toplevel)"
 cd "$ROOT_DIR"
 source ./scripts/ci/git_helpers.sh
@@ -30,19 +43,36 @@ else
 fi
 
 changed_files=()
+changed_file_list="$(mktemp "${TMPDIR:-/tmp}/js-lint-changed.XXXXXX")"
+trap 'rm -f -- "$changed_file_list"' EXIT
 
-while IFS= read -r file; do
+if ! git diff --name-only -z --diff-filter=ACMR "$range" >"$changed_file_list"; then
+    echo "Unable to determine changed files for range $range." >&2
+    exit 1
+fi
+
+while IFS= read -r -d '' file; do
     if [[ "$file" == assets/js/*.js && "$file" != assets/js/*.min.js ]]; then
         changed_files+=("$file")
     fi
-done < <(git diff --name-only --diff-filter=ACMR "$range")
+done <"$changed_file_list"
 
 if [[ "${#changed_files[@]}" -eq 0 ]]; then
     echo "No changed JS files under assets/js (excluding *.min.js); skipping ESLint."
+    if [[ "$mode" == "check" ]]; then
+        : "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required for --check-only}"
+        printf 'has_changes=false\n' >>"$GITHUB_OUTPUT"
+    fi
     exit 0
 fi
 
-echo "Running ESLint for changed JS files:"
+echo "Selected JavaScript files:"
 printf ' - %s\n' "${changed_files[@]}"
+
+if [[ "$mode" == "check" ]]; then
+    : "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required for --check-only}"
+    printf 'has_changes=true\n' >>"$GITHUB_OUTPUT"
+    exit 0
+fi
 
 ./node_modules/.bin/eslint --max-warnings=0 "${changed_files[@]}"
