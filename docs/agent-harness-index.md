@@ -27,7 +27,7 @@ This file stays intentionally short. It is a map, not a second runbook.
 | Core pre-PR path | `scripts/ci/pre_pr_quick.sh`, `scripts/ci/pre_pr_full.sh` | Actual executable gate logic; invoked explicitly under `WORKFLOW.md`. |
 | CI gate semantics and job wiring | `.github/workflows/ci.yml` | Ground truth for job triggers, blocking status, and artifacts. |
 | Standard review and landing | `WORKFLOW.md`, `code_review.md` | One independent reviewer, risk-based specialists, current blocking CI, and authorized merge of the reviewed head. |
-| Local/CI root-host test prerequisites | `docs/root-host-test-harness.md` | Docker Desktop skip boundaries, required Linux-root failures, and security invariants. |
+| Local/CI root-host test prerequisites | [Docker test guidance](docker.md#linux-roothost-tests) | Local skips, required Linux CI checks, and focused diagnosis. |
 | CI test execution and timing comparisons | `docs/ci-test-execution.md` | Main tests, application coverage, and direct GitHub job timing. |
 | Observability runtime ownership | `docs/observability.md` | Runtime split between release gates, Kuma, and Sentry. |
 | Kuma Retention-monitor Env transaction | `docs/ops/production-kuma-monitoring-env.md` | Exact-commit helper installation, coordinated writer authority, recovery adoption, atomic Env activation, race handling, and separate Push/timer gates. |
@@ -80,7 +80,7 @@ This file stays intentionally short. It is a map, not a second runbook.
     exactly once as blocking or advisory; advisory jobs remain outside
     blocking execution checks, while missing or unclassified jobs fail closed.
 - Scope-specific checks:
-  - root/host prerequisite contract: `docs/root-host-test-harness.md`
+  - root/host prerequisite contract: [Docker test guidance](docker.md#linux-roothost-tests)
   - write-path contracts: `docs/ci-write-contracts.md`
   - integration smoke browser evidence: `docs/release-gate-dashboard.md`
   - production provider UI smoke: `docs/release-gate-provider-ui-smoke.md`

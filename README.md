@@ -194,7 +194,9 @@ explicitly only when you are fine reinstalling them afterwards:
 bash ./scripts/cleanup_local_artifacts.sh --with-deps
 ```
 
-Hook note: `./scripts/setup-worktree.sh` installs the managed `.git/hooks/pre-commit`
+### Git hooks
+
+`./scripts/setup-worktree.sh` installs the managed `.git/hooks/pre-commit`
 hook. The managed `pre-commit` runs fast formatting, syntax, and
 changed-frontend checks. The installer removes the old repository-managed
 `pre-push` hook while preserving custom hooks. Run
@@ -205,7 +207,7 @@ managed push hook. Invoke
 [WORKFLOW.md](WORKFLOW.md#3-validate-locally); pushing does not rerun them.
 Linux root/host tests use the explicit Docker Desktop skip versus required
 GitHub Actions failure contract documented in
-[Root/Host Test Harness](docs/root-host-test-harness.md); local skips never
+[Linux root/host tests](docs/docker.md#linux-roothost-tests); local skips never
 replace the required native-Linux CI proof.
 
 Local checks attempt to clean up their Compose project on normal shell exit,
