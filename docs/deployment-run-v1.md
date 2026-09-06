@@ -67,7 +67,10 @@ runs out of the active tree with the existing, mutually compatible tools.
 Do not run this after a partial tooling update; restore the previous matching
 helper and validator/contract first.
 
-Run once as root on the production host, before installing the new tooling:
+Run once as root on the production host, before installing the new tooling.
+The example uses a new destination for the Kuma-policy transition, distinct
+from earlier traffic-check or renderer-input archives. For another transition,
+choose another unused destination; never reuse or overwrite an earlier archive.
 
 ```bash
 python3 - <<'PY_UPGRADE'
@@ -97,7 +100,7 @@ except FileNotFoundError:
     print('No historical runs to move.')
 else:
     os.close(runs)
-    archive = '/root/fh-deployment-runs-before-renderer-input-removal'
+    archive = '/root/fh-deployment-runs-before-kuma-monitor-consolidation'
     os.mkdir(archive, 0o700)  # Existing destination aborts; never overwrite it.
     destination = old.open_absolute_directory(archive, 0o700)
     os.rename('runs', 'runs', src_dir_fd=root, dst_dir_fd=destination)

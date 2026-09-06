@@ -9,13 +9,23 @@ use PHPUnit\Framework\TestCase;
 
 final class ProdValidateKumaMonitorsTest extends TestCase
 {
-    private function repoRoot(): string
-    {
-        return dirname(__DIR__, 3);
-    }
+    private const ROLES = [
+        ['App-Homepage', 'http'],
+        ['App — Health Shallow', 'keyword'],
+        ['App - Health Deep', 'json-query'],
+        ['Host - Services', 'push'],
+        ['Host - Resources', 'push'],
+        ['Ops - Restore Verify Freshness', 'push'],
+        ['Ops - Backup Creation Freshness', 'push'],
+        ['App - Log Errors', 'push'],
+        ['App - php8.5-fpm Log Errors', 'push'],
+        ['App - PDF Renderer Log Errors', 'push'],
+        ['App - Dashboard PDF Export', 'push'],
+        ['Security - Scanner Activity', 'push'],
+    ];
 
     #[DataProvider('kumaScenarios')]
-    public function testKumaSectionRequiresExpectedActiveIdentityAndGreenCount(
+    public function testKumaSectionRequiresExpectedMonitorRolesAndGreenCount(
         string $scenario,
         int $expectedExitCode,
         string $expectedOutput,
@@ -28,24 +38,24 @@ final class ProdValidateKumaMonitorsTest extends TestCase
         mkdir($stubBin, 0777, true);
 
         try {
-            if ($scenario === 'missing' || $scenario === 'unreadable') {
-                if ($scenario === 'unreadable') {
-                    symlink($workspace . '/does-not-exist', $database);
-                }
+            if ($scenario === 'missing') {
+                // Keep the database absent so the real readability guard is exercised.
+            } elseif ($scenario === 'unreadable') {
+                symlink($workspace . '/does-not-exist', $database);
             } else {
-                file_put_contents($database, 'fixture');
+                $this->createDatabase($database, $scenario);
             }
-            $this->writeSqliteStub($stubBin . '/sqlite3');
+            $this->writeSqliteShim($stubBin . '/sqlite3');
             $this->writeKumaSectionRunner($runner, $database);
 
             $result = $this->runCommand(['bash', $runner], $this->repoRoot(), [
-                'PATH' => $stubBin . ':' . getenv('PATH'),
+                'PATH' => $stubBin . ':' . (getenv('PATH') ?: ''),
                 'KUMA_SCENARIO' => $scenario,
             ]);
 
             self::assertSame($expectedExitCode, $result['exit_code'], $result['stderr']);
             self::assertStringContainsString($expectedOutput, $result['stdout'] . $result['stderr']);
-            self::assertStringNotContainsString('1,2,4,5,6,7,9,10,11,12,13,14', $result['stdout']);
+            self::assertStringNotContainsString('SELECT *', $result['stdout'] . $result['stderr']);
         } finally {
             $this->removeDirectory($workspace);
         }
@@ -54,33 +64,74 @@ final class ProdValidateKumaMonitorsTest extends TestCase
     /** @return iterable<string,array{string,int,string}> */
     public static function kumaScenarios(): iterable
     {
-        yield 'expected set and green' => ['expected', 0, 'kuma.expected_active_ids=12'];
-        yield 'wrong identity set' => ['wrong_identity', 1, 'FAIL kuma expected 12 active IDs'];
+        yield 'current ids' => ['current', 0, 'kuma.expected_monitor_roles=12'];
+        yield 'regenerated ids' => ['regenerated', 0, 'kuma.expected_monitor_roles=12'];
+        yield 'missing role' => ['missing_role', 1, 'FAIL kuma expected 12 monitor roles'];
+        yield 'wrong role type' => ['wrong_type', 1, 'FAIL kuma expected 12 monitor roles'];
+        yield 'duplicate role' => ['duplicate_role', 1, 'FAIL kuma expected 12 monitor roles'];
+        yield 'red latest status' => ['red', 1, 'FAIL kuma expected 12 monitor roles'];
+        yield 'extra active monitor' => ['extra', 1, 'FAIL kuma expected 12 monitor roles'];
         yield 'missing database' => ['missing', 1, 'FAIL kuma unavailable'];
         yield 'unreadable database' => ['unreadable', 1, 'FAIL kuma unavailable'];
-        yield 'red latest status' => ['red', 1, 'FAIL kuma expected 12 active IDs'];
-        yield 'extra active monitor' => ['extra', 1, 'FAIL kuma expected 12 active IDs'];
-        yield 'query failure' => ['queryfail', 1, 'FAIL kuma expected 12 active IDs'];
+        yield 'query failure' => ['queryfail', 1, 'FAIL kuma expected 12 monitor roles'];
     }
 
-    private function writeSqliteStub(string $path): void
+    private function createDatabase(string $path, string $scenario): void
+    {
+        $database = new \SQLite3($path);
+        $database->exec('CREATE TABLE monitor (id INTEGER PRIMARY KEY, name TEXT, type TEXT, active INTEGER)');
+        $database->exec('CREATE TABLE heartbeat (monitor_id INTEGER, status INTEGER, time INTEGER)');
+        $ids = $scenario === 'regenerated' ? range(101, 112) : [1, 2, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14];
+        foreach (self::ROLES as $index => [$name, $type]) {
+            if ($scenario === 'missing_role' && $name === 'App - Health Deep') {
+                continue;
+            }
+            if ($scenario === 'wrong_type' && $name === 'App - Health Deep') {
+                $type = 'keyword';
+            }
+            $statement = $database->prepare(
+                'INSERT INTO monitor (id, name, type, active) VALUES (:id, :name, :type, 1)',
+            );
+            $statement->bindValue(':id', $ids[$index], SQLITE3_INTEGER);
+            $statement->bindValue(':name', $name, SQLITE3_TEXT);
+            $statement->bindValue(':type', $type, SQLITE3_TEXT);
+            $statement->execute();
+            $heartbeat = $database->prepare(
+                'INSERT INTO heartbeat (monitor_id, status, time) VALUES (:id, :status, :time)',
+            );
+            $heartbeat->bindValue(':id', $ids[$index], SQLITE3_INTEGER);
+            $heartbeat->bindValue(':status', $scenario === 'red' && $index === 0 ? 0 : 1, SQLITE3_INTEGER);
+            $heartbeat->bindValue(':time', $index, SQLITE3_INTEGER);
+            $heartbeat->execute();
+        }
+        if ($scenario === 'duplicate_role') {
+            $database->exec("DELETE FROM monitor WHERE name = 'Security - Scanner Activity'");
+            $database->exec(
+                "INSERT INTO monitor (id, name, type, active) VALUES (999, 'App - Health Deep', 'json-query', 1)",
+            );
+            $database->exec('INSERT INTO heartbeat (monitor_id, status, time) VALUES (999, 1, 99)');
+        }
+        if ($scenario === 'extra') {
+            $database->exec("INSERT INTO monitor (id, name, type, active) VALUES (999, 'Untracked', 'push', 1)");
+            $database->exec('INSERT INTO heartbeat (monitor_id, status, time) VALUES (999, 1, 99)');
+        }
+        $database->close();
+    }
+
+    private function writeSqliteShim(string $path): void
     {
         file_put_contents(
             $path,
-            <<<'BASH'
-            #!/usr/bin/env bash
-            set -euo pipefail
-            query="${*: -1}"
-            if [[ "${KUMA_SCENARIO}" == 'queryfail' ]]; then
-                exit 1
-            elif [[ "$query" == *'AND id IN (1,2,4,5,6,7,9,10,11,12,13,14)'* ]]; then
-                [[ "${KUMA_SCENARIO}" == 'wrong_identity' ]] && printf '11\n' || printf '12\n'
-            elif [[ "$query" == *'COUNT(*) FROM monitor'* ]]; then
-                [[ "${KUMA_SCENARIO}" == 'extra' ]] && printf '13\n' || printf '12\n'
-            else
-                [[ "${KUMA_SCENARIO}" == 'red' ]] && printf '11\n' || printf '12\n'
-            fi
-            BASH
+            <<<'PHP'
+            #!/usr/bin/env php
+            <?php
+            if (getenv('KUMA_SCENARIO') === 'queryfail') {
+                exit(1);
+            }
+            $database = new SQLite3($argv[1], SQLITE3_OPEN_READONLY);
+            $value = $database->querySingle($argv[2]);
+            echo $value . PHP_EOL;
+            PHP
             ,
         );
         chmod($path, 0755);
@@ -124,6 +175,11 @@ final class ProdValidateKumaMonitorsTest extends TestCase
         $exitCode = proc_close($process);
 
         return ['exit_code' => $exitCode, 'stdout' => $stdout, 'stderr' => $stderr];
+    }
+
+    private function repoRoot(): string
+    {
+        return dirname(__DIR__, 3);
     }
 
     private function removeDirectory(string $path): void

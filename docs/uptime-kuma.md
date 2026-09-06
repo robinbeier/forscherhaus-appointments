@@ -48,15 +48,19 @@ dependency check in its response; the former standalone PDF Renderer monitor
 is removed from the active catalog. The PDF renderer log monitor remains
 unchanged.
 
-Operational transition for the live Kuma instance: after `App - Health Deep`
-(`id: 4`) and its notifications are verified active, pause the former PDF
-Renderer monitor (`id: 8`). Keep its existing history; this repository change
-does not require a Push runtime or cron update.
+Operational transition for the existing live Kuma instance: after `App - Health Deep`
+(`json-query`) and its notifications are verified active, pause the former
+`App - PDF Renderer` (`json-query`) monitor. Its historical ID is `8`; identify
+it by its name and type if the instance has been rebuilt. Keep its existing
+history; this repository change does not require a Push runtime or cron update.
 Finish any active deployment before changing the monitor count. Future deployments
 must use the matching `12/12` post-gate contracts; before upgrading older installed
 deployment tools, follow the [completed-run upgrade procedure](deployment-run-v1.md#one-time-upgrade-after-traffic-check-removal).
 Pausing the monitor does not alter old completed deployment records or authorize
 an installation of deployment tools.
+
+Post-change validation requires the catalog's monitor names and types, not the
+historical database IDs. A fresh reconstruction may assign different IDs.
 
 Repo desired monitor catalog:
 
