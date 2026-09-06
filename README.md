@@ -207,7 +207,9 @@ bash ./scripts/cleanup_local_artifacts.sh --with-deps
 
 `./scripts/setup-worktree.sh` installs the managed `.git/hooks/pre-commit`
 hook. The managed `pre-commit` runs fast formatting, syntax, and
-changed-frontend checks. The installer removes the old repository-managed
+changed-frontend checks. Node dependencies are required only for formatting or
+frontend changes; the hook does not require Composer dependencies. Pure shell
+changes need neither dependency directory. The installer removes the old repository-managed
 `pre-push` hook while preserving custom hooks. Run
 `./scripts/install-git-hooks.sh` once in an existing clone to remove its old
 managed push hook. Invoke
