@@ -2,11 +2,13 @@
 
 namespace Tests\Unit\Scripts;
 
+use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use ReleaseGate\GateCliSupport;
 
 require_once __DIR__ . '/../../../scripts/release-gate/lib/GateCliSupport.php';
 
+#[Group('root-deployment')]
 class GateCliSupportTest extends TestCase
 {
     public function testZeroSurpriseReplayHelpIncludesProfileAndCredentialsOptions(): void

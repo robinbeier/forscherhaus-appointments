@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace Tests\Unit\Scripts;
 
 use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\RootHostTestPrerequisites;
 
+#[Group('root-deployment')]
 final class ReleaseArchiveDumpRetentionRootTest extends TestCase
 {
     private const APP = '/var/www/html/easyappointments';

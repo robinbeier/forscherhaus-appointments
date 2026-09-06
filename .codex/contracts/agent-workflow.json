@@ -51,22 +51,23 @@
         "advisory_jobs": [],
         "blocking_execution_fingerprints": {
             "workflow_execution_envelope": "b00690b770e9cc3b3223dec8bbeb2f46db76443642fb7ddadf3fb8237ebb7f99",
-            "changes": "22a2ff5798e086fa9ab38576902c71c51dd3d318a7a59b97382f9d9a50e86907",
-            "build-test": "87b85b916221f9ce01b77120dbbc2493c1758341be293d995d1cf295e93f0615",
-            "phpstan-application": "9f59a61df75b5df5904661560490a70a1c9269dcec320757ed11d6f5dc566bf7",
-            "js-lint-changed": "2be15a8595f42a9b076782789b1fe5c1386bd19e1abc4b59b936762950436305",
-            "architecture-ownership-map": "7311eb7f2a7972b4eaebb9d1a69903517789f8c4ced4ee93483a283c99080cbc",
-            "architecture-boundaries": "c655384ce6979371fa42b087cdffdb8c9d9bff75d287972570e3c17c8d817d84",
-            "typed-request-dto": "5e2a6daa0ed2b9bed4fbfbbab065e20b7ed25abe157a1265e84297c2219b2b00",
-            "typed-request-contracts": "50b13f9339970e4c886503707fa8320ff5dc556694b3df524625cc912b9c44e7",
-            "deep-runtime-suite": "fa65ac1e5ec583f2ab02071d48786b57a7cdeb37e1b4e5210fbb525c031b838d",
-            "coverage-shard-unit": "c73abb5eeb1dc51a65c198b07f40567ea2adcc4042ffa9496baad3b83a433af9",
-            "coverage-shard-integration": "b6770ad5666e2f4b9d05ea0bfda28050f963ec47ecdc666fe48069121419401b",
             "api-contract-openapi": "6e224d3eec1b26fa2eb1e4c3d62f45524253a5e5468cff7e029f9d8b4e2ce069",
+            "architecture-boundaries": "c655384ce6979371fa42b087cdffdb8c9d9bff75d287972570e3c17c8d817d84",
+            "architecture-ownership-map": "7311eb7f2a7972b4eaebb9d1a69903517789f8c4ced4ee93483a283c99080cbc",
             "booking-controller-flows": "cc7be7cb392f2e57805c331b68019a719996bc4fcc32f744ac6461b0e64b3b69",
+            "build-test": "225f61e554f57e69a423da8db90a6ebc6b14efc1076c1b730d7bbadc2c5a9489",
+            "changes": "22a2ff5798e086fa9ab38576902c71c51dd3d318a7a59b97382f9d9a50e86907",
             "coverage-delta": "5ceefd757a18f9bc5e3d6bea19fb6ca32bb2a83ebb77a781bfe077dada7a05ba",
+            "coverage-shard-integration": "b6770ad5666e2f4b9d05ea0bfda28050f963ec47ecdc666fe48069121419401b",
+            "coverage-shard-unit": "c73abb5eeb1dc51a65c198b07f40567ea2adcc4042ffa9496baad3b83a433af9",
+            "deep-runtime-suite": "fa65ac1e5ec583f2ab02071d48786b57a7cdeb37e1b4e5210fbb525c031b838d",
             "integration-smoke": "17de4f0907f27bed9f71f40547041109e8877d8f9ba2643821372dd2cf56b88a",
-            "pdf-renderer-tests": "f1eaead4ec5726c94d67dab088268f7394e9c1d902f60feffa5783184ae4646c"
+            "js-lint-changed": "2be15a8595f42a9b076782789b1fe5c1386bd19e1abc4b59b936762950436305",
+            "pdf-renderer-tests": "f1eaead4ec5726c94d67dab088268f7394e9c1d902f60feffa5783184ae4646c",
+            "phpstan-application": "9f59a61df75b5df5904661560490a70a1c9269dcec320757ed11d6f5dc566bf7",
+            "root-deployment-tests": "b53b993a9b9ee718d37d00598e9253665fa93538872333a3e55fc7eae6972a56",
+            "typed-request-contracts": "50b13f9339970e4c886503707fa8320ff5dc556694b3df524625cc912b9c44e7",
+            "typed-request-dto": "5e2a6daa0ed2b9bed4fbfbbab065e20b7ed25abe157a1265e84297c2219b2b00"
         },
         "condition_grammar": {
             "version": 1,
@@ -233,6 +234,9 @@
                 "kind": "fingerprinted_execution"
             },
             "pdf-renderer-tests": {
+                "kind": "fingerprinted_execution"
+            },
+            "root-deployment-tests": {
                 "kind": "fingerprinted_execution"
             }
         }

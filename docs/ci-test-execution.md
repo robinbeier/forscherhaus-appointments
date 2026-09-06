@@ -22,6 +22,20 @@ main-suite failure handling, database setup and cleanup, root deployment
 checks, and explicit deterministic integration-test settings. Path selection
 is tested by `tests/Unit/Scripts/CiPathFilterMatrixTest.php`.
 
+## Independent general and root tests
+
+In GitHub CI, `build-test` excludes the `root-deployment` group. The independent
+`root-deployment-tests` job executes those twelve classes through the existing
+root regression script, plus the retained Python scanner tests. Both jobs are
+blocking and start without waiting for one another. The root job installs only
+Composer dependencies; it needs no Node, application database, or application
+configuration. Its database-restore fixtures use their own pinned MariaDB image.
+
+The group prevents ordinary tests inside those classes from running twice and
+avoids rediscovering root-only tests in the general CI run. Local `phpunit.xml`
+and coverage selection are unchanged; running the normal local command still
+discovers all tests and applies their existing platform prerequisites.
+
 ## PHP-only job preparation
 
 The application PHPStan, request DTO, and request-contract jobs install only

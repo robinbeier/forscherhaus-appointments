@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Scripts;
 
+use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\RootHostTestPrerequisites;
 
+#[Group('root-deployment')]
 final class SessionRetentionRootTest extends TestCase
 {
     private const APP_ROOT = '/var/www/html/easyappointments';

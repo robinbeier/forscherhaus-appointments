@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace Tests\Unit\Scripts;
 
 use Ops\DeploymentEvidenceAuthorityV1;
+use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\RootHostTestPrerequisites;
 
 require_once __DIR__ . '/../../../scripts/ops/lib/DeploymentEvidenceAuthorityV1.php';
 
+#[Group('root-deployment')]
 final class BackupSetProducerRootTest extends TestCase
 {
     private const PASSWORD = 'Rob466_Backup_Only_0123456789abcdef';

@@ -6,10 +6,12 @@ namespace Tests\Unit\Scripts;
 
 use Ops\DeployResultV1;
 use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
 require_once __DIR__ . '/../../../scripts/ops/lib/DeployResultV1.php';
 
+#[Group('root-deployment')]
 final class DeployResultReceiptStorageTest extends TestCase
 {
     private string $protectedDirectory;

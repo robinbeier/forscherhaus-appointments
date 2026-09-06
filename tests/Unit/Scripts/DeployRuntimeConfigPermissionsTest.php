@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Scripts;
 
+use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
+#[Group('root-deployment')]
 final class DeployRuntimeConfigPermissionsTest extends TestCase
 {
     private string $workspace;

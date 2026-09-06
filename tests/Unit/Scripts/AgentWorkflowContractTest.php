@@ -137,6 +137,7 @@ class AgentWorkflowContractTest extends TestCase
                 'js-lint-changed',
                 'pdf-renderer-tests',
                 'phpstan-application',
+                'root-deployment-tests',
                 'typed-request-contracts',
                 'typed-request-dto',
                 'write-contract-api',
@@ -149,7 +150,7 @@ class AgentWorkflowContractTest extends TestCase
             $ci['blocking_jobs'],
             static fn(array $job): bool => ($job['kind'] ?? null) === 'fingerprinted_execution',
         );
-        self::assertCount(16, $fingerprintedJobs);
+        self::assertCount(17, $fingerprintedJobs);
         $expectedFingerprintComponents = array_merge(['workflow_execution_envelope'], array_keys($fingerprintedJobs));
         $actualFingerprintComponents = array_keys($ci['blocking_execution_fingerprints']);
         sort($expectedFingerprintComponents, SORT_STRING);
