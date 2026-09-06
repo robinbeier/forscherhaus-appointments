@@ -54,18 +54,12 @@ configure_hook_compose_project() {
     export CI_DOCKER_COMPOSE_PROJECT_NAME
 }
 
-ensure_stack_started() {
-    if [[ "${STACK_STARTED}" == "1" || "${IN_CONTAINER}" == "1" ]]; then
-        return
-    fi
-
-    STACK_STARTED=1
-    ci_docker_compose up -d --no-deps php-fpm >/dev/null
-}
-
 cleanup_stack() {
     if [[ "${STACK_STARTED}" == "1" ]]; then
-        ci_docker_cleanup_stack
+        ci_docker_compose down --remove-orphans >/dev/null 2>&1 || true
+        if [[ -n "${CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH:-}" ]]; then
+            rmdir "${CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH}" >/dev/null 2>&1 || true
+        fi
     fi
 }
 
@@ -135,10 +129,20 @@ if [[ "${#php_files[@]}" -gt 0 ]]; then
     else
         require_cmd docker
         configure_hook_compose_project
-        ensure_stack_started
-        for php_file in "${php_files[@]}"; do
-            ci_docker_compose exec -T -w /var/www/html php-fpm php -l "${php_file}" >/dev/null || die "PHP syntax error in ${php_file}"
-        done
+        STACK_STARTED=1
+        CI_DOCKER_COMPOSE_PROJECT_NAME="${CI_DOCKER_COMPOSE_PROJECT_NAME}-lint-$$"
+        export CI_DOCKER_COMPOSE_PROJECT_NAME
+        if ! ci_docker_compose run --rm --no-deps -T -w /var/www/html php-fpm bash -c '
+            status=0
+            for php_file in "$@"; do
+                if ! php -l "$php_file"; then
+                    status=1
+                fi
+            done
+            exit "$status"
+        ' -- "${php_files[@]}"; then
+            die "PHP syntax errors detected."
+        fi
     fi
 fi
 
