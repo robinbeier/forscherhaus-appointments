@@ -831,6 +831,7 @@ jobs:
         with:
           php-version: "8.4.1"
           coverage: none
+          extensions: gd
           tools: composer:v2
       - name: Install Composer dependencies
         run: composer install --no-interaction --no-progress
