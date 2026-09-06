@@ -77,20 +77,6 @@ monitors:
       retry_interval: 900
       max_retries: 1
       env_var: KUMA_PUSH_URL_BACKUP_CREATION
-    - id: 8
-      name: App - PDF Renderer
-      type: json-query
-      secret_headers:
-          X-Health-Token: <same host-local value as App - Health Deep>
-      interval: 30
-      retry_interval: 30
-      max_retries: 2
-      timeout: 15
-      method: GET
-      url: https://dasforscherhaus-leg.de/index.php/healthz
-      json_path: checks.pdf_renderer.ok
-      expected_value: 'true'
-      accepted_statuscodes: ['200', '503']
     - id: 9
       name: App - Log Errors
       type: push

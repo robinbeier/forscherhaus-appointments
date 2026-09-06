@@ -42,6 +42,17 @@ restore-verification freshness and backup-creation freshness. ROB-390 and
 ROB-391 applied the related live Kuma changes on 2026-05-20; future live Kuma
 renames or new monitor creation still require an explicit Kuma write gate.
 
+The active repo desired monitor catalog now contains 12 monitors. `App - Health
+Deep` remains the single JSON health monitor and includes the PDF renderer
+dependency check in its response; the former standalone PDF Renderer monitor
+is removed from the active catalog. The PDF renderer log monitor remains
+unchanged.
+
+Operational transition for the live Kuma instance: after `App - Health Deep`
+(`id: 4`) and its notifications are verified active, pause the former PDF
+Renderer monitor (`id: 8`). Keep its existing history; this repository change
+does not require a Push runtime or cron update.
+
 Repo desired monitor catalog:
 
 | Name | Type | Interval | Secret handling |
@@ -53,7 +64,6 @@ Repo desired monitor catalog:
 | Host - Resources | `push` | 60s | `KUMA_PUSH_URL_HOST_RESOURCES` |
 | Ops - Restore Verify Freshness | `push` | 900s | `KUMA_PUSH_URL_OPS_JOBS` |
 | Ops - Backup Creation Freshness | `push` | 900s | `KUMA_PUSH_URL_BACKUP_CREATION` |
-| App - PDF Renderer | `json-query` | 30s | same `X-Health-Token` boundary as deep health |
 | App - Log Errors | `push` | 60s | `KUMA_PUSH_URL_APP_LOGS` |
 | App - php8.5-fpm Log Errors | `push` | 60s | `KUMA_PUSH_URL_PHP_FPM_LOGS` |
 | App - PDF Renderer Log Errors | `push` | 60s | `KUMA_PUSH_URL_PDF_RENDERER_LOGS` |
@@ -86,9 +96,9 @@ boundaries:
 - `/index.php/healthz` is the application-owned deep health route. It requires
   the `X-Health-Token` header and returns dependency checks for database, GD,
   storage, and PDF renderer.
-- `App - Health Deep` and `App - PDF Renderer` both read from
-  `/index.php/healthz`; the latter checks the `checks.pdf_renderer.ok` JSON
-  value.
+- `App - Health Deep` reads `/index.php/healthz`, including the
+  `checks.pdf_renderer.ok` dependency result in the overall deep-health
+  response.
 
 The `X-Health-Token` value belongs only in Kuma monitor headers or host-local
 files such as `/etc/fh/healthz.token`. Do not copy the value into Git, Linear,

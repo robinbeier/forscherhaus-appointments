@@ -419,7 +419,7 @@ fi
 
 section kuma
 if [[ -r /var/lib/uptime-kuma-data/kuma.db ]] && command -v sqlite3 >/dev/null 2>&1; then
-    expected_active_monitors=13
+    expected_active_monitors=12
     active="$(sqlite3 /var/lib/uptime-kuma-data/kuma.db 'SELECT COUNT(*) FROM monitor WHERE active = 1;' 2>/dev/null || printf query_failed)"
     green="$(sqlite3 /var/lib/uptime-kuma-data/kuma.db "SELECT SUM(CASE WHEN latest_status = 1 THEN 1 ELSE 0 END) FROM (SELECT m.id, COALESCE((SELECT h.status FROM heartbeat h WHERE h.monitor_id = m.id ORDER BY h.time DESC LIMIT 1), -1) latest_status FROM monitor m WHERE m.active = 1);" 2>/dev/null || printf query_failed)"
     printf 'kuma.active_monitors=%s\n' "$active"

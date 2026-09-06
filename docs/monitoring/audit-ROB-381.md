@@ -2,6 +2,9 @@
 
 Date: 2026-05-20
 
+This audit records the state observed on that date, not the current monitor
+catalog. For current operations, use [Uptime Kuma Operations](../uptime-kuma.md).
+
 Scope: audit current monitoring and production signals for Forscherhaus
 Appointments. This document separates observed state from target
 recommendations. It intentionally excludes secrets, Push URLs, tokens, DB rows,
