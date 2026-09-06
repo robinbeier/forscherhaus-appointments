@@ -26,6 +26,9 @@ or caller-supplied identity is accepted.
 For every held archive, retention re-hashes and re-runs the same bounded safe
 Tar contract on one stable file descriptor. The live capacity bounds must match
 the canonical hold exactly before they can influence the capacity projection.
+The retained scanner tests in
+`tests/Unit/Scripts/release_archive_dump_retention_v1_test.py` cover malformed
+Tar entries and capacity accounting and run with the root deployment regressions.
 
 Repository cleanup does not remove any installed host file or authorize
 retention execution, timer changes, or other production mutations.

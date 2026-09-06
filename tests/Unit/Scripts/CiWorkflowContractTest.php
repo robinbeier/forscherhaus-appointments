@@ -113,6 +113,10 @@ class CiWorkflowContractTest extends TestCase
             'tests/Unit/Scripts/ReleaseArchiveDumpRetentionRootTest.php',
             $rootDeploymentScript,
         );
+        self::assertStringContainsString(
+            'sudo python3 -m unittest tests.Unit.Scripts.release_archive_dump_retention_v1_test',
+            $rootDeploymentScript,
+        );
 
         $diagnostics = $steps['Diagnostics (build-test database)'];
         self::assertSame('failure()', $diagnostics['if'] ?? null);
