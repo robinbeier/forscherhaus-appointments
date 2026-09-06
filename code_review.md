@@ -116,8 +116,8 @@ non-blocking suggestions must not restart a completed review cycle.
 No separate CLI login or external bootstrap review is required for standard
 review, including changes to review-tool code or policy. If a reviewer is
 unavailable, use another available independent reviewer or a human; keep the
-PR open if no independent review can be obtained. The sealed runner and the
-attestation mergegate are optional legacy tooling described in
+PR open if no independent review can be obtained. The sealed reviewer and
+trusted bootstrap are optional tooling described in
 [optional agent tooling](docs/optional-agent-review.md), not prerequisites.
 Current blocking CI, resolved substantive findings, an updated independent
 review summary, and explicit merge authorization are still required by

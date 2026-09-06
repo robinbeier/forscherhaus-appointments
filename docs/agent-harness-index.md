@@ -28,7 +28,6 @@ This file stays intentionally short. It is a map, not a second runbook.
 | Core pre-PR path | `scripts/ci/pre_pr_quick.sh`, `scripts/ci/pre_pr_full.sh` | Actual executable gate logic. |
 | CI gate semantics and job wiring | `.github/workflows/ci.yml` | Ground truth for job triggers, blocking status, and artifacts. |
 | Standard review and landing | `WORKFLOW.md`, `code_review.md` | One independent reviewer, risk-based specialists, current blocking CI, and authorized merge of the reviewed head. |
-| Optional legacy mergegate | `docs/exact-head-mergegate.md`, `scripts/ci/check_exact_head_mergegate.php` | Existing opt-in attestation verifier; not required by the standard path. |
 | Local/CI root-host test prerequisites | `docs/root-host-test-harness.md` | Docker Desktop skip boundaries, required Linux-root failures, and security invariants. |
 | CI test execution and timing comparisons | `docs/ci-test-execution.md` | Main tests, application coverage, and direct GitHub job timing. |
 | Observability runtime ownership | `docs/observability.md` | Runtime split between release gates, Kuma, and Sentry. |
@@ -63,8 +62,8 @@ This file stays intentionally short. It is a map, not a second runbook.
     check applicable blocking CI and unresolved findings, and merge only with
     user authorization and `--match-head-commit`
   - no separate CLI login, sealed runner, or attestation command is required
-- Optional legacy tooling:
-  - `docs/optional-agent-review.md` and `docs/exact-head-mergegate.md`
+- Optional sealed reviewer and trusted bootstrap tooling:
+  - `docs/optional-agent-review.md`
 - Harness readiness score:
   - `composer check:agent-harness-readiness`
   - The machine contract owns the supported CI-condition tokens and binds

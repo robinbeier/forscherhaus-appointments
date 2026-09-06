@@ -411,68 +411,8 @@ class AgentWorkflowContractTest extends TestCase
             $contract['land']['merge_command'] ?? null,
         );
         self::assertSame('In Review', $contract['land']['push_after_ready_linear_state'] ?? null);
-        self::assertSame(1, $contract['land']['exact_head_mergegate']['schema_version'] ?? null);
-        self::assertSame('main', $contract['land']['exact_head_mergegate']['base_ref'] ?? null);
-        self::assertSame('ci.yml', $contract['land']['exact_head_mergegate']['workflow_file'] ?? null);
-        self::assertSame('CI', $contract['land']['exact_head_mergegate']['workflow_name'] ?? null);
-        self::assertSame(
-            'before_between_and_after_bounded_evidence_observations',
-            $contract['land']['exact_head_mergegate']['pr_revalidation'] ?? null,
-        );
-        self::assertSame(
-            'two_identical_bounded_observations',
-            $contract['land']['exact_head_mergegate']['ci_evidence_revalidation'] ?? null,
-        );
-        self::assertSame(
-            'two_identical_bounded_observations',
-            $contract['land']['exact_head_mergegate']['review_evidence_revalidation'] ?? null,
-        );
-        self::assertSame(
-            'land.exact_head_mergegate.required_review_lenses',
-            $contract['land']['exact_head_mergegate']['review_lens_source'] ?? null,
-        );
-        self::assertSame(
-            ['correctness_security', 'design_maintainability', 'tests_regression_flake'],
-            $contract['land']['exact_head_mergegate']['required_review_lenses'] ?? null,
-        );
-        self::assertSame(
-            'exact-head-review-attestation:v2',
-            $contract['land']['exact_head_mergegate']['review_attestation']['marker'] ?? null,
-        );
-        self::assertSame(
-            'no_findings',
-            $contract['land']['exact_head_mergegate']['review_attestation']['verdict'] ?? null,
-        );
-        self::assertSame(
-            'owner_accountable_assertion',
-            $contract['land']['exact_head_mergegate']['review_attestation']['authority_model'] ?? null,
-        );
-        self::assertFalse(
-            $contract['land']['exact_head_mergegate']['review_attestation']['cryptographic_agent_execution_proof'] ??
-                null,
-        );
-        self::assertFalse(
-            $contract['land']['exact_head_mergegate']['review_attestation']['malicious_repository_owner_in_scope'] ??
-                null,
-        );
-        self::assertTrue(
-            $contract['land']['exact_head_mergegate']['review_attestation']['requires_unedited_comment'] ?? null,
-        );
-        self::assertSame(
-            'graphql_user_content_edit_count_excluding_creation',
-            $contract['land']['exact_head_mergegate']['review_attestation']['comment_edit_evidence'] ?? null,
-        );
-        self::assertSame(
-            ['review_id', 'review_comment_id', 'review_payload_digest'],
-            $contract['land']['exact_head_mergegate']['review_attestation']['activity_watermarks'] ?? null,
-        );
-        self::assertSame(
-            ['OWNER'],
-            $contract['land']['exact_head_mergegate']['review_attestation']['trusted_author_associations'] ?? null,
-        );
         self::assertTrue($contract['land']['requires_independent_review'] ?? null);
         self::assertTrue($contract['land']['requires_current_blocking_ci'] ?? null);
-        self::assertFalse($contract['land']['requires_exact_head_mergegate'] ?? null);
         self::assertSame('standard', $contract['review']['mode'] ?? null);
         self::assertSame(1, $contract['review']['minimum_independent_reviewers'] ?? null);
         self::assertSame('risk_based', $contract['review']['specialist_review'] ?? null);
@@ -649,14 +589,8 @@ class AgentWorkflowContractTest extends TestCase
     {
         $index = $this->readRepoFile('docs/agent-harness-index.md');
         $gitignore = $this->readRepoFile('.gitignore');
-        $composer = $this->readRepoJson('composer.json');
 
         self::assertStringContainsString('docs/ci-write-contracts.md', $index);
-        self::assertStringContainsString('docs/exact-head-mergegate.md', $index);
-        self::assertSame(
-            'php scripts/ci/check_exact_head_mergegate.php',
-            $composer['scripts']['check:exact-head-mergegate'] ?? null,
-        );
         self::assertStringContainsString('/.deptrac.cache', $gitignore);
         self::assertStringContainsString('/.playwright-cli/', $gitignore);
         self::assertStringNotContainsString('/.playwright-mcp/', $gitignore);

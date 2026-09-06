@@ -8,7 +8,8 @@ description: Drive an open PR from merge prep through merge by syncing the branc
 # Land
 
 Use this skill only when merging is authorized. Follow the standard independent
-review path in `WORKFLOW.md`; the optional legacy attestation tool is not a
+review path in `WORKFLOW.md`; optional sealed reviewer tooling is described in
+[optional agent tooling](../../../docs/optional-agent-review.md) and is not a
 prerequisite for landing.
 
 ## Goals
