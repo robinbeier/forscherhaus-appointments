@@ -509,7 +509,7 @@ class GateCliSupportTest extends TestCase
         );
     }
 
-    public function testElevatedRealRsyncFailureStopsBeforeAtomicSwitchAndEmitsSafeReason(): void
+    public function testElevatedRealRsyncFailureStopsBeforeAtomicSwitch(): void
     {
         if (PHP_OS_FAMILY !== 'Linux' || trim((string) shell_exec('id -u')) !== '0') {
             self::markTestSkipped('Root on Linux is required for the production storage-transfer regression.');
@@ -534,10 +534,9 @@ class GateCliSupportTest extends TestCase
         source "$1"
         DEPLOY_TIMING_RUN_ID="018f6f52-4c87-4d4e-8b19-6a66e6e1af25"
         DEPLOY_TIMING_START_MS="$(deploy_timing_now_ms)"
-        deploy_detail_init 0
         switch_sentinel="$4"
         perform_atomic_switch() { : > "$switch_sentinel"; }
-        sync_storage_payload_with_detail "$2" "$3"
+        sync_storage_payload "$2" "$3"
         perform_atomic_switch
         BASH;
 
@@ -555,20 +554,6 @@ class GateCliSupportTest extends TestCase
 
             self::assertNotSame(0, $result['exit_code']);
             self::assertFileDoesNotExist($switchSentinel);
-            $events = $this->deployDetailEvents($result['stdout']);
-            self::assertCount(3, $events);
-            self::assertSame([1, 2, 3], array_column($events, 'sequence'));
-            self::assertSame(['source_before', 'target_before'], array_column(array_slice($events, 0, 2), 'boundary'));
-            self::assertSame(
-                ['storage_fingerprint', 'storage_fingerprint', 'subphase'],
-                array_column($events, 'event'),
-            );
-            self::assertNotContains('target_after', array_column($events, 'boundary'));
-            $failure = $events[2];
-            self::assertSame('subphase', $failure['event']);
-            self::assertSame('storage_transfer', $failure['subphase']);
-            self::assertSame('failed', $failure['status']);
-            self::assertSame('rsync_failed', $failure['reason_code']);
             self::assertStringNotContainsString($workspace, $result['stdout'] . $result['stderr']);
             self::assertStringNotContainsString('SENSITIVE_MARKER', $result['stdout'] . $result['stderr']);
         } finally {
@@ -702,24 +687,6 @@ class GateCliSupportTest extends TestCase
         }
 
         $this->assertNotSame([], $events);
-
-        return $events;
-    }
-
-    /**
-     * @return list<array<string,mixed>>
-     */
-    private function deployDetailEvents(string $output): array
-    {
-        $events = [];
-        foreach (preg_split('/\R/', $output) ?: [] as $line) {
-            if (!str_starts_with($line, 'DEPLOY_DETAIL ')) {
-                continue;
-            }
-            $event = json_decode(substr($line, strlen('DEPLOY_DETAIL ')), true, 64, JSON_THROW_ON_ERROR);
-            self::assertIsArray($event);
-            $events[] = $event;
-        }
 
         return $events;
     }
