@@ -40,10 +40,63 @@ to an existing Run-ID is permitted only when the candidate intent independently
 validates and has the same hash. Same Run-ID plus changed intent is exit `75`
 (`state_conflict`); a new attempt needs a new authorization and Run-ID.
 
-Existing run records from before removal of the traffic check are not accepted
-by this contract. Finish any active run before updating the host tooling, update
-the related helpers together, and use a new run ID for the next deployment.
-Historical records do not need conversion.
+### One-time upgrade after traffic-check removal
+
+Old completed runs still contain the removed intent fields and journal state.
+The dump producer checks every directory in `runs/`, so finishing active runs
+and choosing a new run ID alone is insufficient. Before replacing **any** of
+the installed helpers or their sibling contract, move the verified completed
+runs out of the active tree with the existing, mutually compatible tools.
+Do not run this after a partial tooling update; restore the previous matching
+helper and validator/contract first.
+
+Run once as root on the production host, before installing the new tooling:
+
+```bash
+python3 - <<'PY_UPGRADE'
+import fcntl
+import importlib.util
+import os
+import stat
+
+helper = '/usr/local/libexec/fh/deployment_dump_attestation_v1.py'
+spec = importlib.util.spec_from_file_location('installed_dump_helper', helper)
+old = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(old)
+root = old.open_absolute_directory(old.ORCHESTRATOR_ROOT, 0o700)
+locks = old.open_child(root, 'locks', 0o700)
+lock = os.open('fh-production-change.lock',
+               os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW, dir_fd=locks)
+meta = os.fstat(lock)
+assert stat.S_ISREG(meta.st_mode) and meta.st_uid == meta.st_gid == 0
+assert meta.st_nlink == 1 and stat.S_IMODE(meta.st_mode) == 0o600
+fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+assert old.identity(meta) == old.identity(
+    os.stat('fh-production-change.lock', dir_fd=locks, follow_symlinks=False))
+old.assert_no_nonterminal_runs(root)
+try:
+    runs = old.open_child(root, 'runs', 0o700)
+except FileNotFoundError:
+    print('No historical runs to move.')
+else:
+    os.close(runs)
+    archive = '/root/fh-deployment-runs-before-traffic-removal'
+    os.mkdir(archive, 0o700)  # Existing destination aborts; never overwrite it.
+    destination = old.open_absolute_directory(archive, 0o700)
+    os.rename('runs', 'runs', src_dir_fd=root, dst_dir_fd=destination)
+    os.fsync(destination)
+    os.fsync(root)
+    print('Completed runs moved out of the active tree.')
+PY_UPGRADE
+```
+
+The existing helper validates terminal journals and evidence using the old
+contract while the production-change lock is held. Any active claim, running
+operation, incomplete run, or invalid terminal bundle stops the move. An
+absent `runs/` directory is supported by the dump producer; the Host Runner
+creates it for a new run. Update the related helpers together after this step
+and use a new run ID. The moved history is outside the scanned tree and needs
+no conversion or permanent compatibility code.
 
 ## State journal
 
