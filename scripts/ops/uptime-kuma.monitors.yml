@@ -2,6 +2,8 @@
 # extended by reviewed repo-only monitoring follow-ups.
 # This is a template for manual or scripted reconstruction. It intentionally
 # omits Push tokens and other secret values.
+# IDs describe the original capture; a rebuilt instance may assign new IDs.
+# Post-change validation matches the required monitor names and types.
 # Entries added or renamed after the production capture require an explicit
 # live Kuma gate before the UI is expected to match exactly.
 
