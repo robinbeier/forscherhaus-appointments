@@ -869,10 +869,9 @@ final class DeploymentHostRunnerV1RootTest extends TestCase
     public function testControllerValidatorAcceptsOnlyExactContractRunArgvForBothActions(): void
     {
         $deploy = $this->systemdFixture('deploy', '/etc/fh/${FH_HEALTHZ_TOKEN}.token');
-        $externalDeploy = $this->systemdFixture('deploy', null, 'external');
         $rollback = $this->systemdFixture('rollback');
 
-        foreach ([$deploy['argv'], $externalDeploy['argv'], $rollback['argv']] as $argv) {
+        foreach ([$deploy['argv'], $rollback['argv']] as $argv) {
             self::assertSame(0, $this->validateControllerArgv($argv), implode(' ', $argv));
             self::assertContains('--expand-environment=no', $argv);
             self::assertLessThan(array_search('--', $argv, true), array_search('--expand-environment=no', $argv, true));
@@ -936,9 +935,7 @@ final class DeploymentHostRunnerV1RootTest extends TestCase
             count($deployArgv) - 1 =>
                 '/var/lib/fh-deploy-orchestrator/runs/' . self::OTHER_RUN_ID . '/deploy-result.json',
         ]);
-        $renderer = array_search('--renderer-deploy-mode', $deployArgv, true);
-        self::assertIsInt($renderer);
-        $mutations['undocumented docker renderer'] = array_replace($deployArgv, [$renderer + 1 => 'docker']);
+        $mutations['removed renderer option'] = [...$deployArgv, '--renderer-deploy-mode', 'host'];
 
         foreach ($mutations as $name => $mutated) {
             self::assertSame(70, $this->validateControllerArgv($mutated), $name);
@@ -1116,7 +1113,7 @@ final class DeploymentHostRunnerV1RootTest extends TestCase
     }
 
     /** @return array{launch:array<string,mixed>,argv:list<string>} */
-    private function systemdFixture(string $action, ?string $healthzPath = null, string $rendererMode = 'host'): array
+    private function systemdFixture(string $action, ?string $healthzPath = null): array
     {
         $request = DeploymentHostRunnerContractV1::decodeDeployRequest(
             (string) file_get_contents(__DIR__ . '/../../Fixtures/deployment-host-runner-v1/deploy-request.json'),
@@ -1128,7 +1125,6 @@ final class DeploymentHostRunnerV1RootTest extends TestCase
         if ($healthzPath !== null) {
             $input['parameters']['healthz_token']['path'] = $healthzPath;
         }
-        $input['parameters']['renderer_deploy_mode'] = $rendererMode;
         if ($action === 'rollback') {
             $originalDeployRequest = $request;
             $request = [

@@ -116,7 +116,7 @@ final class DeploymentHostRunnerProtectedSourceV1Test extends TestCase
         self::assertSame(0, $assembly['exit_code']);
         self::assertSame([[$request['release_id'], hash('sha256', $provenance)]], $buildHelper->calls);
         self::assertSame([[$request['run_id'], 'deploy-ref-zero-surprise-dump.sql.gz', $dumpSha]], $dumpHelper->calls);
-        self::assertSame([[$request['run_id'], $request['release_id'], 'host']], $capacityHelper->calls);
+        self::assertSame([[$request['run_id'], $request['release_id'], 'external']], $capacityHelper->calls);
         self::assertSame(1, $storage->pinCount);
         self::assertSame('passed', $assembly['sections']['capacity']['status']);
         self::assertSame('passed', $assembly['sections']['artifact']['status']);

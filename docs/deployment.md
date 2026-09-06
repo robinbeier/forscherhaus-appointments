@@ -84,12 +84,13 @@ Run deploys from the production host, using the uploaded archive:
   --zero-surprise-incident-webhook-file /etc/fh/zero-surprise-incident.ini
 ```
 
-When the host runs the PDF renderer as an external/containerized service and
-does not install host-level Node.js, add:
-
-```bash
---renderer-deploy-mode external
-```
+Production uses the Docker-backed `fh-pdf-renderer` service. Deployment
+restarts that service and checks renderer and application health; it does not
+install Node/npm packages or create Puppeteer caches on the host. No renderer
+mode or state-directory option is needed. Remove the former
+`--renderer-deploy-mode external` and `--renderer-state-dir` options from saved
+commands when updating deployment tools. New runner execution inputs omit
+`renderer_deploy_mode`; previously pinned inputs must not be reused for a new run.
 
 `deploy_ea.sh` performs these safety checks before switching traffic:
 
@@ -100,8 +101,6 @@ does not install host-level Node.js, add:
 - staged runtime config is generated for isolated predeploy replay
 - zero-surprise predeploy restore-dump replay passes
 - generated predeploy report validates
-- renderer dependency lockfile exists before switch when using the default
-  host-managed renderer mode
 - stage and current live runtime config permissions satisfy the fail-closed
   contract below after every generic ownership/mode pass
 

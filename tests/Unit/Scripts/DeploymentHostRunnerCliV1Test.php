@@ -232,8 +232,7 @@ final class DeploymentHostRunnerCliV1Test extends TestCase
     {
         $original = $this->deployEnvelope();
         $changedInput = $original['execution_input'];
-        $changedInput['parameters']['renderer_deploy_mode'] =
-            $changedInput['parameters']['renderer_deploy_mode'] === 'host' ? 'external' : 'host';
+        $changedInput['parameters']['healthz_token']['sha256'] = str_repeat('c', 64);
         $changedInputBytes = DeploymentHostRunnerContractV1::encodeExecutionInput($changedInput);
         $changed = DeploymentHostRunnerCliEnvelopeV1::decode(
             $this->envelope(

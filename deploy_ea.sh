@@ -21,8 +21,6 @@ MARK_RELEASE=1
 
 RENDERER_SERVICE="fh-pdf-renderer"
 RENDERER_HEALTH_URL="http://127.0.0.1:3003/healthz"
-RENDERER_STATE_DIR="/var/lib/fh-pdf-renderer"
-RENDERER_DEPLOY_MODE="${FH_RENDERER_DEPLOY_MODE:-host}"
 DEEP_HEALTH_URL="http://localhost/index.php/healthz"
 HEALTHZ_TOKEN_FILE=""
 ZERO_SURPRISE_REPORT=""
@@ -791,24 +789,6 @@ run_zero_surprise_predeploy_gate() {
   return 0
 }
 
-prepare_stage_renderer_dependencies() {
-  if [[ "$DRYRUN" -eq 0 && "$RENDERER_DEPLOY_MODE" == "host" ]]; then
-    [[ -f "$STAGE_ROOT/pdf-renderer/package-lock.json" ]] || return 1
-  elif [[ "$DRYRUN" -eq 1 && "$RENDERER_DEPLOY_MODE" == "host" ]]; then
-    echo "[DRY-RUN] would verify $STAGE_ROOT/pdf-renderer/package-lock.json exists"
-  else
-    echo "[i] Renderer dependency install handled externally; skipping host npm gate."
-  fi
-
-  if [[ "$RENDERER_DEPLOY_MODE" == "host" ]]; then
-    prepare_renderer_state_dir || return $?
-    install_renderer_dependencies || return $?
-  else
-    echo "[i] Renderer deploy mode external: leaving dependency/image preparation to '$RENDERER_SERVICE'."
-  fi
-  return 0
-}
-
 normalize_stage_permissions() {
   run_shell "chown -R '$WEBUSER':'$WEBUSER' '$STAGE_ROOT'" || return $?
   run_shell "find '$STAGE_ROOT' -type d -exec chmod 755 {} +" || return $?
@@ -846,11 +826,6 @@ Core options:
 Renderer / health gate options:
   --renderer-service NAME      systemd service name               [default: fh-pdf-renderer]
   --renderer-health-url URL    Renderer health endpoint           [default: http://127.0.0.1:3003/healthz]
-  --renderer-state-dir PATH    Persistent renderer state dir      [default: /var/lib/fh-pdf-renderer]
-  --renderer-deploy-mode MODE  Renderer dependency mode:
-                                host installs npm deps before switch,
-                                external only restarts/probes service
-                                                                  [default: host]
   --deep-health-url URL         App deep health endpoint           [default: http://localhost/index.php/healthz]
   --healthz-token-file PATH     File containing deep-health token  [required for non-dry deploy]
   --zero-surprise-report PATH   Output path for generated predeploy report
@@ -1048,29 +1023,6 @@ reload_services() {
       "${SYSTEMCTL_BASE[@]}" reload "$s_trim" 2>/dev/null || true
     fi
   done
-}
-
-prepare_renderer_state_dir() {
-  local state_home="${RENDERER_STATE_DIR}/home"
-  local npm_cache="${RENDERER_STATE_DIR}/npm-cache"
-  local xdg_config="${RENDERER_STATE_DIR}/config"
-  local xdg_cache="${RENDERER_STATE_DIR}/cache"
-  local xdg_data="${RENDERER_STATE_DIR}/data"
-  local tmp_dir="${RENDERER_STATE_DIR}/tmp"
-  local puppeteer_cache="${xdg_cache}/puppeteer"
-
-  if [[ "$DRYRUN" -eq 1 ]]; then
-    echo "[DRY-RUN] mkdir -p '$state_home' '$npm_cache' '$xdg_config' '$xdg_cache' '$xdg_data' '$tmp_dir' '$puppeteer_cache'"
-    echo "[DRY-RUN] chown -R '$WEBUSER':'$WEBUSER' '$RENDERER_STATE_DIR'"
-    echo "[DRY-RUN] chmod 0750 '$RENDERER_STATE_DIR' '$state_home' '$npm_cache' '$xdg_config' '$xdg_cache' '$xdg_data' '$tmp_dir' '$puppeteer_cache'"
-    return 0
-  fi
-
-  mkdir -p "$state_home" "$npm_cache" "$xdg_config" "$xdg_cache" "$xdg_data" "$tmp_dir" "$puppeteer_cache" \
-    || return $?
-  chown -R "$WEBUSER":"$WEBUSER" "$RENDERER_STATE_DIR" || return $?
-  chmod 0750 "$RENDERER_STATE_DIR" "$state_home" "$npm_cache" "$xdg_config" "$xdg_cache" "$xdg_data" "$tmp_dir" "$puppeteer_cache" \
-    || return $?
 }
 
 restore_runtime_script_permissions() {
@@ -1497,24 +1449,6 @@ harden_and_verify_runtime_config() {
     && apply_runtime_config_permissions verify "$app_root"
 }
 
-install_renderer_dependencies() {
-  local renderer_dir="${STAGE_ROOT}/pdf-renderer"
-  local state_home="${RENDERER_STATE_DIR}/home"
-  local npm_cache="${RENDERER_STATE_DIR}/npm-cache"
-  local puppeteer_cache="${RENDERER_STATE_DIR}/cache/puppeteer"
-
-  if [[ "$DRYRUN" -eq 1 ]]; then
-    echo "[DRY-RUN] runuser -u '$WEBUSER' -- env HOME='$state_home' NPM_CONFIG_CACHE='$npm_cache' PUPPETEER_CACHE_DIR='$puppeteer_cache' bash -lc \"cd '$renderer_dir' && npm ci --omit=dev --no-audit --no-fund\""
-    return 0
-  fi
-
-  runuser -u "$WEBUSER" -- env \
-    HOME="$state_home" \
-    NPM_CONFIG_CACHE="$npm_cache" \
-    PUPPETEER_CACHE_DIR="$puppeteer_cache" \
-    bash -lc "cd '$renderer_dir' && npm ci --omit=dev --no-audit --no-fund"
-}
-
 read_healthz_token() {
   local token
 
@@ -1640,18 +1574,6 @@ perform_atomic_switch() {
 
 is_positive_integer() {
   [[ "$1" =~ ^[1-9][0-9]*$ ]]
-}
-
-validate_renderer_deploy_mode() {
-  case "$RENDERER_DEPLOY_MODE" in
-    host|external)
-      return 0
-      ;;
-    *)
-      echo "[!] --renderer-deploy-mode must be 'host' or 'external'."
-      return 1
-      ;;
-  esac
 }
 
 extract_base64_field() {
@@ -2368,8 +2290,6 @@ while [[ $# -gt 0 ]]; do
     --no-mark) MARK_RELEASE=0; shift 1;;
     --renderer-service) RENDERER_SERVICE="$2"; shift 2;;
     --renderer-health-url) RENDERER_HEALTH_URL="$2"; shift 2;;
-    --renderer-state-dir) RENDERER_STATE_DIR="$2"; shift 2;;
-    --renderer-deploy-mode) RENDERER_DEPLOY_MODE="$2"; shift 2;;
     --deep-health-url) DEEP_HEALTH_URL="$2"; shift 2;;
     --healthz-token-file) HEALTHZ_TOKEN_FILE="$2"; shift 2;;
     --zero-surprise-report) ZERO_SURPRISE_REPORT="$2"; shift 2;;
@@ -2421,8 +2341,6 @@ fi
 if [[ -z "$ZERO_SURPRISE_PROFILE" ]]; then
   die "[!] --zero-surprise-profile must not be empty."
 fi
-validate_renderer_deploy_mode || exit 1
-
 absolutize_path_var HEALTHZ_TOKEN_FILE
 absolutize_path_var ZERO_SURPRISE_REPORT
 absolutize_path_var ZERO_SURPRISE_DUMP_FILE
@@ -2480,8 +2398,6 @@ echo "    Web user             : $WEBUSER"
 echo "    Reload services      : $RELOAD_SERVICES"
 echo "    Renderer service     : $RENDERER_SERVICE"
 echo "    Renderer health URL  : $RENDERER_HEALTH_URL"
-echo "    Renderer state dir   : $RENDERER_STATE_DIR"
-echo "    Renderer deploy mode : $RENDERER_DEPLOY_MODE"
 echo "    Deep health URL      : $DEEP_HEALTH_URL"
 echo "    Token file           : ${HEALTHZ_TOKEN_FILE:-<not-set-dry-run>}"
 echo "    Zero-surprise gate   : $REQUIRE_ZERO_SURPRISE"
@@ -2518,10 +2434,6 @@ if ! echo "$ARCH_LIST" | grep -E '(^|.*/)(application/config/config\.php)$' >/de
 fi
 
 # Pre-switch mandatory gates: runtime tool checks + service-control permission.
-if [[ "$RENDERER_DEPLOY_MODE" == "host" ]]; then
-  require_command node
-  require_command npm
-fi
 require_command curl
 require_command php
 require_command runuser
@@ -2561,9 +2473,6 @@ run_shell "cp '$APP/config.php' '$STAGE_ROOT/config.php'"
 run_shell "mkdir -p '$STAGE_ROOT/storage'"
 sync_live_storage_to_stage \
   || die "[!] Live storage transfer failed. Aborting before atomic switch."
-
-prepare_stage_renderer_dependencies \
-  || die "[!] Renderer dependency preparation failed. Aborting before atomic switch."
 
 normalize_stage_permissions \
   || die "[!] Final staged permission normalization failed. Aborting before atomic switch."
