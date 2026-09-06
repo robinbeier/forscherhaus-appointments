@@ -387,10 +387,9 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-      - name: Frontend compile
-        run: |
-          npm ci --no-audit --no-fund
-          npx gulp compile
+      - name: Install frontend test dependencies
+        # PHP tests consume committed source fixtures; this job does not build runtime assets.
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
