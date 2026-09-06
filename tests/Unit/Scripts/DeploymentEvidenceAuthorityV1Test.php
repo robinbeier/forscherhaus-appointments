@@ -1686,8 +1686,8 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                 ],
                 'post_gates' => [
                     'status' => 'passed',
-                    'kuma_healthy_count' => 13,
-                    'kuma_total_count' => 13,
+                    'kuma_healthy_count' => 12,
+                    'kuma_total_count' => 12,
                     'runtime_config_passed' => true,
                     'services_passed' => true,
                     'endpoints_passed' => true,

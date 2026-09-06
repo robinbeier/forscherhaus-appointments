@@ -1106,8 +1106,8 @@ final class DeploymentContractV1Test extends TestCase
         yield 'all checks unavailable' => [[]];
         yield 'mixed partial checks' => [
             [
-                'kuma_healthy_count' => 13,
-                'kuma_total_count' => 13,
+                'kuma_healthy_count' => 12,
+                'kuma_total_count' => 12,
                 'runtime_config_passed' => true,
             ],
         ];
@@ -1235,17 +1235,17 @@ final class DeploymentContractV1Test extends TestCase
     /** @return iterable<string,array{array<string,mixed>}> */
     public static function invalidIncompletePostGateShapeProvider(): iterable
     {
-        yield 'healthy count without total' => [['kuma_healthy_count' => 13]];
-        yield 'total count without healthy' => [['kuma_total_count' => 13]];
-        yield 'negative Kuma count' => [['kuma_healthy_count' => -1, 'kuma_total_count' => 13]];
-        yield 'wrong Kuma type' => [['kuma_healthy_count' => '13', 'kuma_total_count' => 13]];
-        yield 'healthy exceeds total' => [['kuma_healthy_count' => 14, 'kuma_total_count' => 13]];
+        yield 'healthy count without total' => [['kuma_healthy_count' => 12]];
+        yield 'total count without healthy' => [['kuma_total_count' => 12]];
+        yield 'negative Kuma count' => [['kuma_healthy_count' => -1, 'kuma_total_count' => 12]];
+        yield 'wrong Kuma type' => [['kuma_healthy_count' => '12', 'kuma_total_count' => 12]];
+        yield 'healthy exceeds total' => [['kuma_healthy_count' => 13, 'kuma_total_count' => 12]];
         yield 'wrong gate type' => [['runtime_config_passed' => 'true']];
         yield 'passed is non-null' => [['passed' => false]];
         yield 'all checks complete' => [
             [
-                'kuma_healthy_count' => 13,
-                'kuma_total_count' => 13,
+                'kuma_healthy_count' => 12,
+                'kuma_total_count' => 12,
                 'runtime_config_passed' => true,
                 'services_passed' => true,
                 'endpoints_passed' => true,
@@ -1853,10 +1853,10 @@ final class DeploymentContractV1Test extends TestCase
         }
     }
 
-    public function testSuccessfulEvidenceRequiresEveryPostGateIncludingKumaThirteenOfThirteen(): void
+    public function testSuccessfulEvidenceRequiresEveryPostGateIncludingKumaTwelveOfTwelve(): void
     {
         $evidence = $this->validEvidence($this->successfulRunLines());
-        $evidence['post_gates']['kuma_healthy_count'] = 12;
+        $evidence['post_gates']['kuma_healthy_count'] = 11;
 
         $this->expectException(RuntimeException::class);
         DeploymentContractV1::validateEvidence($evidence);
@@ -2236,8 +2236,8 @@ final class DeploymentContractV1Test extends TestCase
             'rollback' => $this->rollbackEvidence('not_invoked'),
             'post_gates' => [
                 'status' => 'passed',
-                'kuma_healthy_count' => 13,
-                'kuma_total_count' => 13,
+                'kuma_healthy_count' => 12,
+                'kuma_total_count' => 12,
                 'runtime_config_passed' => true,
                 'services_passed' => true,
                 'endpoints_passed' => true,

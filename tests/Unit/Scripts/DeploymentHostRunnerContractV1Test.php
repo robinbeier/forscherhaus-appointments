@@ -4479,8 +4479,8 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             'deploy_receipt_sha256' => $subject === 'deploy' ? self::SHA : null,
             'post_gates' => [
                 'status' => $passed ? 'passed' : 'failed',
-                'kuma_healthy_count' => $passed ? 13 : 12,
-                'kuma_total_count' => 13,
+                'kuma_healthy_count' => $passed ? 12 : 11,
+                'kuma_total_count' => 12,
                 'runtime_config_passed' => true,
                 'services_passed' => true,
                 'endpoints_passed' => true,
@@ -5037,8 +5037,8 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             ],
             'post_gates' => [
                 'status' => 'passed',
-                'kuma_healthy_count' => 13,
-                'kuma_total_count' => 13,
+                'kuma_healthy_count' => 12,
+                'kuma_total_count' => 12,
                 'runtime_config_passed' => true,
                 'services_passed' => true,
                 'endpoints_passed' => true,

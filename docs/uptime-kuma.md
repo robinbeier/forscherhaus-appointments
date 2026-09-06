@@ -52,6 +52,11 @@ Operational transition for the live Kuma instance: after `App - Health Deep`
 (`id: 4`) and its notifications are verified active, pause the former PDF
 Renderer monitor (`id: 8`). Keep its existing history; this repository change
 does not require a Push runtime or cron update.
+Finish any active deployment before changing the monitor count. Future deployments
+must use the matching `12/12` post-gate contracts; before upgrading older installed
+deployment tools, follow the [completed-run upgrade procedure](deployment-run-v1.md#one-time-upgrade-after-traffic-check-removal).
+Pausing the monitor does not alter old completed deployment records or authorize
+an installation of deployment tools.
 
 Repo desired monitor catalog:
 

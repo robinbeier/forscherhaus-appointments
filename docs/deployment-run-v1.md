@@ -42,7 +42,12 @@ validates and has the same hash. Same Run-ID plus changed intent is exit `75`
 
 ### One-time upgrade after traffic-check removal
 
-This procedure also applies when upgrading from the former host-renderer
+This procedure also applies when upgrading completed post-gate evidence from
+the former `13/13` Kuma monitor policy to the consolidated `12/12` policy.
+Keep the old matching tools for reconciliation; do not rewrite historical
+monitor counts to make old reports pass the new contract.
+
+It also applies when upgrading from the former host-renderer
 execution input containing `renderer_deploy_mode`. That old input is not
 accepted by the new closed contract, even though its v1 schema name is unchanged.
 Before replacing any tools, stop submitting new runs and use the **old matching
@@ -259,7 +264,7 @@ Its sections are:
 - local/remote artifact, manifest, and host/artifact deploy-script hashes;
 - exactly-once deploy exit and any rollback performed inside that child;
 - a separate at-most-once dedicated post-gate rollback reservation and verdict;
-- independent post-gates including Kuma raw `13/13`, runtime config, services,
+- independent post-gates including Kuma raw `12/12`, runtime config, services,
   endpoints, logs, scanner, and dormant/clean;
 - outer orchestrator start/end/wall-clock values in a separate section;
 - the terminal state and stable exit/reason pair.
