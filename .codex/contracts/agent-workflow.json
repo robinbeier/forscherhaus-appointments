@@ -246,70 +246,8 @@
         "requires_exact_head": true,
         "merge_command": "gh pr merge --merge --match-head-commit <current_head_sha>",
         "push_after_ready_linear_state": "In Review",
-        "exact_head_mergegate": {
-            "schema_version": 1,
-            "base_ref": "main",
-            "workflow_file": "ci.yml",
-            "workflow_name": "CI",
-            "pr_revalidation": "before_between_and_after_bounded_evidence_observations",
-            "ci_evidence_revalidation": "two_identical_bounded_observations",
-            "review_evidence_revalidation": "two_identical_bounded_observations",
-            "review_lens_source": "land.exact_head_mergegate.required_review_lenses",
-            "workflow_parser": {
-                "isolation": "php_no_ini_scoped_autoloader",
-                "package_path": "vendor/symfony/yaml",
-                "runtime_files": [
-                    "Exception/ExceptionInterface.php",
-                    "Exception/ParseException.php",
-                    "Exception/RuntimeException.php",
-                    "Inline.php",
-                    "Parser.php",
-                    "Tag/TaggedValue.php",
-                    "Unescaper.php",
-                    "Yaml.php"
-                ],
-                "runtime_files_sha256": "ea0f1c3a176b9a34fa2cada62ff1c331a7ff96cf077febf3a753fd29652584e6"
-            },
-            "required_checks": [
-                "changes",
-                "build-test",
-                "js-lint-changed",
-                "phpstan-application",
-                "typed-request-dto",
-                "architecture-ownership-map",
-                "architecture-boundaries"
-            ],
-            "conditional_checks": [
-                "typed-request-contracts",
-                "deep-check-bootstrap",
-                "deep-runtime-suite",
-                "coverage-shard-unit",
-                "coverage-shard-integration",
-                "coverage-delta",
-                "api-contract-openapi",
-                "write-contract-booking",
-                "write-contract-api",
-                "booking-controller-flows",
-                "integration-smoke",
-                "pdf-renderer-tests"
-            ],
-            "review_attestation": {
-                "marker": "exact-head-review-attestation:v2",
-                "verdict": "no_findings",
-                "authority_model": "owner_accountable_assertion",
-                "cryptographic_agent_execution_proof": false,
-                "malicious_repository_owner_in_scope": false,
-                "requires_unedited_comment": true,
-                "comment_edit_evidence": "graphql_user_content_edit_count_excluding_creation",
-                "activity_watermarks": ["review_id", "review_comment_id", "review_payload_digest"],
-                "trusted_author_associations": ["OWNER"],
-                "blocking_feedback_author_associations": ["OWNER", "MEMBER", "COLLABORATOR"]
-            },
-            "required_review_lenses": ["correctness_security", "design_maintainability", "tests_regression_flake"]
-        },
         "requires_independent_review": true,
-        "requires_current_blocking_ci": true,
-        "requires_exact_head_mergegate": false
+        "requires_current_blocking_ci": true
     },
     "review": {
         "mode": "standard",
@@ -379,16 +317,6 @@
         "scripts/agent/trusted_base_launcher.sh": {
             "contract_reference": ".codex/contracts/agent-workflow.json",
             "required_sections": {}
-        },
-        "docs/exact-head-mergegate.md": {
-            "contract_reference": ".codex/contracts/agent-workflow.json",
-            "required_sections": {
-                "## Evidence Contract": [
-                    "The command uses authenticated GitHub REST GET requests plus bounded, read-only GraphQL queries and binds all evidence"
-                ],
-                "## Review Attestation": ["The three final reviews remain independent review work."],
-                "## Result and Landing": ["Only an exit 0 after the final PR-head and bounded evidence revalidations"]
-            }
         },
         "docs/ci-write-contracts.md": {
             "contract_reference": "../.codex/contracts/agent-workflow.json",

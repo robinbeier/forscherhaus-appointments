@@ -5,13 +5,10 @@ It does not require these tools. Use this legacy path only when the user
 explicitly requests it; unavailable CLI authentication, platform support, or
 bootstrap diagnostics are not prerequisites for a standard review.
 
-The sections below retain the existing specialized tooling contracts. Their
-mandatory wording applies only inside this opt-in path. The sealed runner,
-its runtime pins, and its fail-closed checks are unchanged. It is not a
-fallback to invoke these tools directly from an unverified checkout.
-The machine settings in `authority.reviewer`, `trusted_base_bootstrap`, and
-`land.exact_head_mergegate` describe this optional subsystem; `review` and the
-other `land` fields describe the normal path.
+The sections below retain the existing sealed reviewer and trusted bootstrap
+contracts. Their mandatory wording applies only when those tools are
+explicitly requested. It is not a fallback to invoke them directly from an
+unverified checkout.
 
 For controlled parallel implementation, use the ownership guidance in `WORKFLOW.md`.
 This is independent of whether the final review uses the standard path.
@@ -242,48 +239,16 @@ canaries. It writes only inside private system-temporary roots, never the user
 home, and returns `review_evidence: false`; it can diagnose the harness but can
 never satisfy a final-review or landing requirement.
 
-After the final reviews are finding-free, record their canonical,
-privacy-safe exact-head attestation on the PR and run the repository-owned
-read-only verifier:
-
-```bash
-composer check:exact-head-mergegate -- --pr=<number-or-canonical-url> --reviewed-sha=<40-character-sha>
-```
-
-The verifier uses GitHub REST GET requests plus bounded, read-only GraphQL
-queries. It must run from the exact reviewed `HEAD`, loads its policy from that
-committed tree, and rejects local changes to the contract or mergegate
-implementation. Its workflow parser runs isolated and accepts only the YAML
-runtime file manifest and digest pinned by that reviewed policy.
-It observes all normalized CI and review evidence twice. It reads PR identity
-before, between, and after those bounded observations. All three PR reads and
-both complete evidence observations must remain equal. It requires the open
-non-draft PR, clean mergeability, the canonical successful CI run and every
-blocking check to bind to that PR and SHA. Always-on checks must succeed;
-diff-conditional checks must be either successful or explicitly skipped. It
-also requires the three distinct review lenses from the machine contract in
-one new, unedited, SHA-bound owner attestation with exact review-activity
-watermarks and a privacy-safe review payload digest. Batched GraphQL edit
-counts bind the attestation's unedited state plus each trusted formal review
-and inline review comment, while only body digests enter the watermark. A still-active trusted
-`CHANGES_REQUESTED` review, trusted watermark or payload drift, edited trusted
-inline feedback, newer trusted review feedback, or a newer invalid attestation
-marker invalidates that evidence. Missing, pending, duplicated, malformed,
-stale, or wrong-suite evidence fails closed. The report contains no raw comment
-body, reviewer identity, token, capability, or personal data.
-Untrusted review activity neither grants authority nor vetoes landing. See
-`docs/exact-head-mergegate.md`.
-
-An exit `0` is required before `Ready to Merge`, but it does not perform the
-merge. Use the compare-and-swap merge command from
-`.codex/contracts/agent-workflow.json` on the same still-current SHA.
+Use the normal review and landing path in [WORKFLOW.md](../WORKFLOW.md) after
+the independent reviews and applicable blocking CI are complete. The primary
+agent records the review result, verifies the current reviewed head, and uses
+the authorized merge flow.
 
 The PR is not done until:
 
 - required blocking CI is green
 - no open review findings remain
 - the PR is mergeable
-- the read-only exact-head mergegate passes on the current reviewed SHA
 - required docs or migration notes are included
 - the reviewed head, CI head, and current PR head are identical
 - the issue is moved to `Done`
