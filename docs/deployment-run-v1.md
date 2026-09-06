@@ -370,10 +370,11 @@ The separately pinned `deployment_host_execution_input.v1` is canonical JSON
 with one final newline, no NUL, and at most 16,384 bytes. It contains exactly
 `schema`, `run_id`, `intent_sha256`, `action`, and `parameters`; it contains no
 caller-selected executable, argv, environment, inline secret, app root, runtime
-user, or result path. Deploy parameters bind the immutable `release_id`, the
-closed renderer mode, and root-protected path-plus-SHA references for the
+user, or result path. Deploy parameters bind the immutable `release_id`,
+`artifact_provenance_sha256`, and root-protected path-plus-SHA references for the
 health token, dump, predeploy credentials, canary credentials, and incident
-webhook. The execution-input producer is a fully trusted root authority for
+webhook. Renderer operation is fixed to the Docker-backed service; no renderer
+mode is accepted in the execution input. The execution-input producer is a fully trusted root authority for
 selecting those protected files; web/user-authored input is rejected, and a
 path plus digest is integrity evidence rather than authorization by itself.
 Before a deploy reservation, the executable snapshots those five references
