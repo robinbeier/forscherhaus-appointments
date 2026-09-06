@@ -20,7 +20,9 @@ class AgentWorkflowContractTest extends TestCase
 
     public function testCanonicalWorkflowSurfacesReferenceMachineContract(): void
     {
-        $contract = $this->readRepoJson('.codex/contracts/agent-workflow.json');
+        $contract = agentHarnessReadinessLoadWorkflowContract(
+            $this->repoRoot . '/.codex/contracts/agent-workflow.json',
+        );
         $surfaces = $contract['surfaces'] ?? null;
         self::assertIsArray($surfaces);
 
