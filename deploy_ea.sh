@@ -959,18 +959,14 @@ validate_deploy_script_drift() {
 
 detect_php_fpm_reload_service() {
   local unit
+  local state
 
-  while read -r unit _; do
+  while read -r unit _ state _; do
+    [[ "$state" == active ]] || continue
     [[ "$unit" =~ ^php[0-9.]+-fpm\.service$ ]] || continue
     printf '%s\n' "${unit%.service}"
     return 0
-  done < <(/bin/systemctl list-units --type=service --all 'php*-fpm.service' --no-legend 2>/dev/null || true)
-
-  while read -r unit _; do
-    [[ "$unit" =~ ^php[0-9.]+-fpm\.service$ ]] || continue
-    printf '%s\n' "${unit%.service}"
-    return 0
-  done < <(/bin/systemctl list-unit-files 'php*-fpm.service' --type=service --no-legend 2>/dev/null || true)
+  done < <("${SYSTEMCTL_BASE[@]}" list-units --type=service --state=active 'php*-fpm.service' --no-legend 2>/dev/null || true)
 
   return 1
 }
@@ -989,17 +985,23 @@ resolve_reload_services() {
 reload_services() {
   local s
   local s_trim
+  local reload_status=0
 
+  [[ -n "${RELOAD_SERVICES//[[:space:],]/}" ]] || return 0
   IFS=',' read -ra SVCS <<< "$RELOAD_SERVICES"
   for s in "${SVCS[@]}"; do
     s_trim="$(echo "$s" | xargs)"
     [[ -n "$s_trim" ]] || continue
     if [[ "$DRYRUN" -eq 1 ]]; then
-      echo "[DRY-RUN] ${SYSTEMCTL_BASE[*]} reload '$s_trim' 2>/dev/null || true"
+      echo "[DRY-RUN] ${SYSTEMCTL_BASE[*]} reload '$s_trim' 2>/dev/null"
     else
-      "${SYSTEMCTL_BASE[@]}" reload "$s_trim" 2>/dev/null || true
+      if ! "${SYSTEMCTL_BASE[@]}" reload "$s_trim" 2>/dev/null; then
+        reload_status=1
+      fi
     fi
   done
+
+  return "$reload_status"
 }
 
 restore_runtime_script_permissions() {
@@ -2149,6 +2151,13 @@ rollback_after_failure() {
   fi
 
   if [[ "$rollback_ok" -eq 1 ]]; then
+    if ! reload_services; then
+      echo "[!] Rollback failed: service reload failed."
+      rollback_ok=0
+    fi
+  fi
+
+  if [[ "$rollback_ok" -eq 1 ]]; then
     if probe_renderer_health; then
       renderer_result="ok"
     else
@@ -2156,8 +2165,6 @@ rollback_after_failure() {
       rollback_ok=0
     fi
   fi
-
-  reload_services || true
 
   if [[ "$rollback_ok" -eq 1 ]]; then
     if probe_deep_health_contract; then
@@ -2453,6 +2460,10 @@ perform_atomic_switch
 
 verify_post_switch_runtime_config_contracts
 
+if ! reload_services; then
+  rollback_after_failure "service reload failed"
+fi
+
 if ! probe_renderer_health; then
   rollback_after_failure "renderer health check failed ($RENDERER_HEALTH_URL)"
 fi
@@ -2468,8 +2479,6 @@ fi
 if [[ "$MARK_RELEASE" -eq 1 ]]; then
   run_shell "bash -lc 'echo \"$REL  \$(date -u +%FT%TZ)\" > \"$APP/_RELEASE\"'"
 fi
-
-reload_services
 
 if command -v curl >/dev/null 2>&1; then
   if [[ "$DRYRUN" -eq 1 ]]; then

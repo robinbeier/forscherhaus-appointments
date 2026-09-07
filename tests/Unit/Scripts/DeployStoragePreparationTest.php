@@ -63,6 +63,28 @@ final class DeployStoragePreparationTest extends TestCase
         );
     }
 
+    public function testPhpFpmDetectorSelectsActiveUnitWithoutInstalledUnitFallback(): void
+    {
+        $script = <<<'BASH'
+        set -Eeuo pipefail
+        source "$1"
+
+        fake_systemctl() {
+          [[ "${1:-}" == list-units ]] || return 1
+          printf '%s\n' \
+            'php8.2-fpm.service loaded inactive dead' \
+            'php8.5-fpm.service loaded active running'
+        }
+        SYSTEMCTL_BASE=(fake_systemctl)
+        detected="$(detect_php_fpm_reload_service)"
+        printf '%s\n' "$detected"
+        BASH;
+
+        $result = $this->runCommand(['bash', '-c', $script, 'bash', $this->root . '/deploy_ea.sh']);
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertSame("php8.5-fpm\n", $result['stdout']);
+    }
+
     public function testStorageTransferCopiesSpecialNames(): void
     {
         if (trim((string) shell_exec('command -v rsync')) === '') {
