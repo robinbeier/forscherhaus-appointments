@@ -220,10 +220,14 @@ PR is treated as ready. These evidence levels are deliberately distinct:
 A successful quick hook or local full gate is never merge authorization by
 itself.
 
-For changes limited to prose, links, or historical documentation, use a
-docs-only local check: run `git diff --check`, the existing managed Prettier
-check on changed Markdown files that still exist, and verify changed references against their
-canonical sources. This shortcut does not apply when a diff changes behavior,
+For changes limited to prose, links, or historical documentation, check the
+complete proposed diff with `git diff --check origin/main...HEAD` against the
+current PR base; also use `git diff --cached --check` for staged changes before
+committing. Keep the existing formatting policy: the managed hook checks files
+covered by Prettier, while `.prettierignore` excludes `docs/`. Review Markdown
+readability directly for those excluded files; do not claim a formatter check
+for ignored files. Verify changed references against their canonical sources.
+This shortcut does not apply when a diff changes behavior,
 executable instructions, security or operating rules, or validation policy;
 those changes require their relevant checks and the full gate as appropriate.
 Docs-only local validation does not replace blocking CI, independent final-head
