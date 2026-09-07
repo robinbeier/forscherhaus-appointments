@@ -44,11 +44,13 @@ restore-verification freshness and backup-creation freshness. ROB-390 and
 ROB-391 applied the related live Kuma changes on 2026-05-20; future live Kuma
 renames or new monitor creation still require an explicit Kuma write gate.
 
-The active repo desired monitor catalog now contains 12 monitors. `App - Health
+The repo desired monitor catalog contains 10 monitors; the live instance remains
+at 12 until the separately approved transition below. `App - Health
 Deep` remains the single JSON health monitor and includes the PDF renderer
 dependency check in its response; the former standalone PDF Renderer monitor
-is removed from the active catalog. The PDF renderer log monitor remains
-unchanged.
+is removed from the active catalog. The static shallow-health and PDF-renderer
+journal monitors are retired from the desired catalog; functional deep-health
+and PDF-export checks remain.
 
 Operational transition for the existing live Kuma instance: after `App - Health Deep`
 (`json-query`) and its notifications are verified active, pause the former
@@ -74,12 +76,33 @@ results. `prod_doctor.sh` reports observations without certifying the catalog.
 Application deployments rely on their direct checks; neither the catalog nor
 an all-green monitor count is an additional release condition.
 
+### Pending live transition: two redundant monitors
+
+The static `/health` file contains only `OK`; its keyword monitor adds no
+application or dependency check beyond the retained Homepage and Deep Health
+monitors. Keep the endpoint itself for existing consumers.
+
+The PDF renderer journal monitor counts only `err..alert` journal priorities.
+Renderer application output does not reliably assign those priorities, so a
+green result is not proof of successful rendering. Retain Deep Health for
+renderer reachability and the Dashboard PDF Export monitor for actual exports;
+use renderer logs on demand when either reports a failure.
+
+This repository change does not alter the installed Push bundle or live cron.
+Until a separate production approval, keep their existing files and configuration.
+For the later transition, back up the affected configuration, verify Homepage,
+Deep Health and PDF Export plus their notification assignments, pause the
+`App — Health Shallow` and `App - PDF Renderer Log Errors` monitors, and remove
+only the PDF-renderer-log cron invocation. Verify the remaining heartbeats and
+notifications. Only then may its installed script be retired. Preserve monitor
+history and do not delete shared runtime libraries or credentials. If validation
+fails, restore the exact cron and previous monitor states from the backup.
+
 Repo desired monitor catalog:
 
 | Name | Type | Interval | Secret handling |
 | --- | --- | ---: | --- |
 | App-Homepage | `http` | 30s | public URL only |
-| App — Health Shallow | `keyword` | 30s | public URL only |
 | App - Health Deep | `json-query` | 30s | `X-Health-Token` header value in Kuma/host-local config only |
 | Host - Services | `push` | 60s | `KUMA_PUSH_URL_HOST_SERVICES` |
 | Host - Resources | `push` | 60s | `KUMA_PUSH_URL_HOST_RESOURCES` |
@@ -87,7 +110,6 @@ Repo desired monitor catalog:
 | Ops - Backup Creation Freshness | `push` | 900s | `KUMA_PUSH_URL_BACKUP_CREATION` |
 | App - Log Errors | `push` | 60s | `KUMA_PUSH_URL_APP_LOGS` |
 | App - php8.5-fpm Log Errors | `push` | 60s | `KUMA_PUSH_URL_PHP_FPM_LOGS` |
-| App - PDF Renderer Log Errors | `push` | 60s | `KUMA_PUSH_URL_PDF_RENDERER_LOGS` |
 | App - Dashboard PDF Export | `push` | 900s | `KUMA_PUSH_URL_PDF_EXPORT` |
 | Security - Scanner Activity | `push` | 60s | `KUMA_PUSH_URL_SECURITY_SCANNER` |
 
@@ -186,7 +208,8 @@ not authorize an Env change, Push, timer activation, or deletion.
 
 For `/etc/cron.d`, the canonical desired state is
 `scripts/ops/config/fh-uptime-kuma-push.cron`; the personal-crontab form remains
-in `scripts/ops/uptime-kuma-crontab.example`. The production schedule runs:
+in `scripts/ops/uptime-kuma-crontab.example`. The desired schedule after the
+approved transition runs:
 
 - host services every minute
 - host resources every minute
@@ -195,8 +218,8 @@ in `scripts/ops/uptime-kuma-crontab.example`. The production schedule runs:
   writes its success marker
 - app log errors every minute plus a 30 second staggered run
 - php-fpm log errors every minute
-- PDF renderer log errors every minute
 - dashboard PDF export every 15 minutes
+- scanner activity every minute
 
 The `App - Log Errors` Push monitor is still an app-error monitor, not a
 scanner monitor. Its script ignores only built-in, narrow known-noise patterns

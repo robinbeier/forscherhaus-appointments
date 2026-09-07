@@ -28,7 +28,7 @@ final class KumaPushRuntimeBundleTest extends TestCase
 
         $files = $manifest['files'] ?? null;
         self::assertIsArray($files);
-        self::assertCount(15, $files);
+        self::assertCount(14, $files);
         $sourcePaths = [];
         foreach ($files as $entry) {
             self::assertIsArray($entry);
@@ -61,8 +61,8 @@ final class KumaPushRuntimeBundleTest extends TestCase
             ),
         );
         sort($entryPoints);
-        self::assertCount(9, $entryPoints);
-        self::assertCount(9, array_unique($entryPoints));
+        self::assertCount(8, $entryPoints);
+        self::assertCount(8, array_unique($entryPoints));
         $cron = file_get_contents($this->repoRoot() . '/' . self::CRON_SOURCE);
         self::assertIsString($cron);
         $expectedCron = ['SHELL=/bin/bash', 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'];
@@ -75,7 +75,6 @@ final class KumaPushRuntimeBundleTest extends TestCase
                 ['app_logs', '*', ''],
                 ['app_logs', '*', 'sleep 30; '],
                 ['php_fpm_logs', '*', ''],
-                ['pdf_renderer_logs', '*', ''],
                 ['pdf_export', '*/15', ''],
                 ['apache_scanner_activity', '*', ''],
                 ['backup_creation', '*/15', ''],
