@@ -10,7 +10,6 @@
  * ---------------------------------------------------------------------------- */
 
 const babel = require('gulp-babel');
-const changedModule = require('gulp-changed');
 const cached = require('gulp-cached');
 const css = require('gulp-clean-css');
 const fs = require('fs-extra');
@@ -18,10 +17,6 @@ const gulp = require('gulp');
 const plumber = require('gulp-plumber');
 const rename = require('gulp-rename');
 const sass = require('gulp-sass')(require('sass'));
-
-// const debug = require('gulp-debug');
-
-const changed = changedModule.default ?? changedModule;
 
 let deleteSyncPromise;
 
@@ -41,7 +36,6 @@ function scripts() {
     return gulp
         .src(['assets/js/**/*.js', '!assets/js/**/*.min.js'])
         .pipe(plumber())
-        .pipe(changed('assets/js/**/*'))
         .pipe(babel({comments: false}))
         .pipe(rename({suffix: '.min'}))
         .pipe(gulp.dest('assets/js'));
