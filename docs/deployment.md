@@ -202,32 +202,20 @@ with:
 - `30` when deployment failed and automatic rollback succeeded
 - `31` when deployment failed and rollback failed or could not be verified
 
-For the long-horizon LTS migration project, the old production server remains a
-separate rollback target until the new server has been rehearsed and explicitly
-accepted.
-
-## Production Server Rebuild Target
-
-For a fresh Ubuntu LTS server, keep this deployment model:
-
-1. Provision OS packages, PHP-FPM, Apache, MariaDB client access, Composer,
-   Docker, and the PDF renderer service. Host-level Node.js is not required
-   when the PDF renderer runs as a container and release artifacts are built
-   off-host.
-2. Restore or migrate the application database separately.
-3. Upload a release archive to `/root/releases`.
-4. Place host-local secrets and credentials under `/etc/fh`.
-5. Run `deploy_ea.sh` with zero-surprise predeploy and canary enabled.
-6. Keep the old server available until production checks and Uptime Kuma
-   monitors are green after cutover.
-
-The full rebuild checklist lives in `docs/server-rebuild-runbook.md`.
-
 The release-pair publisher prepares `/root/releases` as `root:root` mode
 `0700` before upload. On a documented legacy/rebuild host where that exact
 root-owned directory still has mode `0755`, `--prepare` performs the single
 inode-bound migration to `0700`, fsyncs it, and revalidates the same directory.
 Other owners, types, symlinks, or modes are rejected unchanged.
+
+## Future Server Rebuild Planning
+
+A future rebuild needs a new plan based on the server and requirements at that
+point. Before destructive work, verify database, host-configuration and
+[Kuma backups](uptime-kuma.md#backup-and-restore), retain protected off-host
+copies, and test the recovery path. Creating a provider snapshot alone is not
+proof of a tested restore. Use the [database restore rehearsal](database-migration-rehearsal.md)
+and current deployment guidance when preparing that plan.
 
 ## Required Host-Local Secrets
 
