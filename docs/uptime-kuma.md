@@ -44,7 +44,7 @@ restore-verification freshness and backup-creation freshness. ROB-390 and
 ROB-391 applied the related live Kuma changes on 2026-05-20; future live Kuma
 renames or new monitor creation still require an explicit Kuma write gate.
 
-The repo desired monitor catalog contains eight monitors. A repository merge
+The repo desired monitor catalog contains seven monitors. A repository merge
 does not update the live catalog; use the bounded retirement procedure below. `App - Health
 Deep` remains the single JSON health monitor and includes the PDF renderer
 dependency check in its response; the former standalone PDF Renderer monitor
@@ -101,13 +101,21 @@ or an optional access service) are not required for this single-server setup.
 Keep service-state inspection in `prod_doctor.sh` and post-change diagnostics;
 retiring the monitor does not stop services or remove those diagnostic checks.
 
+The `Security - Scanner Activity` Push monitor counted matching access-log
+requests, including blocked bursts from multiple sources. A `2xx` response did
+not prove disclosure, and a blocked burst did not by itself require action.
+Retire that continuous alert, while retaining Apache/Fail2ban protection and the
+fixed scanner-path checks used by `prod_doctor.sh` and post-change validation.
+Logs remain available for focused incident diagnosis; retiring the alarm does
+not resolve any independently identified security finding.
+
 Retirement changes monitor activation and the corresponding cron invocation,
 not any monitored service. For each explicitly approved live
 retirement, back up the affected configuration, verify retained monitors and
 notification assignments, pause the identified monitor, and remove only its
 cron invocation. The retired monitors are `App — Health Shallow` (keyword),
 `App - PDF Renderer Log Errors` (push), `App - php8.5-fpm Log Errors` (push),
-and `Host - Services` (push);
+`Host - Services` (push), and `Security - Scanner Activity` (push);
 the shallow monitor has no cron invocation. Already-paused monitors require no
 further change. Verify fresh regular results from all retained monitors.
 Preserve history, shared libraries and credentials. An unused installed script
@@ -126,7 +134,6 @@ Repo desired monitor catalog:
 | Ops - Backup Creation Freshness | `push` | 900s | `KUMA_PUSH_URL_BACKUP_CREATION` |
 | App - Log Errors | `push` | 60s | `KUMA_PUSH_URL_APP_LOGS` |
 | App - Dashboard PDF Export | `push` | 900s | `KUMA_PUSH_URL_PDF_EXPORT` |
-| Security - Scanner Activity | `push` | 60s | `KUMA_PUSH_URL_SECURITY_SCANNER` |
 
 `App - Log Errors` is an event monitor: each newly read error is reported once,
 and the next run without a new error reports recovery. Set its Kuma **Retries**
@@ -137,15 +144,6 @@ extra retry grace for missing heartbeats; the producer normally sends every
 30 seconds. Preserve notification assignments and all other monitor settings.
 This configuration change requires production approval; a repository merge does
 not apply it. Verify the saved value and a fresh normal heartbeat afterward.
-
-`Security - Scanner Activity` is telemetry-first. The push script still reports
-`scanner_activity`, but it only sends a red state when the threshold is exceeded
-and the burst is actionable: at least one direct scanner path returned `2xx`,
-or the number of distinct sources reaches
-`KUMA_SECURITY_SCANNER_SOURCE_THRESHOLD` (default `5`). Query-only scanner
-markers are still counted in `success_2xx` and `query_marker_2xx`, but they do
-not turn the monitor red by themselves. Pure `3xx/4xx` bursts remain green and
-are logged in the push message without raw IPs or raw request paths.
 
 The catalog above records the non-secret monitor shape. Live monitor history,
 Push URLs, and other credentials remain host-owned.
@@ -238,7 +236,6 @@ approved transition runs:
   writes its success marker
 - app log errors every minute plus a 30 second staggered run
 - dashboard PDF export every 15 minutes
-- scanner activity every minute
 
 The `App - Log Errors` Push monitor is still an app-error monitor, not a
 scanner monitor. Its script ignores only built-in, narrow known-noise patterns
