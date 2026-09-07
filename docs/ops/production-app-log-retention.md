@@ -43,8 +43,10 @@ cause, then consider the simplest suitable retention mechanism.
 
 This project operates exactly one production server. The
 [`kuma_push_host_resources.sh`](../../scripts/ops/kuma_push_host_resources.sh)
-source still contains an optional app-log-retention branch, disabled by default.
-Its helper is no longer supplied by this repository; do not enable that branch.
+source no longer contains the retired app-log-retention branch.
+Older installed bundles may still contain it, disabled by default; keep it
+disabled until a separately approved package replacement removes it. Its helper
+is no longer supplied by this repository.
 Do not remove an installed helper while an active monitor depends on it;
 review the installed dependency first. Keep the ordinary app-error and host-resource
 monitors. Repository changes do not update the installed monitoring bundle.
