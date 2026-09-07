@@ -79,7 +79,7 @@ Run deploys from the production host, using the uploaded archive:
   --zero-surprise-dump-file /path/to/easyappointments.sql.gz \
   --zero-surprise-predeploy-credentials-file /etc/fh/zero-surprise-predeploy.ini \
   --zero-surprise-canary-credentials-file /etc/fh/zero-surprise-canary.ini \
-  --zero-surprise-incident-webhook-file /etc/fh/zero-surprise-incident.ini
+  --zero-surprise-incident-webhook-file /etc/fh/zero-surprise-incident-webhook.ini
 ```
 
 Production uses the Docker-backed `fh-pdf-renderer` service. Deployment
@@ -91,12 +91,7 @@ deployment commands. Deployment does not install Node/npm packages or create
 Puppeteer caches on the host. No renderer
 mode or state-directory option is needed. Remove the former
 `--renderer-deploy-mode external` and `--renderer-state-dir` options from saved
-commands when updating deployment tools. New runner execution inputs omit
-`renderer_deploy_mode`. Before upgrading installed tools, complete/reconcile old
-runs with the old matching toolset and move completed runs out of the active
-tree using the [contract upgrade procedure](deployment-run-v1.md#one-time-upgrade-after-traffic-check-removal).
-Do not replace helpers while any old run or active claim remains unresolved;
-previously pinned inputs must not be reused for a new run.
+commands when updating deployment tools.
 
 For normal application-only changes, the deploy script reloads the detected
 PHP-FPM unit. Apache is left untouched because the deploy changes application
@@ -231,7 +226,7 @@ These files are intentionally not committed:
 - `/etc/fh/healthz.token`
 - `/etc/fh/zero-surprise-predeploy.ini`
 - `/etc/fh/zero-surprise-canary.ini`
-- `/etc/fh/zero-surprise-incident.ini`
+- `/etc/fh/zero-surprise-incident-webhook.ini`
 - any Uptime Kuma push monitor URLs or tokens
 
 ## Breakglass
