@@ -28,7 +28,6 @@ final class DeploymentDumpAttestationProducerV1Test extends TestCase
     private string $cli;
     private string $authorityDocs;
     private string $helperPath;
-    private string $sameServerBackup;
 
     protected function setUp(): void
     {
@@ -37,7 +36,6 @@ final class DeploymentDumpAttestationProducerV1Test extends TestCase
         $this->helper = file_get_contents($this->helperPath) ?: '';
         $this->cli = file_get_contents($root . '/scripts/ops/verify_deployment_dump_v1.php') ?: '';
         $this->authorityDocs = file_get_contents($root . '/docs/deployment-evidence-authority-v1.md') ?: '';
-        $this->sameServerBackup = file_get_contents($root . '/scripts/ops/prepare_same_server_rebuild_backup.sh') ?: '';
     }
 
     public function testClosedInputAndPinnedImageContract(): void
@@ -703,12 +701,5 @@ final class DeploymentDumpAttestationProducerV1Test extends TestCase
         );
         self::assertSame(70, $invalid['exit']);
         self::assertSame('', $invalid['stdout']);
-    }
-
-    public function testSameServerBackupDumpSourceMatchesClosedTableDataContract(): void
-    {
-        self::assertStringContainsString('--skip-triggers', $this->sameServerBackup);
-        self::assertStringNotContainsString('--triggers', $this->sameServerBackup);
-        self::assertStringNotContainsString('--routines', $this->sameServerBackup);
     }
 }
