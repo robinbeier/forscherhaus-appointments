@@ -255,8 +255,6 @@ addresses, no secrets, no discovered file names, and no production data.
 
 - `docs/security/production-server-threat-model.md`: ROB-395 server threat
   model and ROB-396 follow-up framing.
-- `docs/long-horizon/ROB-292-prod-security-hardening/Plan.md`: Milestone 3
-  scope and stop conditions.
 - `docs/ops/agent-operations.md`: read-only-first production operations
   workflow.
 - `scripts/ops/README.md`: redacted ops harness and sensitive-path validation

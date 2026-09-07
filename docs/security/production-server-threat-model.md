@@ -233,7 +233,6 @@ Repo-only docs/scripts/tests:
 - ROB-395: Dieses Dokument reviewen und aktuell halten.
 - ROB-397: `prod_doctor.sh` um zusaetzliche redacted posture facts erweitern,
   falls ROB-396 sichere Klassen definiert.
-- Long-Horizon-Dokumentation fuer ROB-292 nach jedem Milestone aktualisieren.
 
 Read-only prod verification:
 
@@ -264,10 +263,6 @@ Production changes requiring explicit approval:
   Health-Token-Grenze und Backup/Restore-Kontext.
 - `scripts/ops/README.md`: Ops-Script-Inventar, Push-Monitor-Semantik,
   Sensitive-Path-Validation und Log-Klassifizierung.
-- `docs/long-horizon/ROB-292-prod-security-hardening/Plan.md`: ROB-393 bis
-  ROB-397 Milestone-Gates.
-- `docs/long-horizon/ROB-292-prod-security-hardening/Documentation.md`:
-  Koordinationsentscheidungen und Baseline-Notizen.
 - `bash scripts/ops/prod_doctor.sh`: redacted read-only Snapshot vom
   2026-05-21T13:49:22Z.
 - `bash scripts/ops/prod_logs_summary.sh --since "24 hours ago"`: redacted
