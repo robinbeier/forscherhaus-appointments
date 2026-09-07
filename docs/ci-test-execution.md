@@ -28,9 +28,12 @@ is tested by `tests/Unit/Scripts/CiPathFilterMatrixTest.php`.
 In GitHub CI, `build-test` excludes the `root-deployment` group. The independent
 `root-deployment-tests` job executes those classes through the existing
 root regression script, plus the retained Python scanner tests. Both jobs are
-blocking and start without waiting for one another. The root job installs only
-Composer dependencies; it needs no Node, application database, or application
-configuration. Its database-restore fixtures use their own pinned MariaDB image.
+blocking; the root job waits for the changed-path classification and is skipped
+only when every changed path is Markdown under `docs/`. `build-test` remains
+unconditional and still consumes the Markdown files it tests. The root job
+installs only Composer dependencies; it needs no Node, application database, or
+application configuration. Its database-restore fixtures use their own pinned
+MariaDB image.
 
 The group prevents ordinary tests inside those classes from running twice and
 avoids rediscovering root-only tests in the general CI run. Local `phpunit.xml`

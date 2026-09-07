@@ -9,6 +9,30 @@ use PHPUnit\Framework\TestCase;
 
 class CiPathFilterMatrixTest extends TestCase
 {
+    public function testOnlyMarkdownDocumentationChangesSkipRootDeploymentJob(): void
+    {
+        $matches = $this->applyFilters(['docs/file.md', 'docs/monitoring/target-concept.md', 'docs/nested/notes.md']);
+
+        self::assertFalse($matches['root_deployment_required']);
+    }
+
+    public function testNonMarkdownAndCodeToMarkdownChangesKeepRootDeploymentProtection(): void
+    {
+        foreach (
+            [
+                'docs/monitoring/target-concept.txt',
+                'README.md',
+                '.github/workflows/ci.yml',
+                'application/controllers/Booking.php',
+                ['application/controllers/Legacy.php', 'docs/Legacy.md'],
+            ]
+            as $changedPaths
+        ) {
+            $paths = is_array($changedPaths) ? $changedPaths : [$changedPaths];
+            self::assertTrue($this->applyFilters($paths)['root_deployment_required'], implode(', ', $paths));
+        }
+    }
+
     public function testCoverageGateScriptChangeOnlyTriggersCoverageHeavyJobs(): void
     {
         $matches = $this->applyFilters(['scripts/ci/check_coverage_delta.php']);
@@ -483,7 +507,11 @@ class CiPathFilterMatrixTest extends TestCase
 
             foreach ($changedPaths as $path) {
                 foreach ($patterns as $pattern) {
-                    if (preg_match($this->globToRegex($pattern), $path) === 1) {
+                    $isNegated = str_starts_with($pattern, '!');
+                    $glob = $isNegated ? substr($pattern, 1) : $pattern;
+                    $matchesPattern = preg_match($this->globToRegex($glob), $path) === 1;
+
+                    if ($matchesPattern !== $isNegated) {
                         $matches[$name] = true;
                         break 2;
                     }
@@ -496,10 +524,10 @@ class CiPathFilterMatrixTest extends TestCase
 
     private function globToRegex(string $pattern): string
     {
-        $placeholder = '__DOUBLE_STAR__';
-        $quoted = preg_quote(str_replace('**', $placeholder, $pattern), '/');
+        $quoted = preg_quote($pattern, '/');
+        $quoted = str_replace('\*\*\/', '(?:.*\/)?', $quoted);
+        $quoted = str_replace('\*\*', '.*', $quoted);
         $quoted = str_replace('\*', '[^\/]*', $quoted);
-        $quoted = str_replace($placeholder, '.*', $quoted);
 
         return '/^' . $quoted . '$/';
     }
@@ -545,6 +573,7 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertArrayHasKey('coverage_required', $filters);
         self::assertArrayHasKey('pdf_renderer_tests_required', $filters);
         self::assertArrayHasKey('ldap_guardrail_required', $filters);
+        self::assertSame(['!docs/**/*.md'], $filters['root_deployment_required']);
 
         return $filters;
     }
