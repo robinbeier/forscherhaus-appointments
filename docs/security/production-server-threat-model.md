@@ -264,10 +264,6 @@ Production changes requiring explicit approval:
   Health-Token-Grenze und Backup/Restore-Kontext.
 - `scripts/ops/README.md`: Ops-Script-Inventar, Push-Monitor-Semantik,
   Sensitive-Path-Validation und Log-Klassifizierung.
-- `docs/long-horizon/ROB-292-prod-security-hardening/Plan.md`: ROB-393 bis
-  ROB-397 Milestone-Gates.
-- `docs/long-horizon/ROB-292-prod-security-hardening/Documentation.md`:
-  Koordinationsentscheidungen und Baseline-Notizen.
 - `bash scripts/ops/prod_doctor.sh`: redacted read-only Snapshot vom
   2026-05-21T13:49:22Z.
 - `bash scripts/ops/prod_logs_summary.sh --since "24 hours ago"`: redacted
