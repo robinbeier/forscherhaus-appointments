@@ -3,7 +3,6 @@
 # plus host-local env file. Production /etc/cron.d desired state lives in
 # config/fh-uptime-kuma-push.cron.
 
-* * * * * KUMA_PUSH_ENV_FILE=/root/backups/uptime-kuma-push.env /usr/local/libexec/fh-kuma-push-runtime-v1/scripts/ops/kuma_push_host_services.sh
 * * * * * KUMA_PUSH_ENV_FILE=/root/backups/uptime-kuma-push.env /usr/local/libexec/fh-kuma-push-runtime-v1/scripts/ops/kuma_push_host_resources.sh
 */15 * * * * KUMA_PUSH_ENV_FILE=/root/backups/uptime-kuma-push.env /usr/local/libexec/fh-kuma-push-runtime-v1/scripts/ops/kuma_push_ops_jobs.sh
 */15 * * * * KUMA_PUSH_ENV_FILE=/root/backups/uptime-kuma-push.env /usr/local/libexec/fh-kuma-push-runtime-v1/scripts/ops/kuma_push_backup_creation.sh
