@@ -4,14 +4,8 @@
     "install_root": "/usr/local/libexec/fh-kuma-push-runtime-v1",
     "cron_path": "/etc/cron.d/fh-uptime-kuma-push",
     "cron_source": "scripts/ops/config/fh-uptime-kuma-push.cron",
-    "cron_sha256": "6e79ea27afdcf5ec186c62c5b60638b5c3c8e2cee1708a3347ee8683228ad35a",
+    "cron_sha256": "ddb47db8c80c24ee929129b5c765be05e16383d0e4a9986638acafdd43f76b54",
     "files": [
-        {
-            "source": "scripts/ops/kuma_push_apache_scanner_activity.sh",
-            "install": "scripts/ops/kuma_push_apache_scanner_activity.sh",
-            "role": "entrypoint",
-            "sha256": "cce2443335f24428ddace5e3642590c95badbbfc47c93454553414c4785a5f93"
-        },
         {
             "source": "scripts/ops/kuma_push_app_logs.sh",
             "install": "scripts/ops/kuma_push_app_logs.sh",

@@ -9,21 +9,21 @@ requirement to build another package-version framework.
 
 ## Package and current state
 
-The repository payload excludes the retired journal and Host Services
-monitors. An older installed bundle may retain their unused scripts for rollback;
+The repository payload excludes the retired journal, Host Services and Scanner
+Activity monitors. An older installed bundle may retain their unused scripts for rollback;
 retirement of their cron entries is a separate approved production operation.
 See [Kuma operations](../uptime-kuma.md#retired-monitors).
 Compare installed files with their recorded installed revision, not a newer
 manifest that has not been installed.
 
 `scripts/ops/config/kuma_push_runtime_bundle_v1.json` lists the complete payload:
-six entrypoints, two shell libraries, the dashboard PDF gate and its three PHP
+five entrypoints, two shell libraries, the dashboard PDF gate and its three PHP
 libraries. Each row binds its source/install path, role and SHA-256. Keep the
 manifest and changed source hashes together in the same reviewed commit. Repository checks retain the closed
 payload, cron contract and execution of the bundled PDF gate.
 
-The canonical cron file is `scripts/ops/config/fh-uptime-kuma-push.cron`: seven
-invocations of six entrypoints, including the twice-per-minute app-log check.
+The canonical cron file is `scripts/ops/config/fh-uptime-kuma-push.cron`: six
+invocations of five entrypoints, including the twice-per-minute app-log check.
 Changing a package does not authorize changing its schedules, environment file,
 log targets, monitor identities or notification settings.
 

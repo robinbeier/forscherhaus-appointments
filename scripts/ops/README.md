@@ -73,7 +73,6 @@ Script inventory:
 - `kuma_push_ops_jobs.sh` monitors restore-verification marker freshness
 - `kuma_push_backup_creation.sh` monitors backup-creation marker freshness
 - `kuma_push_pdf_export.sh` runs the dashboard PDF release gate as a synthetic smoke
-- `kuma_push_apache_scanner_activity.sh` watches recent Apache access logs for common scanner probes and only alerts on actionable scanner activity
 - `lib/kuma_push_common.sh` provides shared env, curl, and log helpers
 - `prod_doctor.sh` prints redacted read-only production status
 - `prod_logs_summary.sh` prints redacted recent production log summaries
@@ -132,7 +131,6 @@ Required new Push URLs:
 - `KUMA_PUSH_URL_BACKUP_CREATION`
 - `KUMA_PUSH_URL_APP_LOGS`
 - `KUMA_PUSH_URL_PDF_EXPORT`
-- `KUMA_PUSH_URL_SECURITY_SCANNER`
 
 Optional ops freshness env:
 
