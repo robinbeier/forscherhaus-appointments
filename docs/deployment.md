@@ -162,12 +162,16 @@ descriptor.
 After the atomic switch, `deploy_ea.sh` verifies:
 
 - the active and previous release still satisfy the runtime config contract
+- the configured service reload list; every listed unit is attempted and any
+  reload failure triggers rollback before health gates
 - renderer health endpoint
 - app deep-health contract
 - zero-surprise live canary
 
 Any post-switch failure triggers automatic rollback to the previous app path.
-Rollback checks renderer and application health without restarting the renderer.
+After restoring the release, rollback reloads the configured services and checks
+renderer and application health without restarting the renderer. A failed reload
+leaves the rollback unverifiable.
 If the renderer remains unhealthy, rollback is not reported as verified success;
 restoring application files alone cannot repair that independent dependency.
 

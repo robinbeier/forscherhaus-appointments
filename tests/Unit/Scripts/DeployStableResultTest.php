@@ -364,6 +364,120 @@ final class DeployStableResultTest extends TestCase
         self::assertSame(31, $failure['exit_code'], $failure['stderr']);
     }
 
+    public function testReloadServicesAttemptsEveryCsvUnitAndAggregatesFailures(): void
+    {
+        $result = $this->runShell(
+            <<<'BASH'
+            source ./deploy_ea.sh
+            DRYRUN=0
+            CALLS="$(mktemp)"
+            fake_systemctl() {
+              printf '%s\n' "$*" >> "$CALLS"
+              [[ "${2:-}" == 'first' ]] && return 1
+              return 0
+            }
+            SYSTEMCTL_BASE=(fake_systemctl)
+            RELOAD_SERVICES='first,second,third'
+            if reload_services; then
+              status=0
+            else
+              status=$?
+            fi
+            printf 'status=%s\n' "$status"
+            cat "$CALLS"
+            rm -f "$CALLS"
+            BASH
+            ,
+        );
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertSame("status=1\nreload first\nreload second\nreload third\n", $result['stdout']);
+    }
+
+    public function testEmptyReloadListAndDryRunDoNotInvokeServiceControl(): void
+    {
+        $result = $this->runShell(
+            <<<'BASH'
+            source ./deploy_ea.sh
+            SYSTEMCTL_BASE=(false)
+            DRYRUN=0
+            RELOAD_SERVICES=''
+            reload_services
+            RELOAD_SERVICES=' , '
+            reload_services
+            printf 'empty-lists-ok\n'
+            DRYRUN=1
+            RELOAD_SERVICES='first,second'
+            reload_services
+            printf 'dry-run-ok\n'
+            BASH
+            ,
+        );
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertStringContainsString("empty-lists-ok\n", $result['stdout']);
+        self::assertStringContainsString("dry-run-ok\n", $result['stdout']);
+    }
+
+    public function testPostSwitchReloadPrecedesHealthAndFailureEntersRollback(): void
+    {
+        $source = (string) file_get_contents(dirname(__DIR__, 3) . '/deploy_ea.sh');
+        $boundary = "\nperform_atomic_switch\n";
+        $position = strrpos($source, $boundary);
+        self::assertNotFalse($position);
+        $postSwitch = substr($source, $position + strlen($boundary));
+        $script = <<<'BASH'
+        source ./deploy_ea.sh
+        DRYRUN=0
+        RELOAD_SERVICES=php-test
+        RELOAD_EXIT="$2"
+        fake_systemctl() { printf 'reload\n'; return "$RELOAD_EXIT"; }
+        SYSTEMCTL_BASE=(fake_systemctl)
+        verify_post_switch_runtime_config_contracts() { :; }
+        rollback_after_failure() { printf 'rollback:%s\n' "$1"; exit 30; }
+        probe_renderer_health() { printf 'health\n'; exit 0; }
+        probe_deep_health_contract() { printf 'unexpected-deep-health\n'; return 0; }
+        run_zero_surprise_live_canary() { printf 'unexpected-canary\n'; return 0; }
+        eval "$1"
+        BASH;
+        foreach (
+            [0 => [0, "reload\nhealth\n"], 1 => [30, "reload\nrollback:service reload failed\n"]]
+            as $reloadExit => $expected
+        ) {
+            $result = $this->runCommand(['bash', '-c', $script, 'bash', $postSwitch, (string) $reloadExit]);
+            self::assertSame($expected[0], $result['exit_code'], $result['stderr']);
+            self::assertSame($expected[1], $result['stdout']);
+        }
+    }
+
+    public function testRollbackReloadFailureRemainsUnverifiedExit31(): void
+    {
+        $result = $this->runShell(
+            <<<'BASH'
+            source ./deploy_ea.sh
+            deploy_result_trap_install
+            DRYRUN=0
+            APP=/fixed/active
+            PREV=/fixed/previous
+            REL=ea_contract
+            WEBUSER=www-data
+            CURRENT_SCRIPT_PATH=/fixed/deploy_ea.sh
+            DEPLOY_RESULT_PHASE=switch_complete
+
+            emit_zero_surprise_incident() { :; }
+            reload_services() { return 1; }
+            probe_renderer_health() { echo 'unexpected-health-check'; return 0; }
+            probe_deep_health_contract() { return 0; }
+            bash() { return 0; }
+            rollback_after_failure 'service reload failed'
+            BASH
+            ,
+        );
+
+        self::assertSame(31, $result['exit_code'], $result['stderr']);
+        self::assertStringContainsString('Rollback failed: service reload failed.', $result['stdout']);
+        self::assertStringNotContainsString('unexpected-health-check', $result['stdout']);
+    }
+
     public function testUnhealthyRendererKeepsRollbackFailureExit31(): void
     {
         $result = $this->runShell(
