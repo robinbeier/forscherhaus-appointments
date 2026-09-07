@@ -15,7 +15,8 @@ REL=""
 APP="/var/www/html/easyappointments"
 SRC="/root/releases"
 WEBUSER="www-data"
-RELOAD_SERVICES="apache2,php8.2-fpm"
+RELOAD_SERVICES="php8.2-fpm"
+RELOAD_SERVICES_EXPLICIT=0
 DRYRUN=0
 MARK_RELEASE=1
 
@@ -817,7 +818,7 @@ Core options:
   --app PATH                   Live app path                     [default: /var/www/html/easyappointments]
   --src DIR                    Directory with release archive     [default: /root/releases]
   --user WEBUSER               Web user for ownership/actions     [default: www-data]
-  --reload LIST                Services to reload (CSV)           [default: apache2,<detected php-fpm>]
+  --reload LIST                Services to reload (CSV)           [default: <detected php-fpm>]
   --result-file PATH           Publish durable deploy_result.v1 candidate
   --dry-run                    Print actions only
   --no-mark                    Skip writing _RELEASE marker
@@ -975,15 +976,14 @@ detect_php_fpm_reload_service() {
 }
 
 resolve_reload_services() {
-  local default_reload="apache2,php8.2-fpm"
   local detected_php_fpm
 
-  [[ "$RELOAD_SERVICES" == "$default_reload" ]] || return 0
+  [[ "$RELOAD_SERVICES_EXPLICIT" -eq 0 ]] || return 0
 
   detected_php_fpm="$(detect_php_fpm_reload_service || true)"
   [[ -n "$detected_php_fpm" ]] || return 0
 
-  RELOAD_SERVICES="apache2,${detected_php_fpm}"
+  RELOAD_SERVICES="${detected_php_fpm}"
 }
 
 reload_services() {
@@ -2256,7 +2256,7 @@ while [[ $# -gt 0 ]]; do
     --app) APP="$2"; shift 2;;
     --src) SRC="$2"; shift 2;;
     --user) WEBUSER="$2"; shift 2;;
-    --reload) RELOAD_SERVICES="$2"; shift 2;;
+    --reload) RELOAD_SERVICES="$2"; RELOAD_SERVICES_EXPLICIT=1; shift 2;;
     --result-file) DEPLOY_RESULT_RECEIPT_PATH="$2"; shift 2;;
     --dry-run) DRYRUN=1; shift 1;;
     --no-mark) MARK_RELEASE=0; shift 1;;
