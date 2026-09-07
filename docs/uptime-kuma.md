@@ -57,10 +57,9 @@ Operational transition for the existing live Kuma instance: after `App - Health 
 `App - PDF Renderer` (`json-query`) monitor. Its historical ID is `8`; identify
 it by its name and type if the instance has been rebuilt. Keep its existing
 history; this repository change does not require a Push runtime or cron update.
-Finish any active deployment before changing the monitor count. Future deployments
-must use the direct post-gate checks defined by their matching deployment
-contract; before upgrading older installed deployment tools, follow the
-[completed-run upgrade procedure](deployment-run-v1.md#one-time-upgrade-after-traffic-check-removal).
+Finish any active deployment before changing the monitor count. Application
+deployments use the direct checks described in
+[the deployment runbook](deployment.md).
 Pausing the monitor does not alter old completed deployment records or authorize
 an installation of deployment tools.
 

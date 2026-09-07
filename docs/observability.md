@@ -3,11 +3,6 @@
 Purpose: define the runtime ownership between release gates and Uptime Kuma
 without turning top-level docs into an operations runbook.
 
-The repository retirement of Sentry becomes effective with the deployment that
-contains the corresponding application changes. Until then, the live
-production Sentry project, events, and host configuration are unchanged. This
-document describes the post-deployment repository contract.
-
 ## System Boundaries
 
 - Release gates are the executable truth for deploy safety.
@@ -38,29 +33,17 @@ Error and diagnostic data policy:
 
 ## Deploy Observability Model
 
-Use the deploy layers in this order:
-
-1. zero-surprise predeploy replay against a fresh dump
-2. atomic switch
-3. renderer health
-4. deep health
-5. zero-surprise live canary
-6. resume Uptime Kuma monitors
-
-Operational rule:
-
-- Put Uptime Kuma into maintenance only for the real deploy window.
-- Resume Kuma only after post-deploy health and canary checks pass.
+The [deployment runbook](deployment.md) defines preparation, switch, direct
+health checks and rollback. The [zero-surprise gate](release-gate-zero-surprise.md)
+defines the predeploy replay and live canary. These checks evaluate the
+application directly; application deployment does not require pausing or
+resuming Kuma monitors or waiting for an all-green dashboard.
 
 ## Monitoring Responsibilities
 
-Use Uptime Kuma for:
-
-- homepage and health endpoints
-- renderer health
-- push-monitored app/php-fpm/pdf-renderer log checks
-- synthetic PDF export probes
-- cron or backup freshness signals
+The [Uptime Kuma catalog](uptime-kuma.md) defines the retained availability,
+application-error, PDF-export, resource and backup signals, along with their
+operational boundaries. Use that catalog rather than a second monitor list here.
 
 Do not add a parent booking-confirmation PDF live synthetic until the criteria
 in
