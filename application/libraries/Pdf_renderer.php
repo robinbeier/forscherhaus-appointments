@@ -136,14 +136,10 @@ class Pdf_renderer
         }
 
         if ($lastException instanceof Throwable) {
-            $this->captureRendererFailure($lastException);
             throw new RuntimeException('PDF rendering failed for all configured endpoints.', 0, $lastException);
         }
 
-        $exception = new RuntimeException('PDF rendering failed: no renderer endpoint available.');
-        $this->captureRendererFailure($exception);
-
-        throw $exception;
+        throw new RuntimeException('PDF rendering failed: no renderer endpoint available.');
     }
 
     /**
@@ -287,58 +283,6 @@ class Pdf_renderer
         }
 
         return $payload;
-    }
-
-    protected function captureRendererFailure(Throwable $exception): void
-    {
-        if (!class_exists('SentryBootstrap')) {
-            return;
-        }
-
-        SentryBootstrap::captureException(
-            $exception,
-            [
-                'area' => 'pdf_renderer',
-                'operation' => 'render_html',
-            ],
-            $this->buildRendererFailureContext(),
-        );
-    }
-
-    /**
-     * Provide enough runtime context to explain endpoint selection in Sentry.
-     *
-     * @return array<string, mixed>
-     */
-    protected function buildRendererFailureContext(): array
-    {
-        return [
-            'endpoint_kinds' => array_map(
-                fn(string $endpoint): string => $this->classifyEndpointKind($endpoint),
-                $this->endpoints,
-            ),
-            'primary_endpoint_kind' => isset($this->endpoints[0])
-                ? $this->classifyEndpointKind($this->endpoints[0])
-                : null,
-            'endpoint_count' => count($this->endpoints),
-            'container_runtime' => $this->isContainerRuntime(),
-            'local_environment' => $this->isLocalEnvironment(),
-        ];
-    }
-
-    protected function classifyEndpointKind(string $endpoint): string
-    {
-        $host = parse_url($endpoint, PHP_URL_HOST);
-
-        if (is_string($host) && in_array(strtolower($host), ['localhost', '127.0.0.1', '::1'], true)) {
-            return 'loopback';
-        }
-
-        if ($host === 'pdf-renderer') {
-            return 'docker_dns';
-        }
-
-        return 'configured';
     }
 
     protected function logRendererFailure(string $endpoint, Throwable $exception): void

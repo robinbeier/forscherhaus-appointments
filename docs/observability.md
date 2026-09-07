@@ -1,13 +1,19 @@
 # Observability
 
-Purpose: define the runtime ownership between release gates, Uptime Kuma, and
-Sentry without turning top-level docs into an operations runbook.
+Purpose: define the runtime ownership between release gates and Uptime Kuma
+without turning top-level docs into an operations runbook.
+
+The repository retirement of Sentry becomes effective with the deployment that
+contains the corresponding application changes. Until then, the live
+production Sentry project, events, and host configuration are unchanged. This
+document describes the post-deployment repository contract.
 
 ## System Boundaries
 
 - Release gates are the executable truth for deploy safety.
 - Uptime Kuma provides outside-in availability and push-monitor coverage.
-- Sentry captures application errors and traces from the real PHP request path.
+- Application logs and release gates provide the repository-owned error and
+  regression signals.
 
 These layers complement each other. They do not replace each other.
 
@@ -19,35 +25,16 @@ PDF renderer endpoint resolution:
 - Host PHP runtime: `http://127.0.0.1:3003`
 - Apache `mod_php`: prefer explicit `SetEnv PDF_RENDERER_URL "http://127.0.0.1:3003"`
 
-Sentry runtime configuration:
+Error and diagnostic data policy:
 
-- For PHP-FPM request paths, `env[...]` pool config is sufficient.
-- For Apache `mod_php` request paths, configure `SENTRY_*` via Apache `SetEnv`.
-- If the application is served by Apache `mod_php`, Apache is the canonical
-  runtime source for Sentry and `PDF_RENDERER_URL`.
-- `SentryBootstrap` installs a `before_send` scrubber and also scrubs explicit
-  extras passed through `SentryBootstrap::captureException()`. Keep this as the
-  central redaction boundary before adding new capture sites.
-
-Sentry data policy:
-
-- Do send stable tags such as `area`, `operation`, `export_type`, release, and
-  environment.
-- Do not send raw appointment hashes, recovery tokens, Push URLs, DSNs, request
-  bodies, authorization headers, customer emails, phone numbers, or names.
-- For bearer-like values needed for correlation, use boolean presence flags or
-  non-reversible short digests from `SentryBootstrap::safeDigest()`.
-- PDF renderer failures should send endpoint categories such as `loopback`,
-  `docker_dns`, or `configured`, not full renderer URLs.
-
-Sentry delivery smoke:
-
-- `php scripts/ops/sentry_smoke.php` is dry-run by default and prints no DSN,
-  token, event payload, or server config.
-- To send the synthetic event from a host with Sentry env already configured,
-  explicitly set `SENTRY_SMOKE_SEND=1`.
-- The smoke event uses `area=sentry_smoke` and `operation=delivery_smoke`; it
-  must stay synthetic and must not include production customer/request data.
+- Keep raw request bodies, authorization headers, customer contact data,
+  appointment hashes, recovery tokens, Push URLs, and database values out of
+  logs, diagnostics, and monitor messages.
+- Use stable classifications and short non-reversible digests only when
+  correlation is required.
+- PDF renderer failures continue through ordinary application logging and
+  release-gate checks; this document defines no separate endpoint
+  categorization channel.
 
 ## Deploy Observability Model
 
@@ -92,16 +79,12 @@ Health endpoint boundaries:
 - If a deep-health monitor fails with `401`, treat that as a header/config
   boundary issue, not an app dependency outage, until proven otherwise.
 
-Use Sentry for:
-
-- uncaught PHP exceptions
-- selected caught exceptions on critical request paths
-- release-correlated application failures such as PDF renderer errors
-
-Do not use Sentry for expected business outcomes such as validation failures,
-invalid logins, CAPTCHA failures, booking conflicts, unauthorized health probes,
-scanner 404s, or availability checks. Those remain normal HTTP responses,
-Kuma/ops signals, or log-only observations depending on the case.
+Use application logs and release gates for unexpected PHP exceptions, critical
+request-path failures, and release-correlated regressions such as PDF renderer
+errors. Expected validation failures, invalid logins, CAPTCHA failures,
+booking conflicts, unauthorized health probes, scanner 404s, and availability
+checks remain normal HTTP responses, Kuma/ops signals, or log-only observations
+depending on the case.
 
 ## Anti-Drift Rule
 

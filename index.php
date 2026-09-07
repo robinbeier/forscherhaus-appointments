@@ -72,7 +72,6 @@ if (!file_exists(__DIR__ . '/vendor/autoload.php')) {
 }
 
 require_once __DIR__ . '/vendor/autoload.php';
-require_once __DIR__ . '/application/bootstrap/SentryBootstrap.php';
 
 /*
  *---------------------------------------------------------------
@@ -143,8 +142,6 @@ switch (ENVIRONMENT) {
         echo 'The application environment is not set correctly.';
         exit(1); // EXIT_ERROR
 }
-
-SentryBootstrap::bootFromGlobals(ENVIRONMENT, __DIR__ . '/_RELEASE', $_SERVER);
 
 /*
  *---------------------------------------------------------------

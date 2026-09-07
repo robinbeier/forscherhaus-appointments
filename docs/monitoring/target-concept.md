@@ -4,10 +4,15 @@ Date: 2026-05-20
 
 This is the historical design proposal from that date. For the maintained
 monitor catalog and operating instructions, use [Uptime Kuma Operations](../uptime-kuma.md).
-The standalone PDF dependency monitor has since been consolidated into Deep Health.
+Its monitor rows are historical design guidance, not a claim about current live
+monitor state. The proposal recommends consolidating the standalone PDF
+dependency monitor into Deep Health; verify live adoption separately.
 
 This concept is intentionally built around the existing stack: Uptime Kuma,
-Sentry, app health endpoints, release gates, logs, and repo-owned ops scripts.
+app health endpoints, release gates, logs, and repo-owned ops scripts.
+The repository Sentry integration is being retired. That retirement takes
+effect with the later deployment containing the application changes; the live
+Sentry project, events, and host configuration remain unchanged until then.
 No new monitoring platform is recommended at this stage.
 
 ## Target Architecture
@@ -29,22 +34,6 @@ operational dependency is down or stale?"
 Kuma should not be used as generic error tracking. A business conflict,
 validation error, bot 404, or single expected warning should not look like app
 downtime.
-
-### Sentry
-
-Use Sentry for unexpected application failures:
-
-- uncaught or explicitly captured exceptions;
-- caught exceptions on critical flows when the app can continue but the user
-  action failed;
-- release-correlated regressions;
-- safe context around area, operation, route, role, and export type.
-
-Sentry should answer: "Which app code path failed, under which release and
-environment, and is this a regression?"
-
-Sentry should not be used as an availability monitor. If the app cannot be
-reached, Kuma owns the first signal.
 
 ### App Health Endpoints
 
@@ -104,109 +93,15 @@ postdeploy health and canary gates pass.
 | Host - Resources | Detect disk/memory/load pressure | Kuma Push | Capacity | `kuma_push_host_resources.sh` | 60s | threshold breach | Identify path/process before cleanup | Medium | No process dumps in Push msg |
 | Ops - Restore Verify Freshness | Detect stale restore verification | Kuma Push | Backup | `kuma_push_ops_jobs.sh` restore-verify marker age | 15m | marker missing, invalid, or > 1440m | Renew backup/restore verification | Medium | Marker basename and age only; no backup contents |
 | Ops - Backup Creation Freshness | Prove backup creation job freshness | Kuma Push | Backup | `kuma_push_backup_creation.sh` backup-success marker age | 15m | marker missing, invalid, or > 1440m | Check backup creation job and storage | Medium | Marker basename and age only; no dump listing or backup contents |
-| App - Log Errors | Detect new unclassified app errors | Kuma Push | Error | `kuma_push_app_logs.sh` | 60s plus 30s stagger | new non-ignored `ERROR - ` lines | Classify with `prod_logs_summary.sh`; route to Sentry/issue if real | Low-medium after ROB-382/ROB-392 | Push URL secret; ignore regex targeted only |
+| App - Log Errors | Detect new unclassified app errors | Kuma Push | Error | `kuma_push_app_logs.sh` | 60s plus 30s stagger | new non-ignored `ERROR - ` lines | Classify with `prod_logs_summary.sh`; create a narrow follow-up if real | Low-medium after ROB-382/ROB-392 | Push URL secret; ignore regex targeted only |
 | App - php8.5-fpm Log Errors | Detect PHP-FPM service errors | Kuma Push | Error | `journalctl -u php8.5-fpm` | 60s | error count > threshold | Inspect PHP-FPM journal and app health | Medium | Live display name aligned by ROB-391; Push URL stays host-local |
 | App - PDF Renderer Log Errors | Detect renderer service errors | Kuma Push | Error | `journalctl -u fh-pdf-renderer` | 60s | error count > threshold | Inspect renderer container/service | Medium | No PDF content in messages |
 | App - Dashboard PDF Export | Prove live dashboard PDF path | Kuma Push script | Business/PDF | `kuma_push_pdf_export.sh` | 15m | gate rc != 0 or report missing | Check dashboard gate report, renderer, auth creds | Medium | Uses host-local gate credentials |
 | App - Booking Confirmation PDF | No-go for live synthetic until privacy-safe target exists | Release gate/manual only | Business/PDF | Booking confirmation PDF gate | Manual/release only | PDF cannot be downloaded/validated in approved gate | Use release/restored-data gate; do not add Kuma monitor yet | Medium-high | No real family hashes or reusable bearer links |
 | Security - Scanner Activity | Track scanner spikes separately | Kuma Push | Security | Apache access log patterns | 60s | scanner count above threshold plus actionable status/source signal | Observe or tune ingress; not app downtime | Medium | No raw IPs in Push msg |
 | TLS/Certbot Freshness | Catch renewal/timer risk | Script or Kuma | Security/Availability | certbot cert/timer status | Daily | cert near expiry or timer missing | Run certbot validation; inspect Apache | Low | Public cert data only |
-| Sentry Production Errors | Alert on unexpected app exceptions | Sentry alert | Error | Sentry project | Continuous | new/high-frequency prod issue | Triage by release, area, operation | Medium | No PII; redaction required |
-| Sentry PDF/Export Regression | Escalate critical export/PDF failures | Sentry alert | Business/Error | Sentry tags `area`, `export_type` | Continuous | PDF/export issue in prod | Check renderer, gate reports, recent deploy | Low-medium | No HTML/customer data |
-| Sentry Event Delivery Smoke | Prove Sentry still receives events | Manual or scheduled safe script | Error/Observability | Sentry test event in non-prod or controlled prod | Release or weekly | event missing | Fix DSN/env/project/alerting | Low | Use synthetic message only |
 | Release Gate Result | Block bad deploys before alert storm | CI/deploy | Release | `deploy_ea.sh` and release reports | Per deploy | predeploy/canary failure | Stop deploy or rollback | Low | Reports avoid credentials |
 | Codex Prod Doctor | Standard first incident snapshot | Script | Diagnostic | `prod_doctor.sh` | On incident | n/a | Summarize state before changes | Low | Redacted; no raw DB rows |
-
-## Sentry Concept
-
-### Capture In Sentry
-
-Capture these classes:
-
-- uncaught production exceptions from the PHP request path;
-- caught exceptions on critical flows where user action fails:
-  dashboard exports, PDF renderer, booking confirmation, backend calendar saves,
-  login/recovery unexpected failures, sync, notifications, and webhooks;
-- repeated unexpected 5xx responses from application code;
-- release-correlated failures after deploy.
-
-### Do Not Capture In Sentry
-
-Do not capture:
-
-- expected 409 booking/calendar conflicts;
-- validation errors, CAPTCHA failures, invalid login, unauthorized requests;
-- bot/scanner 404s and forward-proxy probes;
-- health endpoint unauthorized responses;
-- raw request bodies, DB rows, confirmation hashes, tokens, Push URLs,
-  passwords, email addresses, or names.
-
-### Tags And Context
-
-Recommended tags:
-
-- `environment`: `production`, `staging`, `testing`
-- `release`: from `_RELEASE`
-- `area`: `booking`, `calendar`, `dashboard_export`, `pdf_renderer`,
-  `login`, `recovery`, `sync`, `notification`, `webhook`
-- `operation`: stable operation name
-- `controller`: controller class or route group
-- `http_status`: only after classification
-- `role`: role slug only when authenticated; no user id/name/email
-- `export_type`: for PDF/dashboard exports
-- `renderer_endpoint_kind`: `loopback`, `docker_dns`, `configured`, not full
-  tokenized endpoint
-
-Recommended extra context:
-
-- `request_uri` only after query-string/token scrubbing;
-- booking flow state such as `manage_mode`, not customer data;
-- PDF duration/status and endpoint count, not HTML or payload;
-- sync provider count or provider class, not provider names or tokens.
-
-Current context changed by ROB-383:
-
-- Booking confirmation capture no longer sends raw `appointment_hash`; it sends
-  `appointment_hash_present` and a short non-reversible digest.
-- PDF renderer capture sends endpoint categories, not concrete renderer URLs.
-- `SentryBootstrap` scrubs explicit extras and installs a `before_send`
-  scrubber for event extras/request data/user context.
-
-### Redaction
-
-Keep `SENTRY_SEND_DEFAULT_PII=false` in production. Add an explicit
-`before_send` scrubber before expanding Sentry coverage. It should remove:
-
-- emails, names, phone numbers, IPs if not required for security triage;
-- query strings with token/key/password/secret/auth parameters;
-- appointment hashes and recovery tokens;
-- Push URLs and webhook authorization headers;
-- DB connection details.
-
-### Alerts
-
-Recommended Sentry alerts:
-
-- P1: any new prod issue with `area=pdf_renderer` or `area=dashboard_export`
-  during a release window or with repeated events.
-- P1: unexpected 5xx issue spike on booking/calendar/public routes.
-- P2: one new unresolved prod issue in critical flows outside school hours.
-- P3: low-frequency non-critical issue, triage next workday.
-
-No Sentry alert for expected 4xx/business conflicts.
-
-### Grouping
-
-Default grouping should be exception class plus stack trace. For explicitly
-captured caught exceptions, add stable tags and, if needed later, fingerprints
-by:
-
-- `area`
-- `operation`
-- exception class
-- normalized root cause
-
-Do not group by appointment hash, customer, provider, or full URL.
 
 ## Uptime Kuma Concept
 
@@ -250,8 +145,6 @@ Add:
 
 - TLS/certbot freshness if not already covered by Kuma certificate features or
   post-change checks;
-- scheduled Sentry delivery smoke only if the completed one-off smoke evidence
-  is not enough for operations.
 
 Keep deferred after ROB-387:
 
@@ -312,7 +205,7 @@ availability, dependency, capacity, or deploy regression.
 Use P2 for:
 
 - dashboard PDF export synthetic failing while app route is healthy;
-- new Sentry issue in a critical flow with low volume;
+- new application-log issue in a critical flow with low volume;
 - restore verify marker stale but app otherwise healthy;
 - cert expiry approaching warning window;
 - PHP-FPM or PDF renderer journal errors without current outage.
@@ -323,7 +216,7 @@ First action: redacted logs plus relevant script/gate report.
 
 Use P3 for:
 
-- low-frequency Sentry issue outside critical flows;
+- low-frequency application-log issue outside critical flows;
 - scanner activity above threshold but no app impact;
 - non-blocking CI trend warnings;
 - post-change validation warning where all live monitors remain green and root
@@ -342,7 +235,7 @@ Observe without alerting Robin for:
 ## Standard Codex Alarm Workflow
 
 1. Identify monitor class: public HTTP, deep health, Push freshness, app logs,
-   host resources, synthetic, or Sentry.
+   host resources, or synthetic.
 2. Check whether primary availability is green: homepage, `/health`, deep
    health, Kuma latest status.
 3. Run `bash scripts/ops/prod_doctor.sh`.
@@ -351,8 +244,7 @@ Observe without alerting Robin for:
    expected env variable. Do not print the env file.
 6. Decide route:
    - Kuma-only infra/dependency issue;
-   - Sentry-only app exception/business flow issue;
-   - both systems for real dependency/app failure;
+   - application-log or release-gate error/business-flow issue;
    - observation/noise for known scanner/business cases.
 7. Do not change production until the failure class is clear and the stop
    conditions are not triggered.
@@ -383,22 +275,7 @@ implementation run. Treat it as shipped baseline:
   classification helper;
 - no runtime rate-limit bypass is part of the shipped solution.
 
-### 2. Sentry Hardening And Verification - Shipped Repo-Side
-
-Marking: `Repo-only`, `Sentry`, `Needs decision`
-
-ROB-383 was completed by PR #281. Shipped repo-side state:
-
-- central Sentry event scrubbing removes bearer-like values, raw request input,
-  sensitive headers, and raw confirmation URLs before send;
-- booking confirmation captures no longer include raw appointment hashes;
-- PDF renderer failures report endpoint kind instead of raw renderer URL;
-- the Sentry smoke script is dry-run by default and sends only when the
-  operator explicitly sets `SENTRY_SMOKE_SEND=1`;
-- live production event-ingestion verification remains gated on secure
-  Sentry token or connector access.
-
-### 3. Deep Health And Kuma Secret Boundary Cleanup - Shipped Repo-Side
+### 2. Deep Health And Kuma Secret Boundary Cleanup - Shipped Repo-Side
 
 Marking: `Repo-only`, `Kuma`
 
@@ -410,7 +287,7 @@ Marking: `Repo-only`, `Kuma`
 - Live Kuma header audit remains a gated read-only Kuma step because token
   values must not be printed or committed.
 
-### 4. Backup And Cron Freshness Split - Shipped Repo-Side
+### 3. Backup And Cron Freshness Split - Shipped Repo-Side
 
 Marking: `Repo-only`, `Server`, `Kuma`
 
@@ -422,7 +299,7 @@ Marking: `Repo-only`, `Server`, `Kuma`
 - Live adoption requires host-local Push URL provisioning and cron/timer
   scheduling; Push URLs remain secrets.
 
-### 5. Runtime Name Drift Cleanup - Shipped Repo-Side
+### 4. Runtime Name Drift Cleanup - Shipped Repo-Side
 
 Marking: `Repo-only`, `Kuma`, `Server`
 
@@ -434,7 +311,7 @@ Marking: `Repo-only`, `Kuma`, `Server`
   names configurable.
 - Renaming a stale live Kuma display name remains an explicit Kuma write gate.
 
-### 6. Optional Parent Confirmation PDF Synthetic
+### 5. Optional Parent Confirmation PDF Synthetic
 
 Marking: `Needs decision`, `Repo-only`, `Kuma`
 
@@ -451,14 +328,13 @@ Current safe use:
 
 - run the existing booking confirmation PDF gate during release/restore
   validation with a non-production or explicitly approved host-local hash;
-- keep continuous monitoring on renderer health, dashboard PDF export, logs,
-  and Sentry PDF/export regressions.
+- keep continuous monitoring on renderer health, dashboard PDF export, and logs.
 
 Only revisit as a separate gated issue if a privacy-safe synthetic target exists
 and all bearer-like values remain host-local. The detailed decision is in
 [Parent Booking Confirmation PDF Synthetic Decision](parent-confirmation-pdf-synthetic-decision.md).
 
-### 7. ROB-367 Observation Tie-In
+### 6. ROB-367 Observation Tie-In
 
 Marking: `Server`, `Kuma`, `Repo-only`
 
@@ -486,37 +362,34 @@ Recommended order:
 1. ROB-382: Uptime-Kuma App-Log-Monitor gegen Scanner-/Proxy-Noise haerten.
    Done by PR #280; keep as shipped baseline, do not broaden.
    Labels: `Repo-only`, `Server`, `Kuma`.
-2. ROB-383: Sentry redaction and event-context hardening.
-   Completed by PR #281.
-   Labels: `Repo-only`, `Sentry`, `Needs decision`.
-3. ROB-384: Kuma deep-health secret-boundary documentation and live header audit.
+2. ROB-384: Kuma deep-health secret-boundary documentation and live header audit.
    Completed by PR #283; live header audit remains gated.
    Labels: `Repo-only`, `Kuma`.
-4. ROB-385: Backup freshness vs restore-verify freshness split.
+3. ROB-385: Backup freshness vs restore-verify freshness split.
    Completed by PR #284; live Push URL provisioning was completed by ROB-390.
    Labels: `Repo-only`, `Server`, `Kuma`.
-5. ROB-386: Production monitor runtime-name drift cleanup (`php8.3` to `php8.5`).
+4. ROB-386: Production monitor runtime-name drift cleanup (`php8.3` to `php8.5`).
    Completed by PR #285; live Kuma display-name alignment was completed by
    ROB-391.
    Labels: `Repo-only`, `Kuma`, `Server`.
-6. ROB-387: decide privacy-safe parent confirmation PDF live synthetic.
+5. ROB-387: decide privacy-safe parent confirmation PDF live synthetic.
    Completed by PR #286; decision is no live parent confirmation synthetic yet.
    Labels: `Needs decision`, `Repo-only`, `Kuma`.
-7. ROB-367: include monitoring soak and lessons learned.
+6. ROB-367: include monitoring soak and lessons learned.
    Completed as the post-rebuild observation handoff; follow-up live changes
    were split into ROB-390, ROB-391, and ROB-392.
    Labels: `Server`, `Kuma`, `Repo-only`.
-8. ROB-388: completed roadmap coordination for the monitoring follow-up.
+7. ROB-388: completed roadmap coordination for the monitoring follow-up.
    Completed by PR #287 as the final repo-only coordination package.
-   Labels: `Repo-only first`, `Server gate`, `Kuma gate`, `Sentry gate`.
-9. ROB-390: split live backup-creation freshness from restore verification.
+   Labels: `Repo-only first`, `Server gate`, `Kuma gate`.
+8. ROB-390: split live backup-creation freshness from restore verification.
    Completed on 2026-05-20; live Kuma summary showed 13 active monitors and
    13 latest green after the change.
    Labels: `Server`, `Kuma`.
-10. ROB-391: align live PHP-FPM monitor display name with `php8.5-fpm`.
+9. ROB-391: align live PHP-FPM monitor display name with `php8.5-fpm`.
     Completed on 2026-05-20.
     Labels: `Kuma`.
-11. ROB-392: tighten production app-log counting.
+10. ROB-392: tighten production app-log counting.
     Completed by PR #289.
     Labels: `Repo-only`, `Server`, `Kuma`.
 
@@ -524,22 +397,11 @@ Recommended order:
 
 Urgent:
 
-- Keep future Sentry configuration changes gated; the one-off live ingestion
-  smoke completed on 2026-05-20 and is recorded in
-  [Sentry Ingestion Enablement Gate](sentry-ingestion-gate-2026-05-20.md).
-- Keep the minimal Sentry production issue alert as the only new Sentry alert
-  for now; it was completed on 2026-05-20 after the first API attempt stopped
-  safely with HTTP `403` and token permissions were corrected. The result is
-  recorded in
-  [Sentry Alert Gate](sentry-alert-gate-2026-05-20.md).
 - Keep live Push URL, health-token, and parent-confirmation bearer-like values
   out of chat, Linear, docs, and git.
 
 Useful but not urgent:
 
-- Revisit a scheduled Sentry delivery smoke only after the minimal production
-  issue alert has real observation time and there is a concrete operational
-  need beyond manual deploy/configuration gates.
 - Reconcile any future Kuma desired-state drift with redacted snapshots before
   changing live monitors.
 - Revisit parent confirmation PDF synthetics only if a privacy-safe synthetic
@@ -550,5 +412,4 @@ Do not build now:
 - Prometheus/Grafana/Loki or another monitoring stack.
 - Live write-path booking synthetics against real production data.
 - Broad "ignore all 404/warning" filters.
-- Sentry as an availability substitute.
 - Kuma as generic exception tracking.
