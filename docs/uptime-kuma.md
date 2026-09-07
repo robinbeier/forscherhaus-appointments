@@ -44,8 +44,8 @@ restore-verification freshness and backup-creation freshness. ROB-390 and
 ROB-391 applied the related live Kuma changes on 2026-05-20; future live Kuma
 renames or new monitor creation still require an explicit Kuma write gate.
 
-The repo desired monitor catalog contains 10 monitors; the live instance remains
-at 12 until the separately approved transition below. `App - Health
+The repo desired monitor catalog contains nine monitors. A repository merge
+does not update the live catalog; use the bounded retirement procedure below. `App - Health
 Deep` remains the single JSON health monitor and includes the PDF renderer
 dependency check in its response; the former standalone PDF Renderer monitor
 is removed from the active catalog. The static shallow-health and PDF-renderer
@@ -76,7 +76,7 @@ results. `prod_doctor.sh` reports observations without certifying the catalog.
 Application deployments rely on their direct checks; neither the catalog nor
 an all-green monitor count is an additional release condition.
 
-### Pending live transition: two redundant monitors
+### Retired journal and shallow monitors
 
 The static `/health` file contains only `OK`; its keyword monitor adds no
 application or dependency check beyond the retained Homepage and Deep Health
@@ -88,15 +88,24 @@ green result is not proof of successful rendering. Retain Deep Health for
 renderer reachability and the Dashboard PDF Export monitor for actual exports;
 use renderer logs on demand when either reports a failure.
 
-This repository change does not alter the installed Push bundle or live cron.
-Until a separate production approval, keep their existing files and configuration.
-For the later transition, back up the affected configuration, verify Homepage,
-Deep Health and PDF Export plus their notification assignments, pause the
-`App — Health Shallow` and `App - PDF Renderer Log Errors` monitors, and remove
-only the PDF-renderer-log cron invocation. Verify the remaining heartbeats and
-notifications. Only then may its installed script be retired. Preserve monitor
-history and do not delete shared runtime libraries or credentials. If validation
-fails, restore the exact cron and previous monitor states from the backup.
+The PHP-FPM journal monitor also counts only `err..alert` journal entries and
+masks journal-query failures as empty output. PHP-FPM's primary error log is
+configured separately; a green journal result does not establish absence of
+FPM errors. Keep FPM logs available for diagnosis, and retain Homepage, Deep
+Health, Host Services and application error monitoring.
+
+Retirement changes monitor activation and the corresponding cron invocation,
+not the PHP-FPM or renderer service. For each explicitly approved live
+retirement, back up the affected configuration, verify retained monitors and
+notification assignments, pause the identified monitor, and remove only its
+cron invocation. The retired monitors are `App — Health Shallow` (keyword),
+`App - PDF Renderer Log Errors` (push), and `App - php8.5-fpm Log Errors` (push);
+the shallow monitor has no cron invocation. Already-paused monitors require no
+further change. Verify fresh regular results from all retained monitors.
+Preserve history, shared libraries and credentials. An unused installed script
+may remain for rollback; never remove an installed script while cron still
+references it. On failure, restore only the affected prior cron and monitor
+state, preserving unrelated changes and newly recorded history.
 
 Repo desired monitor catalog:
 
@@ -109,9 +118,18 @@ Repo desired monitor catalog:
 | Ops - Restore Verify Freshness | `push` | 900s | `KUMA_PUSH_URL_OPS_JOBS` |
 | Ops - Backup Creation Freshness | `push` | 900s | `KUMA_PUSH_URL_BACKUP_CREATION` |
 | App - Log Errors | `push` | 60s | `KUMA_PUSH_URL_APP_LOGS` |
-| App - php8.5-fpm Log Errors | `push` | 60s | `KUMA_PUSH_URL_PHP_FPM_LOGS` |
 | App - Dashboard PDF Export | `push` | 900s | `KUMA_PUSH_URL_PDF_EXPORT` |
 | Security - Scanner Activity | `push` | 60s | `KUMA_PUSH_URL_SECURITY_SCANNER` |
+
+`App - Log Errors` is an event monitor: each newly read error is reported once,
+and the next run without a new error reports recovery. Set its Kuma **Retries**
+(`maxretries`) to **0**, keeping the 60-second heartbeat interval and the existing
+twice-per-minute producer schedule. Requiring a repeated failure can suppress a
+single error as pending and then silently recover. Zero retries also removes the
+extra retry grace for missing heartbeats; the producer normally sends every
+30 seconds. Preserve notification assignments and all other monitor settings.
+This configuration change requires production approval; a repository merge does
+not apply it. Verify the saved value and a fresh normal heartbeat afterward.
 
 `Security - Scanner Activity` is telemetry-first. The push script still reports
 `scanner_activity`, but it only sends a red state when the threshold is exceeded
@@ -122,9 +140,8 @@ markers are still counted in `success_2xx` and `query_marker_2xx`, but they do
 not turn the monitor red by themselves. Pure `3xx/4xx` bursts remain green and
 are logged in the push message without raw IPs or raw request paths.
 
-The accepted Ubuntu 26.04 rebuild runs PHP-FPM as `php8.5-fpm`. Repo desired
-state, host-local Push env, script defaults, and live Kuma monitor display names
-should all target `php8.5-fpm`.
+The host-service check targets the PHP-FPM unit `php8.5-fpm`; retiring its
+journal monitor does not remove that service-state check.
 
 The catalog above records the non-secret monitor shape. Live monitor history,
 Push URLs, and other credentials remain host-owned.
@@ -217,7 +234,6 @@ approved transition runs:
 - backup-creation freshness every 15 minutes after the host-local backup job
   writes its success marker
 - app log errors every minute plus a 30 second staggered run
-- php-fpm log errors every minute
 - dashboard PDF export every 15 minutes
 - scanner activity every minute
 

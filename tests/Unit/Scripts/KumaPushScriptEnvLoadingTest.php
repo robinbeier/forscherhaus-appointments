@@ -8,63 +8,6 @@ use PHPUnit\Framework\TestCase;
 
 final class KumaPushScriptEnvLoadingTest extends TestCase
 {
-    public function testPhpFpmLogMonitorLoadsEnvBeforeResolvingDefaults(): void
-    {
-        $workspace = $this->createWorkspace();
-
-        try {
-            $envFile = $workspace . '/php-fpm.env';
-            $journalArgsFile = $workspace . '/journalctl-args.txt';
-
-            file_put_contents(
-                $envFile,
-                implode(PHP_EOL, [
-                    'KUMA_PUSH_URL_PHP_FPM_LOGS=https://kuma.example/php-fpm',
-                    'KUMA_PHP_FPM_SERVICE_NAME=php9.9-fpm',
-                    'KUMA_PHP_FPM_LOG_WINDOW_MINUTES=11',
-                    'KUMA_PHP_FPM_ERROR_THRESHOLD=0',
-                    '',
-                ]),
-            );
-
-            $this->writeStub(
-                $workspace . '/bin/journalctl',
-                <<<'BASH'
-                #!/usr/bin/env bash
-                set -euo pipefail
-                printf '%s\n' "$*" > "$JOURNALCTL_ARGS_FILE"
-                exit 0
-                BASH
-                ,
-            );
-
-            $this->writeStub(
-                $workspace . '/bin/curl',
-                <<<'BASH'
-                #!/usr/bin/env bash
-                set -euo pipefail
-                exit 0
-                BASH
-                ,
-            );
-
-            $result = $this->runCommand(['bash', 'scripts/ops/kuma_push_php_fpm_logs.sh'], $this->repoRoot(), [
-                'PATH' => $workspace . '/bin:' . (getenv('PATH') ?: ''),
-                'KUMA_PUSH_ENV_FILE' => $envFile,
-                'JOURNALCTL_ARGS_FILE' => $journalArgsFile,
-            ]);
-
-            self::assertSame(0, $result['exit_code'], $result['stderr']);
-            self::assertStringContainsString('OK php_fpm_errors=0 window=11m', $result['stdout']);
-            self::assertSame(
-                '-u php9.9-fpm --since -11 min -p err..alert --no-pager -o cat' . PHP_EOL,
-                file_get_contents($journalArgsFile),
-            );
-        } finally {
-            $this->removeDirectory($workspace);
-        }
-    }
-
     public function testPdfExportMonitorLoadsEnvBeforeResolvingDefaults(): void
     {
         $workspace = $this->createWorkspace();
