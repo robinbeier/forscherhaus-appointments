@@ -47,43 +47,20 @@ This file stays intentionally short. It is a map, not a second runbook.
 
 ## Validation Routing
 
-- Small local confidence check:
-  - `docker compose run --rm php-fpm composer test`
-- Fast developer-feedback gate; not merge authorization:
-  - `bash ./scripts/ci/pre_pr_quick.sh`
-- Full local review-ready gate; not merge authorization:
-  - `PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh`
-- Standard review and landing:
-  - follow `WORKFLOW.md`: record independent review for the current PR head,
-    check applicable blocking CI and unresolved findings, and merge only with
-    user authorization and `--match-head-commit`
-  - no separate CLI login or attestation command is required
-- Workflow consistency checks run with `composer test`:
-  - `AgentWorkflowContractTest` checks the current repository;
-    `AgentHarnessReadinessTest` covers the shared helper in
-    `scripts/ci/lib/WorkflowContractChecks.php`.
-  - Canonical steering-document references remain checked.
-  - The machine contract owns the supported CI-condition tokens; the checker
-    fails closed on invalid grammar.
-  - The workflow execution envelope and every `fingerprinted_execution` job
-    have separate canonical fingerprints, so drift reports identify the
-    affected component. Display-only job/step names and order-insensitive
-    `needs` and trigger-type lists are normalized, while order-sensitive glob
-    filters are preserved. `exact_execution` jobs are derived from their class
-    and checked directly against their structured contracts. Job/step
-    conditions are parsed into a canonical semantic form with the contract
-    grammar. The contract selects a versioned strict failure-control policy;
-    unknown policy IDs, workflow/job/step shell overrides, and explicit
-    `continue-on-error` fail closed. Every workflow job must be classified
-    exactly once as blocking or advisory; advisory jobs remain outside
-    blocking execution checks, while missing or unclassified jobs fail closed.
+- [Validate locally](../WORKFLOW.md#3-validate-locally) using the focused,
+  quick, and full gates described in the canonical workflow.
+- [CI test execution and timing](ci-test-execution.md) covers the main tests,
+  coverage jobs, and local/CI comparisons.
+- [Review and landing](../WORKFLOW.md#pr-and-review-expectations) follows
+  the exact-head and authorization requirements in `WORKFLOW.md`.
+- [CI write contracts and workflow fingerprints](ci-write-contracts.md#ci-jobs)
+  cover the blocking-job contract, failure controls, and drift checks.
 - Scope-specific checks:
   - root/host prerequisite contract: [Docker test guidance](docker.md#linux-roothost-tests)
-  - write-path contracts: `docs/ci-write-contracts.md`
-  - integration smoke browser evidence: `docs/release-gate-dashboard.md`
-  - production provider UI smoke: `docs/release-gate-provider-ui-smoke.md`
-  - production Customers UI smoke: `docs/release-gate-customers-ui-smoke.md`
-  - architecture boundaries entry points: `AGENTS.md`
+  - integration smoke browser evidence: [Dashboard release gate](release-gate-dashboard.md)
+  - production provider UI smoke: [Provider UI smoke release gate](release-gate-provider-ui-smoke.md)
+  - production Customers UI smoke: [Customers UI smoke release gate](release-gate-customers-ui-smoke.md)
+  - architecture boundaries entry points: [AGENTS.md](../AGENTS.md)
 
 ## Editing Rules
 
