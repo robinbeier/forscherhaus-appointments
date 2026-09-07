@@ -10,7 +10,6 @@ mkdir -p "$LOG_DIR"
 
 RAW_REPORT="$LOG_DIR/deptrac-raw-report.json"
 CHANGED_GATE_REPORT="$LOG_DIR/deptrac-changed-gate.json"
-GITHUB_ACTIONS_LOG="$LOG_DIR/deptrac-github-actions.log"
 
 SCOPE_PREFIXES=(
   "application/controllers/"
@@ -89,7 +88,6 @@ if [[ "$git_diff_exit" -ne 0 ]]; then
   "changed_scope_files": []
 }
 JSON
-  : > "$GITHUB_ACTIONS_LOG"
   echo "::error::git diff failed for range '$DIFF_RANGE'."
   exit 1
 fi
@@ -112,7 +110,6 @@ if [[ "${#changed_scope_files[@]}" -eq 0 ]]; then
 }
 JSON
 
-  : > "$GITHUB_ACTIONS_LOG"
   echo "No changed PHP files in Deptrac scope; skipping gate."
   exit 0
 fi
@@ -122,8 +119,6 @@ rm -f "$RAW_REPORT"
 set +e
 ./vendor/bin/deptrac analyse --config-file=deptrac.yaml --formatter=json --output="$RAW_REPORT" --no-progress >/dev/null 2>&1
 deptrac_json_exit=$?
-./vendor/bin/deptrac analyse --config-file=deptrac.yaml --formatter=github-actions --no-progress >"$GITHUB_ACTIONS_LOG" 2>&1
-deptrac_actions_exit=$?
 set -e
 
 if [[ ! -f "$RAW_REPORT" ]]; then
@@ -134,8 +129,7 @@ if [[ ! -f "$RAW_REPORT" ]]; then
   "reason": "Deptrac JSON report was not created.",
   "diff_range": "$DIFF_RANGE",
   "changed_scope_files": [$(printf '"%s",' "${changed_scope_files[@]}" | sed 's/,$//')],
-  "deptrac_json_exit_code": $deptrac_json_exit,
-  "deptrac_github_actions_exit_code": $deptrac_actions_exit
+  "deptrac_json_exit_code": $deptrac_json_exit
 }
 JSON
   echo "::error::Deptrac JSON report missing: $RAW_REPORT"
@@ -146,7 +140,7 @@ changed_scope_tmp="$(mktemp)"
 printf '%s\n' "${changed_scope_files[@]}" > "$changed_scope_tmp"
 
 read -r changed_violation_count deptrac_report_error_count < <(
-  python3 - "$RAW_REPORT" "$changed_scope_tmp" "$CHANGED_GATE_REPORT" "$ROOT_DIR" "$DIFF_RANGE" "$deptrac_json_exit" "$deptrac_actions_exit" <<'PY'
+  python3 - "$RAW_REPORT" "$changed_scope_tmp" "$CHANGED_GATE_REPORT" "$ROOT_DIR" "$DIFF_RANGE" "$deptrac_json_exit" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -157,7 +151,6 @@ out_report = Path(sys.argv[3])
 root_dir = Path(sys.argv[4]).resolve()
 diff_range = sys.argv[5]
 json_exit = int(sys.argv[6])
-actions_exit = int(sys.argv[7])
 
 def normalize(path: str) -> str:
     text = path.replace('\\', '/').strip()
@@ -224,7 +217,6 @@ result = {
     'changed_scope_files': sorted(changed_files),
     'deptrac': {
         'json_exit_code': json_exit,
-        'github_actions_exit_code': actions_exit,
         'report': {
             'violations': int(report.get('Violations', 0) or 0),
             'skipped_violations': int(report.get('Skipped violations', 0) or 0),
