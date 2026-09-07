@@ -262,8 +262,8 @@ monitor definitions do not change during that cutover.
 
 ## Backup and Restore
 
-For any future restore or migration, use a fresh approved full backup close to
-the migration window. Verify archive/database integrity, current monitor
+For any future full-history migration, use a fresh approved full backup close
+to the migration window. Verify archive/database integrity, current monitor
 definitions, and fresh successful pushes from the host-local scripts. A tested
 older backup proves restore mechanics only; it is not the current production
 backup or monitor state.
