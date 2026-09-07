@@ -959,18 +959,14 @@ validate_deploy_script_drift() {
 
 detect_php_fpm_reload_service() {
   local unit
+  local state
 
-  while read -r unit _; do
+  while read -r unit _ state _; do
+    [[ "$state" == active ]] || continue
     [[ "$unit" =~ ^php[0-9.]+-fpm\.service$ ]] || continue
     printf '%s\n' "${unit%.service}"
     return 0
-  done < <(/bin/systemctl list-units --type=service --all 'php*-fpm.service' --no-legend 2>/dev/null || true)
-
-  while read -r unit _; do
-    [[ "$unit" =~ ^php[0-9.]+-fpm\.service$ ]] || continue
-    printf '%s\n' "${unit%.service}"
-    return 0
-  done < <(/bin/systemctl list-unit-files 'php*-fpm.service' --type=service --no-legend 2>/dev/null || true)
+  done < <("${SYSTEMCTL_BASE[@]}" list-units --type=service --state=active 'php*-fpm.service' --no-legend 2>/dev/null || true)
 
   return 1
 }

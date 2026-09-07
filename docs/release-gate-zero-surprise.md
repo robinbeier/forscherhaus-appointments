@@ -163,12 +163,8 @@ Pre-switch order in `deploy_ea.sh`:
 8. validate the generated predeploy report
 9. continue with stage preparation and `perform_atomic_switch`
 
-Post-switch order in `deploy_ea.sh`:
-
-1. `perform_atomic_switch`
-2. `probe_renderer_health`
-3. `probe_deep_health_contract`
-4. `run_zero_surprise_live_canary`
+For the post-switch and rollback sequence, follow
+[the deployment guide](deployment.md#deploy).
 
 Canary failure path is hard-wired to:
 
