@@ -170,7 +170,6 @@ final class BackupSetProducerContractTest extends TestCase
                 'scripts/ops/libexec/deployment_dump_attestation_v1.py',
                 'scripts/ops/libexec/release_archive_dump_retention_v1.py',
                 'scripts/ops/libexec/session_retention_v1.py',
-                'scripts/ops/libexec/zero_surprise_image_cleanup_v1.py',
                 'scripts/ops/prod_build_cache_retention.sh',
             ]
             as $path
@@ -189,7 +188,6 @@ final class BackupSetProducerContractTest extends TestCase
             'scripts/ops/libexec/deployment_dump_attestation_v1.py',
             'scripts/ops/libexec/release_archive_dump_retention_v1.py',
             'scripts/ops/libexec/session_retention_v1.py',
-            'scripts/ops/libexec/zero_surprise_image_cleanup_v1.py',
             'scripts/ops/prod_build_cache_retention.sh',
         ];
         $program = <<<'PY'

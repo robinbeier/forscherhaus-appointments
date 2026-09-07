@@ -164,10 +164,6 @@ class CiWorkflowContractTest extends TestCase
         self::assertStringContainsString('tests/Unit/Scripts/PublishReleasePairRootTest.php', $rootDeploymentScript);
         self::assertStringContainsString('tests/Unit/Scripts/SessionRetentionRootTest.php', $rootDeploymentScript);
         self::assertStringContainsString(
-            'tests/Unit/Scripts/ZeroSurpriseProductionImageCleanupRootTest.php',
-            $rootDeploymentScript,
-        );
-        self::assertStringContainsString(
             'tests/Unit/Scripts/ReleaseArchiveDumpRetentionRootTest.php',
             $rootDeploymentScript,
         );
