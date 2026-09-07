@@ -8,7 +8,6 @@ the live SQLite database or Push monitor secrets in the repository.
 Repository-owned:
 
 - container template: `docker/compose.uptime-kuma.yml`
-- desired monitor template: `scripts/ops/uptime-kuma.monitors.yml`
 - push scripts: `scripts/ops/kuma_push_*.sh`
 - host-local env example: `scripts/ops/uptime-kuma-push.env.example`
 - crontab example: `scripts/ops/uptime-kuma-crontab.example`
@@ -27,14 +26,19 @@ Host-owned:
 
 ## Production Snapshot
 
-Read-only inventory captured on 2026-05-14 and refreshed after the 2026-08-01
-2.5.0 maintenance update:
+Refreshed after the authorized 2026-09-07 switch to the slim image:
 
-- container: `uptime-kuma`
-- image: `louislam/uptime-kuma:2.5.0`
+- image: pinned in `docker/compose.uptime-kuma.yml` to `2.5.3-slim` and its digest
 - listen address: `127.0.0.1:3001`
 - data mount: `/var/lib/uptime-kuma-data` bind-mounted at `/app/data`
-- database file: `/app/data/kuma.db`
+- database file: `/app/data/kuma.db` (SQLite)
+
+The slim image omits Chromium and embedded MariaDB; this instance uses SQLite
+and HTTP, keyword, JSON, and Push monitors. It does not use browser monitors.
+After the switch, container health and production validation passed, with the
+monitor and notification configuration preserved. The previous `2.5.0` image
+and the complete pre-switch data/Compose backup remain available for recovery;
+rollback must restore the old data together with the old image.
 
 Active monitors were captured on 2026-05-14. The repo desired-state catalog now
 also includes reviewed follow-up changes, such as the ROB-385 split between
@@ -102,8 +106,8 @@ The accepted Ubuntu 26.04 rebuild runs PHP-FPM as `php8.5-fpm`. Repo desired
 state, host-local Push env, script defaults, and live Kuma monitor display names
 should all target `php8.5-fpm`.
 
-The full non-secret monitor shape is mirrored in
-`scripts/ops/uptime-kuma.monitors.yml`.
+The catalog above records the non-secret monitor shape. Live monitor history,
+Push URLs, and other credentials remain host-owned.
 
 ## Health Monitor Boundary
 
@@ -121,9 +125,7 @@ boundaries:
 
 The `X-Health-Token` value belongs only in Kuma monitor headers or host-local
 files such as `/etc/fh/healthz.token`. Do not copy the value into Git, Linear,
-chat, command transcripts, desired-state YAML, or runbook examples. The
-desired-state YAML may name the required header, but must keep the value as a
-host-local placeholder.
+chat, command transcripts, or runbook examples.
 
 For a live header audit, record only sanitized facts:
 
@@ -155,9 +157,8 @@ docker compose -f docker/compose.uptime-kuma.yml up -d
 Put Apache or another reverse proxy in front of `127.0.0.1:3001` for
 `monitor.dasforscherhaus-leg.de`.
 
-Create the monitors from `scripts/ops/uptime-kuma.monitors.yml` manually in the
-Kuma UI or with a separately reviewed import script. For Push monitors, copy the
-generated Push URLs into a host-local env file based on
+For an explicitly approved new Push monitor, store its generated Push URL in
+a host-local env file based on
 `scripts/ops/uptime-kuma-push.env.example`.
 
 ## Push Script Installation
@@ -263,22 +264,13 @@ For a full-history migration:
 6. Confirm every Push monitor receives a fresh successful push from the new
    host-local cron/scripts.
 
-For a clean template rebuild:
-
-1. Start Kuma with `docker/compose.uptime-kuma.yml`.
-2. Recreate monitors from `scripts/ops/uptime-kuma.monitors.yml`.
-3. Store generated Push URLs in the host-local env file.
-4. Install the crontab from `scripts/ops/uptime-kuma-crontab.example`.
-5. Run every push script once manually.
-6. Confirm all app, host, and ops monitors are green.
-
 ## 2026-05-14 Restore Status
 
 Confirmed:
 
 - production monitor desired state was captured without Push tokens
 - production already has historical Kuma backup archives
-- repo now contains a Kuma container template, monitor template, env example,
+- repo at that time contained a Kuma container template, monitor template, env example,
   crontab example, and the missing Host/Ops Push scripts
 - historical backup
   `/root/backups/uptime-kuma/uptime-kuma-data-pre-2.2.1-20260310T152414Z.tar.gz`
@@ -326,7 +318,7 @@ Redacted result:
 
 - source, backup, and post-update SQLite integrity checks returned `ok`;
 - the production and repository Compose image pins target
-  `louislam/uptime-kuma:2.5.0`;
+  `louislam/uptime-kuma:2.5.0` at that time;
 - the container restarted healthy on `127.0.0.1:3001` and reported version
   `2.5.0`;
 - post-change validation showed 13 active monitors and 13 latest green;
@@ -399,8 +391,8 @@ Validation:
 - local HTTP smoke returned `HTTP/1.1 302 Found` to `/dashboard`
 - restored database contained `12` monitors
 - restored database contained `8` Push monitors
-- restored monitor metadata matched `scripts/ops/uptime-kuma.monitors.yml`
-  for ID, name, type, interval, retry interval, and max retries
+- restored monitor metadata matched the then-current reconstruction template
+  (retired in September 2026) for ID, name, type, interval, retry interval, and max retries
 - a temporary host-local Push env file was generated from the restored DB and
   kept outside the repository
 - all 8 Push monitors accepted green test pings against the restored instance

@@ -251,11 +251,7 @@ class CiPathFilterMatrixTest extends TestCase
 
     public function testUptimeKumaDesiredStateDoesNotTriggerIntegrationSmoke(): void
     {
-        $matches = $this->applyFilters([
-            'docker/compose.uptime-kuma.yml',
-            'docs/uptime-kuma.md',
-            'scripts/ops/uptime-kuma.monitors.yml',
-        ]);
+        $matches = $this->applyFilters(['docker/compose.uptime-kuma.yml', 'docs/uptime-kuma.md']);
         self::assertTrue($matches['coverage_required']);
         self::assertTrue($matches['api_contract']);
         self::assertFalse($matches['integration_smoke']);
