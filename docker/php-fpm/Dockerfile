@@ -39,7 +39,6 @@ RUN apt-get update \
     && curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer \
     && curl -sLS https://deb.nodesource.com/setup_24.x | bash - \
     && apt-get install -y nodejs \
-    && npm install -g npm \
     && apt-get install -q -y ssmtp mailutils \
     && echo "hostname=localhost.localdomain" > /etc/ssmtp/ssmtp.conf \
     && echo "root=root@example.org" >> /etc/ssmtp/ssmtp.conf \
