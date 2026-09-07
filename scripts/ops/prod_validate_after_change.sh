@@ -417,50 +417,6 @@ else
     failures=$((failures + 1))
 fi
 
-section kuma
-if [[ -r /var/lib/uptime-kuma-data/kuma.db ]] && command -v sqlite3 >/dev/null 2>&1; then
-    expected_active_monitors=12
-    expected_monitor_roles_sql="$(cat <<'SQL'
-WITH expected(name, type) AS (VALUES
-    ('App-Homepage', 'http'),
-    ('App — Health Shallow', 'keyword'),
-    ('App - Health Deep', 'json-query'),
-    ('Host - Services', 'push'),
-    ('Host - Resources', 'push'),
-    ('Ops - Restore Verify Freshness', 'push'),
-    ('Ops - Backup Creation Freshness', 'push'),
-    ('App - Log Errors', 'push'),
-    ('App - php8.5-fpm Log Errors', 'push'),
-    ('App - PDF Renderer Log Errors', 'push'),
-    ('App - Dashboard PDF Export', 'push'),
-    ('Security - Scanner Activity', 'push')
-)
-SELECT COUNT(*)
-FROM expected
-WHERE EXISTS (
-    SELECT 1
-    FROM monitor
-    WHERE monitor.active = 1
-      AND monitor.name = expected.name
-      AND monitor.type = expected.type
-);
-SQL
-)"
-    active="$(sqlite3 /var/lib/uptime-kuma-data/kuma.db 'SELECT COUNT(*) FROM monitor WHERE active = 1;' 2>/dev/null || printf query_failed)"
-    matched_roles="$(sqlite3 /var/lib/uptime-kuma-data/kuma.db "$expected_monitor_roles_sql" 2>/dev/null || printf query_failed)"
-    green="$(sqlite3 /var/lib/uptime-kuma-data/kuma.db "SELECT SUM(CASE WHEN latest_status = 1 THEN 1 ELSE 0 END) FROM (SELECT m.id, COALESCE((SELECT h.status FROM heartbeat h WHERE h.monitor_id = m.id ORDER BY h.time DESC LIMIT 1), -1) latest_status FROM monitor m WHERE m.active = 1);" 2>/dev/null || printf query_failed)"
-    printf 'kuma.active_monitors=%s\n' "$active"
-    printf 'kuma.expected_monitor_roles=%s\n' "$matched_roles"
-    printf 'kuma.green_latest=%s\n' "$green"
-    if [[ "$active" != "$expected_active_monitors" || "$matched_roles" != "$expected_active_monitors" || "$green" != "$expected_active_monitors" ]]; then
-        printf 'FAIL kuma expected %s monitor roles and %s green\n' "$expected_active_monitors" "$expected_active_monitors" >&2
-        failures=$((failures + 1))
-    fi
-else
-    printf 'FAIL kuma unavailable\n' >&2
-    failures=$((failures + 1))
-fi
-
 section resources
 root_used_pct="$(df -P / | awk 'NR == 2 {gsub(/%/, "", $5); print $5}')"
 mem_available_mib="$(awk '/MemAvailable/ {printf "%d", $2 / 1024}' /proc/meminfo)"

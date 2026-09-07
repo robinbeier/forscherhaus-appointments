@@ -54,13 +54,23 @@ Operational transition for the existing live Kuma instance: after `App - Health 
 it by its name and type if the instance has been rebuilt. Keep its existing
 history; this repository change does not require a Push runtime or cron update.
 Finish any active deployment before changing the monitor count. Future deployments
-must use the matching `12/12` post-gate contracts; before upgrading older installed
-deployment tools, follow the [completed-run upgrade procedure](deployment-run-v1.md#one-time-upgrade-after-traffic-check-removal).
+must use the direct post-gate checks defined by their matching deployment
+contract; before upgrading older installed deployment tools, follow the
+[completed-run upgrade procedure](deployment-run-v1.md#one-time-upgrade-after-traffic-check-removal).
 Pausing the monitor does not alter old completed deployment records or authorize
 an installation of deployment tools.
 
-Post-change validation requires the catalog's monitor names and types, not the
-historical database IDs. A fresh reconstruction may assign different IDs.
+After an authorized change to Kuma itself, manually compare the affected
+monitors in its dashboard with the catalog below by name and type, then verify
+their status and notification assignments. Historical database IDs are not
+identity: a fresh reconstruction may assign different IDs. This is an operator
+check for monitoring changes, not an automated deployment gate.
+
+`prod_validate_after_change.sh` still checks the monitoring endpoint and
+container, but does not validate the Kuma database, catalog, or heartbeat
+results. `prod_doctor.sh` reports observations without certifying the catalog.
+Application deployments rely on their direct checks; neither the catalog nor
+an all-green monitor count is an additional release condition.
 
 Repo desired monitor catalog:
 

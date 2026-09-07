@@ -1106,8 +1106,6 @@ final class DeploymentContractV1Test extends TestCase
         yield 'all checks unavailable' => [[]];
         yield 'mixed partial checks' => [
             [
-                'kuma_healthy_count' => 12,
-                'kuma_total_count' => 12,
                 'runtime_config_passed' => true,
             ],
         ];
@@ -1235,17 +1233,10 @@ final class DeploymentContractV1Test extends TestCase
     /** @return iterable<string,array{array<string,mixed>}> */
     public static function invalidIncompletePostGateShapeProvider(): iterable
     {
-        yield 'healthy count without total' => [['kuma_healthy_count' => 12]];
-        yield 'total count without healthy' => [['kuma_total_count' => 12]];
-        yield 'negative Kuma count' => [['kuma_healthy_count' => -1, 'kuma_total_count' => 12]];
-        yield 'wrong Kuma type' => [['kuma_healthy_count' => '12', 'kuma_total_count' => 12]];
-        yield 'healthy exceeds total' => [['kuma_healthy_count' => 13, 'kuma_total_count' => 12]];
         yield 'wrong gate type' => [['runtime_config_passed' => 'true']];
         yield 'passed is non-null' => [['passed' => false]];
         yield 'all checks complete' => [
             [
-                'kuma_healthy_count' => 12,
-                'kuma_total_count' => 12,
                 'runtime_config_passed' => true,
                 'services_passed' => true,
                 'endpoints_passed' => true,
@@ -1853,34 +1844,32 @@ final class DeploymentContractV1Test extends TestCase
         }
     }
 
-    public function testSuccessfulEvidenceRequiresEveryPostGateIncludingKumaTwelveOfTwelve(): void
+    #[DataProvider('postGateBooleanProvider')]
+    public function testSuccessfulEvidenceRejectsFalsePostGate(string $field): void
     {
         $evidence = $this->validEvidence($this->successfulRunLines());
-        $evidence['post_gates']['kuma_healthy_count'] = 11;
+        $evidence['post_gates'][$field] = false;
 
         $this->expectException(RuntimeException::class);
         DeploymentContractV1::validateEvidence($evidence);
     }
 
-    public function testFailedPostGateEvidenceRejectsMoreHealthyThanTotalKumaChecks(): void
+    /** @return iterable<string,array{string}> */
+    public static function postGateBooleanProvider(): iterable
     {
-        $lines = $this->rollbackRunningLines();
-        $lines[] = $this->encode(
-            $this->transition($lines, 'failed_post_switch_rollback_failed', 1, 31, 'rollback_failed'),
-        );
-        $evidence = $this->invokedFailureEvidence(
-            $lines,
-            'failed_post_switch_rollback_failed',
-            31,
-            'rollback_failed',
-            31,
-            'failed',
-            'failed',
-        );
-        $evidence['post_gates']['kuma_healthy_count'] = 14;
-
-        $this->expectException(RuntimeException::class);
-        DeploymentContractV1::validateBundle($lines, $evidence);
+        foreach (
+            [
+                'runtime_config_passed',
+                'services_passed',
+                'endpoints_passed',
+                'logs_passed',
+                'scanner_passed',
+                'dormant_clean_passed',
+            ]
+            as $field
+        ) {
+            yield $field => [$field];
+        }
     }
 
     public function testPostGateSummaryIsDerivedFromEveryIndividualCheck(): void
@@ -2236,8 +2225,6 @@ final class DeploymentContractV1Test extends TestCase
             'rollback' => $this->rollbackEvidence('not_invoked'),
             'post_gates' => [
                 'status' => 'passed',
-                'kuma_healthy_count' => 12,
-                'kuma_total_count' => 12,
                 'runtime_config_passed' => true,
                 'services_passed' => true,
                 'endpoints_passed' => true,

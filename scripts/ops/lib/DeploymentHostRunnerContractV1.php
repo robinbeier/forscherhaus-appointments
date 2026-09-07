@@ -84,8 +84,6 @@ final class DeploymentHostRunnerContractV1
 
     private const POST_GATE_KEYS = [
         'status',
-        'kuma_healthy_count',
-        'kuma_total_count',
         'runtime_config_passed',
         'services_passed',
         'endpoints_passed',
@@ -592,21 +590,13 @@ final class DeploymentHostRunnerContractV1
         self::assertExactKeys($report['post_gates'], self::POST_GATE_KEYS, 'post_gates');
         $postGates = $report['post_gates'];
         self::assertEnum($postGates['status'], ['passed', 'failed'], 'post_gates.status');
-        foreach (['kuma_healthy_count', 'kuma_total_count'] as $field) {
-            if (!is_int($postGates[$field]) || $postGates[$field] < 0) {
-                throw new RuntimeException('post-gate counts are invalid');
-            }
-        }
-        if ($postGates['kuma_total_count'] !== 12 || $postGates['kuma_healthy_count'] > 12) {
-            throw new RuntimeException('post-gate Kuma observation is invalid');
-        }
-        foreach (array_slice(self::POST_GATE_KEYS, 3) as $field) {
+        foreach (array_slice(self::POST_GATE_KEYS, 1) as $field) {
             if (!is_bool($postGates[$field])) {
                 throw new RuntimeException('post-gate booleans are invalid');
             }
         }
-        $passed = $postGates['kuma_healthy_count'] === 12;
-        foreach (array_slice(self::POST_GATE_KEYS, 3, -1) as $field) {
+        $passed = true;
+        foreach (array_slice(self::POST_GATE_KEYS, 1, -1) as $field) {
             $passed = $passed && $postGates[$field];
         }
         if ($postGates['passed'] !== $passed || ($postGates['status'] === 'passed') !== $passed) {

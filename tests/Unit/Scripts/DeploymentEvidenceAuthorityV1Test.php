@@ -1576,8 +1576,6 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
         ]);
         $postGateKeys = [
             'status',
-            'kuma_healthy_count',
-            'kuma_total_count',
             'runtime_config_passed',
             'services_passed',
             'endpoints_passed',
@@ -1686,8 +1684,6 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
                 ],
                 'post_gates' => [
                     'status' => 'passed',
-                    'kuma_healthy_count' => 12,
-                    'kuma_total_count' => 12,
                     'runtime_config_passed' => true,
                     'services_passed' => true,
                     'endpoints_passed' => true,

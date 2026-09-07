@@ -33,6 +33,34 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
         self::assertSame(hash('sha256', $encoded), DeploymentHostRunnerContractV1::fileSha256($encoded));
     }
 
+    #[DataProvider('postGateBooleanProvider')]
+    public function testPostGateReportRejectsForgedSuccessForEveryBooleanGate(string $field): void
+    {
+        $report = $this->postGateReport(true, 'deploy');
+        $report['post_gates'][$field] = false;
+
+        $this->expectException(RuntimeException::class);
+        DeploymentHostRunnerContractV1::validatePostGateReport($report);
+    }
+
+    /** @return iterable<string,array{string}> */
+    public static function postGateBooleanProvider(): iterable
+    {
+        foreach (
+            [
+                'runtime_config_passed',
+                'services_passed',
+                'endpoints_passed',
+                'logs_passed',
+                'scanner_passed',
+                'dormant_clean_passed',
+            ]
+            as $field
+        ) {
+            yield $field => [$field];
+        }
+    }
+
     public function testRecoveryRequestContainsOnlyExistingRunIdentity(): void
     {
         $request = [
@@ -4479,8 +4507,6 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             'deploy_receipt_sha256' => $subject === 'deploy' ? self::SHA : null,
             'post_gates' => [
                 'status' => $passed ? 'passed' : 'failed',
-                'kuma_healthy_count' => $passed ? 12 : 11,
-                'kuma_total_count' => 12,
                 'runtime_config_passed' => true,
                 'services_passed' => true,
                 'endpoints_passed' => true,
@@ -5037,8 +5063,6 @@ final class DeploymentHostRunnerContractV1Test extends TestCase
             ],
             'post_gates' => [
                 'status' => 'passed',
-                'kuma_healthy_count' => 12,
-                'kuma_total_count' => 12,
                 'runtime_config_passed' => true,
                 'services_passed' => true,
                 'endpoints_passed' => true,

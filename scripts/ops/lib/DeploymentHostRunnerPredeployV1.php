@@ -401,8 +401,6 @@ final class HostRunnerPredeployOrchestrator
         $postGates = array_fill_keys(
             [
                 'status',
-                'kuma_healthy_count',
-                'kuma_total_count',
                 'runtime_config_passed',
                 'services_passed',
                 'endpoints_passed',
