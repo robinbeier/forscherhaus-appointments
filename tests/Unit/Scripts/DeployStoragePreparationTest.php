@@ -27,6 +27,31 @@ final class DeployStoragePreparationTest extends TestCase
         self::assertLessThan($switch, $sync);
     }
 
+    public function testDefaultReloadResolutionTargetsDetectedPhpFpmAndPreservesExplicitApacheAndFallback(): void
+    {
+        $script = <<<'BASH'
+        set -Eeuo pipefail
+        source "$1"
+
+        detect_php_fpm_reload_service() { printf 'php8.5-fpm\n'; }
+        resolve_reload_services
+        printf 'detected=%s\n' "$RELOAD_SERVICES"
+
+        RELOAD_SERVICES='apache2,php8.2-fpm'
+        resolve_reload_services
+        printf 'explicit=%s\n' "$RELOAD_SERVICES"
+
+        detect_php_fpm_reload_service() { return 1; }
+        RELOAD_SERVICES='php8.2-fpm'
+        resolve_reload_services
+        printf 'fallback=%s\n' "$RELOAD_SERVICES"
+        BASH;
+
+        $result = $this->runCommand(['bash', '-c', $script, 'bash', $this->root . '/deploy_ea.sh']);
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertSame("detected=php8.5-fpm\nexplicit=apache2,php8.2-fpm\nfallback=php8.2-fpm\n", $result['stdout']);
+    }
+
     public function testStorageTransferCopiesSpecialNames(): void
     {
         if (trim((string) shell_exec('command -v rsync')) === '') {

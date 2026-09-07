@@ -98,6 +98,12 @@ tree using the [contract upgrade procedure](deployment-run-v1.md#one-time-upgrad
 Do not replace helpers while any old run or active claim remains unresolved;
 previously pinned inputs must not be reused for a new run.
 
+For normal application-only changes, the deploy script reloads the detected
+PHP-FPM unit. Apache is left untouched because the deploy changes application
+release files; pass an explicit `--reload` list when a host configuration change
+also requires an Apache reload. If PHP-FPM detection finds no unit, the
+`php8.2-fpm` fallback remains in effect.
+
 `deploy_ea.sh` performs these safety checks before switching traffic:
 
 - archive exists and contains required release files

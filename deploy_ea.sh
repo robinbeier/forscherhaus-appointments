@@ -15,7 +15,7 @@ REL=""
 APP="/var/www/html/easyappointments"
 SRC="/root/releases"
 WEBUSER="www-data"
-RELOAD_SERVICES="apache2,php8.2-fpm"
+RELOAD_SERVICES="php8.2-fpm"
 DRYRUN=0
 MARK_RELEASE=1
 
@@ -817,7 +817,7 @@ Core options:
   --app PATH                   Live app path                     [default: /var/www/html/easyappointments]
   --src DIR                    Directory with release archive     [default: /root/releases]
   --user WEBUSER               Web user for ownership/actions     [default: www-data]
-  --reload LIST                Services to reload (CSV)           [default: apache2,<detected php-fpm>]
+  --reload LIST                Services to reload (CSV)           [default: <detected php-fpm>]
   --result-file PATH           Publish durable deploy_result.v1 candidate
   --dry-run                    Print actions only
   --no-mark                    Skip writing _RELEASE marker
@@ -975,7 +975,7 @@ detect_php_fpm_reload_service() {
 }
 
 resolve_reload_services() {
-  local default_reload="apache2,php8.2-fpm"
+  local default_reload="php8.2-fpm"
   local detected_php_fpm
 
   [[ "$RELOAD_SERVICES" == "$default_reload" ]] || return 0
@@ -983,7 +983,7 @@ resolve_reload_services() {
   detected_php_fpm="$(detect_php_fpm_reload_service || true)"
   [[ -n "$detected_php_fpm" ]] || return 0
 
-  RELOAD_SERVICES="apache2,${detected_php_fpm}"
+  RELOAD_SERVICES="${detected_php_fpm}"
 }
 
 reload_services() {
