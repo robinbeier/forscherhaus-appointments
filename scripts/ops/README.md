@@ -41,7 +41,6 @@ Deep-health monitor boundary:
 Script inventory:
 
 - `kuma_push_app_logs.sh` monitors newly appended application log errors
-- `kuma_push_host_services.sh` monitors critical systemd services
 - `kuma_push_host_resources.sh` monitors disk, memory, and load thresholds
 - `prod_session_retention.sh` inspects or explicitly applies the bounded ROB-440
   24-hour file-session policy; its systemd units are shipped disabled and the
@@ -128,7 +127,6 @@ Default env file:
 
 Required new Push URLs:
 
-- `KUMA_PUSH_URL_HOST_SERVICES`
 - `KUMA_PUSH_URL_HOST_RESOURCES`
 - `KUMA_PUSH_URL_OPS_JOBS`
 - `KUMA_PUSH_URL_BACKUP_CREATION`

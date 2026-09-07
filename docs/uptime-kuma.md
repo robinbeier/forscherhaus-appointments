@@ -44,7 +44,7 @@ restore-verification freshness and backup-creation freshness. ROB-390 and
 ROB-391 applied the related live Kuma changes on 2026-05-20; future live Kuma
 renames or new monitor creation still require an explicit Kuma write gate.
 
-The repo desired monitor catalog contains nine monitors. A repository merge
+The repo desired monitor catalog contains eight monitors. A repository merge
 does not update the live catalog; use the bounded retirement procedure below. `App - Health
 Deep` remains the single JSON health monitor and includes the PDF renderer
 dependency check in its response; the former standalone PDF Renderer monitor
@@ -76,7 +76,7 @@ results. `prod_doctor.sh` reports observations without certifying the catalog.
 Application deployments rely on their direct checks; neither the catalog nor
 an all-green monitor count is an additional release condition.
 
-### Retired journal and shallow monitors
+### Retired monitors
 
 The static `/health` file contains only `OK`; its keyword monitor adds no
 application or dependency check beyond the retained Homepage and Deep Health
@@ -92,14 +92,22 @@ The PHP-FPM journal monitor also counts only `err..alert` journal entries and
 masks journal-query failures as empty output. PHP-FPM's primary error log is
 configured separately; a green journal result does not establish absence of
 FPM errors. Keep FPM logs available for diagnosis, and retain Homepage, Deep
-Health, Host Services and application error monitoring.
+Health and application error monitoring.
+
+The `Host - Services` Push monitor only queried `systemctl is-active`, not
+application readiness. Homepage, Deep Health and actual PDF exports retain
+functional checks. Separate alerts for service state alone (including Docker
+or an optional access service) are not required for this single-server setup.
+Keep service-state inspection in `prod_doctor.sh` and post-change diagnostics;
+retiring the monitor does not stop services or remove those diagnostic checks.
 
 Retirement changes monitor activation and the corresponding cron invocation,
-not the PHP-FPM or renderer service. For each explicitly approved live
+not any monitored service. For each explicitly approved live
 retirement, back up the affected configuration, verify retained monitors and
 notification assignments, pause the identified monitor, and remove only its
 cron invocation. The retired monitors are `App — Health Shallow` (keyword),
-`App - PDF Renderer Log Errors` (push), and `App - php8.5-fpm Log Errors` (push);
+`App - PDF Renderer Log Errors` (push), `App - php8.5-fpm Log Errors` (push),
+and `Host - Services` (push);
 the shallow monitor has no cron invocation. Already-paused monitors require no
 further change. Verify fresh regular results from all retained monitors.
 Preserve history, shared libraries and credentials. An unused installed script
@@ -113,7 +121,6 @@ Repo desired monitor catalog:
 | --- | --- | ---: | --- |
 | App-Homepage | `http` | 30s | public URL only |
 | App - Health Deep | `json-query` | 30s | `X-Health-Token` header value in Kuma/host-local config only |
-| Host - Services | `push` | 60s | `KUMA_PUSH_URL_HOST_SERVICES` |
 | Host - Resources | `push` | 60s | `KUMA_PUSH_URL_HOST_RESOURCES` |
 | Ops - Restore Verify Freshness | `push` | 900s | `KUMA_PUSH_URL_OPS_JOBS` |
 | Ops - Backup Creation Freshness | `push` | 900s | `KUMA_PUSH_URL_BACKUP_CREATION` |
@@ -139,9 +146,6 @@ or the number of distinct sources reaches
 markers are still counted in `success_2xx` and `query_marker_2xx`, but they do
 not turn the monitor red by themselves. Pure `3xx/4xx` bursts remain green and
 are logged in the push message without raw IPs or raw request paths.
-
-The host-service check targets the PHP-FPM unit `php8.5-fpm`; retiring its
-journal monitor does not remove that service-state check.
 
 The catalog above records the non-secret monitor shape. Live monitor history,
 Push URLs, and other credentials remain host-owned.
@@ -228,7 +232,6 @@ For `/etc/cron.d`, the canonical desired state is
 in `scripts/ops/uptime-kuma-crontab.example`. The desired schedule after the
 approved transition runs:
 
-- host services every minute
 - host resources every minute
 - restore-verification freshness every 15 minutes
 - backup-creation freshness every 15 minutes after the host-local backup job
