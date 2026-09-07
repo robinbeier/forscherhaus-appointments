@@ -180,8 +180,6 @@ final class DeploymentHostRunnerAdmissionV1Test extends TestCase
             'deploy_receipt_sha256' => hash('sha256', $receiptBytes),
             'post_gates' => [
                 'status' => 'failed',
-                'kuma_healthy_count' => 11,
-                'kuma_total_count' => 12,
                 'runtime_config_passed' => true,
                 'services_passed' => true,
                 'endpoints_passed' => true,

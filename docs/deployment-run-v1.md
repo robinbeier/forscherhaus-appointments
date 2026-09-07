@@ -42,10 +42,12 @@ validates and has the same hash. Same Run-ID plus changed intent is exit `75`
 
 ### One-time upgrade after traffic-check removal
 
-This procedure also applies when upgrading completed post-gate evidence from
-the former `13/13` Kuma monitor policy to the consolidated `12/12` policy.
-Keep the old matching tools for reconciliation; do not rewrite historical
-monitor counts to make old reports pass the new contract.
+This procedure also applies when retiring the Kuma monitor-count fields from
+the closed post-gate contract. Keep the old matching tools for reconciliation
+and archiving of completed or nonterminal runs; do not rewrite historical
+reports or add a legacy adapter to make old reports pass the new contract.
+Replacing the matching toolset changes contract validation only. It does not
+change the live Kuma instance or its monitor state.
 
 It also applies when upgrading from the former host-renderer
 execution input containing `renderer_deploy_mode`. That old input is not
@@ -100,7 +102,7 @@ except FileNotFoundError:
     print('No historical runs to move.')
 else:
     os.close(runs)
-    archive = '/root/fh-deployment-runs-before-kuma-monitor-consolidation'
+    archive = '/root/fh-deployment-runs-before-kuma-count-retirement'
     os.mkdir(archive, 0o700)  # Existing destination aborts; never overwrite it.
     destination = old.open_absolute_directory(archive, 0o700)
     os.rename('runs', 'runs', src_dir_fd=root, dst_dir_fd=destination)
@@ -259,7 +261,8 @@ stdout, stderr, exception text, credentials, or raw logs.
 Its sections are:
 
 - expected and observed commit plus exact verification result;
-- dump age/SHA plus explicit checksum-, gzip-, and restore-verification evidence;
+- protected fresh-dump age/SHA plus explicit checksum-, gzip-, and
+  restore-verification evidence from the predeploy replay;
 - capacity available/projected bytes and inodes, the authenticated staged inode
   count, independently observed restored-datadir inode count, fixed 64-inode
   allowance, observed/projected used percentages, the fixed
@@ -267,10 +270,17 @@ Its sections are:
 - local/remote artifact, manifest, and host/artifact deploy-script hashes;
 - exactly-once deploy exit and any rollback performed inside that child;
 - a separate at-most-once dedicated post-gate rollback reservation and verdict;
-- independent post-gates including Kuma raw `12/12`, runtime config, services,
-  endpoints, logs, scanner, and dormant/clean;
+- independent post-gates for runtime configuration, services, endpoints, logs,
+  scanner, and dormant/clean;
 - outer orchestrator start/end/wall-clock values in a separate section;
 - the terminal state and stable exit/reason pair.
+
+Evidence ownership is deliberately split. Backup/restore evidence comes from
+the protected fresh dump and predeploy replay. PDF export evidence comes from
+that replay and the live canary. Those checks are not additional `post_gates`
+fields. The standalone `prod_validate_after_change.sh` command is a general
+post-change sanity check; it is not an independent backup/restore or PDF-export
+proof source.
 
 Not-yet-observed sections retain their exact keys with `null` values and a
 fixed `not_observed`/`not_invoked` status. They never invent zero hashes or
@@ -309,8 +319,7 @@ follows `post_gates_running`, or `unknown` with reservation count `1`, fixed
 mode `dedicated_post_gate_recovery`, and no invented verdict when it follows
 `rollback_running`. In that shape
 `passed` is `null`, unobserved checks stay `null`,
-observed booleans retain their exact values, and the two Kuma counts are either
-both absent or both valid with healthy not exceeding total. At least one check
+observed booleans retain their exact values. At least one check
 must remain unobserved. The same transition uses `passed` or `failed` when all
 checks completed before terminal persistence; no other failure transition may
 claim passed post-gates, and no other terminal state or reason accepts

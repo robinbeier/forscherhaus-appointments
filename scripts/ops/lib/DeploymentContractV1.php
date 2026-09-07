@@ -1223,8 +1223,6 @@ final class DeploymentContractV1
             $section,
             [
                 'status',
-                'kuma_healthy_count',
-                'kuma_total_count',
                 'runtime_config_passed',
                 'services_passed',
                 'endpoints_passed',
@@ -1242,19 +1240,7 @@ final class DeploymentContractV1
         }
         if ($section['status'] === 'incomplete') {
             self::assertSame($section['passed'], null, 'post_gates.passed');
-            $healthyObserved = $section['kuma_healthy_count'] !== null;
-            $totalObserved = $section['kuma_total_count'] !== null;
-            if ($healthyObserved !== $totalObserved) {
-                throw new RuntimeException('incomplete post-gate Kuma counts must be observed together');
-            }
-            $hasUnobservedCheck = !$healthyObserved;
-            if ($healthyObserved) {
-                self::assertNonNegativeInteger($section['kuma_healthy_count'], 'post_gates.kuma_healthy_count');
-                self::assertNonNegativeInteger($section['kuma_total_count'], 'post_gates.kuma_total_count');
-                if ($section['kuma_healthy_count'] > $section['kuma_total_count']) {
-                    throw new RuntimeException('post-gate Kuma counts are inconsistent');
-                }
-            }
+            $hasUnobservedCheck = false;
             foreach (
                 [
                     'runtime_config_passed',
@@ -1277,11 +1263,6 @@ final class DeploymentContractV1
             }
             return;
         }
-        self::assertNonNegativeInteger($section['kuma_healthy_count'], 'post_gates.kuma_healthy_count');
-        self::assertNonNegativeInteger($section['kuma_total_count'], 'post_gates.kuma_total_count');
-        if ($section['kuma_healthy_count'] > $section['kuma_total_count']) {
-            throw new RuntimeException('post-gate Kuma counts are inconsistent');
-        }
         foreach (
             [
                 'runtime_config_passed',
@@ -1297,8 +1278,6 @@ final class DeploymentContractV1
             self::assertBoolean($section[$field], 'post_gates.' . $field);
         }
         $passed =
-            $section['kuma_healthy_count'] === 12 &&
-            $section['kuma_total_count'] === 12 &&
             $section['runtime_config_passed'] &&
             $section['services_passed'] &&
             $section['endpoints_passed'] &&

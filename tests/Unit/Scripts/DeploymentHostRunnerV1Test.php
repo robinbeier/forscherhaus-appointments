@@ -1332,8 +1332,6 @@ final class DeploymentHostRunnerV1Test extends TestCase
             'deploy_receipt_sha256' => hash('sha256', $receipt),
             'post_gates' => [
                 'status' => 'failed',
-                'kuma_healthy_count' => 11,
-                'kuma_total_count' => 12,
                 'runtime_config_passed' => true,
                 'services_passed' => true,
                 'endpoints_passed' => true,
@@ -1577,8 +1575,6 @@ final class DeploymentHostRunnerV1Test extends TestCase
             'deploy_receipt_sha256' => hash('sha256', $receipt),
             'post_gates' => [
                 'status' => 'failed',
-                'kuma_healthy_count' => 11,
-                'kuma_total_count' => 12,
                 'runtime_config_passed' => true,
                 'services_passed' => true,
                 'endpoints_passed' => true,
@@ -2046,8 +2042,6 @@ final class DeploymentHostRunnerV1Test extends TestCase
             'deploy_receipt_sha256' => hash('sha256', $receipt),
             'post_gates' => [
                 'status' => 'failed',
-                'kuma_healthy_count' => 11,
-                'kuma_total_count' => 12,
                 'runtime_config_passed' => true,
                 'services_passed' => true,
                 'endpoints_passed' => true,
@@ -2349,8 +2343,6 @@ final class DeploymentHostRunnerV1Test extends TestCase
                 'deploy_receipt_sha256' => hash('sha256', $receiptBytes),
                 'post_gates' => [
                     'status' => 'passed',
-                    'kuma_healthy_count' => 12,
-                    'kuma_total_count' => 12,
                     'runtime_config_passed' => true,
                     'services_passed' => true,
                     'endpoints_passed' => true,
@@ -2413,8 +2405,6 @@ final class DeploymentHostRunnerV1Test extends TestCase
             'deploy_receipt_sha256' => hash('sha256', $receiptBytes),
             'post_gates' => [
                 'status' => 'failed',
-                'kuma_healthy_count' => 11,
-                'kuma_total_count' => 12,
                 'runtime_config_passed' => true,
                 'services_passed' => true,
                 'endpoints_passed' => true,
@@ -2524,7 +2514,6 @@ final class DeploymentHostRunnerV1Test extends TestCase
         }
         $rollbackPostGates = $deployReport['post_gates'];
         $rollbackPostGates['status'] = $reportPassed ? 'passed' : 'failed';
-        $rollbackPostGates['kuma_healthy_count'] = $reportPassed ? 12 : 11;
         $rollbackPostGates['logs_passed'] = $reportPassed;
         $rollbackPostGates['passed'] = $reportPassed;
         $completion->acceptRollbackPostGateReport(
