@@ -73,7 +73,7 @@ Assess whether the executed validation actually proves the change is safe:
 
 - For bug fixes, prefer an appropriate regression test when feasible.
 - Check that the narrowest relevant tests were run.
-- For review-ready changes, expect the full pre-PR gate unless the change is clearly not at that stage yet.
+- For review-ready changes, expect the full pre-PR gate except for the bounded [docs-only local validation](WORKFLOW.md#3-validate-locally).
 - Flag missing negative-path or edge-case coverage when the change affects them.
 - Flag weak assertions that would let the bug survive.
 
