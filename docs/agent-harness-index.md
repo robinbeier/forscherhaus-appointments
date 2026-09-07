@@ -47,8 +47,9 @@ This file stays intentionally short. It is a map, not a second runbook.
 
 ## Validation Routing
 
-- [Validate locally](../WORKFLOW.md#3-validate-locally) using the focused,
-  quick, and full gates described in the canonical workflow.
+- [Local validation requirements](../WORKFLOW.md#3-validate-locally) explain
+  the evidence needed before review; [command entry points](../AGENTS.md#default-path)
+  include the focused test, quick gate, and full gate invocations.
 - [CI test execution and timing](ci-test-execution.md) covers the main tests,
   coverage jobs, and local/CI comparisons.
 - [Review and landing](../WORKFLOW.md#pr-and-review-expectations) follows
