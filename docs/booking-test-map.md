@@ -26,7 +26,6 @@ ist eine Orientierung, keine vollständige Testliste.
 
 | Reise/Verhalten | Tests | Ebene und abgedecktes Risiko |
 | --- | --- | --- |
-| Bestätigungscontroller meldet Ausnahme mit Kontext | `tests/Unit/Controllers/BookingConfirmationControllerTest.php` | Unit; Sentry-Fehlerpfad |
 | Browser lädt Bestätigungs-PDF und Download wird ausgewertet | `scripts/release-gate/booking_confirmation_pdf_gate.php` plus `scripts/release-gate/playwright/booking_confirmation_download.js` | Browser-/Release-Gate, read-only; reale Bestätigungsseite, PDF/Download und Parser |
 | Download-Sentinel bleibt stabil | `tests/Unit/Scripts/BookingConfirmationDownloadSnippetTest.php`, `BookingConfirmationRunCodeResultTest.php` | Source-/Parser-Unit; Marker, Fallback-Ausgabe und ungültige Playwright-Ausgabe |
 

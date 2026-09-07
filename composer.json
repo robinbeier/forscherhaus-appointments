@@ -41,8 +41,7 @@
         "ezyang/htmlpurifier": "^4.17",
         "symfony/options-resolver": "^7.4",
         "symfony/finder": "^7.4",
-        "phpmailer/phpmailer": "^7.0.2",
-        "sentry/sentry": "^4.0"
+        "phpmailer/phpmailer": "^7.0.2"
     },
     "require-dev": {
         "roave/security-advisories": "dev-master",

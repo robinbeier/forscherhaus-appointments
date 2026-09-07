@@ -36,10 +36,12 @@ Source: repository search for CSP reporting and collector terms.
 - No implemented CSP report endpoint was found.
 - No `report-uri` or `report-to` production target was found.
 - No `securitypolicyviolation` browser capture path was found.
-- `application/bootstrap/SentryBootstrap.php` provides Sentry event scrubbing
-  and safe digests for selected application events.
-- `docs/observability.md` defines Sentry as application-error observability, not
-  as a raw browser-report collector.
+- The pre-retirement repository source snapshot included
+  `application/bootstrap/SentryBootstrap.php` for Sentry event scrubbing and
+  safe digests on selected application events; this source has since been
+  retired from the repository and is retained here only as historical evidence.
+- The pre-retirement `docs/observability.md` classified Sentry as
+  application-error observability, not as a raw browser-report collector.
 - ROB-398, ROB-399, and ROB-407 provide the existing narrow Apache header
   gate pattern.
 
