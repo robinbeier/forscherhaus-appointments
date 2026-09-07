@@ -24,10 +24,6 @@ repo checkout -> release archive -> upload -> staged extract -> predeploy gates 
 - `docs/release-gate-provider-ui-smoke.md` documents the separately authorized,
   on-demand postdeploy browser smoke with a synthetic provider lease.
 
-Current rollout note: when no deployment is active, update the host runner and
-`deploy_ea.sh` as one coordinated rollout. No compatibility promise is made for
-old timing bundles.
-
 ## Build
 
 Build from a clean, validated repository checkout:
@@ -165,12 +161,10 @@ fixed outcome/exit bindings documented in `docs/deployment-run-v1.md`, and is
 published once through file fsync, atomic no-replace publication, and
 parent-directory fsync. Receipt write, fsync, publication, or final identity
 failure returns abnormal exit `74`, which is not a valid receipt outcome pair.
-The later Host Runner accepts bytes only after independently observing the
-terminal child result and proving its exact exit/outcome match under the global
-and per-run locks; it then persists the exact receipt-byte SHA-256 in durable
-runner state. Missing, invalid, mismatched, exit-`74`, killed, or unknown results
-remain unknown and require manual recovery without respawn. Receipt bytes and
-output are not standalone verdict oracles. `--result-file` is not
+The caller must independently observe the terminal child result and verify its
+exact exit/outcome match; receipt bytes and output alone do not prove success.
+Missing, invalid, mismatched, exit-`74`, killed, or unknown results require
+state inspection before any retry. `--result-file` is not
 available in dry-run mode. Without it, existing deploy exits are unchanged.
 
 An otherwise unhandled failure after a completed switch enters the same
