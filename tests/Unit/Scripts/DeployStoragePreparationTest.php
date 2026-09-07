@@ -236,7 +236,7 @@ final class DeployStoragePreparationTest extends TestCase
         self::assertStringNotContainsString('install_renderer_dependencies', $source);
         self::assertStringNotContainsString('require_command node', $source);
         self::assertStringNotContainsString('require_command npm', $source);
-        self::assertStringContainsString('restart_renderer_service', $source);
+        self::assertStringNotContainsString('restart_renderer_service', $source);
         self::assertStringContainsString('probe_renderer_health', $source);
         self::assertStringContainsString('probe_deep_health_contract', $source);
 

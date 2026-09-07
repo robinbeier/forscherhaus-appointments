@@ -87,8 +87,12 @@ Run deploys from the production host, using the uploaded archive:
 ```
 
 Production uses the Docker-backed `fh-pdf-renderer` service. Deployment
-restarts that service and checks renderer and application health; it does not
-install Node/npm packages or create Puppeteer caches on the host. No renderer
+keeps that independently managed container running and checks renderer and
+application health. Application deployment and rollback do not restart or update
+the renderer image; image changes require a separate coordinated operation.
+The obsolete `--renderer-service` option is removed; drop it from saved application
+deployment commands. Deployment does not install Node/npm packages or create
+Puppeteer caches on the host. No renderer
 mode or state-directory option is needed. Remove the former
 `--renderer-deploy-mode external` and `--renderer-state-dir` options from saved
 commands when updating deployment tools. New runner execution inputs omit
@@ -132,12 +136,14 @@ descriptor.
 After the atomic switch, `deploy_ea.sh` verifies:
 
 - the active and previous release still satisfy the runtime config contract
-- PDF renderer service restart
 - renderer health endpoint
 - app deep-health contract
 - zero-surprise live canary
 
 Any post-switch failure triggers automatic rollback to the previous app path.
+Rollback checks renderer and application health without restarting the renderer.
+If the renderer remains unhealthy, rollback is not reported as verified success;
+restoring application files alone cannot repair that independent dependency.
 
 Normal deploy execution exposes a stable result seam for the host-side caller:
 

@@ -364,6 +364,35 @@ final class DeployStableResultTest extends TestCase
         self::assertSame(31, $failure['exit_code'], $failure['stderr']);
     }
 
+    public function testUnhealthyRendererKeepsRollbackFailureExit31(): void
+    {
+        $result = $this->runShell(
+            <<<'BASH'
+            source ./deploy_ea.sh
+            deploy_result_trap_install
+            DRYRUN=0
+            APP=/fixed/active
+            PREV=/fixed/previous
+            REL=ea_contract
+            WEBUSER=www-data
+            CURRENT_SCRIPT_PATH=/fixed/deploy_ea.sh
+            ZERO_SURPRISE_CANARY_REPORT=''
+            DEPLOY_RESULT_PHASE=switch_complete
+
+            emit_zero_surprise_incident() { :; }
+            reload_services() { :; }
+            probe_renderer_health() { return 1; }
+            probe_deep_health_contract() { return 0; }
+            bash() { return 0; }
+            rollback_after_failure 'renderer health check failed'
+            BASH
+            ,
+        );
+
+        self::assertSame(31, $result['exit_code'], $result['stderr']);
+        self::assertStringContainsString('Renderer check      : failed', $result['stdout']);
+    }
+
     public function testSignalAfterRollbackVerificationPreservesTheFinalResult(): void
     {
         $success = $this->runShell($this->rollbackHarness(true, true));
@@ -407,7 +436,6 @@ final class DeployStableResultTest extends TestCase
 
             emit_zero_surprise_incident() { :; }
             reload_services() { :; }
-            restart_renderer_service() { return 0; }
             probe_renderer_health() { return 0; }
             probe_deep_health_contract() { return 0; }
             bash() {
@@ -693,7 +721,6 @@ final class DeployStableResultTest extends TestCase
         deploy_result_after_finalize() { {$afterFinalize}; }
         emit_zero_surprise_incident() { {$incident}; }
         reload_services() { :; }
-        restart_renderer_service() { return 0; }
         probe_renderer_health() { return 0; }
         probe_deep_health_contract() { return 0; }
         bash() { {$rollbackResult}; }
