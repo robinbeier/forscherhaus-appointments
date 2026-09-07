@@ -506,8 +506,7 @@ Recommended order:
    Completed as the post-rebuild observation handoff; follow-up live changes
    were split into ROB-390, ROB-391, and ROB-392.
    Labels: `Server`, `Kuma`, `Repo-only`.
-8. ROB-388: run the full long-horizon implementation from
-   `docs/long-horizon/ROB-381/`.
+8. ROB-388: completed roadmap coordination for the monitoring follow-up.
    Completed by PR #287 as the final repo-only coordination package.
    Labels: `Repo-only first`, `Server gate`, `Kuma gate`, `Sentry gate`.
 9. ROB-390: split live backup-creation freshness from restore verification.

@@ -10,7 +10,6 @@ Welcome to the documentation pages of Easy!Appointments. Navigate through the av
 - [Docker](docker.md)
 - [Architecture Map](architecture-map.md)
 - [Ownership Map](ownership-map.md)
-- [Agent Readiness Refresh (2026-03-11)](agent-readiness-refresh-2026-03-11.md)
 - [Architecture Boundary Gates (CI)](../README.md#testing-before-pr)
 - [Google Calendar Sync](google-calendar-sync.md)
 - [CalDAV Calendar Sync](caldav-calendar-sync.md)
@@ -21,7 +20,6 @@ Welcome to the documentation pages of Easy!Appointments. Navigate through the av
 - [Cutover Rehearsal Checklist](cutover-rehearsal-checklist.md)
 - [Same-Server Rebuild Runbook](same-server-rebuild-runbook.md)
 - [Codex Production Operations Harness](ops/agent-operations.md)
-- [Branch Stabilization Long-Horizon Task](long-horizon-branch-stabilization/Prompt.md)
 - [Old-Server Rollback Drill](old-server-rollback-drill.md)
 - [FAQ](faq.md)
 
