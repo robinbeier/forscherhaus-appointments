@@ -235,26 +235,15 @@ build cache are retained. This is not a cleanup of other projects.
 
 CI note:
 
-- CI is changed-file gated and deep docker-compose jobs only run for relevant
-  changes; on pull requests they are limited to non-draft PRs.
-- `deep-runtime-suite` is the shared producer for `api-contract-openapi`,
-  `write-contract-booking`, `write-contract-api`,
-  `booking-controller-flows`, and `integration-smoke`.
-- `integration-smoke` now captures a narrow browser evidence bundle on failure
-  under `storage/logs/ci/deep-runtime-suite/integration-smoke-browser/`
-  (`summary.json`, screenshot, snapshot, trace, network log).
-- `phpstan-application`, `js-lint-changed`, `architecture-ownership-map`,
-  `architecture-boundaries`, `typed-request-dto`,
-  `typed-request-contracts`, `api-contract-openapi`,
-  `write-contract-booking`, `write-contract-api`,
-  `booking-controller-flows`, and `coverage-delta` are blocking.
-- `pdf-renderer-tests` runs the blocking PDF renderer health and regression tests for relevant changes.
-- Test selection and direct CI timing comparisons are described in
-  [CI Test Execution](docs/ci-test-execution.md).
-- Full job wiring lives in `.github/workflows/ci.yml`; the compact local
-  command map and cross-links live in [AGENTS.md](AGENTS.md); specialized
-  runtime details stay in the topic docs linked from
-  [Agent Harness Index](docs/agent-harness-index.md).
+- [CI workflow](.github/workflows/ci.yml) is canonical for CI triggers,
+  blocking jobs, and artifacts.
+- [CI test execution](docs/ci-test-execution.md) covers changed-file test
+  selection and job preparation.
+- [Docker integration runtime](docs/docker.md#github-integration-runtime)
+  describes the runner, PHP, MySQL, and browser environment.
+- [Browser evidence](docs/release-gate-dashboard.md#agent-friendly-browser-evidence)
+  documents integration-smoke failure diagnostics. The practical evidence
+  path is `storage/logs/ci/deep-runtime-suite/integration-smoke-browser/`.
 
 For doc-only/meta commits in constrained environments:
 
