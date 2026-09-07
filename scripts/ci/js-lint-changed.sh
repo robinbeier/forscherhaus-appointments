@@ -43,19 +43,36 @@ else
 fi
 
 changed_files=()
+build_tools_changed=false
 changed_file_list="$(mktemp "${TMPDIR:-/tmp}/js-lint-changed.XXXXXX")"
 trap 'rm -f -- "$changed_file_list"' EXIT
 
-if ! git diff --name-only -z --diff-filter=ACMR "$range" >"$changed_file_list"; then
+if ! git diff --name-only -z --diff-filter=ACMRD "$range" >"$changed_file_list"; then
     echo "Unable to determine changed files for range $range." >&2
     exit 1
 fi
 
 while IFS= read -r -d '' file; do
-    if [[ "$file" == assets/js/*.js && "$file" != assets/js/*.min.js ]]; then
+    if [[ "$file" == assets/js/*.js && "$file" != assets/js/*.min.js && -f "$file" ]]; then
         changed_files+=("$file")
     fi
+    case "$file" in
+        gulpfile.js|babel.config.json|package.json|package-lock.json|tests/JavaScript/gulp_build.test.js|scripts/ci/js-lint-changed.sh|.github/workflows/ci.yml)
+            build_tools_changed=true
+            ;;
+    esac
 done <"$changed_file_list"
+
+# The compiler regression uses the same Node installation as ESLint. Keep
+# JavaScript selection separate so tooling-only changes do not lint all sources.
+if [[ "$mode" == "check" ]]; then
+    : "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required for --check-only}"
+    if [[ "$build_tools_changed" == "true" || "${#changed_files[@]}" -gt 0 ]]; then
+        printf 'needs_node=true\n' >>"$GITHUB_OUTPUT"
+    else
+        printf 'needs_node=false\n' >>"$GITHUB_OUTPUT"
+    fi
+fi
 
 if [[ "${#changed_files[@]}" -eq 0 ]]; then
     echo "No changed JS files under assets/js (excluding *.min.js); skipping ESLint."

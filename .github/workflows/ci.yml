@@ -410,25 +410,28 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - name: Check changed JS files
+      - name: Check frontend validation inputs
         id: js_changes
         env:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
         run: ./scripts/ci/js-lint-changed.sh --check-only
       - name: Setup Node.js
-        if: steps.js_changes.outputs.has_changes == 'true'
+        if: steps.js_changes.outputs.needs_node == 'true'
         uses: actions/setup-node@v6
         with:
           node-version: '24'
           cache: npm
       - name: Install npm dependencies
-        if: steps.js_changes.outputs.has_changes == 'true'
+        if: steps.js_changes.outputs.needs_node == 'true'
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: ESLint changed JS files
         if: steps.js_changes.outputs.has_changes == 'true'
         env:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
         run: ./scripts/ci/js-lint-changed.sh
+      - name: Frontend compiler regression tests
+        if: steps.js_changes.outputs.needs_node == 'true'
+        run: node --test tests/JavaScript/gulp_build.test.js
 
   phpstan-application:
     runs-on: ubuntu-latest
