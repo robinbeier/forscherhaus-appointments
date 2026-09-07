@@ -66,6 +66,7 @@ final class KumaPushRuntimeBundleTest extends TestCase
         $cron = file_get_contents($this->repoRoot() . '/' . self::CRON_SOURCE);
         self::assertIsString($cron);
         $expectedCron = ['SHELL=/bin/bash', 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'];
+        $cronEntryPoints = [];
         foreach (
             [
                 ['host_services', '*', ''],
@@ -81,6 +82,7 @@ final class KumaPushRuntimeBundleTest extends TestCase
             ]
             as [$monitor, $minute, $delay]
         ) {
+            $cronEntryPoints[] = 'scripts/ops/kuma_push_' . $monitor . '.sh';
             $expectedCron[] =
                 $minute .
                 ' * * * * root ' .
@@ -94,6 +96,9 @@ final class KumaPushRuntimeBundleTest extends TestCase
                 $monitor .
                 '.log 2>&1';
         }
+        $cronEntryPoints = array_values(array_unique($cronEntryPoints));
+        sort($cronEntryPoints);
+        self::assertSame($entryPoints, $cronEntryPoints);
         self::assertSame(implode("\n", $expectedCron) . "\n", $cron);
         self::assertContains('scripts/ops/kuma_push_pdf_export.sh', $entryPoints);
         self::assertContains('scripts/ops/lib/kuma_push_common.sh', $sourcePaths);
