@@ -3,6 +3,8 @@
 Run the development containers of Easy!Appointments with Docker and Docker Compose utility. Docker allows you to compose your application in microservices, so that you can easily get started with the local development.
 
 Simply clone the project and run `docker compose up` to start the environment.
+Nginx starts after PHP-FPM so its configured upstream name exists during startup;
+application readiness is still checked by the existing smoke and replay checks.
 
 If you work with multiple git worktrees of the same repository, use a unique
 Compose project name per worktree to avoid mixed stacks.
