@@ -188,7 +188,6 @@ final class ProdValidateAppLogSnapshotTest extends TestCase
         $this->writeJournalctlStub($stubBin);
         $this->writeSystemctlStub($stubBin);
         $this->writeDockerStub($stubBin);
-        $this->writeSqliteStub($stubBin);
         $this->writeCertbotStub($stubBin);
     }
 
@@ -343,24 +342,6 @@ final class ProdValidateAppLogSnapshotTest extends TestCase
             ,
         );
         chmod($stubBin . '/docker', 0755);
-    }
-
-    private function writeSqliteStub(string $stubBin): void
-    {
-        file_put_contents(
-            $stubBin . '/sqlite3',
-            <<<'BASH'
-            #!/usr/bin/env bash
-            query="${*: -1}"
-            if [[ "$query" == *"COUNT(*) FROM monitor"* ]]; then
-                printf '12\n'
-            else
-                printf '12\n'
-            fi
-            BASH
-            ,
-        );
-        chmod($stubBin . '/sqlite3', 0755);
     }
 
     private function writeCertbotStub(string $stubBin): void
