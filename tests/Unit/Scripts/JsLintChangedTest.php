@@ -29,7 +29,7 @@ final class JsLintChangedTest extends TestCase
         $result = $this->runLint($repository, ['--check-only']);
 
         self::assertSame(0, $result['exit_code'], $result['stderr']);
-        self::assertSame("has_changes=false\n", file_get_contents($result['output_file']));
+        self::assertSame("needs_node=false\nhas_changes=false\n", file_get_contents($result['output_file']));
         self::assertFileDoesNotExist($result['eslint_log']);
     }
 
@@ -44,8 +44,26 @@ final class JsLintChangedTest extends TestCase
         $result = $this->runLint($repository, ['--check-only']);
 
         self::assertSame(0, $result['exit_code'], $result['stderr']);
-        self::assertSame("has_changes=true\n", file_get_contents($result['output_file']));
+        self::assertSame("needs_node=true\nhas_changes=true\n", file_get_contents($result['output_file']));
         self::assertFileDoesNotExist($result['eslint_log']);
+    }
+
+    public function testBuildToolChangesRequireNodeWithoutSelectingJavaScript(): void
+    {
+        $repository = $this->repository();
+        file_put_contents($repository . '/gulpfile.js', "initial\n");
+        $this->commit($repository, 'initial');
+        file_put_contents($repository . '/gulpfile.js', "changed\n");
+        $this->commit($repository, 'build tooling');
+
+        $result = $this->runLint($repository, ['--check-only']);
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertSame("needs_node=true\nhas_changes=false\n", file_get_contents($result['output_file']));
+        self::assertFileDoesNotExist($result['eslint_log']);
+        $lint = $this->runLint($repository);
+        self::assertSame(0, $lint['exit_code'], $lint['stderr']);
+        self::assertFileDoesNotExist($lint['eslint_log']);
     }
 
     public function testNormalModePassesChangedJsSubdirectoryAndRenameToEslint(): void
@@ -81,7 +99,22 @@ final class JsLintChangedTest extends TestCase
         $result = $this->runLint($repository, ['--check-only']);
 
         self::assertSame(0, $result['exit_code'], $result['stderr']);
-        self::assertSame("has_changes=false\n", file_get_contents($result['output_file']));
+        self::assertSame("needs_node=false\nhas_changes=false\n", file_get_contents($result['output_file']));
+        self::assertFileDoesNotExist($result['eslint_log']);
+    }
+
+    public function testDeletedBuildToolStillRequiresCompilerChecks(): void
+    {
+        $repository = $this->repository();
+        file_put_contents($repository . '/gulpfile.js', "initial\n");
+        $this->commit($repository, 'initial');
+        unlink($repository . '/gulpfile.js');
+        $this->commit($repository, 'remove build tool');
+
+        $result = $this->runLint($repository, ['--check-only']);
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertSame("needs_node=true\nhas_changes=false\n", file_get_contents($result['output_file']));
         self::assertFileDoesNotExist($result['eslint_log']);
     }
 

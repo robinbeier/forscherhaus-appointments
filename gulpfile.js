@@ -9,12 +9,12 @@
  * @since       v1.4.0
  * ---------------------------------------------------------------------------- */
 
+const {pipeline} = require('node:stream/promises');
 const babel = require('gulp-babel');
 const cached = require('gulp-cached');
 const css = require('gulp-clean-css');
 const fs = require('fs-extra');
 const gulp = require('gulp');
-const plumber = require('gulp-plumber');
 const rename = require('gulp-rename');
 const sass = require('gulp-sass')(require('sass'));
 
@@ -32,25 +32,26 @@ function clean(done) {
     done();
 }
 
+// Consume destination output so promise-based pipelines cannot stall on Vinyl files.
 function scripts() {
-    return gulp
-        .src(['assets/js/**/*.js', '!assets/js/**/*.min.js'])
-        .pipe(plumber())
-        .pipe(babel({comments: false}))
-        .pipe(rename({suffix: '.min'}))
-        .pipe(gulp.dest('assets/js'));
+    return pipeline(
+        gulp.src(['assets/js/**/*.js', '!assets/js/**/*.min.js']),
+        babel({comments: false}),
+        rename({suffix: '.min'}),
+        gulp.dest('assets/js').resume(),
+    );
 }
 
 function styles() {
-    return gulp
-        .src(['assets/css/**/*.scss', '!assets/css/**/*.min.css'])
-        .pipe(plumber())
-        .pipe(cached())
-        .pipe(sass().on('error', sass.logError))
-        .pipe(gulp.dest('assets/css'))
-        .pipe(css())
-        .pipe(rename({suffix: '.min'}))
-        .pipe(gulp.dest('assets/css'));
+    return pipeline(
+        gulp.src(['assets/css/**/*.scss', '!assets/css/**/*.min.css']),
+        cached(),
+        sass(),
+        gulp.dest('assets/css'),
+        css(),
+        rename({suffix: '.min'}),
+        gulp.dest('assets/css').resume(),
+    );
 }
 
 function watch(done) {

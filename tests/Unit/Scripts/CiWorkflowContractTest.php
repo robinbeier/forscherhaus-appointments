@@ -15,29 +15,35 @@ class CiWorkflowContractTest extends TestCase
         self::assertSame(
             [
                 'Git clone',
-                'Check changed JS files',
+                'Check frontend validation inputs',
                 'Setup Node.js',
                 'Install npm dependencies',
                 'ESLint changed JS files',
+                'Frontend compiler regression tests',
             ],
             array_keys($steps),
         );
-        self::assertSame('js_changes', $steps['Check changed JS files']['id']);
-        self::assertArrayNotHasKey('if', $steps['Check changed JS files']);
+        self::assertSame('js_changes', $steps['Check frontend validation inputs']['id']);
+        self::assertArrayNotHasKey('if', $steps['Check frontend validation inputs']);
         self::assertSame(
             './scripts/ci/js-lint-changed.sh --check-only',
-            $this->stepRun($steps, 'Check changed JS files'),
+            $this->stepRun($steps, 'Check frontend validation inputs'),
         );
-        foreach (['Setup Node.js', 'Install npm dependencies', 'ESLint changed JS files'] as $name) {
-            self::assertSame("steps.js_changes.outputs.has_changes == 'true'", $steps[$name]['if']);
+        foreach (['Setup Node.js', 'Install npm dependencies', 'Frontend compiler regression tests'] as $name) {
+            self::assertSame("steps.js_changes.outputs.needs_node == 'true'", $steps[$name]['if']);
             self::assertArrayNotHasKey('continue-on-error', $steps[$name]);
         }
         self::assertSame(
             'npm ci --ignore-scripts --no-audit --no-fund',
             $this->stepRun($steps, 'Install npm dependencies'),
         );
-        self::assertSame($steps['Check changed JS files']['env'], $steps['ESLint changed JS files']['env']);
+        self::assertSame($steps['Check frontend validation inputs']['env'], $steps['ESLint changed JS files']['env']);
         self::assertSame('./scripts/ci/js-lint-changed.sh', $this->stepRun($steps, 'ESLint changed JS files'));
+        self::assertSame("steps.js_changes.outputs.has_changes == 'true'", $steps['ESLint changed JS files']['if']);
+        self::assertSame(
+            'node --test tests/JavaScript/gulp_build.test.js',
+            $this->stepRun($steps, 'Frontend compiler regression tests'),
+        );
     }
 
     public function testGeneralAndRootSuitesRunIndependentlyAndFailClosed(): void

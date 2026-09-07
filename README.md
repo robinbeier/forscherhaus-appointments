@@ -173,8 +173,10 @@ gates: it requires committed dependency files and stops if npm's lockfile
 refresh changes them. After editing frontend dependencies in `package.json`,
 run `npm install`, review the updated lockfile, and commit both files. Use
 `npm ci` to install an already matching committed lockfile; both installation
-commands also prepare assets through postinstall. For interactive UI work, use
-`npm run build` after frontend changes.
+commands also prepare assets through postinstall. Compiler errors fail `npm run build`, including builds started by hooks or
+release preparation. `npm start` watches frontend files; after a failed
+rebuild, correcting the file triggers the next attempt. Its initial build
+must succeed before watching starts.
 
 For the full optional matrix, scope-specific smokes, and rollback notes, see
 [Agent Harness Index](docs/agent-harness-index.md) and [AGENTS.md](AGENTS.md).
