@@ -18,8 +18,8 @@ UFW.
 
 Latest relevant accepted baseline after ROB-401:
 
-- Local `main` includes the ROB-401 gate documentation and prior posture
-  decisions.
+- The central [SSH gate safety requirements](production-server-posture-decision.md#ssh-gate)
+  define the access and recovery preconditions for SSH changes.
 - `prod_doctor.sh` provides redacted posture classes for UFW status, expected
   listener classes, loopback-only internal services, and unexpected public
   listener count.
