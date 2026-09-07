@@ -167,10 +167,9 @@ Kuma is red:
   `/usr/local/libexec/fh-kuma-push-runtime-v1/scripts/ops/kuma_push_*.sh`
   entrypoint manually only when the env file exists on the host and output can
   stay redacted. See `docs/ops/production-kuma-push-runtime.md`.
-- Activate the existing retention-success Env key only through the separately
-  approved exact-commit transaction in
-  `docs/ops/production-kuma-monitoring-env.md`; never edit or print the
-  protected Env interactively.
+- Preserve the enabled retention-success Env setting. For separately approved
+  future Env changes, follow `docs/uptime-kuma.md`; never print the protected
+  Env or overwrite it with the example configuration.
 - Never print Push URLs or tokens.
 
 Disk, memory, or swap pressure:

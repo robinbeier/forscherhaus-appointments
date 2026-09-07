@@ -30,7 +30,6 @@ This file stays intentionally short. It is a map, not a second runbook.
 | Local/CI root-host test prerequisites | [Docker test guidance](docker.md#linux-roothost-tests) | Local skips, required Linux CI checks, and focused diagnosis. |
 | CI test execution and timing comparisons | `docs/ci-test-execution.md` | Main tests, application coverage, and direct GitHub job timing. |
 | Observability runtime ownership | `docs/observability.md` | Runtime split between release gates, Kuma, application logs, and diagnostics. |
-| Kuma Retention-monitor Env transaction | `docs/ops/production-kuma-monitoring-env.md` | Exact-commit helper installation, coordinated writer authority, recovery adoption, atomic Env activation, race handling, and separate Push/timer gates. |
 | Production SSH operations harness | `docs/ops/agent-operations.md` | Agent-first production orientation, read-only diagnostics, and post-change validation. |
 | Production Docker build-cache retention | `docs/ops/production-build-cache-retention.md` | Fixed dry-run/execute boundary, cache policy, stop conditions, and validation. |
 | Production backup-set producer | `docs/ops/production-backup-set-producer.md` | Closed connection/dump authority, atomic set publication, protected handoff-to-attestation selection, disabled ROB-480 recurring continuity units, and no-gap legacy scheduler cutover. |

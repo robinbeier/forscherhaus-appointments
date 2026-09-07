@@ -22,12 +22,9 @@ contract, use `docs/deployment-run-v1.md`, `lib/DeployResultV1.php`, and
 host runner or activate production behavior.
 
 Use `scripts/ops/uptime-kuma-push.env.example` as the host-local env template.
-The immutable root runtime, canonical `/etc/cron.d` file and migration contract
+The immutable root runtime, canonical `/etc/cron.d` file and update boundary
 are documented in
 [`docs/ops/production-kuma-push-runtime.md`](../../docs/ops/production-kuma-push-runtime.md);
-the separate transactional Retention-monitor activation contract is documented
-in
-[`docs/ops/production-kuma-monitoring-env.md`](../../docs/ops/production-kuma-monitoring-env.md);
 `scripts/ops/uptime-kuma-crontab.example` remains the personal-crontab form.
 
 Deep-health monitor boundary:
@@ -81,11 +78,6 @@ Script inventory:
 - `kuma_push_pdf_export.sh` runs the dashboard PDF release gate as a synthetic smoke
 - `kuma_push_apache_scanner_activity.sh` watches recent Apache access logs for common scanner probes and only alerts on actionable scanner activity
 - `lib/kuma_push_common.sh` provides shared env, curl, and log helpers
-- `prod_kuma_monitoring_env_v1.sh` is local plan-only by default and provides
-  separate exact-commit Inspect, no-clobber Helper-Install and single Env-Execute
-  modes for ROB-490; the Execute path is the only supported post-bootstrap Env
-  writer and holds the canonical writer-authority lock throughout the
-  transaction; it never performs a Push or a timer/service action
 - `prod_doctor.sh` prints redacted read-only production status
 - `prod_logs_summary.sh` prints redacted recent production log summaries
 - `prod_validate_after_change.sh` runs the standard post-change production gate

@@ -12,8 +12,6 @@ Repository-owned:
 - host-local env example: `scripts/ops/uptime-kuma-push.env.example`
 - crontab example: `scripts/ops/uptime-kuma-crontab.example`
 - immutable root runtime: `docs/ops/production-kuma-push-runtime.md`
-- transactional Retention-monitor Env gate:
-  `docs/ops/production-kuma-monitoring-env.md`
 
 Host-owned:
 
@@ -165,8 +163,9 @@ a host-local env file based on
 
 Install the versioned, root-controlled runtime described in
 `docs/ops/production-kuma-push-runtime.md`. Root cron must never execute Push
-scripts or their libraries from the app release tree. Create the host-local env
-file separately:
+scripts or their libraries from the app release tree. Only for initial setup,
+when no host-local Env exists, create it separately. Never overwrite an existing
+Env with this example:
 
 ```bash
 install -m 0600 scripts/ops/uptime-kuma-push.env.example /root/backups/uptime-kuma-push.env
@@ -174,11 +173,16 @@ install -m 0600 scripts/ops/uptime-kuma-push.env.example /root/backups/uptime-ku
 
 Fill in real Push URLs on the host only.
 
-Enabling the existing ROB-453 retention-success signal is not a manual Env edit.
-Use the separately approved, exact-commit transaction in
-`docs/ops/production-kuma-monitoring-env.md`. Helper installation, the single
-Env transaction, one Push, timer enablement and timer start remain distinct
-gates.
+The retention-success check in `kuma_push_host_resources.sh` reads
+`KUMA_RELEASE_RETENTION_MONITOR_ENABLED=1` from the protected host-local Env.
+The completed one-time activation helper is retired; regular monitoring does
+not depend on it. Keep the enabled setting and existing recovery files.
+
+Future Env changes need explicit approval for the concrete change, a verified
+backup, root-only permissions, protection against concurrent writes, and a
+checked rollback. Preserve unrelated settings and secrets. Never overwrite an
+existing Env with the example above or print its contents. A code update does
+not authorize an Env change, Push, timer activation, or deletion.
 
 For `/etc/cron.d`, the canonical desired state is
 `scripts/ops/config/fh-uptime-kuma-push.cron`; the personal-crontab form remains
