@@ -1,6 +1,6 @@
 # Production Kuma Push Runtime
 
-The nine monitoring entrypoints run from the root-controlled directory
+The monitoring entrypoints run from the root-controlled directory
 `/usr/local/libexec/fh-kuma-push-runtime-v1`, outside the mutable application
 release. Production cron does not execute monitoring code from that release.
 The one-time ROB-489 installation/cron migration is complete; its installer and
@@ -9,14 +9,20 @@ requirement to build another package-version framework.
 
 ## Package and current state
 
+The repository payload excludes the retired PDF-renderer-log monitor. The
+installed bundle and cron retain it until the separately approved transition
+in [Kuma operations](../uptime-kuma.md#pending-live-transition-two-redundant-monitors).
+Do not compare that older installation to the new manifest as if it had already
+been updated.
+
 `scripts/ops/config/kuma_push_runtime_bundle_v1.json` lists the complete payload:
-nine entrypoints, two shell libraries, the dashboard PDF gate and its three PHP
+eight entrypoints, two shell libraries, the dashboard PDF gate and its three PHP
 libraries. Each row binds its source/install path, role and SHA-256. Keep the
 manifest and changed source hashes together in the same reviewed commit. Repository checks retain the closed
 payload, cron contract and execution of the bundled PDF gate.
 
-The canonical cron file is `scripts/ops/config/fh-uptime-kuma-push.cron`: ten
-invocations of nine entrypoints, including the twice-per-minute app-log check.
+The canonical cron file is `scripts/ops/config/fh-uptime-kuma-push.cron`: nine
+invocations of eight entrypoints, including the twice-per-minute app-log check.
 Changing a package does not authorize changing its schedules, environment file,
 log targets, monitor identities or notification settings.
 

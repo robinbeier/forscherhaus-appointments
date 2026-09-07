@@ -8,63 +8,6 @@ use PHPUnit\Framework\TestCase;
 
 final class KumaPushScriptEnvLoadingTest extends TestCase
 {
-    public function testPdfRendererLogMonitorLoadsEnvBeforeResolvingDefaults(): void
-    {
-        $workspace = $this->createWorkspace();
-
-        try {
-            $envFile = $workspace . '/renderer.env';
-            $journalArgsFile = $workspace . '/journalctl-args.txt';
-
-            file_put_contents(
-                $envFile,
-                implode(PHP_EOL, [
-                    'KUMA_PUSH_URL_PDF_RENDERER_LOGS=https://kuma.example/render',
-                    'KUMA_PDF_RENDERER_SERVICE_NAME=custom-renderer.service',
-                    'KUMA_PDF_RENDERER_LOG_WINDOW_MINUTES=7',
-                    'KUMA_PDF_RENDERER_ERROR_THRESHOLD=0',
-                    '',
-                ]),
-            );
-
-            $this->writeStub(
-                $workspace . '/bin/journalctl',
-                <<<'BASH'
-                #!/usr/bin/env bash
-                set -euo pipefail
-                printf '%s\n' "$*" > "$JOURNALCTL_ARGS_FILE"
-                exit 0
-                BASH
-                ,
-            );
-
-            $this->writeStub(
-                $workspace . '/bin/curl',
-                <<<'BASH'
-                #!/usr/bin/env bash
-                set -euo pipefail
-                exit 0
-                BASH
-                ,
-            );
-
-            $result = $this->runCommand(['bash', 'scripts/ops/kuma_push_pdf_renderer_logs.sh'], $this->repoRoot(), [
-                'PATH' => $workspace . '/bin:' . (getenv('PATH') ?: ''),
-                'KUMA_PUSH_ENV_FILE' => $envFile,
-                'JOURNALCTL_ARGS_FILE' => $journalArgsFile,
-            ]);
-
-            self::assertSame(0, $result['exit_code'], $result['stderr']);
-            self::assertStringContainsString('OK pdf_renderer_errors=0 window=7m', $result['stdout']);
-            self::assertSame(
-                '-u custom-renderer.service --since -7 min -p err..alert --no-pager -o cat' . PHP_EOL,
-                file_get_contents($journalArgsFile),
-            );
-        } finally {
-            $this->removeDirectory($workspace);
-        }
-    }
-
     public function testPhpFpmLogMonitorLoadsEnvBeforeResolvingDefaults(): void
     {
         $workspace = $this->createWorkspace();
