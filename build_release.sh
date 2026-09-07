@@ -188,14 +188,10 @@ else
   echo "[DRY-RUN] Würde das vollständige, aus Commit-Quellen und Vendor-Vertrag abgeleitete Runtime-Assetmanifest ins Stage kopieren"
 fi
 
-# 2) Safety-Check: CI-Config muss jetzt im Stage existieren
+# 2) Vollständiges Stage-Verzeichnis vor der Paketinstallation prüfen
 if [[ "$DRYRUN" -eq 0 ]]; then
-  if [[ ! -f "$STAGE/application/config/config.php" ]]; then
-    echo "[!] CI-Config fehlt im Stage: $STAGE/application/config/config.php"; exit 1
-  fi
   php scripts/release-gate/validate_release_artifact.php --root="$STAGE"
 else
-  echo "[DRY-RUN] Würde prüfen: $STAGE/application/config/config.php existiert"
   echo "[DRY-RUN] Würde das Stage-Verzeichnis mit scripts/release-gate/validate_release_artifact.php prüfen"
 fi
 
@@ -218,10 +214,7 @@ if [[ "$DRYRUN" -eq 0 ]]; then
   # macOS: avoid Apple metadata/xattrs in the release tarball to keep remote
   # validation output small and reproducible across GNU tar environments.
   COPYFILE_DISABLE=1 tar --no-mac-metadata --no-xattrs -C "$STAGE" -czf "$ARCHIVE" .
-  # 4) Archivinhalt prüfen (toleriert optionales './')
-  tar -tzf "$ARCHIVE" | tr -d '\r' | grep -E '^(\./)?application/config/config.php$' >/dev/null \
-    && echo "[OK] CI-Config im Archiv" \
-    || { echo "[!] CI-Config fehlt im Archiv"; exit 1; }
+  # 4) Vollständigen Archivinhalt prüfen
   php scripts/release-gate/validate_release_artifact.php --archive="$ARCHIVE"
   php scripts/ops/create_release_build_provenance.php \
     --release="$REL" --commit="$EXPECTED_COMMIT" --stage="$STAGE" --archive="$ARCHIVE" \
@@ -229,7 +222,6 @@ if [[ "$DRYRUN" -eq 0 ]]; then
     --package-lock="$STAGE/package-lock.json" --deploy-script="$STAGE/deploy_ea.sh" > "$PROVENANCE"
 else
   echo "[DRY-RUN] Würde Archiv erstellen: $ARCHIVE"
-  echo "[DRY-RUN] Würde CI-Config im Archiv verifizieren"
   echo "[DRY-RUN] Würde das Release-Archiv mit scripts/release-gate/validate_release_artifact.php prüfen"
 fi
 
