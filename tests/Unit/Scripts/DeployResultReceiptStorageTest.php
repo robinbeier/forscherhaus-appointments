@@ -511,7 +511,6 @@ final class DeployResultReceiptStorageTest extends TestCase
             deploy_result_trap_install
 
             bash() { return 0; }
-            restart_renderer_service() { return 0; }
             probe_renderer_health() { return 0; }
             reload_services() { return 0; }
             probe_deep_health_contract() { return 0; }
@@ -544,7 +543,6 @@ final class DeployResultReceiptStorageTest extends TestCase
             deploy_result_trap_install
 
             bash() { return 0; }
-            restart_renderer_service() { return 0; }
             probe_renderer_health() { return 0; }
             reload_services() { return 0; }
             probe_deep_health_contract() { return 0; }
@@ -583,7 +581,6 @@ final class DeployResultReceiptStorageTest extends TestCase
             deploy_result_trap_install
 
             bash() { builtin printf 'rollback-invoked\n' >> "$rollback_sentinel"; }
-            restart_renderer_service() { return 0; }
             probe_renderer_health() { return 0; }
             reload_services() { return 0; }
             probe_deep_health_contract() { return 0; }

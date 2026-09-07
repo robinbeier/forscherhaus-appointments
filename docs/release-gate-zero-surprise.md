@@ -166,10 +166,9 @@ Pre-switch order in `deploy_ea.sh`:
 Post-switch order in `deploy_ea.sh`:
 
 1. `perform_atomic_switch`
-2. `restart_renderer_service`
-3. `probe_renderer_health`
-4. `probe_deep_health_contract`
-5. `run_zero_surprise_live_canary`
+2. `probe_renderer_health`
+3. `probe_deep_health_contract`
+4. `run_zero_surprise_live_canary`
 
 Canary failure path is hard-wired to:
 

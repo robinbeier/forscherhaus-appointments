@@ -19,7 +19,6 @@ RELOAD_SERVICES="apache2,php8.2-fpm"
 DRYRUN=0
 MARK_RELEASE=1
 
-RENDERER_SERVICE="fh-pdf-renderer"
 RENDERER_HEALTH_URL="http://127.0.0.1:3003/healthz"
 DEEP_HEALTH_URL="http://localhost/index.php/healthz"
 HEALTHZ_TOKEN_FILE=""
@@ -824,7 +823,6 @@ Core options:
   --no-mark                    Skip writing _RELEASE marker
 
 Renderer / health gate options:
-  --renderer-service NAME      systemd service name               [default: fh-pdf-renderer]
   --renderer-health-url URL    Renderer health endpoint           [default: http://127.0.0.1:3003/healthz]
   --deep-health-url URL         App deep health endpoint           [default: http://localhost/index.php/healthz]
   --healthz-token-file PATH     File containing deep-health token  [required for non-dry deploy]
@@ -920,23 +918,12 @@ absolutize_path_var() {
   printf -v "$var_name" '%s' "$(absolutize_path "$value")"
 }
 
-ensure_renderer_restart_permissions() {
+initialize_service_control() {
   if [[ "$EUID" -eq 0 ]]; then
     SYSTEMCTL_BASE=(/bin/systemctl)
-    echo "[i] Service control mode: root"
-    return 0
+  else
+    SYSTEMCTL_BASE=(sudo -n /bin/systemctl)
   fi
-
-  SYSTEMCTL_BASE=(sudo -n /bin/systemctl)
-
-  if [[ "$DRYRUN" -eq 1 ]]; then
-    echo "[DRY-RUN] prerequisite check: sudo -n -l /bin/systemctl restart '$RENDERER_SERVICE'"
-    return 0
-  fi
-
-  command -v sudo >/dev/null 2>&1 || die "[!] 'sudo' is required for non-root deployment user."
-  sudo -n -l /bin/systemctl restart "$RENDERER_SERVICE" >/dev/null 2>&1 \
-    || die "[!] Missing non-interactive permission for '/bin/systemctl restart $RENDERER_SERVICE'."
 }
 
 validate_stage_release_artifact() {
@@ -967,16 +954,6 @@ validate_deploy_script_drift() {
 
   cmp -s "$CURRENT_SCRIPT_PATH" "$stage_deploy_script" \
     || die "[!] Host deploy script drift detected: '$CURRENT_SCRIPT_PATH' does not match '$stage_deploy_script'. Sync the host deploy script from the merged repo before deploying."
-}
-
-systemctl_run() {
-  local action="$1"
-  shift
-  if [[ "$DRYRUN" -eq 1 ]]; then
-    echo "[DRY-RUN] ${SYSTEMCTL_BASE[*]} $action $*"
-    return 0
-  fi
-  "${SYSTEMCTL_BASE[@]}" "$action" "$@"
 }
 
 detect_php_fpm_reload_service() {
@@ -1549,11 +1526,6 @@ probe_deep_health_contract() {
 
   echo "[!] Deep health contract validation failed after $DEEP_HEALTH_RETRIES attempts: $DEEP_HEALTH_URL"
   return 1
-}
-
-restart_renderer_service() {
-  echo "[i] Restarting renderer service: $RENDERER_SERVICE"
-  systemctl_run restart "$RENDERER_SERVICE"
 }
 
 perform_atomic_switch() {
@@ -2160,7 +2132,7 @@ rollback_after_failure() {
 
   if [[ "$DRYRUN" -eq 1 ]]; then
     echo "[DRY-RUN] bash '$CURRENT_SCRIPT_PATH' --runtime-config-rollback --active '$APP' --previous '$PREV' --failed '$failed_path' --runtime-user '$WEBUSER'"
-    echo "[DRY-RUN] restart renderer + validate renderer/deep health"
+    echo "[DRY-RUN] validate renderer/deep health"
     deploy_result_finish "$EXIT_ROLLBACK_SUCCESS"
   fi
 
@@ -2177,7 +2149,7 @@ rollback_after_failure() {
   fi
 
   if [[ "$rollback_ok" -eq 1 ]]; then
-    if restart_renderer_service && probe_renderer_health; then
+    if probe_renderer_health; then
       renderer_result="ok"
     else
       renderer_result="failed"
@@ -2288,7 +2260,6 @@ while [[ $# -gt 0 ]]; do
     --result-file) DEPLOY_RESULT_RECEIPT_PATH="$2"; shift 2;;
     --dry-run) DRYRUN=1; shift 1;;
     --no-mark) MARK_RELEASE=0; shift 1;;
-    --renderer-service) RENDERER_SERVICE="$2"; shift 2;;
     --renderer-health-url) RENDERER_HEALTH_URL="$2"; shift 2;;
     --deep-health-url) DEEP_HEALTH_URL="$2"; shift 2;;
     --healthz-token-file) HEALTHZ_TOKEN_FILE="$2"; shift 2;;
@@ -2396,7 +2367,6 @@ echo "    Stage                : $STAGE"
 echo "    Prev                 : $PREV"
 echo "    Web user             : $WEBUSER"
 echo "    Reload services      : $RELOAD_SERVICES"
-echo "    Renderer service     : $RENDERER_SERVICE"
 echo "    Renderer health URL  : $RENDERER_HEALTH_URL"
 echo "    Deep health URL      : $DEEP_HEALTH_URL"
 echo "    Token file           : ${HEALTHZ_TOKEN_FILE:-<not-set-dry-run>}"
@@ -2433,7 +2403,7 @@ if ! echo "$ARCH_LIST" | grep -E '(^|.*/)(application/config/config\.php)$' >/de
   exit 1
 fi
 
-# Pre-switch mandatory gates: runtime tool checks + service-control permission.
+# Pre-switch mandatory gates: runtime tool checks.
 require_command curl
 require_command php
 require_command runuser
@@ -2442,8 +2412,7 @@ if [[ "$REQUIRE_ZERO_SURPRISE" -eq 1 ]]; then
   require_command docker
   require_docker_compose
 fi
-ensure_renderer_restart_permissions
-
+initialize_service_control
 if [[ -e "$STAGE" ]]; then
   run_shell "rm -rf '$STAGE'"
 fi
@@ -2483,10 +2452,6 @@ verify_pre_switch_runtime_config_contracts \
 perform_atomic_switch
 
 verify_post_switch_runtime_config_contracts
-
-if ! restart_renderer_service; then
-  rollback_after_failure "renderer service restart failed"
-fi
 
 if ! probe_renderer_health; then
   rollback_after_failure "renderer health check failed ($RENDERER_HEALTH_URL)"

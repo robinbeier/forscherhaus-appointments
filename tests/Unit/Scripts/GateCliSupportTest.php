@@ -225,11 +225,11 @@ class GateCliSupportTest extends TestCase
         $this->assertIsInt($atomicSwitch);
         $postSwitchVerification = strpos($source, "\nverify_post_switch_runtime_config_contracts\n", $atomicSwitch + 1);
         $this->assertIsInt($postSwitchVerification);
-        $rendererRestart = strpos($source, "\nif ! restart_renderer_service; then", $postSwitchVerification + 1);
-        $this->assertIsInt($rendererRestart);
+        $rendererHealth = strpos($source, "\nif ! probe_renderer_health; then", $postSwitchVerification + 1);
+        $this->assertIsInt($rendererHealth);
 
         $this->assertLessThan($postSwitchVerification, $atomicSwitch);
-        $this->assertLessThan($rendererRestart, $postSwitchVerification);
+        $this->assertLessThan($rendererHealth, $postSwitchVerification);
     }
 
     public function testClassifyAssertionExitCodeReturnsRuntimeForPreflightChecks(): void
