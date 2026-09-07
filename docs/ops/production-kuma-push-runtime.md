@@ -60,7 +60,8 @@ The procedure below is a planning boundary, not an executable update command.
    conflicting operation is active. Preserve a complete root-only, same-filesystem
    copy of the old runtime and cron, verified against the recorded installed
    manifest, and retain it through postflight. Atomically replace the exact
-   canonical cron object with a saved paused form of its ten invocations.
+   canonical cron object with a saved paused form of the invocations identified
+   in that recorded cron configuration.
    The reviewed operation must define how it identifies and drains their complete
    process trees, including PDF children, with a bounded timeout; if ownership
    or completion cannot be established, abort and restore the guarded cron. A directory rename alone does
