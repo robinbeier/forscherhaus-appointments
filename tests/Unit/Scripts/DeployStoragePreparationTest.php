@@ -37,19 +37,30 @@ final class DeployStoragePreparationTest extends TestCase
         resolve_reload_services
         printf 'detected=%s\n' "$RELOAD_SERVICES"
 
+        RELOAD_SERVICES='php8.2-fpm'
+        RELOAD_SERVICES_EXPLICIT=1
+        resolve_reload_services
+        printf 'explicit-php=%s\n' "$RELOAD_SERVICES"
+
         RELOAD_SERVICES='apache2,php8.2-fpm'
+        RELOAD_SERVICES_EXPLICIT=1
         resolve_reload_services
         printf 'explicit=%s\n' "$RELOAD_SERVICES"
 
         detect_php_fpm_reload_service() { return 1; }
         RELOAD_SERVICES='php8.2-fpm'
+        RELOAD_SERVICES_EXPLICIT=0
         resolve_reload_services
         printf 'fallback=%s\n' "$RELOAD_SERVICES"
+
         BASH;
 
         $result = $this->runCommand(['bash', '-c', $script, 'bash', $this->root . '/deploy_ea.sh']);
         self::assertSame(0, $result['exit_code'], $result['stderr']);
-        self::assertSame("detected=php8.5-fpm\nexplicit=apache2,php8.2-fpm\nfallback=php8.2-fpm\n", $result['stdout']);
+        self::assertSame(
+            "detected=php8.5-fpm\nexplicit-php=php8.2-fpm\nexplicit=apache2,php8.2-fpm\nfallback=php8.2-fpm\n",
+            $result['stdout'],
+        );
     }
 
     public function testStorageTransferCopiesSpecialNames(): void
