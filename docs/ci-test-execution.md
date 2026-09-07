@@ -78,8 +78,6 @@ time and covered statement lines; local full validation still uses Docker.
 
 `pre_pr_full.sh` runs `pre_pr_quick.sh` first and stops if it fails. The quick
 check owns the application PHPStan run, so the full check does not repeat it.
-`PRE_PR_PHPSTAN_APPLICATION_SCRIPT` still selects the command for both entry
-points; the full check forwards it to the quick check.
 
 | Check | Quick alone | Full |
 | --- | --- | --- |

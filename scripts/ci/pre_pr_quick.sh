@@ -7,8 +7,6 @@ source ./scripts/ci/git_helpers.sh
 source ./scripts/ci/docker_compose_helpers.sh
 
 BASE_REF="${PRE_PR_BASE_REF:-main}"
-# Keep quick-gate static analysis configurable for toolchain upgrade branches.
-PHPSTAN_APPLICATION_SCRIPT="${PRE_PR_PHPSTAN_APPLICATION_SCRIPT:-phpstan:application}"
 # Keep the quick gate aligned with the repo's frontend tooling baseline.
 ROOT_NODE_MINIMUM_VERSION=24.0.0
 CI_DOCKER_LOG_PREFIX="pre-pr-quick"
@@ -87,7 +85,7 @@ echo_section "PHPUnit"
 ci_docker_compose run --rm php-fpm composer test
 
 echo_section "PHPStan application"
-ci_docker_compose run --rm php-fpm composer "$PHPSTAN_APPLICATION_SCRIPT"
+ci_docker_compose run --rm php-fpm composer phpstan:application
 
 echo_section "Typed request-dto gate"
 ci_docker_compose run --rm php-fpm composer phpstan:request-dto
