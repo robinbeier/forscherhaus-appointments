@@ -68,9 +68,38 @@ artifacts: do not commit, attach, or paste their contents, and remove them after
 recording validation evidence unless they are intentionally retained for a
 follow-up rehearsal.
 
+## Production database migrations
+
+`deploy_ea.sh` migrates only the isolated replay database. It does **not**
+migrate the production database. Before invoking it, compare the reviewed
+release's migration set with the live `ea_migrations` version and identify any
+pending changes. A passing replay alone does not prove the live schema is ready.
+
+For a release with pending migrations:
+
+1. Review and rehearse the exact migration delta against a restored backup.
+   Verify a fresh production backup and successful restoration before any live
+   database write. Decide whether the previous application can still run against
+   the changed schema and record the recovery plan.
+2. For backward-compatible changes, run the reviewed target release's
+   `php index.php console migrate` explicitly against the protected production
+   configuration **before** the application switch. Use a separate, trusted
+   extraction of that exact release; do not run the old live release's migration
+   code or use the browser update endpoint. Keep credentials private and preserve
+   the existing production-change lock across the migration and deployment.
+3. Verify the live migration version and required schema, then invoke the
+   deployment below. See [Console](console.md) for migration command behavior.
+
+An incompatible migration needs a coordinated operator plan before execution.
+If compatibility, migration success or recovery is uncertain, stop before the
+application switch. Application rollback restores files; it does not undo database
+changes. Never apply an automatic migration down or restore a database merely
+because an application rollout failed.
+
 ## Deploy
 
-Run deploys from the production host, using the uploaded archive:
+After resolving any pending production migrations above, run the deployment
+from the production host using the uploaded archive:
 
 ```bash
 /root/deploy_ea.sh \
