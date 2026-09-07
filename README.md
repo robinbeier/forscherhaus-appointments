@@ -130,7 +130,7 @@ This prevents mixed container mounts across worktrees.
 - [Write-path CI contracts](docs/ci-write-contracts.md)
 - [Architecture map](docs/architecture-map.md)
 - [Ownership map](docs/ownership-map.md)
-- [Installation guide](docs/installation-guide.md)
+- [Deployment runbook](docs/deployment.md)
 - [Docker guide](docs/docker.md)
 - [Observability guide](docs/observability.md)
 - [Production session retention](docs/ops/production-session-retention.md)
@@ -141,7 +141,6 @@ This prevents mixed container mounts across worktrees.
 - [LDAP](docs/ldap.md)
 - [LDAP parallel replacement spike](docs/ldap-parallel-spike.md)
 - [Provider room feature](docs/feature-provider-room.md)
-- [FAQ](docs/faq.md)
 
 ## Contribution Rules
 

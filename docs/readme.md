@@ -4,7 +4,6 @@ Welcome to the Forscherhaus Appointments documentation. Use the repository
 [README](../README.md) for local setup and contributor entry points, and
 [Deployment](deployment.md) for the current artifact-based release path.
 
-- [Installation](installation-guide.md)
 - [Translations](manage-translations.md)
 - [REST API](rest-api.md)
 - [Console](console.md)
@@ -19,6 +18,5 @@ Welcome to the Forscherhaus Appointments documentation. Use the repository
 - [Dashboard Release Gate](release-gate-dashboard.md)
 - [Booking Confirmation PDF Gate](release-gate-booking-confirmation-pdf.md)
 - [Codex Production Operations Harness](ops/agent-operations.md)
-- [FAQ](faq.md)
 
 *This document applies to the Forscherhaus Appointments fork.*
