@@ -27,14 +27,19 @@ Host-owned:
 
 ## Production Snapshot
 
-Read-only inventory captured on 2026-05-14 and refreshed after the 2026-08-01
-2.5.0 maintenance update:
+Refreshed after the authorized 2026-09-07 switch to the slim image:
 
-- container: `uptime-kuma`
-- image: `louislam/uptime-kuma:2.5.0`
+- image: pinned in `docker/compose.uptime-kuma.yml` to `2.5.3-slim` and its digest
 - listen address: `127.0.0.1:3001`
 - data mount: `/var/lib/uptime-kuma-data` bind-mounted at `/app/data`
-- database file: `/app/data/kuma.db`
+- database file: `/app/data/kuma.db` (SQLite)
+
+The slim image omits Chromium and embedded MariaDB; this instance uses SQLite
+and HTTP, keyword, JSON, and Push monitors. It does not use browser monitors.
+After the switch, container health and production validation passed, with the
+monitor and notification configuration preserved. The previous `2.5.0` image
+and the complete pre-switch data/Compose backup remain available for recovery;
+rollback must restore the old data together with the old image.
 
 Active monitors were captured on 2026-05-14. The repo desired-state catalog now
 also includes reviewed follow-up changes, such as the ROB-385 split between
@@ -326,7 +331,7 @@ Redacted result:
 
 - source, backup, and post-update SQLite integrity checks returned `ok`;
 - the production and repository Compose image pins target
-  `louislam/uptime-kuma:2.5.0`;
+  `louislam/uptime-kuma:2.5.0` at that time;
 - the container restarted healthy on `127.0.0.1:3001` and reported version
   `2.5.0`;
 - post-change validation showed 13 active monitors and 13 latest green;
