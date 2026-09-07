@@ -65,5 +65,5 @@ If the future criteria are met, implement this as a separate gated issue:
 4. Add unit coverage proving the wrapper redacts hash/URL values from output.
 5. Create the Kuma Push monitor only through an explicit Kuma write gate.
 
-Until then, keep the monitor catalog entry as a documented no-go/needs-decision
-item rather than an active desired-state monitor.
+This decision records the deferred monitor and its no-go criteria. Keep it out
+of the active monitor catalog and desired state until the criteria above are met.
