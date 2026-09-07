@@ -61,7 +61,9 @@ The builder:
 - installs production Composer dependencies into the stage
 - validates the staged tree and final archive with
   `scripts/release-gate/validate_release_artifact.php`
-- verifies upload checksum and required archive entries when upload is enabled
+- when upload is enabled, verifies the uploaded archive and provenance files
+  (including size and SHA-256) before publishing them without replacing existing
+  release files
 
 Local release archives and provenance sidecars are written below the randomized
 `/tmp/<REL>.output.XXXXXX/` directory and include the staged application config.

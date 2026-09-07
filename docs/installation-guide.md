@@ -1,13 +1,10 @@
 # Installation Guide
 
-> This page will guide you through the installation and configuration of Easy!Appointments.
-
-### Introduction
-Easy!Appointments is a web appointment scheduler that can be installed and run in web servers. Users will be able to reach the application through their web browsers by using an active internet connection, just like visiting a normal website. The installation process is very similar to other popular web systems like WordPress and Joomla, so it is very likely that you will be familiar with the next steps. Follow this article strictly in order to complete the installation with no problems. After that, read the "Configuration" section for adjusting the system to fit your needs.
+For this fork, use the [README](../README.md) for local setup. Production
+deployments use the artifact-based path in [Deployment](deployment.md). This
+page retains the existing browser installer and manual configuration procedure.
 
 ### Installation
-There are 6 steps you must follow during the installation process.
-
   1. **Make sure that your server has at least the following applications/tools installed: Apache(v2.4), PHP(v8.3.6+) and MySQL(v5.7+).** Easy!Appointments needs these programs to run. Most of the web hosting companies provide these tools within their Linux hosting plans. If you want to install Easy!Appointments on your local server use one of the pre-made bundles available on the web (XAMPP, MAMP, WAMP ...), all of which are free to use. PHP should have the `curl`, `json`, `mbstring`, `gd`, `simplexml`, and `fileinfo` extensions enabled (the `curl` extension is required for Google Calendar synchronization).
   2. **Create a new database (or use an existing one).** The database is necessary for storing the system data. Therefore your hosting plan must include at least one MySQL database. You must also get the database administration credentials because they will be needed later on.
   3. **Upload the Easy!Appointments source files to your server.** You can place the files into a directory with named "easyappointments" or "appointments" or "book" etc. Make sure that you mark the Easy!Appointments folder URL because it will be needed in the following step. For example if the system files are placed in the this directory ".../httpdocs/easyappointments/" then the URL to this folder will be "http://your-domain.com/easyappointments". This URL will be needed in the following steps.
