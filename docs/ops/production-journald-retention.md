@@ -1,10 +1,9 @@
 # Production Journal Maintenance
 
 Use systemd's built-in journal rotation and the existing host disk-space alert.
-There is no repository-owned journal helper or scheduled vacuum. The immutable
-Kuma v1 bundle retains its old, disabled-by-default journal monitor branch for
-compatibility; do not enable it after retiring the helper. The repository does
-not impose a 1 GiB / 30-day policy. Merging this documentation does not change production configuration.
+There is no repository-owned journal helper or scheduled vacuum. The repository
+does not impose a 1 GiB / 30-day policy. Merging this documentation does not
+change production configuration.
 
 ## Inspect before deciding
 
@@ -47,12 +46,12 @@ vacuum does not install a lasting limit or require a journald restart. If
 repeated manual cleanup becomes necessary, consider a native `SystemMaxUse`
 setting before introducing another tool or scheduled job.
 
-## Existing installations
+## Installed monitoring
 
-The retired helper was not installed and its optional monitor was disabled on
-the checked production host on 2026-09-05. The Kuma v1 bundle remains
-byte-identical so existing installations still validate against its manifest. A repository update does not remove host-local
-files.
-If another host has the old helper, managed drop-in, or journal monitor enabled,
-review that installation separately; do not remove its live helper while the
-old monitor depends on it. Keep the ordinary disk, memory, load, and other retention checks.
+The [`kuma_push_host_resources.sh`](../../scripts/ops/kuma_push_host_resources.sh)
+source still contains an optional journald-retention branch, disabled by default.
+Its helper is no longer supplied by this repository; do not enable that branch.
+Do not remove an installed helper while an active monitor depends on it;
+review the installed dependency first. Keep the ordinary disk, memory, load, and other
+retention checks. Repository changes do not update the installed monitoring
+bundle or remove host-local files.
