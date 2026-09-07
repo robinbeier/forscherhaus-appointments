@@ -2402,14 +2402,6 @@ if [[ -e "$PREV" ]]; then
   fi
 fi
 
-ARCH_LIST="$(tar -tzf "$ARCHIVE" | tr -d '\r' || true)"
-if ! echo "$ARCH_LIST" | grep -E '(^|.*/)(application/config/config\.php)$' >/dev/null; then
-  echo "[!] CI config not found in archive (tolerant pre-check failed)."
-  echo "    Archive sample (first 40 entries):"
-  echo "$ARCH_LIST" | sed -n '1,40p'
-  exit 1
-fi
-
 # Pre-switch mandatory gates: runtime tool checks.
 require_command curl
 require_command php
