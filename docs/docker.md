@@ -57,36 +57,12 @@ arguments in a Compose override to include them in the shared identity. Remote p
 are not detected automatically. Normal cleanup still removes only the local
 project's containers and test data; images are retained for reuse.
 
-You will need modify the root `config.php` so that it matches the following example:
+## Local configuration
 
-```php 
-class Config {
-    // ------------------------------------------------------------------------
-    // GENERAL SETTINGS
-    // ------------------------------------------------------------------------
-    
-    const BASE_URL      = 'http://localhost'; 
-    const LANGUAGE      = 'english';
-    const DEBUG_MODE    = TRUE;
-
-    // ------------------------------------------------------------------------
-    // DATABASE SETTINGS
-    // ------------------------------------------------------------------------
-    
-    const DB_HOST       = 'mysql';
-    const DB_NAME       = 'easyappointments';
-    const DB_USERNAME   = 'user';
-    const DB_PASSWORD   = 'password';
-
-    // ------------------------------------------------------------------------
-    // GOOGLE CALENDAR SYNC
-    // ------------------------------------------------------------------------
-    
-    const GOOGLE_SYNC_FEATURE   = FALSE; // You can optionally enable the Google Sync feature. 
-    const GOOGLE_CLIENT_ID      = '';
-    const GOOGLE_CLIENT_SECRET  = '';
-}
-```
+Keep the root `config.php` local. If it is missing, the worktree setup,
+PHP-FPM container, and Composer test scripts create it from
+[`config-sample.php`](../config-sample.php); they do not overwrite an existing configuration. Keep
+local credentials and other secrets out of version control.
 
 In the host machine the server is accessible from `http://localhost` and the database from `localhost:3306`.
 The development stack pins MySQL `8.4.8` in `docker-compose.yml` for CI parity, while application migrations remain compatible with MySQL `5.7+`.
@@ -100,8 +76,6 @@ Use the Docker Compose PHP service as the canonical test environment:
 ```bash
 docker compose run --rm php-fpm composer test
 ```
-
-The `composer test` script auto-creates `config.php` from `config-sample.php` when missing, so fresh checkouts can run tests without a manual copy step.
 
 Alternative command in the same container context:
 
