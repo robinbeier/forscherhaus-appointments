@@ -1,6 +1,12 @@
 # Production-Server-Threat-Model
 
-Stand: 2026-05-21
+Stand der historischen Ausgangsanalyse: 2026-05-21. Keine aktuelle
+Bestandsaufnahme des Servers.
+
+Die Sentry-Verweise beschreiben die inzwischen entfernte App-Integration.
+Fuer die heutige Fehlerbeobachtung und Datenbehandlung gilt
+[Observability](../observability.md); fuer aktuelle Betriebspruefungen siehe
+[Agent Operations](../ops/agent-operations.md).
 
 Scope: realer Production-Server fuer Forscherhaus Appointments. Dieses Dokument
 ist keine erneute Code-Security-Review. Es beschreibt Server-, Deployment-,
