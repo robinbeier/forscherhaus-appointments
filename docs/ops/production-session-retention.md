@@ -80,10 +80,16 @@ A separately authorized manual pass uses the existing execute command above.
 Confirm no deploy, dump, restore, replay, smoke, or other cleanup is active.
 Exit `75` with `status=partial` means bounded, locked, or cap-limited work is
 incomplete; no success marker is written. Re-inventory before deciding on
-another pass. After `status=pass`, verify marker freshness, disk/inodes,
-application and renderer/deep health, service and scanner posture, and the
-sanitized status of the retained monitors using the
-[standard post-change validation](agent-operations.md).
+another pass. After `status=pass`:
+
+- Repeat the [cleanup inventory](production-cleanup-inventory.md) for
+  `session_retention.marker_status`, `session_retention.marker_age_seconds`,
+  and root disk usage; check inode usage with read-only `df -Pi /` on the host.
+- Run the [standard post-change validation](agent-operations.md) for application
+  and renderer/deep health, services, and scanner posture.
+- Inspect the retained monitors in the [Kuma dashboard](../uptime-kuma.md),
+  including a fresh resources result. The standard validator checks Kuma's
+  endpoint/container, not monitor heartbeats. Record only sanitized status.
 
 For a separately approved helper or unit update, preserve the installed
 regular, single-link, root-owned `0555`
