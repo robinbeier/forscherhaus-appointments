@@ -75,6 +75,16 @@ For routine inspection, use the default read-only wrapper above and the
 state and next trigger, the service result, and marker freshness. The service
 should be inactive between runs. Retain aggregate results only; investigate
 blocked results or unknown file counts before considering an execute pass.
+The inventory reports enabled/active state and the marker. For the next trigger
+and the last service outcome, run these read-only commands on the host:
+
+```bash
+systemctl show fh-session-retention.timer -p NextElapseUSecRealtime
+systemctl show fh-session-retention.service -p ActiveState -p Result -p ExecMainStatus
+```
+
+A fresh marker does not override a failed service result. Investigate a failure
+before treating the scheduled run as healthy.
 
 A separately authorized manual pass uses the existing execute command above.
 Confirm no deploy, dump, restore, replay, smoke, or other cleanup is active.
