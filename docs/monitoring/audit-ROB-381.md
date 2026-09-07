@@ -44,7 +44,7 @@ Repo and issue sources:
 - `docs/ops/agent-operations.md`
 - `docs/uptime-kuma.md`
 - `scripts/ops/README.md`
-- `scripts/ops/uptime-kuma.monitors.yml`
+- the former Kuma reconstruction template (retired in September 2026)
 - `scripts/ops/uptime-kuma-crontab.example`
 - `scripts/ops/uptime-kuma-push.env.example`
 - `scripts/ops/kuma_push_*.sh`
@@ -79,8 +79,9 @@ URLs, tokens, raw config, raw Kuma DB rows, or DB rows were copied here.
 
 ### Uptime Kuma
 
-`docs/uptime-kuma.md` and `scripts/ops/uptime-kuma.monitors.yml` mirror the
-current desired state:
+At the time of this audit, `docs/uptime-kuma.md` and the former reconstruction
+template recorded the state below. The template was retired in September 2026;
+use `docs/uptime-kuma.md` for current monitor roles.
 
 | Monitor | Type | What it really checks | Signal |
 | --- | --- | --- | --- |

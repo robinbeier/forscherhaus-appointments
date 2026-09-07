@@ -3,8 +3,7 @@
 These scripts mirror and extend the current production Uptime Kuma setup without
 storing Push secrets in the repository.
 
-Current production monitor names are documented in `docs/uptime-kuma.md` and
-mirrored in `scripts/ops/uptime-kuma.monitors.yml`.
+Current production monitor roles are documented in `docs/uptime-kuma.md`.
 
 For agent-first production diagnostics and post-change validation, start with
 `docs/ops/agent-operations.md` and the `prod_*.sh` scripts in this directory.
