@@ -140,6 +140,10 @@ also requires an Apache reload. If PHP-FPM detection finds no unit, the
 - stage and current live runtime config permissions satisfy the fail-closed
   contract below after every generic ownership/mode pass
 
+Archive extraction and the complete staged-file validation establish the release
+contents before the live switch. `--dry-run` prints the planned actions; use the
+release-artifact validator when an archive-content check is needed without a deploy.
+
 The runtime config contract is deliberately narrower than the generic release
 permissions: the app root is `root:root` with mode `0755`, while root
 `config.php` is `root:<web-user-primary-group>` with mode `0440`. Both paths

@@ -418,6 +418,67 @@ final class DeployStableResultTest extends TestCase
         self::assertStringContainsString("dry-run-ok\n", $result['stdout']);
     }
 
+    public function testExtractedPreSwitchArchiveFailuresStopBeforeLiveSwitch(): void
+    {
+        $source = (string) file_get_contents(dirname(__DIR__, 3) . '/deploy_ea.sh');
+        $start = strpos($source, '[[ -f "$ARCHIVE" ]] || die');
+        $end = strpos($source, "\nvalidate_stage_release_artifact\n", $start === false ? 0 : $start);
+        self::assertNotFalse($start);
+        self::assertNotFalse($end);
+        $preSwitch = substr($source, $start, $end - $start);
+        self::assertIsString($preSwitch);
+
+        $script = <<<'BASH'
+        set -eu
+        fixture="$(mktemp -d)"
+        trap 'rm -rf "$fixture"' EXIT
+        mkdir -p "$fixture/missing/application" "$fixture/valid/application/config" "$fixture/live"
+        printf 'placeholder\n' > "$fixture/missing/application/readme.txt"
+        printf '<?php\n' > "$fixture/valid/application/config/config.php"
+        printf '<?php\n' > "$fixture/live/config.php"
+        tar -czf "$fixture/missing-config.tar.gz" -C "$fixture/missing" .
+        tar -czf "$fixture/valid.tar.gz" -C "$fixture/valid" .
+        printf 'not a gzip archive\n' > "$fixture/corrupt.tar.gz"
+
+        run_probe() (
+          local label="$1"
+          local archive="$2"
+          local stage="$fixture/stage-$label"
+          local marker="$fixture/switch-$label"
+          rm -rf "$stage" "$marker"
+          source ./deploy_ea.sh
+          deploy_result_trap_install
+          ARCHIVE="$archive"
+          APP="$fixture/live"
+          PREV="$fixture/previous-$label"
+          STAGE="$stage"
+          DRYRUN=0
+          REQUIRE_ZERO_SURPRISE=0
+          require_command() { :; }
+          initialize_service_control() { :; }
+          perform_atomic_switch() { printf 'live-switch\n' > "$marker"; }
+          PRE_SWITCH_BODY
+          perform_atomic_switch
+        )
+
+        run_probe valid "$fixture/valid.tar.gz"
+        [[ -f "$fixture/switch-valid" ]]
+
+        set +e
+        run_probe missing-config "$fixture/missing-config.tar.gz"
+        missing_status=$?
+        run_probe corrupt "$fixture/corrupt.tar.gz"
+        corrupt_status=$?
+        set -e
+        [[ "$missing_status" -eq 30 && "$corrupt_status" -eq 30 ]]
+        [[ ! -e "$fixture/switch-missing-config" && ! -e "$fixture/switch-corrupt" ]]
+        BASH;
+        $script = str_replace('PRE_SWITCH_BODY', $preSwitch, $script);
+
+        $result = $this->runShell($script);
+        self::assertSame(0, $result['exit_code'], $result['stdout'] . $result['stderr']);
+    }
+
     public function testPostSwitchReloadPrecedesHealthAndFailureEntersRollback(): void
     {
         $source = (string) file_get_contents(dirname(__DIR__, 3) . '/deploy_ea.sh');
