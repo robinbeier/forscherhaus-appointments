@@ -235,12 +235,12 @@ rollout has this exact order:
    marker. A `partial`, `blocked`, `known`, or `unknown` mutation outcome never
    substitutes for this postflight.
 
-6. Obtain a separate monitoring approval and use the exact-commit,
-   root-controlled ROB-490 transaction from
-   `docs/ops/production-kuma-monitoring-env.md` to set
-   `KUMA_RELEASE_RETENTION_MONITOR_ENABLED=1` in the protected Env. The helper
-   installation and the single Env transaction are separate modes. Only after
-   their exact postflight may the separately approved existing Push run:
+6. Preserve the existing `KUMA_RELEASE_RETENTION_MONITOR_ENABLED=1` setting
+   in the protected Env. Its one-time activation is complete; the regular
+   resource monitor reads it without an activation helper. If the setting is
+   missing or disabled, stop and plan a separately approved Env change under
+   `docs/uptime-kuma.md`. An explicitly approved manual Push can verify the
+   existing signal without changing the setting:
 
    ```bash
      ssh -o StrictHostKeyChecking=accept-new \
