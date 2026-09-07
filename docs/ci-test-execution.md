@@ -87,8 +87,11 @@ check owns the application PHPStan run, so the full check does not repeat it.
 | Deep integration and optional coverage | Not included | Included |
 
 Request DTO and request-contract suites overlap but have different scopes.
-The full and changed-file architecture checks also have distinct reporting
-and scope semantics; they remain separate. Each stage keeps its existing
+The local full check runs the complete Deptrac analysis once in Docker. A
+successful full analysis already rules out violations in changed files, so
+the local check does not repeat the narrower changed-file analysis on the
+host. GitHub CI retains its changed-file gate and report. CODEOWNERS and
+component-boundary checks remain separate. Each stage keeps its existing
 Docker cleanup, including failure handling.
 
 ## Comparing CI duration
