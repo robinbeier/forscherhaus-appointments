@@ -23,6 +23,5 @@ sudo env FH_ROOT_HOST_TESTS_REQUIRED=1 php vendor/bin/phpunit --no-configuration
   tests/Unit/Scripts/PublishReleasePairRootTest.php \
   tests/Unit/Scripts/ReleaseArchiveDumpRetentionRootTest.php \
   tests/Unit/Scripts/SessionRetentionRootTest.php \
-  tests/Unit/Scripts/ZeroSurpriseProductionImageCleanupRootTest.php \
   tests/Unit/Scripts/ReleaseArtifactValidatorTest.php
 sudo python3 -m unittest tests.Unit.Scripts.release_archive_dump_retention_v1_test

@@ -21,7 +21,7 @@ This map defines component boundaries, path ownership scope, and dependency edge
 | `integrations-sync` | Integrations & Sync | auth-session, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 17 | 3 |
 | `api-v1` | REST API v1 | auth-session, integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 5 | 3 |
 | `shared-core` | Shared Core | None | 7 | 3 |
-| `platform-quality-tooling` | Platform, CI, Release Gates | api-v1, booking-public, dashboard-exports, installation-bootstrap, people-services-admin, settings-compliance, shared-core | 23 | 14 |
+| `platform-quality-tooling` | Platform, CI, Release Gates | api-v1, booking-public, dashboard-exports, installation-bootstrap, people-services-admin, settings-compliance, shared-core | 21 | 13 |
 
 ## Component Details
 
@@ -381,9 +381,7 @@ Path rules:
 - `scripts/ops/lib/DeploymentContractV1.php` (exact_file)
 - `scripts/ops/lib/DeploymentHostRunnerContractV1.php` (exact_file)
 - `scripts/ops/prod_customers_ui_smoke.sh` (exact_file)
-- `scripts/ops/libexec/zero_surprise_image_cleanup_v1.py` (exact_file)
 - `scripts/ops/prod_provider_ui_smoke.sh` (exact_file)
-- `scripts/ops/prod_zero_surprise_image_cleanup.sh` (exact_file)
 - `scripts/ops/provider_ui_smoke_principal.sh` (exact_file)
 - `scripts/ops/validate_deployment_contract_v1.php` (exact_file)
 - `scripts/release-gate` (directory)
@@ -403,7 +401,6 @@ Key files:
 - `scripts/ops/lib/DeployResultV1.php`
 - `scripts/ops/lib/DeploymentContractV1.php`
 - `scripts/ops/lib/DeploymentHostRunnerContractV1.php`
-- `scripts/ops/prod_zero_surprise_image_cleanup.sh`
 - `scripts/ops/validate_deployment_contract_v1.php`
 - `scripts/release-gate/dashboard_release_gate.php`
 - `scripts/release-gate/customers_ui_smoke.php`
