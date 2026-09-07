@@ -43,9 +43,9 @@ validates and has the same hash. Same Run-ID plus changed intent is exit `75`
 ### One-time upgrade after traffic-check removal
 
 This procedure also applies when retiring the Kuma monitor-count fields from
-the closed post-gate contract. Keep the old matching tools for reconciliation
-and archiving of completed or nonterminal runs; do not rewrite historical
-reports or add a legacy adapter to make old reports pass the new contract.
+the closed post-gate contract. Use the old matching tools to finish or reconcile
+nonterminal runs first. Archive only completed runs with those tools; do not
+rewrite historical reports or add a legacy adapter to make them pass the new contract.
 Replacing the matching toolset changes contract validation only. It does not
 change the live Kuma instance or its monitor state.
 
