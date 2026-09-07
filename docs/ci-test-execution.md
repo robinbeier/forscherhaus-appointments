@@ -9,13 +9,14 @@ For booking journeys and their concrete protection, see the
 
 - `phpunit.xml` runs the main unit suite, including CI and operations tooling
   tests in `tests/Unit/Scripts`.
-- `phpunit.coverage.unit.xml` measures the nine selected request-data library
+- `phpunit.coverage.unit.xml` measures the selected request-data library
   test files. Tooling tests are not repeated here: the coverage source is
   application code, not the tooling scripts.
 - `phpunit.coverage.integration.xml` retains application and integration tests.
   The main suite remains necessary because not every application unit test is
   selected by the coverage configurations.
-- Coverage thresholds and report merging remain unchanged.
+- Coverage thresholds are defined by the
+  [coverage-delta policy](../scripts/ci/config/coverage_delta_policy.php).
 
 Useful workflow checks live in `tests/Unit/Scripts/CiWorkflowContractTest.php`:
 main-suite failure handling, database setup and cleanup, root deployment
@@ -25,7 +26,7 @@ is tested by `tests/Unit/Scripts/CiPathFilterMatrixTest.php`.
 ## Independent general and root tests
 
 In GitHub CI, `build-test` excludes the `root-deployment` group. The independent
-`root-deployment-tests` job executes those twelve classes through the existing
+`root-deployment-tests` job executes those classes through the existing
 root regression script, plus the retained Python scanner tests. Both jobs are
 blocking and start without waiting for one another. The root job installs only
 Composer dependencies; it needs no Node, application database, or application
@@ -43,11 +44,14 @@ Composer dependencies. Their analysis, unit tests, and adoption checks do not
 consume generated frontend assets. `build-test` installs its JavaScript test
 dependencies without building assets. Only browser checks prepare runtime assets.
 
-The changed-JavaScript lint job checks its Git diff before setting up Node or
-installing packages. If no maintained JavaScript source changed, it finishes
-without dependency installation. When needed, `npm ci --ignore-scripts` installs
-ESLint without generating frontend assets. The same selector drives the check
-and lint modes; a failed diff fails the job instead of reporting no changes.
+The changed-JavaScript job uses a [shared selector](../scripts/ci/js-lint-changed.sh)
+before setting up Node or installing packages. It selects changed, existing
+non-minified files under `assets/js/` for ESLint. Frontend build-tooling and
+compiler-test changes can also require Node even when no application JavaScript
+changed. Whenever Node is needed, the job runs the compiler regression tests;
+ESLint runs only on the selected source files. `npm ci --ignore-scripts` installs
+their dependencies without building application assets. A failed diff check
+fails the job instead of reporting no changes.
 
 ## Integration coverage preparation
 
@@ -59,20 +63,19 @@ for normal Docker development.
 After database readiness, `php index.php console install` creates the seeded
 instance using the existing bounded retry loop. Installation failure stops
 the job before coverage runs. Diagnostics and unconditional Compose cleanup
-remain in place. Each PHP job installs its own locked Composer dependencies
-after setting up PHP. There is no shared dependency-build job or vendor archive
-to upload, wait for, download and unpack. Coverage result artifacts still pass
-between the coverage shards and their merge job.
+remain in place. The coverage shards install their own locked Composer
+dependencies after setting up PHP. The standalone `coverage-delta` job uses
+PHP to merge the downloaded Clover/XML reports and evaluate the policy; it does
+not need a Composer vendor tree. Coverage result artifacts still pass between
+the coverage shards and their merge job.
 
 The selected suite needs neither a PHP-FPM web server nor a browser. PDF and
 health controller unit tests use test doubles for network calls. The separate
 deep runtime and browser checks use the host PHP test server described in
-[the Docker guide](docker.md#github-integration-runtime). Test selection,
-coverage commands and thresholds are unchanged.
+[the Docker guide](docker.md#github-integration-runtime).
 
-The former seed-snapshot handoff and the coverage job's PHP container build
-are both unnecessary for this path. Use actual GitHub runs to compare elapsed
-time and covered statement lines; local full validation still uses Docker.
+Use actual GitHub runs to compare elapsed time and covered statement lines;
+local full validation still uses Docker.
 
 ## Local quick and full checks
 
@@ -100,14 +103,3 @@ Use GitHub Actions job and step timestamps for a specific before/after
 comparison. Record both run links and the changed workload. A shorter parallel
 job does not necessarily shorten the overall workflow by the same amount.
 Do not describe two runs as an established statistical baseline.
-
-Automatic timing-cohort and heavy-job duration trend reports have been removed.
-CI changes require no timing epoch, all-job timing fingerprint update or
-maintained duration thresholds. Execution checks remain in place.
-
-For the coverage-selection change in PR #400, the unit coverage step took
-6m45s in [run 33961076120](https://github.com/robinbeier/forscherhaus-appointments/actions/runs/33961076120)
-and 5s in [run 33962119628](https://github.com/robinbeier/forscherhaus-appointments/actions/runs/33962119628).
-Both GitHub Clover artifacts contained exactly the same 411 covered
-application statement lines, with none lost or added. This is evidence for
-that change, not a promise about future total CI duration.
