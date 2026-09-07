@@ -1005,7 +1005,6 @@ jobs:
           name: architecture-boundaries-artifacts
           path: |
             storage/logs/ci/deptrac-changed-gate.json
-            storage/logs/ci/deptrac-github-actions.log
             storage/logs/ci/component-boundary-latest.json
           if-no-files-found: warn
       - name: Diagnostics (failure reports)

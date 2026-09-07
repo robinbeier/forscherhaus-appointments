@@ -52,7 +52,7 @@
         "blocking_execution_fingerprints": {
             "workflow_execution_envelope": "b00690b770e9cc3b3223dec8bbeb2f46db76443642fb7ddadf3fb8237ebb7f99",
             "api-contract-openapi": "6e224d3eec1b26fa2eb1e4c3d62f45524253a5e5468cff7e029f9d8b4e2ce069",
-            "architecture-boundaries": "c655384ce6979371fa42b087cdffdb8c9d9bff75d287972570e3c17c8d817d84",
+            "architecture-boundaries": "f91fa15bf3e0ece3f1f102ef9091de393e375b3a54e4930d68d380916d9b4523",
             "architecture-ownership-map": "7311eb7f2a7972b4eaebb9d1a69903517789f8c4ced4ee93483a283c99080cbc",
             "booking-controller-flows": "cc7be7cb392f2e57805c331b68019a719996bc4fcc32f744ac6461b0e64b3b69",
             "build-test": "3b70e4ce8581167df367434c1d8f1b3c09a893d51433ca1ec1e08555989f22b4",
