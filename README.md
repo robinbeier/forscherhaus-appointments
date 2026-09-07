@@ -61,7 +61,6 @@ npm run build
 
 npm run lint:js
 
-docker compose run --rm php-fpm composer test
 PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh
 ```
 
@@ -144,19 +143,23 @@ This prevents mixed container mounts across worktrees.
 - [Provider room feature](docs/feature-provider-room.md)
 - [FAQ](docs/faq.md)
 
-## Contribution Rules (Short)
+## Contribution Rules
 
-- Keep production code changes inside `application/`.
-- Do not modify `system/` unless applying an explicit upstream patch.
-- Use CodeIgniter migrations for all DB schema changes (with rollback path).
-- Keep `config.php` out of version control; update `config-sample.php` only with safe defaults.
+See [AGENTS.md](AGENTS.md) for repository guardrails, review expectations, and
+the contributor entry path.
 
 ## Testing Before PR
 
-Default review-ready path:
+Optional early focused check:
 
 ```bash
 docker compose run --rm php-fpm composer test
+```
+
+Default review-ready path (the full gate includes this Composer test through
+its quick-gate stage):
+
+```bash
 PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh
 ```
 
