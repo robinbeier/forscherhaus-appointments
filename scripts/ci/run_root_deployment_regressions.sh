@@ -17,7 +17,6 @@ sudo env FH_ROOT_HOST_TESTS_REQUIRED=1 php vendor/bin/phpunit --no-configuration
   tests/Unit/Scripts/DeployRuntimeConfigPermissionsTest.php \
   tests/Unit/Scripts/DeployRuntimeConfigRollbackTest.php \
   tests/Unit/Scripts/GateCliSupportTest.php \
-  tests/Unit/Scripts/DeploymentHostRunnerV1RootTest.php \
   tests/Unit/Scripts/DeploymentDumpAttestationProducerV1RootTest.php \
   tests/Unit/Scripts/BackupSetProducerRootTest.php \
   tests/Unit/Scripts/PublishReleasePairRootTest.php \

@@ -1,1 +1,0 @@
-{"action":"deploy","event":"reservation_persisted","intent_sha256":"613d3c8405643ca2bdf9929a879fe493d71d757ad5535de0a037c7ba1601c930","reason":"none","recorded_at_utc":"2026-08-11T13:00:00Z","run_id":"018f6f52-4c87-4d4e-8b19-6a66e6e1af25","schema":"deployment_host_operator_event.v1","sequence":1,"status":"running"}

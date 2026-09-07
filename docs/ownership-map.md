@@ -365,7 +365,6 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
   - `scripts/ci/dashboard_integration_smoke.php`
   - `scripts/ops/lib/DeployResultV1.php`
   - `scripts/ops/lib/DeploymentContractV1.php`
-  - `scripts/ops/lib/DeploymentHostRunnerContractV1.php`
   - `scripts/ops/validate_deployment_contract_v1.php`
   - `scripts/release-gate/dashboard_release_gate.php`
   - `scripts/release-gate/customers_ui_smoke.php`
@@ -381,7 +380,6 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
   - `scripts/ops/customers_ui_smoke_principals.sh` (exact_file)
   - `scripts/ops/lib/DeployResultV1.php` (exact_file)
   - `scripts/ops/lib/DeploymentContractV1.php` (exact_file)
-  - `scripts/ops/lib/DeploymentHostRunnerContractV1.php` (exact_file)
   - `scripts/ops/prod_customers_ui_smoke.sh` (exact_file)
   - `scripts/ops/prod_provider_ui_smoke.sh` (exact_file)
   - `scripts/ops/provider_ui_smoke_principal.sh` (exact_file)
