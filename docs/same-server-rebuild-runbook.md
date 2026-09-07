@@ -12,8 +12,8 @@ provider snapshot is the migration-level rollback path.
 - The server keeps the same public IP after reinstall.
 - The provider panel can create and restore a full server snapshot.
 - SSH access is available again after reinstall.
-- Production traffic is not expected before August 2026, so downtime during the
-  rebuild is acceptable.
+- Downtime and rollback timing are operator decisions for the specific rebuild.
+  The completed 2026 rebuild schedule is not a standing maintenance window.
 - A fresh database dump may be created directly before the wipe and copied to
   secure local storage.
 - `/etc/fh`, Apache virtual hosts, cronjobs, systemd units, app configs, and
@@ -83,11 +83,13 @@ Evidence to record:
 - server ID or host reference
 - confirmation that snapshot creation completed
 
+The accepted May 2026 rebuild recorded snapshot creation, but did not test a
+provider-snapshot restore. That acceptance is not evidence of a rehearsed
+snapshot rollback.
+
 Rollback rule:
 
 - If the rebuild becomes blocked, restore the provider snapshot from the panel.
-- No time-based rollback threshold is required for this project because
-  production traffic is not expected before August 2026.
 - Keep all local pre-wipe backups until the rebuilt server has passed app,
   database, deployment, and Kuma validation.
 
@@ -225,9 +227,8 @@ Required validation:
 
 ## Phase 6: Uptime Kuma Restore
 
-Use the secured operator archive documented in [uptime-kuma.md](uptime-kuma.md)
-and the latest status in
-[long-horizon-lts-modernization/Documentation.md](long-horizon-lts-modernization/Documentation.md).
+Use the secured operator archive and restore guidance documented in
+[uptime-kuma.md](uptime-kuma.md).
 
 Restore rules:
 

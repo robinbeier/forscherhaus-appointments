@@ -67,10 +67,8 @@ For a parallel rebuild, use the newest sensible Ubuntu LTS image available when
 the server is created. The expected future target is Ubuntu 26.04 LTS once it is
 available through the provider and the LTS upgrade/rebuild window is stable.
 
-For the selected same-server rebuild, the target baseline is Ubuntu 26.04 LTS
-because it is now visible in the provider panel and the project has no expected
-production traffic before October 2026. Ubuntu 24.04 LTS remains the fallback
-if 26.04 package/runtime validation fails before restore acceptance.
+For the selected same-server rebuild, use its canonical
+[target baseline](same-server-rebuild-runbook.md#target-baseline).
 
 Target runtime choices:
 
@@ -176,9 +174,8 @@ The rebuild project must choose and test one of these paths:
 - start Kuma from repo-documented monitor templates and accept loss of old
   history
 
-See the Uptime Kuma milestone in
-`docs/long-horizon-lts-modernization/Plan.md` and the operational template in
-`docs/uptime-kuma.md`.
+See the operational Uptime Kuma template in
+[uptime-kuma.md](uptime-kuma.md).
 
 ## Cutover Strategy
 

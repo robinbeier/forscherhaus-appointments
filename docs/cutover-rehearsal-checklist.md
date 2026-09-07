@@ -10,9 +10,8 @@ It does not replace the detailed runbooks it references.
 For the currently selected same-server Hetzner rebuild, use
 [same-server-rebuild-runbook.md](same-server-rebuild-runbook.md) as the
 operational source of truth. In that path there is no second live target server,
-the public IP is expected to stay unchanged, production traffic is not expected
-before August 2026, and provider snapshot restore replaces old-server DNS
-rollback as the migration-level rollback path.
+the public IP is expected to stay unchanged, and provider snapshot restore
+replaces old-server DNS rollback as the migration-level rollback path.
 
 ## Non-Goals
 
@@ -43,10 +42,6 @@ rollback as the migration-level rollback path.
   [uptime-kuma.md](uptime-kuma.md)
 - DB restore rehearsal shape and latest restored-data validation:
   [database-migration-rehearsal.md](database-migration-rehearsal.md)
-- Long-horizon milestone scope and status:
-  [long-horizon-lts-modernization/Plan.md](long-horizon-lts-modernization/Plan.md)
-  and
-  [long-horizon-lts-modernization/Documentation.md](long-horizon-lts-modernization/Documentation.md)
 
 ## Required Inputs
 
