@@ -24,6 +24,17 @@ a short pointer file for emergency orientation.
    Never print DB rows, Push URLs, tokens, passwords, `config.php`, Kuma DB
    contents, health-token values, or `/etc/fh` file contents.
 
+The doctor reports the current state; post-change validation enforces the
+existing health and resource requirements. Both deliberately sample again:
+a pre-change result does not prove the post-change state. For application logs,
+the doctor counts all error-like entries in recently modified files, while
+validation distinguishes new actionable errors from historical entries.
+
+Both commands send their needed log-classification functions from the reviewed
+local `scripts/ops/lib/app_log_classification.sh` over SSH. Validation does not
+load those rules from the installed application or maintain a fallback copy.
+No server-side installation of this library is needed for either command.
+
 The operator decides when a deploy or Customers UI smoke may run. Explicit
 operator approval is the timing decision; access-log classification and active
 HTTP connections do not veto it. Keep functional validation, concurrency locks,

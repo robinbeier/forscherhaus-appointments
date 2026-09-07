@@ -89,6 +89,58 @@ final class ProdValidateAppLogSnapshotTest extends TestCase
         }
     }
 
+    public function testProdValidateUsesPackagedRulesWhenRemoteRulesConflict(): void
+    {
+        $workspace = sys_get_temp_dir() . '/prod-validate-app-log-' . bin2hex(random_bytes(8));
+        $stubBin = $workspace . '/bin';
+        $appRoot = $workspace . '/app-root';
+        $logFile = $appRoot . '/storage/logs/log-2026-06-04.php';
+        $appendMarker = $workspace . '/append.done';
+
+        mkdir($stubBin, 0777, true);
+        mkdir(dirname($logFile), 0777, true);
+        mkdir($appRoot . '/scripts/ops/lib', 0777, true);
+
+        try {
+            $this->writeStubs($stubBin);
+            file_put_contents(
+                $appRoot . '/scripts/ops/lib/app_log_classification.sh',
+                <<<'BASH'
+                app_log_known_noise_regex() { printf '%s\n' 'ERROR - .*genuine'; }
+                app_log_error_like_regex() { printf '%s\n' '^NEVER_MATCH'; }
+                BASH
+                ,
+            );
+            file_put_contents(
+                $logFile,
+                implode("\n", [
+                    "<?php defined('BASEPATH') OR exit('No direct script access allowed'); ?>",
+                    'ERROR - 2026-06-04 14:45:09 --> historical genuine failure',
+                    '',
+                ]),
+            );
+
+            $result = $this->runCommand(
+                ['bash', 'scripts/ops/prod_validate_after_change.sh', '--prod-ssh-target', 'prod.example'],
+                $this->repoRoot(),
+                array_merge($this->commandEnv($stubBin, $appRoot), [
+                    'APP_LOG_APPEND_FILE' => $logFile,
+                    'APP_LOG_APPEND_MARKER' => $appendMarker,
+                    'APP_LOG_APPEND_MODE' => 'canonical-noise-and-genuine',
+                ]),
+            );
+
+            self::assertNotSame(0, $result['exit_code'], 'A fresh genuine app-log error should fail the gate.');
+            self::assertStringContainsString('app_error_like_lines_current=1', $result['stdout']);
+            self::assertStringContainsString('app_error_like_lines_24h=2', $result['stdout']);
+            self::assertStringContainsString('app_error_like_lines_24h_historical=1', $result['stdout']);
+            self::assertStringContainsString('FAIL app_error_like_lines_current expected=0 got=1', $result['stderr']);
+            self::assertStringNotContainsString('Wwwgooglecom/index', $result['stdout'] . $result['stderr']);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
     public function testProdValidateTreatsTruncatedAppLogContentAsCurrent(): void
     {
         $workspace = sys_get_temp_dir() . '/prod-validate-app-log-' . bin2hex(random_bytes(8));
@@ -253,6 +305,11 @@ final class ProdValidateAppLogSnapshotTest extends TestCase
                         printf '%s\n' 'non-error padding after rewrite'
                         printf '%s\n' 'non-error padding after rewrite'
                     } > "${APP_LOG_APPEND_FILE}"
+                elif [[ "${APP_LOG_APPEND_MODE:-append}" == "canonical-noise-and-genuine" ]]; then
+                    {
+                        printf '%s\n' 'ERROR - 2026-06-04 14:55:00 --> 404 Page Not Found: Wwwgooglecom/index'
+                        printf '%s\n' 'ERROR - 2026-06-04 14:56:00 --> fresh genuine failure'
+                    } >> "${APP_LOG_APPEND_FILE}"
                 else
                     {
                         printf '%s\n' 'ERROR - 2026-06-04 14:55:00 --> 404 Page Not Found: Azenvnet/index'

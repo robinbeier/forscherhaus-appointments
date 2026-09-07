@@ -12,6 +12,8 @@ source "${SCRIPT_DIR}/lib/prod_common.sh"
 source "${SCRIPT_DIR}/lib/prod_sensitive_paths.sh"
 # shellcheck source=scripts/ops/lib/prod_scanner_paths.sh
 source "${SCRIPT_DIR}/lib/prod_scanner_paths.sh"
+# shellcheck source=scripts/ops/lib/app_log_classification.sh
+source "${SCRIPT_DIR}/lib/app_log_classification.sh"
 
 SSH_OPTIONS=(-o StrictHostKeyChecking=accept-new)
 PROD_SSH_TARGET="$(prod_default_ssh_target)"
@@ -71,6 +73,11 @@ run_remote() {
         declare -f prod_scanner_public_ipv4_address
         declare -f prod_scanner_host_context_specs
         declare -f prod_scanner_host_contexts_check_all
+        declare -f app_log_known_noise_regex
+        declare -f app_log_filter_actionable_file
+        declare -f app_log_error_like_regex
+        declare -f app_log_extract_error_like_file
+        declare -f app_log_count_error_like_file
     )"
 
     {
@@ -84,69 +91,6 @@ APP_ROOT="${APP_ROOT:-/var/www/html/easyappointments}"
 section() {
     printf '\n[%s]\n' "$1"
 }
-
-if [[ -r "${APP_ROOT}/scripts/ops/lib/app_log_classification.sh" ]]; then
-    # shellcheck source=scripts/ops/lib/app_log_classification.sh
-    source "${APP_ROOT}/scripts/ops/lib/app_log_classification.sh"
-else
-    app_log_known_noise_regex() {
-        cat <<'REGEX'
-ERROR - .*--> 404 Page Not Found: Azenvnet/index|ERROR - .*--> Severity: Warning --> unlink\(.*/storage/cache/rate_limit_key_[^)]*\): No such file or directory .*/system/libraries/Cache/drivers/Cache_file\.php 279
-REGEX
-    }
-
-    app_log_filter_actionable_file() {
-        local input_file="$1"
-        local output_file="$2"
-        grep -Ev "$(app_log_known_noise_regex)" "$input_file" > "$output_file" || true
-    }
-
-    app_log_error_like_regex() {
-        cat <<'REGEX'
-^(ERROR|CRITICAL)[[:space:]-]|^(Fatal error|Uncaught)|^PHP (Fatal error|Parse error|Recoverable fatal error)
-REGEX
-    }
-
-    app_log_extract_error_like_file() {
-        local input_file="$1"
-        local output_file="$2"
-        grep -Eh "$(app_log_error_like_regex)" "$input_file" > "$output_file" 2>/dev/null || true
-    }
-
-    app_log_count_error_like_file() {
-        local input_file="$1"
-        grep -Eh "$(app_log_error_like_regex)" "$input_file" 2>/dev/null \
-            | wc -l \
-            | awk '{print $1}'
-    }
-
-    app_log_filter_since_timestamp_file() {
-        local input_file="$1"
-        local output_file="$2"
-        local since_timestamp="$3"
-
-        awk -v since_timestamp="$since_timestamp" '
-            function entry_timestamp(line) {
-                if (substr(line, 1, 8) == "ERROR - ") {
-                    return substr(line, 9, 19)
-                }
-
-                if (substr(line, 1, 11) == "CRITICAL - ") {
-                    return substr(line, 12, 19)
-                }
-
-                return ""
-            }
-
-            {
-                timestamp = entry_timestamp($0)
-                if (timestamp != "" && timestamp >= since_timestamp) {
-                    print
-                }
-            }
-        ' "$input_file" > "$output_file" || true
-    }
-fi
 
 check_eq() {
     local key="$1"

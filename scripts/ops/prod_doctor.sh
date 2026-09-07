@@ -14,6 +14,8 @@ source "${SCRIPT_DIR}/lib/prod_sensitive_paths.sh"
 source "${SCRIPT_DIR}/lib/prod_scanner_paths.sh"
 # shellcheck source=scripts/ops/lib/prod_posture.sh
 source "${SCRIPT_DIR}/lib/prod_posture.sh"
+# shellcheck source=scripts/ops/lib/app_log_classification.sh
+source "${SCRIPT_DIR}/lib/app_log_classification.sh"
 
 SSH_OPTIONS=(-o StrictHostKeyChecking=accept-new)
 PROD_SSH_TARGET="$(prod_default_ssh_target)"
@@ -67,6 +69,7 @@ run_remote() {
         declare -f prod_posture_listen_class
         declare -f prod_posture_ss_listening_ports
         declare -f prod_posture_check_firewall_and_ports
+        declare -f app_log_error_like_regex
     )"
 
     {
@@ -98,13 +101,12 @@ app_error_count() {
     local count=0
     local file
     local matches
-    local error_like_regex='^(ERROR|CRITICAL)[[:space:]-]|^(Fatal error|Uncaught)|^PHP (Fatal error|Parse error|Recoverable fatal error)'
     if [[ ! -d /var/www/html/easyappointments/storage/logs ]]; then
         printf 'missing'
         return
     fi
     while IFS= read -r -d '' file; do
-        matches="$(grep -Eh "$error_like_regex" "$file" 2>/dev/null | wc -l | awk '{print $1}' || true)"
+        matches="$(grep -Eh "$(app_log_error_like_regex)" "$file" 2>/dev/null | wc -l | awk '{print $1}' || true)"
         count=$((count + matches))
     done < <(find /var/www/html/easyappointments/storage/logs -maxdepth 1 -type f -mtime -1 -print0)
     printf '%s' "$count"
