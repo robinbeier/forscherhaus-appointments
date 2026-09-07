@@ -50,7 +50,7 @@ Need the shortest route to the right steering source?
 - [Agent Harness Index](docs/agent-harness-index.md): routing across onboarding,
   agent runtime, CI, architecture, and ownership
 - [WORKFLOW.md](WORKFLOW.md): agent runtime and ticket-to-merge rules
-- [AGENTS.md](AGENTS.md): compact repo guardrails plus the extended local/CI command matrix
+- [AGENTS.md](AGENTS.md): compact repo guardrails and entry points
 
 ## Core Commands
 
@@ -67,7 +67,7 @@ PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh
 
 For optional smoke tests, write-path contracts, deep runtime suites, release
 gates, and CI-only signals, use [Agent Harness Index](docs/agent-harness-index.md)
-as the routing map and [AGENTS.md](AGENTS.md) as the compact command-and-guardrail hub.
+as the routing map and [AGENTS.md](AGENTS.md) as the compact guardrail and entry-point hub.
 The public existing-appointment write boundary is documented in
 [Public Reschedule Authority](docs/security/public-reschedule-authority.md).
 
@@ -128,7 +128,7 @@ This prevents mixed container mounts across worktrees.
 ## Documentation Map
 
 - [Agent harness index](docs/agent-harness-index.md)
-- [Compact guardrails and extended command matrix](AGENTS.md)
+- [Compact guardrails and entry points](AGENTS.md)
 - [Write-path CI contracts](docs/ci-write-contracts.md)
 - [Architecture map](docs/architecture-map.md)
 - [Ownership map](docs/ownership-map.md)
@@ -172,8 +172,11 @@ once before its browser checks. The existing lockfile sync remains in both
 gates: it requires committed dependency files and stops if npm's lockfile
 refresh changes them. After editing frontend dependencies in `package.json`,
 run `npm install`, review the updated lockfile, and commit both files. Use
-`npm ci` to install an already matching committed lockfile; both installation
-commands also prepare assets through postinstall. Compiler errors fail `npm run build`, including builds started by hooks or
+`npm ci` to install an already matching committed lockfile. In normal local
+development, both commands run the postinstall lifecycle and refresh assets;
+production or `--omit=dev` installs skip that refresh, while `--ignore-scripts`
+skips lifecycle scripts entirely, so build assets explicitly when needed.
+Compiler errors fail `npm run build`, including builds started by hooks or
 release preparation. `npm start` watches frontend files; after a failed
 rebuild, correcting the file triggers the next attempt. Its initial build
 must succeed before watching starts.
