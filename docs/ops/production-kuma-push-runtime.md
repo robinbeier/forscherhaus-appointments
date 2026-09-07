@@ -1,156 +1,84 @@
-# Production Kuma Push Runtime V1
+# Production Kuma Push Runtime
 
-ROB-489 removes the privileged monitoring execution path from the mutable app
-release tree. The nine root cron entrypoints run only from the immutable,
-versioned runtime at:
+The nine monitoring entrypoints run from the root-controlled directory
+`/usr/local/libexec/fh-kuma-push-runtime-v1`, outside the mutable application
+release. Production cron does not execute monitoring code from that release.
+The one-time ROB-489 installation/cron migration is complete; its installer and
+wrapper are retired. The `v1` directory name remains the installed path, not a
+requirement to build another package-version framework.
 
-```text
-/usr/local/libexec/fh-kuma-push-runtime-v1
-```
+## Package and current state
 
-The runtime changes code provenance, not monitor behavior. Push URLs, tokens,
-host-local environment values, monitor identities, schedules, log targets and
-the two-per-minute app-log cadence remain unchanged.
+`scripts/ops/config/kuma_push_runtime_bundle_v1.json` lists the complete payload:
+nine entrypoints, two shell libraries, the dashboard PDF gate and its three PHP
+libraries. Each row binds its source/install path, role and SHA-256. Keep the
+manifest and changed source hashes together in the same reviewed commit. Repository checks retain the closed
+payload, cron contract and execution of the bundled PDF gate.
 
-## Closed bundle
+The canonical cron file is `scripts/ops/config/fh-uptime-kuma-push.cron`: ten
+invocations of nine entrypoints, including the twice-per-minute app-log check.
+Changing a package does not authorize changing its schedules, environment file,
+log targets, monitor identities or notification settings.
 
-`scripts/ops/config/kuma_push_runtime_bundle_v1.json` is the canonical source
-manifest. It binds exactly:
+Installed files remain regular, root:root, mode 0555 and single-link. Directories
+are root:root, mode 0755; ancestors must not be group/world writable. Reject
+symlinks, hard links, extra/missing files and unexpected hashes. Keep the Push
+environment and credentials host-local and protected.
 
-- nine `scripts/ops/kuma_push_*.sh` entrypoints;
-- `lib/kuma_push_common.sh` and `lib/app_log_classification.sh`;
-- the dashboard PDF gate and its three PHP libraries.
+The PDF entrypoint uses only its bundled gate code. `KUMA_PDF_EXPORT_APP_ROOT`
+selects application data/config, never executable code. The historical
+`KUMA_PDF_EXPORT_REPO_ROOT` name remains a compatibility fallback.
 
-Every manifest row fixes source path, identical relative installation path,
-role and SHA-256. Installed files must be regular, `root:root`, mode `0555`,
-Single-Link and beneath root-owned ancestors with no group/world write bit.
-Symlinked, hard-linked, hash-divergent, extra or missing files fail closed.
+A merged repository change is not proof that production has been updated.
+Compare installed hashes with the manifest from the recorded installed commit;
+use the new commit's manifest only for the proposed replacement. Old migration
+recovery records remain host-owned; retiring their writer does not authorize
+removing those records or make them a mandatory dependency of every update.
 
-The PDF entrypoint executes its bundled dashboard gate. It may read application
-configuration and write the existing report beneath the app storage path, but
-it does not execute PHP or shell code from the app release tree.
+## Bounded package replacement
 
-`KUMA_PDF_EXPORT_APP_ROOT` is the explicit optional app-data/config root. The
-historical `KUMA_PDF_EXPORT_REPO_ROOT` name remains a backwards-compatible
-fallback, so existing host-local values do not change during migration. Neither
-variable selects executable gate code.
+There is no general-purpose updater. Prepare a concrete, independently reviewed
+operation for each required replacement and obtain explicit production approval.
+The procedure below is a planning boundary, not an executable update command.
 
-## Cron contract
+1. **Bind and inspect.** Select an independently reviewed, merged commit with
+   green required checks. Resolve the exact Git object with replacement refs
+   disabled; export only the manifest's closed payload from that object, never
+   from a writable worktree. Validate paths, hashes, ownership, modes and links
+   in private root-controlled staging. Extraction must discard archived owner
+   and mode metadata. Record current installed hashes and the exact cron bytes
+   and identity without printing secrets.
+2. **Coordinate and preserve.** Acquire `/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock`
+   nonblocking after verifying root ownership, mode 0600, single-link regular
+   type and identity; revalidate its identity after acquisition. Confirm no
+   conflicting operation is active. Preserve a complete root-only, same-filesystem
+   copy of the old runtime and cron, verified against the recorded installed
+   manifest, and retain it through postflight. Atomically replace the exact
+   canonical cron object with a saved paused form of its ten invocations.
+   The reviewed operation must define how it identifies and drains their complete
+   process trees, including PDF children, with a bounded timeout; if ownership
+   or completion cannot be established, abort and restore the guarded cron. A directory rename alone does
+   not protect a running script that subsequently opens another bundled file.
+   Do not stop the host cron service or alter other jobs.
+3. **Exchange and verify.** Publish the complete validated directory atomically
+   on the same filesystem and durably sync the publication. Preserve the old
+   directory for rollback. Revalidate the installed closed payload, metadata,
+   the changed resource-monitor behavior, bundled PDF execution and exact original
+   cron configuration before restoring
+   the paused invocations. Do not overwrite a concurrently changed cron object;
+   verify its identity and expected bytes before any replacement.
+4. **Validate or return.** Check the normal production health/log summaries and
+   wait for fresh regular monitor results, including the slower Push monitors.
+   On a known failure, pause/drain these invocations again and restore the
+   verified old directory and exact prior cron together, then verify recovery.
+   Restore cron only if its current inode, trusted metadata and bytes still
+   match this operation's expected object. Preserve any concurrent writer's
+   object and both runtime snapshots; report failed rollback for a separate
+   recovery decision rather than overwriting it.
+   A failed or uncertain rollback must be reported as such. After an unknown
+   transport/mutation result, retain both versions and staging, inspect read-only
+   and make a separate recovery decision; never retry blindly or delete evidence.
 
-The `/etc/cron.d` desired state is
-`scripts/ops/config/fh-uptime-kuma-push.cron`. It contains ten invocations of
-the nine entrypoints; only `kuma_push_app_logs.sh` occurs twice. Migration may
-replace only the exact old prefix
-`/var/www/html/easyappointments/scripts/ops/` with the fixed runtime prefix.
-All other bytes, including schedules, env-file path and log targets, are fixed.
-
-Production preflight requires the complete current cron file to equal either
-the canonical legacy form or the canonical migrated form. Mixed roots,
-unknown entrypoints, a different count, a caller-supplied path, or any other
-byte drift blocks before mutation.
-
-## Installer and rollback
-
-`scripts/ops/libexec/kuma_push_runtime_v1.py` is dry-run by default. The live
-wrapper is also plan-only by default and is pinned to the production Tailscale
-target:
-
-```bash
-bash scripts/ops/prod_kuma_push_runtime_v1.sh
-```
-
-After merge, bind the live call to the exact clean `origin/main` commit:
-
-```bash
-bash scripts/ops/prod_kuma_push_runtime_v1.sh \
-  --execute \
-  --confirm-live-write ROB-489 \
-  --expected-commit 40_HEX_MERGE_COMMIT
-```
-
-Before its first SSH call, the wrapper requires the expected commit to equal
-local `HEAD`, the local `refs/remotes/origin/main` commit and the live
-`refs/heads/main` value returned by `git ls-remote origin`. It derives the
-closed artifact list from that commit's manifest and streams the payload with
-`git archive` from the same immutable commit object; the writable worktree is
-never the production payload source. The wrapper forces
-`GIT_NO_REPLACE_OBJECTS=1` for every local Git operation, so local replacement
-refs cannot substitute a different tree beneath the verified commit ID. Root
-extraction discards archived owner
-and permission metadata under a fixed safe umask before the helper validates
-the staged trust contract. A stale local main, an unmerged feature head or live
-remote drift is therefore a hard stop.
-
-Execute stages only the manifest, helper and closed artifact list under a
-private root directory. The helper verifies source ownership, modes, links and
-hashes; publishes the runtime directory atomically with a Linux no-replace
-rename; records the original cron bytes plus a secret-free recovery manifest
-under `/var/lib/fh-kuma-push-runtime-v1`; and migrates the cron file with an
-atomic exchange-and-verify operation. The exchanged prior object must retain
-the exact preflight inode identity, trusted metadata and bytes. A concurrent
-replacement is atomically restored instead of being overwritten.
-The wrapper deletes its private staging directory only after a known successful
-result.
-
-The helper records each successful atomic bundle or cron publication before its
-fallible parent-directory durability sync. If that sync, any later check or
-postflight fails after a new runtime publication, rollback restores and durably
-syncs the exact prior cron bytes when that can still be proven. A published
-runtime is monotonic and is never removed automatically: an independent
-root-owned cron writer could otherwise begin referencing it between the last
-reference check and deletion. The retained immutable bundle is safe and
-idempotently reusable; every such failed result truthfully reports a performed
-mutation. If cron restoration or its durability sync cannot be proven, the
-result is additionally reported as a failed rollback. Recovery records remain
-root-only.
-If rollback restores both cron and runtime but newly written root-only recovery
-evidence remains, the failed result still reports `mutation_performed=true`.
-The recovery state is not hidden behind a simulated no-mutation result.
-Rollback restores the saved cron only while the current bytes still equal the
-version published by this transaction; a concurrent root-owned replacement is
-never overwritten and instead produces the same fail-closed retained-runtime
-state. An exchange recovery deletes its displaced temporary object only after
-that object is proven to be the exact inode and bytes published by this
-transaction. If another root writer wins during recovery, its displaced bytes
-remain in the private ROB-489 dot-temporary namespace and the result is
-`rollback_failed`; they are never silently unlinked. The restore payload is
-the immutable cron snapshot read and verified in memory before the first
-mutation. The persistent recovery backup is evidence, not a later restore
-authority, so concurrent backup drift can fail postflight but can never inject
-changed bytes into the live cron.
-Every later installed-state inspect revalidates the exact recovery directory,
-cron backup and canonical recovery metadata; missing, additional or changed
-recovery evidence fails closed.
-An unknown transport result is never retried: retain the staging directory and
-perform read-only inventory before requesting a separate recovery decision.
-
-## Supported inspect, skip and fail states
-
-- `pass`, legacy cron, runtime absent: execution is ready for the one bounded
-  installation and migration.
-- `pass`, migrated cron, exact runtime present: already converged; execute is
-  idempotent and does not rewrite either object.
-- Missing host prerequisites are not skips. Missing Python, `renameat2`, fixed
-  directories, cron file, or required root authority makes the host profile
-  unsupported and fails closed.
-- Identity, hash, link, mode, owner, path, count, byte, recovery or rollback
-  drift is a real contract failure, never a simulated success.
-
-## Production postflight
-
-After a known successful migration:
-
-1. Re-run the helper read-only from the exact merged staged source before it is
-   removed, or independently verify every installed hash against the manifest.
-2. Verify the runtime and all files are root-owned, non-linked as specified and
-   not group/world writable.
-3. Verify the cron file is `root:root`, mode `0644`, Single-Link, matches the
-   desired hash and contains exactly nine entrypoints / ten invocations with no
-   app-release executable path.
-4. Run exactly one already-existing Push entrypoint from the fixed runtime with
-   the unchanged protected env file. Never print its URL or token.
-5. Run `prod_doctor.sh`, `prod_logs_summary.sh` and
-   `prod_validate_after_change.sh`; verify all existing monitors remain green.
-
-This migration does not authorize a production deploy, new monitor, retention
-execution, deletion, or any timer/service/monitor activation.
+Use [agent-operations.md](agent-operations.md) for current production diagnostics.
+Keep the operation's backup and evidence root-only. Review any later cleanup
+separately; a successful replacement is not permission to delete recovery data.
