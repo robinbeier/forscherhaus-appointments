@@ -33,6 +33,7 @@ jobs:
       ldap_guardrail_required: ${{ steps.filter.outputs.ldap_guardrail_required }}
       write_contract_booking: ${{ steps.filter.outputs.write_contract_booking }}
       write_contract_api: ${{ steps.filter.outputs.write_contract_api }}
+      root_deployment_required: ${{ steps.filter.outputs.root_deployment_required }}
 
     steps:
       - name: Git clone
@@ -310,6 +311,8 @@ jobs:
               - 'composer.lock'
               - 'index.php'
               - '.github/workflows/ci.yml'
+            root_deployment_required:
+              - '!docs/**/*.md'
 
   build-test:
     runs-on: ubuntu-latest
@@ -384,6 +387,9 @@ jobs:
         run: docker compose down -v --remove-orphans
 
   root-deployment-tests:
+    needs:
+      - changes
+    if: needs.changes.outputs.root_deployment_required == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

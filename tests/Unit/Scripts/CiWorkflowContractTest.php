@@ -113,9 +113,14 @@ class CiWorkflowContractTest extends TestCase
         );
 
         self::assertStringContainsString('--exclude-group root-deployment', $general);
+        $changesJob = $this->workflowJob('changes');
+        self::assertSame(
+            '${{ steps.filter.outputs.root_deployment_required }}',
+            $changesJob['outputs']['root_deployment_required'] ?? null,
+        );
         $rootJob = $this->workflowJob('root-deployment-tests');
-        self::assertArrayNotHasKey('needs', $rootJob);
-        self::assertArrayNotHasKey('if', $rootJob);
+        self::assertSame(['changes'], $rootJob['needs'] ?? null);
+        self::assertSame("needs.changes.outputs.root_deployment_required == 'true'", $rootJob['if'] ?? null);
         self::assertArrayNotHasKey('continue-on-error', $rootJob);
         $rootSteps = $this->namedSteps($rootJob);
         foreach ($rootSteps as $step) {
