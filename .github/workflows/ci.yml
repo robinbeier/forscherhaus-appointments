@@ -855,15 +855,14 @@ jobs:
     steps:
       - name: Git clone
         uses: actions/checkout@v6
+      # Report processing uses only PHP's XML extensions.
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: "8.4.1"
           coverage: none
-          extensions: gd
-          tools: composer:v2
-      - name: Install Composer dependencies
-        run: composer install --no-interaction --no-progress
+          extensions: dom, simplexml
+          tools: none
       - name: Download coverage shard unit artifacts
         uses: actions/download-artifact@v8
         with:
