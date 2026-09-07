@@ -1,6 +1,10 @@
 # Update Guide
 
-This page will guide you through the update procedure of your Easy!Appointments installation. You will need to follow the steps below in order to have successful results.
+For this fork, production updates use the artifact-based deployment path in
+[Deployment](deployment.md). This page is retained as historical upstream
+version-transition guidance; its direct file-replacement steps are not the
+production deployment procedure, and do not establish support for every old
+migration path in the current fork.
 
 If you get a `500 Internal Server Error` message then you must check the error log files, located in the storage/logs directory.
 
