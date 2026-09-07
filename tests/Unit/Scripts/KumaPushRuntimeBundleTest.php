@@ -6,47 +6,50 @@ namespace Tests\Unit\Scripts;
 
 use PHPUnit\Framework\TestCase;
 
-/**
- * Regression coverage for the root-controlled Kuma push runtime bundle.
- *
- * The executable checks deliberately use a root-prefix fixture. They exercise
- * the helper's trust and transaction boundaries without claiming that an
- * unprivileged test process can prove production uid/gid semantics.
- */
+/** Regression coverage for the immutable Kuma push runtime bundle. */
 final class KumaPushRuntimeBundleTest extends TestCase
 {
     private const MANIFEST = 'scripts/ops/config/kuma_push_runtime_bundle_v1.json';
-    private const HELPER = 'scripts/ops/libexec/kuma_push_runtime_v1.py';
-    private const CRON = '/etc/cron.d/fh-uptime-kuma-push';
+    private const CRON_SOURCE = 'scripts/ops/config/fh-uptime-kuma-push.cron';
     private const INSTALL_ROOT = '/usr/local/libexec/fh-kuma-push-runtime-v1';
 
-    public function testManifestBindsTheCompleteClosureAndNineEntryPoints(): void
+    public function testManifestBindsTheCompleteClosureAndCronContract(): void
     {
         $manifest = $this->manifest();
-
         self::assertSame('fh_kuma_push_runtime_bundle.v1', $manifest['schema'] ?? null);
         self::assertSame('v1', $manifest['runtime'] ?? null);
         self::assertSame(self::INSTALL_ROOT, $manifest['install_root'] ?? null);
-        self::assertSame(self::CRON, $manifest['cron_path'] ?? null);
+        self::assertSame('/etc/cron.d/fh-uptime-kuma-push', $manifest['cron_path'] ?? null);
+        self::assertSame(self::CRON_SOURCE, $manifest['cron_source'] ?? null);
+        self::assertSame(
+            $manifest['cron_sha256'] ?? null,
+            hash_file('sha256', $this->repoRoot() . '/' . self::CRON_SOURCE),
+        );
 
         $files = $manifest['files'] ?? null;
         self::assertIsArray($files);
         self::assertCount(15, $files);
-
         $sourcePaths = [];
         foreach ($files as $entry) {
             self::assertIsArray($entry);
-            self::assertArrayHasKey('source', $entry);
-            self::assertArrayHasKey('install', $entry);
             self::assertArrayHasKey('role', $entry);
-            self::assertArrayHasKey('sha256', $entry);
-            self::assertSame($entry['source'], $entry['install']);
-            self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/', (string) $entry['sha256']);
+            self::assertSame($entry['source'] ?? null, $entry['install'] ?? null);
+            self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/', (string) ($entry['sha256'] ?? ''));
+            $expectedRole = match (true) {
+                str_starts_with($entry['source'], 'scripts/ops/lib/') => 'shell_library',
+                str_starts_with($entry['source'], 'scripts/ops/kuma_push_') => 'entrypoint',
+                str_starts_with($entry['source'], 'scripts/release-gate/lib/') => 'pdf_gate_library',
+                $entry['source'] === 'scripts/release-gate/dashboard_release_gate.php' => 'pdf_gate',
+                default => null,
+            };
+            self::assertNotNull($expectedRole);
+            self::assertSame($expectedRole, $entry['role']);
             $sourcePaths[] = $entry['source'];
-            self::assertFileExists($this->repoRoot() . '/' . $entry['source']);
+            $source = $this->repoRoot() . '/' . $entry['source'];
+            self::assertFileExists($source);
             self::assertSame(
                 $entry['sha256'],
-                hash_file('sha256', $this->repoRoot() . '/' . $entry['source']),
+                hash_file('sha256', $source),
                 'Manifest hash drift: ' . $entry['source'],
             );
         }
@@ -60,6 +63,43 @@ final class KumaPushRuntimeBundleTest extends TestCase
         sort($entryPoints);
         self::assertCount(9, $entryPoints);
         self::assertCount(9, array_unique($entryPoints));
+        $cron = file_get_contents($this->repoRoot() . '/' . self::CRON_SOURCE);
+        self::assertIsString($cron);
+        $expectedCron = ['SHELL=/bin/bash', 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'];
+        $cronEntryPoints = [];
+        foreach (
+            [
+                ['host_services', '*', ''],
+                ['host_resources', '*', ''],
+                ['ops_jobs', '*/15', ''],
+                ['app_logs', '*', ''],
+                ['app_logs', '*', 'sleep 30; '],
+                ['php_fpm_logs', '*', ''],
+                ['pdf_renderer_logs', '*', ''],
+                ['pdf_export', '*/15', ''],
+                ['apache_scanner_activity', '*', ''],
+                ['backup_creation', '*/15', ''],
+            ]
+            as [$monitor, $minute, $delay]
+        ) {
+            $cronEntryPoints[] = 'scripts/ops/kuma_push_' . $monitor . '.sh';
+            $expectedCron[] =
+                $minute .
+                ' * * * * root ' .
+                $delay .
+                'KUMA_PUSH_ENV_FILE=/root/backups/uptime-kuma-push.env ' .
+                self::INSTALL_ROOT .
+                '/scripts/ops/kuma_push_' .
+                $monitor .
+                '.sh' .
+                ' >> /var/log/kuma_push_' .
+                $monitor .
+                '.log 2>&1';
+        }
+        $cronEntryPoints = array_values(array_unique($cronEntryPoints));
+        sort($cronEntryPoints);
+        self::assertSame($entryPoints, $cronEntryPoints);
+        self::assertSame(implode("\n", $expectedCron) . "\n", $cron);
         self::assertContains('scripts/ops/kuma_push_pdf_export.sh', $entryPoints);
         self::assertContains('scripts/ops/lib/kuma_push_common.sh', $sourcePaths);
         self::assertContains('scripts/ops/lib/app_log_classification.sh', $sourcePaths);
@@ -77,119 +117,6 @@ final class KumaPushRuntimeBundleTest extends TestCase
         self::assertStringNotContainsString('/var/www/html/easyappointments/scripts/release-gate', $script);
     }
 
-    public function testProductionWrapperPlanAndCommitBindingDoNotContactSsh(): void
-    {
-        $fixture = $this->wrapperFixture();
-
-        try {
-            $plan = $this->runWrapper($fixture, []);
-            self::assertSame(0, $plan['exit_code'], $plan['stderr']);
-            self::assertStringContainsString('mode          : plan-only', $plan['stdout']);
-            self::assertFileDoesNotExist($fixture['ssh_log']);
-
-            $wrongCommit = $this->runWrapper($fixture, [
-                '--execute',
-                '--confirm-live-write',
-                'ROB-489',
-                '--expected-commit',
-                str_repeat('b', 40),
-            ]);
-            self::assertNotSame(0, $wrongCommit['exit_code']);
-            self::assertStringContainsString('does not match', $wrongCommit['stderr']);
-            self::assertFileDoesNotExist($fixture['ssh_log']);
-
-            $unmerged = $this->runWrapper(array_merge($fixture, ['origin_main_commit' => str_repeat('c', 40)]), [
-                '--execute',
-                '--confirm-live-write',
-                'ROB-489',
-                '--expected-commit',
-                $fixture['commit'],
-            ]);
-            self::assertNotSame(0, $unmerged['exit_code']);
-            self::assertStringContainsString('origin/main does not match', $unmerged['stderr']);
-            self::assertFileDoesNotExist($fixture['ssh_log']);
-
-            $remoteDrift = $this->runWrapper(array_merge($fixture, ['remote_main_commit' => str_repeat('d', 40)]), [
-                '--execute',
-                '--confirm-live-write',
-                'ROB-489',
-                '--expected-commit',
-                $fixture['commit'],
-            ]);
-            self::assertNotSame(0, $remoteDrift['exit_code']);
-            self::assertStringContainsString('live origin/main does not match', $remoteDrift['stderr']);
-            self::assertFileDoesNotExist($fixture['ssh_log']);
-        } finally {
-            $this->removeDirectory($fixture['workspace']);
-        }
-    }
-
-    public function testProductionWrapperExecutesPreflightAndCleanupInOrder(): void
-    {
-        $fixture = $this->wrapperFixture();
-
-        try {
-            $result = $this->runWrapper($fixture, [
-                '--execute',
-                '--confirm-live-write',
-                'ROB-489',
-                '--expected-commit',
-                $fixture['commit'],
-            ]);
-            self::assertSame(0, $result['exit_code'], $result['stderr']);
-            self::assertStringContainsString('"status":"pass"', $result['stdout']);
-            self::assertStringContainsString('"mutation_performed":false', $result['stdout']);
-            self::assertStringContainsString('"bundle_installed":true', $result['stdout']);
-            self::assertSame(
-                ['mktemp', 'tar', 'inspect', 'execute', 'cleanup'],
-                file($fixture['ssh_log'], FILE_IGNORE_NEW_LINES),
-            );
-            self::assertSame(
-                ['show:' . $fixture['commit'], 'archive:' . $fixture['commit']],
-                file($fixture['git_log'], FILE_IGNORE_NEW_LINES),
-            );
-            self::assertSame("1\n", file_get_contents($fixture['git_env_log']));
-            self::assertSame(
-                ['safe'],
-                file($fixture['extract_log'], FILE_IGNORE_NEW_LINES),
-                'Root extraction must discard unsafe archived permissions under a fixed umask.',
-            );
-            self::assertFileDoesNotExist($fixture['stage_marker']);
-        } finally {
-            $this->removeDirectory($fixture['workspace']);
-        }
-    }
-
-    public function testProductionWrapperDisablesGitReplaceRefsForCommitArchive(): void
-    {
-        $wrapper = file_get_contents($this->repoRoot() . '/scripts/ops/prod_kuma_push_runtime_v1.sh');
-        self::assertIsString($wrapper);
-        self::assertStringContainsString('export GIT_NO_REPLACE_OBJECTS=1', $wrapper);
-        self::assertStringContainsString('git -C "$REPO_ROOT" archive', $wrapper);
-    }
-
-    public function testProductionWrapperRetainsStageAfterReadOnlyPreflightFailure(): void
-    {
-        $fixture = $this->wrapperFixture(preflightFailure: true);
-
-        try {
-            $result = $this->runWrapper($fixture, [
-                '--execute',
-                '--confirm-live-write',
-                'ROB-489',
-                '--expected-commit',
-                $fixture['commit'],
-            ]);
-            self::assertNotSame(0, $result['exit_code']);
-            self::assertStringContainsString('remote preflight failed', $result['stderr']);
-            self::assertSame(['mktemp', 'tar', 'inspect'], file($fixture['ssh_log'], FILE_IGNORE_NEW_LINES));
-            self::assertFileExists($fixture['stage_marker']);
-            self::assertStringNotContainsString('"bundle_installed":true', $result['stdout']);
-        } finally {
-            $this->removeDirectory($fixture['workspace']);
-        }
-    }
-
     public function testInstalledPdfRuntimeInvokesBundledGateWithSeparateAppRoot(): void
     {
         $fixture = $this->fixture();
@@ -200,10 +127,7 @@ final class KumaPushRuntimeBundleTest extends TestCase
         $curlLog = $workspace . '/curl.log';
         $envFile = $workspace . '/uptime-kuma-push.env';
         $credentials = $workspace . '/release-gate-admin.env';
-
         try {
-            $install = $this->runHelper($fixture['source'], $fixture['root'], true);
-            self::assertSame(0, $install['exit_code'], $install['stderr']);
             mkdir($stubBin, 0755, true);
             mkdir($appRoot . '/storage/logs/ops', 0755, true);
             file_put_contents($credentials, "USERNAME='fixture-user'\nPASSWORD='fixture-password'\n");
@@ -219,7 +143,6 @@ final class KumaPushRuntimeBundleTest extends TestCase
             );
             $this->writePdfPhpStub($stubBin . '/php', $phpLog);
             $this->writeCurlStub($stubBin . '/curl', $curlLog);
-
             $installedPdf = $fixture['root'] . self::INSTALL_ROOT . '/scripts/ops/kuma_push_pdf_export.sh';
             $result = $this->runCommand(['bash', $installedPdf], $this->repoRoot(), [
                 'PATH' => $stubBin . PATH_SEPARATOR . (getenv('PATH') ?: '/usr/bin:/bin'),
@@ -246,499 +169,6 @@ final class KumaPushRuntimeBundleTest extends TestCase
         }
     }
 
-    public function testDryRunReportsNineEntriesAndTenInvocationsWithoutMutation(): void
-    {
-        $fixture = $this->fixture();
-
-        try {
-            $before = $this->snapshot($fixture['root']);
-            $result = $this->runHelper($fixture['source'], $fixture['root']);
-
-            self::assertSame(0, $result['exit_code'], $result['stderr']);
-            $json = $this->jsonOutput($result['stdout']);
-            self::assertSame('pass', $json['status'] ?? null);
-            self::assertTrue($json['execution_ready'] ?? false);
-            self::assertFalse($json['mutation_performed'] ?? true);
-            self::assertSame(15, $json['bundle_files'] ?? null);
-            self::assertSame(9, $json['entrypoints'] ?? null);
-            self::assertSame(10, $json['cron_invocations'] ?? null);
-            self::assertSame($before, $this->snapshot($fixture['root']));
-        } finally {
-            $this->removeDirectory($fixture['workspace']);
-        }
-    }
-
-    public function testConfirmedExecuteInstallsTrustedFilesAndMigratesOnlyLegacyCalls(): void
-    {
-        $fixture = $this->fixture();
-
-        try {
-            $result = $this->runHelper($fixture['source'], $fixture['root'], true);
-            self::assertSame(0, $result['exit_code'], $result['stderr']);
-            $json = $this->jsonOutput($result['stdout']);
-            self::assertSame('pass', $json['status'] ?? null);
-            self::assertTrue($json['mutation_performed'] ?? false);
-
-            $installed = $fixture['root'] . self::INSTALL_ROOT;
-            foreach ($this->manifest()['files'] as $entry) {
-                $path = $installed . '/' . $entry['install'];
-                self::assertFileExists($path);
-                self::assertFalse(is_link($path));
-                self::assertSame(1, (int) (stat($path)['nlink'] ?? 0));
-                self::assertSame('0555', substr(sprintf('%o', (int) fileperms($path)), -4));
-                self::assertSame($entry['sha256'], hash_file('sha256', $path));
-            }
-
-            $cron = file_get_contents($fixture['root'] . self::CRON);
-            self::assertIsString($cron);
-            self::assertStringContainsString('# keep-this-byte', $cron);
-            self::assertStringContainsString('KUMA_PUSH_ENV_FILE=/etc/fh/uptime-kuma-push.env', $cron);
-            self::assertSame(10, substr_count($cron, self::INSTALL_ROOT . '/'));
-            self::assertStringNotContainsString('/var/www/html/easyappointments/scripts/ops/kuma_push_', $cron);
-
-            $recoveryRoot = $fixture['root'] . '/var/lib/fh-kuma-push-runtime-v1';
-            $backupPath = $recoveryRoot . '/rob-489-cron.before';
-            $recoveryPath = $recoveryRoot . '/rob-489-recovery.json';
-            self::assertFileExists($backupPath);
-            self::assertFileExists($recoveryPath);
-            self::assertSame($fixture['legacy_cron'], file_get_contents($backupPath));
-
-            $recovery = json_decode((string) file_get_contents($recoveryPath), true, 512, JSON_THROW_ON_ERROR);
-            self::assertIsArray($recovery);
-            self::assertSame('/etc/cron.d/fh-uptime-kuma-push', $recovery['cron_path'] ?? null);
-            self::assertSame('ROB-489', $recovery['issue'] ?? null);
-            self::assertSame('fh_kuma_push_runtime_recovery.v1', $recovery['schema'] ?? null);
-            self::assertSame(hash('sha256', (string) $fixture['legacy_cron']), $recovery['original_sha256'] ?? null);
-            self::assertSame(hash('sha256', (string) $cron), $recovery['desired_sha256'] ?? null);
-            self::assertSame(self::INSTALL_ROOT, $recovery['runtime_root'] ?? null);
-
-            $inspect = $this->runHelper($fixture['source'], $fixture['root']);
-            self::assertSame(0, $inspect['exit_code'], $inspect['stderr']);
-            $inspectJson = $this->jsonOutput($inspect['stdout']);
-            self::assertSame('pass', $inspectJson['status'] ?? null);
-            self::assertTrue($inspectJson['execution_ready'] ?? false);
-        } finally {
-            $this->removeDirectory($fixture['workspace']);
-        }
-    }
-
-    public function testInstalledRuntimeRequiresIntactRecoveryState(): void
-    {
-        $fixture = $this->fixture();
-
-        try {
-            $install = $this->runHelper($fixture['source'], $fixture['root'], true);
-            self::assertSame(0, $install['exit_code'], $install['stderr']);
-            $recoveryRoot = $fixture['root'] . '/var/lib/fh-kuma-push-runtime-v1';
-            $this->removeDirectory($recoveryRoot);
-
-            $inspect = $this->runHelper($fixture['source'], $fixture['root']);
-            self::assertNotSame(0, $inspect['exit_code']);
-            $json = $this->jsonOutput($inspect['stdout']);
-            self::assertSame('fail', $json['status'] ?? null);
-            self::assertFalse($json['execution_ready'] ?? true);
-            self::assertSame('recovery_missing', $json['reason'] ?? null);
-        } finally {
-            $this->removeDirectory($fixture['workspace']);
-        }
-    }
-
-    public function testInstalledRuntimeRejectsTamperedRecoveryMetadata(): void
-    {
-        $fixture = $this->fixture();
-
-        try {
-            $install = $this->runHelper($fixture['source'], $fixture['root'], true);
-            self::assertSame(0, $install['exit_code'], $install['stderr']);
-            $recoveryPath = $fixture['root'] . '/var/lib/fh-kuma-push-runtime-v1/rob-489-recovery.json';
-            $recovery = json_decode((string) file_get_contents($recoveryPath), true, 512, JSON_THROW_ON_ERROR);
-            self::assertIsArray($recovery);
-            $recovery['desired_sha256'] = str_repeat('0', 64);
-            file_put_contents($recoveryPath, json_encode($recovery, JSON_THROW_ON_ERROR) . PHP_EOL);
-            chmod($recoveryPath, 0600);
-
-            $inspect = $this->runHelper($fixture['source'], $fixture['root']);
-            self::assertNotSame(0, $inspect['exit_code']);
-            $json = $this->jsonOutput($inspect['stdout']);
-            self::assertSame('fail', $json['status'] ?? null);
-            self::assertFalse($json['execution_ready'] ?? true);
-            self::assertSame('recovery_invalid', $json['reason'] ?? null);
-        } finally {
-            $this->removeDirectory($fixture['workspace']);
-        }
-    }
-
-    public function testHashDriftIsFailClosed(): void
-    {
-        $fixture = $this->fixture();
-
-        try {
-            file_put_contents($fixture['source'] . '/scripts/ops/kuma_push_host_resources.sh', "tampered\n");
-            $result = $this->runHelper($fixture['source'], $fixture['root']);
-            self::assertNotSame(0, $result['exit_code']);
-            self::assertSame('fail', $this->jsonOutput($result['stdout'])['status'] ?? null);
-            self::assertFalse(is_dir($fixture['root'] . self::INSTALL_ROOT));
-        } finally {
-            $this->removeDirectory($fixture['workspace']);
-        }
-    }
-
-    public function testSymlinkSourceIsRejectedBeforeMutation(): void
-    {
-        $fixture = $this->fixture();
-
-        try {
-            $target = $fixture['source'] . '/scripts/ops/kuma_push_host_resources.sh';
-            unlink($target);
-            symlink('kuma_push_host_services.sh', $target);
-            $result = $this->runHelper($fixture['source'], $fixture['root']);
-            self::assertNotSame(0, $result['exit_code']);
-            self::assertSame('fail', $this->jsonOutput($result['stdout'])['status'] ?? null);
-            self::assertFalse(is_dir($fixture['root'] . self::INSTALL_ROOT));
-        } finally {
-            $this->removeDirectory($fixture['workspace']);
-        }
-    }
-
-    public function testSourceHardlinkIsRejectedBeforeDryRun(): void
-    {
-        $fixture = $this->fixture();
-
-        try {
-            $source = $fixture['source'] . '/scripts/ops/kuma_push_host_resources.sh';
-            $alias = $fixture['workspace'] . '/source-hardlink-alias';
-            if (!link($source, $alias)) {
-                self::markTestSkipped('Source hardlinks are unavailable on this filesystem.');
-            }
-            self::assertSame(2, (int) (stat($source)['nlink'] ?? 0));
-            $result = $this->runHelper($fixture['source'], $fixture['root']);
-            self::assertNotSame(0, $result['exit_code']);
-            self::assertSame('fail', $this->jsonOutput($result['stdout'])['status'] ?? null);
-            self::assertFalse(is_dir($fixture['root'] . self::INSTALL_ROOT));
-        } finally {
-            $this->removeDirectory($fixture['workspace']);
-        }
-    }
-
-    public function testGroupOrWorldWritableSourceIsRejectedBeforeDryRun(): void
-    {
-        $fixture = $this->fixture();
-
-        try {
-            $source = $fixture['source'] . '/scripts/ops/kuma_push_host_resources.sh';
-            chmod($source, 0666);
-            self::assertSame('0666', substr(sprintf('%o', (int) fileperms($source)), -4));
-            $result = $this->runHelper($fixture['source'], $fixture['root']);
-            self::assertNotSame(0, $result['exit_code']);
-            self::assertSame('fail', $this->jsonOutput($result['stdout'])['status'] ?? null);
-            self::assertFalse(is_dir($fixture['root'] . self::INSTALL_ROOT));
-        } finally {
-            $this->removeDirectory($fixture['workspace']);
-        }
-    }
-
-    public function testExternalHardlinkAfterInstallationBlocksFurtherInspection(): void
-    {
-        $fixture = $this->fixture();
-
-        try {
-            $install = $this->runHelper($fixture['source'], $fixture['root'], true);
-            self::assertSame(0, $install['exit_code'], $install['stderr']);
-            $installed = $fixture['root'] . self::INSTALL_ROOT . '/scripts/ops/kuma_push_host_resources.sh';
-            $alias = $fixture['workspace'] . '/installed-hardlink-alias';
-            if (!link($installed, $alias)) {
-                self::markTestSkipped('Installed-file hardlinks are unavailable on this filesystem.');
-            }
-            self::assertSame(2, (int) (stat($installed)['nlink'] ?? 0));
-            $cronPath = $fixture['root'] . self::CRON;
-            $cronBefore = file_get_contents($cronPath);
-            $result = $this->runHelper($fixture['source'], $fixture['root']);
-            self::assertNotSame(0, $result['exit_code']);
-            self::assertSame('fail', $this->jsonOutput($result['stdout'])['status'] ?? null);
-            self::assertSame($cronBefore, file_get_contents($cronPath));
-        } finally {
-            $this->removeDirectory($fixture['workspace']);
-        }
-    }
-
-    public function testAbnormalCronSetIsRejectedAndExistingTargetIsNotClobbered(): void
-    {
-        $fixture = $this->fixture();
-
-        try {
-            $cronPath = $fixture['root'] . self::CRON;
-            file_put_contents(
-                $cronPath,
-                str_replace('kuma_push_app_logs.sh', 'kuma_push_unknown.sh', file_get_contents($cronPath)),
-            );
-            $result = $this->runHelper($fixture['source'], $fixture['root']);
-            self::assertNotSame(0, $result['exit_code']);
-            self::assertSame('fail', $this->jsonOutput($result['stdout'])['status'] ?? null);
-
-            $this->removeDirectory($fixture['workspace']);
-            $fixture = $this->fixture();
-            $target = $fixture['root'] . self::INSTALL_ROOT . '/scripts/ops/kuma_push_host_services.sh';
-            mkdir(dirname($target), 0755, true);
-            file_put_contents($target, 'pre-existing different target');
-            $result = $this->runHelper($fixture['source'], $fixture['root'], true);
-            self::assertNotSame(0, $result['exit_code']);
-            self::assertSame('fail', $this->jsonOutput($result['stdout'])['status'] ?? null);
-            self::assertSame('pre-existing different target', file_get_contents($target));
-        } finally {
-            $this->removeDirectory($fixture['workspace']);
-        }
-    }
-
-    public function testPrePublicationCronDriftIsPreservedAndRetainsPublishedRuntime(): void
-    {
-        $fixture = $this->fixture();
-
-        try {
-            $cronPath = $fixture['root'] . self::CRON;
-            $legacy = file_get_contents($cronPath);
-            self::assertIsString($legacy);
-            $result = $this->runHelper($fixture['source'], $fixture['root'], true, [
-                'FH_KUMA_PUSH_RUNTIME_TEST_CONCURRENT_CRON_BEFORE_PUBLISH' => 'legacy_drift',
-            ]);
-            self::assertNotSame(0, $result['exit_code']);
-            $json = $this->jsonOutput($result['stdout']);
-            self::assertSame('fail', $json['status'] ?? null);
-            self::assertTrue($json['mutation_performed'] ?? false);
-            self::assertSame($legacy . "# concurrent-prepublication-change\n", file_get_contents($cronPath));
-            self::assertStringNotContainsString(self::INSTALL_ROOT . '/', (string) file_get_contents($cronPath));
-            self::assertDirectoryExists($fixture['root'] . self::INSTALL_ROOT);
-        } finally {
-            $this->removeDirectory($fixture['workspace']);
-        }
-    }
-
-    public function testPrePublicationInstalledCronRetainsThePublishedRuntime(): void
-    {
-        $fixture = $this->fixture();
-
-        try {
-            $cronPath = $fixture['root'] . self::CRON;
-            $legacy = file_get_contents($cronPath);
-            self::assertIsString($legacy);
-            $desired = str_replace(
-                '/var/www/html/easyappointments/scripts/ops/',
-                self::INSTALL_ROOT . '/scripts/ops/',
-                $legacy,
-            );
-            $result = $this->runHelper($fixture['source'], $fixture['root'], true, [
-                'FH_KUMA_PUSH_RUNTIME_TEST_CONCURRENT_CRON_BEFORE_PUBLISH' => 'installed',
-            ]);
-            self::assertNotSame(0, $result['exit_code']);
-            $json = $this->jsonOutput($result['stdout']);
-            self::assertSame('fail', $json['status'] ?? null);
-            self::assertSame('cron_changed', $json['reason'] ?? null);
-            self::assertTrue($json['mutation_performed'] ?? false);
-            self::assertSame($desired, file_get_contents($cronPath));
-            self::assertDirectoryExists($fixture['root'] . self::INSTALL_ROOT);
-        } finally {
-            $this->removeDirectory($fixture['workspace']);
-        }
-    }
-
-    public function testCronWriteFailureRollsBackInstalledBundleAndRedactsSensitiveValues(): void
-    {
-        $fixture = $this->fixture();
-
-        try {
-            $cronPath = $fixture['root'] . self::CRON;
-            $beforeCron = file_get_contents($cronPath);
-            self::assertIsString($beforeCron);
-            $beforeCronHash = hash('sha256', $beforeCron);
-            $result = $this->runHelper($fixture['source'], $fixture['root'], true, [
-                'FH_KUMA_PUSH_RUNTIME_TEST_FAIL_AFTER_CRON_REPLACE' => '1',
-            ]);
-            self::assertNotSame(0, $result['exit_code']);
-            $json = $this->jsonOutput($result['stdout']);
-            self::assertSame('fail', $json['status'] ?? null);
-            self::assertTrue($json['mutation_performed'] ?? false);
-            self::assertDirectoryExists($fixture['root'] . self::INSTALL_ROOT);
-            $afterCron = file_get_contents($cronPath);
-            self::assertSame($beforeCron, $afterCron);
-            self::assertSame($beforeCronHash, hash('sha256', (string) $afterCron));
-            foreach (
-                ['https://kuma.example/push/secret-monitor', 'super-secret-token', 'monitor-identity-42']
-                as $secret
-            ) {
-                self::assertStringNotContainsString($secret, $result['stdout'] . $result['stderr']);
-            }
-        } finally {
-            $this->removeDirectory($fixture['workspace']);
-        }
-    }
-
-    public function testCronDurabilityFailureRollsBackPublishedCronAndRetainsBundle(): void
-    {
-        $fixture = $this->fixture();
-
-        try {
-            $cronPath = $fixture['root'] . self::CRON;
-            $beforeCron = file_get_contents($cronPath);
-            self::assertIsString($beforeCron);
-            $result = $this->runHelper($fixture['source'], $fixture['root'], true, [
-                'FH_KUMA_PUSH_RUNTIME_TEST_FAIL_CRON_DURABILITY' => '1',
-            ]);
-            self::assertNotSame(0, $result['exit_code']);
-            $json = $this->jsonOutput($result['stdout']);
-            self::assertSame('fail', $json['status'] ?? null);
-            self::assertTrue($json['mutation_performed'] ?? false);
-            self::assertSame($beforeCron, file_get_contents($cronPath));
-            self::assertDirectoryExists($fixture['root'] . self::INSTALL_ROOT);
-        } finally {
-            $this->removeDirectory($fixture['workspace']);
-        }
-    }
-
-    public function testBundleDurabilityFailureTracksAndRetainsPublishedRuntime(): void
-    {
-        $fixture = $this->fixture();
-
-        try {
-            $cronPath = $fixture['root'] . self::CRON;
-            $beforeCron = file_get_contents($cronPath);
-            self::assertIsString($beforeCron);
-            $result = $this->runHelper($fixture['source'], $fixture['root'], true, [
-                'FH_KUMA_PUSH_RUNTIME_TEST_FAIL_BUNDLE_DURABILITY' => '1',
-            ]);
-            self::assertNotSame(0, $result['exit_code']);
-            $json = $this->jsonOutput($result['stdout']);
-            self::assertSame('fail', $json['status'] ?? null);
-            self::assertTrue($json['mutation_performed'] ?? false);
-            self::assertSame($beforeCron, file_get_contents($cronPath));
-            self::assertDirectoryExists($fixture['root'] . self::INSTALL_ROOT);
-        } finally {
-            $this->removeDirectory($fixture['workspace']);
-        }
-    }
-
-    public function testFailedCronRollbackRetainsRuntimeAndReportsMutation(): void
-    {
-        $fixture = $this->fixture();
-
-        try {
-            $cronPath = $fixture['root'] . self::CRON;
-            $beforeCron = file_get_contents($cronPath);
-            self::assertIsString($beforeCron);
-            $result = $this->runHelper($fixture['source'], $fixture['root'], true, [
-                'FH_KUMA_PUSH_RUNTIME_TEST_FAIL_AFTER_CRON_REPLACE' => '1',
-                'FH_KUMA_PUSH_RUNTIME_TEST_FAIL_CRON_ROLLBACK_DURABILITY' => '1',
-            ]);
-            self::assertNotSame(0, $result['exit_code']);
-            $json = $this->jsonOutput($result['stdout']);
-            self::assertSame('fail', $json['status'] ?? null);
-            self::assertSame('rollback_failed', $json['reason'] ?? null);
-            self::assertTrue($json['mutation_performed'] ?? false);
-            self::assertSame($beforeCron, file_get_contents($cronPath));
-            self::assertDirectoryExists($fixture['root'] . self::INSTALL_ROOT);
-        } finally {
-            $this->removeDirectory($fixture['workspace']);
-        }
-    }
-
-    public function testConcurrentCronChangeBlocksRollbackAndRetainsRuntime(): void
-    {
-        $fixture = $this->fixture();
-
-        try {
-            $cronPath = $fixture['root'] . self::CRON;
-            $beforeCron = file_get_contents($cronPath);
-            self::assertIsString($beforeCron);
-            $result = $this->runHelper($fixture['source'], $fixture['root'], true, [
-                'FH_KUMA_PUSH_RUNTIME_TEST_CONCURRENT_CRON_CHANGE' => '1',
-                'FH_KUMA_PUSH_RUNTIME_TEST_FAIL_AFTER_CRON_REPLACE' => '1',
-            ]);
-            self::assertNotSame(0, $result['exit_code']);
-            $json = $this->jsonOutput($result['stdout']);
-            self::assertSame('fail', $json['status'] ?? null);
-            self::assertSame('rollback_failed', $json['reason'] ?? null);
-            self::assertTrue($json['mutation_performed'] ?? false);
-            $afterCron = file_get_contents($cronPath);
-            self::assertIsString($afterCron);
-            self::assertNotSame($beforeCron, $afterCron);
-            self::assertStringContainsString('# concurrent-root-change', $afterCron);
-            self::assertDirectoryExists($fixture['root'] . self::INSTALL_ROOT);
-        } finally {
-            $this->removeDirectory($fixture['workspace']);
-        }
-    }
-
-    public function testRecoveryBackupTamperCannotDriveRollbackAfterCronPublication(): void
-    {
-        $helper = file_get_contents($this->repoRoot() . '/' . self::HELPER);
-        self::assertIsString($helper);
-        if (!str_contains($helper, 'FH_KUMA_PUSH_RUNTIME_TEST_MUTATE_RECOVERY_AFTER_CRON')) {
-            self::markTestSkipped('Recovery-after-publication test hook is not present yet.');
-        }
-        $fixture = $this->fixture();
-
-        try {
-            $cronPath = $fixture['root'] . self::CRON;
-            $legacy = file_get_contents($cronPath);
-            self::assertIsString($legacy);
-            $result = $this->runHelper($fixture['source'], $fixture['root'], true, [
-                'FH_KUMA_PUSH_RUNTIME_TEST_MUTATE_RECOVERY_AFTER_CRON' => '1',
-            ]);
-            self::assertNotSame(0, $result['exit_code']);
-            $json = $this->jsonOutput($result['stdout']);
-            self::assertSame('fail', $json['status'] ?? null);
-            self::assertSame('recovery_invalid', $json['reason'] ?? null);
-            self::assertTrue($json['mutation_performed'] ?? false);
-            self::assertSame($legacy, file_get_contents($cronPath));
-            self::assertDirectoryExists($fixture['root'] . self::INSTALL_ROOT);
-
-            $backup = $fixture['root'] . '/var/lib/fh-kuma-push-runtime-v1/rob-489-cron.before';
-            self::assertFileExists($backup);
-            self::assertNotSame($legacy, file_get_contents($backup));
-        } finally {
-            $this->removeDirectory($fixture['workspace']);
-        }
-    }
-
-    public function testConcurrentWriterDuringCronRestoreIsRetainedUnderRob489TempNamespace(): void
-    {
-        $helper = file_get_contents($this->repoRoot() . '/' . self::HELPER);
-        self::assertIsString($helper);
-        if (!str_contains($helper, 'FH_KUMA_PUSH_RUNTIME_TEST_CONCURRENT_CRON_DURING_RESTORE')) {
-            self::markTestSkipped('Concurrent-restore test hook is not present yet.');
-        }
-        $fixture = $this->fixture();
-
-        try {
-            $cronPath = $fixture['root'] . self::CRON;
-            $legacy = file_get_contents($cronPath);
-            self::assertIsString($legacy);
-            $result = $this->runHelper($fixture['source'], $fixture['root'], true, [
-                'FH_KUMA_PUSH_RUNTIME_TEST_CONCURRENT_CRON_BEFORE_PUBLISH' => 'legacy_drift',
-                'FH_KUMA_PUSH_RUNTIME_TEST_CONCURRENT_CRON_DURING_RESTORE' => '1',
-            ]);
-            self::assertNotSame(0, $result['exit_code']);
-            $json = $this->jsonOutput($result['stdout']);
-            self::assertSame('fail', $json['status'] ?? null);
-            self::assertSame('rollback_failed', $json['reason'] ?? null);
-            self::assertTrue($json['mutation_performed'] ?? false);
-            self::assertDirectoryExists($fixture['root'] . self::INSTALL_ROOT);
-
-            $liveCron = file_get_contents($cronPath);
-            self::assertSame($legacy . "# concurrent-prepublication-change\n", $liveCron);
-            self::assertStringNotContainsString('# concurrent-restore-change', (string) $liveCron);
-
-            $retained = false;
-            foreach (glob(dirname($cronPath) . '/.fh-uptime-kuma-push.rob489-*.tmp') ?: [] as $temporary) {
-                if (str_contains((string) file_get_contents($temporary), '# concurrent-restore-change')) {
-                    $retained = true;
-                    break;
-                }
-            }
-            self::assertTrue($retained, 'Concurrent writer B bytes must remain in the ROB-489 temp namespace.');
-        } finally {
-            $this->removeDirectory($fixture['workspace']);
-        }
-    }
-
     /** @return array<string, mixed> */
     private function manifest(): array
     {
@@ -746,11 +176,10 @@ final class KumaPushRuntimeBundleTest extends TestCase
         self::assertIsString($contents);
         $manifest = json_decode($contents, true, 512, JSON_THROW_ON_ERROR);
         self::assertIsArray($manifest);
-
         return $manifest;
     }
 
-    /** @return array{workspace:string,source:string,root:string,legacy_cron:string} */
+    /** @return array{workspace:string,source:string,root:string} */
     private function fixture(): array
     {
         $workspace = sys_get_temp_dir() . '/kuma-push-runtime-' . bin2hex(random_bytes(8));
@@ -759,192 +188,27 @@ final class KumaPushRuntimeBundleTest extends TestCase
         mkdir($source, 0755, true);
         mkdir($root . '/etc/cron.d', 0755, true);
         mkdir($root . '/usr/local/libexec', 0755, true);
-        mkdir($root . '/var/lib', 0755, true);
-        mkdir($root . '/run/lock', 0755, true);
-
         $manifest = $this->manifest();
-        $manifestTarget = $source . '/' . self::MANIFEST;
-        if (!is_dir(dirname($manifestTarget))) {
-            self::assertTrue(mkdir(dirname($manifestTarget), 0755, true));
-        }
-        self::assertTrue(copy($this->repoRoot() . '/' . self::MANIFEST, $manifestTarget));
-
-        $cronSource =
-            $manifest['cron_source'] ?? ($manifest['cron_template'] ?? 'scripts/ops/uptime-kuma-crontab.example');
-        self::assertIsString($cronSource);
-        $cronSourceTarget = $source . '/' . $cronSource;
-        if (!is_dir(dirname($cronSourceTarget))) {
-            self::assertTrue(mkdir(dirname($cronSourceTarget), 0755, true));
-        }
-        self::assertTrue(copy($this->repoRoot() . '/' . $cronSource, $cronSourceTarget));
-
-        foreach ($manifest['files'] as $entry) {
-            $sourcePath = $this->repoRoot() . '/' . $entry['source'];
-            $targetPath = $source . '/' . $entry['source'];
-            if (!is_dir(dirname($targetPath))) {
-                self::assertTrue(mkdir(dirname($targetPath), 0755, true));
+        foreach (array_merge([$manifest['cron_source']], array_column($manifest['files'], 'source')) as $relative) {
+            $target = $source . '/' . $relative;
+            if (!is_dir(dirname($target))) {
+                mkdir(dirname($target), 0755, true);
             }
-            self::assertTrue(copy($sourcePath, $targetPath), 'Unable to copy ' . $entry['source']);
+            self::assertTrue(copy($this->repoRoot() . '/' . $relative, $target));
         }
-        $helperTarget = $source . '/' . self::HELPER;
-        if (!is_dir(dirname($helperTarget))) {
-            self::assertTrue(mkdir(dirname($helperTarget), 0755, true));
+        $installedRoot = $root . self::INSTALL_ROOT;
+        foreach ($manifest['files'] as $entry) {
+            $target = $installedRoot . '/' . $entry['install'];
+            if (!is_dir(dirname($target))) {
+                mkdir(dirname($target), 0755, true);
+            }
+            self::assertTrue(copy($this->repoRoot() . '/' . $entry['source'], $target));
+            chmod($target, 0555);
         }
-        self::assertTrue(copy($this->repoRoot() . '/' . self::HELPER, $helperTarget));
-
-        $lines = [
-            '# keep-this-byte',
-            'SHELL=/bin/sh',
-            'KUMA_PUSH_ENV_FILE=/etc/fh/uptime-kuma-push.env',
-            '* * * * * /var/www/html/easyappointments/scripts/ops/kuma_push_host_services.sh',
-            '* * * * * /var/www/html/easyappointments/scripts/ops/kuma_push_host_resources.sh',
-            '*/15 * * * * /var/www/html/easyappointments/scripts/ops/kuma_push_ops_jobs.sh',
-            '*/15 * * * * /var/www/html/easyappointments/scripts/ops/kuma_push_backup_creation.sh',
-            '* * * * * /var/www/html/easyappointments/scripts/ops/kuma_push_app_logs.sh',
-            '* * * * * sleep 30; /var/www/html/easyappointments/scripts/ops/kuma_push_app_logs.sh',
-            '* * * * * /var/www/html/easyappointments/scripts/ops/kuma_push_php_fpm_logs.sh',
-            '* * * * * /var/www/html/easyappointments/scripts/ops/kuma_push_pdf_renderer_logs.sh',
-            '*/15 * * * * /var/www/html/easyappointments/scripts/ops/kuma_push_pdf_export.sh',
-            '* * * * * /var/www/html/easyappointments/scripts/ops/kuma_push_apache_scanner_activity.sh',
-            '',
-        ];
-        $legacyCron = implode(PHP_EOL, $lines);
-        file_put_contents($root . self::CRON, $legacyCron);
-
-        return [
-            'workspace' => $workspace,
-            'source' => $source,
-            'root' => $root,
-            'legacy_cron' => $legacyCron,
-        ];
-    }
-
-    /** @return array<string, mixed> */
-    private function wrapperFixture(bool $preflightFailure = false): array
-    {
-        $workspace = sys_get_temp_dir() . '/kuma-push-wrapper-' . bin2hex(random_bytes(8));
-        $bin = $workspace . '/bin';
-        $gitLog = $workspace . '/git.log';
-        $gitEnvLog = $workspace . '/git-env.log';
-        $sshLog = $workspace . '/ssh.log';
-        $extractLog = $workspace . '/extract.log';
-        $stageMarker = $workspace . '/stage-retained';
-        $stageRoot = $workspace . '/stage';
-        $commit = str_repeat('a', 40);
-        mkdir($bin, 0755, true);
-        file_put_contents($bin . '/uname', "#!/bin/sh\nprintf '%s\\n' Linux\n");
-        file_put_contents(
-            $bin . '/git',
-            <<<'SH'
-            #!/bin/sh
-            case "$*" in
-              *"rev-parse HEAD"*) printf '%s\n' "$FH_WRAPPER_COMMIT" ;;
-              *"rev-parse --verify refs/remotes/origin/main^{commit}"*) printf '%s\n' "$FH_WRAPPER_ORIGIN_MAIN_COMMIT" ;;
-              *"ls-remote --exit-code origin refs/heads/main"*) printf '%s\trefs/heads/main\n' "$FH_WRAPPER_REMOTE_MAIN_COMMIT" ;;
-              *"show $FH_WRAPPER_COMMIT:scripts/ops/config/kuma_push_runtime_bundle_v1.json"*)
-                printf 'show:%s\n' "$FH_WRAPPER_COMMIT" >> "$FH_WRAPPER_GIT_LOG"
-                cat "$FH_WRAPPER_REPO_ROOT/scripts/ops/config/kuma_push_runtime_bundle_v1.json"
-                ;;
-              *"archive --format=tar $FH_WRAPPER_COMMIT --"*)
-                printf 'archive:%s\n' "$FH_WRAPPER_COMMIT" >> "$FH_WRAPPER_GIT_LOG"
-                printf '%s\n' "${GIT_NO_REPLACE_OBJECTS:-unset}" >> "$FH_WRAPPER_GIT_ENV_LOG"
-                while [ "$#" -gt 0 ] && [ "$1" != '--' ]; do shift; done
-                [ "$#" -gt 0 ]
-                shift
-                exec /usr/bin/tar -C "$FH_WRAPPER_REPO_ROOT" -cf - "$@"
-                ;;
-              *) exit 0 ;;
-            esac
-            SH
-            ,
+        self::assertTrue(
+            copy($this->repoRoot() . '/' . $manifest['cron_source'], $root . '/etc/cron.d/fh-uptime-kuma-push'),
         );
-        file_put_contents(
-            $bin . '/ssh',
-            <<<'SH'
-            #!/bin/sh
-            set -eu
-            last=''
-            for arg in "$@"; do last="$arg"; done
-            stage_root="$FH_WRAPPER_STAGE_ROOT"
-            if printf '%s\n' "$last" | grep -q 'mktemp'; then
-              mkdir -p "$stage_root"
-              : > "$FH_WRAPPER_STAGE_MARKER"
-              printf '%s\n' mktemp >> "$FH_WRAPPER_SSH_LOG"
-              printf '%s\n' '/root/.fh-kuma-push-runtime-v1.ABCDEFGH'
-              exit 0
-            fi
-            if printf '%s\n' "$last" | grep -q '/usr/bin/tar --no-same-owner --no-same-permissions'; then
-              printf '%s\n' tar >> "$FH_WRAPPER_SSH_LOG"
-              case "$last" in
-                "umask 022; "*) printf '%s\n' safe >> "$FH_WRAPPER_EXTRACT_LOG" ;;
-                *) exit 71 ;;
-              esac
-              umask 022
-              tar --no-same-permissions -xf - -C "$stage_root"
-              exit 0
-            fi
-            if printf '%s\n' "$last" | grep -q -- '--source-root'; then
-              if printf '%s\n' "$last" | grep -q -- '--execute'; then
-                printf '%s\n' execute >> "$FH_WRAPPER_SSH_LOG"
-                printf '%s\n' '{"status":"pass","execution_ready":true,"bundle_installed":true,"cron_state":"installed"}'
-              else
-                printf '%s\n' inspect >> "$FH_WRAPPER_SSH_LOG"
-                if [ "${FH_WRAPPER_PREFLIGHT_FAILURE:-0}" = 1 ]; then
-                  printf '%s\n' '{"status":"fail","execution_ready":false}'
-                  exit 23
-                fi
-                printf '%s\n' '{"status":"pass","execution_ready":true,"mutation_performed":false}'
-              fi
-              exit 0
-            fi
-            if printf '%s\n' "$last" | grep -q 'rm -rf'; then
-              printf '%s\n' cleanup >> "$FH_WRAPPER_SSH_LOG"
-              rm -rf "$stage_root" "$FH_WRAPPER_STAGE_MARKER"
-              exit 0
-            fi
-            exit 70
-            SH
-            ,
-        );
-        chmod($bin . '/uname', 0755);
-        chmod($bin . '/git', 0755);
-        chmod($bin . '/ssh', 0755);
-
-        return [
-            'workspace' => $workspace,
-            'bin' => $bin,
-            'git_log' => $gitLog,
-            'git_env_log' => $gitEnvLog,
-            'extract_log' => $extractLog,
-            'ssh_log' => $sshLog,
-            'stage_marker' => $stageMarker,
-            'stage_root' => $stageRoot,
-            'commit' => $commit,
-            'preflight_failure' => $preflightFailure,
-        ];
-    }
-
-    /** @param array<string, mixed> $fixture @param list<string> $arguments */
-    private function runWrapper(array $fixture, array $arguments): array
-    {
-        return $this->runCommand(
-            array_merge(['bash', $this->repoRoot() . '/scripts/ops/prod_kuma_push_runtime_v1.sh'], $arguments),
-            $this->repoRoot(),
-            [
-                'PATH' => $fixture['bin'] . PATH_SEPARATOR . dirname(PHP_BINARY) . PATH_SEPARATOR . '/usr/bin:/bin',
-                'FH_WRAPPER_COMMIT' => $fixture['commit'],
-                'FH_WRAPPER_GIT_LOG' => $fixture['git_log'],
-                'FH_WRAPPER_GIT_ENV_LOG' => $fixture['git_env_log'],
-                'FH_WRAPPER_EXTRACT_LOG' => $fixture['extract_log'],
-                'FH_WRAPPER_ORIGIN_MAIN_COMMIT' => $fixture['origin_main_commit'] ?? $fixture['commit'],
-                'FH_WRAPPER_REPO_ROOT' => $this->repoRoot(),
-                'FH_WRAPPER_REMOTE_MAIN_COMMIT' => $fixture['remote_main_commit'] ?? $fixture['commit'],
-                'FH_WRAPPER_STAGE_ROOT' => $fixture['stage_root'],
-                'FH_WRAPPER_STAGE_MARKER' => $fixture['stage_marker'],
-                'FH_WRAPPER_SSH_LOG' => $fixture['ssh_log'],
-                'FH_WRAPPER_PREFLIGHT_FAILURE' => $fixture['preflight_failure'] ? '1' : '0',
-            ],
-        );
+        return ['workspace' => $workspace, 'source' => $source, 'root' => $root];
     }
 
     private function writePdfPhpStub(string $path, string $logPath): void
@@ -959,10 +223,8 @@ final class KumaPushRuntimeBundleTest extends TestCase
             "printf 'gate=%s RELEASE_GATE_REPO_ROOT=%s\\n' \"\$1\" \"\${RELEASE_GATE_REPO_ROOT:-}\" >> " .
             escapeshellarg($logPath) .
             "\n" .
-            "output=''\n" .
-            "for arg in \"\$@\"; do case \"\$arg\" in --output-json=*) output=\"\${arg#--output-json=}\" ;; esac; done\n" .
-            "[ -n \"\$output\" ]\n" .
-            "printf '%s\\n' '{\"checks\":[{\"name\":\"fixture_gate\",\"status\":\"pass\"}]}' > \"\$output\"\n";
+            "output=''\nfor arg in \"\$@\"; do case \"\$arg\" in --output-json=*) output=\"\${arg#--output-json=}\" ;; esac; done\n" .
+            "[ -n \"\$output\" ]\nprintf '%s\\n' '{\"checks\":[{\"name\":\"fixture_gate\",\"status\":\"pass\"}]}' > \"\$output\"\n";
         file_put_contents($path, $script);
         chmod($path, 0755);
     }
@@ -971,56 +233,6 @@ final class KumaPushRuntimeBundleTest extends TestCase
     {
         file_put_contents($path, "#!/bin/sh\nprintf '%s\\n' \"\$*\" >> " . escapeshellarg($logPath) . "\n");
         chmod($path, 0755);
-    }
-
-    /** @return array{exit_code:int,stdout:string,stderr:string} */
-    /** @param array<string, string> $env */
-    private function runHelper(string $source, string $root, bool $execute = false, array $env = []): array
-    {
-        $command = [
-            'python3',
-            '-I',
-            '-B',
-            $source . '/' . self::HELPER,
-            '--source-root',
-            $source,
-            '--root-prefix',
-            $root,
-        ];
-        if ($execute) {
-            $command[] = '--execute';
-            $command[] = '--confirm-live-write';
-            $command[] = 'ROB-489';
-        }
-
-        return $this->runCommand($command, $this->repoRoot(), $env);
-    }
-
-    /** @return array<string, mixed> */
-    private function jsonOutput(string $stdout): array
-    {
-        $json = json_decode(trim($stdout), true);
-        self::assertIsArray($json, 'Helper output must be one JSON object: ' . $stdout);
-
-        return $json;
-    }
-
-    /** @return array<string, string> */
-    private function snapshot(string $root): array
-    {
-        $files = [];
-        $iterator = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS),
-        );
-        foreach ($iterator as $file) {
-            if ($file->isFile()) {
-                $relative = substr($file->getPathname(), strlen($root));
-                $files[$relative] = hash_file('sha256', $file->getPathname());
-            }
-        }
-        ksort($files);
-
-        return $files;
     }
 
     /** @param list<string> $command @param array<string, string> $env */
@@ -1040,7 +252,6 @@ final class KumaPushRuntimeBundleTest extends TestCase
         $stderr = stream_get_contents($pipes[2]);
         fclose($pipes[1]);
         fclose($pipes[2]);
-
         return ['exit_code' => proc_close($process), 'stdout' => (string) $stdout, 'stderr' => (string) $stderr];
     }
 

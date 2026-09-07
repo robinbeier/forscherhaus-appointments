@@ -81,11 +81,6 @@ Script inventory:
 - `kuma_push_pdf_export.sh` runs the dashboard PDF release gate as a synthetic smoke
 - `kuma_push_apache_scanner_activity.sh` watches recent Apache access logs for common scanner probes and only alerts on actionable scanner activity
 - `lib/kuma_push_common.sh` provides shared env, curl, and log helpers
-- `prod_kuma_push_runtime_v1.sh` plans or performs the exact ROB-489 immutable
-  runtime installation and ten-invocation cron path migration over Tailscale;
-  default mode is local plan-only, while execute additionally binds local HEAD,
-  local origin/main and live origin/main to the same expected merge commit and
-  transfers the closed payload directly from that commit with `git archive`
 - `prod_kuma_monitoring_env_v1.sh` is local plan-only by default and provides
   separate exact-commit Inspect, no-clobber Helper-Install and single Env-Execute
   modes for ROB-490; the Execute path is the only supported post-bootstrap Env

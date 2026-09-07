@@ -49,8 +49,10 @@ setting before introducing another tool or scheduled job.
 ## Installed monitoring
 
 The [`kuma_push_host_resources.sh`](../../scripts/ops/kuma_push_host_resources.sh)
-source still contains an optional journald-retention branch, disabled by default.
-Its helper is no longer supplied by this repository; do not enable that branch.
+source no longer contains the retired journald-retention branch.
+Older installed bundles may still contain it, disabled by default; keep it
+disabled until a separately approved package replacement removes it. Its helper
+is no longer supplied by this repository.
 Do not remove an installed helper while an active monitor depends on it;
 review the installed dependency first. Keep the ordinary disk, memory, load, and other
 retention checks. Repository changes do not update the installed monitoring
