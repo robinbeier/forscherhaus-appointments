@@ -58,34 +58,40 @@ approval. The Root PHPUnit suite creates isolated fixed production paths only on
 a disposable Linux root runner and exercises identity, type, owner, mode,
 locking, cutoff, cap, marker, and replay behavior.
 
-## Separate Production Rollout
+## Operating the existing retention service
 
-The following is an ordered future runbook, not merge authorization:
+A read-only production check on 2026-09-07 confirmed that
+`fh-session-retention.timer` was enabled and active, its service had completed
+successfully, and `KUMA_SESSION_RETENTION_MONITOR_ENABLED=1` was configured.
+This is a dated observation, not a guarantee of current health. Repository
+changes do not install helpers, change the schedule, or authorize live writes.
 
-1. Confirm no deploy, dump, restore, replay, smoke, or other
-   cleanup is active. Run the standard read-only doctor and cleanup inventory.
-2. Install `scripts/ops/libexec/session_retention_v1.py` as the regular,
-   single-link, root-owned `0555` file
-   `/usr/local/libexec/fh-session-retention-v1`. Never execute the deploy-tree
-   copy as root. Copy both unit files from `scripts/ops/systemd/` to
-   `/etc/systemd/system/` as root-owned `0644`, run `systemd-analyze verify`,
-   then `daemon-reload`. Do **not** enable the timer.
-3. Run the repository wrapper in default dry-run mode. Retain the aggregate
-   result only. Stop on any blocked result or unknown file count.
-4. With a separate live-write GO, run one manual execute pass. Exit `75` with
-   `status=partial` means the bound, locked, or cap-limited work is incomplete;
-   no success marker is written. Re-inventory before deciding on another pass.
-5. After a `status=pass`, verify marker freshness, root disk/inodes, app health,
-   renderer/deep health, services, scanner posture, and Kuma raw status.
-6. Set `KUMA_SESSION_RETENTION_MONITOR_ENABLED=1` in the protected Kuma push
-   environment and verify the existing host-resources push remains green.
-7. Only after another explicit approval, enable and start
-   `fh-session-retention.timer`. Confirm the next trigger and that the service is
-   inactive between runs.
+The timer policy is daily at 03:37 UTC with up to 15 minutes randomized delay.
+The monitor treats a missing, invalid, or older-than-36-hours marker as critical
+when monitoring is enabled.
 
-The timer runs daily at 03:37 UTC with up to 15 minutes randomized delay. The
-monitor treats a missing, invalid, or older-than-36-hours marker as critical
-once monitoring is explicitly enabled.
+For routine inspection, use the default read-only wrapper above and the
+[cleanup inventory](production-cleanup-inventory.md). Check the timer's current
+state and next trigger, the service result, and marker freshness. The service
+should be inactive between runs. Retain aggregate results only; investigate
+blocked results or unknown file counts before considering an execute pass.
+
+A separately authorized manual pass uses the existing execute command above.
+Confirm no deploy, dump, restore, replay, smoke, or other cleanup is active.
+Exit `75` with `status=partial` means bounded, locked, or cap-limited work is
+incomplete; no success marker is written. Re-inventory before deciding on
+another pass. After `status=pass`, verify marker freshness, disk/inodes,
+application and renderer/deep health, service and scanner posture, and the
+sanitized status of the retained monitors using the
+[standard post-change validation](agent-operations.md).
+
+For a separately approved helper or unit update, preserve the installed
+regular, single-link, root-owned `0555`
+`/usr/local/libexec/fh-session-retention-v1` and root-owned `0644` units under
+`/etc/systemd/system/`. Never execute the deploy-tree copy as root. Validate
+changed units with `systemd-analyze verify` before `daemon-reload`, retain a
+reviewed rollback copy, and repeat dry-run and post-change validation. An
+update is not authorization to enable or restart the timer or alter monitoring.
 
 ## Rollback
 

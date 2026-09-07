@@ -35,7 +35,7 @@ This file stays intentionally short. It is a map, not a second runbook.
 | Production backup-set producer | `docs/ops/production-backup-set-producer.md` | Closed connection/dump authority, atomic set publication, protected handoff-to-attestation selection, disabled ROB-480 recurring continuity units, and no-gap legacy scheduler cutover. |
 | Production dump-producer admission | `docs/ops/production-dump-producer-admission.md` | Pinned single-producer registry, canonical manifest/attestation binding, on-demand read-only observation, and cleanup-inventory integration. |
 | Production legacy release hold | `docs/ops/production-legacy-release-hold.md` | Existing host-local hold for unverifiable legacy archives; retention protection after retirement of the one-time provisioning helper. |
-| Production session retention | `docs/ops/production-session-retention.md` | Fixed 24-hour policy, protected cleanup contract, disabled timer, monitoring, and rollout/rollback boundary. |
+| Production session retention | `docs/ops/production-session-retention.md` | Fixed 24-hour policy, protected cleanup contract, routine inspection, monitoring, and pause/recovery guidance. |
 | Production journald retention | `docs/ops/production-journald-retention.md` | Native journal rotation, aggregate inspection, and occasional approved manual cleanup. |
 | Canonical deploy state/result/evidence contract | `docs/deployment-run-v1.md` | Closed ROB-455 intent, lifecycle, child receipt, evidence, and future host-state boundary. |
 | Architecture boundaries | `docs/architecture-map.md` | Generated view of component boundaries. |
