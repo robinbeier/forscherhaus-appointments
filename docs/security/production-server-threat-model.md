@@ -233,7 +233,6 @@ Repo-only docs/scripts/tests:
 - ROB-395: Dieses Dokument reviewen und aktuell halten.
 - ROB-397: `prod_doctor.sh` um zusaetzliche redacted posture facts erweitern,
   falls ROB-396 sichere Klassen definiert.
-- Long-Horizon-Dokumentation fuer ROB-292 nach jedem Milestone aktualisieren.
 
 Read-only prod verification:
 
