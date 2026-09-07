@@ -70,7 +70,6 @@ class PrePrCiComposeReadinessTest extends TestCase
         #!/usr/bin/env bash
         set -euo pipefail
         CI_DOCKER_COMPOSE_PROJECT_NAME=fixture-project
-        PHPSTAN_REQUEST_CONTRACTS_L1_SCRIPT=phpstan:request-contracts:l1
         echo_section() { :; }
         ci_docker_compose() { echo "compose:\$*:project=\${CI_DOCKER_COMPOSE_PROJECT_NAME}" >>"\${LOG_PATH}"; return 17; }
         ci_docker_cleanup_stack() { echo "cleanup:project=\${CI_DOCKER_COMPOSE_PROJECT_NAME}" >>"\${LOG_PATH}"; }

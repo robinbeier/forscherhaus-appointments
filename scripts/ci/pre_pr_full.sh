@@ -10,11 +10,6 @@ BASE_REF="${PRE_PR_BASE_REF:-main}"
 RUN_COVERAGE="${PRE_PR_RUN_COVERAGE:-0}"
 REQUEST_CONTRACTS_L2_BLOCKING="${PRE_PR_REQUEST_CONTRACTS_L2_BLOCKING:-1}"
 REQUEST_CONTRACTS_L2_WARNED=0
-# Allow toolchain-upgrade branches to override composer script targets without forking this gate.
-PHPSTAN_APPLICATION_SCRIPT="${PRE_PR_PHPSTAN_APPLICATION_SCRIPT:-phpstan:application}"
-PHPSTAN_REQUEST_CONTRACTS_L1_SCRIPT="${PRE_PR_PHPSTAN_REQUEST_CONTRACTS_L1_SCRIPT:-phpstan:request-contracts:l1}"
-PHPSTAN_REQUEST_CONTRACTS_L2_SCRIPT="${PRE_PR_PHPSTAN_REQUEST_CONTRACTS_L2_SCRIPT:-phpstan:request-contracts:l2}"
-DEPTRAC_ANALYZE_SCRIPT="${PRE_PR_DEPTRAC_ANALYZE_SCRIPT:-deptrac:analyze}"
 INTEGRATION_SMOKE_BROWSER_BOOTSTRAP_TIMEOUT="${PRE_PR_INTEGRATION_SMOKE_BROWSER_BOOTSTRAP_TIMEOUT:-180}"
 INTEGRATION_SMOKE_BROWSER_OPEN_TIMEOUT="${PRE_PR_INTEGRATION_SMOKE_BROWSER_OPEN_TIMEOUT:-20}"
 CI_DOCKER_LOG_PREFIX="pre-pr-full"
@@ -99,7 +94,7 @@ require_cmd python3
 git_ci_refresh_base_ref_if_safe "$BASE_REF" "pre-pr-full"
 
 echo_section "Run quick pre-PR gate"
-SKIP_LOCAL_DEPS_BOOTSTRAP=1 PRE_PR_BASE_REF="$BASE_REF" PRE_PR_PHPSTAN_APPLICATION_SCRIPT="$PHPSTAN_APPLICATION_SCRIPT" bash ./scripts/ci/pre_pr_quick.sh
+SKIP_LOCAL_DEPS_BOOTSTRAP=1 PRE_PR_BASE_REF="$BASE_REF" bash ./scripts/ci/pre_pr_quick.sh
 
 # The quick gate owns and cleans up its own stack. Install the full-gate trap
 # before the first compose command that follows it, while still avoiding a
@@ -107,22 +102,22 @@ SKIP_LOCAL_DEPS_BOOTSTRAP=1 PRE_PR_BASE_REF="$BASE_REF" PRE_PR_PHPSTAN_APPLICATI
 trap cleanup_stack EXIT
 
 echo_section "Request contract static-analysis gate"
-ci_docker_compose run --rm php-fpm composer "$PHPSTAN_REQUEST_CONTRACTS_L1_SCRIPT"
+ci_docker_compose run --rm php-fpm composer phpstan:request-contracts:l1
 ci_docker_compose run --rm php-fpm composer test:request-contracts
 ci_docker_compose run --rm php-fpm php scripts/ci/check_request_contract_adoption.php
 if [[ "$REQUEST_CONTRACTS_L2_BLOCKING" == "1" ]]; then
-    ci_docker_compose run --rm php-fpm composer "$PHPSTAN_REQUEST_CONTRACTS_L2_SCRIPT"
+    ci_docker_compose run --rm php-fpm composer phpstan:request-contracts:l2
 else
-    if ! ci_docker_compose run --rm php-fpm composer "$PHPSTAN_REQUEST_CONTRACTS_L2_SCRIPT"; then
+    if ! ci_docker_compose run --rm php-fpm composer phpstan:request-contracts:l2; then
         REQUEST_CONTRACTS_L2_WARNED=1
-        echo "[pre-pr-full] WARN: composer ${PHPSTAN_REQUEST_CONTRACTS_L2_SCRIPT} failed (advisory override mode)." >&2
+        echo "[pre-pr-full] WARN: composer phpstan:request-contracts:l2 failed (advisory override mode)." >&2
         echo "[pre-pr-full] WARN: See storage/logs/ci/phpstan-request-contracts-l2.raw for details." >&2
         echo "[pre-pr-full] WARN: Remove PRE_PR_REQUEST_CONTRACTS_L2_BLOCKING=0 to restore strict local blocking." >&2
     fi
 fi
 
 echo_section "Deptrac architecture boundaries gate"
-ci_docker_compose run --rm php-fpm composer "$DEPTRAC_ANALYZE_SCRIPT"
+ci_docker_compose run --rm php-fpm composer deptrac:analyze
 python3 scripts/docs/generate_codeowners_from_map.py --check
 GITHUB_EVENT_NAME=pull_request GITHUB_BASE_REF="$BASE_REF" bash scripts/ci/run_deptrac_changed_gate.sh
 GITHUB_EVENT_NAME=pull_request GITHUB_BASE_REF="$BASE_REF" python3 scripts/ci/check_component_boundaries.py
