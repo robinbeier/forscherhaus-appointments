@@ -18,9 +18,6 @@ bash ./scripts/ldap/smoke.sh
 The default helper stack now uses the versioned `docker/ldap/vegardit` bootstrap fixtures, while the generated runtime
 state under `docker/openldap/{var,etc}` remains local-only and disposable.
 
-For the replacement validation that led to this default cutover, see the archived
-[LDAP parallel replacement spike](ldap-parallel-spike.md).
-
 By default, OpenLDAP is configured to run on `localhost:389`, so it can be accessed on the host machine from this
 address. In the internal Docker Compose network the equivalent address is `openldap:389`.
 
