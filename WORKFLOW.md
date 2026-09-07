@@ -233,13 +233,8 @@ those changes require their relevant checks and the full gate as appropriate.
 Docs-only local validation does not replace blocking CI, independent final-head
 review, or explicit authorization.
 
-Minimum expectation for merge-sensitive changes:
-
-```bash
-docker compose run --rm php-fpm composer test
-```
-
-For other review-ready PRs, run:
+When the full review-ready gate is required, run the command below. It already
+includes the main `composer test` suite through its quick-gate stage:
 
 ```bash
 PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh

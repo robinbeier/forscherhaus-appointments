@@ -46,9 +46,10 @@ Start here for most review-ready changes:
 
 ```bash
 ./scripts/setup-worktree.sh
-docker compose run --rm php-fpm composer test
 PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh
 ```
+
+The full gate includes the Composer test through its quick-gate stage.
 
 Faster local gate:
 

@@ -26,7 +26,6 @@
 
 <!-- Liste exakt die ausgefuehrten Kommandos -->
 <!-- Beispiel:
-docker compose run --rm php-fpm composer test
 PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh
 -->
 
