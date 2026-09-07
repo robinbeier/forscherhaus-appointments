@@ -60,10 +60,17 @@ contract; before upgrading older installed deployment tools, follow the
 Pausing the monitor does not alter old completed deployment records or authorize
 an installation of deployment tools.
 
-Post-change Kuma validation uses the catalog's monitor names and types, not the
-historical database IDs. A fresh reconstruction may assign different IDs. The
-catalog count is desired-state information; deployment post-gates do not treat
-an all-green monitor count as a release condition.
+After an authorized change to Kuma itself, manually compare the affected
+monitors in its dashboard with the catalog below by name and type, then verify
+their status and notification assignments. Historical database IDs are not
+identity: a fresh reconstruction may assign different IDs. This is an operator
+check for monitoring changes, not an automated deployment gate.
+
+`prod_validate_after_change.sh` still checks the monitoring endpoint and
+container, but does not validate the Kuma database, catalog, or heartbeat
+results. `prod_doctor.sh` reports observations without certifying the catalog.
+Application deployments rely on their direct checks; neither the catalog nor
+an all-green monitor count is an additional release condition.
 
 Repo desired monitor catalog:
 
