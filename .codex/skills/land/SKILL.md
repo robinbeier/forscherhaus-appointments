@@ -1,78 +1,46 @@
 ---
 name: land
-description: Drive an open PR from merge prep through merge by syncing the branch,
-    monitoring CI and review feedback, fixing issues when needed, and merging
-    once everything is green and mergeable.
+description: Drive an open PR from merge preparation through merge by syncing
+    the branch, processing CI and review feedback, and merging when authorized.
 ---
 
 # Land
 
-Use this skill only when merging is authorized. Follow the standard independent
-review path in `WORKFLOW.md`.
-
-## Goals
-
-- Keep the PR mergeable against `origin/main`.
-- Process CI and review feedback until no blocking issues remain.
-- Merge the PR and move the Linear issue to `Done`.
-
-## Authoritative Contract
-
-The state and exact-head invariants in the
-[agent workflow contract](../../contracts/agent-workflow.json) are
-machine-checked and authoritative. Keep the prose below consistent with that
-contract.
+Use only when merging is authorized. Follow the canonical independent-review
+path in [WORKFLOW.md](../../../WORKFLOW.md#pr-and-review-expectations).
 
 ## Workflow
 
-1. Confirm the current branch has an open PR and the worktree is clean.
-2. If local changes still exist, use [$commit](../commit/SKILL.md) and
-   [$push](../push/SKILL.md) first.
-3. If the branch is behind or conflicting with `origin/main`, use
-   [$pull](../pull/SKILL.md), then push the result.
-    - Any push after `Ready to Merge` immediately invalidates the landing
-      evidence. Move the Linear issue back to `In Review`, rerun exact-head CI
-      and an independent review of the delta and affected paths on the new head, and restore
-      `Ready to Merge` only after that evidence is green again.
-4. Follow the bounded PR follow-up loop in [WORKFLOW.md](../../../WORKFLOW.md#pr-follow-up)
-   until the PR is green, review-clean, and mergeable, or a blocker requires
-   human help.
-5. If review or CI findings require code changes:
-    - acknowledge them in GitHub where appropriate
-    - move the Linear issue to `In Progress` with [$linear](../linear/SKILL.md)
-    - update the workpad
-    - fix the code, commit, and push; after any fix/commit/push, return the
-      issue to `In Review` and rerun exact-head CI and update independent review for the new head
-      after checking the delta and affected paths before restoring `Ready to Merge`
-    - return immediately to the native PR follow-up loop for the new head
-      and collect its current CI and review evidence
-6. Once the PR is green, review-clean, and mergeable:
-    - read the current PR head, applicable blocking CI results, and review feedback
-    - require a review summary for that head from an independent reviewer;
-      include scope, outcome, and any risk-based specialist or substitution
-    - do not accept missing, pending, failed, or unexpectedly skipped blocking checks
-    - ensure substantive findings are fixed or rejected with a concrete rationale;
-      unresolved blocking reviews prevent landing
-    - confirm that the user authorized merging, not merely PR creation
-    - move an associated Linear issue to `Ready to Merge`
-    - keep the verified SHA for the compare-and-swap merge below
-7. Merge it explicitly:
-    - `gh pr merge --merge --match-head-commit <current_head_sha>`
-    - do not force `--delete-branch` from inside the worker worktree; local
-      workspace cleanup handles branch removal separately and avoids false
-      non-zero exits after a successful merge
-8. After merge:
-    - verify the merge commit and refreshed `origin/main`
-    - move the Linear issue to `Done`
-    - update the `## Codex Workpad` comment with merge result and final
-      validation summary
+1. Confirm an open PR and clean worktree. If local changes remain, use
+   [$commit](../commit/SKILL.md) and [$push](../push/SKILL.md). If the branch
+   is behind or conflicts with `origin/main`, use [$pull](../pull/SKILL.md),
+   then push the result.
+   Any push after `Ready to Merge` invalidates landing evidence; return the
+   issue to `In Review`, recheck exact-head CI, and obtain independent review
+   of the delta and affected paths.
+2. Follow the native, bounded [PR follow-up loop](../../../WORKFLOW.md#pr-follow-up)
+   until CI is green, review-clean, and mergeable, or a blocker needs human
+   help. Apply corrections through [$linear](../linear/SKILL.md), the workpad,
+   [$commit](../commit/SKILL.md), and [$push](../push/SKILL.md); then repeat the
+   new-head checks.
+3. Before landing, read the current PR head, blocking checks, and review
+   feedback. Apply all [pre-merge checks](../../../WORKFLOW.md#pr-and-review-expectations):
+   independent review is recorded for that head, substantive findings are
+   fixed or concretely rejected, checks are green and not unexpectedly skipped,
+   and the PR is mergeable. Confirm explicit merge authorization and move the
+   associated Linear issue to `Ready to Merge`.
+4. Capture the reviewed current SHA and merge with the compare-and-swap command:
 
-## Guardrails
+    ```bash
+    gh pr merge --merge --match-head-commit <current_head_sha>
+    ```
 
-- Do not enable auto-merge just to wait silently.
-- Do not merge with unresolved substantive review findings.
-- Broaden a delta review when scope or risk changed; record the new reviewed SHA.
-- Do not merge a later head than the one that was reviewed and passed
-  blocking CI.
-- If PR follow-up surfaces a real blocker, stop and report it clearly.
-- Keep the workpad compact and do not duplicate the PR URL there.
+    Do not queue auto-merge or use `--delete-branch` from a worker worktree.
+
+5. Verify the merge commit and refreshed `origin/main`, move the associated
+   Linear issue to `Done`, and update the `## Codex Workpad` with the result.
+
+Never merge unresolved substantive findings or a later head than the one whose
+blocking CI and independent review were verified. Keep the workpad compact and
+do not duplicate the PR URL there. Follow the canonical [Linear state and
+workpad rules](../linear/SKILL.md).
