@@ -301,6 +301,21 @@ older review covered code it never inspected.
 Treat both human findings and Codex-review findings as real review work until
 they are explicitly addressed or rejected with a clear rationale.
 
+### PR follow-up
+
+Use native `gh pr view` and `gh pr checks` commands for bounded follow-up,
+and `gh api` for review details and inline-thread resolution state. Inspect all
+issue comments, review submissions, and inline comments, collecting every
+page. Check unresolved threads again before landing, including previously seen
+findings; seeing an item is not resolving it. Address every substantive human or bot finding, or reject it with
+a concrete reason. Diagnose failed-run logs before retrying; retry only evidenced transient infrastructure
+failures, at most three times per head. Do not automatically rerun unexplained
+test failures. A new push invalidates CI and review evidence for the old head;
+recheck the new exact head and obtain independent review of the delta and
+affected paths. Continue follow-up within the authorized task and any agreed
+time limit. Do not leave a detached watcher running or add a new
+watcher wrapper.
+
 ## PR and Review Expectations
 
 The standard path requires one independent reviewer, either a read-only agent
