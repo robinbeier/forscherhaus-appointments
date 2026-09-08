@@ -26,11 +26,12 @@ contract.
 ## Steps
 
 1. Identify the current branch and confirm the worktree is clean.
-2. Run the required local validation for the current scope.
-    - Before marking the PR ready, prefer:
-        - `PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh`
-    - If that has already been run for the current diff, do not rerun it
-      gratuitously.
+2. Run the required local validation for the current scope according to the
+   behavior-based decision in
+   [`WORKFLOW.md`](../../../WORKFLOW.md#3-validate-locally). When that decision
+   requires the full review-ready gate, use:
+   `PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh`. If it has already
+   been run for the current diff, do not rerun it gratuitously.
 3. Push with upstream tracking if needed:
     - `git push -u origin HEAD`
 4. If the push is rejected because the branch is stale or non-fast-forward,

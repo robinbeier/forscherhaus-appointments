@@ -210,25 +210,47 @@ Use the narrowest relevant validation early, then the stronger gate before the
 PR is treated as ready. These evidence levels are deliberately distinct:
 
 - focused tests and the quick hook provide early developer feedback
-- the full local pre-PR gate establishes review readiness
+- the full local pre-PR gate establishes review readiness when required below
 - blocking GitHub CI plus independent review on the unchanged exact PR head establish
   merge readiness
 
 A successful quick hook or local full gate is never merge authorization by
 itself.
 
-For changes limited to prose, links, or historical documentation, check the
-complete proposed diff with `git diff --check origin/main...HEAD` against the
-current PR base; also use `git diff --cached --check` for staged changes before
-committing. Keep the existing formatting policy: the managed hook checks files
-covered by Prettier, while `.prettierignore` excludes `docs/`. Review Markdown
-readability directly for those excluded files; do not claim a formatter check
-for ignored files. Verify changed references against their canonical sources.
-This shortcut does not apply when a diff changes behavior,
-executable instructions, security or operating rules, or validation policy;
-those changes require their relevant checks and the full gate as appropriate.
-Docs-only local validation does not replace blocking CI, independent final-head
+Choose the local gate from the behavior changed, not from the file extension.
+Apply the highest-risk applicable rule when categories are mixed. For every
+category, run `git diff --check origin/main...HEAD` against the current PR base
+and `git diff --cached --check` for staged changes before committing. Review
+Markdown readability directly; `.prettierignore` excludes `docs/`, while the
+managed hook checks files covered by Prettier. Verify changed references
+against their canonical sources.
+
+- Prose, links, references, or formatting only: run
+  the checks above; no application or browser gate is needed.
+- Agent orientation, Linear routing, workpad, or PR instructions: run the
+  relevant existing contract tests,
+  `tests/Unit/Scripts/AgentWorkflowContractTest.php` and/or
+  `tests/Unit/Scripts/AgentDelegationContractTest.php`, and inspect every
+  affected command or rule. These targeted tests support the review; they do
+  not fully validate executable instruction semantics. Agent-process-only edits
+  may omit the full application/browser gate when no runtime, deployment, security, or executable behavior changes.
+- App, deployment, runtime, or security boundaries; executable behavior;
+  testing-policy changes; or unresolved uncertainty: run the relevant checks
+  and the full local pre-PR gate shown below.
+
+Docs/process validation does not replace blocking CI, independent final-head
 review, or explicit authorization.
+
+The two agent contract tests above can run without application bootstrap:
+
+```bash
+php vendor/bin/phpunit --no-configuration --bootstrap vendor/autoload.php \
+  tests/Unit/Scripts/AgentWorkflowContractTest.php \
+  tests/Unit/Scripts/AgentDelegationContractTest.php
+```
+
+This invocation is specific to those tests; application tests retain their
+normal bootstrap.
 
 When the full review-ready gate is required, run the command below. It already
 includes the main `composer test` suite through its quick-gate stage:

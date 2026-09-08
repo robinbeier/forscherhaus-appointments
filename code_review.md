@@ -73,7 +73,9 @@ Assess whether the executed validation actually proves the change is safe:
 
 - For bug fixes, prefer an appropriate regression test when feasible.
 - Check that the narrowest relevant tests were run.
-- For review-ready changes, expect the full pre-PR gate except for the bounded [docs-only local validation](WORKFLOW.md#3-validate-locally).
+- For review-ready changes, apply the behavior-based local validation decision
+  in [WORKFLOW.md](WORKFLOW.md#3-validate-locally); the highest-risk applicable
+  rule wins for mixed changes.
 - Flag missing negative-path or edge-case coverage when the change affects them.
 - Flag weak assertions that would let the bug survive.
 

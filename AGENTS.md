@@ -83,7 +83,9 @@ bash ./scripts/ci/pre_pr_quick.sh
 
 ## Validation Expectations
 
-- Before review, run the narrowest relevant checks plus the full pre-PR gate, except for the bounded [docs-only local validation](WORKFLOW.md#3-validate-locally).
+- Before review, follow the behavior-based local validation decision in
+  [WORKFLOW.md](WORKFLOW.md#3-validate-locally); the highest-risk applicable
+  rule wins for mixed changes.
 - Bei Bugfixes nach Moeglichkeit einen passenden Regressionstest ergaenzen.
 - Update docs when setup, behavior, validation expectations, or routing change.
 - CI truth lives in `.github/workflows/ci.yml`; do not duplicate long job lists here.
