@@ -788,10 +788,10 @@ class Booking extends EA_Controller
                 return;
             }
 
-            // If manage mode is TRUE then the following we should not consider the selected appointment when
-            // calculating the available time periods of the provider.
-
-            $exclude_appointment_id = $request_dto->manageMode ? $request_dto->appointmentId : null;
+            // Only the verified session authority may exclude an existing appointment.
+            $exclude_appointment_id = $request_dto->manageMode
+                ? $this->rescheduleAuthority()->verifiedAppointmentIdForRead($request_dto->appointmentId)
+                : null;
 
             // If the user has selected the "any-provider" option then we will need to search for an available provider
             // that will provide the requested service.
@@ -873,7 +873,9 @@ class Booking extends EA_Controller
             $provider_ids =
                 $provider_id === ANY_PROVIDER ? $this->search_providers_by_service($service_id) : [$provider_id];
 
-            $exclude_appointment_id = $manage_mode ? $appointment_id : null;
+            $exclude_appointment_id = $manage_mode
+                ? $this->rescheduleAuthority()->verifiedAppointmentIdForRead($appointment_id)
+                : null;
 
             // Get the service record.
             $service = $this->services_model->find($service_id);

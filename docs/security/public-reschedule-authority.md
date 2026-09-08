@@ -139,11 +139,29 @@ For every rejected existing-appointment request:
 - existing CAPTCHA, availability, overlap, buffer, provider-smoke, and
   booking-conflict behavior remains in force.
 
+## Public availability reads
+
+`POST /booking/get_available_hours` and `GET /booking/get_unavailable_dates`
+exclude an existing appointment only when `manage_mode` is true and the
+requested appointment ID matches the current session's verified authority.
+Both endpoints check the token/context digests, expiration, unconsumed state,
+and the current canonical snapshot using the same authority record as the
+write path. This also applies to the any-provider selection.
+
+Missing, malformed, expired, consumed, mismatched or state-drifted proof falls
+back to normal public availability: no existing appointment is excluded.
+Request IDs, hashes or token-shaped fields alone do not grant an exclusion.
+Reading availability does not issue, renew, consume or clear authority; the
+existing parent link and subsequent one-time write claim remain unchanged.
+Normal new-booking availability requires no reschedule authority. Final writes
+still perform their own locked authority and availability checks.
+
 ## API and operations boundary
 
 The authenticated REST API keeps its own Basic/Bearer authorization and is not
 granted or restricted by this public authority. Public reschedule authority is
-accepted only by `POST /booking/register` and cannot authorize REST API,
+consumed only by `POST /booking/register`; the availability reads described above
+may verify it without consuming it. It cannot authorize REST API,
 backoffice, cancellation, privacy, deployment, SSH, or production operations.
 
 Local and CI evidence may contain only pass/fail classes and aggregate test

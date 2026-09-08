@@ -176,6 +176,56 @@ class Reschedule_authority
     }
 
     /**
+     * Return the appointment that this session may exclude from public
+     * availability, without consuming, renewing or clearing its authority.
+     */
+    public function verifiedAppointmentIdForRead(?int $appointment_id): ?int
+    {
+        if ($appointment_id === null || $appointment_id <= 0) {
+            return null;
+        }
+
+        $token = session(self::SESSION_TOKEN_KEY);
+        $context = session(self::SESSION_CONTEXT_KEY);
+
+        if (
+            !is_string($token) ||
+            !preg_match('/^[A-Za-z0-9_-]{43}$/', $token) ||
+            !is_string($context) ||
+            !preg_match('/^[A-Za-z0-9_-]{43}$/', $context)
+        ) {
+            return null;
+        }
+
+        $row = $this->db->get_where(self::TABLE, ['token_digest' => $this->digest($token)])->row_array();
+
+        if (
+            empty($row) ||
+            $appointment_id !== (int) $row['appointment_id'] ||
+            !empty($row['consumed_at']) ||
+            strtotime((string) $row['expires_at']) <= time() ||
+            !hash_equals((string) $row['context_digest'], $this->digest($context))
+        ) {
+            return null;
+        }
+
+        try {
+            $state = $this->loadState($appointment_id, false);
+        } catch (RescheduleAuthorityException $exception) {
+            return null;
+        }
+
+        if (
+            $state->customerId !== (int) $row['customer_id'] ||
+            !hash_equals((string) $row['snapshot_digest'], $state->snapshotDigest)
+        ) {
+            return null;
+        }
+
+        return $state->appointmentId;
+    }
+
+    /**
      * Atomically consume the current session authority and bind it to the IDs
      * carried by the attempted update.
      */
