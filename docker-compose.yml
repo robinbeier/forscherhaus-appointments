@@ -81,7 +81,7 @@ services:
         environment:
             - NODE_ENV=production
         ports:
-            - '3003:3000'
+            - '127.0.0.1:3003:3000'
         shm_size: '1gb'
         healthcheck:
             test: ['CMD', 'curl', '-fsS', 'http://localhost:3000/healthz']
