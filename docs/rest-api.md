@@ -34,7 +34,10 @@ token-shaped values never grant update authority by themselves. REST API
 clients remain governed exclusively by Basic/Bearer authentication and should
 use `PUT /api/v1/appointments/:id` for authenticated updates. See
 [Public Reschedule Authority](security/public-reschedule-authority.md) for the
-public write-boundary contract.
+public authority contract. The public available-hours and unavailable-dates
+endpoints verify that same session authority before excluding the requested
+existing appointment. Invalid proof falls back to normal availability; reads
+do not consume or renew the authority.
 
 GET requests accept some parameter helpers that enable the sort, search, pagination and minification of the responses information. Take a look in the following examples:
 
