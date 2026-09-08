@@ -34,11 +34,9 @@ contract.
       evidence. Move the Linear issue back to `In Review`, rerun exact-head CI
       and an independent review of the delta and affected paths on the new head, and restore
       `Ready to Merge` only after that evidence is green again.
-4. Start or resume [$babysit-pr](../babysit-pr/SKILL.md) and keep it running
-   until one of these is true:
-    - the PR is green, review-clean, and mergeable
-    - new review or CI findings require changes
-    - a blocker requires human help
+4. Follow the bounded PR follow-up loop in [WORKFLOW.md](../../../WORKFLOW.md#pr-follow-up)
+   until the PR is green, review-clean, and mergeable, or a blocker requires
+   human help.
 5. If review or CI findings require code changes:
     - acknowledge them in GitHub where appropriate
     - move the Linear issue to `In Progress` with [$linear](../linear/SKILL.md)
@@ -46,7 +44,8 @@ contract.
     - fix the code, commit, and push; after any fix/commit/push, return the
       issue to `In Review` and rerun exact-head CI and update independent review for the new head
       after checking the delta and affected paths before restoring `Ready to Merge`
-    - return to the watcher only after that new-head evidence is available
+    - return immediately to the native PR follow-up loop for the new head
+      and collect its current CI and review evidence
 6. Once the PR is green, review-clean, and mergeable:
     - read the current PR head, applicable blocking CI results, and review feedback
     - require a review summary for that head from an independent reviewer;
@@ -75,5 +74,5 @@ contract.
 - Broaden a delta review when scope or risk changed; record the new reviewed SHA.
 - Do not merge a later head than the one that was reviewed and passed
   blocking CI.
-- If the watcher surfaces a real blocker, stop and report it clearly.
+- If PR follow-up surfaces a real blocker, stop and report it clearly.
 - Keep the workpad compact and do not duplicate the PR URL there.
