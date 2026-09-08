@@ -2,6 +2,7 @@
 # Run: python3 scripts/docs/generate_codeowners_from_map.py
 
 /.github/workflows/ci.yml @robinbeier
+/application/controllers/About.php @robinbeier
 /application/controllers/Account.php @robinbeier
 /application/controllers/Admins.php @robinbeier
 /application/controllers/Api_settings.php @robinbeier
