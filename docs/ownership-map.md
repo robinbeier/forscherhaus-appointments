@@ -90,7 +90,6 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
   - `application/controllers/Booking.php`
   - `application/views/pages/booking.php`
   - `assets/js/http/booking_http_client.js`
-  - `application/libraries/Email_messages.php`
   - `application/libraries/Reschedule_authority.php`
   - `assets/js/pages/booking.js`
   - `assets/js/pages/booking_webmcp.js`
@@ -102,7 +101,6 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
   - `assets/js/pages/booking.js` (exact_file)
   - `assets/js/pages/booking_webmcp.js` (exact_file)
   - `application/libraries/Availability.php` (exact_file)
-  - `application/libraries/Email_messages.php` (exact_file)
   - `application/libraries/Booking_request_dto_factory.php` (exact_file)
   - `application/libraries/Reschedule_authority.php` (exact_file)
 
@@ -141,6 +139,8 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
   - `application/controllers/Calendar.php`
   - `application/models/Appointments_model.php`
   - `assets/js/pages/calendar.js`
+  - `application/libraries/Notifications.php`
+  - `application/libraries/Email_messages.php`
 - Path rules:
   - `application/controllers/Calendar.php` (exact_file)
   - `application/controllers/Appointments.php` (exact_file)
@@ -160,6 +160,8 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
   - `assets/js/pages/blocked_periods.js` (exact_file)
   - `assets/js/components/appointments_modal.js` (exact_file)
   - `assets/js/components/unavailabilities_modal.js` (exact_file)
+  - `application/libraries/Notifications.php` (exact_file)
+  - `application/libraries/Email_messages.php` (exact_file)
 
 ### `dashboard-exports`
 
@@ -331,15 +333,16 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
 - Key files:
   - `application/libraries/Request_normalizer.php`
   - `application/libraries/Accounts.php`
-  - `application/libraries/Notifications.php`
 - Path rules:
   - `application/views/components/jquery_compat_inline.php` (exact_file)
   - `application/libraries/Accounts.php` (exact_file)
-  - `application/libraries/Notifications.php` (exact_file)
   - `application/libraries/Pdf_renderer.php` (exact_file)
   - `application/libraries/Request_normalizer.php` (exact_file)
   - `application/libraries/Timezones.php` (exact_file)
   - `application/models/Roles_model.php` (exact_file)
+  - `application/libraries/Ics_file.php` (exact_file)
+  - `application/libraries/Ics_provider.php` (exact_file)
+  - `application/libraries/Ics_calendar.php` (exact_file)
 
 ### `platform-quality-tooling`
 

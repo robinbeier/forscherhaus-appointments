@@ -161,10 +161,6 @@
           "match": "exact_file"
         },
         {
-          "path": "application/libraries/Email_messages.php",
-          "match": "exact_file"
-        },
-        {
           "path": "application/libraries/Booking_request_dto_factory.php",
           "match": "exact_file"
         },
@@ -177,7 +173,6 @@
         "application/controllers/Booking.php",
         "application/views/pages/booking.php",
         "assets/js/http/booking_http_client.js",
-        "application/libraries/Email_messages.php",
         "application/libraries/Reschedule_authority.php",
         "assets/js/pages/booking.js",
         "assets/js/pages/booking_webmcp.js"
@@ -239,7 +234,7 @@
     {
       "component_id": "scheduling-backoffice",
       "role": "Calendar & Scheduling",
-      "summary": "Backoffice scheduling operations, calendar interactions and appointment orchestration.",
+      "summary": "Backoffice scheduling operations, calendar interactions, appointment orchestration and appointment notification delivery.",
       "primary_handle": "@robinbeier",
       "secondary_handle": "@robinbeier",
       "ownership_mode": "single-owner",
@@ -319,12 +314,22 @@
         {
           "path": "assets/js/components/unavailabilities_modal.js",
           "match": "exact_file"
+        },
+        {
+          "path": "application/libraries/Notifications.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/libraries/Email_messages.php",
+          "match": "exact_file"
         }
       ],
       "key_files": [
         "application/controllers/Calendar.php",
         "application/models/Appointments_model.php",
-        "assets/js/pages/calendar.js"
+        "assets/js/pages/calendar.js",
+        "application/libraries/Notifications.php",
+        "application/libraries/Email_messages.php"
       ],
       "depends_on": [
         "integrations-sync",
@@ -793,10 +798,6 @@
           "match": "exact_file"
         },
         {
-          "path": "application/libraries/Notifications.php",
-          "match": "exact_file"
-        },
-        {
           "path": "application/libraries/Pdf_renderer.php",
           "match": "exact_file"
         },
@@ -811,12 +812,23 @@
         {
           "path": "application/models/Roles_model.php",
           "match": "exact_file"
+        },
+        {
+          "path": "application/libraries/Ics_file.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/libraries/Ics_provider.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/libraries/Ics_calendar.php",
+          "match": "exact_file"
         }
       ],
       "key_files": [
         "application/libraries/Request_normalizer.php",
-        "application/libraries/Accounts.php",
-        "application/libraries/Notifications.php"
+        "application/libraries/Accounts.php"
       ],
       "depends_on": []
     },
