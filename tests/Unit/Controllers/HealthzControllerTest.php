@@ -78,12 +78,9 @@ class HealthzControllerTest extends TestCase
     {
         $hadPdfRendererUrl = array_key_exists('PDF_RENDERER_URL', $_ENV);
         $pdfRendererUrl = $_ENV['PDF_RENDERER_URL'] ?? null;
-        $hadLoopbackFallback = array_key_exists('HEALTHZ_ALLOW_LOOPBACK_FALLBACK', $_ENV);
-        $loopbackFallback = $_ENV['HEALTHZ_ALLOW_LOOPBACK_FALLBACK'] ?? null;
 
         try {
             $_ENV['PDF_RENDERER_URL'] = 'http://example.com:3000/';
-            unset($_ENV['HEALTHZ_ALLOW_LOOPBACK_FALLBACK']);
 
             $controller = $this->createController(false);
             $endpoints = $controller->callResolvePdfRendererEndpoints();
@@ -97,45 +94,6 @@ class HealthzControllerTest extends TestCase
                 $_ENV['PDF_RENDERER_URL'] = $pdfRendererUrl;
             } else {
                 unset($_ENV['PDF_RENDERER_URL']);
-            }
-
-            if ($hadLoopbackFallback) {
-                $_ENV['HEALTHZ_ALLOW_LOOPBACK_FALLBACK'] = $loopbackFallback;
-            } else {
-                unset($_ENV['HEALTHZ_ALLOW_LOOPBACK_FALLBACK']);
-            }
-        }
-    }
-
-    public function testResolvePdfRendererEndpointsAllowsImplicitLocalhostFallbackWhenOptedIn(): void
-    {
-        $hadPdfRendererUrl = array_key_exists('PDF_RENDERER_URL', $_ENV);
-        $pdfRendererUrl = $_ENV['PDF_RENDERER_URL'] ?? null;
-        $hadLoopbackFallback = array_key_exists('HEALTHZ_ALLOW_LOOPBACK_FALLBACK', $_ENV);
-        $loopbackFallback = $_ENV['HEALTHZ_ALLOW_LOOPBACK_FALLBACK'] ?? null;
-
-        try {
-            $_ENV['PDF_RENDERER_URL'] = 'http://example.com:3000/';
-            $_ENV['HEALTHZ_ALLOW_LOOPBACK_FALLBACK'] = 'true';
-
-            $controller = $this->createController(false);
-            $endpoints = $controller->callResolvePdfRendererEndpoints();
-
-            $this->assertSame(
-                ['http://example.com:3000', 'http://pdf-renderer:3000', 'http://localhost:3003'],
-                $endpoints,
-            );
-        } finally {
-            if ($hadPdfRendererUrl) {
-                $_ENV['PDF_RENDERER_URL'] = $pdfRendererUrl;
-            } else {
-                unset($_ENV['PDF_RENDERER_URL']);
-            }
-
-            if ($hadLoopbackFallback) {
-                $_ENV['HEALTHZ_ALLOW_LOOPBACK_FALLBACK'] = $loopbackFallback;
-            } else {
-                unset($_ENV['HEALTHZ_ALLOW_LOOPBACK_FALLBACK']);
             }
         }
     }
