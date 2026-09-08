@@ -900,10 +900,6 @@
           "match": "exact_file"
         },
         {
-          "path": "scripts/ops/validate_deployment_contract_v1.php",
-          "match": "exact_file"
-        },
-        {
           "path": "scripts/release-gate",
           "match": "directory"
         },
@@ -937,7 +933,6 @@
         "scripts/ci/dashboard_integration_smoke.php",
         "scripts/ops/lib/DeployResultV1.php",
         "scripts/ops/lib/DeploymentContractV1.php",
-        "scripts/ops/validate_deployment_contract_v1.php",
         "scripts/release-gate/dashboard_release_gate.php",
         "scripts/release-gate/customers_ui_smoke.php",
         "scripts/release-gate/provider_ui_smoke.php"
