@@ -431,7 +431,8 @@ final class DeployStableResultTest extends TestCase
             WEBUSER="$(id -un)"
             rsync() {
               [[ "$1" == '-a' && "$2" == '--' ]]
-              cp -a -- "$3/." "$4/"
+              # Match rsync -a mode copying without claiming hardlink preservation.
+              cp -a --no-preserve=links -- "$3/." "$4/"
             }
             mkdir -p "$APP/storage/sessions" "$STAGE_ROOT/storage" "$fixture/outside"
             printf 'private\n' > "$APP/storage/sessions/ea_sessionaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -447,7 +448,7 @@ final class DeployStableResultTest extends TestCase
             printf 'stage\n' > "$STAGE_ROOT/storage/sessions-placeholder"
             mkdir -p "$STAGE_ROOT/storage/sessions"
             printf 'predeploy\n' > "$STAGE_ROOT/storage/sessions/ea_sessioncccccccccccccccccccccccccccccccc"
-            chmod 644 "$STAGE_ROOT/storage/sessions/ea_sessioncccccccccccccccccccccccccccccccc"
+            chmod 600 "$STAGE_ROOT/storage/sessions/ea_sessioncccccccccccccccccccccccccccccccc"
             prepare_zero_surprise_stage_runtime() { :; }
             REQUIRE_ZERO_SURPRISE=0
             prepare_predeploy_stage_permissions
@@ -469,7 +470,7 @@ final class DeployStableResultTest extends TestCase
 
         self::assertSame(0, $result['exit_code'], $result['stdout'] . $result['stderr']);
         self::assertSame(
-            "private=600\npublic=600\nforeign=644\nhardlink=644\nhardlink-alias=644\nordinary=644\ntarget=644\n",
+            "private=600\npublic=644\nforeign=644\nhardlink=644\nhardlink-alias=644\nordinary=644\ntarget=644\n",
             $result['stdout'],
         );
     }

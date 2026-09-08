@@ -771,19 +771,11 @@ sync_live_storage_to_stage() {
   sync_storage_payload "$APP/storage" "$STAGE_ROOT/storage"
 }
 
-normalize_stage_session_permissions() {
-  local stage_root="$1"
-
-  run_shell "if [[ -d '$stage_root/storage/sessions' ]]; then find -P '$stage_root/storage/sessions' -maxdepth 1 -type f -name 'ea_session*' -links 1 -exec chmod 600 {} +; fi" || return $?
-  return 0
-}
-
 prepare_predeploy_stage_permissions() {
   prepare_zero_surprise_stage_runtime || return $?
   run_shell "chown -R '$WEBUSER':'$WEBUSER' '$STAGE_ROOT'" || return $?
   run_shell "find '$STAGE_ROOT' -type d -exec chmod 755 {} +" || return $?
-  run_shell "find '$STAGE_ROOT' -type f -exec chmod 644 {} +" || return $?
-  normalize_stage_session_permissions "$STAGE_ROOT" || return $?
+  run_shell "find -P '$STAGE_ROOT' -path '$STAGE_ROOT/storage/sessions' -prune -o -type f -exec chmod 644 {} +" || return $?
   restore_runtime_script_permissions || return $?
   if [[ "$REQUIRE_ZERO_SURPRISE" -eq 1 ]]; then
     harden_and_verify_runtime_config "$STAGE_ROOT" || return $?
@@ -800,8 +792,7 @@ run_zero_surprise_predeploy_gate() {
 normalize_stage_permissions() {
   run_shell "chown -R '$WEBUSER':'$WEBUSER' '$STAGE_ROOT'" || return $?
   run_shell "find '$STAGE_ROOT' -type d -exec chmod 755 {} +" || return $?
-  run_shell "find '$STAGE_ROOT' -type f -exec chmod 644 {} +" || return $?
-  normalize_stage_session_permissions "$STAGE_ROOT" || return $?
+  run_shell "find -P '$STAGE_ROOT' -path '$STAGE_ROOT/storage/sessions' -prune -o -type f -exec chmod 644 {} +" || return $?
   restore_runtime_script_permissions || return $?
   return 0
 }

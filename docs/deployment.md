@@ -139,9 +139,9 @@ also requires an Apache reload. If PHP-FPM detection finds no unit, the
 - generated predeploy report validates
 - stage and current live runtime config permissions satisfy the fail-closed
   contract below after every generic ownership/mode pass
-- direct regular `ea_session*` files with one link under `storage/sessions`
-  are reset to mode `0600` after each generic stage permission pass; symlinks
-  and their targets are not followed
+- generic file permission passes exclude `storage/sessions`, preserving the
+  source modes copied by `rsync -a`; existing invalid session modes need the
+  separately authorized correction before deployment
 
 Archive extraction and the complete staged-file validation establish the release
 contents before the live switch. `--dry-run` prints the planned actions; use the
