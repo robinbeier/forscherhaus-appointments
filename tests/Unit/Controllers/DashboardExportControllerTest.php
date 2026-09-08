@@ -290,127 +290,6 @@ class DashboardExportControllerTest extends TestCase
         $this->assertArrayNotHasKey('notes', $mapped[0]);
     }
 
-    public function testBuildPrincipalPagesCreatesSingleEmptyPageWhenNoMetrics(): void
-    {
-        $controller = $this->createControllerWithThreshold(0.9);
-
-        $pages = $controller->callBuildPrincipalPages([]);
-
-        $this->assertCount(1, $pages);
-        $this->assertSame([], $pages[0]);
-    }
-
-    public function testBuildPrincipalPagesKeepsThreeMetricsOnFirstPage(): void
-    {
-        $controller = $this->createControllerWithThreshold(0.9);
-        $metrics = $this->createPrincipalMetrics(3);
-
-        $pages = $controller->callBuildPrincipalPages($metrics);
-
-        $this->assertCount(1, $pages);
-        $this->assertCount(3, $pages[0]);
-    }
-
-    public function testBuildPrincipalPagesUsesTwoPagesForSixteenMetrics(): void
-    {
-        $controller = $this->createControllerWithThreshold(0.9);
-        $metrics = $this->createPrincipalMetrics(16);
-
-        $pages = $controller->callBuildPrincipalPages($metrics);
-
-        $this->assertCount(2, $pages);
-        $this->assertCount(3, $pages[0]);
-        $this->assertCount(13, $pages[1]);
-    }
-
-    public function testBuildPrincipalPagesUsesThreePagesForTwentyMetrics(): void
-    {
-        $controller = $this->createControllerWithThreshold(0.9);
-        $metrics = $this->createPrincipalMetrics(20);
-
-        $pages = $controller->callBuildPrincipalPages($metrics);
-
-        $this->assertCount(3, $pages);
-        $this->assertCount(3, $pages[0]);
-        $this->assertCount(13, $pages[1]);
-        $this->assertCount(4, $pages[2]);
-    }
-
-    public function testBuildPrincipalOverviewPrecomputesCountersAndTopAttention(): void
-    {
-        $controller = $this->createControllerWithThreshold(0.9);
-        $metrics = [
-            [
-                'provider_name' => 'Teacher A',
-                'gap_to_threshold' => 4,
-                'has_capacity_gap' => true,
-                'has_plan' => true,
-                'has_explicit_target' => true,
-                'status_reasons' => ['booking_goal_missed', 'after_15_goal_missed', 'capacity_gap'],
-            ],
-            [
-                'provider_name' => 'Teacher B',
-                'gap_to_threshold' => 0,
-                'has_capacity_gap' => false,
-                'has_plan' => true,
-                'has_explicit_target' => true,
-                'status_reasons' => ['after_15_goal_missed'],
-            ],
-            [
-                'provider_name' => 'Teacher C',
-                'gap_to_threshold' => 0,
-                'has_capacity_gap' => true,
-                'has_plan' => true,
-                'has_explicit_target' => true,
-                'status_reasons' => ['capacity_gap'],
-            ],
-            [
-                'provider_name' => 'Teacher D',
-                'gap_to_threshold' => 0,
-                'has_capacity_gap' => false,
-                'has_plan' => true,
-                'has_explicit_target' => true,
-                'status_reasons' => [],
-            ],
-            [
-                'provider_name' => 'Teacher E',
-                'gap_to_threshold' => 0,
-                'has_capacity_gap' => false,
-                'has_plan' => false,
-                'has_explicit_target' => true,
-                'status_reasons' => [],
-            ],
-        ];
-        $summary = [
-            'booked_distinct_total_formatted' => '10',
-            'target_total_formatted' => '24',
-            'missing_parents_total' => 14,
-            'missing_parents_total_formatted' => '14',
-            'fill_rate' => 0.42,
-        ];
-
-        $overview = $controller->callBuildPrincipalOverview($metrics, $summary);
-
-        $this->assertSame(5, $overview['teachers_total']);
-        $this->assertSame(1, $overview['below_count']);
-        $this->assertSame(1, $overview['booking_goal_missed_count']);
-        $this->assertSame(2, $overview['after_15_goal_missed_count']);
-        $this->assertSame(2, $overview['capacity_gap_count']);
-        $this->assertSame(3, $overview['attention_count']);
-        $this->assertSame(3, $overview['in_target_count']);
-        $this->assertSame(4, $overview['gap_total']);
-        $this->assertSame('4', $overview['gap_total_formatted']);
-        $this->assertSame('3 / 5 Lehrkräfte im Buchungsziel', $overview['in_target_label']);
-        $this->assertSame('10', $overview['booked_distinct_formatted']);
-        $this->assertSame('24', $overview['target_total_formatted']);
-        $this->assertSame(14, $overview['missing_parents_total']);
-        $this->assertSame('14', $overview['missing_parents_total_formatted']);
-        $this->assertSame(0.42, $overview['fill_rate_value']);
-        $this->assertCount(3, $overview['top_attention']);
-        $this->assertSame('Teacher A', $overview['top_attention'][0]['provider_name']);
-        $this->assertSame($controller->callResolveCapacityGapLabel(), $overview['capacity_gap_label']);
-    }
-
     public function testBuildSummaryTracksFallbackTargetAndThresholdCounters(): void
     {
         $controller = $this->createControllerWithThreshold(0.9);
@@ -420,6 +299,7 @@ class DashboardExportControllerTest extends TestCase
                 [
                     'target' => 10,
                     'booked' => 6,
+                    'booked_appointments' => 3,
                     'open' => 4,
                     'needs_attention' => true,
                     'is_target_fallback' => true,
@@ -429,6 +309,7 @@ class DashboardExportControllerTest extends TestCase
                 [
                     'target' => 8,
                     'booked' => 8,
+                    'booked_appointments' => 8,
                     'open' => 0,
                     'needs_attention' => false,
                     'is_target_fallback' => false,
@@ -438,6 +319,7 @@ class DashboardExportControllerTest extends TestCase
                 [
                     'target' => 0,
                     'booked' => 0,
+                    'booked_appointments' => 0,
                     'open' => 0,
                     'needs_attention' => false,
                     'is_target_fallback' => false,
@@ -453,6 +335,8 @@ class DashboardExportControllerTest extends TestCase
         $this->assertSame('18', $summary['target_total_formatted']);
         $this->assertSame(14, $summary['booked_total']);
         $this->assertSame('14', $summary['booked_total_formatted']);
+        $this->assertSame(11, $summary['appointment_count_total']);
+        $this->assertSame('11', $summary['appointment_count_total_formatted']);
         $this->assertSame(4, $summary['open_total']);
         $this->assertSame('4', $summary['open_total_formatted']);
         $this->assertSame(1, $summary['attention_count']);
@@ -462,10 +346,33 @@ class DashboardExportControllerTest extends TestCase
         $this->assertSame(2, $summary['with_plan_count']);
         $this->assertSame(3, $summary['missing_to_threshold_total']);
         $this->assertSame('3', $summary['missing_to_threshold_total_formatted']);
-        $this->assertSame(4, $summary['missing_parents_total']);
-        $this->assertSame('4', $summary['missing_parents_total_formatted']);
+        $this->assertArrayNotHasKey('missing_parents_total', $summary);
+        $this->assertArrayNotHasKey('booked_distinct_total', $summary);
         $this->assertSame(1, $summary['providers_below_threshold']);
         $this->assertEqualsWithDelta(14 / 18, $summary['fill_rate'], 0.0001);
+    }
+
+    public function testBuildSummaryDoesNotInventAppointmentCountWhenAnyMetricLacksIt(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+
+        $summary = $controller->callBuildSummary(
+            [['target' => 10, 'booked' => 6, 'booked_appointments' => 4], ['target' => 8, 'booked' => 8]],
+            0.9,
+        );
+
+        $this->assertNull($summary['appointment_count_total']);
+        $this->assertSame('—', $summary['appointment_count_total_formatted']);
+    }
+
+    public function testBuildSummaryUsesZeroAppointmentCountForEmptyMetrics(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+
+        $summary = $controller->callBuildSummary([], 0.9);
+
+        $this->assertSame(0, $summary['appointment_count_total']);
+        $this->assertSame('0', $summary['appointment_count_total_formatted']);
     }
 
     public function testSortPrincipalMetricsForReportPrioritizesSharedStatusReasonsAndSeverity(): void
@@ -476,6 +383,11 @@ class DashboardExportControllerTest extends TestCase
             [
                 'provider_name' => 'Capacity Only',
                 'gap_to_threshold' => 8,
+                'target' => 12,
+                'has_plan' => true,
+                'slots_planned_raw' => 10,
+                'has_explicit_target' => true,
+                'has_capacity_gap' => true,
                 'after_15_percent' => null,
                 'after_15_evaluable' => false,
                 'status_reasons' => ['capacity_gap'],
@@ -483,6 +395,7 @@ class DashboardExportControllerTest extends TestCase
             [
                 'provider_name' => 'After 15 High',
                 'gap_to_threshold' => 0,
+                'has_explicit_target' => true,
                 'after_15_percent' => 31.0,
                 'after_15_evaluable' => true,
                 'status_reasons' => ['after_15_goal_missed'],
@@ -490,6 +403,7 @@ class DashboardExportControllerTest extends TestCase
             [
                 'provider_name' => 'Booking Only',
                 'gap_to_threshold' => 3,
+                'has_explicit_target' => true,
                 'after_15_percent' => 45.0,
                 'after_15_evaluable' => true,
                 'status_reasons' => ['booking_goal_missed'],
@@ -497,6 +411,7 @@ class DashboardExportControllerTest extends TestCase
             [
                 'provider_name' => 'Combined Low Gap',
                 'gap_to_threshold' => 2,
+                'has_explicit_target' => true,
                 'after_15_percent' => 12.0,
                 'after_15_evaluable' => true,
                 'status_reasons' => ['booking_goal_missed', 'after_15_goal_missed'],
@@ -504,6 +419,7 @@ class DashboardExportControllerTest extends TestCase
             [
                 'provider_name' => 'Combined High Gap',
                 'gap_to_threshold' => 5,
+                'has_explicit_target' => true,
                 'after_15_percent' => 24.0,
                 'after_15_evaluable' => true,
                 'status_reasons' => ['booking_goal_missed', 'after_15_goal_missed'],
@@ -511,6 +427,7 @@ class DashboardExportControllerTest extends TestCase
             [
                 'provider_name' => 'After 15 Low',
                 'gap_to_threshold' => 0,
+                'has_explicit_target' => true,
                 'after_15_percent' => 11.0,
                 'after_15_evaluable' => true,
                 'status_reasons' => ['after_15_goal_missed'],
@@ -518,6 +435,7 @@ class DashboardExportControllerTest extends TestCase
             [
                 'provider_name' => 'All Good',
                 'gap_to_threshold' => 0,
+                'has_explicit_target' => true,
                 'after_15_percent' => 40.0,
                 'after_15_evaluable' => true,
                 'status_reasons' => [],
@@ -526,14 +444,81 @@ class DashboardExportControllerTest extends TestCase
 
         $this->assertSame(
             [
+                'Capacity Only',
                 'Combined High Gap',
-                'Combined Low Gap',
                 'Booking Only',
+                'Combined Low Gap',
                 'After 15 Low',
                 'After 15 High',
-                'Capacity Only',
                 'All Good',
             ],
+            array_column($sorted, 'provider_name'),
+        );
+    }
+
+    public function testPrincipalSortingPutsOfferIssuesBeforeBookingLateUnknownAndReachedRows(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+
+        $sorted = $controller->callSortPrincipalMetricsForReport([
+            [
+                'provider_name' => 'Reached',
+                'target' => 10,
+                'has_plan' => true,
+                'slots_planned_raw' => 10,
+                'has_explicit_target' => true,
+                'status_reasons' => [],
+            ],
+            [
+                'provider_name' => 'Booking gap',
+                'target' => 10,
+                'has_plan' => true,
+                'slots_planned_raw' => 10,
+                'has_explicit_target' => true,
+                'gap_to_threshold' => 2,
+                'status_reasons' => ['booking_goal_missed'],
+            ],
+            [
+                'provider_name' => 'No plan',
+                'target' => 10,
+                'has_plan' => false,
+                'slots_planned_raw' => null,
+                'has_explicit_target' => true,
+                'gap_to_threshold' => 4,
+                'status_reasons' => [],
+            ],
+            [
+                'provider_name' => 'Capacity gap',
+                'target' => 10,
+                'has_plan' => true,
+                'slots_planned_raw' => 10,
+                'has_explicit_target' => true,
+                'has_capacity_gap' => true,
+                'gap_to_threshold' => 4,
+                'status_reasons' => [],
+            ],
+            [
+                'provider_name' => 'Late warning',
+                'target' => 10,
+                'has_plan' => true,
+                'slots_planned_raw' => 10,
+                'has_explicit_target' => true,
+                'after_15_percent' => 10.0,
+                'after_15_evaluable' => true,
+                'status_reasons' => ['after_15_goal_missed'],
+            ],
+            [
+                'provider_name' => 'Automatic target',
+                'target' => 10,
+                'is_target_fallback' => true,
+                'has_plan' => true,
+                'slots_planned_raw' => 10,
+                'status_reasons' => [],
+            ],
+        ]);
+
+        $this->assertSame(
+            ['Capacity gap', 'No plan', 'Booking gap', 'Late warning', 'Automatic target', 'Reached'],
             array_column($sorted, 'provider_name'),
         );
     }
@@ -725,6 +710,30 @@ class DashboardExportControllerTest extends TestCase
         $this->assertSame('Klassengröße', $mapped[1]['target_origin_label']);
     }
 
+    public function testMapMetricsForViewPreservesReliableAppointmentCountSeparatelyFromBookedMetric(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+
+        $mapped = $controller->callMapMetricsForView(
+            [
+                [
+                    'provider_id' => 42,
+                    'provider_name' => 'Fallback Teacher',
+                    'target' => 12,
+                    'booked' => 9,
+                    'booked_appointments' => 99,
+                    'open' => 3,
+                    'fill_rate' => 0.75,
+                ],
+            ],
+            0.9,
+        );
+
+        $this->assertSame(9, $mapped[0]['booked_raw']);
+        $this->assertSame(99, $mapped[0]['booked_appointments_raw']);
+        $this->assertSame('99', $mapped[0]['booked_appointments_formatted']);
+    }
+
     private function createControllerWithThreshold(float $configuredThreshold, mixed $pdfDebugDumpFlag = false): object
     {
         $dashboardMetrics = new class extends Dashboard_metrics {
@@ -772,11 +781,6 @@ class DashboardExportControllerTest extends TestCase
                 return $this->buildProviderPreparationAppointmentPages($appointments);
             }
 
-            public function callBuildPrincipalPages(array $metrics): array
-            {
-                return $this->buildPrincipalPages($metrics);
-            }
-
             public function callBuildPdfStreamOptions(string $debugDumpPath): array
             {
                 return $this->buildPdfStreamOptions($debugDumpPath);
@@ -795,11 +799,6 @@ class DashboardExportControllerTest extends TestCase
             public function callMapMetricsForView(array $metrics, float $threshold): array
             {
                 return $this->mapMetricsForView($metrics, $threshold);
-            }
-
-            public function callBuildPrincipalOverview(array $metrics, array $summary): array
-            {
-                return $this->buildPrincipalOverview($metrics, $summary);
             }
 
             public function callSortPrincipalMetricsForReport(array $metrics): array
@@ -857,21 +856,5 @@ class DashboardExportControllerTest extends TestCase
         }
 
         return $appointments;
-    }
-
-    private function createPrincipalMetrics(int $count): array
-    {
-        $metrics = [];
-
-        for ($index = 0; $index < $count; $index++) {
-            $metrics[] = [
-                'provider_id' => $index + 1,
-                'provider_name' => 'Teacher ' . $index,
-                'gap_to_threshold' => 0,
-                'fill_ratio' => 1.0,
-            ];
-        }
-
-        return $metrics;
     }
 }

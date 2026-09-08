@@ -254,6 +254,8 @@ class DashboardMetricsTest extends TestCase
 
         $this->assertSame(5, $metricsByProvider[10]['booked']);
         $this->assertSame(13, $metricsByProvider[11]['booked']);
+        $this->assertSame(5, $metricsByProvider[10]['booked_appointments']);
+        $this->assertSame(13, $metricsByProvider[11]['booked_appointments']);
         $this->assertSame(58, $metricsByProvider[10]['slots_planned']);
         $this->assertFalse($metricsByProvider[10]['has_capacity_gap']);
         $this->assertTrue($metricsByProvider[10]['after_15_evaluable']);
@@ -624,6 +626,8 @@ class DashboardMetricsTest extends TestCase
 
         $this->assertCount(1, $metrics);
         $this->assertSame(8, $metrics[0]['target']);
+        $this->assertSame(4, $metrics[0]['booked']);
+        $this->assertSame(99, $metrics[0]['booked_appointments']);
         $this->assertTrue($metrics[0]['is_target_fallback']);
         $this->assertSame(5, $metrics[0]['slots_planned']);
         $this->assertSame(8, $metrics[0]['slots_required']);
