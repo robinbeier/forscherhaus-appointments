@@ -41,7 +41,7 @@ contract.
     - a blocker requires human help
 5. If review or CI findings require code changes:
     - acknowledge them in GitHub where appropriate
-    - move the Linear issue to `Rework` with [$linear](../linear/SKILL.md)
+    - move the Linear issue to `In Progress` with [$linear](../linear/SKILL.md)
     - update the workpad
     - fix the code, commit, and push; after any fix/commit/push, return the
       issue to `In Review` and rerun exact-head CI and update independent review for the new head

@@ -46,15 +46,9 @@ Rules:
 
 ## Required Repo States
 
-This repo expects the Linear workflow states:
-
-- `Todo`
-- `In Progress`
-- `In Review`
-- `Rework`
-- `Ready to Merge`
-- `Done`
-- `Canceled`
+Use the canonical state model and correction loop in
+[WORKFLOW.md](../../../WORKFLOW.md). Fetch the exact destination state from
+the live team workflow before changing an issue.
 
 ## Common Queries And Mutations
 
@@ -212,7 +206,7 @@ Update the workpad at least:
 
 - when a run starts and you have learned new facts
 - before opening or updating a PR
-- when moving the issue to `In Review`, `Rework`, `Ready to Merge`, or `Done`
+- when moving the issue to `In Progress`, `In Review`, `Ready to Merge`, or `Done`
 
 Workpad rules:
 
