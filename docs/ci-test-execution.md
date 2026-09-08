@@ -28,9 +28,13 @@ is tested by `tests/Unit/Scripts/CiPathFilterMatrixTest.php`.
 In GitHub CI, `build-test` excludes the `root-deployment` group. The independent
 `root-deployment-tests` job executes those classes through the existing
 root regression script, plus the retained Python scanner tests. Both jobs are
-blocking; the root job waits for the changed-path classification and is skipped
-only when every changed path is Markdown under `docs/`. `build-test` remains
-unconditional and still consumes the Markdown files it tests. The root job
+blocking when selected. General tests, root tests, application PHPStan, and
+request DTO checks use one conservative changed-path filter: ordinary Markdown
+under `docs/` skips their runtime preparation and execution. Docs consumed by
+existing contract tests are explicitly included. Every other path, including
+root-level agent instructions, configuration, unknown paths, and mixed code/doc
+diffs, keeps those checks. The workflow itself still runs on documentation
+changes. The root job
 installs only Composer dependencies; it needs no Node, application database, or
 application configuration. Its database-restore fixtures use their own pinned
 MariaDB image.
@@ -39,6 +43,11 @@ The group prevents ordinary tests inside those classes from running twice and
 avoids rediscovering root-only tests in the general CI run. Local `phpunit.xml`
 and coverage selection are unchanged; running the normal local command still
 discovers all tests and applies their existing platform prerequisites.
+
+Architecture/ownership documentation and CODEOWNERS checks continue to run.
+The architecture-boundaries job skips PHP setup and Composer installation for
+ordinary docs; its existing Deptrac selector still produces the normal skipped
+report, and the Python component-boundary check still runs.
 
 ## PHP-only job preparation
 

@@ -46,6 +46,24 @@ class CiWorkflowContractTest extends TestCase
         );
     }
 
+    public function testArchitectureDocsChecksRemainWithoutPhpPreparation(): void
+    {
+        $job = $this->workflowJob('architecture-boundaries');
+        self::assertSame(['changes'], $job['needs']);
+        self::assertArrayNotHasKey('if', $job);
+        $steps = $this->namedSteps($job);
+        foreach (['Setup PHP', 'Install dependencies'] as $name) {
+            self::assertSame("needs.changes.outputs.runtime_checks_required == 'true'", $steps[$name]['if']);
+        }
+        foreach (
+            ['Check generated CODEOWNERS', 'Run Deptrac changed-file gate', 'Run component boundary check']
+            as $name
+        ) {
+            self::assertArrayNotHasKey('if', $steps[$name]);
+            self::assertArrayNotHasKey('continue-on-error', $steps[$name]);
+        }
+    }
+
     public function testGeneralAndRootSuitesRunIndependentlyAndFailClosed(): void
     {
         $job = $this->workflowJob('build-test');
@@ -88,6 +106,8 @@ class CiWorkflowContractTest extends TestCase
         self::assertStringContainsString('grep -Fq "const DB_HOST = \'127.0.0.1\';" config.php', $prepare);
 
         self::assertSame('docker compose up -d mysql', $this->stepRun($steps, 'Start build-test database'));
+        self::assertSame(['changes'], $job['needs'] ?? null);
+        self::assertSame("needs.changes.outputs.runtime_checks_required == 'true'", $job['if'] ?? null);
         self::assertSame(
             'bash scripts/ci/wait_for_mysql_readiness.sh',
             $this->stepRun($steps, 'Wait for build-test MySQL readiness'),
@@ -115,13 +135,22 @@ class CiWorkflowContractTest extends TestCase
         self::assertStringContainsString('--exclude-group root-deployment', $general);
         $changesJob = $this->workflowJob('changes');
         self::assertSame(
-            '${{ steps.filter.outputs.root_deployment_required }}',
-            $changesJob['outputs']['root_deployment_required'] ?? null,
+            '${{ steps.filter.outputs.runtime_checks_required }}',
+            $changesJob['outputs']['runtime_checks_required'] ?? null,
         );
         $rootJob = $this->workflowJob('root-deployment-tests');
         self::assertSame(['changes'], $rootJob['needs'] ?? null);
-        self::assertSame("needs.changes.outputs.root_deployment_required == 'true'", $rootJob['if'] ?? null);
+        self::assertSame("needs.changes.outputs.runtime_checks_required == 'true'", $rootJob['if'] ?? null);
         self::assertArrayNotHasKey('continue-on-error', $rootJob);
+        foreach (['phpstan-application', 'typed-request-dto'] as $jobName) {
+            $selectedJob = $this->workflowJob($jobName);
+            self::assertSame(['changes'], $selectedJob['needs'] ?? null, $jobName);
+            self::assertSame(
+                "needs.changes.outputs.runtime_checks_required == 'true'",
+                $selectedJob['if'] ?? null,
+                $jobName,
+            );
+        }
         $rootSteps = $this->namedSteps($rootJob);
         foreach ($rootSteps as $step) {
             self::assertArrayNotHasKey('continue-on-error', $step);
