@@ -170,6 +170,7 @@ jobs:
               - 'application/views/exports/dashboard_teacher_pdf.php'
               - 'pdf-renderer/**'
               - 'docker-compose.yml'
+              - 'docker/compose.zero-surprise.yml'
               - 'scripts/release-gate/dashboard_release_gate.php'
               - 'tests/Unit/Views/DashboardTeacherPdfViewTest.php'
               - '.github/workflows/ci.yml'
