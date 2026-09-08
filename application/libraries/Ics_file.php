@@ -89,7 +89,7 @@ class Ics_file
         $manage_url = '';
 
         if (!empty($appointment['hash'])) {
-            $manage_url = site_url('booking/reschedule/' . $appointment['hash']);
+            $manage_url = public_site_url('booking/reschedule/' . $appointment['hash']);
         }
 
         if ($manage_url !== '') {

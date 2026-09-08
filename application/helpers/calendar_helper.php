@@ -23,18 +23,23 @@ if (!function_exists('build_google_calendar_link')) {
             return '';
         }
 
-        $dates = sprintf('%s/%s',
+        $dates = sprintf(
+            '%s/%s',
             calendar_helper_format_utc($start, 'Ymd\THis\Z'),
-            calendar_helper_format_utc($end, 'Ymd\THis\Z'));
+            calendar_helper_format_utc($end, 'Ymd\THis\Z'),
+        );
 
-        $params = array_filter([
-            'action' => 'TEMPLATE',
-            'text' => calendar_helper_sanitize_text($event['title'] ?? ''),
-            'dates' => $dates,
-            'details' => calendar_helper_sanitize_text($event['description'] ?? ''),
-            'location' => calendar_helper_sanitize_text($event['location'] ?? ''),
-            'ctz' => $event['timezone'] ?? '',
-        ], fn ($value) => $value !== '' && $value !== null);
+        $params = array_filter(
+            [
+                'action' => 'TEMPLATE',
+                'text' => calendar_helper_sanitize_text($event['title'] ?? ''),
+                'dates' => $dates,
+                'details' => calendar_helper_sanitize_text($event['description'] ?? ''),
+                'location' => calendar_helper_sanitize_text($event['location'] ?? ''),
+                'ctz' => $event['timezone'] ?? '',
+            ],
+            fn($value) => $value !== '' && $value !== null,
+        );
 
         $query = http_build_query($params, '', '&', PHP_QUERY_RFC3986);
 
@@ -65,17 +70,21 @@ if (!function_exists('build_outlook_calendar_link')) {
             return '';
         }
 
-        $params = array_filter([
-            'path' => '/calendar/action/compose',
-            'rru' => 'addevent',
-            'startdt' => calendar_helper_format_utc($start, DateTimeInterface::ATOM),
-            'enddt' => calendar_helper_format_utc($end, DateTimeInterface::ATOM),
-            'subject' => calendar_helper_sanitize_text($event['title'] ?? ''),
-            'body' => calendar_helper_sanitize_text($event['description'] ?? ''),
-            'location' => calendar_helper_sanitize_text($event['location'] ?? ''),
-        ], fn ($value) => $value !== '' && $value !== null);
+        $params = array_filter(
+            [
+                'path' => '/calendar/action/compose',
+                'rru' => 'addevent',
+                'startdt' => calendar_helper_format_utc($start, DateTimeInterface::ATOM),
+                'enddt' => calendar_helper_format_utc($end, DateTimeInterface::ATOM),
+                'subject' => calendar_helper_sanitize_text($event['title'] ?? ''),
+                'body' => calendar_helper_sanitize_text($event['description'] ?? ''),
+                'location' => calendar_helper_sanitize_text($event['location'] ?? ''),
+            ],
+            fn($value) => $value !== '' && $value !== null,
+        );
 
-        return 'https://outlook.office.com/calendar/0/deeplink/compose?' . http_build_query($params, '', '&', PHP_QUERY_RFC3986);
+        return 'https://outlook.office.com/calendar/0/deeplink/compose?' .
+            http_build_query($params, '', '&', PHP_QUERY_RFC3986);
     }
 }
 
@@ -85,7 +94,7 @@ if (!function_exists('build_ics_download_url')) {
      */
     function build_ics_download_url(string $appointment_hash): string
     {
-        return site_url('appointments/ics/' . rawurlencode($appointment_hash));
+        return public_site_url('appointments/ics/' . rawurlencode($appointment_hash));
     }
 }
 
