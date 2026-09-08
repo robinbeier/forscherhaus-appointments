@@ -354,44 +354,6 @@ class Appointments_model extends EA_Model
     }
 
     /**
-     * Remove all the Google Calendar event IDs from appointment records.
-     *
-     * @param int $provider_id Matching provider ID.
-     */
-    public function clear_google_sync_ids(int $provider_id): void
-    {
-        $this->db->update('appointments', ['id_google_calendar' => null], ['id_users_provider' => $provider_id]);
-    }
-
-    /**
-     * Remove all the Google Calendar event IDs from appointment records.
-     *
-     * @param int $provider_id Matching provider ID.
-     */
-    public function clear_caldav_sync_ids(int $provider_id): void
-    {
-        $this->db->update('appointments', ['id_caldav_calendar' => null], ['id_users_provider' => $provider_id]);
-    }
-
-    /**
-     * Deletes recurring CalDAV events for the provided date period.
-     *
-     * @param string $start_date_time
-     * @param string $end_date_time
-     *
-     * @return void
-     */
-    public function delete_caldav_recurring_events(string $start_date_time, string $end_date_time): void
-    {
-        $this->db
-            ->where('start_datetime >=', $start_date_time)
-            ->where('end_datetime <=', $end_date_time)
-            ->where('is_unavailability', true)
-            ->like('id_caldav_calendar', 'RECURRENCE')
-            ->delete('appointments');
-    }
-
-    /**
      * Remove an existing appointment from the database.
      *
      * @param int $appointment_id Appointment ID.

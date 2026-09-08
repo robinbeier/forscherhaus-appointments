@@ -78,9 +78,7 @@ class Calendar extends EA_Controller
         $this->load->model('roles_model');
 
         $this->load->library('accounts');
-        $this->load->library('google_sync');
         $this->load->library('notifications');
-        $this->load->library('synchronization');
         $this->load->library('timezones');
         $this->load->library('webhooks_client');
     }
@@ -191,7 +189,6 @@ class Calendar extends EA_Controller
             'available_services' => $available_services,
             'secretary_providers' => $secretary_providers,
             'edit_appointment' => $edit_appointment,
-            'google_sync_feature' => config('google_sync_feature'),
             'customers' => $this->customers_model->get(null, 50, null, 'update_datetime DESC'),
             'default_language' => setting('default_language'),
             'default_timezone' => setting('default_timezone'),
@@ -277,10 +274,6 @@ class Calendar extends EA_Controller
                         $appointment['id_users_customer'] = $customer['id'] ?? $customer_data['id'];
                     }
 
-                    if ($manage_mode && !empty($appointment['id'])) {
-                        $this->synchronization->remove_appointment_on_provider_change($appointment['id']);
-                    }
-
                     $this->appointments_model->only($appointment, $this->allowed_appointment_fields);
 
                     $this->appointments_model->optional($appointment, $this->optional_appointment_fields);
@@ -319,8 +312,6 @@ class Calendar extends EA_Controller
                 'date_format' => setting('date_format'),
                 'time_format' => setting('time_format'),
             ];
-
-            $this->synchronization->sync_appointment_saved($appointment, $service, $provider, $customer, $settings);
 
             $this->notifications->notify_appointment_saved(
                 $appointment,
@@ -387,8 +378,7 @@ class Calendar extends EA_Controller
      * Delete appointment from the database.
      *
      * This method deletes an existing appointment from the database. Once this action is finished it cannot be undone.
-     * Notification emails are send to both provider and customer and the delete action is executed to the Google
-     * Calendar account of the provider, if the "google_sync" setting is enabled.
+     * Notification emails are sent to both provider and customer.
      */
     public function delete_appointment(): void
     {
@@ -438,8 +428,6 @@ class Calendar extends EA_Controller
                 $cancellation_reason,
             );
 
-            $this->synchronization->sync_appointment_deleted($appointment, $provider);
-
             $this->webhooks_client->trigger(WEBHOOK_APPOINTMENT_DELETE, $appointment);
 
             json_response([
@@ -480,8 +468,6 @@ class Calendar extends EA_Controller
 
             $unavailability = $this->unavailabilities_model->find($unavailability_id);
 
-            $this->synchronization->sync_unavailability_saved($unavailability, $provider);
-
             $this->webhooks_client->trigger(WEBHOOK_UNAVAILABILITY_SAVE, $unavailability);
 
             json_response([
@@ -513,8 +499,6 @@ class Calendar extends EA_Controller
             $provider = $this->providers_model->find($unavailability['id_users_provider']);
 
             $this->unavailabilities_model->delete($unavailability_id);
-
-            $this->synchronization->sync_unavailability_deleted($unavailability, $provider);
 
             $this->webhooks_client->trigger(WEBHOOK_UNAVAILABILITY_DELETE, $unavailability);
 

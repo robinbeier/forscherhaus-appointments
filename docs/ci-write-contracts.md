@@ -82,8 +82,9 @@ Secret bleibt unverändert, ein expliziter String ersetzt es und `null` löscht
 es. Typ- und Längenfehler werden vor der Mutation mit wertfreien Meldungen
 abgelehnt. OpenAPI führt diese Felder nur in Payload-Schemas mit
 `writeOnly: true`; Record-Schemas und Beispiele enthalten sie nicht.
-Backoffice-, Sync- und Webhook-Dispatch-Consumer bleiben serverseitige
-DB-Consumer und sind keine alternative REST-Leseoberfläche.
+Die Kalender-Synchronisierung ist entfernt; historische Kalenderfelder bleiben
+als Daten erhalten und aktivieren keine Synchronisierung. Webhook-Dispatch bleibt
+ein serverseitiger DB-Consumer und keine alternative REST-Leseoberfläche.
 
 ## Evidence-Privacy-Vertrag
 

@@ -76,7 +76,6 @@ class Booking extends EA_Controller
         $this->load->model('consents_model');
 
         $this->load->library('timezones');
-        $this->load->library('synchronization');
         $this->load->library('notifications');
         $this->load->library('availability');
         $this->load->library('webhooks_client');
@@ -551,8 +550,6 @@ class Booking extends EA_Controller
                 'date_format' => setting('date_format'),
                 'time_format' => setting('time_format'),
             ];
-
-            $this->synchronization->sync_appointment_saved($appointment, $service, $provider, $customer, $settings);
 
             $this->notifications->notify_appointment_saved(
                 $appointment,

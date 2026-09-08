@@ -59,7 +59,7 @@ bash ./scripts/ci/pre_pr_quick.sh
 
 ## Topic Routing
 
-- Docker stack, local services, dump restore, PDF renderer, LDAP, Baikal: `docs/docker.md`
+- Docker stack, local services, dump restore, PDF renderer, LDAP: `docs/docker.md`
 - Console commands: `docs/console.md`
 - Write-path contracts: `docs/ci-write-contracts.md`
 - Release gates: `docs/release-gate-dashboard.md`, `docs/release-gate-booking-confirmation-pdf.md`, `docs/release-gate-provider-ui-smoke.md`, `docs/release-gate-customers-ui-smoke.md`, `docs/release-gate-zero-surprise.md`

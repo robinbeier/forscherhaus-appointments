@@ -74,14 +74,6 @@ class Backend_api extends EA_Controller
     }
 
     /**
-     * Disable a providers sync setting.
-     */
-    public function ajax_disable_provider_sync(): void
-    {
-        redirect('google/disable_provider_sync');
-    }
-
-    /**
      * Filter the customer records with the given key string.
      */
     public function ajax_filter_customers(): void
@@ -279,22 +271,6 @@ class Backend_api extends EA_Controller
     public function ajax_change_language(): void
     {
         redirect('account/change_language');
-    }
-
-    /**
-     * This method will return a list of the available Google Calendars.
-     */
-    public function ajax_get_google_calendars(): void
-    {
-        redirect('google/get_google_calendars');
-    }
-
-    /**
-     * Select a specific google calendar for a provider.
-     */
-    public function ajax_select_google_calendar(): void
-    {
-        redirect('google/select_google_calendar');
     }
 
     /**

@@ -80,18 +80,6 @@ php index.php console backup /path/to/backup/folder
 You can also provide a custom directory for your backup files. 
 
 
-##### Sync
-
-```
-php index.php console sync
-``` 
-
-This command will trigger the calendar synchronization for all the system providers. 
-
-It is especially important, because it can be automatically executed on a regular base with a cron job. 
-
-This way the app provider schedules will always be updated. 
-
 ##### Provider UI Smoke
 
 The root-only `provider_ui_smoke` lifecycle supports the isolated production

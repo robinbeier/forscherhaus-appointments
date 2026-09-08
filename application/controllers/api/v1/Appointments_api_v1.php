@@ -35,7 +35,6 @@ class Appointments_api_v1 extends EA_Controller
         $this->load->library('api');
         $this->load->library('api_request_dto_factory');
         $this->load->library('webhooks_client');
-        $this->load->library('synchronization');
         $this->load->library('notifications');
 
         $this->api->auth();
@@ -278,8 +277,6 @@ class Appointments_api_v1 extends EA_Controller
             'time_format' => setting('time_format'),
         ];
 
-        $this->synchronization->sync_appointment_saved($appointment, $service, $provider, $customer, $settings);
-
         $this->notifications->notify_appointment_saved(
             $appointment,
             $service,
@@ -365,8 +362,6 @@ class Appointments_api_v1 extends EA_Controller
             ];
 
             $this->appointments_model->delete($id);
-
-            $this->synchronization->sync_appointment_deleted($deleted_appointment, $provider);
 
             $this->notifications->notify_appointment_deleted(
                 $deleted_appointment,

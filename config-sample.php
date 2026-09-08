@@ -44,12 +44,4 @@ class Config
     const DB_NAME = 'easyappointments';
     const DB_USERNAME = 'user';
     const DB_PASSWORD = 'password';
-
-    // ------------------------------------------------------------------------
-    // GOOGLE CALENDAR SYNC
-    // ------------------------------------------------------------------------
-
-    const GOOGLE_SYNC_FEATURE = false; // Enter TRUE or FALSE
-    const GOOGLE_CLIENT_ID = '';
-    const GOOGLE_CLIENT_SECRET = '';
 }

@@ -76,6 +76,7 @@
         "integrations-sync",
         "people-services-admin",
         "scheduling-backoffice",
+        "settings-compliance",
         "shared-core"
       ]
     },
@@ -534,6 +535,10 @@
       "ownership_notes": "Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.",
       "path_rules": [
         {
+          "path": "application/controllers/About.php",
+          "match": "exact_file"
+        },
+        {
           "path": "application/controllers/Api_settings.php",
           "match": "exact_file"
         },
@@ -643,13 +648,14 @@
         "auth-session",
         "integrations-sync",
         "people-services-admin",
-        "scheduling-backoffice"
+        "scheduling-backoffice",
+        "shared-core"
       ]
     },
     {
       "component_id": "integrations-sync",
       "role": "Integrations & Sync",
-      "summary": "External sync and integration adapters (Google, CalDAV, LDAP, webhooks).",
+      "summary": "External integration adapters (LDAP and webhooks).",
       "primary_handle": "@robinbeier",
       "secondary_handle": "@robinbeier",
       "ownership_mode": "single-owner",
@@ -658,14 +664,6 @@
       "manual_approval_required": true,
       "ownership_notes": "Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.",
       "path_rules": [
-        {
-          "path": "application/controllers/Google.php",
-          "match": "exact_file"
-        },
-        {
-          "path": "application/controllers/Caldav.php",
-          "match": "exact_file"
-        },
         {
           "path": "application/controllers/Webhooks.php",
           "match": "exact_file"
@@ -676,18 +674,6 @@
         },
         {
           "path": "application/controllers/Ldap_settings.php",
-          "match": "exact_file"
-        },
-        {
-          "path": "application/libraries/Google_sync.php",
-          "match": "exact_file"
-        },
-        {
-          "path": "application/libraries/Caldav_sync.php",
-          "match": "exact_file"
-        },
-        {
-          "path": "application/libraries/Synchronization.php",
           "match": "exact_file"
         },
         {
@@ -729,7 +715,6 @@
       ],
       "key_files": [
         "application/controllers/Integrations.php",
-        "application/libraries/Synchronization.php",
         "application/libraries/Webhooks_client.php"
       ],
       "depends_on": [

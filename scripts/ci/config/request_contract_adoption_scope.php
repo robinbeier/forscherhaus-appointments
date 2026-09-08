@@ -124,14 +124,6 @@ return [
         'methods' => ['save', 'search'],
     ],
     [
-        'file' => 'application/controllers/Caldav.php',
-        'methods' => ['connect_to_server', 'disable_provider_sync'],
-    ],
-    [
-        'file' => 'application/controllers/Google.php',
-        'methods' => ['oauth_callback', 'get_google_calendars', 'select_google_calendar', 'disable_provider_sync'],
-    ],
-    [
         'file' => 'application/controllers/Webhooks.php',
         'methods' => ['search', 'store', 'update', 'destroy', 'find'],
     ],

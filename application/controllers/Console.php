@@ -11,11 +11,6 @@
  * @since       v1.3.2
  * ---------------------------------------------------------------------------- */
 
-use Jsvrcek\ICS\Exception\CalendarEventException;
-
-require_once __DIR__ . '/Google.php';
-require_once __DIR__ . '/Caldav.php';
-
 /**
  * Console controller.
  *
@@ -42,9 +37,7 @@ class Console extends EA_Controller
 
         $this->load->model('admins_model');
         $this->load->model('customers_model');
-        $this->load->model('providers_model');
         $this->load->model('services_model');
-        $this->load->model('settings_model');
     }
 
     /**
@@ -123,38 +116,6 @@ class Console extends EA_Controller
     public function backup(): void
     {
         $this->instance->backup($GLOBALS['argv'][3] ?? null);
-    }
-
-    /**
-     * Trigger the synchronization of all provider calendars with Google Calendar.
-     *
-     * Use this method in a cronjob to automatically sync events between Easy!Appointments and Google Calendar.
-     *
-     * Notice:
-     *
-     * Google syncing must first be enabled for each individual provider from inside the backend calendar page.
-     *
-     * Usage:
-     *
-     * php index.php console sync
-     *
-     * @throws CalendarEventException
-     * @throws Exception
-     * @throws Throwable
-     */
-    public function sync(): void
-    {
-        $providers = $this->providers_model->get();
-
-        foreach ($providers as $provider) {
-            if (filter_var($provider['settings']['google_sync'], FILTER_VALIDATE_BOOLEAN)) {
-                Google::sync((string) $provider['id']);
-            }
-
-            if (filter_var($provider['settings']['caldav_sync'], FILTER_VALIDATE_BOOLEAN)) {
-                Caldav::sync((string) $provider['id']);
-            }
-        }
     }
 
     /**
@@ -257,7 +218,6 @@ class Console extends EA_Controller
             '⇾ php index.php console seed',
             '⇾ php index.php console install',
             '⇾ php index.php console backup',
-            '⇾ php index.php console sync',
             '⇾ php index.php console customers_ui_smoke <install|verify|activate|deactivate|remove>',
             '⇾ php index.php console provider_ui_smoke <install|verify|activate|deactivate|remove>',
             '',

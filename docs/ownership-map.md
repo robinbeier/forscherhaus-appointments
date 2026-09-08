@@ -243,6 +243,7 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
   - `application/controllers/Legal_settings.php`
   - `assets/js/pages/business_settings.js`
 - Path rules:
+  - `application/controllers/About.php` (exact_file)
   - `application/controllers/Api_settings.php` (exact_file)
   - `application/controllers/Booking_settings.php` (exact_file)
   - `application/controllers/Business_settings.php` (exact_file)
@@ -281,17 +282,11 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
 - Ownership notes: Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.
 - Key files:
   - `application/controllers/Integrations.php`
-  - `application/libraries/Synchronization.php`
   - `application/libraries/Webhooks_client.php`
 - Path rules:
-  - `application/controllers/Google.php` (exact_file)
-  - `application/controllers/Caldav.php` (exact_file)
   - `application/controllers/Webhooks.php` (exact_file)
   - `application/controllers/Integrations.php` (exact_file)
   - `application/controllers/Ldap_settings.php` (exact_file)
-  - `application/libraries/Google_sync.php` (exact_file)
-  - `application/libraries/Caldav_sync.php` (exact_file)
-  - `application/libraries/Synchronization.php` (exact_file)
   - `application/libraries/Webhooks_client.php` (exact_file)
   - `application/libraries/Ldap_client.php` (exact_file)
   - `application/libraries/Integrations_request_dto_factory.php` (exact_file)

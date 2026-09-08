@@ -124,8 +124,6 @@ class Unavailabilities extends EA_Controller
 
             $provider = $this->providers_model->find($unavailability['id_users_provider']);
 
-            $this->synchronization->sync_unavailability_saved($unavailability, $provider);
-
             $this->webhooks_client->trigger(WEBHOOK_UNAVAILABILITY_SAVE, $unavailability);
 
             json_response([
@@ -180,8 +178,6 @@ class Unavailabilities extends EA_Controller
             $unavailability = $this->unavailabilities_model->find($unavailability_id);
 
             $provider = $this->providers_model->find($unavailability['id_users_provider']);
-
-            $this->synchronization->sync_unavailability_saved($unavailability, $provider);
 
             $this->webhooks_client->trigger(WEBHOOK_UNAVAILABILITY_SAVE, $unavailability);
 

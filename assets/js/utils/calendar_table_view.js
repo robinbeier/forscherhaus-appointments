@@ -2106,9 +2106,6 @@ App.Utils.CalendarTableView = (function () {
         $('#insert-working-plan-exception').hide();
 
         addEventListeners();
-
-        // Hide Google Calendar Sync buttons because they can not be used within this view.
-        $('#enable-sync, #google-sync').hide();
     }
 
     return {
