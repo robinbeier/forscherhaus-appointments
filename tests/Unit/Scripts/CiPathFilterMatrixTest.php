@@ -266,6 +266,7 @@ class CiPathFilterMatrixTest extends TestCase
     public static function rendererRegressionTriggerPathProvider(): array
     {
         return [
+            'isolated replay compose overlay' => ['docker/compose.zero-surprise.yml'],
             'dashboard export controller' => ['application/controllers/Dashboard_export.php'],
             'pdf renderer library' => ['application/libraries/Pdf_renderer.php'],
             'teacher pdf view' => ['application/views/exports/dashboard_teacher_pdf.php'],

@@ -170,6 +170,7 @@ jobs:
               - 'application/views/exports/dashboard_teacher_pdf.php'
               - 'pdf-renderer/**'
               - 'docker-compose.yml'
+              - 'docker/compose.zero-surprise.yml'
               - 'scripts/release-gate/dashboard_release_gate.php'
               - 'tests/Unit/Views/DashboardTeacherPdfViewTest.php'
               - '.github/workflows/ci.yml'
@@ -948,6 +949,25 @@ jobs:
     steps:
       - name: Git clone
         uses: actions/checkout@v6
+      - name: Verify PDF renderer host isolation
+        run: |
+          python3 - <<'PYTHON'
+          import json
+          import subprocess
+
+          def ports(*files):
+              command = ["docker", "compose"]
+              for path in files:
+                  command += ["-f", path]
+              config = json.loads(subprocess.check_output(command + ["config", "--format", "json"]))
+              return config["services"]["pdf-renderer"].get("ports", [])
+
+          published = ports("docker-compose.yml")
+          assert len(published) == 1, published
+          assert published[0]["host_ip"] == "127.0.0.1", published
+          assert str(published[0]["published"]) == "3003" and published[0]["target"] == 3000, published
+          assert ports("docker-compose.yml", "docker/compose.zero-surprise.yml") == []
+          PYTHON
       - name: Start PDF renderer service
         run: docker compose up -d pdf-renderer
       - name: Wait for PDF renderer health
