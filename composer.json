@@ -35,9 +35,7 @@
         "gregwar/captcha": "^1.1.9",
         "jsvrcek/ics": "^0.8.4",
         "monolog/monolog": "^3.0",
-        "google/apiclient": "^2.12.6",
         "guzzlehttp/guzzle": "^7.9.2",
-        "sabre/vobject": "^4.5",
         "ezyang/htmlpurifier": "^4.17",
         "symfony/options-resolver": "^7.4",
         "symfony/finder": "^7.4",
@@ -58,7 +56,6 @@
         "symfony/yaml": "^8.0"
     },
     "scripts": {
-        "pre-autoload-dump": "Google\\Task\\Composer::cleanup",
         "test": "if [ ! -f config.php ]; then cp config-sample.php config.php; fi; APP_ENV=testing php -d memory_limit=512M vendor/bin/phpunit",
         "test:booking-controller-flows": "if [ ! -f config.php ]; then cp config-sample.php config.php; fi; APP_ENV=testing php -d memory_limit=512M vendor/bin/phpunit -c phpunit.booking-flows.xml",
         "test:request-dto": "if [ ! -f config.php ]; then cp config-sample.php config.php; fi; APP_ENV=testing php -d memory_limit=512M vendor/bin/phpunit -c phpunit.request-dto.xml",
@@ -100,11 +97,6 @@
         "release:gate:dashboard": "php scripts/release-gate/dashboard_release_gate.php",
         "release:gate:booking-confirmation-pdf": "php scripts/release-gate/booking_confirmation_pdf_gate.php",
         "release:gate:zero-surprise": "php scripts/release-gate/zero_surprise_replay.php"
-    },
-    "extra": {
-        "google/apiclient-services": [
-            "Calendar"
-        ]
     },
     "autoload": {
         "psr-4": {

@@ -236,10 +236,6 @@ and representative application exports; check fonts, pagination, and landscape
 output as well as successful HTTP responses. Repository changes do not replace
 the production renderer until a separately approved rebuild/deployment.
 
-Baikal, a self-hosted CalDAV server used to develop the CalDAV syncing integration is available on `http://localhost:8100` (credentials are `admin` / `admin`). 
-
-While activating CalDAV sync with the local Docker-based Baikal, you will need to first create a new Baikal user and then the credentials you defined along with the http://baikal/dav.php URL
-
 Openldap is configured to run through the `openldap` container and ports `389` and `636`.
 
 The default Docker stack no longer bundles phpLDAPadmin. Use the deterministic LDAP reset/smoke helpers and standard

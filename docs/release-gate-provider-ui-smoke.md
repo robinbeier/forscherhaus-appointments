@@ -25,8 +25,8 @@ does not create a usable standing login.
 
 `activate` installs the verifier only for a bounded ten-minute lease and creates
 an exact synthetic provider/service/customer/appointment fixture. The lifecycle
-uses direct internal writes with notifications, calendar synchronization,
-webhooks, and public booking disabled. `deactivate` removes the entire ephemeral
+uses direct internal writes with notifications, webhooks, and public booking
+disabled. `deactivate` removes the entire ephemeral
 fixture, clears the verifier again, removes the lease state, and verifies the
 dormant/clean invariant.
 

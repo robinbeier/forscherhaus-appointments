@@ -89,13 +89,10 @@ class BookingCancellationControllerFlowTest extends TestCase
     private function createCancellationController(): Booking_cancellation
     {
         $controller = new class extends Booking_cancellation {
-            public function __construct()
-            {
-            }
+            public function __construct() {}
         };
 
         $this->wireCancellationDependencies($controller);
-        $controller->synchronization = BookingFlowFixtures::createNoopSynchronization();
         $controller->notifications = BookingFlowFixtures::createNoopNotifications();
         $controller->webhooks_client = BookingFlowFixtures::createNoopWebhooksClient();
 

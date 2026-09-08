@@ -420,9 +420,9 @@ collection, detail, create, or update responses. Query parameters such as
 On PUT, omitting one of these properties preserves its currently stored value.
 Providing a string replaces the stored value; providing `null` clears it.
 Successful mutation responses never echo the submitted credential. This
-write-only REST boundary does not change the authenticated backoffice,
-Google/CalDAV synchronization, or webhook-dispatch paths that consume stored
-credentials server-side.
+write-only REST boundary also protects retained legacy calendar credentials.
+Google/CalDAV synchronization has been removed; these retained fields do not
+enable it. Webhook dispatch continues to consume its stored credential server-side.
 
 ### Secretaries
 

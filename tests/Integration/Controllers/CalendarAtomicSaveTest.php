@@ -158,7 +158,6 @@ class CalendarAtomicSaveTest extends TestCase
                 throw new RuntimeException(lang('buffer_conflict_error'));
             }
         };
-        $controller->synchronization = BookingFlowFixtures::createNoopSynchronization();
         $controller->notifications = BookingFlowFixtures::createNoopNotifications();
         $controller->webhooks_client = BookingFlowFixtures::createNoopWebhooksClient();
 

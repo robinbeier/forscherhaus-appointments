@@ -18,7 +18,7 @@ This map defines component boundaries, path ownership scope, and dependency edge
 | `dashboard-exports` | Dashboard & Exports | scheduling-backoffice, people-services-admin, shared-core | 11 | 3 |
 | `people-services-admin` | People, Providers, Services | integrations-sync, scheduling-backoffice, settings-compliance, shared-core | 24 | 3 |
 | `settings-compliance` | Settings & Compliance | auth-session, integrations-sync, people-services-admin, scheduling-backoffice | 25 | 3 |
-| `integrations-sync` | Integrations & Sync | auth-session, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 17 | 3 |
+| `integrations-sync` | Integrations & Sync | auth-session, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 12 | 2 |
 | `api-v1` | REST API v1 | auth-session, integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 5 | 3 |
 | `shared-core` | Shared Core | None | 7 | 3 |
 | `platform-quality-tooling` | Platform, CI, Release Gates | api-v1, booking-public, dashboard-exports, installation-bootstrap, people-services-admin, settings-compliance, shared-core | 19 | 11 |
@@ -277,7 +277,7 @@ Key files:
 
 ### `integrations-sync` - Integrations & Sync
 
-External sync and integration adapters (Google, CalDAV, LDAP, webhooks).
+External integration adapters (LDAP and webhooks).
 
 Dependencies:
 - `auth-session`
@@ -287,14 +287,9 @@ Dependencies:
 - `shared-core`
 
 Path rules:
-- `application/controllers/Google.php` (exact_file)
-- `application/controllers/Caldav.php` (exact_file)
 - `application/controllers/Webhooks.php` (exact_file)
 - `application/controllers/Integrations.php` (exact_file)
 - `application/controllers/Ldap_settings.php` (exact_file)
-- `application/libraries/Google_sync.php` (exact_file)
-- `application/libraries/Caldav_sync.php` (exact_file)
-- `application/libraries/Synchronization.php` (exact_file)
 - `application/libraries/Webhooks_client.php` (exact_file)
 - `application/libraries/Ldap_client.php` (exact_file)
 - `application/libraries/Integrations_request_dto_factory.php` (exact_file)
@@ -307,7 +302,6 @@ Path rules:
 
 Key files:
 - `application/controllers/Integrations.php`
-- `application/libraries/Synchronization.php`
 - `application/libraries/Webhooks_client.php`
 
 ### `api-v1` - REST API v1

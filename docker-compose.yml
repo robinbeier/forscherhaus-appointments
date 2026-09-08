@@ -58,14 +58,6 @@ services:
         environment:
             API_URL: openapi.yml
 
-    baikal:
-        image: ckulka/baikal:0.10.1-apache-php8.2
-        ports:
-            - '8100:80'
-        volumes:
-            - ./docker/baikal/config:/var/www/baikal/config
-            - ./docker/baikal/data:/var/www/baikal/Specific
-
     openldap:
         image: vegardit/openldap@sha256:efa7cff027fa2ac503b073161849f93e4ccaaa1b9ac0a9788814865032952564
         hostname: openldap

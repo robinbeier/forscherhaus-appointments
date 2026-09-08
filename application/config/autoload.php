@@ -84,7 +84,7 @@ $autoload['helper'] = [
     'setting',
     'string',
     'url',
-    'validation'
+    'validation',
 ];
 
 /*
@@ -100,7 +100,7 @@ $autoload['helper'] = [
 |
 */
 
-$autoload['config'] = ['app', 'google', 'email'];
+$autoload['config'] = ['app', 'email'];
 
 /*
 | -------------------------------------------------------------------

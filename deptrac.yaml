@@ -75,6 +75,5 @@ deptrac:
             - Ldap_client
             - Notifications
             - Permissions
-            - Synchronization
             - Timezones
             - Webhooks_client

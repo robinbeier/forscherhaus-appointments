@@ -32,7 +32,6 @@ class Booking_cancellation extends EA_Controller
         $this->load->model('services_model');
         $this->load->model('customers_model');
 
-        $this->load->library('synchronization');
         $this->load->library('notifications');
         $this->load->library('webhooks_client');
     }
@@ -102,8 +101,6 @@ class Booking_cancellation extends EA_Controller
             ];
 
             $this->appointments_model->delete($appointment['id']);
-
-            $this->synchronization->sync_appointment_deleted($appointment, $provider);
 
             $this->notifications->notify_appointment_deleted(
                 $appointment,

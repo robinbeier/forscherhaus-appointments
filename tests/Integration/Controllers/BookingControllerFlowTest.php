@@ -274,7 +274,6 @@ class BookingControllerFlowTest extends TestCase
         $this->assertSame($winningCustomer, $this->fixtures->findCustomerById((int) $winningCustomer['id']));
         $this->assertSame($winningAppointment, $this->fixtures->findAppointmentById((int) $winningAppointment['id']));
         $this->assertSame(1, $this->fixtures->countAppointmentsForCustomer((int) $winningCustomer['id']));
-        $this->assertSame(0, $controller->synchronization->savedCalls);
         $this->assertSame(0, $controller->notifications->savedCalls);
         $this->assertSame(0, $controller->webhooks_client->calls);
     }
@@ -692,7 +691,6 @@ class BookingControllerFlowTest extends TestCase
         $this->assertSame(lang('customer_is_already_booked'), $response['message'] ?? null);
         $this->assertSame($beforeAppointment, $this->fixtures->findAppointmentById($scenario['appointment_id']));
         $this->assertSame($beforeCustomer, $this->fixtures->findCustomerById($scenario['customer_id']));
-        $this->assertSame(0, $controller->synchronization->savedCalls);
         $this->assertSame(0, $controller->notifications->savedCalls);
         $this->assertSame(0, $controller->webhooks_client->calls);
     }
@@ -743,7 +741,6 @@ class BookingControllerFlowTest extends TestCase
         $this->assertFalse($response['captcha_verification'] ?? true);
         $this->assertSame($beforeAppointment, $this->fixtures->findAppointmentById($scenario['appointment_id']));
         $this->assertSame($beforeCustomer, $this->fixtures->findCustomerById($scenario['customer_id']));
-        $this->assertSame(0, $controller->synchronization->savedCalls);
         $this->assertSame(0, $controller->notifications->savedCalls);
         $this->assertSame(0, $controller->webhooks_client->calls);
 
@@ -900,7 +897,6 @@ class BookingControllerFlowTest extends TestCase
 
         $this->wireBookingDependencies($controller, $injectCache);
 
-        $controller->synchronization = BookingFlowFixtures::createNoopSynchronization();
         $controller->notifications = BookingFlowFixtures::createNoopNotifications();
         $controller->webhooks_client = BookingFlowFixtures::createNoopWebhooksClient();
 
@@ -1006,7 +1002,6 @@ class BookingControllerFlowTest extends TestCase
         $this->assertSame(lang('appointment_not_found'), $response['message'] ?? null);
         $this->assertSame($expectedAppointment, $this->fixtures->findAppointmentById($appointmentId));
         $this->assertSame($expectedCustomer, $this->fixtures->findCustomerById($customerId));
-        $this->assertSame(0, $controller->synchronization->savedCalls);
         $this->assertSame(0, $controller->notifications->savedCalls);
         $this->assertSame(0, $controller->webhooks_client->calls);
     }

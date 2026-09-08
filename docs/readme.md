@@ -11,8 +11,6 @@ Welcome to the Forscherhaus Appointments documentation. Use the repository
 - [Architecture Map](architecture-map.md)
 - [Ownership Map](ownership-map.md)
 - [Architecture Boundary Gates (CI)](../README.md#testing-before-pr)
-- [Google Calendar Sync](google-calendar-sync.md)
-- [CalDAV Calendar Sync](caldav-calendar-sync.md)
 - [LDAP](ldap.md)
 - [Provider Room Feature](feature-provider-room.md)
 - [Dashboard Release Gate](release-gate-dashboard.md)

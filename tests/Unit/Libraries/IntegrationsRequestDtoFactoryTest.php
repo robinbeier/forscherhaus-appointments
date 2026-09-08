@@ -20,42 +20,6 @@ class IntegrationsRequestDtoFactoryTest extends TestCase
         $this->factory = new Integrations_request_dto_factory(new Request_normalizer());
     }
 
-    public function testCreateCaldavConnectRequestDtoNormalizesCredentials(): void
-    {
-        $dto = $this->factory->createCaldavConnectRequestDto(
-            '9',
-            ' https://caldav.example.test ',
-            ' teacher ',
-            ' pass ',
-        );
-
-        $this->assertSame(9, $dto->providerId);
-        $this->assertSame('https://caldav.example.test', $dto->caldavUrl);
-        $this->assertSame('teacher', $dto->caldavUsername);
-        $this->assertSame(' pass ', $dto->caldavPassword);
-    }
-
-    public function testCreateCaldavConnectRequestDtoKeepsUrlAndUsernameNonNull(): void
-    {
-        $dto = $this->factory->createCaldavConnectRequestDto('9', '   ', '   ', ' pass ');
-
-        $this->assertSame('', $dto->caldavUrl);
-        $this->assertSame('', $dto->caldavUsername);
-        $this->assertSame(' pass ', $dto->caldavPassword);
-    }
-
-    public function testCreateGoogleDtosNormalizeProviderAndCalendarValues(): void
-    {
-        $oauth = $this->factory->createGoogleOAuthCallbackRequestDto(' code-123 ');
-        $provider = $this->factory->createGoogleProviderRequestDto('11');
-        $selection = $this->factory->createGoogleCalendarSelectionRequestDto('11', ' primary ');
-
-        $this->assertSame('code-123', $oauth->code);
-        $this->assertSame(11, $provider->providerId);
-        $this->assertSame(11, $selection->providerId);
-        $this->assertSame('primary', $selection->calendarId);
-    }
-
     public function testCreateLdapSearchRequestDtoPreservesKeywordWhitespaceCompat(): void
     {
         $dto = $this->factory->createLdapSearchRequestDto('  Ada  ');

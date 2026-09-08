@@ -12,57 +12,11 @@
  * ---------------------------------------------------------------------------- */
 
 /**
- * Typed CalDAV connect request DTO.
- */
-final class CaldavConnectRequestDto
-{
-    public function __construct(
-        public readonly string|int|null $providerId,
-        public readonly string $caldavUrl,
-        public readonly string $caldavUsername,
-        public readonly ?string $caldavPassword,
-    ) {
-    }
-}
-
-/**
- * Typed Google OAuth callback request DTO.
- */
-final class GoogleOAuthCallbackRequestDto
-{
-    public function __construct(public readonly ?string $code)
-    {
-    }
-}
-
-/**
- * Typed Google provider request DTO.
- */
-final class GoogleProviderRequestDto
-{
-    public function __construct(public readonly string|int|null $providerId)
-    {
-    }
-}
-
-/**
- * Typed Google calendar selection request DTO.
- */
-final class GoogleCalendarSelectionRequestDto
-{
-    public function __construct(public readonly string|int|null $providerId, public readonly ?string $calendarId)
-    {
-    }
-}
-
-/**
  * Typed LDAP search request DTO.
  */
 final class LdapSearchRequestDto
 {
-    public function __construct(public readonly string $keyword)
-    {
-    }
+    public function __construct(public readonly string $keyword) {}
 }
 
 /**
@@ -80,8 +34,7 @@ final class WebhookCrudRequestDto
         public readonly int $offset,
         public readonly string|int|null $webhookId,
         public readonly array $webhook,
-    ) {
-    }
+    ) {}
 }
 
 /**
@@ -111,36 +64,6 @@ class Integrations_request_dto_factory
         $this->request_normalizer = $CI->request_normalizer;
     }
 
-    public function buildCaldavConnectRequestDto(): CaldavConnectRequestDto
-    {
-        return $this->createCaldavConnectRequestDto(
-            request('provider_id'),
-            request('caldav_url'),
-            request('caldav_username'),
-            request('caldav_password'),
-        );
-    }
-
-    public function buildGoogleOAuthCallbackRequestDto(): GoogleOAuthCallbackRequestDto
-    {
-        return $this->createGoogleOAuthCallbackRequestDto(request('code'));
-    }
-
-    public function buildGoogleProviderRequestDto(string $provider_id_key = 'provider_id'): GoogleProviderRequestDto
-    {
-        return $this->createGoogleProviderRequestDto(request($provider_id_key));
-    }
-
-    public function buildProviderRequestDto(string $provider_id_key = 'provider_id'): GoogleProviderRequestDto
-    {
-        return $this->createGoogleProviderRequestDto(request($provider_id_key));
-    }
-
-    public function buildGoogleCalendarSelectionRequestDto(): GoogleCalendarSelectionRequestDto
-    {
-        return $this->createGoogleCalendarSelectionRequestDto(request('provider_id'), request('calendar_id'));
-    }
-
     public function buildLdapSearchRequestDto(): LdapSearchRequestDto
     {
         return $this->createLdapSearchRequestDto(request('keyword'));
@@ -157,40 +80,6 @@ class Integrations_request_dto_factory
             request('offset', '0'),
             request($webhook_id_key),
             request($webhook_key),
-        );
-    }
-
-    public function createCaldavConnectRequestDto(
-        mixed $provider_id,
-        mixed $caldav_url,
-        mixed $caldav_username,
-        mixed $caldav_password,
-    ): CaldavConnectRequestDto {
-        return new CaldavConnectRequestDto(
-            $this->normalizeEntityIdCompat($provider_id),
-            $this->request_normalizer->normalizeString($caldav_url, '', false) ?? '',
-            $this->request_normalizer->normalizeString($caldav_username, '', false) ?? '',
-            $this->normalizeSensitiveStringCompat($caldav_password),
-        );
-    }
-
-    public function createGoogleOAuthCallbackRequestDto(mixed $code): GoogleOAuthCallbackRequestDto
-    {
-        return new GoogleOAuthCallbackRequestDto($this->request_normalizer->normalizeString($code, null, true));
-    }
-
-    public function createGoogleProviderRequestDto(mixed $provider_id): GoogleProviderRequestDto
-    {
-        return new GoogleProviderRequestDto($this->normalizeEntityIdCompat($provider_id));
-    }
-
-    public function createGoogleCalendarSelectionRequestDto(
-        mixed $provider_id,
-        mixed $calendar_id,
-    ): GoogleCalendarSelectionRequestDto {
-        return new GoogleCalendarSelectionRequestDto(
-            $this->normalizeEntityIdCompat($provider_id),
-            $this->request_normalizer->normalizeString($calendar_id, null, true),
         );
     }
 

@@ -68,7 +68,7 @@ App-Risiken, die stark an Serverkonfiguration haengen:
   hochsensitiv.
 - App zu Docker-PDF-Renderer: Renderer laeuft containerisiert und soll nur ueber
   die definierte lokale Grenze erreichbar sein.
-- App/Host zu Sentry, LDAP, CalDAV/Google und Webhooks: ausgehende
+- App/Host zu LDAP und Webhooks: ausgehende
   Netzwerkgrenzen koennen Daten oder Credentials exponieren, wenn falsch
   konfiguriert.
 - Kuma zu Health Endpoints und Push-Monitoren: Kuma liest HTTP/JSON-Signale und

@@ -1615,8 +1615,6 @@ App.Utils.CalendarDefaultView = (function () {
                     return $('<option/>', {
                         'value': availableProvider.id,
                         'type': FILTER_TYPE_PROVIDER,
-                        'google-sync': settings.google_sync,
-                        'caldav-sync': settings.caldav_sync,
                         'text': availableProvider.first_name + ' ' + availableProvider.last_name,
                     });
                 }),
@@ -1714,7 +1712,7 @@ App.Utils.CalendarDefaultView = (function () {
 
         // Automatically refresh the calendar page every 10 seconds (without loading animation).
         setInterval(() => {
-            if ($('.popover').length || App.Utils.CalendarSync.isCurrentlySyncing()) {
+            if ($('.popover').length) {
                 return;
             }
 

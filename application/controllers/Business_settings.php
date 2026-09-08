@@ -41,9 +41,7 @@ class Business_settings extends EA_Controller
         $this->load->model('settings_model');
 
         $this->load->library('accounts');
-        $this->load->library('google_sync');
         $this->load->library('notifications');
-        $this->load->library('synchronization');
         $this->load->library('timezones');
     }
 
@@ -99,11 +97,7 @@ class Business_settings extends EA_Controller
             $settings = $settings_request->settings;
 
             foreach ($settings as $setting) {
-                $existing_setting = $this->settings_model
-                    ->query()
-                    ->where('name', $setting['name'])
-                    ->get()
-                    ->row_array();
+                $existing_setting = $this->settings_model->query()->where('name', $setting['name'])->get()->row_array();
 
                 if (!empty($existing_setting)) {
                     $setting['id'] = $existing_setting['id'];
