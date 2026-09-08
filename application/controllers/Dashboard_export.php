@@ -26,10 +26,6 @@ class Dashboard_export extends EA_Controller
 
     protected const STATUS_REASON_CAPACITY_GAP = 'capacity_gap';
 
-    protected const PRINCIPAL_PDF_FIRST_PAGE_TEACHERS = 3;
-
-    protected const PRINCIPAL_PDF_CONTINUATION_PAGE_TEACHERS = 13;
-
     protected const TEACHER_PDF_FIRST_PAGE_APPOINTMENTS = 11;
 
     protected const TEACHER_PDF_CONTINUATION_PAGE_APPOINTMENTS = 14;
@@ -114,8 +110,6 @@ class Dashboard_export extends EA_Controller
             $mappedMetrics = $this->mapMetricsForView($metrics, $threshold);
             $sortedPrincipalMetrics = $this->sortPrincipalMetricsForReport($mappedMetrics);
 
-            $this->load->helper('donut');
-
             $view_data = [
                 'school_name' => $this->resolveSchoolName(),
                 'logo_data_url' => $this->resolveLogoDataUrl(),
@@ -127,8 +121,6 @@ class Dashboard_export extends EA_Controller
                 'threshold_ratio' => $threshold,
                 'summary' => $summary,
                 'metrics' => $sortedPrincipalMetrics,
-                'principal_pages' => $this->buildPrincipalPages($sortedPrincipalMetrics),
-                'principal_overview' => $this->buildPrincipalOverview($sortedPrincipalMetrics, $summary),
             ];
 
             $this->pdfRenderer->stream_view(
@@ -539,14 +531,19 @@ class Dashboard_export extends EA_Controller
         $fill_rate = (float) ($summary['fill_rate'] ?? 0.0);
         $total_target = (int) ($summary['target_total'] ?? 0);
         $total_booked = (int) ($summary['booked_total'] ?? 0);
-        $booked_distinct_total = (int) ($summary['booked_distinct_total'] ?? $total_booked);
-        $missing_parents_total = max($total_target - $booked_distinct_total, 0);
         $total_open = (int) ($summary['open_total'] ?? 0);
         $attention_count = (int) ($summary['attention_count'] ?? 0);
         $fallback_count = (int) ($summary['fallback_count'] ?? 0);
         $explicit_target_count = (int) ($summary['explicit_target_count'] ?? 0);
         $with_plan_count = (int) ($summary['with_plan_count'] ?? 0);
         $missing_to_threshold_total = (int) ($summary['missing_to_threshold_total'] ?? 0);
+        $explicit_target_total = 0;
+
+        foreach ($metrics as $metric) {
+            if (!empty($metric['has_explicit_target'])) {
+                $explicit_target_total += max(0, (int) ($metric['target'] ?? 0));
+            }
+        }
 
         return [
             'provider_count' => $provider_count,
@@ -566,12 +563,39 @@ class Dashboard_export extends EA_Controller
             'with_plan_count' => $with_plan_count,
             'missing_to_threshold_total' => $missing_to_threshold_total,
             'missing_to_threshold_total_formatted' => $this->formatNumber($missing_to_threshold_total),
-            'booked_distinct_total' => $booked_distinct_total,
-            'booked_distinct_total_formatted' => $this->formatNumber($booked_distinct_total),
-            'missing_parents_total' => $missing_parents_total,
-            'missing_parents_total_formatted' => $this->formatNumber($missing_parents_total),
             'providers_below_threshold' => (int) ($summary['providers_below_threshold'] ?? $attention_count),
+            'appointment_count_total' => $this->resolveAppointmentCountTotal($metrics),
+            'appointment_count_total_formatted' => $this->formatAppointmentCountTotal($metrics),
+            'explicit_target_total' => $explicit_target_total,
+            'explicit_target_total_formatted' => $this->formatNumber($explicit_target_total),
+            'explicit_target_complete' => $explicit_target_count === $provider_count,
         ];
+    }
+
+    protected function resolveAppointmentCountTotal(array $metrics): ?int
+    {
+        if (empty($metrics)) {
+            return 0;
+        }
+
+        $total = 0;
+
+        foreach ($metrics as $metric) {
+            if (!array_key_exists('booked_appointments', $metric) || !is_int($metric['booked_appointments'])) {
+                return null;
+            }
+
+            $total += max(0, $metric['booked_appointments']);
+        }
+
+        return $total;
+    }
+
+    protected function formatAppointmentCountTotal(array $metrics): string
+    {
+        $total = $this->resolveAppointmentCountTotal($metrics);
+
+        return $total === null ? '—' : $this->formatNumber($total);
     }
 
     /**
@@ -591,6 +615,10 @@ class Dashboard_export extends EA_Controller
 
             $target = (int) ($metric['target'] ?? 0);
             $booked = (int) ($metric['booked'] ?? 0);
+            $booked_appointments =
+                array_key_exists('booked_appointments', $metric) && is_int($metric['booked_appointments'])
+                    ? max(0, $metric['booked_appointments'])
+                    : null;
             $open = (int) ($metric['open'] ?? 0);
             $slots_planned = null;
             $slots_required = null;
@@ -641,6 +669,9 @@ class Dashboard_export extends EA_Controller
                 'open' => $this->formatNumber($open),
                 'target_raw' => $target,
                 'booked_raw' => $booked,
+                'booked_appointments_raw' => $booked_appointments,
+                'booked_appointments_formatted' =>
+                    $booked_appointments !== null ? $this->formatNumber($booked_appointments) : '—',
                 'open_raw' => $open,
                 'fill_rate' => $fill_rate,
                 'fill_rate_percent' => $this->formatPercent($fill_rate, $fill_rate_decimals),
@@ -694,7 +725,7 @@ class Dashboard_export extends EA_Controller
                 return $priority_sort;
             }
 
-            $gap_sort = ((int) ($right['gap_to_threshold'] ?? 0)) <=> ((int) ($left['gap_to_threshold'] ?? 0));
+            $gap_sort = $this->resolvePrincipalBookingGap($right) <=> $this->resolvePrincipalBookingGap($left);
 
             if ($gap_sort !== 0) {
                 return $gap_sort;
@@ -712,118 +743,22 @@ class Dashboard_export extends EA_Controller
         return $sorted_metrics;
     }
 
-    /**
-     * Split principal metrics into first-page and continuation-page chunks.
-     *
-     * @param array $metrics
-     *
-     * @return array
-     */
-    protected function buildPrincipalPages(array $metrics): array
+    protected function resolvePrincipalBookingGap(array $metric): int
     {
-        $metrics_all = array_values($metrics);
-
-        if (empty($metrics_all)) {
-            return [[]];
+        if (empty($metric['has_explicit_target'])) {
+            return 0;
         }
 
-        $first_page_size = max(1, self::PRINCIPAL_PDF_FIRST_PAGE_TEACHERS);
-        $continuation_page_size = max(1, self::PRINCIPAL_PDF_CONTINUATION_PAGE_TEACHERS);
+        $target = max(0, (int) ($metric['target_raw'] ?? ($metric['target'] ?? 0)));
+        $booked = array_key_exists('booked_appointments_raw', $metric)
+            ? $metric['booked_appointments_raw']
+            : $metric['booked'] ?? null;
 
-        $first_chunk = array_splice($metrics_all, 0, $first_page_size);
-        $pages = [$first_chunk];
-
-        while (!empty($metrics_all)) {
-            $pages[] = array_splice($metrics_all, 0, $continuation_page_size);
+        if ($booked === null) {
+            return max(0, (int) ($metric['gap_to_threshold'] ?? 0));
         }
 
-        return $pages;
-    }
-
-    /**
-     * Build principal-report overview counters and preformatted labels.
-     *
-     * @param array $metrics
-     * @param array $summary
-     *
-     * @return array
-     */
-    protected function buildPrincipalOverview(array $metrics, array $summary): array
-    {
-        $teachers_total = count($metrics);
-        $below_count = 0;
-        $after_15_goal_missed_count = 0;
-        $capacity_gap_count = 0;
-        $gap_total = 0;
-        $top_attention = [];
-        $attention_count = 0;
-        $in_target_count = 0;
-
-        foreach ($metrics as $metric) {
-            $gap = max(0, (int) ($metric['gap_to_threshold'] ?? 0));
-            $status_reasons = $this->normalizeStatusReasons($metric['status_reasons'] ?? []);
-            $booking_goal_missed = in_array(self::STATUS_REASON_BOOKING_GOAL_MISSED, $status_reasons, true);
-            $after_15_goal_missed = in_array(self::STATUS_REASON_AFTER_15_GOAL_MISSED, $status_reasons, true);
-            $capacity_gap = in_array(self::STATUS_REASON_CAPACITY_GAP, $status_reasons, true);
-            $is_booking_goal_evaluable =
-                !empty($metric['has_plan']) &&
-                !empty($metric['has_explicit_target']) &&
-                empty($metric['is_zero_target']);
-
-            if ($booking_goal_missed) {
-                $below_count++;
-                $gap_total += $gap;
-            }
-
-            if ($after_15_goal_missed) {
-                $after_15_goal_missed_count++;
-            }
-
-            if ($capacity_gap) {
-                $capacity_gap_count++;
-            }
-
-            $has_attention = $this->hasPrincipalAttention($metric);
-
-            if ($has_attention) {
-                $attention_count++;
-            }
-
-            if ($is_booking_goal_evaluable && !$booking_goal_missed) {
-                $in_target_count++;
-            }
-
-            if ($has_attention && count($top_attention) < 5) {
-                $top_attention[] = $metric;
-            }
-        }
-
-        return [
-            'teachers_total' => $teachers_total,
-            'below_count' => $below_count,
-            'booking_goal_missed_count' => $below_count,
-            'after_15_goal_missed_count' => $after_15_goal_missed_count,
-            'capacity_gap_count' => $capacity_gap_count,
-            'attention_count' => $attention_count,
-            'in_target_count' => $in_target_count,
-            'gap_total' => $gap_total,
-            'gap_total_formatted' => $this->formatNumber($gap_total),
-            'in_target_label' => sprintf(
-                '%s / %s Lehrkräfte im Buchungsziel',
-                $this->formatNumber($in_target_count),
-                $this->formatNumber($teachers_total),
-            ),
-            'top_attention' => $top_attention,
-            'capacity_gap_label' => $this->resolveCapacityGapLabel(),
-            'booked_distinct_formatted' =>
-                (string) ($summary['booked_distinct_total_formatted'] ??
-                    ($summary['booked_total_formatted'] ?? $this->formatNumber(0))),
-            'target_total_formatted' => (string) ($summary['target_total_formatted'] ?? $this->formatNumber(0)),
-            'fill_rate_value' => (float) ($summary['fill_rate'] ?? 0.0),
-            'missing_parents_total' => (int) ($summary['missing_parents_total'] ?? 0),
-            'missing_parents_total_formatted' =>
-                (string) ($summary['missing_parents_total_formatted'] ?? $this->formatNumber(0)),
-        ];
+        return max($target - max(0, (int) $booked), 0);
     }
 
     /**
@@ -903,15 +838,19 @@ class Dashboard_export extends EA_Controller
     protected function resolvePrincipalActionPriority(array $metric): int
     {
         $status_reasons = $this->normalizeStatusReasons($metric['status_reasons'] ?? []);
-        $booking_goal_missed = in_array(self::STATUS_REASON_BOOKING_GOAL_MISSED, $status_reasons, true);
         $after_15_goal_missed = in_array(self::STATUS_REASON_AFTER_15_GOAL_MISSED, $status_reasons, true);
-        $capacity_gap = in_array(self::STATUS_REASON_CAPACITY_GAP, $status_reasons, true);
+        $target = (int) ($metric['target_raw'] ?? ($metric['target'] ?? 0));
+        $planned = array_key_exists('slots_planned_raw', $metric)
+            ? $metric['slots_planned_raw']
+            : $metric['slots_planned'] ?? null;
+        $offer_issue =
+            !empty($metric['has_capacity_gap']) || ($target > 0 && (empty($metric['has_plan']) || $planned === null));
 
-        if ($booking_goal_missed && $after_15_goal_missed) {
+        if ($offer_issue) {
             return 0;
         }
 
-        if ($booking_goal_missed) {
+        if ($this->resolvePrincipalBookingGap($metric) > 0) {
             return 1;
         }
 
@@ -919,7 +858,7 @@ class Dashboard_export extends EA_Controller
             return 2;
         }
 
-        if ($capacity_gap) {
+        if (!empty($metric['is_target_fallback']) || empty($metric['has_explicit_target'])) {
             return 3;
         }
 

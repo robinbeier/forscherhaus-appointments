@@ -6,209 +6,135 @@ use Tests\TestCase;
 
 class DashboardPrincipalPdfViewTest extends TestCase
 {
-    public function testRendersAfter15ColumnAndStackedStatusBadges(): void
+    public function testOffersRemainActionableWithoutStackedStatusBadges(): void
     {
-        require_once APPPATH . 'helpers/donut_helper.php';
+        $output = $this->render([
+            $this->metric([
+                'provider_name' => 'Beispiel <script>alert(1)</script>',
+                'booked_appointments_raw' => 0,
+                'slots_planned_raw' => 17,
+                'slots_required_raw' => 20,
+                'has_capacity_gap' => true,
+                'status_reasons' => ['booking_goal_missed', 'after_15_goal_missed', 'capacity_gap'],
+            ]),
+        ]);
 
-        $school_name = 'Forscherhaus';
-        $logo_data_url = null;
-        $generated_at_text = '12.03.2026, 10:00';
-        $period_label = '13.04.2026 - 19.04.2026';
-        $threshold_percent = '90 %';
-        $threshold_ratio = 0.9;
-        $summary = [
-            'fill_rate_formatted' => '0,0 %',
-            'booked_distinct_total_formatted' => '0',
-            'target_total_formatted' => '18',
-            'fill_rate' => 0.0,
-        ];
-        $principal_pages = [
-            [
-                [
-                    'provider_name' => 'Adina Rossmeisl',
-                    'target' => '18',
-                    'target_raw' => 18,
-                    'booked' => '0',
-                    'booked_raw' => 0,
-                    'fill_rate_percent' => '0,0 %',
-                    'fill_rate_percent_value' => 0,
-                    'gap_to_threshold' => 17,
-                    'gap_to_threshold_formatted' => '17',
-                    'slots_planned_raw' => 17,
-                    'slots_required_raw' => 18,
-                    'has_capacity_gap' => true,
-                    'has_plan' => true,
-                    'has_explicit_target' => true,
-                    'after_15_percent' => 11.8,
-                    'after_15_evaluable' => true,
-                    'status_reasons' => ['booking_goal_missed', 'after_15_goal_missed', 'capacity_gap'],
-                ],
-            ],
-        ];
-        $principal_overview = [
-            'teachers_total' => 1,
-            'below_count' => 1,
-            'booking_goal_missed_count' => 1,
-            'after_15_goal_missed_count' => 1,
-            'capacity_gap_count' => 1,
-            'attention_count' => 1,
-            'in_target_count' => 0,
-            'gap_total_formatted' => '17',
-            'in_target_label' => '0 / 1 Lehrkräfte im Buchungsziel',
-            'top_attention' => $principal_pages[0],
-            'booked_distinct_formatted' => '0',
-            'target_total_formatted' => '18',
-            'fill_rate_value' => 0.0,
-            'capacity_gap_label' => 'Kapazitätslücke',
-        ];
-        $metrics = $principal_pages[0];
+        self::assertStringContainsString('Terminangebot ergänzen', $output);
+        self::assertStringContainsString('3 zusätzliche Termine erforderlich.', $output);
+        self::assertStringContainsString('Auch Angebot nach 15 Uhr prüfen.', $output);
+        self::assertStringContainsString('Beispiel &lt;script&gt;', $output);
+        self::assertStringNotContainsString('<script>alert(1)</script>', $output);
+        self::assertStringNotContainsString('status-list', $output);
+    }
 
-        ob_start();
-        include APPPATH . 'views/exports/dashboard_principal_pdf.php';
-        $output = (string) ob_get_clean();
+    public function testNoPlanOrMissingTargetIsNotReportedAsBookingGoalReached(): void
+    {
+        $output = $this->render([
+            $this->metric(['has_plan' => false, 'slots_planned_raw' => null]),
+            $this->metric(['has_explicit_target' => false, 'is_target_fallback' => true]),
+        ]);
 
-        $this->assertStringContainsString(lang('dashboard_principal_after_15_heading') ?: 'Nach 15:00', $output);
-        $this->assertStringContainsString(
-            lang('dashboard_principal_until_booking_goal') ?: 'bis Buchungsziel',
-            $output,
+        self::assertStringContainsString('Terminangebot prüfen', $output);
+        self::assertStringContainsString('Kein Klassenziel bewertet', $output);
+        self::assertStringContainsString('Ohne festgelegte Klassengröße', $output);
+        self::assertStringNotContainsString('Buchungsziel erreicht', $output);
+    }
+
+    public function testTrueAppointmentCountDoesNotBecomeAClaimAboutReachedFamilies(): void
+    {
+        $output = $this->render(
+            [$this->metric(['booked_appointments_raw' => 3, 'booked_raw' => 9])],
+            ['appointment_count_total' => 3, 'booked_distinct_total' => 9, 'missing_parents_total' => 17],
         );
-        $this->assertStringContainsString(lang('dashboard_booking_goal_missed') ?: 'Buchungsziel verfehlt', $output);
-        $this->assertStringContainsString(lang('dashboard_after_15_goal_missed') ?: '15-Uhr-Vorgabe verfehlt', $output);
-        $this->assertStringContainsString(lang('dashboard_slots_gap_badge') ?: 'Kapazitätslücke', $output);
-        $this->assertStringContainsString('11,8&nbsp;%', $output);
-        $this->assertStringContainsString('status-list', $output);
-        $this->assertStringNotContainsString('provider__badge', $output);
+
+        self::assertStringContainsString('>3</div><div class="label">Gebuchte Termine', $output);
+        self::assertStringContainsString('Benötigte<br>Termine', $output);
+        self::assertStringContainsString('Termine zählen Buchungen.', $output);
+        self::assertStringNotContainsString('Eltern erreicht', $output);
+        self::assertStringNotContainsString('Fehlende Eltern', $output);
     }
 
-    public function testDoesNotClaimAllTeachersAreInBookingGoalWhenNoPlanRowsHaveNoAttentionBadges(): void
+    public function testUnavailableAppointmentCountIsNotInventedFromLegacySlotCount(): void
     {
-        require_once APPPATH . 'helpers/donut_helper.php';
+        $output = $this->render(
+            [$this->metric(['booked_appointments_raw' => null, 'booked_raw' => 9])],
+            ['appointment_count_total' => null, 'booked_total' => 9],
+        );
 
-        $school_name = 'Forscherhaus';
-        $logo_data_url = null;
-        $generated_at_text = '12.03.2026, 10:00';
-        $period_label = '13.04.2026 - 19.04.2026';
-        $threshold_percent = '90 %';
-        $threshold_ratio = 0.9;
-        $summary = [
-            'fill_rate_formatted' => '0,0 %',
-            'booked_distinct_total_formatted' => '0',
-            'target_total_formatted' => '18',
-            'fill_rate' => 0.0,
-        ];
-        $principal_pages = [
+        self::assertStringContainsString('>—</div><div class="label">Gebuchte Termine', $output);
+        self::assertStringNotContainsString('Buchungsziel erreicht', $output);
+    }
+
+    public function testEmptySelectionExplainsTheMissingDataWithoutClaimingCompletion(): void
+    {
+        $output = $this->render([], ['appointment_count_total' => 0]);
+
+        self::assertStringContainsString('Keine Daten für diese Auswahl.', $output);
+        self::assertStringContainsString('kein Nachweis, dass alle Buchungen erledigt sind', $output);
+        self::assertStringContainsString('Keine Lehrkräfte in der aktuellen Auswahl.', $output);
+    }
+
+    public function testFullClassTargetRemainsOpenAfterTheLegacyThreshold(): void
+    {
+        $output = $this->render(
             [
-                [
-                    'provider_name' => 'Teacher Without Plan',
-                    'target' => '18',
-                    'target_raw' => 18,
-                    'booked' => '0',
-                    'booked_raw' => 0,
-                    'fill_rate_percent' => '0,0 %',
-                    'fill_rate_percent_value' => 0,
+                $this->metric([
+                    'target_raw' => 24,
+                    'booked_appointments_raw' => 23,
+                    'booked_raw' => 48,
                     'gap_to_threshold' => 0,
-                    'gap_to_threshold_formatted' => '0',
-                    'slots_planned_raw' => null,
-                    'slots_required_raw' => 18,
-                    'has_capacity_gap' => false,
-                    'has_plan' => false,
-                    'has_explicit_target' => true,
-                    'after_15_percent' => null,
-                    'after_15_evaluable' => false,
                     'status_reasons' => [],
-                ],
+                ]),
             ],
-        ];
-        $principal_overview = [
-            'teachers_total' => 1,
-            'below_count' => 0,
-            'booking_goal_missed_count' => 0,
-            'after_15_goal_missed_count' => 0,
-            'capacity_gap_count' => 0,
-            'attention_count' => 0,
-            'in_target_count' => 0,
-            'gap_total_formatted' => '0',
-            'in_target_label' => '0 / 1 Lehrkräfte im Buchungsziel',
-            'top_attention' => [],
-            'booked_distinct_formatted' => '0',
-            'target_total_formatted' => '18',
-            'fill_rate_value' => 0.0,
-            'capacity_gap_label' => 'Kapazitätslücke',
-        ];
-        $metrics = $principal_pages[0];
-
-        ob_start();
-        include APPPATH . 'views/exports/dashboard_principal_pdf.php';
-        $output = (string) ob_get_clean();
-
-        $this->assertStringNotContainsString('Alle Klassenleitungen liegen aktuell im Buchungsziel.', $output);
+            ['appointment_count_total' => 23, 'explicit_target_total' => 24, 'explicit_target_complete' => true],
+        );
+        self::assertStringContainsString('1 Buchungen bis zum Ziel.', $output);
+        self::assertStringNotContainsString('Buchungsziel erreicht', $output);
+        self::assertStringContainsString('>24</div><div class="label">Benötigte Termine', $output);
+        self::assertStringNotContainsString('90 %', $output);
     }
 
-    public function testRendersMissingParentsSummaryInsteadOfThresholdGap(): void
+    public function testPartialTargetIsLabelledAsIncomplete(): void
     {
-        require_once APPPATH . 'helpers/donut_helper.php';
+        $output = $this->render(
+            [$this->metric()],
+            ['appointment_count_total' => 15, 'explicit_target_total' => 20, 'explicit_target_complete' => false],
+        );
+        self::assertStringContainsString('Bekannte Ziele; Auswahl ist unvollständig', $output);
+    }
 
-        $school_name = 'Forscherhaus';
-        $logo_data_url = null;
-        $generated_at_text = '12.03.2026, 10:00';
-        $period_label = '13.04.2026 - 19.04.2026';
-        $threshold_percent = '90 %';
-        $threshold_ratio = 0.9;
-        $summary = [
-            'fill_rate_formatted' => '93,1 %',
-            'booked_distinct_total_formatted' => '215',
-            'target_total_formatted' => '231',
-            'missing_parents_total_formatted' => '16',
-            'fill_rate' => 215 / 231,
-        ];
-        $principal_pages = [
+    private function metric(array $overrides = []): array
+    {
+        return array_replace(
             [
-                [
-                    'provider_name' => 'Saskia Hucke',
-                    'target' => '20',
-                    'target_raw' => 20,
-                    'booked' => '16',
-                    'booked_raw' => 16,
-                    'fill_ratio' => 0.8,
-                    'fill_rate_percent' => '80,0 %',
-                    'fill_rate_percent_value' => 80,
-                    'gap_to_threshold' => 2,
-                    'gap_to_threshold_formatted' => '2',
-                    'slots_planned_raw' => 23,
-                    'slots_required_raw' => 22,
-                    'has_plan' => true,
-                    'has_explicit_target' => true,
-                    'status_reasons' => ['booking_goal_missed'],
-                ],
+                'provider_name' => 'Mira Beispiel',
+                'target_raw' => 20,
+                'booked_raw' => 15,
+                'booked_appointments_raw' => 15,
+                'gap_to_threshold' => 3,
+                'slots_planned_raw' => 22,
+                'slots_required_raw' => 22,
+                'has_capacity_gap' => false,
+                'has_plan' => true,
+                'has_explicit_target' => true,
+                'status_reasons' => ['booking_goal_missed'],
             ],
-        ];
-        $principal_overview = [
-            'teachers_total' => 1,
-            'below_count' => 1,
-            'booking_goal_missed_count' => 1,
-            'after_15_goal_missed_count' => 0,
-            'capacity_gap_count' => 0,
-            'attention_count' => 1,
-            'in_target_count' => 0,
-            'gap_total_formatted' => '2',
-            'in_target_label' => '0 / 1 Lehrkräfte im Buchungsziel',
-            'top_attention' => $principal_pages[0],
-            'booked_distinct_formatted' => '215',
-            'target_total_formatted' => '231',
-            'missing_parents_total_formatted' => '16',
-            'fill_rate_value' => 215 / 231,
-            'capacity_gap_label' => 'Kapazitätslücke',
-        ];
-        $metrics = $principal_pages[0];
+            $overrides,
+        );
+    }
+
+    private function render(array $metrics, array $summary = ['appointment_count_total' => 0]): string
+    {
+        $school_name = 'Beispielschule';
+        $logo_data_url = null;
+        $generated_at_text = '08.09.2026, 23:00';
+        $period_label = '18.11.2026';
+        $threshold_ratio = 0.9;
+        $service_label = 'Elternsprechtag';
+        $status_label = 'Gebucht';
 
         ob_start();
         include APPPATH . 'views/exports/dashboard_principal_pdf.php';
-        $output = (string) ob_get_clean();
-
-        $this->assertStringContainsString('215 von 231 Eltern erreicht', $output);
-        $this->assertStringContainsString('Fehlend', $output);
-        $this->assertStringContainsString('Fehlende Eltern:', $output);
-        $this->assertStringContainsString('<strong>16</strong>', $output);
-        $this->assertStringNotContainsString('Fehlend bis Buchungsziel', $output);
+        return (string) ob_get_clean();
     }
 }
