@@ -567,6 +567,48 @@ final class DeployStableResultTest extends TestCase
         }
     }
 
+    public function testSuccessfulPostSwitchTailUsesRetainedChecksThenFinalizesWithoutOptionalHttpProbe(): void
+    {
+        $source = (string) file_get_contents(dirname(__DIR__, 3) . '/deploy_ea.sh');
+        $boundary = "\nperform_atomic_switch\n";
+        $position = strrpos($source, $boundary);
+        self::assertNotFalse($position);
+        $postSwitch = substr($source, $position + strlen($boundary));
+        $script = <<<'BASH'
+        source ./deploy_ea.sh
+        DRYRUN=0
+        MARK_RELEASE=1
+        APP=/fixed/active
+        ARCHIVE=/fixed/archive.tar.gz
+        PREV=/fixed/previous
+        LOG=/fixed/deploy.log
+        REL=ea_contract
+        CURRENT_SCRIPT_PATH=/fixed/deploy_ea.sh
+        WEBUSER=www-data
+        curl() { printf 'unexpected-curl\n' >&2; return 99; }
+        verify_post_switch_runtime_config_contracts() { printf 'config\n'; }
+        reload_services() { printf 'reload\n'; }
+        probe_renderer_health() { printf 'renderer\n'; }
+        probe_deep_health_contract() { printf 'deep\n'; }
+        run_zero_surprise_live_canary() { printf 'canary\n'; }
+        run_shell() { printf 'release\n'; }
+        deploy_result_finalize() { printf 'finalize\n'; return 0; }
+        deploy_result_finish() { printf 'finish\n'; return 0; }
+        eval "$1"
+        BASH;
+        $result = $this->runCommand(['bash', '-c', $script, 'bash', $postSwitch]);
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertStringNotContainsString('unexpected-curl', $result['stderr']);
+        $previousPosition = -1;
+        foreach (['config', 'reload', 'renderer', 'deep', 'canary', 'release', 'finalize', 'finish'] as $step) {
+            $position = strpos($result['stdout'], $step . "\n", $previousPosition + 1);
+            self::assertNotFalse($position, $step);
+            self::assertGreaterThan($previousPosition, $position, $step);
+            $previousPosition = $position;
+        }
+    }
+
     public function testRollbackReloadFailureRemainsUnverifiedExit31(): void
     {
         $result = $this->runShell(
