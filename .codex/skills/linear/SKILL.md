@@ -5,223 +5,36 @@ description: |
     and the single persistent `## Codex Workpad` comment.
 ---
 
-# Linear GraphQL
+# Linear
 
-Use this skill when the Linear issue state, PR linkage, or workpad comment must
-be updated.
+Follow the canonical [state model](../../../WORKFLOW.md#linear-states),
+[workpad rules](../../../WORKFLOW.md#codex-workpad), and
+[primary-agent authority](../../../WORKFLOW.md#model-aware-delegation).
+Use the configured Linear tools and their actual input schema; this skill does
+not require a particular GraphQL transport or tool name.
 
-Default order:
+## Working sequence
 
-1. Read the issue and current comments.
-2. Find or create the single persistent `## Codex Workpad` comment.
-3. Refresh that workpad before new implementation work.
-4. Keep later updates in the same comment instead of posting separate summary
-   comments.
+1. Read the issue, its current state, and current comments.
+2. Find the persistent comment starting with `## Codex Workpad`. Create it
+   only if none exists. If several exist, update only the newest authoritative
+   workpad; do not delete other comments. If authority is unclear, leave that
+   mutation pending.
+3. Update the workpad in place at the points defined in `WORKFLOW.md`, including
+   before implementation, publication, and state changes. Keep current evidence
+   and next actions concise; do not repeat the issue title or paste raw logs.
+4. Resolve the destination from the live team states and pass its exact name
+   or identifier as supported by the available tool.
+5. Attach the actual GitHub PR after it exists. Keep the PR URL on the issue
+   attachment, not in the workpad.
+6. Verify the resulting issue, comment, or attachment state. Treat reported
+   errors as failures and do not infer success from a partial response. Check
+   existing state before retrying an uncertain write to avoid duplicates.
 
-## Primary Tool
+If Linear access is unavailable, report the affected action as blocked and
+continue independent authorized work. Never invent issue states, identifiers,
+comments, attachments, or mutation results.
 
-Use the configured Linear integration available in the current Codex session. If
-a GraphQL client is available, prefer it for precise reads and mutations. If no
-Linear tool is available, stop and report the missing access instead of
-inventing state changes.
-
-Tool input:
-
-```json
-{
-    "query": "query or mutation document",
-    "variables": {
-        "optional": "graphql variables object"
-    }
-}
-```
-
-Rules:
-
-- Prefer a single GraphQL operation per tool call, but multi-operation
-  documents are allowed and may require an explicit operation name on the
-  Linear side.
-- Treat a top-level `errors` array as failure.
-- Ask only for the fields you need.
-
-## Required Repo States
-
-Use the canonical state model and correction loop in
-[WORKFLOW.md](../../../WORKFLOW.md). Fetch the exact destination state from
-the live team workflow before changing an issue.
-
-## Common Queries And Mutations
-
-### Query an issue by key or id
-
-```graphql
-query IssueByKey($key: String!) {
-    issue(id: $key) {
-        id
-        identifier
-        title
-        description
-        branchName
-        url
-        updatedAt
-        state {
-            id
-            name
-            type
-        }
-        team {
-            id
-            key
-            name
-            states {
-                nodes {
-                    id
-                    name
-                    type
-                }
-            }
-        }
-    }
-}
-```
-
-### Read issue comments to find the workpad
-
-```graphql
-query IssueComments($id: String!) {
-    issue(id: $id) {
-        id
-        comments(first: 50) {
-            nodes {
-                id
-                body
-                url
-                updatedAt
-            }
-        }
-    }
-}
-```
-
-Look for exactly one comment whose body starts with `## Codex Workpad`. If none
-exists, create it. If more than one exists, keep the newest authoritative one
-and update that comment only.
-
-### Create a comment
-
-```graphql
-mutation CreateComment($issueId: String!, $body: String!) {
-    commentCreate(input: {issueId: $issueId, body: $body}) {
-        success
-        comment {
-            id
-            url
-        }
-    }
-}
-```
-
-### Update a comment
-
-```graphql
-mutation UpdateComment($id: String!, $body: String!) {
-    commentUpdate(id: $id, input: {body: $body}) {
-        success
-        comment {
-            id
-            body
-            url
-        }
-    }
-}
-```
-
-### Move an issue to a different state
-
-```graphql
-mutation MoveIssueToState($id: String!, $stateId: String!) {
-    issueUpdate(id: $id, input: {stateId: $stateId}) {
-        success
-        issue {
-            id
-            identifier
-            state {
-                id
-                name
-            }
-        }
-    }
-}
-```
-
-### Attach a GitHub PR to an issue
-
-```graphql
-mutation AttachGitHubPR($issueId: String!, $url: String!, $title: String) {
-    attachmentLinkGitHubPR(issueId: $issueId, url: $url, title: $title, linkKind: links) {
-        success
-        attachment {
-            id
-            title
-            url
-        }
-    }
-}
-```
-
-## Workpad Contract
-
-Maintain one persistent comment per issue whose body starts with:
-
-```md
-## Codex Workpad
-```
-
-Keep it concise and rewrite it in place instead of creating new plan comments.
-Recommended sections:
-
-```md
-## Codex Workpad
-
-### Status
-
-- Summary: <where the issue stands now>
-- Next: <next concrete action>
-
-### Plan
-
-- <next concrete steps only>
-
-### Validation
-
-- Done: <commands or checks already run>
-- Pending: <remaining checks if any>
-
-### Blockers
-
-- None.
-```
-
-Update the workpad at least:
-
-- when a run starts and you have learned new facts
-- before opening or updating a PR
-- when moving the issue to `In Progress`, `In Review`, `Ready to Merge`, or `Done`
-
-Workpad rules:
-
-- Keep any environment stamp to one short line.
-- Do not duplicate issue title, labels, blocker metadata, or PR URL in the
-  workpad.
-- Summarize evidence instead of pasting long command output.
-- For small or already-understood tasks, update the workpad and move on instead
-  of expanding it into a long narrative.
-
-## Usage Rules
-
-- Fetch the exact destination `stateId` from `issue.team.states` before
-  changing state.
-- Prefer `attachmentLinkGitHubPR` over a plain URL when attaching a PR.
-- Do not create multiple workpad comments.
-- Do not put the PR URL into the workpad; keep PR linkage on the issue itself.
-- Do not add raw-token shell helpers for Linear GraphQL; use `linear_graphql`.
+Request only the information needed for the current action. Keep secrets,
+raw tokens, personal data, and raw logs out of normal output and workpads.
+Do not add raw-token shell helpers or another ad hoc Linear transport.
