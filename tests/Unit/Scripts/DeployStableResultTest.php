@@ -567,6 +567,151 @@ final class DeployStableResultTest extends TestCase
         }
     }
 
+    public function testRendererHealthRejectsTransportFailureWithHttp200AndRetriesAfterTimeout(): void
+    {
+        $result = $this->runShell(
+            <<<'BASH'
+            source ./deploy_ea.sh
+            DRYRUN=0
+            RENDERER_HEALTH_RETRIES=2
+            RENDERER_HEALTH_SLEEP_SECONDS=1
+            calls_file=$(mktemp)
+            printf '0' > "$calls_file"
+            trap 'rm -f "$calls_file"' EXIT
+            sleep() { printf 'sleep:%s' "$1"; }
+            curl() {
+              [[ "$1" == '--connect-timeout' && "$2" == '3' && "$3" == '--max-time' && "$4" == '10' && "$5" == '-sS' && "$6" == '-o' && "$7" == '/dev/null' && "$8" == '-w' && "$9" == '%{http_code}' ]] || return 97
+              calls=$(( $(<"$calls_file") + 1 ))
+              printf '%s' "$calls" > "$calls_file"
+              if [[ "$calls" -eq 1 ]]; then printf '200'; return 28; fi
+              printf '200'
+            }
+            probe_renderer_health
+            printf 'calls=%s' "$(<"$calls_file")"
+            BASH
+            ,
+        );
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertStringContainsString('curl exit 28', $result['stdout']);
+        self::assertStringContainsString('sleep:1', $result['stdout']);
+        self::assertStringContainsString('calls=2', $result['stdout']);
+        self::assertStringNotContainsString('000000', $result['stdout']);
+    }
+
+    public function testRendererHealthSleepsOnlyBetweenExhaustedAttempts(): void
+    {
+        $result = $this->runShell(
+            <<<'BASH'
+            source ./deploy_ea.sh
+            DRYRUN=0
+            RENDERER_HEALTH_RETRIES=3
+            RENDERER_HEALTH_SLEEP_SECONDS=1
+            sleeps=0
+            sleep() { sleeps=$((sleeps + 1)); }
+            curl() { printf '503'; return 0; }
+            if probe_renderer_health; then exit 1; fi
+            printf 'sleeps=%s' "$sleeps"
+            BASH
+            ,
+        );
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertStringContainsString('sleeps=2', $result['stdout']);
+    }
+
+    public function testDeepHealthRetriesHttp200TransportTimeoutThenAcceptsValidContract(): void
+    {
+        $result = $this->runShell(
+            <<<'BASH'
+            source ./deploy_ea.sh
+            DRYRUN=0
+            DEEP_HEALTH_RETRIES=2
+            calls_file=$(mktemp)
+            printf '0' > "$calls_file"
+            trap 'rm -f "$calls_file"' EXIT
+            sleeps=0
+            sleep() { sleeps=$((sleeps + 1)); }
+            read_healthz_token() { printf token; }
+            curl() {
+              [[ "$1" == '--connect-timeout' && "$2" == '3' && "$3" == '--max-time' && "$4" == '30' && "$5" == '-sS' && "$6" == '-o' && "$8" == '-w' && "$9" == '%{http_code}' && "${10}" == '-H' && "${11}" == 'X-Health-Token: token' ]] || return 97
+              local output=''
+              while (($# > 0)); do
+                if [[ "$1" == '-o' ]]; then output="$2"; shift 2; else shift; fi
+              done
+              printf '%s' '{"status":"ok","checks":{"pdf_renderer":{"ok":true}}}' > "$output"
+              calls=$(( $(<"$calls_file") + 1 ))
+              printf '%s' "$calls" > "$calls_file"
+              printf '200'
+              [[ "$calls" -eq 1 ]] && return 28
+              return 0
+            }
+            if ! probe_deep_health_contract; then exit 1; fi
+            printf 'calls=%s sleeps=%s' "$(<"$calls_file")" "$sleeps"
+            BASH
+            ,
+        );
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertStringContainsString('calls=2 sleeps=1', $result['stdout']);
+        self::assertStringContainsString('curl exit 28', $result['stdout']);
+    }
+
+    public function testDeepHealthRejectsMalformedAndPdfFalseResponses(): void
+    {
+        $result = $this->runShell(
+            <<<'BASH'
+            source ./deploy_ea.sh
+            DRYRUN=0
+            DEEP_HEALTH_RETRIES=1
+            sleeps=0
+            sleep() { sleeps=$((sleeps + 1)); }
+            read_healthz_token() { printf token; }
+            mode=malformed
+            curl() {
+              [[ "$1" == '--connect-timeout' && "$2" == '3' && "$3" == '--max-time' && "$4" == '30' && "$5" == '-sS' && "$6" == '-o' && "$8" == '-w' && "$9" == '%{http_code}' && "${10}" == '-H' && "${11}" == 'X-Health-Token: token' ]] || return 97
+              local output=''
+              while (($# > 0)); do
+                if [[ "$1" == '-o' ]]; then output="$2"; shift 2; else shift; fi
+              done
+              if [[ "$mode" == 'malformed' ]]; then printf '{' > "$output"; else printf '%s' '{"status":"ok","checks":{"pdf_renderer":{"ok":false}}}' > "$output"; fi
+              printf '200'
+            }
+            if probe_deep_health_contract; then exit 1; fi
+            mode=pdf-false
+            if probe_deep_health_contract; then exit 1; fi
+            printf 'rejected-twice sleeps=%s' "$sleeps"
+            BASH
+            ,
+        );
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertStringContainsString('rejected-twice sleeps=0', $result['stdout']);
+        self::assertStringContainsString('deep health response is not valid JSON', $result['stderr']);
+        self::assertStringContainsString('deep health contract mismatch', $result['stderr']);
+    }
+
+    public function testHealthProbeDryRunShowsLimitsWithoutReadingToken(): void
+    {
+        $result = $this->runShell(
+            <<<'BASH'
+            source ./deploy_ea.sh
+            DRYRUN=1
+            curl() { printf 'curl-called' >&2; return 1; }
+            read_healthz_token() { printf 'token-read' >&2; return 1; }
+            probe_renderer_health
+            probe_deep_health_contract
+            BASH
+            ,
+        );
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertStringContainsString('connect=3s, max=10s', $result['stdout']);
+        self::assertStringContainsString('connect=3s, max=30s', $result['stdout']);
+        self::assertStringNotContainsString('token-read', $result['stderr']);
+        self::assertStringNotContainsString('curl-called', $result['stderr']);
+    }
+
     public function testSuccessfulPostSwitchTailUsesRetainedChecksThenFinalizesWithoutOptionalHttpProbe(): void
     {
         $source = (string) file_get_contents(dirname(__DIR__, 3) . '/deploy_ea.sh');

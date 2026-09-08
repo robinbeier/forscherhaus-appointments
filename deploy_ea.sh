@@ -45,6 +45,9 @@ RENDERER_HEALTH_RETRIES=15
 RENDERER_HEALTH_SLEEP_SECONDS=2
 DEEP_HEALTH_RETRIES=10
 DEEP_HEALTH_SLEEP_SECONDS=2
+HEALTH_CONNECT_TIMEOUT_SECONDS=3
+RENDERER_HEALTH_TIMEOUT_SECONDS=10
+DEEP_HEALTH_TIMEOUT_SECONDS=30
 
 EXIT_DEPLOY_FAILED=30
 EXIT_ROLLBACK_SUCCESS=30
@@ -1453,20 +1456,28 @@ read_healthz_token() {
 probe_renderer_health() {
   local attempt
   local code
+  local curl_exit
 
   if [[ "$DRYRUN" -eq 1 ]]; then
-    echo "[DRY-RUN] renderer health probe: $RENDERER_HEALTH_URL (${RENDERER_HEALTH_RETRIES}x, ${RENDERER_HEALTH_SLEEP_SECONDS}s)"
+    echo "[DRY-RUN] renderer health probe: $RENDERER_HEALTH_URL (${RENDERER_HEALTH_RETRIES}x, connect=${HEALTH_CONNECT_TIMEOUT_SECONDS}s, max=${RENDERER_HEALTH_TIMEOUT_SECONDS}s, sleep=${RENDERER_HEALTH_SLEEP_SECONDS}s)"
     return 0
   fi
 
   for ((attempt = 1; attempt <= RENDERER_HEALTH_RETRIES; attempt++)); do
-    code="$(curl -sS -o /dev/null -w '%{http_code}' "$RENDERER_HEALTH_URL" || echo 000)"
-    if [[ "$code" == "200" ]]; then
+    if code="$(curl --connect-timeout "$HEALTH_CONNECT_TIMEOUT_SECONDS" --max-time "$RENDERER_HEALTH_TIMEOUT_SECONDS" -sS -o /dev/null -w '%{http_code}' "$RENDERER_HEALTH_URL")"; then
+      curl_exit=0
+    else
+      curl_exit=$?
+    fi
+    [[ "$code" =~ ^[0-9]{3}$ ]] || code=000
+    if [[ "$curl_exit" -eq 0 && "$code" == "200" ]]; then
       echo "[OK] Renderer health is up: HTTP 200 (attempt $attempt/$RENDERER_HEALTH_RETRIES)"
       return 0
     fi
-    echo "[i] Renderer health pending: HTTP $code (attempt $attempt/$RENDERER_HEALTH_RETRIES)"
-    sleep "$RENDERER_HEALTH_SLEEP_SECONDS"
+    echo "[i] Renderer health pending: HTTP $code (curl exit $curl_exit, attempt $attempt/$RENDERER_HEALTH_RETRIES)"
+    if (( attempt < RENDERER_HEALTH_RETRIES )); then
+      sleep "$RENDERER_HEALTH_SLEEP_SECONDS"
+    fi
   done
 
   echo "[!] Renderer health failed after $RENDERER_HEALTH_RETRIES attempts: $RENDERER_HEALTH_URL"
@@ -1478,9 +1489,10 @@ probe_deep_health_contract() {
   local body_file
   local http_code
   local attempt
+  local curl_exit
 
   if [[ "$DRYRUN" -eq 1 ]]; then
-    echo "[DRY-RUN] deep health probe: $DEEP_HEALTH_URL with header X-Health-Token:<redacted> and contract status=ok + checks.pdf_renderer.ok=true (${DEEP_HEALTH_RETRIES}x, ${DEEP_HEALTH_SLEEP_SECONDS}s)"
+    echo "[DRY-RUN] deep health probe: $DEEP_HEALTH_URL with header X-Health-Token:<redacted> and contract status=ok + checks.pdf_renderer.ok=true (${DEEP_HEALTH_RETRIES}x, connect=${HEALTH_CONNECT_TIMEOUT_SECONDS}s, max=${DEEP_HEALTH_TIMEOUT_SECONDS}s, sleep=${DEEP_HEALTH_SLEEP_SECONDS}s)"
     return 0
   fi
 
@@ -1488,12 +1500,19 @@ probe_deep_health_contract() {
 
   for ((attempt = 1; attempt <= DEEP_HEALTH_RETRIES; attempt++)); do
     body_file="$(mktemp)"
-    http_code="$(curl -sS -o "$body_file" -w '%{http_code}' -H "X-Health-Token: $token" "$DEEP_HEALTH_URL" || echo 000)"
+    if http_code="$(curl --connect-timeout "$HEALTH_CONNECT_TIMEOUT_SECONDS" --max-time "$DEEP_HEALTH_TIMEOUT_SECONDS" -sS -o "$body_file" -w '%{http_code}' -H "X-Health-Token: $token" "$DEEP_HEALTH_URL")"; then
+      curl_exit=0
+    else
+      curl_exit=$?
+    fi
+    [[ "$http_code" =~ ^[0-9]{3}$ ]] || http_code=000
 
-    if [[ "$http_code" != "200" ]]; then
-      echo "[i] Deep health pending: HTTP $http_code from $DEEP_HEALTH_URL (attempt $attempt/$DEEP_HEALTH_RETRIES)"
+    if [[ "$curl_exit" -ne 0 || "$http_code" != "200" ]]; then
+      echo "[i] Deep health pending: HTTP $http_code (curl exit $curl_exit) from $DEEP_HEALTH_URL (attempt $attempt/$DEEP_HEALTH_RETRIES)"
       rm -f "$body_file"
-      sleep "$DEEP_HEALTH_SLEEP_SECONDS"
+      if (( attempt < DEEP_HEALTH_RETRIES )); then
+        sleep "$DEEP_HEALTH_SLEEP_SECONDS"
+      fi
       continue
     fi
 
@@ -1523,7 +1542,9 @@ probe_deep_health_contract() {
 
     echo "[i] Deep health contract pending: $DEEP_HEALTH_URL (attempt $attempt/$DEEP_HEALTH_RETRIES)"
     rm -f "$body_file"
-    sleep "$DEEP_HEALTH_SLEEP_SECONDS"
+    if (( attempt < DEEP_HEALTH_RETRIES )); then
+      sleep "$DEEP_HEALTH_SLEEP_SECONDS"
+    fi
   done
 
   echo "[!] Deep health contract validation failed after $DEEP_HEALTH_RETRIES attempts: $DEEP_HEALTH_URL"
