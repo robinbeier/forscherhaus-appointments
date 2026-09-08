@@ -2472,18 +2472,6 @@ if [[ "$MARK_RELEASE" -eq 1 ]]; then
   run_shell "bash -lc 'echo \"$REL  \$(date -u +%FT%TZ)\" > \"$APP/_RELEASE\"'"
 fi
 
-if command -v curl >/dev/null 2>&1; then
-  if [[ "$DRYRUN" -eq 1 ]]; then
-    echo "[DRY-RUN] curl -fsS http://localhost/ >/dev/null && echo '[OK] HTTP-Check localhost/' || echo '[i] HTTP-Check skipped/failed (non-critical)'"
-  else
-    if curl -fsS http://localhost/ >/dev/null; then
-      echo "[OK] HTTP-Check localhost/"
-    else
-      echo "[i] HTTP-Check skipped/failed (non-critical)"
-    fi
-  fi
-fi
-
 deploy_result_finalize 0
 echo "[✓] Deployment completed: $APP"
 echo "    Archive        : $ARCHIVE"
