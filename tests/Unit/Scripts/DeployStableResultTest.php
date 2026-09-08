@@ -418,6 +418,63 @@ final class DeployStableResultTest extends TestCase
         self::assertStringContainsString("dry-run-ok\n", $result['stdout']);
     }
 
+    public function testStorageSyncAndStageNormalizationKeepSessionFilesPrivate(): void
+    {
+        $result = $this->runShell(
+            <<<'BASH'
+            set -Eeuo pipefail
+            fixture="$(mktemp -d)"
+            trap 'rm -rf "$fixture"' EXIT
+            source ./deploy_ea.sh
+            APP="$fixture/app"
+            STAGE_ROOT="$fixture/stage"
+            WEBUSER="$(id -un)"
+            rsync() {
+              [[ "$1" == '-a' && "$2" == '--' ]]
+              # Match rsync -a mode copying without claiming hardlink preservation.
+              cp -a --no-preserve=links -- "$3/." "$4/"
+            }
+            mkdir -p "$APP/storage/sessions" "$STAGE_ROOT/storage" "$fixture/outside"
+            printf 'private\n' > "$APP/storage/sessions/ea_sessionaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            printf 'also private\n' > "$APP/storage/sessions/ea_sessionbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            printf 'foreign\n' > "$APP/storage/sessions/foreign-file"
+            printf 'hardlinked\n' > "$APP/storage/sessions/ea_session_hardlink"
+            ln "$APP/storage/sessions/ea_session_hardlink" "$APP/storage/sessions/ea_session_hardlink_alias"
+            printf 'ordinary\n' > "$APP/storage/ordinary.txt"
+            printf 'outside\n' > "$fixture/outside/target.txt"
+            chmod 600 "$APP/storage/sessions/ea_sessionaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            chmod 644 "$APP/storage/sessions/ea_sessionbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" "$APP/storage/sessions/foreign-file" "$APP/storage/sessions/ea_session_hardlink" "$APP/storage/ordinary.txt" "$fixture/outside/target.txt"
+            ln -s "$fixture/outside/target.txt" "$APP/storage/sessions/ea_session_link"
+            printf 'stage\n' > "$STAGE_ROOT/storage/sessions-placeholder"
+            mkdir -p "$STAGE_ROOT/storage/sessions"
+            printf 'predeploy\n' > "$STAGE_ROOT/storage/sessions/ea_sessioncccccccccccccccccccccccccccccccc"
+            chmod 600 "$STAGE_ROOT/storage/sessions/ea_sessioncccccccccccccccccccccccccccccccc"
+            prepare_zero_surprise_stage_runtime() { :; }
+            REQUIRE_ZERO_SURPRISE=0
+            prepare_predeploy_stage_permissions
+            [[ "$(stat -c '%a' "$STAGE_ROOT/storage/sessions/ea_sessioncccccccccccccccccccccccccccccccc")" == 600 ]]
+            sync_live_storage_to_stage
+            normalize_stage_permissions
+            stat_mode() { stat -c '%a' "$1"; }
+            printf 'private=%s\n' "$(stat_mode "$STAGE_ROOT/storage/sessions/ea_sessionaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")"
+            printf 'public=%s\n' "$(stat_mode "$STAGE_ROOT/storage/sessions/ea_sessionbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")"
+            printf 'foreign=%s\n' "$(stat_mode "$STAGE_ROOT/storage/sessions/foreign-file")"
+            printf 'hardlink=%s\n' "$(stat_mode "$STAGE_ROOT/storage/sessions/ea_session_hardlink")"
+            printf 'hardlink-alias=%s\n' "$(stat_mode "$STAGE_ROOT/storage/sessions/ea_session_hardlink_alias")"
+            printf 'ordinary=%s\n' "$(stat_mode "$STAGE_ROOT/storage/ordinary.txt")"
+            printf 'target=%s\n' "$(stat_mode "$fixture/outside/target.txt")"
+            [[ -L "$STAGE_ROOT/storage/sessions/ea_session_link" ]]
+            BASH
+            ,
+        );
+
+        self::assertSame(0, $result['exit_code'], $result['stdout'] . $result['stderr']);
+        self::assertSame(
+            "private=600\npublic=644\nforeign=644\nhardlink=644\nhardlink-alias=644\nordinary=644\ntarget=644\n",
+            $result['stdout'],
+        );
+    }
+
     public function testExtractedPreSwitchArchiveFailuresStopBeforeLiveSwitch(): void
     {
         $source = (string) file_get_contents(dirname(__DIR__, 3) . '/deploy_ea.sh');

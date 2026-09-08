@@ -109,11 +109,11 @@ class GateCliSupportTest extends TestCase
                 $result['stdout'],
             );
             $this->assertStringContainsString(
-                "find '{$expectedStageRoot}' -type f -exec chmod 644 {} +",
+                "find -P '{$expectedStageRoot}' -path '{$expectedStageRoot}/storage/sessions' -prune -o -type f -exec chmod 644 {} +",
                 $result['stdout'],
             );
             $this->assertStringNotContainsString(
-                "find '{$expectedStageRoot}' -type f -exec chmod 644 {} \\;",
+                "find -P '{$expectedStageRoot}' -path '{$expectedStageRoot}/storage/sessions' -prune -o -type f -exec chmod 644 {} \\;",
                 $result['stdout'],
             );
             $this->assertStringContainsString(
@@ -125,7 +125,7 @@ class GateCliSupportTest extends TestCase
                 $result['stdout'],
             );
 
-            $genericPermissionPass = "find '{$expectedStageRoot}' -type f -exec chmod 644 {} +";
+            $genericPermissionPass = "find -P '{$expectedStageRoot}' -path '{$expectedStageRoot}/storage/sessions' -prune -o -type f -exec chmod 644 {} +";
             $stageHarden = "bash '{$repoRoot}/deploy_ea.sh' --runtime-config-permissions 'harden' --app-root '{$expectedStageRoot}' --runtime-user 'www-data'";
             $liveHarden = "bash '{$repoRoot}/deploy_ea.sh' --runtime-config-permissions 'harden' --app-root '{$appPath}' --runtime-user 'www-data'";
             $atomicMove = "mv '{$appPath}' '{$appPath}_prev_ea_20260320_1200'";

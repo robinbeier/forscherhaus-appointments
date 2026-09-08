@@ -775,7 +775,7 @@ prepare_predeploy_stage_permissions() {
   prepare_zero_surprise_stage_runtime || return $?
   run_shell "chown -R '$WEBUSER':'$WEBUSER' '$STAGE_ROOT'" || return $?
   run_shell "find '$STAGE_ROOT' -type d -exec chmod 755 {} +" || return $?
-  run_shell "find '$STAGE_ROOT' -type f -exec chmod 644 {} +" || return $?
+  run_shell "find -P '$STAGE_ROOT' -path '$STAGE_ROOT/storage/sessions' -prune -o -type f -exec chmod 644 {} +" || return $?
   restore_runtime_script_permissions || return $?
   if [[ "$REQUIRE_ZERO_SURPRISE" -eq 1 ]]; then
     harden_and_verify_runtime_config "$STAGE_ROOT" || return $?
@@ -792,7 +792,7 @@ run_zero_surprise_predeploy_gate() {
 normalize_stage_permissions() {
   run_shell "chown -R '$WEBUSER':'$WEBUSER' '$STAGE_ROOT'" || return $?
   run_shell "find '$STAGE_ROOT' -type d -exec chmod 755 {} +" || return $?
-  run_shell "find '$STAGE_ROOT' -type f -exec chmod 644 {} +" || return $?
+  run_shell "find -P '$STAGE_ROOT' -path '$STAGE_ROOT/storage/sessions' -prune -o -type f -exec chmod 644 {} +" || return $?
   restore_runtime_script_permissions || return $?
   return 0
 }
