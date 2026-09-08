@@ -243,6 +243,7 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
   - `application/controllers/Legal_settings.php`
   - `assets/js/pages/business_settings.js`
 - Path rules:
+  - `application/controllers/About.php` (exact_file)
   - `application/controllers/Api_settings.php` (exact_file)
   - `application/controllers/Booking_settings.php` (exact_file)
   - `application/controllers/Business_settings.php` (exact_file)

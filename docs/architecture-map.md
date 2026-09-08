@@ -10,14 +10,14 @@ This map defines component boundaries, path ownership scope, and dependency edge
 
 | Component | Role | Depends On | Path Rules | Key Files |
 |---|---|---|---:|---:|
-| `auth-session` | Access & Session | integrations-sync, people-services-admin, scheduling-backoffice, shared-core | 13 | 3 |
+| `auth-session` | Access & Session | integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 13 | 3 |
 | `installation-bootstrap` | Installation & Bootstrap | people-services-admin, settings-compliance, shared-core | 4 | 3 |
 | `booking-public` | Public Booking | integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 10 | 7 |
 | `booking-lifecycle` | Booking Confirmation/Cancellation | booking-public, integrations-sync, people-services-admin, scheduling-backoffice, shared-core | 5 | 3 |
 | `scheduling-backoffice` | Calendar & Scheduling | integrations-sync, people-services-admin, settings-compliance, shared-core | 18 | 3 |
 | `dashboard-exports` | Dashboard & Exports | scheduling-backoffice, people-services-admin, shared-core | 11 | 3 |
 | `people-services-admin` | People, Providers, Services | integrations-sync, scheduling-backoffice, settings-compliance, shared-core | 24 | 3 |
-| `settings-compliance` | Settings & Compliance | auth-session, integrations-sync, people-services-admin, scheduling-backoffice | 25 | 3 |
+| `settings-compliance` | Settings & Compliance | auth-session, integrations-sync, people-services-admin, scheduling-backoffice, shared-core | 26 | 3 |
 | `integrations-sync` | Integrations & Sync | auth-session, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 12 | 2 |
 | `api-v1` | REST API v1 | auth-session, integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 5 | 3 |
 | `shared-core` | Shared Core | None | 7 | 3 |
@@ -33,6 +33,7 @@ Dependencies:
 - `integrations-sync`
 - `people-services-admin`
 - `scheduling-backoffice`
+- `settings-compliance`
 - `shared-core`
 
 Path rules:
@@ -242,8 +243,10 @@ Dependencies:
 - `integrations-sync`
 - `people-services-admin`
 - `scheduling-backoffice`
+- `shared-core`
 
 Path rules:
+- `application/controllers/About.php` (exact_file)
 - `application/controllers/Api_settings.php` (exact_file)
 - `application/controllers/Booking_settings.php` (exact_file)
 - `application/controllers/Business_settings.php` (exact_file)

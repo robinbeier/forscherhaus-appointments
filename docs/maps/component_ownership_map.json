@@ -76,6 +76,7 @@
         "integrations-sync",
         "people-services-admin",
         "scheduling-backoffice",
+        "settings-compliance",
         "shared-core"
       ]
     },
@@ -534,6 +535,10 @@
       "ownership_notes": "Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.",
       "path_rules": [
         {
+          "path": "application/controllers/About.php",
+          "match": "exact_file"
+        },
+        {
           "path": "application/controllers/Api_settings.php",
           "match": "exact_file"
         },
@@ -643,7 +648,8 @@
         "auth-session",
         "integrations-sync",
         "people-services-admin",
-        "scheduling-backoffice"
+        "scheduling-backoffice",
+        "shared-core"
       ]
     },
     {
