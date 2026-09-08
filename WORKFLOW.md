@@ -113,7 +113,6 @@ Expected statuses:
 - `Todo`
 - `In Progress`
 - `In Review`
-- `Rework`
 - `Ready to Merge`
 - `Done`
 - `Canceled`
@@ -124,16 +123,14 @@ Normal path:
 
 Review change path:
 
-`In Review` -> `Rework` -> `In Review`
+`In Review` -> `In Progress` -> `In Review`
 
 Use the states as follows:
 
 - `Todo`: ready to start, no implementation has begun yet.
-- `In Progress`: active implementation and local validation.
+- `In Progress`: active implementation, review corrections, and local validation.
 - `In Review`: PR exists and is waiting on human review, CI completion, or
   explicit merge intent.
-- `Rework`: active response to PR review feedback, CI failures, or requested
-  follow-up on the same PR.
 - `Ready to Merge`: final landing phase after the required reviews are
   finding-free and blocking CI is green on the same unchanged exact commit.
   Any new push returns the issue to `In Review`.
@@ -259,12 +256,13 @@ When the branch is ready to publish:
 
 Do not leave a reviewable PR in `In Progress`.
 
-### 5. Rework loop
+### 5. Review correction loop
 
-When the issue is moved to `Rework`:
+When review or CI findings require changes:
 
+- move the issue to `In Progress` while working on the corrections
 - inspect open PR comments, reviewer findings, and failing CI
-- update the workpad with the current rework plan
+- update the workpad with the current correction plan
 - fix the required issues
 - commit and push the changes
 - return the issue to `In Review` when waiting on reviewers again
