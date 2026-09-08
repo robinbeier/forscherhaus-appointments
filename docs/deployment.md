@@ -175,6 +175,12 @@ After the atomic switch, `deploy_ea.sh` verifies:
 - app deep-health contract
 - zero-surprise live canary
 
+Each renderer/deep-health HTTP attempt uses a fixed 3-second connection limit;
+the renderer attempt has a 10-second overall limit and the deep-health attempt
+has a 30-second overall limit. Existing retry counts and post-switch rollback
+behavior remain unchanged; these are per-attempt bounds, not a total deploy
+deadline.
+
 Any post-switch failure triggers automatic rollback to the previous app path.
 After restoring the release, rollback reloads the configured services and checks
 renderer and application health without restarting the renderer. A failed reload
