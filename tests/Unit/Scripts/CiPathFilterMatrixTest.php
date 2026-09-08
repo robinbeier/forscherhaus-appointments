@@ -13,7 +13,49 @@ class CiPathFilterMatrixTest extends TestCase
     {
         $matches = $this->applyFilters(['docs/file.md', 'docs/monitoring/target-concept.md', 'docs/nested/notes.md']);
 
-        self::assertFalse($matches['root_deployment_required']);
+        self::assertFalse($matches['runtime_checks_required']);
+    }
+
+    public function testPureProseChangesSkipPhpBuildJobs(): void
+    {
+        foreach (
+            [
+                'docs/security/ROB-403-hsts-policy-decision.md',
+                'docs/monitoring/parent-confirmation-pdf-synthetic-decision.md',
+            ]
+            as $path
+        ) {
+            self::assertFalse($this->applyFilters([$path])['runtime_checks_required'], $path);
+        }
+    }
+
+    public function testMachineConsumedDocsAndMixedChangesKeepPhpBuildProtection(): void
+    {
+        foreach (
+            [
+                'AGENTS.md',
+                'docs/AGENTS.md',
+                'docs/ops/AGENTS.md',
+                'system/core/CodeIgniter.php',
+                'config-sample.php',
+                'future-tool.py',
+                'docs/deployment.md',
+                'docs/deployment-run-v1.md',
+                'docs/deployment-evidence-authority-v1.md',
+                'docs/ops/production-backup-set-producer.md',
+                'docs/ops/production-dump-producer-admission.md',
+                'docs/ops/production-release-archive-dump-retention.md',
+                'docs/architecture-map.md',
+                'docs/ownership-map.md',
+                'docs/agent-harness-index.md',
+                'docs/maps/component_ownership_map.json',
+                ['docs/deployment.md', 'application/controllers/Booking.php'],
+            ]
+            as $changedPaths
+        ) {
+            $paths = is_array($changedPaths) ? $changedPaths : [$changedPaths];
+            self::assertTrue($this->applyFilters($paths)['runtime_checks_required'], implode(', ', $paths));
+        }
     }
 
     public function testNonMarkdownAndCodeToMarkdownChangesKeepRootDeploymentProtection(): void
@@ -29,7 +71,7 @@ class CiPathFilterMatrixTest extends TestCase
             as $changedPaths
         ) {
             $paths = is_array($changedPaths) ? $changedPaths : [$changedPaths];
-            self::assertTrue($this->applyFilters($paths)['root_deployment_required'], implode(', ', $paths));
+            self::assertTrue($this->applyFilters($paths)['runtime_checks_required'], implode(', ', $paths));
         }
     }
 
@@ -569,7 +611,7 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertArrayHasKey('coverage_required', $filters);
         self::assertArrayHasKey('pdf_renderer_tests_required', $filters);
         self::assertArrayHasKey('ldap_guardrail_required', $filters);
-        self::assertSame(['!docs/**/*.md'], $filters['root_deployment_required']);
+        self::assertArrayHasKey('runtime_checks_required', $filters);
 
         return $filters;
     }
