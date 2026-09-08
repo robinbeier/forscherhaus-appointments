@@ -216,7 +216,7 @@ docker compose \
 rm -rf /private/tmp/fh-php85-smoke-mysql
 ```
 
-The headless Chrome sidecar that renders PDFs is exposed via the `pdf-renderer` service (`http://localhost:3003`). When you run the PHP stack outside of Docker, make sure the application can reach the sidecar by setting the runtime environment variable `PDF_RENDERER_URL=http://127.0.0.1:3003`; inside the Compose network the default `http://pdf-renderer:3000` endpoint is used automatically. If the request path runs through Apache `mod_php`, set `PDF_RENDERER_URL` in Apache as well, because PHP-FPM-only env wiring will not reach those requests. HTML debug dumps for dashboard PDF exports are disabled by default and can be enabled temporarily with `PDF_RENDERER_DEBUG_DUMP=true`.
+The headless Chrome sidecar that renders PDFs is available only on host loopback via the `pdf-renderer` service (`http://127.0.0.1:3003`), not to other machines on the network. The renderer accepts trusted HTML and must not be exposed publicly; the isolated deployment replay publishes no renderer port. When you run the PHP stack outside of Docker, make sure the application can reach the sidecar by setting the runtime environment variable `PDF_RENDERER_URL=http://127.0.0.1:3003`; inside the Compose network the default `http://pdf-renderer:3000` endpoint is used automatically. If the request path runs through Apache `mod_php`, set `PDF_RENDERER_URL` in Apache as well, because PHP-FPM-only env wiring will not reach those requests. HTML debug dumps for dashboard PDF exports are disabled by default and can be enabled temporarily with `PDF_RENDERER_DEBUG_DUMP=true`.
 
 
 The renderer image uses `node:24-bookworm-slim` and installs only the Chrome

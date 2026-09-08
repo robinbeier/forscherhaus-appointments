@@ -63,7 +63,7 @@
             "deep-runtime-suite": "8eb3720a7a31f3ef91c46f13d9f27be12b088b1195abcaeed83f4d28762f9d2f",
             "integration-smoke": "17de4f0907f27bed9f71f40547041109e8877d8f9ba2643821372dd2cf56b88a",
             "js-lint-changed": "b711d579f5d81be4e4d1ca6749a315e6eb01191196fe0593ff3ae8b7ca13dd01",
-            "pdf-renderer-tests": "f1eaead4ec5726c94d67dab088268f7394e9c1d902f60feffa5783184ae4646c",
+            "pdf-renderer-tests": "6b9cb2d1de9938b11d434eab11453d35b9c25c2ddcbfc140bf4173e52d27a10a",
             "phpstan-application": "6db5d9a74906543f3e86147447d74d3f5b3314ded06aad4352165752c07c7f14",
             "root-deployment-tests": "06f2fefb0dcecbfbe358bbc25f80d7ef45e2e6a132abf1391eaf89cc5cd5bfad",
             "typed-request-contracts": "50b13f9339970e4c886503707fa8320ff5dc556694b3df524625cc912b9c44e7",
