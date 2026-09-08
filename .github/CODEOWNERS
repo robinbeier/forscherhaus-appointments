@@ -158,5 +158,4 @@
 /scripts/ops/prod_customers_ui_smoke.sh @robinbeier
 /scripts/ops/prod_provider_ui_smoke.sh @robinbeier
 /scripts/ops/provider_ui_smoke_principal.sh @robinbeier
-/scripts/ops/validate_deployment_contract_v1.php @robinbeier
 /scripts/release-gate/** @robinbeier

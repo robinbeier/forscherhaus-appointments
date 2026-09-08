@@ -17,9 +17,9 @@ For the on-demand, no-customer-data Customers UI role smoke, use
 never belongs in Kuma or cron.
 
 For the pure ROB-455 deploy intent, lifecycle, child-result receipt, and evidence
-contract, use `docs/deployment-run-v1.md`, `lib/DeployResultV1.php`, and
-`validate_deployment_contract_v1.php`. This contract slice does not install a
-host runner or activate production behavior.
+contract, use `docs/deployment-run-v1.md`, `lib/DeploymentContractV1.php`, and
+`lib/DeployResultV1.php`. These libraries do not install a host runner or
+activate production behavior.
 
 Use `scripts/ops/uptime-kuma-push.env.example` as the host-local env template.
 The immutable root runtime, canonical `/etc/cron.d` file and update boundary
@@ -87,10 +87,6 @@ Script inventory:
 - `prod_customers_ui_smoke.sh` runs their operator-side Customers view/search
   smoke with no customer fixture and independent ten-minute cleanup
 
-- `validate_deployment_contract_v1.php` validates canonical local
-  `deployment_run.v1` JSONL plus closed `deployment_evidence.v1` JSON without
-  invoking a deploy or trusting a production path; the evidence keeps the
-  normal deploy reservation separate from any at-most-once post-gate recovery
 - `lib/DeployResultV1.php` validates a closed canonical `deploy_result.v1`
   child-receipt candidate and derives its fixed deploy-evidence tuple without
   reading timing or process output; authority additionally requires an

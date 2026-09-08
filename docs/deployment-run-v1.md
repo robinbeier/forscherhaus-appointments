@@ -255,18 +255,3 @@ lock and reject conflicting or unverifiable historical run state. Keep these
 checks, the shared evidence validators, and
 `/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock`; removing the
 unused runner does not make an existing run record safe to ignore.
-
-## Local validation
-
-The pure validator can validate a completed local fixture without privileged
-execution:
-
-```bash
-php scripts/ops/validate_deployment_contract_v1.php \
-  --run-jsonl=/path/to/events.jsonl \
-  --evidence-json=/path/to/evidence.json
-```
-
-Exit `0` means the two closed contracts agree. Invocation errors exit `64`;
-invalid or conflicting contract data exits `70`. This command does not inspect
-or trust a production path and is not a production runner.

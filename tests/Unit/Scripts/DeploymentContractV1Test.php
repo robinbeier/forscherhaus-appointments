@@ -566,39 +566,6 @@ final class DeploymentContractV1Test extends TestCase
         yield 'artifact expectation' => ['artifact', 'expectation', 'future_expectation'];
     }
 
-    public function testCliValidatesFixturesAndUsesStableUsageAndInvalidExitCodes(): void
-    {
-        $fixtureRoot = dirname(__DIR__, 2) . '/Fixtures/deployment-contract-v1';
-        [$validExit, $validStdout, $validStderr] = $this->runCli([
-            '--run-jsonl=' . $fixtureRoot . '/failed-before-write.jsonl',
-            '--evidence-json=' . $fixtureRoot . '/failed-before-write-evidence.json',
-        ]);
-        self::assertSame(0, $validExit, $validStderr);
-        self::assertSame('', $validStderr);
-        $validOutput = json_decode($validStdout, true, 64, JSON_THROW_ON_ERROR);
-        self::assertSame(
-            ['schema', 'valid', 'run_id', 'state', 'records', 'recovery', 'evidence_sha256'],
-            array_keys($validOutput),
-        );
-        self::assertSame('deployment_contract_validation.v1', $validOutput['schema']);
-        self::assertTrue($validOutput['valid']);
-        self::assertSame(self::RUN_ID, $validOutput['run_id']);
-        self::assertSame('failed_before_write', $validOutput['state']);
-        self::assertSame('terminal', $validOutput['recovery']);
-        self::assertMatchesRegularExpression('/^[0-9a-f]{64}$/', $validOutput['evidence_sha256']);
-
-        [$usageExit, , $usageStderr] = $this->runCli([]);
-        self::assertSame(64, $usageExit);
-        self::assertStringContainsString('Usage:', $usageStderr);
-
-        [$invalidExit, , $invalidStderr] = $this->runCli([
-            '--run-jsonl=' . $fixtureRoot . '/failed-before-write.jsonl',
-            '--evidence-json=' . $fixtureRoot . '/missing.json',
-        ]);
-        self::assertSame(70, $invalidExit);
-        self::assertStringContainsString('INVALID:', $invalidStderr);
-    }
-
     public function testStateConflictBeforeWriteBundleRemainsRepresentable(): void
     {
         $lines = $this->runThrough('accepted');
@@ -2434,36 +2401,6 @@ final class DeploymentContractV1Test extends TestCase
         $section['max_used_percent'] = DeploymentContractV1::MAX_CAPACITY_USED_PERCENT;
 
         return $section;
-    }
-
-    /** @param array<string,mixed> $section @return array<string,mixed> */
-    private function runCli(array $arguments): array
-    {
-        $command = [
-            PHP_BINARY,
-            dirname(__DIR__, 3) . '/scripts/ops/validate_deployment_contract_v1.php',
-            ...$arguments,
-        ];
-        $process = proc_open(
-            $command,
-            [
-                0 => ['pipe', 'r'],
-                1 => ['pipe', 'w'],
-                2 => ['pipe', 'w'],
-            ],
-            $pipes,
-            dirname(__DIR__, 3),
-        );
-        self::assertIsResource($process);
-        fclose($pipes[0]);
-        $stdout = stream_get_contents($pipes[1]);
-        $stderr = stream_get_contents($pipes[2]);
-        fclose($pipes[1]);
-        fclose($pipes[2]);
-        self::assertIsString($stdout);
-        self::assertIsString($stderr);
-
-        return [proc_close($process), $stdout, $stderr];
     }
 
     /** @param array<string,mixed> $value */
