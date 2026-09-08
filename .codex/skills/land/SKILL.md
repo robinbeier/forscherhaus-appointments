@@ -44,7 +44,8 @@ contract.
     - fix the code, commit, and push; after any fix/commit/push, return the
       issue to `In Review` and rerun exact-head CI and update independent review for the new head
       after checking the delta and affected paths before restoring `Ready to Merge`
-    - return to the watcher only after that new-head evidence is available
+    - return immediately to the native PR follow-up loop for the new head
+      and collect its current CI and review evidence
 6. Once the PR is green, review-clean, and mergeable:
     - read the current PR head, applicable blocking CI results, and review feedback
     - require a review summary for that head from an independent reviewer;
