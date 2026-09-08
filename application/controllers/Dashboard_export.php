@@ -537,6 +537,13 @@ class Dashboard_export extends EA_Controller
         $explicit_target_count = (int) ($summary['explicit_target_count'] ?? 0);
         $with_plan_count = (int) ($summary['with_plan_count'] ?? 0);
         $missing_to_threshold_total = (int) ($summary['missing_to_threshold_total'] ?? 0);
+        $explicit_target_total = 0;
+
+        foreach ($metrics as $metric) {
+            if (!empty($metric['has_explicit_target'])) {
+                $explicit_target_total += max(0, (int) ($metric['target'] ?? 0));
+            }
+        }
 
         return [
             'provider_count' => $provider_count,
@@ -559,6 +566,9 @@ class Dashboard_export extends EA_Controller
             'providers_below_threshold' => (int) ($summary['providers_below_threshold'] ?? $attention_count),
             'appointment_count_total' => $this->resolveAppointmentCountTotal($metrics),
             'appointment_count_total_formatted' => $this->formatAppointmentCountTotal($metrics),
+            'explicit_target_total' => $explicit_target_total,
+            'explicit_target_total_formatted' => $this->formatNumber($explicit_target_total),
+            'explicit_target_complete' => $explicit_target_count === $provider_count,
         ];
     }
 
@@ -715,7 +725,7 @@ class Dashboard_export extends EA_Controller
                 return $priority_sort;
             }
 
-            $gap_sort = ((int) ($right['gap_to_threshold'] ?? 0)) <=> ((int) ($left['gap_to_threshold'] ?? 0));
+            $gap_sort = $this->resolvePrincipalBookingGap($right) <=> $this->resolvePrincipalBookingGap($left);
 
             if ($gap_sort !== 0) {
                 return $gap_sort;
@@ -731,6 +741,24 @@ class Dashboard_export extends EA_Controller
         });
 
         return $sorted_metrics;
+    }
+
+    protected function resolvePrincipalBookingGap(array $metric): int
+    {
+        if (empty($metric['has_explicit_target'])) {
+            return 0;
+        }
+
+        $target = max(0, (int) ($metric['target_raw'] ?? ($metric['target'] ?? 0)));
+        $booked = array_key_exists('booked_appointments_raw', $metric)
+            ? $metric['booked_appointments_raw']
+            : $metric['booked'] ?? null;
+
+        if ($booked === null) {
+            return max(0, (int) ($metric['gap_to_threshold'] ?? 0));
+        }
+
+        return max($target - max(0, (int) $booked), 0);
     }
 
     /**
@@ -810,7 +838,6 @@ class Dashboard_export extends EA_Controller
     protected function resolvePrincipalActionPriority(array $metric): int
     {
         $status_reasons = $this->normalizeStatusReasons($metric['status_reasons'] ?? []);
-        $booking_goal_missed = in_array(self::STATUS_REASON_BOOKING_GOAL_MISSED, $status_reasons, true);
         $after_15_goal_missed = in_array(self::STATUS_REASON_AFTER_15_GOAL_MISSED, $status_reasons, true);
         $target = (int) ($metric['target_raw'] ?? ($metric['target'] ?? 0));
         $planned = array_key_exists('slots_planned_raw', $metric)
@@ -823,7 +850,7 @@ class Dashboard_export extends EA_Controller
             return 0;
         }
 
-        if ($booking_goal_missed && !empty($metric['has_explicit_target'])) {
+        if ($this->resolvePrincipalBookingGap($metric) > 0) {
             return 1;
         }
 

@@ -48,7 +48,8 @@ class DashboardPrincipalPdfViewTest extends TestCase
         );
 
         self::assertStringContainsString('>3</div><div class="label">Gebuchte Termine', $output);
-        self::assertStringContainsString('Termine zählen Buchungen, keine eindeutigen Familien.', $output);
+        self::assertStringContainsString('Benötigte<br>Termine', $output);
+        self::assertStringContainsString('Termine zählen Buchungen.', $output);
         self::assertStringNotContainsString('Eltern erreicht', $output);
         self::assertStringNotContainsString('Fehlende Eltern', $output);
     }
@@ -61,6 +62,7 @@ class DashboardPrincipalPdfViewTest extends TestCase
         );
 
         self::assertStringContainsString('>—</div><div class="label">Gebuchte Termine', $output);
+        self::assertStringNotContainsString('Buchungsziel erreicht', $output);
     }
 
     public function testEmptySelectionExplainsTheMissingDataWithoutClaimingCompletion(): void
@@ -70,6 +72,35 @@ class DashboardPrincipalPdfViewTest extends TestCase
         self::assertStringContainsString('Keine Daten für diese Auswahl.', $output);
         self::assertStringContainsString('kein Nachweis, dass alle Buchungen erledigt sind', $output);
         self::assertStringContainsString('Keine Lehrkräfte in der aktuellen Auswahl.', $output);
+    }
+
+    public function testFullClassTargetRemainsOpenAfterTheLegacyThreshold(): void
+    {
+        $output = $this->render(
+            [
+                $this->metric([
+                    'target_raw' => 24,
+                    'booked_appointments_raw' => 23,
+                    'booked_raw' => 48,
+                    'gap_to_threshold' => 0,
+                    'status_reasons' => [],
+                ]),
+            ],
+            ['appointment_count_total' => 23, 'explicit_target_total' => 24, 'explicit_target_complete' => true],
+        );
+        self::assertStringContainsString('1 Buchungen bis zum Ziel.', $output);
+        self::assertStringNotContainsString('Buchungsziel erreicht', $output);
+        self::assertStringContainsString('>24</div><div class="label">Benötigte Termine', $output);
+        self::assertStringNotContainsString('90 %', $output);
+    }
+
+    public function testPartialTargetIsLabelledAsIncomplete(): void
+    {
+        $output = $this->render(
+            [$this->metric()],
+            ['appointment_count_total' => 15, 'explicit_target_total' => 20, 'explicit_target_complete' => false],
+        );
+        self::assertStringContainsString('Bekannte Ziele; Auswahl ist unvollständig', $output);
     }
 
     private function metric(array $overrides = []): array

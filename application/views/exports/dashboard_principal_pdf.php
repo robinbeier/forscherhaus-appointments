@@ -1,7 +1,6 @@
 <?php
 $metrics = array_values($metrics ?? []);
 $number = static fn(?int $value): string => $value === null ? '—' : number_format($value, 0, ',', '.');
-$threshold = (float) ($threshold_ratio ?? 0.9);
 $rows = [];
 $offerAttention = 0;
 $bookingAttention = 0;
@@ -12,9 +11,9 @@ foreach ($metrics as $metric) {
     $booked = isset($metric['booked_appointments_raw']) ? max(0, (int) $metric['booked_appointments_raw']) : null;
     $explicit = !empty($metric['has_explicit_target']);
     $hasPlan = !empty($metric['has_plan']);
-    $gap = max(0, (int) ($metric['gap_to_threshold'] ?? 0));
     $offerIssue = !empty($metric['has_capacity_gap']) || ($target > 0 && (!$hasPlan || $planned === null));
-    $bookingIssue = $explicit && $target > 0 && $hasPlan && $gap > 0;
+    $missingBookings = $explicit && $target > 0 && $booked !== null ? max($target - $booked, 0) : 0;
+    $bookingIssue = $explicit && $target > 0 && $hasPlan && $missingBookings > 0;
     $reasons = is_array($metric['status_reasons'] ?? null) ? $metric['status_reasons'] : [];
     $lateIssue = in_array('after_15_goal_missed', $reasons, true);
     $offerAttention += (int) $offerIssue;
@@ -33,7 +32,10 @@ foreach ($metrics as $metric) {
                 : 'Planungsgrundlage unklar.';
     } elseif ($bookingIssue) {
         $action = $booked === 0 ? 'Buchungsstart prüfen' : 'An Buchung erinnern';
-        $detail = $number($gap) . ' Buchungen bis zum Ziel.';
+        $detail = $number($missingBookings) . ' Buchungen bis zum Ziel.';
+    } elseif ($booked === null) {
+        $action = 'Buchungszahl prüfen';
+        $detail = 'Keine verlässliche Terminzahl verfügbar.';
     } elseif ($lateIssue) {
         $action = 'Spätere Termine prüfen';
         $detail = 'Vorgabe nach 15 Uhr noch offen.';
@@ -62,6 +64,13 @@ foreach ($metrics as $metric) {
     );
 }
 $appointmentCount = isset($summary['appointment_count_total']) ? (int) $summary['appointment_count_total'] : null;
+$requiredCount = array_key_exists('explicit_target_total', $summary) ? (int) $summary['explicit_target_total'] : null;
+$requiredComplete = !empty($summary['explicit_target_complete']);
+$requiredCaption = $requiredComplete
+    ? 'Summe der festgelegten Klassengrößen'
+    : ($requiredCount === 0
+        ? 'Kein festgelegtes Ziel'
+        : 'Bekannte Ziele; Auswahl ist unvollständig');
 ?>
 <!doctype html>
 <html lang="de">
@@ -135,10 +144,12 @@ tr { break-inside: avoid; page-break-inside: avoid; }
 <section class="summary" aria-label="Zusammenfassung">
     <div class="kpi"><div class="value"><?= html_escape(
         $number($appointmentCount),
-    ) ?></div><div class="label">Gebuchte Termine</div><div class="caption">Termine, keine Familienzählung</div></div>
+    ) ?></div><div class="label">Gebuchte Termine</div><div class="caption">Ausgewählte Buchungen</div></div>
     <div class="kpi"><div class="value"><?= html_escape(
-        $number($offerAttention),
-    ) ?></div><div class="label">Terminangebot prüfen</div><div class="caption">Lehrkräfte</div></div>
+        $number($requiredCount),
+    ) ?></div><div class="label">Benötigte Termine</div><div class="caption"><?= html_escape(
+    $requiredCaption,
+) ?></div></div>
     <div class="kpi"><div class="value"><?= html_escape(
         $number($bookingAttention),
     ) ?></div><div class="label">Buchungsziel noch offen</div><div class="caption">Lehrkräfte mit festgelegtem Ziel</div></div>
@@ -160,7 +171,7 @@ tr { break-inside: avoid; page-break-inside: avoid; }
 </div>
 <div class="table-heading"><h2>Stand je Lehrkraft</h2><p>Hinweise zuerst · Die Bezeichnungen entsprechen den hinterlegten Lehrkräften.</p></div>
 <table>
-    <thead><tr><th class="teacher">Lehrkraft / Lerngruppe</th><th class="booked numeric">Termine</th><th class="target numeric">Klassen-<br>größe</th><th class="offered numeric">Angebot /<br>erforderlich</th><th class="action">Nächster Schritt</th></tr></thead>
+    <thead><tr><th class="teacher">Lehrkraft / Lerngruppe</th><th class="booked numeric">Gebuchte<br>Termine</th><th class="target numeric">Benötigte<br>Termine</th><th class="offered numeric">Angebot /<br>erforderlich</th><th class="action">Nächster Schritt</th></tr></thead>
     <tbody>
     <?php foreach ($rows as $row): ?>
         <tr class="<?= $row['offerIssue'] || $row['bookingIssue'] || $row['lateIssue'] ? 'attention' : '' ?>">
@@ -183,11 +194,7 @@ tr { break-inside: avoid; page-break-inside: avoid; }
     </tbody>
 </table>
 <div class="explanation">
-    <p><strong>So sind die Zahlen gemeint:</strong> Termine zählen Buchungen, keine eindeutigen Familien. Eine Familie kann mehrere Termine haben. „Fehlende Familien“ lassen sich daraus nicht zuverlässig bestimmen.</p>
-    <p>Das Buchungsziel beträgt <?= html_escape(
-        number_format($threshold * 100, 0, ',', '.'),
-    ) ?> % der festgelegten Klassengröße. Das erforderliche Terminangebot folgt der bestehenden Kapazitätsplanung. „—“ bedeutet: nicht verfügbar oder nicht festgelegt.</p>
-    <p>Alle Werte gelten nur für den ausgewählten Zeitraum, die Lehrkräfte, Angebote und Status. Die Entscheidung über eine Erinnerung trifft die Schulleitung anhand des Zeitpunkts im Buchungsverlauf.</p>
+    <p>Termine zählen Buchungen. Benötigte Termine entsprechen den hinterlegten Klassengrößen: ein Termin je Schülerin oder Schüler. Das Angebot folgt der bestehenden Kapazitätsplanung. „—“ bedeutet: nicht verfügbar oder nicht festgelegt. Alle Werte gelten für die aktuelle Auswahl. Den Zeitpunkt einer Erinnerung entscheidet die Schulleitung.</p>
 </div>
 </body>
 </html>

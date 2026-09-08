@@ -342,6 +342,8 @@ class DashboardExportControllerTest extends TestCase
         $this->assertSame(1, $summary['attention_count']);
         $this->assertSame(1, $summary['fallback_count']);
         $this->assertSame(1, $summary['explicit_target_count']);
+        $this->assertSame(8, $summary['explicit_target_total']);
+        $this->assertFalse($summary['explicit_target_complete']);
         $this->assertSame(2, $summary['without_target_count']);
         $this->assertSame(2, $summary['with_plan_count']);
         $this->assertSame(3, $summary['missing_to_threshold_total']);
@@ -454,6 +456,30 @@ class DashboardExportControllerTest extends TestCase
             ],
             array_column($sorted, 'provider_name'),
         );
+    }
+
+    public function testSortPrincipalMetricsUsesFullExplicitTargetGap(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+
+        $sorted = $controller->callSortPrincipalMetricsForReport([
+            [
+                'provider_name' => 'Nearly full',
+                'has_explicit_target' => true,
+                'target_raw' => 24,
+                'booked_appointments_raw' => 23,
+                'gap_to_threshold' => 0,
+            ],
+            [
+                'provider_name' => 'One more needed',
+                'has_explicit_target' => true,
+                'target_raw' => 24,
+                'booked_appointments_raw' => 22,
+                'gap_to_threshold' => 0,
+            ],
+        ]);
+
+        $this->assertSame('One more needed', $sorted[0]['provider_name']);
     }
 
     public function testPrincipalSortingPutsOfferIssuesBeforeBookingLateUnknownAndReachedRows(): void
