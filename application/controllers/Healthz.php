@@ -374,17 +374,6 @@ class Healthz extends EA_Controller
     }
 
     /**
-     * Allow non-local loopback fallback only when explicitly enabled.
-     */
-    protected function shouldAllowNonLocalLoopbackFallback(): bool
-    {
-        $raw = env('HEALTHZ_ALLOW_LOOPBACK_FALLBACK', 'false');
-        $normalized = strtolower(trim((string) $raw));
-
-        return in_array($normalized, ['1', 'true', 'yes', 'on'], true);
-    }
-
-    /**
      * Detect whether the app runs in a local-like runtime environment.
      */
     protected function isLocalEnvironment(): bool
