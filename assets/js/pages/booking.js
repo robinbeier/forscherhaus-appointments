@@ -914,6 +914,8 @@ App.Pages.Booking = (function () {
 
         const serviceOptionText = serviceId ? $selectService.find('option:selected').text() : lang('service');
         const providerOptionText = providerId ? $selectProvider.find('option:selected').text() : lang('provider');
+        const escapedServiceOptionText = App.Utils.String.escapeHtml(serviceOptionText);
+        const escapedProviderOptionText = App.Utils.String.escapeHtml(providerOptionText);
         const selectedProvider = vars('available_providers').find(
             (availableProvider) => Number(availableProvider.id) === Number(providerId),
         );
@@ -956,10 +958,10 @@ App.Pages.Booking = (function () {
         $('#appointment-details').html(`
             <div>
                 <div class="mb-2 fw-bold fs-3">
-                    ${serviceOptionText}
+                    ${escapedServiceOptionText}
                 </div> 
                 <div class="mb-2 fw-bold text-muted">
-                    ${providerOptionText}
+                    ${escapedProviderOptionText}
                 </div>
                 <div class="mb-2" ${!providerRoom ? 'hidden' : ''}>
                     <i class="fas fa-door-open me-2"></i>
@@ -975,7 +977,7 @@ App.Pages.Booking = (function () {
                 </div> 
                 <div class="mb-2" ${!Number(service.price) ? 'hidden' : ''}>
                     <i class="fas fa-cash-register me-2"></i>
-                    ${Number(service.price).toFixed(2)} ${service.currency}
+                    ${Number(service.price).toFixed(2)} ${App.Utils.String.escapeHtml(service.currency ?? '')}
                 </div>
             </div>     
         `);
@@ -1197,11 +1199,13 @@ App.Pages.Booking = (function () {
         const additionalInfoParts = [];
 
         if (Number(service.price) > 0) {
-            additionalInfoParts.push(`${lang('price')}: ${Number(service.price).toFixed(2)} ${service.currency}`);
+            additionalInfoParts.push(
+                `${lang('price')}: ${Number(service.price).toFixed(2)} ${App.Utils.String.escapeHtml(service.currency ?? '')}`,
+            );
         }
 
         if (service.location) {
-            additionalInfoParts.push(`${lang('location')}: ${service.location}`);
+            additionalInfoParts.push(`${lang('location')}: ${App.Utils.String.escapeHtml(service.location)}`);
         }
 
         if (additionalInfoParts.length) {
