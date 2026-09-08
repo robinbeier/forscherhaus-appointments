@@ -103,7 +103,7 @@ class Booking_confirmation extends EA_Controller
 
         $calendar_end_at = $end_at;
 
-        $manage_url = site_url('booking/reschedule/' . $appointment['hash']);
+        $manage_url = public_site_url('booking/reschedule/' . $appointment['hash']);
 
         $event_description = trim(lang('calendar_event_manage_hint') . ' ' . $manage_url);
 

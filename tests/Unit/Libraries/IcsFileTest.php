@@ -20,16 +20,24 @@ class IcsFileTest extends TestCase
     public function testGetStreamUsesManageLinkWhenHashExists(): void
     {
         $library = new Ics_file();
+        $originalBase = config('base_url');
+        config(['base_url' => 'https://attacker.example/untrusted']);
 
-        $stream = $library->get_stream(
-            $this->makeAppointment(['hash' => 'abc123']),
-            $this->makeService(),
-            $this->makeProvider(),
-            $this->makeCustomer(),
-        );
+        try {
+            $stream = $library->get_stream(
+                $this->makeAppointment(['hash' => 'abc123']),
+                $this->makeService(),
+                $this->makeProvider(),
+                $this->makeCustomer(),
+            );
+        } finally {
+            config(['base_url' => $originalBase]);
+        }
 
         $description = $this->extractDescription($stream);
 
+        $this->assertStringContainsString(rtrim(\Config::BASE_URL, '/'), $description);
+        $this->assertStringNotContainsString('attacker.example', $description);
         $this->assertStringContainsString('booking/reschedule/abc123', $description);
         $this->assertStringNotContainsString(lang('provider'), $description);
         $this->assertStringNotContainsString(lang('customer'), $description);

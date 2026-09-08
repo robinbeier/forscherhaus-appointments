@@ -12,15 +12,15 @@ This map defines component boundaries, path ownership scope, and dependency edge
 |---|---|---|---:|---:|
 | `auth-session` | Access & Session | integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 13 | 3 |
 | `installation-bootstrap` | Installation & Bootstrap | people-services-admin, settings-compliance, shared-core | 4 | 3 |
-| `booking-public` | Public Booking | integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 10 | 7 |
+| `booking-public` | Public Booking | integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 9 | 6 |
 | `booking-lifecycle` | Booking Confirmation/Cancellation | booking-public, integrations-sync, people-services-admin, scheduling-backoffice, shared-core | 5 | 3 |
-| `scheduling-backoffice` | Calendar & Scheduling | integrations-sync, people-services-admin, settings-compliance, shared-core | 18 | 3 |
+| `scheduling-backoffice` | Calendar & Scheduling | integrations-sync, people-services-admin, settings-compliance, shared-core | 20 | 5 |
 | `dashboard-exports` | Dashboard & Exports | scheduling-backoffice, people-services-admin, shared-core | 11 | 3 |
 | `people-services-admin` | People, Providers, Services | integrations-sync, scheduling-backoffice, settings-compliance, shared-core | 24 | 3 |
 | `settings-compliance` | Settings & Compliance | auth-session, integrations-sync, people-services-admin, scheduling-backoffice, shared-core | 26 | 3 |
 | `integrations-sync` | Integrations & Sync | auth-session, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 12 | 2 |
 | `api-v1` | REST API v1 | auth-session, integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 5 | 3 |
-| `shared-core` | Shared Core | None | 7 | 3 |
+| `shared-core` | Shared Core | None | 9 | 2 |
 | `platform-quality-tooling` | Platform, CI, Release Gates | api-v1, booking-public, dashboard-exports, installation-bootstrap, people-services-admin, settings-compliance, shared-core | 19 | 11 |
 
 ## Component Details
@@ -95,7 +95,6 @@ Path rules:
 - `assets/js/pages/booking.js` (exact_file)
 - `assets/js/pages/booking_webmcp.js` (exact_file)
 - `application/libraries/Availability.php` (exact_file)
-- `application/libraries/Email_messages.php` (exact_file)
 - `application/libraries/Booking_request_dto_factory.php` (exact_file)
 - `application/libraries/Reschedule_authority.php` (exact_file)
 
@@ -103,7 +102,6 @@ Key files:
 - `application/controllers/Booking.php`
 - `application/views/pages/booking.php`
 - `assets/js/http/booking_http_client.js`
-- `application/libraries/Email_messages.php`
 - `application/libraries/Reschedule_authority.php`
 - `assets/js/pages/booking.js`
 - `assets/js/pages/booking_webmcp.js`
@@ -133,7 +131,7 @@ Key files:
 
 ### `scheduling-backoffice` - Calendar & Scheduling
 
-Backoffice scheduling operations, calendar interactions and appointment orchestration.
+Backoffice scheduling operations, calendar interactions, appointment orchestration and appointment notification delivery.
 
 Dependencies:
 - `integrations-sync`
@@ -160,11 +158,15 @@ Path rules:
 - `assets/js/pages/blocked_periods.js` (exact_file)
 - `assets/js/components/appointments_modal.js` (exact_file)
 - `assets/js/components/unavailabilities_modal.js` (exact_file)
+- `application/libraries/Notifications.php` (exact_file)
+- `application/libraries/Email_messages.php` (exact_file)
 
 Key files:
 - `application/controllers/Calendar.php`
 - `application/models/Appointments_model.php`
 - `assets/js/pages/calendar.js`
+- `application/libraries/Notifications.php`
+- `application/libraries/Email_messages.php`
 
 ### `dashboard-exports` - Dashboard & Exports
 
@@ -341,16 +343,17 @@ Dependencies:
 Path rules:
 - `application/views/components/jquery_compat_inline.php` (exact_file)
 - `application/libraries/Accounts.php` (exact_file)
-- `application/libraries/Notifications.php` (exact_file)
 - `application/libraries/Pdf_renderer.php` (exact_file)
 - `application/libraries/Request_normalizer.php` (exact_file)
 - `application/libraries/Timezones.php` (exact_file)
 - `application/models/Roles_model.php` (exact_file)
+- `application/libraries/Ics_file.php` (exact_file)
+- `application/libraries/Ics_provider.php` (exact_file)
+- `application/libraries/Ics_calendar.php` (exact_file)
 
 Key files:
 - `application/libraries/Request_normalizer.php`
 - `application/libraries/Accounts.php`
-- `application/libraries/Notifications.php`
 
 ### `platform-quality-tooling` - Platform, CI, Release Gates
 
