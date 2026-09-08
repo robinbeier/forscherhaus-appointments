@@ -16,6 +16,31 @@ The fixed initial policy is deliberately conservative:
   execute path must acquire and hold it as well;
 - image, container, and volume inventories must remain exactly unchanged.
 
+## Proposed Native Docker GC Configuration
+
+The repository includes
+[`scripts/ops/config/docker-build-cache-gc.json`](../../scripts/ops/config/docker-build-cache-gc.json)
+as a proposed native Docker builder-GC policy. It is a sample only: it is not
+installed, activated, scheduled, or an authorization to change a host. The
+policy enables builder GC with a 2 GiB reserved space and a 168-hour unused
+cache duration. The 2 GiB value is a reserve, not a hard total-size cap; recent
+cache can exceed it, and the proposal imposes no hard fresh-cache cap.
+
+An operator evaluating this proposal must confirm that the effective Docker
+builder uses the default Docker driver; this daemon setting does not configure
+a separate custom BuildKit daemon. Merge its `builder.gc` object with the
+existing daemon configuration, preserve unrelated settings, and save the exact
+pre-change configuration, including an explicit record when it was absent.
+Validate the candidate with `dockerd --validate` and obtain separate approval
+before activation. Native GC relies on BuildKit's in-use protection; it does
+not execute `prod_build_cache_retention.sh` or its global activity guard.
+Activation requires a Docker restart, which may briefly affect PDF, Kuma, and
+the app. Run the Docker, PDF, Kuma, and app health checks afterward; on any
+failure, restore the exact prior configuration (or absence), restart Docker,
+and revalidate. This cannot restore cache already deleted by GC.
+
+See the [Docker builder garbage-collection documentation](https://docs.docker.com/build/cache/garbage-collection/).
+
 ## Read-only Snapshot
 
 Run the normal health and cleanup inventory first:
