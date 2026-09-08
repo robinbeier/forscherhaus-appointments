@@ -16,6 +16,8 @@
  * Set your installation BASE_URL * without the trailing slash * and the database
  * credentials in order to connect to the database. You can enable the DEBUG_MODE
  * while developing the application.
+ * BASE_URL is also the trusted public address for appointment links in messages,
+ * shared confirmations and calendar attachments; include any installation subpath.
  *
  * Set the default language by changing the LANGUAGE constant. For a full list of
  * available languages look at the /application/config/config.php file.
