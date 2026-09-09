@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit\Scripts;
 
 use PHPUnit\Framework\TestCase;
+use Tests\Support\CliOutputCapture;
 
 require_once __DIR__ . '/../../../scripts/ci/assert_deep_runtime_suite.php';
 
@@ -70,6 +71,7 @@ class AssertDeepRuntimeSuiteTest extends TestCase
 
     public function testRunAssertDeepRuntimeSuiteCliFailsForMissingSuite(): void
     {
+        $output = new CliOutputCapture();
         $manifestPath = $this->tmpDir . '/manifest.json';
         file_put_contents(
             $manifestPath,
@@ -84,13 +86,15 @@ class AssertDeepRuntimeSuiteTest extends TestCase
             ),
         );
 
-        $exitCode = runAssertDeepRuntimeSuiteCli([
-            'assert_deep_runtime_suite.php',
-            '--manifest=' . $manifestPath,
-            '--suite=api-contract-openapi',
-        ]);
+        $exitCode = runAssertDeepRuntimeSuiteCli(
+            ['assert_deep_runtime_suite.php', '--manifest=' . $manifestPath, '--suite=api-contract-openapi'],
+            $output->stdout,
+            $output->stderr,
+        );
 
-        self::assertSame(ASSERT_DEEP_RUNTIME_SUITE_EXIT_FAILURE, $exitCode);
+        self::assertSame(ASSERT_DEEP_RUNTIME_SUITE_EXIT_FAILURE, $exitCode, $output->diagnostic());
+        self::assertStringContainsString('[FAIL] deep-runtime verdict failed:', $output->stderrContents());
+        self::assertSame('', $output->stdoutContents());
     }
 
     private function removeDirectory(string $directory): void

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit\Scripts;
 
 use PHPUnit\Framework\TestCase;
+use Tests\Support\CliOutputCapture;
 
 require_once __DIR__ . '/../../../scripts/ci/merge_coverage_shards.php';
 
@@ -32,6 +33,7 @@ class CoverageShardMergeTest extends TestCase
 
     public function testRunCoverageShardMergeCliMergesInputsAndWritesOutputs(): void
     {
+        $output = new CliOutputCapture();
         $inputA = $this->tmpDir . '/shard-a-clover.xml';
         $inputB = $this->tmpDir . '/shard-b-clover.xml';
         $outputClover = $this->tmpDir . '/coverage-merged.xml';
@@ -46,15 +48,21 @@ class CoverageShardMergeTest extends TestCase
             '/tmp/shard-c.php' => [30 => 0],
         ]);
 
-        $exitCode = runCoverageShardMergeCli([
-            'merge_coverage_shards.php',
-            '--input=' . $inputA,
-            '--input=' . $inputB,
-            '--output-clover=' . $outputClover,
-            '--output-json=' . $outputJson,
-        ]);
+        $exitCode = runCoverageShardMergeCli(
+            [
+                'merge_coverage_shards.php',
+                '--input=' . $inputA,
+                '--input=' . $inputB,
+                '--output-clover=' . $outputClover,
+                '--output-json=' . $outputJson,
+            ],
+            $output->stdout,
+            $output->stderr,
+        );
 
-        self::assertSame(COVERAGE_SHARD_MERGE_EXIT_SUCCESS, $exitCode);
+        self::assertSame(COVERAGE_SHARD_MERGE_EXIT_SUCCESS, $exitCode, $output->diagnostic());
+        self::assertStringContainsString('[PASS] coverage-shard-merge', $output->stdoutContents());
+        self::assertSame('', $output->stderrContents());
         self::assertFileExists($outputClover);
         self::assertFileExists($outputJson);
 
@@ -70,36 +78,45 @@ class CoverageShardMergeTest extends TestCase
 
     public function testRunCoverageShardMergeCliFailsWhenLessThanTwoInputsProvided(): void
     {
+        $output = new CliOutputCapture();
         $inputA = $this->tmpDir . '/shard-a-clover.xml';
         $this->writeCloverShard($inputA, ['/tmp/shard-a.php' => [10 => 1]]);
 
-        $exitCode = runCoverageShardMergeCli([
-            'merge_coverage_shards.php',
-            '--input=' . $inputA,
-            '--output-clover=' . $this->tmpDir . '/coverage-merged.xml',
-            '--output-json=' . $this->tmpDir . '/coverage-merge.json',
-        ]);
+        $exitCode = runCoverageShardMergeCli(
+            [
+                'merge_coverage_shards.php',
+                '--input=' . $inputA,
+                '--output-clover=' . $this->tmpDir . '/coverage-merged.xml',
+                '--output-json=' . $this->tmpDir . '/coverage-merge.json',
+            ],
+            $output->stdout,
+            $output->stderr,
+        );
 
-        self::assertSame(COVERAGE_SHARD_MERGE_EXIT_RUNTIME_ERROR, $exitCode);
+        self::assertSame(COVERAGE_SHARD_MERGE_EXIT_RUNTIME_ERROR, $exitCode, $output->diagnostic());
+        self::assertStringContainsString('[ERROR] coverage-shard-merge failed:', $output->stderrContents());
     }
 
     public function testRunCoverageShardMergeCliFailsForUnknownOption(): void
     {
+        $output = new CliOutputCapture();
         $outputJson = $this->tmpDir . '/coverage-merge-invalid-option.json';
 
-        $exitCode = runCoverageShardMergeCli([
-            'merge_coverage_shards.php',
-            '--output-json=' . $outputJson,
-            '--invalid-option',
-        ]);
+        $exitCode = runCoverageShardMergeCli(
+            ['merge_coverage_shards.php', '--output-json=' . $outputJson, '--invalid-option'],
+            $output->stdout,
+            $output->stderr,
+        );
 
-        self::assertSame(COVERAGE_SHARD_MERGE_EXIT_RUNTIME_ERROR, $exitCode);
+        self::assertSame(COVERAGE_SHARD_MERGE_EXIT_RUNTIME_ERROR, $exitCode, $output->diagnostic());
+        self::assertStringContainsString('[ERROR] coverage-shard-merge failed:', $output->stderrContents());
         self::assertFileExists($outputJson);
         self::assertSame('error', $this->readJsonFile($outputJson)['status']);
     }
 
     public function testRunCoverageShardMergeCliNormalizesEquivalentRepoPathsAcrossEnvironments(): void
     {
+        $output = new CliOutputCapture();
         $inputA = $this->tmpDir . '/shard-a-clover.xml';
         $inputB = $this->tmpDir . '/shard-b-clover.xml';
         $outputClover = $this->tmpDir . '/coverage-merged.xml';
@@ -117,14 +134,19 @@ class CoverageShardMergeTest extends TestCase
             ],
         ]);
 
-        $exitCode = runCoverageShardMergeCli([
-            'merge_coverage_shards.php',
-            '--input=' . $inputA,
-            '--input=' . $inputB,
-            '--output-clover=' . $outputClover,
-        ]);
+        $exitCode = runCoverageShardMergeCli(
+            [
+                'merge_coverage_shards.php',
+                '--input=' . $inputA,
+                '--input=' . $inputB,
+                '--output-clover=' . $outputClover,
+            ],
+            $output->stdout,
+            $output->stderr,
+        );
 
-        self::assertSame(COVERAGE_SHARD_MERGE_EXIT_SUCCESS, $exitCode);
+        self::assertSame(COVERAGE_SHARD_MERGE_EXIT_SUCCESS, $exitCode, $output->diagnostic());
+        self::assertStringContainsString('[PASS] coverage-shard-merge', $output->stdoutContents());
 
         $metrics = $this->readCloverProjectMetrics($outputClover);
         self::assertSame(3, $metrics['statements']);

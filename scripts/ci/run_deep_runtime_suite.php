@@ -522,10 +522,16 @@ function deepRuntimeDefaultBrowserEvidenceOnFailureChecks(): array
 /**
  * @param array<int, array<string, mixed>> $suiteDefinitions
  * @param callable(array<string, mixed>):int $runner
+ * @param resource $stdout
+ * @param resource $stderr
  * @return array<string, mixed>
  */
-function runConfiguredDeepRuntimeSuites(array $suiteDefinitions, callable $runner): array
-{
+function runConfiguredDeepRuntimeSuites(
+    array $suiteDefinitions,
+    callable $runner,
+    $stdout = STDOUT,
+    $stderr = STDERR,
+): array {
     $manifest = [
         'schema_version' => 1,
         'requested_suites' => array_map(static fn(array $suite): string => (string) $suite['id'], $suiteDefinitions),
@@ -536,7 +542,7 @@ function runConfiguredDeepRuntimeSuites(array $suiteDefinitions, callable $runne
     foreach ($suiteDefinitions as $suite) {
         $suiteId = (string) $suite['id'];
         $startedAt = microtime(true);
-        fwrite(STDOUT, '[INFO] Running deep runtime suite: ' . $suiteId . PHP_EOL);
+        fwrite($stdout, '[INFO] Running deep runtime suite: ' . $suiteId . PHP_EOL);
 
         $exitCode = $runner($suite);
         $durationSeconds = (int) round(microtime(true) - $startedAt);
@@ -551,7 +557,7 @@ function runConfiguredDeepRuntimeSuites(array $suiteDefinitions, callable $runne
             'artifacts_dir' => $suite['artifacts_dir'] ?? null,
         ];
 
-        $stream = $status === 'pass' ? STDOUT : STDERR;
+        $stream = $status === 'pass' ? $stdout : $stderr;
         fwrite(
             $stream,
             sprintf(

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit\Scripts;
 
 use PHPUnit\Framework\TestCase;
+use Tests\Support\CliOutputCapture;
 
 require_once __DIR__ . '/../../../scripts/ci/run_deep_runtime_suite.php';
 
@@ -164,6 +165,7 @@ class DeepRuntimeSuiteTest extends TestCase
 
     public function testRunConfiguredDeepRuntimeSuitesContinuesAfterFailuresAndBuildsManifest(): void
     {
+        $output = new CliOutputCapture();
         $suiteDefinitions = [
             [
                 'id' => 'api-contract-openapi',
@@ -181,15 +183,31 @@ class DeepRuntimeSuiteTest extends TestCase
             ],
         ];
 
-        $manifest = runConfiguredDeepRuntimeSuites($suiteDefinitions, static function (array $suite): int {
-            return $suite['id'] === 'api-contract-openapi' ? 1 : 0;
-        });
+        $manifest = runConfiguredDeepRuntimeSuites(
+            $suiteDefinitions,
+            static function (array $suite): int {
+                return $suite['id'] === 'api-contract-openapi' ? 1 : 0;
+            },
+            $output->stdout,
+            $output->stderr,
+        );
+
+        self::assertStringContainsString(
+            '[INFO] Running deep runtime suite: api-contract-openapi',
+            $output->stdoutContents(),
+        );
+        self::assertStringContainsString('[FAIL] deep-runtime-suite api-contract-openapi', $output->stderrContents());
+        self::assertStringContainsString(
+            '[PASS] deep-runtime-suite booking-controller-flows',
+            $output->stdoutContents(),
+        );
+        self::assertStringNotContainsString('[FAIL] deep-runtime-suite', $output->stdoutContents());
 
         self::assertSame(['api-contract-openapi', 'booking-controller-flows'], $manifest['requested_suites']);
         self::assertSame('contract_failure', $manifest['suites']['api-contract-openapi']['status']);
-        self::assertSame(1, $manifest['suites']['api-contract-openapi']['exit_code']);
+        self::assertSame(1, $manifest['suites']['api-contract-openapi']['exit_code'], $output->diagnostic());
         self::assertSame('pass', $manifest['suites']['booking-controller-flows']['status']);
-        self::assertSame(0, $manifest['suites']['booking-controller-flows']['exit_code']);
+        self::assertSame(0, $manifest['suites']['booking-controller-flows']['exit_code'], $output->diagnostic());
         self::assertArrayHasKey('artifacts_dir', $manifest['suites']['api-contract-openapi']);
         self::assertNotSame('', $manifest['completed_at_utc']);
     }
