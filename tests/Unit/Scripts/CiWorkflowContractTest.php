@@ -260,6 +260,47 @@ class CiWorkflowContractTest extends TestCase
         self::assertSame('chromium', $steps['Run deep runtime suite']['env']['PLAYWRIGHT_MCP_BROWSER'] ?? null);
     }
 
+    public function testDeepRuntimeArtifactsAreAttemptScopedAndConsumersFailClosed(): void
+    {
+        $producer = $this->workflowJob('deep-runtime-suite');
+        self::assertSame(
+            'deep-runtime-suite-artifacts-${{ github.run_attempt }}',
+            $producer['outputs']['artifact-name'] ?? null,
+        );
+
+        $producerSteps = $this->namedSteps($producer);
+        $upload = $producerSteps['Upload deep runtime suite artifacts'];
+        self::assertSame('always()', $upload['if'] ?? null);
+        self::assertSame('deep-runtime-suite-artifacts-${{ github.run_attempt }}', $upload['with']['name'] ?? null);
+        self::assertSame('error', $upload['with']['if-no-files-found'] ?? null);
+
+        $consumerArtifactExpression =
+            "\${{ needs.deep-runtime-suite.outputs.artifact-name || 'missing-deep-runtime-artifact' }}";
+        foreach (
+            [
+                'api-contract-openapi',
+                'write-contract-booking',
+                'write-contract-api',
+                'booking-controller-flows',
+                'integration-smoke',
+            ]
+            as $jobName
+        ) {
+            $consumerSteps = $this->namedSteps($this->workflowJob($jobName));
+            self::assertSame(
+                'actions/download-artifact@v8',
+                $consumerSteps['Download deep runtime suite artifacts']['uses'],
+            );
+            self::assertSame(
+                $consumerArtifactExpression,
+                $consumerSteps['Download deep runtime suite artifacts']['with']['name'] ?? null,
+                $jobName,
+            );
+        }
+
+        self::assertSame('always()', $producerSteps['Cleanup deep runtime services']['if'] ?? null);
+    }
+
     public function testCoverageIntegrationInitializesItsOwnDatabaseAfterReadiness(): void
     {
         $job = $this->workflowJob('coverage-shard-integration');

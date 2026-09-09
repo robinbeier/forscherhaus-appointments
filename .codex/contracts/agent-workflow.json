@@ -51,17 +51,17 @@
         "advisory_jobs": [],
         "blocking_execution_fingerprints": {
             "workflow_execution_envelope": "b00690b770e9cc3b3223dec8bbeb2f46db76443642fb7ddadf3fb8237ebb7f99",
-            "api-contract-openapi": "6e224d3eec1b26fa2eb1e4c3d62f45524253a5e5468cff7e029f9d8b4e2ce069",
+            "api-contract-openapi": "041780f895cb9f59eb199a67368595ef9a793adc289e37f053e9b16b84fa70aa",
             "architecture-boundaries": "51f63bd49022eb1f1052e18c8a333591eb51b73587519634eb787901582b0030",
             "architecture-ownership-map": "7311eb7f2a7972b4eaebb9d1a69903517789f8c4ced4ee93483a283c99080cbc",
-            "booking-controller-flows": "cc7be7cb392f2e57805c331b68019a719996bc4fcc32f744ac6461b0e64b3b69",
+            "booking-controller-flows": "5f4d4d8680a5528864a4282d4838f63a054d845e78666be8ba9f616d47a3c984",
             "build-test": "53380278293adfcfe4d56b18ac65bbbb8422ef3baa0fd047393c681979414318",
             "changes": "dafdf0e180df7a12900d2fd4f8fc4db1d9e3dc5d1a68036f5ad2272ea8a182c2",
             "coverage-delta": "41fc1f9e90eac5fc1292745e1aaceee0f31ddc2be1f9c3f3b240f206f99580a5",
             "coverage-shard-integration": "7c9af9305dad6bd9725f4dcaa5b4a8254717be256d4ac3c80a07d75dcfd37ae6",
             "coverage-shard-unit": "c73abb5eeb1dc51a65c198b07f40567ea2adcc4042ffa9496baad3b83a433af9",
-            "deep-runtime-suite": "8eb3720a7a31f3ef91c46f13d9f27be12b088b1195abcaeed83f4d28762f9d2f",
-            "integration-smoke": "17de4f0907f27bed9f71f40547041109e8877d8f9ba2643821372dd2cf56b88a",
+            "deep-runtime-suite": "5d436180749ed3d539102dba9c5bcfbfae7f1227c614031d6b4e210aa78e35fa",
+            "integration-smoke": "6a4e5be04a8d86d3a2cd5b83efb3cbf7fa5926ea549d640a01da0101ec7ede04",
             "js-lint-changed": "b711d579f5d81be4e4d1ca6749a315e6eb01191196fe0593ff3ae8b7ca13dd01",
             "pdf-renderer-tests": "6b9cb2d1de9938b11d434eab11453d35b9c25c2ddcbfc140bf4173e52d27a10a",
             "phpstan-application": "6db5d9a74906543f3e86147447d74d3f5b3314ded06aad4352165752c07c7f14",
@@ -169,7 +169,7 @@
                 "evidence": {
                     "checkout_action": "actions/checkout@v6",
                     "download_action": "actions/download-artifact@v8",
-                    "artifact": "deep-runtime-suite-artifacts",
+                    "artifact": "${{ needs.deep-runtime-suite.outputs.artifact-name || 'missing-deep-runtime-artifact' }}",
                     "path": "storage/logs/ci/deep-runtime-suite"
                 },
                 "assertion": {
@@ -217,7 +217,7 @@
                 "evidence": {
                     "checkout_action": "actions/checkout@v6",
                     "download_action": "actions/download-artifact@v8",
-                    "artifact": "deep-runtime-suite-artifacts",
+                    "artifact": "${{ needs.deep-runtime-suite.outputs.artifact-name || 'missing-deep-runtime-artifact' }}",
                     "path": "storage/logs/ci/deep-runtime-suite"
                 },
                 "assertion": {
