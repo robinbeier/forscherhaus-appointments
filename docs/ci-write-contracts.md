@@ -15,6 +15,12 @@ Einmal-Authority darf das anschliessende Update freigeben. `manage_mode`, IDs
 oder der Route-Hash allein reichen nicht. Der vollstaendige Sicherheitsvertrag
 steht in [Public Reschedule Authority](security/public-reschedule-authority.md).
 
+Die Backoffice-Endpunkte `customers/store` und `services/store` legen nur neue
+Datensätze an. Eine mitgesendete bestehende ID wird abgewiesen; Änderungen laufen
+über `update` mit Bearbeitungsrecht und den bestehenden Zugriffsprüfungen.
+`EntityStoreAuthorizationTest` prüft diese Trennung einschließlich normalem
+Anlegen, berechtigtem Bearbeiten und der bestehenden E-Mail-Prüfung.
+
 ## Local Repro (Docker CI-Parity)
 
 ```bash

@@ -140,6 +140,14 @@ class Services extends EA_Controller
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityPayloadRequestDto('service');
             $service = $request_dto->payload;
 
+            if (!empty($service['id'])) {
+                json_response(
+                    ['success' => false, 'message' => 'Use the update endpoint to edit an existing record.'],
+                    403,
+                );
+                return;
+            }
+
             $this->services_model->only($service, $this->allowed_service_fields);
 
             $this->services_model->optional($service, $this->optional_service_fields);

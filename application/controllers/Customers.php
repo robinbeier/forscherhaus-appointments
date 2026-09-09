@@ -235,6 +235,14 @@ class Customers extends EA_Controller
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityPayloadRequestDto('customer');
             $customer = $request_dto->payload;
 
+            if (!empty($customer['id'])) {
+                json_response(
+                    ['success' => false, 'message' => 'Use the update endpoint to edit an existing record.'],
+                    403,
+                );
+                return;
+            }
+
             $this->customers_model->only($customer, $this->allowed_customer_fields);
 
             $this->customers_model->optional($customer, $this->optional_customer_fields);
