@@ -104,12 +104,6 @@ class Booking extends EA_Controller
      */
     public function index(): void
     {
-        if (!is_app_installed()) {
-            redirect('installation');
-
-            return;
-        }
-
         $company_name = setting('company_name');
         $company_logo = setting('company_logo');
         $company_color = setting('company_color');
