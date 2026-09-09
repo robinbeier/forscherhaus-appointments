@@ -34,7 +34,7 @@
             "source": "scripts/ops/kuma_push_pdf_export.sh",
             "install": "scripts/ops/kuma_push_pdf_export.sh",
             "role": "entrypoint",
-            "sha256": "344e02039d569415cb68032843f45baf36178f3a1f43d080a281f5a7f3a5cb32"
+            "sha256": "350eb79182c169a2a6b4d8784f86718c7498e95f01416f4678f0fca54df3da63"
         },
         {
             "source": "scripts/ops/lib/kuma_push_common.sh",
@@ -52,7 +52,7 @@
             "source": "scripts/release-gate/dashboard_release_gate.php",
             "install": "scripts/release-gate/dashboard_release_gate.php",
             "role": "pdf_gate",
-            "sha256": "84cfd56628609398cde896d4c345a53a578cc8399f1722b58904563f68019842"
+            "sha256": "df86dd59a2000e3f6c3a1c2f0f4d215773b83c69a94354d5133295a8d600df7a"
         },
         {
             "source": "scripts/release-gate/lib/GateAssertions.php",
@@ -64,7 +64,7 @@
             "source": "scripts/release-gate/lib/GateCliSupport.php",
             "install": "scripts/release-gate/lib/GateCliSupport.php",
             "role": "pdf_gate_library",
-            "sha256": "83e4c3153ce82c2f1b1ec1a1114ab6fffd4daffaa860d46fb0b11acedb725ba0"
+            "sha256": "a0169a77fabebafc5743b9665625ef37e6ae78e2fe81726293d9bbe32aed3dd1"
         },
         {
             "source": "scripts/release-gate/lib/GateHttpClient.php",

@@ -1,6 +1,10 @@
-#!/usr/bin/env php
 <?php
 declare(strict_types=1);
+
+if (PHP_SAPI !== 'cli') {
+    http_response_code(404);
+    exit;
+}
 
 require_once __DIR__ . '/lib/GateAssertions.php';
 require_once __DIR__ . '/lib/GateCliSupport.php';
@@ -356,6 +360,7 @@ function parseCliOptions(string $defaultOutputPath, array $csrfDefaults): array
         'index-page::',
         'username:',
         'password:',
+        'password-stdin',
         'start-date:',
         'end-date:',
         'statuses::',
@@ -400,7 +405,7 @@ function parseCliOptions(string $defaultOutputPath, array $csrfDefaults): array
 
     $baseUrl = trim(getRequiredOption($options, 'base-url'));
     $username = trim(getRequiredOption($options, 'username'));
-    $password = getRequiredOption($options, 'password');
+    $password = GateCliSupport::readPassword($options);
     $startDate = trim(getRequiredOption($options, 'start-date'));
     $endDate = trim(getRequiredOption($options, 'end-date'));
 
@@ -744,7 +749,8 @@ function printUsage(): void
         'Required:',
         '  --base-url=URL                 App base URL (example: http://localhost)',
         '  --username=NAME                Admin username for login',
-        '  --password=PASS                Admin password for login',
+        '  --password=PASS                Admin password for login (legacy local/CI mode)',
+        '  --password-stdin               Read the exact password bytes from stdin',
         '  --start-date=YYYY-MM-DD        Filter start date (inclusive)',
         '  --end-date=YYYY-MM-DD          Filter end date (inclusive)',
         '',

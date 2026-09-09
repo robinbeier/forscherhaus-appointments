@@ -12,6 +12,20 @@ require_once __DIR__ . '/../../../scripts/release-gate/zero_surprise_replay.php'
 
 class ZeroSurpriseReplayTest extends TestCase
 {
+    public function testExternalStepPassesPasswordOnlyThroughStdin(): void
+    {
+        $password = "synthetic quote' and newline\n";
+        $result = runExternalStep(
+            [PHP_BINARY, '-r', 'echo hash("sha256", stream_get_contents(STDIN));'],
+            dirname(__DIR__, 3),
+            5,
+            $password,
+        );
+        self::assertSame('pass', $result['status']);
+        self::assertSame(hash('sha256', $password), $result['stdout_tail']);
+        self::assertStringNotContainsString($password, json_encode($result, JSON_THROW_ON_ERROR));
+    }
+
     public function testReplayTeardownRecordsComposeAndImageCleanup(): void
     {
         $report = $this->report();

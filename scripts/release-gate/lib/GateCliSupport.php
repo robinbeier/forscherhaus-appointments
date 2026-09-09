@@ -85,6 +85,42 @@ final class GateCliSupport
     }
 
     /**
+     * Resolve a CLI password without placing stdin bytes in an argv string.
+     * Explicit --password remains supported for existing local callers.
+     *
+     * @param array<string,mixed> $options
+     */
+    public static function readPassword(array $options): string
+    {
+        $hasExplicit = array_key_exists('password', $options);
+        $hasStdin = array_key_exists('password-stdin', $options);
+
+        if ($hasExplicit && $hasStdin) {
+            throw new \InvalidArgumentException('Use either --password or --password-stdin, not both.');
+        }
+
+        if ($hasStdin) {
+            $password = stream_get_contents(STDIN);
+            if (!is_string($password) || $password === '') {
+                throw new \InvalidArgumentException('--password-stdin requires non-empty stdin input.');
+            }
+
+            return $password;
+        }
+
+        if (!$hasExplicit) {
+            throw new \InvalidArgumentException('Missing required option --password or --password-stdin.');
+        }
+
+        $password = is_array($options['password']) ? (string) end($options['password']) : (string) $options['password'];
+        if ($password === '') {
+            throw new \InvalidArgumentException('Password must not be empty.');
+        }
+
+        return $password;
+    }
+
+    /**
      * @param array<string, mixed> $check
      */
     private static function isHttpStatusAssertionFailure(array $check): bool
@@ -96,11 +132,7 @@ final class GateCliSupport
 
     private static function isRuntimePreflightCheck(string $checkName): bool
     {
-        $runtimeChecks = [
-            'readiness_login_page',
-            'readiness_pdf_health',
-            'auth_login_validate',
-        ];
+        $runtimeChecks = ['readiness_login_page', 'readiness_pdf_health', 'auth_login_validate'];
 
         return in_array($checkName, $runtimeChecks, true);
     }

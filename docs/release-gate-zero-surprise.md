@@ -45,6 +45,8 @@ Resolution order is fixed:
 ## Credentials INI
 
 The same INI shape is used by the automated predeploy replay and the postdeploy canary.
+Both pass passwords to their booking and dashboard child checks through standard
+input; password values are not included in child process arguments.
 
 Required keys:
 

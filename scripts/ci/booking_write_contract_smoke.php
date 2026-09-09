@@ -2,9 +2,15 @@
 
 declare(strict_types=1);
 
+if (PHP_SAPI !== 'cli') {
+    http_response_code(404);
+    exit();
+}
+
 require_once dirname(__DIR__, 2) . '/vendor/autoload.php';
 require_once __DIR__ . '/../release-gate/lib/GateAssertions.php';
 require_once __DIR__ . '/../release-gate/lib/GateHttpClient.php';
+require_once __DIR__ . '/../release-gate/lib/GateCliSupport.php';
 require_once __DIR__ . '/lib/OpenApiContractValidator.php';
 require_once __DIR__ . '/lib/CheckSelection.php';
 require_once __DIR__ . '/lib/BookedSlotMatcher.php';
@@ -25,6 +31,7 @@ use CiContract\WriteContractCleanupRegistry;
 use ReleaseGate\GateAssertionException;
 use ReleaseGate\GateAssertions;
 use ReleaseGate\GateHttpClient;
+use ReleaseGate\GateCliSupport;
 
 const BOOKING_WRITE_CONTRACT_EXIT_SUCCESS = 0;
 const BOOKING_WRITE_CONTRACT_EXIT_ASSERTION_FAILURE = 1;
@@ -1069,6 +1076,7 @@ function parseCliOptions(): array
         'index-page::',
         'username:',
         'password:',
+        'password-stdin',
         'http-timeout::',
         'booking-search-days::',
         'retry-count::',
@@ -1087,7 +1095,7 @@ function parseCliOptions(): array
 
     $baseUrl = trim((string) ($options['base-url'] ?? ''));
     $username = trim((string) ($options['username'] ?? ''));
-    $password = (string) ($options['password'] ?? '');
+    $password = GateCliSupport::readPassword($options);
 
     if ($baseUrl === '' || $username === '' || $password === '') {
         throw new ContractAssertionException('Missing required arguments. Use --help for usage.');
@@ -1190,7 +1198,12 @@ function printHelpAndExit(): void
         --base-url=http://nginx \
         --index-page=index.php \
         --username=administrator \
-        --password=administrator
+        --password-stdin
+
+    Password input:
+      --password-stdin reads exact stdin bytes; provide input without an added newline.
+      --password=VALUE remains available for existing local/CI callers.
+      Use exactly one password input mode.
 
     Optional:
       --booking-search-days=14
