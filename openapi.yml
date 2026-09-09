@@ -1584,7 +1584,7 @@ paths:
                             schema:
                                 type: array
                                 items:
-                                    $ref: '#/components/schemas/ServiceRecord'
+                                    $ref: '#/components/schemas/SettingRecord'
                 '401':
                     description: Unauthorized
                 '500':
