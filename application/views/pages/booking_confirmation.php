@@ -794,7 +794,15 @@ if (is_string($share_fallback_text_template) && $share_fallback_text_template !=
         const shareUnavailableMessage = <?= json_encode(
             lang('share_link_unavailable') ?: 'Sharing is not available on this device.',
         ) ?>;
-        const sharePayload = <?= json_encode($share_payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
+        const sharePayload = <?= json_encode(
+            $share_payload,
+            JSON_HEX_TAG |
+                JSON_HEX_AMP |
+                JSON_HEX_APOS |
+                JSON_HEX_QUOT |
+                JSON_UNESCAPED_SLASHES |
+                JSON_UNESCAPED_UNICODE,
+        ) ?>;
         const shareFallbackTitle = <?= json_encode($share_fallback_title) ?>;
         const shareFallbackText = <?= json_encode($share_fallback_text) ?>;
         const pdfButtons = document.querySelectorAll('[data-generate-pdf]');
@@ -808,7 +816,12 @@ if (is_string($share_fallback_text_template) && $share_fallback_text_template !=
         ) ?>;
         const appointmentPdfData = <?= json_encode(
             $appointment_pdf_data,
-            JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+            JSON_HEX_TAG |
+                JSON_HEX_AMP |
+                JSON_HEX_APOS |
+                JSON_HEX_QUOT |
+                JSON_UNESCAPED_SLASHES |
+                JSON_UNESCAPED_UNICODE,
         ) ?>;
         const pdfExportPreparingMessage = <?= json_encode($pdf_export_preparing_message) ?>;
         const pdfExportReadyMessage = <?= json_encode($pdf_export_ready_message) ?>;
