@@ -7,6 +7,14 @@ live-write operation.
 
 ## Fixed Policy
 
+Application authentication expires after the configured `sess_expiration`
+seconds without a request (normally 7200). The loaded application session
+extension checks its server-side activity timestamp before controllers run;
+session-file age and ID rotation do not renew an expired login. Existing logins
+without that timestamp require one fresh login after this change is deployed.
+Anonymous sessions remain usable, and `sess_expiration=0` disables the inactivity
+limit. This does not change the retention schedule below.
+
 - exact root: `/var/www/html/easyappointments/storage/sessions`;
 - session prefix: `ea_session`, followed by a PHP-compatible session ID;
 - retention: 86,400 seconds (24 hours), inclusive at the cutoff;

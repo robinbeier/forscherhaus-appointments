@@ -41,6 +41,7 @@
 /application/controllers/Webhooks.php @robinbeier
 /application/controllers/api/v1/** @robinbeier
 /application/core/Customers_ui_smoke_access_policy.php @robinbeier
+/application/core/EA_Session.php @robinbeier
 /application/core/Provider_ui_smoke_access_policy.php @robinbeier
 /application/libraries/Accounts.php @robinbeier
 /application/libraries/Api.php @robinbeier
@@ -68,6 +69,7 @@
 /application/libraries/Provider_utilization.php @robinbeier
 /application/libraries/Request_normalizer.php @robinbeier
 /application/libraries/Reschedule_authority.php @robinbeier
+/application/libraries/Session/EA_Session.php @robinbeier
 /application/libraries/Timezones.php @robinbeier
 /application/libraries/Webhooks_client.php @robinbeier
 /application/models/Admins_model.php @robinbeier
