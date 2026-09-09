@@ -105,15 +105,15 @@ class GateCliSupportTest extends TestCase
             $this->assertStringContainsString("report '{$resolvedCwd}/reports/predeploy.json'", $result['stdout']);
             $expectedStageRoot = $appPath . '_ea_20260320_1200_stage';
             $this->assertStringContainsString(
-                "find '{$expectedStageRoot}' -type d -exec chmod 755 {} +",
+                "find -P '{$expectedStageRoot}' -path '{$expectedStageRoot}/storage' -prune -o -path '{$expectedStageRoot}/config.php' -prune -o -type d -exec chmod 755 {} +",
                 $result['stdout'],
             );
             $this->assertStringContainsString(
-                "find -P '{$expectedStageRoot}' -path '{$expectedStageRoot}/storage/sessions' -prune -o -type f -exec chmod 644 {} +",
+                "find -P '{$expectedStageRoot}' -path '{$expectedStageRoot}/storage' -prune -o -path '{$expectedStageRoot}/config.php' -prune -o -type f -links 1 -exec chmod 644 {} +",
                 $result['stdout'],
             );
             $this->assertStringNotContainsString(
-                "find -P '{$expectedStageRoot}' -path '{$expectedStageRoot}/storage/sessions' -prune -o -type f -exec chmod 644 {} \\;",
+                "find -P '{$expectedStageRoot}' -path '{$expectedStageRoot}/storage' -prune -o -path '{$expectedStageRoot}/config.php' -prune -o -type f -links 1 -exec chmod 644 {} \\;",
                 $result['stdout'],
             );
             $this->assertStringContainsString(
@@ -125,7 +125,7 @@ class GateCliSupportTest extends TestCase
                 $result['stdout'],
             );
 
-            $genericPermissionPass = "find -P '{$expectedStageRoot}' -path '{$expectedStageRoot}/storage/sessions' -prune -o -type f -exec chmod 644 {} +";
+            $genericPermissionPass = "find -P '{$expectedStageRoot}' -path '{$expectedStageRoot}/storage' -prune -o -path '{$expectedStageRoot}/config.php' -prune -o -type f -links 1 -exec chmod 644 {} +";
             $stageHarden = "bash '{$repoRoot}/deploy_ea.sh' --runtime-config-permissions 'harden' --app-root '{$expectedStageRoot}' --runtime-user 'www-data'";
             $liveHarden = "bash '{$repoRoot}/deploy_ea.sh' --runtime-config-permissions 'harden' --app-root '{$appPath}' --runtime-user 'www-data'";
             $atomicMove = "mv '{$appPath}' '{$appPath}_prev_ea_20260320_1200'";

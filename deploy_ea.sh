@@ -776,9 +776,7 @@ sync_live_storage_to_stage() {
 
 prepare_predeploy_stage_permissions() {
   prepare_zero_surprise_stage_runtime || return $?
-  run_shell "chown -R '$WEBUSER':'$WEBUSER' '$STAGE_ROOT'" || return $?
-  run_shell "find '$STAGE_ROOT' -type d -exec chmod 755 {} +" || return $?
-  run_shell "find -P '$STAGE_ROOT' -path '$STAGE_ROOT/storage/sessions' -prune -o -type f -exec chmod 644 {} +" || return $?
+  apply_stage_permission_policy || return $?
   restore_runtime_script_permissions || return $?
   if [[ "$REQUIRE_ZERO_SURPRISE" -eq 1 ]]; then
     harden_and_verify_runtime_config "$STAGE_ROOT" || return $?
@@ -793,10 +791,39 @@ run_zero_surprise_predeploy_gate() {
 }
 
 normalize_stage_permissions() {
-  run_shell "chown -R '$WEBUSER':'$WEBUSER' '$STAGE_ROOT'" || return $?
-  run_shell "find '$STAGE_ROOT' -type d -exec chmod 755 {} +" || return $?
-  run_shell "find -P '$STAGE_ROOT' -path '$STAGE_ROOT/storage/sessions' -prune -o -type f -exec chmod 644 {} +" || return $?
+  apply_stage_permission_policy || return $?
   restore_runtime_script_permissions || return $?
+  return 0
+}
+
+apply_stage_permission_policy() {
+  local storage_root="${STAGE_ROOT}/storage"
+  local sessions_root="${storage_root}/sessions"
+
+  # Code is never made trustworthy by merely skipping an unsafe entry.  Fail
+  # closed if an extracted code tree contains links or hardlinked regular
+  # files; otherwise a web-owned executable could survive this pass.
+  run_shell "unsafe=\$(find -P '$STAGE_ROOT' -path '$storage_root' -prune -o -path '${STAGE_ROOT}/config.php' -prune -o \( -type l -o -type f -links +1 \) -print -quit); [[ -z \"\$unsafe\" ]] || { echo '[!] Release code contains an unsafe link or hardlink.' >&2; exit 1; }" || return $?
+
+  # Release code is root-controlled.  -P keeps symlinks and their targets out
+  # of the metadata pass; the artifact validator separately rejects unsafe
+  # release links.  Runtime storage is handled below with its own boundary.
+  run_shell "find -P '$STAGE_ROOT' -path '$storage_root' -prune -o -path '${STAGE_ROOT}/config.php' -prune -o -type d -exec chown 0:0 {} +" || return $?
+  run_shell "find -P '$STAGE_ROOT' -path '$storage_root' -prune -o -path '${STAGE_ROOT}/config.php' -prune -o -type d -exec chmod 755 {} +" || return $?
+  run_shell "find -P '$STAGE_ROOT' -path '$storage_root' -prune -o -path '${STAGE_ROOT}/config.php' -prune -o -type f -links 1 -exec chown 0:0 {} +" || return $?
+  run_shell "find -P '$STAGE_ROOT' -path '$storage_root' -prune -o -path '${STAGE_ROOT}/config.php' -prune -o -type f -links 1 -exec chmod 644 {} +" || return $?
+
+  # The application owns writable runtime directories.  Session files are
+  # deliberately excluded: their private owner, mode, hardlinks and symlinks
+  # are copied from the live release and must not be rewritten here.  Regular
+  # files with more than one link are also left untouched so a hardlink cannot
+  # cause metadata changes outside the staged tree; unsafe links and
+  # hardlinks outside sessions have already failed closed above.
+  run_shell "if [[ -d '$storage_root' && ! -L '$storage_root' ]]; then unsafe=\$(find -P '$storage_root' -path '$sessions_root' -prune -o \( -type l -o -type f -links +1 \) -print -quit); [[ -z \"\$unsafe\" ]] || { echo '[!] Runtime storage contains an unsafe link or hardlink outside sessions.' >&2; exit 1; }; else [[ ! -L '$storage_root' ]]; fi" || return $?
+  run_shell "if [[ -d '$storage_root' && ! -L '$storage_root' ]]; then find -P '$storage_root' -path '$sessions_root' -prune -o -type d -exec chown '$WEBUSER':'$WEBUSER' {} +; fi" || return $?
+  run_shell "if [[ -d '$storage_root' && ! -L '$storage_root' ]]; then find -P '$storage_root' -path '$sessions_root' -prune -o -type d -exec chmod 755 {} +; fi" || return $?
+  run_shell "if [[ -d '$storage_root' && ! -L '$storage_root' ]]; then find -P '$storage_root' -path '$sessions_root' -prune -o -type f -links 1 -exec chown '$WEBUSER':'$WEBUSER' {} +; fi" || return $?
+  run_shell "if [[ -d '$storage_root' && ! -L '$storage_root' ]]; then find -P '$storage_root' -path '$sessions_root' -prune -o -type f -links 1 -exec chmod 644 {} +; fi" || return $?
   return 0
 }
 

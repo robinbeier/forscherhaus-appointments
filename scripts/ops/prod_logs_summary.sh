@@ -8,6 +8,8 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/ops/lib/prod_common.sh
 source "${SCRIPT_DIR}/lib/prod_common.sh"
+# shellcheck source=scripts/ops/lib/app_log_classification.sh
+source "${SCRIPT_DIR}/lib/app_log_classification.sh"
 
 SSH_OPTIONS=(-o StrictHostKeyChecking=accept-new)
 PROD_SSH_TARGET="$(prod_default_ssh_target)"
@@ -55,48 +57,19 @@ parse_args() {
 }
 
 run_remote() {
-    ssh "${SSH_OPTIONS[@]}" "${PROD_SSH_TARGET}" "SINCE='${SINCE}' bash -s" <<'REMOTE'
+    {
+        declare -f app_log_known_noise_regex
+        declare -f app_log_filter_actionable_file
+        declare -f app_log_error_like_regex
+        declare -f app_log_extract_error_like_file
+        declare -f app_log_count_error_like_file
+        cat <<'REMOTE'
 set -euo pipefail
+APP_ROOT="${APP_ROOT:-/var/www/html/easyappointments}"
 
 section() {
     printf '\n[%s]\n' "$1"
 }
-
-if [[ -r /var/www/html/easyappointments/scripts/ops/lib/app_log_classification.sh ]]; then
-    # shellcheck source=scripts/ops/lib/app_log_classification.sh
-    source /var/www/html/easyappointments/scripts/ops/lib/app_log_classification.sh
-else
-    app_log_known_noise_regex() {
-        cat <<'REGEX'
-ERROR - .*--> 404 Page Not Found: Azenvnet/index|ERROR - .*--> Severity: Warning --> unlink\(.*/storage/cache/rate_limit_key_[^)]*\): No such file or directory .*/system/libraries/Cache/drivers/Cache_file\.php 279
-REGEX
-    }
-
-    app_log_filter_actionable_file() {
-        local input_file="$1"
-        local output_file="$2"
-        grep -Ev "$(app_log_known_noise_regex)" "$input_file" > "$output_file" || true
-    }
-
-    app_log_error_like_regex() {
-        cat <<'REGEX'
-^(ERROR|CRITICAL)[[:space:]-]|^(Fatal error|Uncaught)|^PHP (Fatal error|Parse error|Recoverable fatal error)
-REGEX
-    }
-
-    app_log_extract_error_like_file() {
-        local input_file="$1"
-        local output_file="$2"
-        grep -Eh "$(app_log_error_like_regex)" "$input_file" > "$output_file" 2>/dev/null || true
-    }
-
-    app_log_count_error_like_file() {
-        local input_file="$1"
-        grep -Eh "$(app_log_error_like_regex)" "$input_file" 2>/dev/null \
-            | wc -l \
-            | awk '{print $1}'
-    }
-fi
 
 redact() {
     sed -E \
@@ -129,7 +102,7 @@ for unit in apache2 php8.5-fpm mariadb fh-pdf-renderer docker cron; do
 done
 
 section app_log_summary
-if [[ -d /var/www/html/easyappointments/storage/logs ]]; then
+if [[ -d "$APP_ROOT/storage/logs" ]]; then
     total_count=0
     actionable_count=0
     while IFS= read -r -d '' file; do
@@ -142,7 +115,7 @@ if [[ -d /var/www/html/easyappointments/storage/logs ]]; then
         matches="$(app_log_count_error_like_file "$tmp_actionable" || true)"
         actionable_count=$((actionable_count + matches))
         rm -f "$tmp_matches" "$tmp_actionable"
-    done < <(find /var/www/html/easyappointments/storage/logs -maxdepth 1 -type f -mtime -1 -print0)
+    done < <(find "$APP_ROOT/storage/logs" -maxdepth 1 -type f -mtime -1 -print0)
     ignored_count=$((total_count - actionable_count))
     printf 'app_error_like_lines_24h=%s\n' "$actionable_count"
     printf 'app_error_like_lines_24h_total=%s\n' "$total_count"
@@ -155,7 +128,7 @@ if [[ -d /var/www/html/easyappointments/storage/logs ]]; then
             app_log_extract_error_like_file "$file" "$tmp_file_matches"
             cat "$tmp_file_matches" >> "$tmp_matches"
             rm -f "$tmp_file_matches"
-        done < <(find /var/www/html/easyappointments/storage/logs -maxdepth 1 -type f -mtime -1 -print0)
+        done < <(find "$APP_ROOT/storage/logs" -maxdepth 1 -type f -mtime -1 -print0)
         app_log_filter_actionable_file "$tmp_matches" "$tmp_actionable"
         tail -n 20 "$tmp_actionable" \
             | redact || true
@@ -165,6 +138,7 @@ else
     printf 'app_logs=missing\n'
 fi
 REMOTE
+    } | ssh "${SSH_OPTIONS[@]}" "${PROD_SSH_TARGET}" "SINCE='${SINCE}' bash -s"
 }
 
 main() {
