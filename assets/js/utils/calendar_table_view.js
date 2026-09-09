@@ -1254,11 +1254,9 @@ App.Utils.CalendarTableView = (function () {
                 ],
             });
         } else if ($target.hasClass('fc-working-plan-exception')) {
-            displayEdit =
-                $target.hasClass('fc-custom') && vars('privileges').appointments.edit === true ? '' : 'd-none'; // Same value at the time.
+            displayEdit = $target.hasClass('fc-custom') && vars('privileges').users.edit === true ? '' : 'd-none';
 
-            displayDelete =
-                $target.hasClass('fc-custom') && vars('privileges').appointments.delete === true ? '' : 'd-none'; // Same value at the time.
+            displayDelete = $target.hasClass('fc-custom') && vars('privileges').users.edit === true ? '' : 'd-none';
 
             $html = $('<div/>', {
                 'html': [
