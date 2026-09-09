@@ -60,7 +60,8 @@ This command will add a test admin, provider, customer and service in the app, s
 php index.php console install
 ```
 
-This command will perform a CLI installation of Easy!Appointments. 
+This command prepares the local or CI test instance, including known fixture credentials.
+The public browser installer is not supported. Do not expose a seeded test instance publicly.
 
 You can run this after your are done configuring your app from the root `config.php` file. 
 

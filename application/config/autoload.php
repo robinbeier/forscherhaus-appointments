@@ -73,7 +73,6 @@ $autoload['helper'] = [
     'file',
     'html',
     'http',
-    'installation',
     'language',
     'password',
     'path',
