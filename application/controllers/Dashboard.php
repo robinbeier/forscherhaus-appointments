@@ -625,7 +625,7 @@ class Dashboard extends EA_Controller
 
         $class_size = (int) $candidate;
 
-        return $class_size > 0 ? $class_size : null;
+        return $class_size >= 0 ? $class_size : null;
     }
 
     /**
