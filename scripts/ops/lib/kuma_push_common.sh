@@ -99,13 +99,17 @@ kuma_push_private_error() {
 
 kuma_push_stat_metadata() {
   local path="$1"
+  local owner
+  local links
 
   if stat -c '%u %a %h' -- "$path" >/dev/null 2>&1; then
     stat -c '%u %a %h' -- "$path"
     return 0
   fi
 
-  stat -f '%u %Lp %l' -- "$path"
+  local raw_mode
+  read -r owner raw_mode links < <(stat -f '%u %p %l' -- "$path")
+  printf '%s %s %s\n' "$owner" "$(printf '%o' "$((0$raw_mode & 07777))")" "$links"
 }
 
 kuma_push_realpath_directory() {
@@ -123,19 +127,17 @@ kuma_push_validate_private_ancestors() {
   local path="$1"
   local owner
   local mode
-  local mode_bits
 
   [[ "$path" == /* && -d "$path" && ! -L "$path" ]] ||
     kuma_push_private_error "Unsafe private path parent: $path" || return 1
 
   while :; do
-    read -r owner mode < <(if stat -c '%u %a' -- "$path" >/dev/null 2>&1; then stat -c '%u %a' -- "$path"; else stat -f '%u %Lp' -- "$path"; fi)
-    mode_bits=$((0$mode))
+    read -r owner mode _ < <(kuma_push_stat_metadata "$path")
     if [[ "$owner" != "0" && "$owner" != "$(id -u)" ]]; then
       kuma_push_private_error "Unsafe private path ancestor owner: $path" || return 1
     fi
-    if (( (mode_bits & 0022) != 0 )); then
-      if [[ "$path" != /tmp && "$path" != /var/tmp && "$path" != /private/tmp && "$path" != /private/var/tmp ]] || [[ "$owner" != 0 ]] || (( (mode_bits & 01000) == 0 )); then
+    if (( (0$mode & 0022) != 0 )); then
+      if [[ "$path" != /tmp && "$path" != /var/tmp && "$path" != /private/tmp && "$path" != /private/var/tmp ]] || [[ "$owner" != 0 ]] || (( (0$mode & 01000) == 0 )); then
         kuma_push_private_error "Unsafe private path ancestor permissions: $path" || return 1
       fi
     fi
@@ -169,8 +171,12 @@ kuma_push_prepare_private_directory() {
     kuma_push_private_error "Unsafe private directory symlink: $requested" || return 1
   fi
   if [[ ! -e "$target" ]]; then
-    (umask 077; mkdir -m 0700 "$target") ||
-      kuma_push_private_error "Unsafe private directory could not be created: $requested" || return 1
+    if ! (umask 077; mkdir -m 0700 "$target"); then
+      # A concurrent safe creator may win the mkdir race.  Reuse the same
+      # ownership/mode checks below, but never repair an unsafe winner.
+      [[ -d "$target" && ! -L "$target" ]] ||
+        kuma_push_private_error "Unsafe private directory could not be created: $requested" || return 1
+    fi
   fi
   [[ -d "$target" && ! -L "$target" ]] ||
     kuma_push_private_error "Unsafe private directory type: $requested" || return 1

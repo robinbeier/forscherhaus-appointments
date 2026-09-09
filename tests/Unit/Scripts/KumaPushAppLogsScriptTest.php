@@ -8,6 +8,42 @@ use PHPUnit\Framework\TestCase;
 
 class KumaPushAppLogsScriptTest extends TestCase
 {
+    public function testPrivateDirectoryPreparationAcceptsOnlyARecreatedSafeRaceWinner(): void
+    {
+        $result = $this->runCommand(
+            [
+                'bash',
+                '-c',
+                <<<'BASH'
+                set -Eeuo pipefail
+                source scripts/ops/lib/kuma_push_common.sh
+                fixture="$(mktemp -d)"
+                trap 'rm -rf "$fixture"' EXIT
+                chmod 755 "$fixture"
+                expected_fixture="$(cd -P "$fixture" && pwd -P)"
+                mode_of() { if stat -c '%a' "$1" >/dev/null 2>&1; then stat -c '%a' "$1"; else stat -f '%Lp' "$1"; fi; }
+
+                mkdir() { command mkdir "$@"; return 1; }
+                safe="$(kuma_push_prepare_private_directory "$fixture/safe")"
+                [[ "$safe" == "$expected_fixture/safe" ]]
+                [[ "$(mode_of "$safe")" == 700 ]]
+                rm -rf "$safe"
+
+                mkdir() { command mkdir "$@"; target="${!#}"; chmod 0777 "$target"; return 1; }
+                if kuma_push_prepare_private_directory "$fixture/unsafe"; then
+                  exit 1
+                fi
+                [[ "$(mode_of "$fixture/unsafe")" == 777 ]]
+                BASH
+                ,
+                'bash',
+            ],
+            $this->repoRoot(),
+        );
+
+        self::assertSame(0, $result['exit_code'], $result['stdout'] . $result['stderr']);
+    }
+
     public function testAppLogMonitorRejectsStateDirectorySymlinkWithoutTouchingTarget(): void
     {
         $workspace = sys_get_temp_dir() . '/kuma-push-private-' . bin2hex(random_bytes(8));
