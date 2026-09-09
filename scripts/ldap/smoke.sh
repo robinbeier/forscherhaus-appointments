@@ -103,7 +103,6 @@ main() {
 
     ensure_ldap_service_exists
 
-    compose up -d "${LDAP_SERVICE_NAME}" >/dev/null
     wait_for_openldap
 
     admin_whoami="$(run_ldap ldapwhoami -x -H "${LDAP_URI}" -D "${LDAP_ADMIN_DN}" -w "${LDAP_ADMIN_PASSWORD}")"

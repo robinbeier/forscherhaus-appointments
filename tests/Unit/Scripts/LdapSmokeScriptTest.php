@@ -8,7 +8,7 @@ use PHPUnit\Framework\TestCase;
 
 class LdapSmokeScriptTest extends TestCase
 {
-    public function testSmokeScriptAcceptsKnownServiceWhenComposeServiceListingTriggersSigpipe(): void
+    public function testSmokeScriptUsesAlreadyRunningServiceWhenComposeServiceListingTriggersSigpipe(): void
     {
         $workspace = sys_get_temp_dir() . '/ldap-smoke-test-' . bin2hex(random_bytes(8));
         $fakeBin = $workspace . '/bin';
@@ -49,8 +49,9 @@ class LdapSmokeScriptTest extends TestCase
                   exit 0
                 fi
                 ;;
-              up)
-                exit 0
+              up|down|stop|rm)
+                echo "lifecycle mutation rejected: ${1}" >&2
+                exit 91
                 ;;
               exec)
                 shift
@@ -99,6 +100,10 @@ class LdapSmokeScriptTest extends TestCase
 
             self::assertSame(0, $result['exit_code'], $result['stderr']);
             self::assertStringContainsString('[PASS] LDAP smoke completed.', $result['stdout']);
+            self::assertStringContainsString('[PASS] admin bind', $result['stdout']);
+            self::assertStringContainsString('[PASS] readonly bind', $result['stdout']);
+            self::assertStringContainsString('[PASS] base search dn', $result['stdout']);
+            self::assertStringContainsString('[PASS] seeded user dn', $result['stdout']);
             self::assertStringNotContainsString('Unknown LDAP service', $result['stderr']);
         } finally {
             $this->removeDirectory($workspace);
