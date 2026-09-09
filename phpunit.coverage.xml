@@ -21,6 +21,7 @@
             <file>./tests/Integration/Controllers/CalendarWorkingPlanPermissionsTest.php</file>
             <file>./tests/Integration/Controllers/ApiReadControllerFlowTest.php</file>
             <file>./tests/Integration/Controllers/ApiIntegrationSecretsWriteOnlyFlowTest.php</file>
+            <file>./tests/Integration/Controllers/ProviderClassSizeTest.php</file>
         </testsuite>
     </testsuites>
     <source>

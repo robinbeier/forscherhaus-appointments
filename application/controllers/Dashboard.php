@@ -409,7 +409,7 @@ class Dashboard extends EA_Controller
                 'booked_percent' => $booked_percent,
                 'open_percent' => $open_percent,
                 'slot_info_text' =>
-                    $target > 0
+                    $class_size !== null || $target > 0
                         ? sprintf($slot_info_with_target, $this->formatNumber($booked), $this->formatNumber($target))
                         : sprintf($slot_info_without_target, $this->formatNumber($booked)),
             ],
@@ -625,7 +625,7 @@ class Dashboard extends EA_Controller
 
         $class_size = (int) $candidate;
 
-        return $class_size > 0 ? $class_size : null;
+        return $class_size >= 0 ? $class_size : null;
     }
 
     /**

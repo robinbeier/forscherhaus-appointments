@@ -45,7 +45,6 @@ class Providers extends EA_Controller
 
     public array $optional_provider_fields = [
         'services' => [],
-        'class_size_default' => null,
     ];
 
     public array $allowed_provider_setting_fields = [
@@ -183,15 +182,9 @@ class Providers extends EA_Controller
 
             $this->providers_model->optional($provider['settings'], $this->optional_provider_setting_fields);
 
-            if (array_key_exists('class_size_default', $provider)) {
-                $class_size_default = $provider['class_size_default'];
-
-                if ($class_size_default === '' || $class_size_default === null) {
-                    $provider['class_size_default'] = null;
-                } else {
-                    $provider['class_size_default'] = (int) $class_size_default;
-                }
-            }
+            $class_size_default = $provider['class_size_default'] ?? null;
+            $provider['class_size_default'] =
+                $class_size_default === '' || $class_size_default === null ? null : (int) $class_size_default;
 
             $provider_id = $this->providers_model->save($provider);
 
@@ -248,15 +241,9 @@ class Providers extends EA_Controller
 
             $this->providers_model->optional($provider['settings'], $this->optional_provider_setting_fields);
 
-            if (array_key_exists('class_size_default', $provider)) {
-                $class_size_default = $provider['class_size_default'];
-
-                if ($class_size_default === '' || $class_size_default === null) {
-                    $provider['class_size_default'] = null;
-                } else {
-                    $provider['class_size_default'] = (int) $class_size_default;
-                }
-            }
+            $class_size_default = $provider['class_size_default'] ?? null;
+            $provider['class_size_default'] =
+                $class_size_default === '' || $class_size_default === null ? null : (int) $class_size_default;
 
             $provider_id = $this->providers_model->save($provider);
 

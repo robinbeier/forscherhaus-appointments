@@ -439,7 +439,7 @@ jobs:
         run: ./scripts/ci/js-lint-changed.sh
       - name: Frontend compiler regression tests
         if: steps.js_changes.outputs.needs_node == 'true'
-        run: node --test tests/JavaScript/gulp_build.test.js tests/JavaScript/dashboard_date_range.test.js
+        run: node --test tests/JavaScript/gulp_build.test.js tests/JavaScript/dashboard_date_range.test.js tests/JavaScript/dashboard_zero_target.test.js
 
   phpstan-application:
     needs:
