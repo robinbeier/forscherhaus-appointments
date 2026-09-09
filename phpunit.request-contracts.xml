@@ -16,7 +16,6 @@
             <file>./tests/Unit/Libraries/AuthRequestDtoFactoryTest.php</file>
             <file>./tests/Unit/Libraries/BackofficeRequestDtoFactoryTest.php</file>
             <file>./tests/Unit/Libraries/CalendarRequestDtoFactoryTest.php</file>
-            <file>./tests/Unit/Libraries/IntegrationsRequestDtoFactoryTest.php</file>
             <file>./tests/Unit/Libraries/ApiRequestDtoFactoryWriteTest.php</file>
         </testsuite>
     </testsuites>

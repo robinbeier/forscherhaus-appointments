@@ -27,7 +27,6 @@ class Blocked_periods_api_v1 extends EA_Controller
 
         $this->load->library('api');
         $this->load->library('api_request_dto_factory');
-        $this->load->library('webhooks_client');
 
         $this->api->auth();
 
@@ -158,8 +157,6 @@ class Blocked_periods_api_v1 extends EA_Controller
 
             $created_blocked_period = $this->blocked_periods_model->find($blocked_period_id);
 
-            $this->webhooks_client->trigger(WEBHOOK_BLOCKED_PERIOD_SAVE, $created_blocked_period);
-
             $this->blocked_periods_model->api_encode($created_blocked_period);
 
             json_response($created_blocked_period, 201);
@@ -194,8 +191,6 @@ class Blocked_periods_api_v1 extends EA_Controller
 
             $updated_blocked_period = $this->blocked_periods_model->find($blocked_period_id);
 
-            $this->webhooks_client->trigger(WEBHOOK_BLOCKED_PERIOD_SAVE, $updated_blocked_period);
-
             $this->blocked_periods_model->api_encode($updated_blocked_period);
 
             json_response($updated_blocked_period);
@@ -223,8 +218,6 @@ class Blocked_periods_api_v1 extends EA_Controller
             $deleted_blocked_period = $occurrences[0];
 
             $this->blocked_periods_model->delete($id);
-
-            $this->webhooks_client->trigger(WEBHOOK_BLOCKED_PERIOD_DELETE, $deleted_blocked_period);
 
             response('', 204);
         } catch (Throwable $e) {

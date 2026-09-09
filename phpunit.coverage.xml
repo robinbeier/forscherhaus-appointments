@@ -20,6 +20,7 @@
             <file>./tests/Integration/Controllers/EntityStoreAuthorizationTest.php</file>
             <file>./tests/Integration/Controllers/CalendarWorkingPlanPermissionsTest.php</file>
             <file>./tests/Integration/Controllers/ApiReadControllerFlowTest.php</file>
+            <file>./tests/Integration/Controllers/ApiIntegrationSecretsWriteOnlyFlowTest.php</file>
         </testsuite>
     </testsuites>
     <source>

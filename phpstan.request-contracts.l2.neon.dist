@@ -26,7 +26,6 @@ parameters:
         - application/controllers/Consents.php
         - application/controllers/Privacy.php
         - application/controllers/Ldap_settings.php
-        - application/controllers/Webhooks.php
         - application/controllers/api/v1/Admins_api_v1.php
         - application/controllers/api/v1/Appointments_api_v1.php
         - application/controllers/api/v1/Availabilities_api_v1.php
@@ -38,7 +37,6 @@ parameters:
         - application/controllers/api/v1/Services_api_v1.php
         - application/controllers/api/v1/Settings_api_v1.php
         - application/controllers/api/v1/Unavailabilities_api_v1.php
-        - application/controllers/api/v1/Webhooks_api_v1.php
     bootstrapFiles:
         - phpstan/bootstrap.php
     scanFiles:

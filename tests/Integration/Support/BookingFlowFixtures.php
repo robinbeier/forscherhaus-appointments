@@ -299,18 +299,6 @@ class BookingFlowFixtures
         };
     }
 
-    public static function createNoopWebhooksClient(): object
-    {
-        return new class {
-            public int $calls = 0;
-
-            public function trigger(...$args): void
-            {
-                $this->calls++;
-            }
-        };
-    }
-
     private function registerCleanup(string $table, int $id): void
     {
         if ($id <= 0) {

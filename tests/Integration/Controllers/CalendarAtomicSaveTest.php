@@ -161,7 +161,6 @@ class CalendarAtomicSaveTest extends TestCase
             }
         };
         $controller->notifications = BookingFlowFixtures::createNoopNotifications();
-        $controller->webhooks_client = BookingFlowFixtures::createNoopWebhooksClient();
 
         return $controller;
     }

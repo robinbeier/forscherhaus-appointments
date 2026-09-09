@@ -8,7 +8,6 @@ parameters:
         - application/libraries/Auth_request_dto_factory.php
         - application/libraries/Backoffice_request_dto_factory.php
         - application/libraries/Calendar_request_dto_factory.php
-        - application/libraries/Integrations_request_dto_factory.php
     bootstrapFiles:
         - phpstan/bootstrap.php
     scanFiles:
