@@ -802,6 +802,10 @@
           "match": "exact_file"
         },
         {
+          "path": "application/models/Users_model.php",
+          "match": "exact_file"
+        },
+        {
           "path": "application/libraries/Pdf_renderer.php",
           "match": "exact_file"
         },

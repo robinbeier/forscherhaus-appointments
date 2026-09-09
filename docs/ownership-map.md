@@ -337,6 +337,7 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
 - Path rules:
   - `application/views/components/jquery_compat_inline.php` (exact_file)
   - `application/libraries/Accounts.php` (exact_file)
+  - `application/models/Users_model.php` (exact_file)
   - `application/libraries/Pdf_renderer.php` (exact_file)
   - `application/libraries/Request_normalizer.php` (exact_file)
   - `application/libraries/Timezones.php` (exact_file)
