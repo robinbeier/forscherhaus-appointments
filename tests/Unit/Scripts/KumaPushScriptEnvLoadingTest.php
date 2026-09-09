@@ -121,6 +121,14 @@ final class KumaPushScriptEnvLoadingTest extends TestCase
             self::assertSame($repoOverride . PHP_EOL, file_get_contents($releaseGateRepoRootFile));
             self::assertStringContainsString('--base-url=https://appointments.example.test', $phpArgs);
             self::assertStringContainsString('--index-page=app.php', $phpArgs);
+            self::assertSame(1, preg_match('/--start-date=(\d{4}-\d{2}-\d{2})/', $phpArgs, $startMatch));
+            self::assertSame(1, preg_match('/--end-date=(\d{4}-\d{2}-\d{2})/', $phpArgs, $endMatch));
+            $start = new \DateTimeImmutable($startMatch[1]);
+            $end = new \DateTimeImmutable($endMatch[1]);
+            self::assertSame('1', $start->format('N'));
+            self::assertSame('5', $end->format('N'));
+            self::assertSame(4, $start->diff($end)->days);
+
             self::assertStringContainsString('--pdf-health-url=https://renderer.example.test/healthz', $phpArgs);
             self::assertStringContainsString('--http-timeout=19', $phpArgs);
             self::assertStringContainsString('--export-timeout=71', $phpArgs);

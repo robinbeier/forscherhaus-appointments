@@ -44,9 +44,9 @@ final class ProviderUiSmokeContract
 
     public const EMPTY_END_DATE = '2099-04-02';
 
-    public const RESTORE_START_DATE = '2099-02-01';
+    public const RESTORE_START_DATE = '2099-02-09';
 
-    public const RESTORE_END_DATE = '2099-02-28';
+    public const RESTORE_END_DATE = '2099-02-13';
 
     /**
      * The provider dashboard must never expose any of these integration or

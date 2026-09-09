@@ -13,7 +13,6 @@ APP_ROOT="${KUMA_PDF_EXPORT_APP_ROOT:-${KUMA_PDF_EXPORT_REPO_ROOT:-/var/www/html
 GATE_SCRIPT="${RUNTIME_ROOT}/scripts/release-gate/dashboard_release_gate.php"
 GATE_OUTPUT_DIR="${KUMA_PDF_EXPORT_OUTPUT_DIR:-${APP_ROOT}/storage/logs/ops}"
 GATE_OUTPUT_FILE="${GATE_OUTPUT_DIR}/kuma-pdf-export-latest.json"
-WINDOW_DAYS="${KUMA_PDF_EXPORT_WINDOW_DAYS:-30}"
 BASE_URL="${KUMA_PDF_EXPORT_BASE_URL:-http://localhost}"
 INDEX_PAGE="${KUMA_PDF_EXPORT_INDEX_PAGE:-index.php}"
 PDF_HEALTH_URL="${KUMA_PDF_EXPORT_PDF_HEALTH_URL:-http://127.0.0.1:3003/healthz}"
@@ -33,8 +32,11 @@ PASSWORD="${KUMA_PDF_EXPORT_PASSWORD:-${PASSWORD:-}}"
 
 mkdir -p "$GATE_OUTPUT_DIR"
 
-start_date="$(kuma_push_date_days_ago "$WINDOW_DAYS")"
-end_date="$(date -u +%F)"
+# Use the latest completed Monday-Friday range, including on weekends.
+weekday="$(date -u +%u)"
+days_since_friday=$(( (weekday + 2) % 7 ))
+start_date="$(kuma_push_date_days_ago "$((days_since_friday + 4))")"
+end_date="$(kuma_push_date_days_ago "$days_since_friday")"
 stdout_file="$(mktemp)"
 stderr_file="$(mktemp)"
 

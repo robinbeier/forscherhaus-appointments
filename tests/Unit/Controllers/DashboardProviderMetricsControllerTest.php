@@ -38,7 +38,7 @@ class DashboardProviderMetricsControllerTest extends TestCase
 
         $_POST = [
             'start_date' => '2026-11-24',
-            'end_date' => '2026-11-30',
+            'end_date' => '2026-11-27',
         ];
 
         $controller = $this->createProviderMetricsController([
@@ -46,7 +46,7 @@ class DashboardProviderMetricsControllerTest extends TestCase
             'provider_name' => 'Lehrkraft',
             'period' => [
                 'start_date' => '2026-11-24',
-                'end_date' => '2026-11-30',
+                'end_date' => '2026-11-27',
             ],
             'progress' => [
                 'booked_percent' => 50,
@@ -76,7 +76,7 @@ class DashboardProviderMetricsControllerTest extends TestCase
         $this->assertSame(42, $response['provider_id']);
         $this->assertSame('Lehrkraft', $response['provider_name']);
         $this->assertSame('2026-11-24', $response['period']['start_date']);
-        $this->assertSame('2026-11-30', $response['period']['end_date']);
+        $this->assertSame('2026-11-27', $response['period']['end_date']);
         $this->assertSame(42, $controller->capturedProviderId);
     }
 
@@ -91,7 +91,7 @@ class DashboardProviderMetricsControllerTest extends TestCase
 
         $_POST = [
             'start_date' => '2026-11-24',
-            'end_date' => '2026-11-30',
+            'end_date' => '2026-11-27',
         ];
 
         $controller = $this->createProviderMetricsController([]);
@@ -114,7 +114,7 @@ class DashboardProviderMetricsControllerTest extends TestCase
         ]);
 
         $_POST = [
-            'end_date' => '2026-11-30',
+            'end_date' => '2026-11-27',
         ];
 
         $controller = $this->createProviderMetricsController([]);
@@ -125,6 +125,22 @@ class DashboardProviderMetricsControllerTest extends TestCase
 
         $this->assertFalse($response['success']);
         $this->assertSame(lang('filter_period_required'), $response['message']);
+        $this->assertFalse($controller->persistCalled);
+    }
+
+    public function testProviderMetricsRejectsOversizedRangeBeforeCalculationOrPersistence(): void
+    {
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+        session(['role_slug' => DB_SLUG_PROVIDER, 'user_id' => 42]);
+        $_POST = ['start_date' => '1000-01-01', 'end_date' => '9999-12-31'];
+        $controller = $this->createProviderMetricsController([]);
+
+        $controller->provider_metrics();
+
+        $response = json_decode(get_instance()->output->get_output(), true);
+        $this->assertFalse($response['success']);
+        $this->assertSame(lang('filter_period_required'), $response['message']);
+        $this->assertSame(0, $controller->capturedProviderId);
         $this->assertFalse($controller->persistCalled);
     }
 
@@ -139,7 +155,7 @@ class DashboardProviderMetricsControllerTest extends TestCase
 
         $_POST = [
             'start_date' => '2026-11-24',
-            'end_date' => '2026-11-30',
+            'end_date' => '2026-11-27',
         ];
 
         $controller = $this->createProviderMetricsController([
@@ -147,7 +163,7 @@ class DashboardProviderMetricsControllerTest extends TestCase
             'provider_name' => 'Lehrkraft',
             'period' => [
                 'start_date' => '2026-11-24',
-                'end_date' => '2026-11-30',
+                'end_date' => '2026-11-27',
             ],
             'progress' => [
                 'booked_percent' => 0,
@@ -163,13 +179,13 @@ class DashboardProviderMetricsControllerTest extends TestCase
         $this->assertTrue($controller->persistCalled);
         $this->assertSame(99, $controller->persistProviderId);
         $this->assertSame('2026-11-24', $controller->persistStartDate);
-        $this->assertSame('2026-11-30', $controller->persistEndDate);
+        $this->assertSame('2026-11-27', $controller->persistEndDate);
     }
 
     public function testCollectProviderMetricsUsesBookedStatusAndSessionProvider(): void
     {
         $start = new DateTimeImmutable('2026-11-24');
-        $end = new DateTimeImmutable('2026-11-30');
+        $end = new DateTimeImmutable('2026-11-27');
 
         $metricsLibrary = $this->createMock(Dashboard_metrics::class);
         $metricsLibrary
@@ -182,7 +198,7 @@ class DashboardProviderMetricsControllerTest extends TestCase
                 ),
                 $this->callback(
                     static fn($value) => $value instanceof DateTimeImmutable &&
-                        $value->format('Y-m-d') === '2026-11-30',
+                        $value->format('Y-m-d') === '2026-11-27',
                 ),
                 ['statuses' => ['Booked'], 'provider_ids' => [77]],
             )

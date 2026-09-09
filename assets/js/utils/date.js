@@ -70,6 +70,44 @@ window.App.Utils.Date = (function () {
     }
 
     /**
+     * Check whether a date range is a valid school-week range.
+     *
+     * A range may contain one weekday or multiple weekdays, but both dates
+     * must be Monday through Friday and belong to the same ISO week and year.
+     *
+     * @param {String|Date} startDate The first date in the range.
+     * @param {String|Date} endDate The last date in the range.
+     *
+     * @return {Boolean} Whether the range is valid.
+     */
+    function isSchoolWeekRange(startDate, endDate) {
+        const parseDate = (value) => {
+            if (value === undefined || value === null) {
+                return moment.invalid();
+            }
+
+            if (typeof value === 'string') {
+                return moment(value, 'YYYY-MM-DD', true);
+            }
+
+            return moment(value);
+        };
+
+        const start = parseDate(startDate);
+        const end = parseDate(endDate);
+
+        if (!start.isValid() || !end.isValid() || start.isAfter(end)) {
+            return false;
+        }
+
+        if (start.isoWeekday() > 5 || end.isoWeekday() > 5) {
+            return false;
+        }
+
+        return start.isoWeek() === end.isoWeek() && start.isoWeekYear() === end.isoWeekYear();
+    }
+
+    /**
      * Get the Id of a Weekday using the US week format and day names (Sunday=0) as used in the JS code of the
      * application, case-insensitive, short and long names supported.
      *
@@ -192,6 +230,7 @@ window.App.Utils.Date = (function () {
     return {
         format,
         getWeekdayId,
+        isSchoolWeekRange,
         sortWeekDictionary,
         getWeekdayName,
     };

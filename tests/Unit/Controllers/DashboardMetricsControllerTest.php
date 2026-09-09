@@ -39,7 +39,7 @@ class DashboardMetricsControllerTest extends TestCase
 
         $_POST = [
             'start_date' => '2026-11-24',
-            'end_date' => '2026-11-30',
+            'end_date' => '2026-11-27',
             'statuses' => ['Booked', 'Cancelled'],
             'service_id' => '5',
             'provider_ids' => ['7', '9'],
@@ -82,7 +82,7 @@ class DashboardMetricsControllerTest extends TestCase
                 ),
                 $this->callback(
                     static fn($value) => $value instanceof DateTimeImmutable &&
-                        $value->format('Y-m-d') === '2026-11-30',
+                        $value->format('Y-m-d') === '2026-11-27',
                 ),
                 [
                     'statuses' => ['Booked', 'Cancelled'],
@@ -110,7 +110,7 @@ class DashboardMetricsControllerTest extends TestCase
         $this->assertTrue($controller->persistCalled);
         $this->assertSame(11, $controller->persistUserId);
         $this->assertSame('2026-11-24', $controller->persistStartDate);
-        $this->assertSame('2026-11-30', $controller->persistEndDate);
+        $this->assertSame('2026-11-27', $controller->persistEndDate);
     }
 
     public function testMetricsDoesNotPersistRangeWhenPeriodIsInvalid(): void
@@ -141,6 +141,31 @@ class DashboardMetricsControllerTest extends TestCase
         $this->assertFalse($controller->persistCalled);
     }
 
+    public function testMetricsRejectsOversizedPeriodAsValidationErrorBeforeCollecting(): void
+    {
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+        session(['role_slug' => DB_SLUG_ADMIN, 'user_id' => 11]);
+        $_POST = ['start_date' => '1000-01-01', 'end_date' => '9999-12-31'];
+        $metricsLibrary = $this->createMock(Dashboard_metrics::class);
+        $metricsLibrary->expects($this->never())->method('collect');
+        $controller = $this->createController();
+        $controller->dashboard_metrics = $metricsLibrary;
+        $originalOutput = get_instance()->output;
+        $output = $this->createPartialMock(\CI_Output::class, ['set_status_header']);
+        $output->expects($this->once())->method('set_status_header')->with(422)->willReturnSelf();
+        get_instance()->output = $output;
+
+        try {
+            $controller->metrics();
+            $response = json_decode($output->get_output(), true);
+            $this->assertFalse($response['success']);
+            $this->assertSame(lang('filter_period_required'), $response['message']);
+            $this->assertFalse($controller->persistCalled);
+        } finally {
+            get_instance()->output = $originalOutput;
+        }
+    }
+
     public function testMetricsRejectsNonAdminWithoutPersisting(): void
     {
         $_SERVER['REQUEST_METHOD'] = 'POST';
@@ -152,7 +177,7 @@ class DashboardMetricsControllerTest extends TestCase
 
         $_POST = [
             'start_date' => '2026-11-24',
-            'end_date' => '2026-11-30',
+            'end_date' => '2026-11-27',
         ];
 
         $metricsLibrary = $this->createMock(Dashboard_metrics::class);
@@ -181,7 +206,7 @@ class DashboardMetricsControllerTest extends TestCase
 
         $_POST = [
             'start_date' => '2026-11-24',
-            'end_date' => '2026-11-30',
+            'end_date' => '2026-11-27',
         ];
 
         $metricsLibrary = $this->createMock(Dashboard_metrics::class);

@@ -711,8 +711,8 @@ function printHelpAndExit(): void
         --index-page=index.php \
         --username=administrator \
         --password=administrator \
-        --start-date=2026-01-01 \
-        --end-date=2026-01-31
+        --start-date=2026-01-12 \
+        --end-date=2026-01-16
 
     Optional:
       --api-username=administrator

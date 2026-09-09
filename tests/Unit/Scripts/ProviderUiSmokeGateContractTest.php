@@ -89,8 +89,8 @@ class ProviderUiSmokeGateContractTest extends TestCase
                 '__EA_PROVIDER_UI_SMOKE_V1_APPOINTMENT_CANCELLED_INSIDE__',
                 '__EA_PROVIDER_UI_SMOKE_V1_APPOINTMENT_BOOKED_OUTSIDE__',
                 '2099-02-12',
-                '2099-02-01',
-                '2099-02-28',
+                '2099-02-09',
+                '2099-02-13',
                 '10:00',
                 '10:30',
             ]
