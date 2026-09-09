@@ -704,6 +704,44 @@ class DashboardExportControllerTest extends TestCase
         $this->assertFalse($mapped[1]['has_explicit_target']);
     }
 
+    public function testPrincipalSortingPutsUnplannedExplicitZeroInOfferAttention(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+        foreach ([true, false] as $hasPlan) {
+            $sorted = $controller->callSortPrincipalMetricsForReport([
+                [
+                    'provider_name' => 'Planned zero',
+                    'target_raw' => 0,
+                    'has_explicit_target' => true,
+                    'has_plan' => true,
+                    'slots_planned_raw' => 2,
+                    'status_reasons' => [],
+                ],
+                [
+                    'provider_name' => 'Missing target',
+                    'target_raw' => 0,
+                    'has_explicit_target' => false,
+                    'has_plan' => true,
+                    'slots_planned_raw' => 2,
+                    'status_reasons' => [],
+                ],
+                [
+                    'provider_name' => 'Unplanned zero',
+                    'target_raw' => 0,
+                    'has_explicit_target' => true,
+                    'has_plan' => $hasPlan,
+                    'slots_planned_raw' => null,
+                    'status_reasons' => [],
+                ],
+            ]);
+
+            self::assertSame(
+                ['Unplanned zero', 'Missing target', 'Planned zero'],
+                array_column($sorted, 'provider_name'),
+            );
+        }
+    }
+
     public function testMapMetricsForViewKeepsPlannedCapacityStableWhenBookingsExist(): void
     {
         $controller = $this->createControllerWithThreshold(0.9);

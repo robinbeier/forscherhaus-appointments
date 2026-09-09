@@ -78,6 +78,49 @@ class DashboardPrincipalPdfViewTest extends TestCase
         self::assertStringNotContainsString('Buchungsziel erreicht', $output);
     }
 
+    public function testTargetPresenceAndPlanStateDriveOfferActionForZeroAndFallbackTargets(): void
+    {
+        $cases = [
+            [
+                'metric' => $this->metric([
+                    'target_raw' => 0,
+                    'booked_raw' => 0,
+                    'booked_appointments_raw' => 0,
+                    'slots_planned_raw' => null,
+                    'has_plan' => true,
+                    'has_explicit_target' => true,
+                ]),
+                'expected' => 'Terminangebot prüfen',
+            ],
+            [
+                'metric' => $this->metric([
+                    'target_raw' => 0,
+                    'booked_raw' => 0,
+                    'booked_appointments_raw' => 0,
+                    'has_plan' => false,
+                    'has_explicit_target' => false,
+                ]),
+                'expected' => 'Kein Klassenziel bewertet',
+            ],
+            [
+                'metric' => $this->metric([
+                    'target_raw' => 12,
+                    'booked_raw' => 0,
+                    'booked_appointments_raw' => 0,
+                    'slots_planned_raw' => null,
+                    'has_plan' => true,
+                    'has_explicit_target' => false,
+                ]),
+                'expected' => 'Terminangebot prüfen',
+            ],
+        ];
+
+        foreach ($cases as $case) {
+            $output = $this->render([$case['metric']]);
+            self::assertStringContainsString($case['expected'], $output);
+        }
+    }
+
     public function testTrueAppointmentCountDoesNotBecomeAClaimAboutReachedFamilies(): void
     {
         $output = $this->render(

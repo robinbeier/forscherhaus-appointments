@@ -841,11 +841,12 @@ class Dashboard_export extends EA_Controller
         $status_reasons = $this->normalizeStatusReasons($metric['status_reasons'] ?? []);
         $after_15_goal_missed = in_array(self::STATUS_REASON_AFTER_15_GOAL_MISSED, $status_reasons, true);
         $target = (int) ($metric['target_raw'] ?? ($metric['target'] ?? 0));
+        $has_target = !empty($metric['has_explicit_target']) || $target > 0;
         $planned = array_key_exists('slots_planned_raw', $metric)
             ? $metric['slots_planned_raw']
             : $metric['slots_planned'] ?? null;
         $offer_issue =
-            !empty($metric['has_capacity_gap']) || ($target > 0 && (empty($metric['has_plan']) || $planned === null));
+            !empty($metric['has_capacity_gap']) || ($has_target && (empty($metric['has_plan']) || $planned === null));
 
         if ($offer_issue) {
             return 0;

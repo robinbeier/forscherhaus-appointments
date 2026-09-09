@@ -11,7 +11,8 @@ foreach ($metrics as $metric) {
     $booked = isset($metric['booked_appointments_raw']) ? max(0, (int) $metric['booked_appointments_raw']) : null;
     $explicit = !empty($metric['has_explicit_target']);
     $hasPlan = !empty($metric['has_plan']);
-    $offerIssue = !empty($metric['has_capacity_gap']) || ($target > 0 && (!$hasPlan || $planned === null));
+    $hasTarget = $explicit || $target > 0;
+    $offerIssue = !empty($metric['has_capacity_gap']) || ($hasTarget && (!$hasPlan || $planned === null));
     $missingBookings = $explicit && $target > 0 && $booked !== null ? max($target - $booked, 0) : 0;
     $bookingIssue = $explicit && $target > 0 && $hasPlan && $missingBookings > 0;
     $reasons = is_array($metric['status_reasons'] ?? null) ? $metric['status_reasons'] : [];
@@ -39,9 +40,6 @@ foreach ($metrics as $metric) {
     } elseif ($lateIssue) {
         $action = 'Spätere Termine prüfen';
         $detail = 'Vorgabe nach 15 Uhr noch offen.';
-    } elseif (!$hasPlan) {
-        $action = 'Terminangebot prüfen';
-        $detail = 'Keine verlässliche Planungsgrundlage verfügbar.';
     } elseif (!$explicit) {
         $action = 'Kein Klassenziel bewertet';
         $detail = 'Automatische oder fehlende Zielgröße.';
