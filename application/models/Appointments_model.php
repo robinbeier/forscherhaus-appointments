@@ -112,7 +112,9 @@ class Appointments_model extends EA_Model
             empty($appointment['id_users_customer']) ||
             (empty($appointment['notes']) && $require_notes)
         ) {
-            throw new InvalidArgumentException('Not all required fields are provided: ' . print_r($appointment, true));
+            throw new InvalidArgumentException(
+                'Not all required fields are provided for the appointment record: start date time, end date time, service, provider, customer, and notes when required.',
+            );
         }
 
         // Make sure that the provided appointment date time values are valid.
