@@ -91,17 +91,15 @@ class Admins_model extends EA_Model
         }
 
         // Make sure all required fields are provided.
-        if (
-            empty($admin['first_name']) ||
-            empty($admin['last_name']) ||
-            empty($admin['email'])
-        ) {
-            throw new InvalidArgumentException('Not all required fields are provided: ' . print_r($admin, true));
+        if (empty($admin['first_name']) || empty($admin['last_name']) || empty($admin['email'])) {
+            throw new InvalidArgumentException(
+                'Not all required fields are provided for the admin record: first name, last name, and email.',
+            );
         }
 
         // Validate the email address.
         if (!filter_var($admin['email'], FILTER_VALIDATE_EMAIL)) {
-            throw new InvalidArgumentException('Invalid email address provided: ' . $admin['email']);
+            throw new InvalidArgumentException('Invalid email address provided for the admin record.');
         }
 
         // Make sure the username is unique.

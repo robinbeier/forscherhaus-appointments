@@ -76,7 +76,7 @@ class Roles_model extends EA_Model
 
         // Make sure all required fields are provided.
         if (empty($role['name'])) {
-            throw new InvalidArgumentException('Not all required fields are provided: ' . print_r($role, true));
+            throw new InvalidArgumentException('Not all required fields are provided for the role record: name.');
         }
     }
 

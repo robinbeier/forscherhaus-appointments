@@ -95,7 +95,7 @@ class Unavailabilities_model extends EA_Model
             empty($unavailability['id_users_provider'])
         ) {
             throw new InvalidArgumentException(
-                'Not all required fields are provided: ' . print_r($unavailability, true),
+                'Not all required fields are provided for the unavailability record: start date time, end date time, and provider.',
             );
         }
 

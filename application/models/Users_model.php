@@ -91,12 +91,10 @@ class Users_model extends EA_Model
         }
 
         // Make sure all required fields are provided.
-        if (
-            empty($user['first_name']) ||
-            empty($user['last_name']) ||
-            empty($user['email'])
-        ) {
-            throw new InvalidArgumentException('Not all required fields are provided: ' . print_r($user, true));
+        if (empty($user['first_name']) || empty($user['last_name']) || empty($user['email'])) {
+            throw new InvalidArgumentException(
+                'Not all required fields are provided for the user record: first name, last name, and email.',
+            );
         }
     }
 
