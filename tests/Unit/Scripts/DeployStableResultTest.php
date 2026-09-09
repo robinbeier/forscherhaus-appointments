@@ -418,23 +418,78 @@ final class DeployStableResultTest extends TestCase
         self::assertStringContainsString("dry-run-ok\n", $result['stdout']);
     }
 
+    public function testStagePermissionPolicyRejectsCodeLinksBeforeMutatingOutsideTargets(): void
+    {
+        $result = $this->runShell(
+            <<<'BASH'
+            set -Eeuo pipefail
+            source ./deploy_ea.sh
+            WEBUSER=www-data
+            DRYRUN=0
+            REQUIRE_ZERO_SURPRISE=0
+
+            for kind in symlink hardlink; do
+              fixture="$(mktemp -d)"
+              trap 'rm -rf "$fixture"' EXIT
+              chmod 755 "$fixture"
+              STAGE_ROOT="$fixture/stage"
+              mkdir -p "$STAGE_ROOT/application" "$STAGE_ROOT/storage"
+              printf 'outside-original\n' > "$fixture/outside-target"
+              chmod 600 "$fixture/outside-target"
+              if [[ "$kind" == symlink ]]; then
+                ln -s "$fixture/outside-target" "$STAGE_ROOT/application/link.php"
+              else
+                ln "$fixture/outside-target" "$STAGE_ROOT/application/link.php"
+              fi
+
+              if apply_stage_permission_policy; then
+                exit 1
+              fi
+              [[ "$(cat "$fixture/outside-target")" == 'outside-original' ]]
+              [[ "$(stat -c '%a' "$fixture/outside-target")" == 600 ]]
+              rm -rf "$fixture"
+              trap - EXIT
+            done
+            BASH
+            ,
+        );
+
+        self::assertSame(0, $result['exit_code'], $result['stdout'] . $result['stderr']);
+    }
+
     public function testStorageSyncAndStageNormalizationKeepSessionFilesPrivate(): void
     {
+        if ((int) trim((string) shell_exec('id -u')) !== 0) {
+            self::markTestSkipped('Root is required to verify release ownership transitions.');
+        }
+        if (posix_getpwnam('www-data') === false) {
+            self::markTestSkipped('The www-data runtime account is required to verify the write boundary.');
+        }
+
         $result = $this->runShell(
             <<<'BASH'
             set -Eeuo pipefail
             fixture="$(mktemp -d)"
             trap 'rm -rf "$fixture"' EXIT
+            chmod 755 "$fixture"
             source ./deploy_ea.sh
             APP="$fixture/app"
             STAGE_ROOT="$fixture/stage"
-            WEBUSER="$(id -un)"
+            WEBUSER=www-data
             rsync() {
               [[ "$1" == '-a' && "$2" == '--' ]]
               # Match rsync -a mode copying without claiming hardlink preservation.
               cp -a --no-preserve=links -- "$3/." "$4/"
             }
             mkdir -p "$APP/storage/sessions" "$STAGE_ROOT/storage" "$fixture/outside"
+            mkdir -p "$STAGE_ROOT/application" "$STAGE_ROOT/storage/logs"
+            printf 'code\n' > "$STAGE_ROOT/application/index.php"
+            printf 'runtime\n' > "$STAGE_ROOT/storage/logs/runtime.log"
+            printf 'config\n' > "$STAGE_ROOT/config.php"
+            chmod 666 "$STAGE_ROOT/application/index.php"
+            chown www-data:www-data "$STAGE_ROOT/application/index.php"
+            chmod 600 "$STAGE_ROOT/storage/logs/runtime.log"
+            chmod 440 "$STAGE_ROOT/config.php"
             printf 'private\n' > "$APP/storage/sessions/ea_sessionaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
             printf 'also private\n' > "$APP/storage/sessions/ea_sessionbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
             printf 'foreign\n' > "$APP/storage/sessions/foreign-file"
@@ -454,7 +509,19 @@ final class DeployStableResultTest extends TestCase
             prepare_predeploy_stage_permissions
             [[ "$(stat -c '%a' "$STAGE_ROOT/storage/sessions/ea_sessioncccccccccccccccccccccccccccccccc")" == 600 ]]
             sync_live_storage_to_stage
+            printf 'outside-hardlink\n' > "$fixture/outside/hard-target"
+            chmod 600 "$fixture/outside/hard-target"
+            ln "$fixture/outside/hard-target" "$STAGE_ROOT/storage/sessions/ea_session_outside_hard"
             normalize_stage_permissions
+            [[ "$(stat -c '%u:%g:%a' "$STAGE_ROOT/application/index.php")" == "0:0:644" ]]
+            [[ "$(stat -c '%a' "$STAGE_ROOT/config.php")" == 440 ]]
+            [[ "$(stat -c '%a' "$STAGE_ROOT/storage/logs/runtime.log")" == 644 ]]
+            runuser -u www-data -- test -w "$STAGE_ROOT/storage/logs/runtime.log"
+            runuser -u www-data -- sh -c "printf 'appended\\n' >> '$STAGE_ROOT/storage/logs/runtime.log'"
+            ! runuser -u www-data -- test -w "$STAGE_ROOT/application/index.php"
+            ! runuser -u www-data -- sh -c "printf 'must-not-write\\n' > '$STAGE_ROOT/application/index.php'"
+            [[ "$(stat -c '%a' "$STAGE_ROOT/storage/sessions/ea_session_outside_hard")" == 600 ]]
+            [[ "$(stat -c '%a' "$fixture/outside/hard-target")" == 600 ]]
             stat_mode() { stat -c '%a' "$1"; }
             printf 'private=%s\n' "$(stat_mode "$STAGE_ROOT/storage/sessions/ea_sessionaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")"
             printf 'public=%s\n' "$(stat_mode "$STAGE_ROOT/storage/sessions/ea_sessionbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")"
