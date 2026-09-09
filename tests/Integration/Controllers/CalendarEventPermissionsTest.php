@@ -34,10 +34,13 @@ class CalendarEventPermissionsTest extends TestCase
     private array $createdUsers = [];
     /** @var array<int> */
     private array $createdEventIds = [];
+    /** @var array<int> */
+    private array $createdBlockedPeriodIds = [];
     private object $notifications;
     private object $webhooks;
     private object $originalExceptions;
     private ?array $providerRoleSnapshot = null;
+    private ?array $adminBlockedPeriodsSnapshot = null;
 
     protected function setUp(): void
     {
@@ -56,6 +59,9 @@ class CalendarEventPermissionsTest extends TestCase
         $this->providerRoleSnapshot = get_instance()
             ->db->get_where('roles', ['slug' => DB_SLUG_PROVIDER])
             ->row_array();
+        $this->adminBlockedPeriodsSnapshot = get_instance()
+            ->db->get_where('roles', ['slug' => DB_SLUG_ADMIN])
+            ->row_array();
         $this->otherProviderId = $this->createProvider($pair['service_id']);
         $this->unassignedProviderId = $this->createProvider($pair['service_id']);
         $this->secretaryId = $this->createSecretary([$this->providerId, $this->otherProviderId]);
@@ -70,6 +76,9 @@ class CalendarEventPermissionsTest extends TestCase
         foreach ($this->createdEventIds as $eventId) {
             get_instance()->db->delete('appointments', ['id' => $eventId]);
         }
+        foreach ($this->createdBlockedPeriodIds as $blockedPeriodId) {
+            get_instance()->db->delete('blocked_periods', ['id' => $blockedPeriodId]);
+        }
         get_instance()->db->delete('secretaries_providers', ['id_users_secretary' => $this->secretaryId]);
         get_instance()->db->where_in('id_users', $this->createdUsers)->delete('services_providers');
         foreach (array_reverse($this->createdUsers) as $id) {
@@ -81,6 +90,13 @@ class CalendarEventPermissionsTest extends TestCase
                 'roles',
                 ['appointments' => $this->providerRoleSnapshot['appointments']],
                 ['id' => $this->providerRoleSnapshot['id']],
+            );
+        }
+        if ($this->adminBlockedPeriodsSnapshot !== null) {
+            get_instance()->db->update(
+                'roles',
+                ['blocked_periods' => $this->adminBlockedPeriodsSnapshot['blocked_periods']],
+                ['id' => $this->adminBlockedPeriodsSnapshot['id']],
             );
         }
         $this->fixtures->restoreSettings();
@@ -195,6 +211,35 @@ class CalendarEventPermissionsTest extends TestCase
 
         $this->assertDenied();
         $this->assertSame($this->otherProviderId, $this->storedProvider($id));
+    }
+
+    public function testBlockedPeriodNotesRespectBlockedPeriodsViewPermissionOnBothReadEndpoints(): void
+    {
+        $this->createBlockedPeriod();
+        $this->authenticate($this->userIdForRole(DB_SLUG_ADMIN), DB_SLUG_ADMIN);
+
+        foreach ([false, true] as $canViewBlockedPeriods) {
+            get_instance()->db->update(
+                'roles',
+                ['blocked_periods' => $canViewBlockedPeriods ? PRIV_VIEW : 0],
+                ['id' => $this->adminBlockedPeriodsSnapshot['id']],
+            );
+
+            foreach (['table', 'filtered'] as $endpoint) {
+                $response = $this->readCalendarEndpoint($endpoint);
+                $blocked = $response['blocked_periods'][0] ?? [];
+
+                $this->assertSame('Synthetic blocked period', $blocked['name'] ?? null, $endpoint);
+                $this->assertSame('2035-04-01 09:00:00', $blocked['start_datetime'] ?? null, $endpoint);
+                $this->assertSame('2035-04-01 10:00:00', $blocked['end_datetime'] ?? null, $endpoint);
+
+                if ($canViewBlockedPeriods) {
+                    $this->assertSame('Private blocked notes', $blocked['notes'] ?? null, $endpoint);
+                } else {
+                    $this->assertArrayNotHasKey('notes', $blocked, $endpoint);
+                }
+            }
+        }
     }
 
     public function testProviderMayEditOwnUnavailability(): void
@@ -398,6 +443,7 @@ class CalendarEventPermissionsTest extends TestCase
                 'services_model',
                 'secretaries_model',
                 'unavailabilities_model',
+                'blocked_periods_model',
             ]
             as $model
         ) {
@@ -416,10 +462,48 @@ class CalendarEventPermissionsTest extends TestCase
         $controller->services_model = $CI->services_model;
         $controller->secretaries_model = $CI->secretaries_model;
         $controller->unavailabilities_model = $CI->unavailabilities_model;
+        $controller->blocked_periods_model = $CI->blocked_periods_model;
         $controller->permissions = $CI->permissions;
         $controller->notifications = $this->notifications;
         $controller->webhooks_client = $this->webhooks;
         return $controller;
+    }
+
+    /** @return array<string, mixed> */
+    private function readCalendarEndpoint(string $endpoint): array
+    {
+        $_POST = [
+            'start_date' => '2035-04-01',
+            'end_date' => '2035-04-01',
+            'record_id' => FILTER_TYPE_ALL,
+            'filter_type' => '',
+            'is_all' => '1',
+        ];
+        get_instance()->output->set_output('');
+
+        if ($endpoint === 'table') {
+            $this->controller()->get_calendar_appointments_for_table_view();
+        } else {
+            $this->controller()->get_calendar_appointments();
+        }
+
+        $response = json_decode(get_instance()->output->get_output(), true);
+        $this->assertIsArray($response);
+
+        return $response;
+    }
+
+    private function createBlockedPeriod(): void
+    {
+        get_instance()->db->insert('blocked_periods', [
+            'create_datetime' => date('Y-m-d H:i:s'),
+            'update_datetime' => date('Y-m-d H:i:s'),
+            'name' => 'Synthetic blocked period',
+            'start_datetime' => '2035-04-01 09:00:00',
+            'end_datetime' => '2035-04-01 10:00:00',
+            'notes' => 'Private blocked notes',
+        ]);
+        $this->createdBlockedPeriodIds[] = (int) get_instance()->db->insert_id();
     }
 
     private function postAppointment(int $id, int $providerId, int $serviceId, int $customerId): void

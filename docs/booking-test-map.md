@@ -42,6 +42,13 @@ ist eine Orientierung, keine vollständige Testliste.
 
 | Kunde oder Angebot löschen | `tests/Unit/Models/ParentCascadeBufferCleanupTest.php` | Datenbanktest; eigene Termine und Puffer verschwinden, fremde bleiben erhalten |
 
+## Verwaltungskalender
+
+| Verhalten | Tests | Abgedecktes Risiko |
+| --- | --- | --- |
+| Anbieter-Konfiguration in Kalenderseite und Ereignisantworten | `tests/Integration/Controllers/CalendarProviderDataTest.php` | Arbeitspläne bleiben verfügbar; historische Integrationsgeheimnisse werden nicht an den Browser weitergegeben. |
+| Sperrzeiten mit rollenabhängigen Notizen | `tests/Integration/Controllers/CalendarEventPermissionsTest.php` | Kalendernutzer sehen gesperrte Zeiten; zusätzliche Notizen erfordern Leserecht für Sperrzeiten. |
+
 ## Entscheidung zur Vereinfachung
 
 In `ParentCascadeBufferCleanupTest` genügt je ein Szenario für Kunde und

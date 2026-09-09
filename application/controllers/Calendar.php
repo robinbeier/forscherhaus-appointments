@@ -167,6 +167,8 @@ class Calendar extends EA_Controller
             );
         }
 
+        $available_providers = array_map($this->calendarProviderData(...), $available_providers);
+
         $available_services = $this->services_model->get_available_services();
 
         $calendar_view_request = $this->calendarRequestDtoFactory()->buildViewRequestDto(
@@ -621,7 +623,9 @@ class Calendar extends EA_Controller
             ];
 
             foreach ($response['appointments'] as &$appointment) {
-                $appointment['provider'] = $this->providers_model->find($appointment['id_users_provider']);
+                $appointment['provider'] = $this->calendarProviderData(
+                    $this->providers_model->find($appointment['id_users_provider']),
+                );
                 $appointment['service'] = $this->services_model->find($appointment['id_services']);
                 $appointment['customer'] = $this->customers_model->find($appointment['id_users_customer']);
             }
@@ -673,16 +677,15 @@ class Calendar extends EA_Controller
             }
 
             foreach ($response['unavailabilities'] as &$unavailability) {
-                $unavailability['provider'] = $this->providers_model->find($unavailability['id_users_provider']);
+                $unavailability['provider'] = $this->calendarProviderData(
+                    $this->providers_model->find($unavailability['id_users_provider']),
+                );
             }
 
             unset($unavailability);
 
             // Add blocked periods to the response.
-            $response['blocked_periods'] = $this->blocked_periods_model->get_for_period(
-                $range_start_date,
-                $range_end_date,
-            );
+            $response['blocked_periods'] = $this->calendarBlockedPeriods($range_start_date, $range_end_date);
 
             json_response($response);
         } catch (Throwable $e) {
@@ -760,7 +763,9 @@ class Calendar extends EA_Controller
             $response['appointments'] = $this->appointments_model->get($where_clause);
 
             foreach ($response['appointments'] as &$appointment) {
-                $appointment['provider'] = $this->providers_model->find($appointment['id_users_provider']);
+                $appointment['provider'] = $this->calendarProviderData(
+                    $this->providers_model->find($appointment['id_users_provider']),
+                );
                 $appointment['service'] = $this->services_model->find($appointment['id_services']);
                 $appointment['customer'] = $this->customers_model->find($appointment['id_users_customer']);
             }
@@ -844,21 +849,46 @@ class Calendar extends EA_Controller
             }
 
             foreach ($response['unavailabilities'] as &$unavailability) {
-                $unavailability['provider'] = $this->providers_model->find($unavailability['id_users_provider']);
+                $unavailability['provider'] = $this->calendarProviderData(
+                    $this->providers_model->find($unavailability['id_users_provider']),
+                );
             }
 
             unset($unavailability);
 
             // Add blocked periods to the response.
-            $response['blocked_periods'] = $this->blocked_periods_model->get_for_period(
-                $range_start_date,
-                $range_end_date,
-            );
+            $response['blocked_periods'] = $this->calendarBlockedPeriods($range_start_date, $range_end_date);
 
             json_response($response);
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    /** Keep provider configuration sent to the calendar limited to its working-plan needs. */
+    private function calendarProviderData(array $provider): array
+    {
+        $provider['settings'] = array_intersect_key(
+            (array) ($provider['settings'] ?? []),
+            array_flip(['working_plan', 'working_plan_exceptions']),
+        );
+
+        return $provider;
+    }
+
+    /** Calendar visibility does not grant access to private blocked-period notes. */
+    private function calendarBlockedPeriods(string $startDate, string $endDate): array
+    {
+        $periods = $this->blocked_periods_model->get_for_period($startDate, $endDate);
+
+        if (cannot('view', PRIV_BLOCKED_PERIODS)) {
+            foreach ($periods as &$period) {
+                unset($period['notes']);
+            }
+            unset($period);
+        }
+
+        return $periods;
     }
 
     private function calendarRequestDtoFactory(): Calendar_request_dto_factory
