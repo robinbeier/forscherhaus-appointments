@@ -85,7 +85,6 @@ jobs:
               - 'application/controllers/api/v1/Webhooks_api_v1.php'
               - 'application/models/**'
               - 'application/libraries/**'
-              - 'application/helpers/installation_helper.php'
               - 'application/libraries/Request_normalizer.php'
               - 'application/libraries/Booking_request_dto_factory.php'
               - 'application/libraries/Dashboard_request_dto_factory.php'

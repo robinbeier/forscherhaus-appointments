@@ -43,7 +43,6 @@ parameters:
         - phpstan/bootstrap.php
     scanFiles:
         - phpstan/stubs/codeigniter-functions.stub.php
-        - application/helpers/installation_helper.php
     scanDirectories:
         - system
         - application/core

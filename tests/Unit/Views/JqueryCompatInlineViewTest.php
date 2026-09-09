@@ -39,7 +39,6 @@ class JqueryCompatInlineViewTest extends TestCase
             APPPATH . 'views/layouts/backend_layout.php',
             APPPATH . 'views/layouts/booking_layout.php',
             APPPATH . 'views/layouts/message_layout.php',
-            APPPATH . 'views/pages/installation.php',
         ];
     }
 }

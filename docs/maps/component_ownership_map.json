@@ -91,7 +91,7 @@
     {
       "component_id": "installation-bootstrap",
       "role": "Installation & Bootstrap",
-      "summary": "First-run installation flow that seeds the initial admin, company, and demo booking data.",
+      "summary": "CLI installation and test-data bootstrap; no public web installer.",
       "primary_handle": "@robinbeier",
       "secondary_handle": "@robinbeier",
       "ownership_mode": "single-owner",
@@ -101,26 +101,12 @@
       "ownership_notes": "Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.",
       "path_rules": [
         {
-          "path": "application/controllers/Installation.php",
-          "match": "exact_file"
-        },
-        {
           "path": "application/libraries/Instance.php",
-          "match": "exact_file"
-        },
-        {
-          "path": "application/views/pages/installation.php",
-          "match": "exact_file"
-        },
-        {
-          "path": "assets/js/pages/installation.js",
           "match": "exact_file"
         }
       ],
       "key_files": [
-        "application/controllers/Installation.php",
-        "application/views/pages/installation.php",
-        "assets/js/pages/installation.js"
+        "application/libraries/Instance.php"
       ],
       "depends_on": [
         "people-services-admin",

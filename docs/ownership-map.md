@@ -69,14 +69,9 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
 - Manual approval required: yes
 - Ownership notes: Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.
 - Key files:
-  - `application/controllers/Installation.php`
-  - `application/views/pages/installation.php`
-  - `assets/js/pages/installation.js`
+  - `application/libraries/Instance.php`
 - Path rules:
-  - `application/controllers/Installation.php` (exact_file)
   - `application/libraries/Instance.php` (exact_file)
-  - `application/views/pages/installation.php` (exact_file)
-  - `assets/js/pages/installation.js` (exact_file)
 
 ### `booking-public`
 
