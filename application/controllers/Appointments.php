@@ -14,7 +14,7 @@
 /**
  * Appointments controller.
  *
- * Handles the appointments related operations.
+ * Serves calendar-file downloads and redirects legacy booking links.
  *
  * Notice: This file used to have the booking page related code which since v1.5 has now moved to the Booking.php
  * controller for improved consistency.
@@ -23,24 +23,6 @@
  */
 class Appointments extends EA_Controller
 {
-    public array $allowed_appointment_fields = [
-        'id',
-        'start_datetime',
-        'end_datetime',
-        'location',
-        'notes',
-        'color',
-        'status',
-        'is_unavailability',
-        'id_users_provider',
-        'id_users_customer',
-        'id_services',
-    ];
-
-    public array $optional_appointment_fields = [
-        //
-    ];
-
     /**
      * Appointments constructor.
      */
@@ -49,11 +31,6 @@ class Appointments extends EA_Controller
         parent::__construct();
 
         $this->load->model('appointments_model');
-        $this->load->model('roles_model');
-
-        $this->load->library('accounts');
-        $this->load->library('timezones');
-        $this->load->library('webhooks_client');
     }
 
     /**
@@ -66,166 +43,6 @@ class Appointments extends EA_Controller
     public function index(string $appointment_hash = ''): void
     {
         redirect('booking/' . $appointment_hash);
-    }
-
-    /**
-     * Filter appointments by the provided keyword.
-     */
-    public function search(): void
-    {
-        try {
-            if (cannot('view', PRIV_APPOINTMENTS)) {
-                abort(403, 'Forbidden');
-            }
-
-            $request_dto = $this->backofficeRequestDtoFactory()->buildSearchRequestDto();
-
-            $appointments = $this->appointments_model->search(
-                $request_dto->keyword,
-                $request_dto->limit,
-                $request_dto->offset,
-                $request_dto->orderBy,
-            );
-
-            $user_id = session('user_id');
-            $role_slug = session('role_slug');
-
-            // If the current user is a provider he must only see his own appointments.
-            if ($role_slug === DB_SLUG_PROVIDER) {
-                foreach ($appointments as $index => $appointment) {
-                    if ((int) $appointment['id_users_provider'] !== (int) $user_id) {
-                        unset($appointments[$index]);
-                    }
-                }
-
-                $appointments = array_values($appointments);
-            }
-
-            // If the current user is a secretary he must only see the appointments of his providers.
-            if ($role_slug === DB_SLUG_SECRETARY) {
-                $provider_ids = $this->secretaries_model->find($user_id)['providers'];
-
-                foreach ($appointments as $index => $appointment) {
-                    if (!in_array((int) $appointment['id_users_provider'], $provider_ids)) {
-                        unset($appointments[$index]);
-                    }
-                }
-
-                $appointments = array_values($appointments);
-            }
-
-            json_response($appointments);
-        } catch (Throwable $e) {
-            json_exception($e);
-        }
-    }
-
-    /**
-     * Store a new appointment.
-     */
-    public function store(): void
-    {
-        try {
-            if (cannot('add', PRIV_APPOINTMENTS)) {
-                abort(403, 'Forbidden');
-            }
-
-            $request_dto = $this->backofficeRequestDtoFactory()->buildEntityPayloadRequestDto('appointment');
-            $appointment = $request_dto->payload;
-
-            $this->appointments_model->only($appointment, $this->allowed_appointment_fields);
-
-            $this->appointments_model->optional($appointment, $this->optional_appointment_fields);
-
-            $appointment_id = $this->appointments_model->save($appointment);
-
-            $appointment = $this->appointments_model->find($appointment);
-
-            $this->webhooks_client->trigger(WEBHOOK_APPOINTMENT_SAVE, $appointment);
-
-            json_response([
-                'success' => true,
-                'id' => $appointment_id,
-            ]);
-        } catch (Throwable $e) {
-            json_exception($e);
-        }
-    }
-
-    /**
-     * Find an appointment.
-     */
-    public function find(): void
-    {
-        try {
-            if (cannot('view', PRIV_APPOINTMENTS)) {
-                abort(403, 'Forbidden');
-            }
-
-            $request_dto = $this->backofficeRequestDtoFactory()->buildEntityIdRequestDto('appointment_id');
-            $appointment_id = $request_dto->id;
-
-            $appointment = $this->appointments_model->find($appointment_id);
-
-            json_response($appointment);
-        } catch (Throwable $e) {
-            json_exception($e);
-        }
-    }
-
-    /**
-     * Update a appointment.
-     */
-    public function update(): void
-    {
-        try {
-            if (cannot('edit', PRIV_APPOINTMENTS)) {
-                abort(403, 'Forbidden');
-            }
-
-            $request_dto = $this->backofficeRequestDtoFactory()->buildEntityPayloadRequestDto('appointment');
-            $appointment = $request_dto->payload;
-
-            $this->appointments_model->only($appointment, $this->allowed_appointment_fields);
-
-            $this->appointments_model->optional($appointment, $this->optional_appointment_fields);
-
-            $appointment_id = $this->appointments_model->save($appointment);
-
-            json_response([
-                'success' => true,
-                'id' => $appointment_id,
-            ]);
-        } catch (Throwable $e) {
-            json_exception($e);
-        }
-    }
-
-    /**
-     * Remove a appointment.
-     */
-    public function destroy(): void
-    {
-        try {
-            if (cannot('delete', PRIV_APPOINTMENTS)) {
-                abort(403, 'Forbidden');
-            }
-
-            $request_dto = $this->backofficeRequestDtoFactory()->buildEntityIdRequestDto('appointment_id');
-            $appointment_id = $request_dto->id;
-
-            $appointment = $this->appointments_model->find($appointment_id);
-
-            $this->appointments_model->delete($appointment_id);
-
-            $this->webhooks_client->trigger(WEBHOOK_APPOINTMENT_DELETE, $appointment);
-
-            json_response([
-                'success' => true,
-            ]);
-        } catch (Throwable $e) {
-            json_exception($e);
-        }
     }
 
     /**
@@ -286,29 +103,5 @@ class Appointments extends EA_Controller
             ->set_header('Content-Disposition: attachment; filename="' . $filename . '"')
             ->set_header('Cache-Control: no-store')
             ->set_output($ics_stream);
-    }
-
-    private function backofficeRequestDtoFactory(): Backoffice_request_dto_factory
-    {
-        if (
-            isset($this->backoffice_request_dto_factory) &&
-            $this->backoffice_request_dto_factory instanceof Backoffice_request_dto_factory
-        ) {
-            return $this->backoffice_request_dto_factory;
-        }
-
-        /** @var EA_Controller|CI_Controller $CI */
-        $CI = &get_instance();
-
-        if (
-            !isset($CI->backoffice_request_dto_factory) ||
-            !$CI->backoffice_request_dto_factory instanceof Backoffice_request_dto_factory
-        ) {
-            $CI->load->library('backoffice_request_dto_factory');
-        }
-
-        $this->backoffice_request_dto_factory = $CI->backoffice_request_dto_factory;
-
-        return $this->backoffice_request_dto_factory;
     }
 }

@@ -38,7 +38,6 @@
 /application/controllers/Secretaries.php @robinbeier
 /application/controllers/Service_categories.php @robinbeier
 /application/controllers/Services.php @robinbeier
-/application/controllers/Unavailabilities.php @robinbeier
 /application/controllers/Webhooks.php @robinbeier
 /application/controllers/api/v1/** @robinbeier
 /application/core/Customers_ui_smoke_access_policy.php @robinbeier
