@@ -21,6 +21,11 @@ Datensätze an. Eine mitgesendete bestehende ID wird abgewiesen; Änderungen lau
 `EntityStoreAuthorizationTest` prüft diese Trennung einschließlich normalem
 Anlegen, berechtigtem Bearbeiten und der bestehenden E-Mail-Prüfung.
 
+Öffentliche Buchungskonflikte liefern einheitlich HTTP 409 mit dem Hinweis,
+dass die angefragte Zeit nicht verfügbar ist. Die Antwort unterscheidet nicht
+zwischen einem belegten Zeitfenster und einer Überschneidung beim Kunden.
+Die Überschneidungsprüfung und das vollständige Zurückrollen bleiben erhalten.
+
 ## Local Repro (Docker CI-Parity)
 
 ```bash
