@@ -33,26 +33,7 @@ App.Http.LdapSettings = (function () {
         return $.post(url, data);
     }
 
-    /**
-     * Search LDAP server.
-     *
-     * @param {String} keyword
-     *
-     * @return {Object}
-     */
-    function search(keyword) {
-        const url = App.Utils.Url.siteUrl('ldap_settings/search');
-
-        const data = {
-            csrf_token: vars('csrf_token'),
-            keyword,
-        };
-
-        return $.post(url, data);
-    }
-
     return {
         save,
-        search,
     };
 })();

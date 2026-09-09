@@ -30,7 +30,6 @@ class Ldap_settings extends EA_Controller
         $this->load->model('settings_model');
 
         $this->load->library('accounts');
-        $this->load->library('ldap_client');
     }
 
     /**
@@ -57,16 +56,13 @@ class Ldap_settings extends EA_Controller
         script_vars([
             'user_id' => $user_id,
             'role_slug' => $role_slug,
-            'ldap_settings' => $this->settings_model->get('name like "ldap_%"'),
-            'ldap_default_filter' => LDAP_DEFAULT_FILTER,
-            'ldap_default_field_mapping' => LDAP_DEFAULT_FIELD_MAPPING,
+            'ldap_settings' => $this->settings_model->get('name IN ("ldap_is_active", "ldap_host", "ldap_port")'),
         ]);
 
         html_vars([
             'page_title' => lang('ldap'),
             'active_menu' => PRIV_SYSTEM_SETTINGS,
             'user_display_name' => $this->accounts->get_user_display_name($user_id),
-            'roles' => $this->roles_model->get(),
         ]);
 
         $this->load->view('pages/ldap_settings');
@@ -86,11 +82,7 @@ class Ldap_settings extends EA_Controller
             $settings = $settings_request->settings;
 
             foreach ($settings as $setting) {
-                $existing_setting = $this->settings_model
-                    ->query()
-                    ->where('name', $setting['name'])
-                    ->get()
-                    ->row_array();
+                $existing_setting = $this->settings_model->query()->where('name', $setting['name'])->get()->row_array();
 
                 if (!empty($existing_setting)) {
                     $setting['id'] = $existing_setting['id'];
@@ -100,33 +92,6 @@ class Ldap_settings extends EA_Controller
             }
 
             response();
-        } catch (Throwable $e) {
-            json_exception($e);
-        }
-    }
-
-    /**
-     * Search the LDAP directory.
-     *
-     * @return void
-     */
-    public function search(): void
-    {
-        try {
-            if (cannot('edit', PRIV_SYSTEM_SETTINGS)) {
-                throw new RuntimeException('You do not have the required permissions for this task.');
-            }
-
-            if (!extension_loaded('ldap')) {
-                throw new RuntimeException('The LDAP extension is not loaded.');
-            }
-
-            $request_dto = $this->integrationsRequestDtoFactory()->buildLdapSearchRequestDto();
-            $keyword = $request_dto->keyword;
-
-            $entries = $this->ldap_client->search($keyword);
-
-            json_response($entries);
         } catch (Throwable $e) {
             json_exception($e);
         }
@@ -154,29 +119,5 @@ class Ldap_settings extends EA_Controller
         $this->backoffice_request_dto_factory = $CI->backoffice_request_dto_factory;
 
         return $this->backoffice_request_dto_factory;
-    }
-
-    private function integrationsRequestDtoFactory(): Integrations_request_dto_factory
-    {
-        if (
-            isset($this->integrations_request_dto_factory) &&
-            $this->integrations_request_dto_factory instanceof Integrations_request_dto_factory
-        ) {
-            return $this->integrations_request_dto_factory;
-        }
-
-        /** @var EA_Controller|CI_Controller $CI */
-        $CI = &get_instance();
-
-        if (
-            !isset($CI->integrations_request_dto_factory) ||
-            !$CI->integrations_request_dto_factory instanceof Integrations_request_dto_factory
-        ) {
-            $CI->load->library('integrations_request_dto_factory');
-        }
-
-        $this->integrations_request_dto_factory = $CI->integrations_request_dto_factory;
-
-        return $this->integrations_request_dto_factory;
     }
 }

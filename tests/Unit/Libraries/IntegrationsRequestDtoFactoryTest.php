@@ -20,27 +20,6 @@ class IntegrationsRequestDtoFactoryTest extends TestCase
         $this->factory = new Integrations_request_dto_factory(new Request_normalizer());
     }
 
-    public function testCreateLdapSearchRequestDtoPreservesKeywordWhitespaceCompat(): void
-    {
-        $dto = $this->factory->createLdapSearchRequestDto('  Ada  ');
-
-        $this->assertSame('  Ada  ', $dto->keyword);
-    }
-
-    public function testCreateLdapSearchRequestDtoPreservesWhitespaceOnlySearchTerm(): void
-    {
-        $dto = $this->factory->createLdapSearchRequestDto('   ');
-
-        $this->assertSame('   ', $dto->keyword);
-    }
-
-    public function testCreateLdapSearchRequestDtoConvertsNullToEmptyString(): void
-    {
-        $dto = $this->factory->createLdapSearchRequestDto(null);
-
-        $this->assertSame('', $dto->keyword);
-    }
-
     public function testCreateWebhookCrudRequestDtoNormalizesSearchPayloadAndId(): void
     {
         $dto = $this->factory->createWebhookCrudRequestDto(

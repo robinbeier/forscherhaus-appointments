@@ -61,108 +61,20 @@
                                 </label>
                                 <input id="ldap-port" class="form-control" data-field="ldap_port">
                             </div>
-
-                            <div class="mb-3">
-                                <label class="form-label" for="ldap-user_dn">
-                                    <?= lang('user_dn') ?>
-                                </label>
-                                <input id="ldap-user_dn" class="form-control" data-field="ldap_user_dn">
-                            </div>
-
-                            <div class="mb-3">
-                                <label class="form-label" for="ldap-password">
-                                    <?= lang('password') ?>
-                                </label>
-                                <input id="ldap-password" type="password" class="form-control"
-                                       data-field="ldap_password">
-                            </div>
-
-                            <div class="mb-3">
-                                <label class="form-label" for="ldap-base-dn">
-                                    <?= lang('base_dn') ?>
-                                </label>
-                                <input id="ldap-base-dn" class="form-control" data-field="ldap_base_dn">
-                            </div>
-
-                            <div class="mb-3">
-                                <div class="d-flex mb-2">
-                                    <label class="form-label mb-0" for="ldap-filter">
-                                        <?= lang('filter') ?>
-                                    </label>
-                                    <button type="button" class="btn btn-sm btn-outline-secondary py-0 ms-auto"
-                                            id="ldap-reset-filter">
-                                        <i class="fas fa-undo me-2"></i>
-                                        <?= lang('reset') ?>
-                                    </button>
-                                </div>
-                                <input id="ldap-filter" class="form-control" data-field="ldap_filter">
-                            </div>
-
-                            <div class="mb-3">
-                                <div class="d-flex mb-2">
-                                    <label class="form-label mb-0" for="ldap-field-mapping">
-                                        <?= lang('field_mapping') ?>
-                                    </label>
-                                    <button type="button" class="btn btn-sm btn-outline-secondary py-0 ms-auto"
-                                            id="ldap-reset-field-mapping">
-                                        <i class="fas fa-undo me-2"></i>
-                                        <?= lang('reset') ?>
-                                    </button>
-                                </div>
-
-                                <textarea id="ldap-field-mapping" class="form-control" rows="5"
-                                          data-field="ldap_field_mapping"></textarea>
-                            </div>
                         </div>
                     </div>
 
                     <?php slot('after_primary_appointment_fields'); ?>
                 </fieldset>
             </form>
-
-            <div class="d-flex justify-content-between align-items-center border-bottom mb-4 py-2">
-                <h4 class="text-black-50 mb-0 fw-light">
-                    <?= lang('search') ?>
-                </h4>
-            </div>
-
-            <p class="text-muted small">
-                <?= lang('ldap_search_hint') ?>
-            </p>
-
-            <form id="ldap-search-form" class="mb-3">
-                <label class="form-label" for="ldap-search-keyword">
-                    <?= lang('keyword') ?>
-                </label>
-
-                <div class="input-group">
-                    <input id="ldap-search-keyword" class="form-control">
-
-                    <button type="submit" class="btn btn-outline-primary">
-                        <?= lang('search') ?>
-                    </button>
-                </div>
-            </form>
-
-            <div id="ldap-search-results" class="mb-3">
-                <!-- JS -->
-            </div>
         </div>
     </div>
 </div>
-
-<?php component('ldap_import_modal', [
-    'roles' => vars('roles'),
-]); ?>
 
 <?php end_section('content'); ?>
 
 <?php section('scripts'); ?>
 
-<script src="<?= asset_url('assets/js/http/customers_http_client.js') ?>"></script>
-<script src="<?= asset_url('assets/js/http/providers_http_client.js') ?>"></script>
-<script src="<?= asset_url('assets/js/http/secretaries_http_client.js') ?>"></script>
-<script src="<?= asset_url('assets/js/http/admins_http_client.js') ?>"></script>
 <script src="<?= asset_url('assets/js/http/ldap_settings_http_client.js') ?>"></script>
 <script src="<?= asset_url('assets/js/pages/ldap_settings.js') ?>"></script>
 
