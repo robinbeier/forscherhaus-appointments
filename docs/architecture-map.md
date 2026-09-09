@@ -20,7 +20,7 @@ This map defines component boundaries, path ownership scope, and dependency edge
 | `settings-compliance` | Settings & Compliance | auth-session, integrations-sync, people-services-admin, scheduling-backoffice, shared-core | 26 | 3 |
 | `integrations-sync` | Integrations & Sync | auth-session, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 12 | 2 |
 | `api-v1` | REST API v1 | auth-session, integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 5 | 3 |
-| `shared-core` | Shared Core | None | 9 | 2 |
+| `shared-core` | Shared Core | None | 10 | 2 |
 | `platform-quality-tooling` | Platform, CI, Release Gates | api-v1, booking-public, dashboard-exports, installation-bootstrap, people-services-admin, settings-compliance, shared-core | 19 | 11 |
 
 ## Component Details
@@ -344,6 +344,7 @@ Dependencies:
 Path rules:
 - `application/views/components/jquery_compat_inline.php` (exact_file)
 - `application/libraries/Accounts.php` (exact_file)
+- `application/models/Users_model.php` (exact_file)
 - `application/libraries/Pdf_renderer.php` (exact_file)
 - `application/libraries/Request_normalizer.php` (exact_file)
 - `application/libraries/Timezones.php` (exact_file)
