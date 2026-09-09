@@ -1809,7 +1809,7 @@ prepare_zero_surprise_stage_runtime() {
 
   if [[ "$DRYRUN" -eq 1 ]]; then
     echo "[DRY-RUN] would generate zero-surprise stage config from '$stage_sample' -> '$stage_config'"
-    echo "[DRY-RUN] would ensure '$STAGE_ROOT/storage/logs/release-gate' exists for replay reports"
+    echo "[DRY-RUN] would ensure '$STAGE_ROOT/storage/logs/release-gate' and '$STAGE_ROOT/storage/cache' exist for runtime output"
     return 0
   fi
 
@@ -1819,7 +1819,7 @@ prepare_zero_surprise_stage_runtime() {
     || return $?
 
   cp "$stage_sample" "$stage_config" >/dev/null 2>&1 || return $?
-  mkdir -p "$STAGE_ROOT/storage/logs/release-gate" >/dev/null 2>&1 || return $?
+  mkdir -p "$STAGE_ROOT/storage/logs/release-gate" "$STAGE_ROOT/storage/cache" >/dev/null 2>&1 || return $?
 
   php "$STAGE_ROOT/scripts/release-gate/prepare_zero_surprise_stage_config.php" \
     --config="$stage_config" \

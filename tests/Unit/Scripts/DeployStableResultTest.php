@@ -8,6 +8,31 @@ use PHPUnit\Framework\TestCase;
 
 final class DeployStableResultTest extends TestCase
 {
+    public function testZeroSurpriseStageRuntimePreparesConfiguredRuntimeCacheDirectory(): void
+    {
+        $result = $this->runShell(
+            <<<'BASH'
+            set -eu
+            fixture="$(mktemp -d)"
+            trap 'rm -rf "$fixture"' EXIT
+            mkdir -p "$fixture/stage/scripts/release-gate"
+            printf '<?php exit(0);\n' > "$fixture/stage/scripts/release-gate/prepare_zero_surprise_stage_config.php"
+            printf 'sample\n' > "$fixture/stage/config-sample.php"
+            source ./deploy_ea.sh
+            STAGE_ROOT="$fixture/stage"
+            REQUIRE_ZERO_SURPRISE=1
+            DRYRUN=0
+            read_zero_surprise_predeploy_base_url() { echo 'http://fixture.test/'; }
+            prepare_zero_surprise_stage_runtime
+            test -d "$STAGE_ROOT/storage/logs/release-gate"
+            test -d "$STAGE_ROOT/storage/cache"
+            BASH
+            ,
+        );
+
+        self::assertSame(0, $result['exit_code'], $result['stdout'] . $result['stderr']);
+    }
+
     public function testNormalMainInstallsStableTrapBeforeArgumentValidation(): void
     {
         $result = $this->runCommand(['bash', 'deploy_ea.sh']);
