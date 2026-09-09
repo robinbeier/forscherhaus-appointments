@@ -26,6 +26,8 @@
             <file>./tests/Integration/Controllers/CalendarAtomicSaveTest.php</file>
             <file>./tests/Integration/Controllers/CalendarCustomerAccessTest.php</file>
             <file>./tests/Integration/Controllers/CalendarEventPermissionsTest.php</file>
+            <file>./tests/Integration/Controllers/CalendarProviderDataTest.php</file>
+            <file>./tests/Integration/Controllers/EntityStoreAuthorizationTest.php</file>
             <file>./tests/Integration/Controllers/CalendarWorkingPlanPermissionsTest.php</file>
             <file>./tests/Integration/Controllers/ApiReadControllerFlowTest.php</file>
         </testsuite>
