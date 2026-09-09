@@ -19,10 +19,23 @@ require_once APPPATH . 'controllers/Booking.php';
 class BookingControllerFlowTest extends TestCase
 {
     private BookingFlowFixtures $fixtures;
+    private \EA_Output $originalOutput;
 
     protected function setUp(): void
     {
         parent::setUp();
+
+        $this->originalOutput = get_instance()->output;
+        get_instance()->output = new class extends \EA_Output {
+            public int $statusCode = 200;
+
+            public function set_status_header($code = 200, $text = '')
+            {
+                $this->statusCode = (int) $code;
+
+                return parent::set_status_header($code, $text);
+            }
+        };
 
         $this->fixtures = new BookingFlowFixtures();
         $this->fixtures->snapshotSettings([
@@ -57,6 +70,7 @@ class BookingControllerFlowTest extends TestCase
         ]);
         $this->fixtures->restoreSettings();
         $this->fixtures->cleanup();
+        get_instance()->output = $this->originalOutput;
 
         parent::tearDown();
     }
@@ -265,7 +279,8 @@ class BookingControllerFlowTest extends TestCase
 
         $this->assertIsArray($response);
         $this->assertFalse($response['success'] ?? true);
-        $this->assertSame(lang('customer_is_already_booked'), $response['message'] ?? null);
+        $this->assertConflictResponse($response);
+        $this->assertSame(409, get_instance()->output->statusCode);
         $this->assertTrue($controller->reschedule_authority->acquired);
         $this->assertTrue($controller->reschedule_authority->released);
         $this->assertSame(1, $this->fixtures->countCustomersByEmail($customerEmail));
@@ -688,7 +703,8 @@ class BookingControllerFlowTest extends TestCase
         $response = json_decode(get_instance()->output->get_output(), true);
         $this->assertIsArray($response);
         $this->assertFalse($response['success'] ?? true);
-        $this->assertSame(lang('customer_is_already_booked'), $response['message'] ?? null);
+        $this->assertConflictResponse($response);
+        $this->assertSame(409, get_instance()->output->statusCode);
         $this->assertSame($beforeAppointment, $this->fixtures->findAppointmentById($scenario['appointment_id']));
         $this->assertSame($beforeCustomer, $this->fixtures->findCustomerById($scenario['customer_id']));
         $this->assertSame(0, $controller->notifications->savedCalls);
@@ -790,12 +806,8 @@ class BookingControllerFlowTest extends TestCase
         $response = json_decode(get_instance()->output->get_output(), true);
 
         $this->assertIsArray($response);
-        $this->assertArrayHasKey('success', $response);
-        $this->assertArrayHasKey('message', $response);
-        $this->assertFalse($response['success'] ?? true);
-        $this->assertIsString($response['message']);
-        $this->assertNotSame('', trim($response['message']));
-        $this->assertSame(lang('requested_hour_is_unavailable'), $response['message']);
+        $this->assertConflictResponse($response);
+        $this->assertSame(409, get_instance()->output->statusCode);
         $this->assertArrayNotHasKey('trace', $response);
         $this->assertFalse($this->fixtures->customerExistsByEmail($customerEmail));
     }
@@ -1066,5 +1078,17 @@ class BookingControllerFlowTest extends TestCase
 
         get_instance()->output->set_output('');
         http_response_code(200);
+    }
+
+    /** @param array<string, mixed> $response */
+    private function assertConflictResponse(array $response): void
+    {
+        $this->assertSame(
+            [
+                'success' => false,
+                'message' => lang('requested_hour_is_unavailable'),
+            ],
+            $response,
+        );
     }
 }
