@@ -68,6 +68,7 @@
 /application/libraries/Provider_utilization.php @robinbeier
 /application/libraries/Request_normalizer.php @robinbeier
 /application/libraries/Reschedule_authority.php @robinbeier
+/application/libraries/Session/EA_Session.php @robinbeier
 /application/libraries/Timezones.php @robinbeier
 /application/libraries/Webhooks_client.php @robinbeier
 /application/models/Admins_model.php @robinbeier
