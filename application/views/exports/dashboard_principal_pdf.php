@@ -39,6 +39,9 @@ foreach ($metrics as $metric) {
     } elseif ($lateIssue) {
         $action = 'Spätere Termine prüfen';
         $detail = 'Vorgabe nach 15 Uhr noch offen.';
+    } elseif (!$hasPlan) {
+        $action = 'Terminangebot prüfen';
+        $detail = 'Keine verlässliche Planungsgrundlage verfügbar.';
     } elseif (!$explicit) {
         $action = 'Kein Klassenziel bewertet';
         $detail = 'Automatische oder fehlende Zielgröße.';
