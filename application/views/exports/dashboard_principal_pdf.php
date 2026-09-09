@@ -223,7 +223,7 @@ $resolveStatusBadges = static function (array $metric): array {
         ];
     }
 
-    if (empty($metric['has_explicit_target']) || !empty($metric['is_zero_target'])) {
+    if (empty($metric['has_explicit_target'])) {
         return [
             [
                 'class' => 'badge--neutral',
@@ -560,7 +560,7 @@ $attentionCount = isset($principalOverview['attention_count'])
                 </div>
               </td>
               <td class="col-right col-size">
-                <?= !empty($metric['is_zero_target'])
+                <?= !empty($metric['is_zero_target']) && empty($metric['has_explicit_target'])
                     ? '&mdash;'
                     : html_escape($metric['target'] ?? ($metric['target_raw'] ?? '0')) ?>
               </td>

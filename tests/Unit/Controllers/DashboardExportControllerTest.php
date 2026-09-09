@@ -653,6 +653,46 @@ class DashboardExportControllerTest extends TestCase
         $this->assertTrue($mapped[0]['after_15_evaluable']);
     }
 
+    public function testMapMetricsForViewDistinguishesExplicitZeroTargetFromMissingTarget(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+
+        $mapped = $controller->callMapMetricsForView(
+            [
+                [
+                    'provider_id' => 42,
+                    'provider_name' => 'Zero Target',
+                    'target' => 0,
+                    'booked' => 0,
+                    'open' => 0,
+                    'fill_rate' => 0.0,
+                    'has_plan' => true,
+                    'has_explicit_target' => true,
+                    'is_target_fallback' => false,
+                ],
+                [
+                    'provider_id' => 43,
+                    'provider_name' => 'Missing Target',
+                    'target' => 0,
+                    'booked' => 0,
+                    'open' => 0,
+                    'fill_rate' => 0.0,
+                    'has_plan' => true,
+                    'has_explicit_target' => false,
+                    'is_target_fallback' => true,
+                ],
+            ],
+            0.9,
+        );
+
+        $this->assertSame(0, $mapped[0]['target_raw']);
+        $this->assertTrue($mapped[0]['has_explicit_target']);
+        $this->assertSame('Klassengröße', $mapped[0]['target_origin_label']);
+        $this->assertSame('Ok', $mapped[0]['status_label']);
+        $this->assertSame(lang('dashboard_no_target'), $mapped[1]['status_label']);
+        $this->assertFalse($mapped[1]['has_explicit_target']);
+    }
+
     public function testMapMetricsForViewKeepsPlannedCapacityStableWhenBookingsExist(): void
     {
         $controller = $this->createControllerWithThreshold(0.9);
@@ -685,6 +725,44 @@ class DashboardExportControllerTest extends TestCase
         $this->assertSame('20', $mapped[0]['slots_planned_formatted']);
         $this->assertFalse($mapped[0]['has_capacity_gap']);
         $this->assertSame(['booking_goal_missed'], $mapped[0]['status_reasons']);
+    }
+
+    public function testTeacherReportKeepsExplicitZeroTargetVisible(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+        $reports = $controller->callMapTeacherReports(
+            [
+                ['provider_id' => 42, 'target' => 0, 'has_explicit_target' => true],
+                ['provider_id' => 43, 'target' => 0, 'has_explicit_target' => false],
+            ],
+            [
+                ['provider_id' => 42, 'target_raw' => 0, 'has_explicit_target' => true],
+                ['provider_id' => 43, 'target_raw' => 0, 'has_explicit_target' => false],
+            ],
+            [],
+        );
+
+        self::assertSame('0', $reports[0]['target_formatted']);
+        self::assertSame(
+            sprintf(lang('dashboard_teacher_pdf_slot_info_with_target'), '0', '0'),
+            $reports[0]['slot_info_text'],
+        );
+        self::assertSame('—', $reports[1]['target_formatted']);
+        self::assertSame(
+            sprintf(lang('dashboard_teacher_pdf_slot_info_without_target'), '0'),
+            $reports[1]['slot_info_text'],
+        );
+
+        $fallback = $controller->callMapTeacherReports(
+            [['provider_id' => 44, 'target' => 12, 'has_explicit_target' => false]],
+            [['provider_id' => 44, 'target_raw' => 12, 'has_explicit_target' => false]],
+            [],
+        )[0];
+        self::assertSame('12', $fallback['target_formatted']);
+        self::assertSame(
+            sprintf(lang('dashboard_teacher_pdf_slot_info_with_target'), '0', '12'),
+            $fallback['slot_info_text'],
+        );
     }
 
     public function testMapMetricsForViewLabelsFallbackTargetOrigin(): void
@@ -800,6 +878,11 @@ class DashboardExportControllerTest extends TestCase
             public function callBuildPrincipalOverview(array $metrics, array $summary): array
             {
                 return $this->buildPrincipalOverview($metrics, $summary);
+            }
+
+            public function callMapTeacherReports(array $rawMetrics, array $mappedMetrics, array $appointments): array
+            {
+                return $this->mapTeacherReports($rawMetrics, $mappedMetrics, $appointments);
             }
 
             public function callSortPrincipalMetricsForReport(array $metrics): array

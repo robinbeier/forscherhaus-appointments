@@ -6,6 +6,46 @@ use Tests\TestCase;
 
 class DashboardPrincipalPdfViewTest extends TestCase
 {
+    public function testExplicitZeroRemainsVisibleInTheExistingReportLayout(): void
+    {
+        require_once APPPATH . 'helpers/donut_helper.php';
+        foreach ([[true, true], [false, true], [true, false]] as [$explicit, $hasPlan]) {
+            $metrics = [
+                [
+                    'provider_name' => 'Synthetic zero',
+                    'target' => '0',
+                    'target_raw' => 0,
+                    'booked_raw' => 0,
+                    'has_explicit_target' => $explicit,
+                    'is_zero_target' => true,
+                    'has_plan' => $hasPlan,
+                    'status_reasons' => [],
+                ],
+            ];
+            ob_start();
+            include APPPATH . 'views/exports/dashboard_principal_pdf.php';
+            $output = (string) ob_get_clean();
+            self::assertSame(
+                1,
+                preg_match('~<tr>\s*<td>\s*<p class="provider">Synthetic zero</p>.*?</tr>~s', $output, $matches),
+            );
+            $row = $matches[0];
+            self::assertMatchesRegularExpression(
+                $explicit
+                    ? '~class="col-right col-size">\s*0\s*</td>~'
+                    : '~class="col-right col-size">\s*&mdash;\s*</td>~',
+                $row,
+            );
+            if (!$hasPlan) {
+                self::assertStringContainsString(lang('no_plan_in_period'), $row);
+            } elseif ($explicit) {
+                self::assertStringNotContainsString(lang('dashboard_no_target'), $row);
+            } else {
+                self::assertStringContainsString(lang('dashboard_no_target'), $row);
+            }
+        }
+    }
+
     public function testRendersAfter15ColumnAndStackedStatusBadges(): void
     {
         require_once APPPATH . 'helpers/donut_helper.php';
