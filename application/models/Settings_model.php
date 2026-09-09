@@ -48,6 +48,17 @@ class Settings_model extends EA_Model
     {
         $this->validate($setting);
 
+        if ($setting['name'] === 'company_color' && strlen($setting['value']) === 4) {
+            $setting['value'] =
+                '#' .
+                $setting['value'][1] .
+                $setting['value'][1] .
+                $setting['value'][2] .
+                $setting['value'][2] .
+                $setting['value'][3] .
+                $setting['value'][3];
+        }
+
         if (empty($setting['id'])) {
             return $this->insert($setting);
         } else {

@@ -28,6 +28,26 @@ class SettingsModelCompanyColorTest extends TestCase
         $this->assertTrue(true);
     }
 
+    public function testSaveNormalizesThreeDigitCompanyColorBeforePersistence(): void
+    {
+        $setting = $this->settingsModel->query()->where('name', 'company_color')->get()->row_array();
+
+        $this->assertNotEmpty($setting);
+        $this->settingsModel->db->trans_begin();
+
+        try {
+            $this->settingsModel->save([
+                'id' => $setting['id'],
+                'name' => 'company_color',
+                'value' => '#Ab3',
+            ]);
+
+            $this->assertSame('#AAbb33', $this->settingsModel->find((int) $setting['id'])['value']);
+        } finally {
+            $this->settingsModel->db->trans_rollback();
+        }
+    }
+
     #[DataProvider('invalidCompanyColorProvider')]
     public function testCompanyColorRejectsInvalidValues(mixed $value): void
     {
