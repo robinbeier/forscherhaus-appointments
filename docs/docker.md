@@ -264,7 +264,7 @@ The script will:
 
 - create a fresh backup on `root@188.245.244.123`
 - download the dump plus metadata to `/tmp`
-- create a safety archive of the current local `docker/mysql` directory
+- create a safety archive of the current local `docker/mysql` directory in a unique private temporary directory (directory `0700`, archive `0600`); its printed path remains available for recovery
 - reset the local MySQL data directory
 - import the production dump into the local `easyappointments` database
 - run `php index.php console migrate`
@@ -290,8 +290,9 @@ cd /path/to/forscherhaus-appointments
 docker compose down
 
 # Optional safety backup of the current local MySQL data directory.
-backup_tgz="/tmp/forscherhaus-mysql-$(date +%Y%m%d-%H%M%S).tgz"
-tar -czf "$backup_tgz" -C docker mysql
+backup_dir="$(mktemp -d "${TMPDIR:-/tmp}/forscherhaus-local-mysql.XXXXXX")"
+backup_tgz="${backup_dir}/mysql.tgz"
+(umask 077; tar -czf "$backup_tgz" -C docker mysql)
 
 # Clean reset local MySQL data (destructive for local DB state).
 mkdir -p docker/mysql

@@ -160,10 +160,15 @@ download_remote_backup() {
 }
 
 backup_local_mysql_dir() {
-    LOCAL_MYSQL_BACKUP_TGZ="/tmp/forscherhaus-local-mysql-$(date +%Y%m%d-%H%M%S).tgz"
+    local backup_dir
+    backup_dir="$(mktemp -d "${TMPDIR:-/tmp}/forscherhaus-local-mysql.XXXXXX")"
+    LOCAL_MYSQL_BACKUP_TGZ="${backup_dir}/mysql.tgz"
 
     log "Saving current local MySQL data directory to ${LOCAL_MYSQL_BACKUP_TGZ}"
-    tar -czf "${LOCAL_MYSQL_BACKUP_TGZ}" -C "${REPO_ROOT}/docker" mysql
+    (
+        umask 077
+        tar -czf "${LOCAL_MYSQL_BACKUP_TGZ}" -C "${REPO_ROOT}/docker" mysql
+    )
 }
 
 wait_for_mysql() {

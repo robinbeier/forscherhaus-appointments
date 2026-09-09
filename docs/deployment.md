@@ -266,7 +266,7 @@ A future rebuild needs a new plan based on the server and requirements at that
 point. Before destructive work, verify database, host-configuration and
 [Kuma backups](uptime-kuma.md#backup-and-restore), retain protected off-host
 copies, and test the recovery path. Creating a provider snapshot alone is not
-proof of a tested restore. Use the [database restore rehearsal](database-migration-rehearsal.md)
+proof of a tested restore. Use the existing [restore replay](release-gate-zero-surprise.md)
 and current deployment guidance when preparing that plan.
 
 ## Required Host-Local Secrets
