@@ -148,6 +148,8 @@ class CalendarAtomicSaveTest extends TestCase
         $controller->customers_model = $CI->customers_model;
         $controller->providers_model = $CI->providers_model;
         $controller->services_model = $CI->services_model;
+        $CI->load->library('permissions');
+        $controller->permissions = $CI->permissions;
         $controller->appointments_model = new class {
             public function only(array &$record, array $fields): void {}
 
