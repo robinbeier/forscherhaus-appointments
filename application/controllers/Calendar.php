@@ -231,6 +231,11 @@ class Calendar extends EA_Controller
             $customer_data = $request_dto->customerData;
             $appointment_data = $request_dto->appointmentData;
 
+            if (!empty($appointment_data['id'])) {
+                $stored_appointment = $this->appointments_model->find((int) $appointment_data['id']);
+                $this->check_event_permissions((int) $stored_appointment['id_users_provider']);
+            }
+
             $this->check_event_permissions((int) $appointment_data['id_users_provider']);
 
             foreach ([$customer_data['id'] ?? null, $appointment_data['id_users_customer'] ?? null] as $customer_id) {
@@ -271,8 +276,8 @@ class Calendar extends EA_Controller
                     $appointment = $appointment_data;
 
                     $required_permissions = !empty($appointment['id'])
-                        ? can('add', PRIV_APPOINTMENTS)
-                        : can('edit', PRIV_APPOINTMENTS);
+                        ? can('edit', PRIV_APPOINTMENTS)
+                        : can('add', PRIV_APPOINTMENTS);
 
                     if (!$required_permissions) {
                         throw new RuntimeException('You do not have the required permissions for this task.');
@@ -460,12 +465,17 @@ class Calendar extends EA_Controller
             $request_dto = $this->calendarRequestDtoFactory()->buildUnavailabilityRequestDto();
             $unavailability = $request_dto->unavailability;
 
-            $required_permissions = !isset($unavailability['id'])
+            $required_permissions = empty($unavailability['id'])
                 ? can('add', PRIV_APPOINTMENTS)
                 : can('edit', PRIV_APPOINTMENTS);
 
             if (!$required_permissions) {
                 throw new RuntimeException('You do not have the required permissions for this task.');
+            }
+
+            if (!empty($unavailability['id'])) {
+                $stored_unavailability = $this->unavailabilities_model->find((int) $unavailability['id']);
+                $this->check_event_permissions((int) $stored_unavailability['id_users_provider']);
             }
 
             $provider_id = (int) $unavailability['id_users_provider'];

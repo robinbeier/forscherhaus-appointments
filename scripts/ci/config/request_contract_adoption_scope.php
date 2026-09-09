@@ -34,15 +34,7 @@ return [
         'methods' => ['of'],
     ],
     [
-        'file' => 'application/controllers/Appointments.php',
-        'methods' => ['search', 'store', 'find', 'update', 'destroy'],
-    ],
-    [
         'file' => 'application/controllers/Blocked_periods.php',
-        'methods' => ['search', 'store', 'find', 'update', 'destroy'],
-    ],
-    [
-        'file' => 'application/controllers/Unavailabilities.php',
         'methods' => ['search', 'store', 'find', 'update', 'destroy'],
     ],
     [
