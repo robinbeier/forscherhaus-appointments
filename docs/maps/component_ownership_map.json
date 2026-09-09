@@ -43,6 +43,10 @@
           "match": "exact_file"
         },
         {
+          "path": "application/core/EA_Session.php",
+          "match": "exact_file"
+        },
+        {
           "path": "application/views/pages/login.php",
           "match": "exact_file"
         },
