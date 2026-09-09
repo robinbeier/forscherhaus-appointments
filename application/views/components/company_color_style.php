@@ -1,8 +1,9 @@
 <?php
 /**
- * @var string $company_color
+ * @var string|null $company_color
  */
-?>
+
+$company_color = validate_hex_color($company_color ?? null) ? $company_color : DEFAULT_COMPANY_COLOR; ?>
 
 <?php if (!empty($company_color) && $company_color !== DEFAULT_COMPANY_COLOR): ?>
     <style>

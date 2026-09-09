@@ -646,6 +646,10 @@
         {
           "path": "assets/js/pages/legal_settings.js",
           "match": "exact_file"
+        },
+        {
+          "path": "application/views/components/company_color_style.php",
+          "match": "exact_file"
         }
       ],
       "key_files": [

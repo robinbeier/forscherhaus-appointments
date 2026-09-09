@@ -79,6 +79,10 @@ class Settings_model extends EA_Model
         if (empty($setting['name'])) {
             throw new InvalidArgumentException('Not all required fields are provided for the setting record: name.');
         }
+
+        if ($setting['name'] === 'company_color' && !validate_hex_color($setting['value'] ?? null)) {
+            throw new InvalidArgumentException('The company color must be a valid hexadecimal color.');
+        }
     }
 
     /**

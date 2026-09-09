@@ -272,6 +272,7 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
   - `assets/js/pages/google_analytics_settings.js` (exact_file)
   - `assets/js/pages/matomo_analytics_settings.js` (exact_file)
   - `assets/js/pages/legal_settings.js` (exact_file)
+  - `application/views/components/company_color_style.php` (exact_file)
 
 ### `integrations-sync`
 

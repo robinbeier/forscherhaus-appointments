@@ -24,3 +24,15 @@ function validate_datetime(string $value): bool
 
     return (bool) $date_time;
 }
+
+/**
+ * Validate a CSS hexadecimal color value.
+ *
+ * @param mixed $value Validation value.
+ *
+ * @return bool Returns the validation result.
+ */
+function validate_hex_color(mixed $value): bool
+{
+    return is_string($value) && preg_match('/\A#[0-9A-Fa-f]{3}(?:[0-9A-Fa-f]{3})?\z/', $value) === 1;
+}
