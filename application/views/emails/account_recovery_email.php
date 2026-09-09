@@ -6,7 +6,8 @@
  * @var string $message
  * @var array $settings
  */
-?>
+
+$company_color = validate_hex_color($settings['company_color'] ?? null) ? $settings['company_color'] : '#429a82'; ?>
 <html lang="en">
 <head>
     <title><?= $subject ?> | Easy!Appointments</title>
@@ -15,7 +16,7 @@
 
 <div class="email-container" style="width: 650px; border: 1px solid #eee; margin: 30px auto;">
     <div id="header"
-         style="background-color: <?= $settings['company_color'] ?? '#429a82' ?>; height: 45px; padding: 10px 15px;">
+         style="background-color: <?= $company_color ?>; height: 45px; padding: 10px 15px;">
         <strong id="logo" style="color: white; font-size: 20px; margin-top: 10px; display: inline-block">
             <?= e($settings['company_name']) ?>
         </strong>

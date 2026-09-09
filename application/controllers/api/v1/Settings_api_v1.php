@@ -101,7 +101,7 @@ class Settings_api_v1 extends EA_Controller
 
             json_response([
                 'name' => $name,
-                'value' => $value,
+                'value' => setting($name),
             ]);
         } catch (Throwable $e) {
             json_exception($e);

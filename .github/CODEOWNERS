@@ -87,6 +87,7 @@
 /application/models/Users_model.php @robinbeier
 /application/models/Webhooks_model.php @robinbeier
 /application/views/components/booking_* @robinbeier
+/application/views/components/company_color_style.php @robinbeier
 /application/views/components/jquery_compat_inline.php @robinbeier
 /application/views/pages/account.php @robinbeier
 /application/views/pages/admins.php @robinbeier
