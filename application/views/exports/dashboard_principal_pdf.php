@@ -68,7 +68,7 @@ $requiredCount = array_key_exists('explicit_target_total', $summary) ? (int) $su
 $requiredComplete = !empty($summary['explicit_target_complete']);
 $requiredCaption = $requiredComplete
     ? 'Summe der festgelegten Klassengrößen'
-    : ($requiredCount === 0
+    : ((int) ($summary['explicit_target_count'] ?? 0) === 0
         ? 'Kein festgelegtes Ziel'
         : 'Bekannte Ziele; Auswahl ist unvollständig');
 ?>

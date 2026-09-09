@@ -119,9 +119,41 @@ class DashboardPrincipalPdfViewTest extends TestCase
     {
         $output = $this->render(
             [$this->metric()],
-            ['appointment_count_total' => 15, 'explicit_target_total' => 20, 'explicit_target_complete' => false],
+            [
+                'appointment_count_total' => 15,
+                'explicit_target_total' => 20,
+                'explicit_target_count' => 1,
+                'explicit_target_complete' => false,
+            ],
         );
         self::assertStringContainsString('Bekannte Ziele; Auswahl ist unvollständig', $output);
+    }
+
+    public function testTargetCaptionUsesPresenceRatherThanSumForMixedSelections(): void
+    {
+        foreach (
+            [
+                [0, 1, false, 'Bekannte Ziele; Auswahl ist unvollständig'],
+                [0, 0, false, 'Kein festgelegtes Ziel'],
+                [0, 2, true, 'Summe der festgelegten Klassengrößen'],
+                [12, 1, false, 'Bekannte Ziele; Auswahl ist unvollständig'],
+            ]
+            as [$total, $count, $complete, $caption]
+        ) {
+            $output = $this->render(
+                [
+                    $this->metric(['target_raw' => $total, 'has_explicit_target' => $count > 0]),
+                    $this->metric(['target_raw' => 0, 'has_explicit_target' => $count > 1]),
+                ],
+                [
+                    'appointment_count_total' => 0,
+                    'explicit_target_total' => $total,
+                    'explicit_target_count' => $count,
+                    'explicit_target_complete' => $complete,
+                ],
+            );
+            self::assertStringContainsString('<div class="caption">' . $caption . '</div>', $output);
+        }
     }
 
     private function metric(array $overrides = []): array
