@@ -28,6 +28,7 @@ final class PrivateValidationDiagnosticsTest extends TestCase
                 'admins',
                 'users',
                 'secretaries',
+                'providers',
                 'customers',
                 'appointments',
                 'blocked_periods',
@@ -142,6 +143,17 @@ final class PrivateValidationDiagnosticsTest extends TestCase
         );
         $this->assertStringContainsString('customer email was not provided', $customerMessage);
         $this->assertStringNotContainsString('sentinel', strtolower($customerMessage));
+
+        foreach (['providers_model', 'secretaries_model'] as $model) {
+            $message = $this->captureValidationException($model, [
+                'first_name' => 'Example',
+                'last_name' => 'Account',
+                'email' => 'invalid-email-sentinel',
+                'settings' => ['password' => 'password-sentinel'],
+            ]);
+            $this->assertStringContainsString('Invalid email address', $message);
+            $this->assertStringNotContainsString('sentinel', strtolower($message));
+        }
     }
 
     public function test_invalid_email_and_provider_diagnostics_do_not_echo_input(): void
