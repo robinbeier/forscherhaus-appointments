@@ -14,7 +14,7 @@ This map defines component boundaries, path ownership scope, and dependency edge
 | `installation-bootstrap` | Installation & Bootstrap | people-services-admin, settings-compliance, shared-core | 4 | 3 |
 | `booking-public` | Public Booking | integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 9 | 6 |
 | `booking-lifecycle` | Booking Confirmation/Cancellation | booking-public, integrations-sync, people-services-admin, scheduling-backoffice, shared-core | 5 | 3 |
-| `scheduling-backoffice` | Calendar & Scheduling | integrations-sync, people-services-admin, settings-compliance, shared-core | 20 | 5 |
+| `scheduling-backoffice` | Calendar & Scheduling | integrations-sync, people-services-admin, settings-compliance, shared-core | 19 | 5 |
 | `dashboard-exports` | Dashboard & Exports | scheduling-backoffice, people-services-admin, shared-core | 11 | 3 |
 | `people-services-admin` | People, Providers, Services | integrations-sync, scheduling-backoffice, settings-compliance, shared-core | 24 | 3 |
 | `settings-compliance` | Settings & Compliance | auth-session, integrations-sync, people-services-admin, scheduling-backoffice, shared-core | 26 | 3 |
@@ -143,7 +143,6 @@ Path rules:
 - `application/controllers/Calendar.php` (exact_file)
 - `application/controllers/Appointments.php` (exact_file)
 - `application/controllers/Blocked_periods.php` (exact_file)
-- `application/controllers/Unavailabilities.php` (exact_file)
 - `application/controllers/Backend.php` (exact_file)
 - `application/controllers/Backend_api.php` (exact_file)
 - `application/libraries/Booking_slot_analytics.php` (exact_file)

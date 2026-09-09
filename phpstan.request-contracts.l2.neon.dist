@@ -9,7 +9,6 @@ parameters:
         - application/controllers/Booking_cancellation.php
         - application/controllers/Appointments.php
         - application/controllers/Blocked_periods.php
-        - application/controllers/Unavailabilities.php
         - application/controllers/Calendar.php
         - application/controllers/Admins.php
         - application/controllers/Providers.php

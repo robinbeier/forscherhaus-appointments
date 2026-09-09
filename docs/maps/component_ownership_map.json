@@ -256,10 +256,6 @@
           "match": "exact_file"
         },
         {
-          "path": "application/controllers/Unavailabilities.php",
-          "match": "exact_file"
-        },
-        {
           "path": "application/controllers/Backend.php",
           "match": "exact_file"
         },

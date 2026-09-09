@@ -145,7 +145,6 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
   - `application/controllers/Calendar.php` (exact_file)
   - `application/controllers/Appointments.php` (exact_file)
   - `application/controllers/Blocked_periods.php` (exact_file)
-  - `application/controllers/Unavailabilities.php` (exact_file)
   - `application/controllers/Backend.php` (exact_file)
   - `application/controllers/Backend_api.php` (exact_file)
   - `application/libraries/Booking_slot_analytics.php` (exact_file)
