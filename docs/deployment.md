@@ -3,6 +3,11 @@
 This repository uses artifact-based deployment as the preferred production path.
 `build_release.sh` creates the production release archive. `npm run build` only
 compiles frontend assets and does not create a separate ZIP release.
+Repository documentation (`docs/`) is excluded from new release archives and
+remains in the source checkout. Systemd documentation links point to the canonical
+repository; the application and recovery scripts do not require these Markdown
+files under the public web root. Previously built archives remain accepted for
+rollback.
 Do not deploy production by editing files in-place or by turning the production
 application directory into the Git checkout.
 

@@ -1,6 +1,6 @@
 [Unit]
 Description=Forscherhaus deterministic session retention
-Documentation=file:/var/www/html/easyappointments/docs/ops/production-session-retention.md
+Documentation=https://github.com/robinbeier/forscherhaus-appointments/blob/main/docs/ops/production-session-retention.md
 After=local-fs.target
 ConditionPathIsDirectory=/var/www/html/easyappointments/storage/sessions
 

@@ -1,6 +1,6 @@
 [Unit]
 Description=Run Forscherhaus session retention daily
-Documentation=file:/var/www/html/easyappointments/docs/ops/production-session-retention.md
+Documentation=https://github.com/robinbeier/forscherhaus-appointments/blob/main/docs/ops/production-session-retention.md
 
 [Timer]
 OnCalendar=*-*-* 03:37:00 UTC
