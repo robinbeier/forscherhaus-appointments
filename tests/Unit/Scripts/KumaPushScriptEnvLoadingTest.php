@@ -110,6 +110,8 @@ final class KumaPushScriptEnvLoadingTest extends TestCase
 
             self::assertSame(0, $result['exit_code'], $result['stderr']);
             self::assertFileExists($reportPath);
+            $reportPath = realpath($reportPath);
+            self::assertIsString($reportPath);
             self::assertStringContainsString('OK dashboard_pdf_gate=all_checks_passed', $result['stdout']);
 
             $phpArgs = file_get_contents($phpGateArgsFile);
@@ -144,6 +146,48 @@ final class KumaPushScriptEnvLoadingTest extends TestCase
             self::assertStringContainsString($reportPath, $summaryArgs);
         } finally {
             $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testPdfExportRejectsLinkedReportWithoutTouchingItsTarget(): void
+    {
+        foreach (['symlink', 'hardlink'] as $kind) {
+            $workspace = $this->createWorkspace();
+            try {
+                $outputDir = $workspace . '/private-output';
+                mkdir($outputDir, 0700);
+                $target = $workspace . '/protected-target';
+                file_put_contents($target, 'keep this target');
+                chmod($target, 0600);
+                $report = $outputDir . '/kuma-pdf-export-latest.json';
+                if ($kind === 'symlink') {
+                    symlink($target, $report);
+                } else {
+                    link($target, $report);
+                }
+                $marker = $workspace . '/child-started';
+                file_put_contents($workspace . '/fixture.env', '');
+                $this->writeStub($workspace . '/bin/php', "#!/bin/sh\ntouch \"\$CHILD_MARKER\"\n");
+                $this->writeStub($workspace . '/bin/curl', "#!/bin/sh\ntouch \"\$CHILD_MARKER\"\n");
+                $result = $this->runCommand(['bash', 'scripts/ops/kuma_push_pdf_export.sh'], $this->repoRoot(), [
+                    'PATH' => $workspace . '/bin:' . getenv('PATH'),
+                    'KUMA_PUSH_ENV_FILE' => $workspace . '/fixture.env',
+                    'KUMA_PDF_EXPORT_CREDENTIALS_FILE' => $workspace . '/absent-credentials.env',
+                    'KUMA_PUSH_URL_PDF_EXPORT' => 'https://fixture.invalid/push',
+                    'KUMA_PDF_EXPORT_USERNAME' => 'fixture',
+                    'KUMA_PDF_EXPORT_PASSWORD' => 'synthetic-password',
+                    'KUMA_PDF_EXPORT_OUTPUT_DIR' => $outputDir,
+                    'CHILD_MARKER' => $marker,
+                ]);
+                self::assertNotSame(0, $result['exit_code'], $kind);
+                self::assertStringContainsString('Unsafe private file', $result['stderr']);
+                self::assertFileDoesNotExist($marker);
+                self::assertSame('keep this target', file_get_contents($target));
+                self::assertSame(0600, fileperms($target) & 0777);
+                self::assertFileExists($report);
+            } finally {
+                $this->removeDirectory($workspace);
+            }
         }
     }
 

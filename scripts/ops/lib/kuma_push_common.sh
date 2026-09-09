@@ -91,3 +91,113 @@ kuma_push_date_days_ago() {
 
   date -u -v-"${days}"d +%F
 }
+
+kuma_push_private_error() {
+  printf '[!] %s\n' "$*" >&2
+  return 1
+}
+
+kuma_push_stat_metadata() {
+  local path="$1"
+
+  if stat -c '%u %a %h' -- "$path" >/dev/null 2>&1; then
+    stat -c '%u %a %h' -- "$path"
+    return 0
+  fi
+
+  stat -f '%u %Lp %l' -- "$path"
+}
+
+kuma_push_realpath_directory() {
+  local path="$1"
+
+  if realpath -e -- "$path" >/dev/null 2>&1; then
+    realpath -e -- "$path"
+    return 0
+  fi
+
+  (cd -P -- "$path" && pwd -P)
+}
+
+kuma_push_validate_private_ancestors() {
+  local path="$1"
+  local owner
+  local mode
+  local mode_bits
+
+  [[ "$path" == /* && -d "$path" && ! -L "$path" ]] ||
+    kuma_push_private_error "Unsafe private path parent: $path" || return 1
+
+  while :; do
+    read -r owner mode < <(if stat -c '%u %a' -- "$path" >/dev/null 2>&1; then stat -c '%u %a' -- "$path"; else stat -f '%u %Lp' -- "$path"; fi)
+    mode_bits=$((0$mode))
+    if [[ "$owner" != "0" && "$owner" != "$(id -u)" ]]; then
+      kuma_push_private_error "Unsafe private path ancestor owner: $path" || return 1
+    fi
+    if (( (mode_bits & 0022) != 0 )); then
+      if [[ "$path" != /tmp && "$path" != /var/tmp && "$path" != /private/tmp && "$path" != /private/var/tmp ]] || [[ "$owner" != 0 ]] || (( (mode_bits & 01000) == 0 )); then
+        kuma_push_private_error "Unsafe private path ancestor permissions: $path" || return 1
+      fi
+    fi
+    [[ "$path" == / ]] && break
+    path="$(dirname -- "$path")"
+  done
+}
+
+kuma_push_prepare_private_directory() {
+  local requested="${1:-}"
+  local parent
+  local leaf
+  local canonical_parent
+  local target
+  local metadata
+  local owner
+  local mode
+
+  [[ "$requested" == /* && "$requested" != */ ]] ||
+    kuma_push_private_error "Unsafe private directory path: $requested" || return 1
+  parent="$(dirname -- "$requested")"
+  leaf="$(basename -- "$requested")"
+  [[ "$leaf" != . && "$leaf" != .. && -n "$leaf" ]] ||
+    kuma_push_private_error "Unsafe private directory leaf: $requested" || return 1
+  canonical_parent="$(kuma_push_realpath_directory "$parent" 2>/dev/null)" ||
+    kuma_push_private_error "Unsafe private directory parent: $requested" || return 1
+  kuma_push_validate_private_ancestors "$canonical_parent" || return 1
+  target="$canonical_parent/$leaf"
+
+  if [[ -L "$target" ]]; then
+    kuma_push_private_error "Unsafe private directory symlink: $requested" || return 1
+  fi
+  if [[ ! -e "$target" ]]; then
+    (umask 077; mkdir -m 0700 "$target") ||
+      kuma_push_private_error "Unsafe private directory could not be created: $requested" || return 1
+  fi
+  [[ -d "$target" && ! -L "$target" ]] ||
+    kuma_push_private_error "Unsafe private directory type: $requested" || return 1
+  metadata="$(kuma_push_stat_metadata "$target")" || return 1
+  read -r owner mode _ <<< "$metadata"
+  [[ -d "$target" && ! -L "$target" && "$owner" == "$(id -u)" && "$mode" == 700 ]] ||
+    kuma_push_private_error "Unsafe private directory ownership or mode: $requested" || return 1
+  target="$(kuma_push_realpath_directory "$target" 2>/dev/null)" ||
+    kuma_push_private_error "Unsafe private directory canonicalization: $requested" || return 1
+  printf '%s\n' "$target"
+}
+
+kuma_push_validate_private_file() {
+  local path="${1:-}"
+  local metadata
+  local owner
+  local mode
+  local links
+
+  [[ "$path" == /* && "$path" != */ ]] ||
+    kuma_push_private_error "Unsafe private file path: $path" || return 1
+  if [[ ! -e "$path" && ! -L "$path" ]]; then
+    return 0
+  fi
+  [[ ! -L "$path" ]] || kuma_push_private_error "Unsafe private file symlink: $path" || return 1
+  metadata="$(kuma_push_stat_metadata "$path")" || return 1
+  read -r owner mode links <<< "$metadata"
+  [[ -f "$path" && ! -L "$path" && "$owner" == "$(id -u)" && "$mode" == 600 && "$links" == 1 ]] ||
+    kuma_push_private_error "Unsafe private file ownership, mode, or link count: $path"
+}

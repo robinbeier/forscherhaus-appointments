@@ -8,6 +8,67 @@ use PHPUnit\Framework\TestCase;
 
 class KumaPushAppLogsScriptTest extends TestCase
 {
+    public function testAppLogMonitorRejectsStateDirectorySymlinkWithoutTouchingTarget(): void
+    {
+        $workspace = sys_get_temp_dir() . '/kuma-push-private-' . bin2hex(random_bytes(8));
+        $stubBin = $workspace . '/bin';
+        $appRoot = $workspace . '/app-root';
+        $stateDir = $workspace . '/state';
+        $stateTarget = $workspace . '/state-target';
+        $envFile = $workspace . '/uptime-kuma-push.env';
+        mkdir($stubBin, 0700, true);
+        mkdir(dirname($appRoot . '/storage/logs'), 0700, true);
+        mkdir($stateTarget, 0700, true);
+        symlink($stateTarget, $stateDir);
+        $this->writeEnvFile($envFile, $appRoot);
+
+        try {
+            $result = $this->runCommand(
+                ['bash', 'scripts/ops/kuma_push_app_logs.sh'],
+                $this->repoRoot(),
+                $this->commandEnv($envFile, $stateDir, $stubBin),
+            );
+
+            self::assertNotSame(0, $result['exit_code']);
+            self::assertStringContainsString('Unsafe private directory', $result['stderr']);
+            self::assertFileDoesNotExist($stateTarget . '/app-logs.state');
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testAppLogMonitorRejectsStateHardlinkWithoutTouchingOutsideTarget(): void
+    {
+        $workspace = sys_get_temp_dir() . '/kuma-push-private-' . bin2hex(random_bytes(8));
+        $stubBin = $workspace . '/bin';
+        $appRoot = $workspace . '/app-root';
+        $stateDir = $workspace . '/state';
+        $outside = $workspace . '/outside-state';
+        $envFile = $workspace . '/uptime-kuma-push.env';
+        mkdir($stubBin, 0700, true);
+        mkdir(dirname($appRoot . '/storage/logs'), 0700, true);
+        mkdir($stateDir, 0700, true);
+        file_put_contents($outside, "outside-state\n");
+        chmod($outside, 0600);
+        link($outside, $stateDir . '/app-logs.state');
+        $this->writeEnvFile($envFile, $appRoot);
+
+        try {
+            $result = $this->runCommand(
+                ['bash', 'scripts/ops/kuma_push_app_logs.sh'],
+                $this->repoRoot(),
+                $this->commandEnv($envFile, $stateDir, $stubBin),
+            );
+
+            self::assertNotSame(0, $result['exit_code']);
+            self::assertStringContainsString('Unsafe private file', $result['stderr']);
+            self::assertSame("outside-state\n", file_get_contents($outside));
+            self::assertSame(0600, fileperms($outside) & 0777);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
     public function testAppLogMonitorLoadsEnvOverridesBeforeResolvingDefaults(): void
     {
         $workspace = sys_get_temp_dir() . '/kuma-push-app-logs-' . bin2hex(random_bytes(8));
@@ -21,7 +82,7 @@ class KumaPushAppLogsScriptTest extends TestCase
 
         mkdir($stubBin, 0777, true);
         mkdir(dirname($logFile), 0777, true);
-        mkdir($stateDir, 0777, true);
+        mkdir($stateDir, 0700, true);
 
         try {
             file_put_contents(
@@ -89,7 +150,7 @@ class KumaPushAppLogsScriptTest extends TestCase
 
         mkdir($stubBin, 0777, true);
         mkdir(dirname($logFile), 0777, true);
-        mkdir($stateDir, 0777, true);
+        mkdir($stateDir, 0700, true);
 
         try {
             $this->writeCurlStub($stubBin, $capturePath);
@@ -145,7 +206,7 @@ class KumaPushAppLogsScriptTest extends TestCase
 
         mkdir($stubBin, 0777, true);
         mkdir(dirname($logFile), 0777, true);
-        mkdir($stateDir, 0777, true);
+        mkdir($stateDir, 0700, true);
 
         try {
             $this->writeCurlStub($stubBin, $capturePath);
@@ -193,7 +254,7 @@ class KumaPushAppLogsScriptTest extends TestCase
 
         mkdir($stubBin, 0777, true);
         mkdir(dirname($logFile), 0777, true);
-        mkdir($stateDir, 0777, true);
+        mkdir($stateDir, 0700, true);
 
         try {
             $this->writeCurlStub($stubBin, $capturePath);
@@ -400,6 +461,10 @@ class KumaPushAppLogsScriptTest extends TestCase
 
     private function removeDirectory(string $path): void
     {
+        if (is_link($path)) {
+            unlink($path);
+            return;
+        }
         if (!is_dir($path)) {
             return;
         }
@@ -410,6 +475,10 @@ class KumaPushAppLogsScriptTest extends TestCase
         );
 
         foreach ($iterator as $item) {
+            if ($item->isLink()) {
+                unlink($item->getPathname());
+                continue;
+            }
             if ($item->isDir()) {
                 rmdir($item->getPathname());
                 continue;

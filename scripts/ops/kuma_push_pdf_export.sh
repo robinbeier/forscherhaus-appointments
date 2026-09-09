@@ -11,8 +11,7 @@ kuma_push_load_env_file
 RUNTIME_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 APP_ROOT="${KUMA_PDF_EXPORT_APP_ROOT:-${KUMA_PDF_EXPORT_REPO_ROOT:-/var/www/html/easyappointments}}"
 GATE_SCRIPT="${RUNTIME_ROOT}/scripts/release-gate/dashboard_release_gate.php"
-GATE_OUTPUT_DIR="${KUMA_PDF_EXPORT_OUTPUT_DIR:-${APP_ROOT}/storage/logs/ops}"
-GATE_OUTPUT_FILE="${GATE_OUTPUT_DIR}/kuma-pdf-export-latest.json"
+GATE_OUTPUT_DIR="${KUMA_PDF_EXPORT_OUTPUT_DIR:-${KUMA_PUSH_STATE_DIR:-/var/tmp/kuma-push-state}}"
 BASE_URL="${KUMA_PDF_EXPORT_BASE_URL:-http://localhost}"
 INDEX_PAGE="${KUMA_PDF_EXPORT_INDEX_PAGE:-index.php}"
 PDF_HEALTH_URL="${KUMA_PDF_EXPORT_PDF_HEALTH_URL:-http://127.0.0.1:3003/healthz}"
@@ -30,7 +29,9 @@ PASSWORD="${KUMA_PDF_EXPORT_PASSWORD:-${PASSWORD:-}}"
 [[ -n "$USERNAME" ]] || kuma_push_die "Missing KUMA_PDF_EXPORT_USERNAME or USERNAME"
 [[ -n "$PASSWORD" ]] || kuma_push_die "Missing KUMA_PDF_EXPORT_PASSWORD or PASSWORD"
 
-mkdir -p "$GATE_OUTPUT_DIR"
+GATE_OUTPUT_DIR="$(kuma_push_prepare_private_directory "$GATE_OUTPUT_DIR")"
+GATE_OUTPUT_FILE="${GATE_OUTPUT_DIR}/kuma-pdf-export-latest.json"
+kuma_push_validate_private_file "$GATE_OUTPUT_FILE"
 
 # Use the latest completed Monday-Friday range, including on weekends.
 weekday="$(date -u +%u)"

@@ -118,6 +118,7 @@ final class KumaPushRuntimeBundleTest extends TestCase
         $fixture = $this->fixture();
         $workspace = $fixture['workspace'];
         $appRoot = $workspace . '/separate-app-root';
+        $stateDir = $workspace . '/private-monitor-state';
         $stubBin = $workspace . '/bin';
         $phpLog = $workspace . '/php-gate.log';
         $curlLog = $workspace . '/curl.log';
@@ -132,6 +133,7 @@ final class KumaPushRuntimeBundleTest extends TestCase
                 implode(PHP_EOL, [
                     'KUMA_PUSH_URL_PDF_EXPORT=https://kuma.example/push/pdf-export',
                     'KUMA_PDF_EXPORT_APP_ROOT=' . $appRoot,
+                    'KUMA_PUSH_STATE_DIR=' . $stateDir,
                     'KUMA_PDF_EXPORT_CREDENTIALS_FILE=' . $credentials,
                     'KUMA_PUSH_ENV_FILE=' . $envFile,
                     '',
@@ -158,7 +160,9 @@ final class KumaPushRuntimeBundleTest extends TestCase
                 'https://kuma.example/push/pdf-export',
                 (string) file_get_contents($curlLog),
             );
-            self::assertFileExists($appRoot . '/storage/logs/ops/kuma-pdf-export-latest.json');
+            self::assertFileExists($stateDir . '/kuma-pdf-export-latest.json');
+            self::assertSame(0600, fileperms($stateDir . '/kuma-pdf-export-latest.json') & 0777);
+            self::assertFileDoesNotExist($appRoot . '/storage/logs/ops/kuma-pdf-export-latest.json');
             self::assertStringContainsString('OK dashboard_pdf_gate=all_checks_passed', $result['stdout']);
         } finally {
             $this->removeDirectory($workspace);
