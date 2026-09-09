@@ -79,6 +79,7 @@ class Calendar extends EA_Controller
 
         $this->load->library('accounts');
         $this->load->library('notifications');
+        $this->load->library('permissions');
         $this->load->library('timezones');
         $this->load->library('webhooks_client');
     }
@@ -232,6 +233,15 @@ class Calendar extends EA_Controller
 
             $this->check_event_permissions((int) $appointment_data['id_users_provider']);
 
+            foreach ([$customer_data['id'] ?? null, $appointment_data['id_users_customer'] ?? null] as $customer_id) {
+                if (
+                    !empty($customer_id) &&
+                    !$this->permissions->has_customer_access((int) session('user_id'), $customer_id)
+                ) {
+                    throw new RuntimeException('You do not have the required permissions for this task.');
+                }
+            }
+
             $manage_mode = !empty($appointment_data['id']);
 
             $this->db->trans_begin();
@@ -242,8 +252,8 @@ class Calendar extends EA_Controller
                     $customer = $customer_data;
 
                     $required_permissions = !empty($customer['id'])
-                        ? can('add', PRIV_CUSTOMERS)
-                        : can('edit', PRIV_CUSTOMERS);
+                        ? can('edit', PRIV_CUSTOMERS)
+                        : can('add', PRIV_CUSTOMERS);
 
                     if (!$required_permissions) {
                         throw new RuntimeException('You do not have the required permissions for this task.');
