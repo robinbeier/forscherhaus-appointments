@@ -46,7 +46,7 @@ class Migration_Add_custom_fields_columns_to_users_table extends EA_Migration
     public function down(): void
     {
         for ($i = self::FIELD_NUMBER; $i > 0; $i--) {
-            $field_name = 'custom_fields_' . $i;
+            $field_name = 'custom_field_' . $i;
 
             if ($this->db->field_exists($field_name, 'users')) {
                 $this->dbforge->drop_column('users', $field_name);
