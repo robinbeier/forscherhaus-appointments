@@ -141,7 +141,9 @@ fi
 # 1) Stage befüllen (Root-config, runtime storage, and local build artifacts ausschließen; ankern!)
 if [[ "$DRYRUN" -eq 0 ]]; then
   git archive --format=tar "$EXPECTED_COMMIT" | tar -xf - -C "$STAGE"
-  rm -rf "$STAGE/storage" "$STAGE/build" "$STAGE/node_modules" "$STAGE/vendor" "$STAGE/tests"
+  rm -rf "$STAGE/storage" "$STAGE/build" "$STAGE/node_modules" "$STAGE/vendor" "$STAGE/tests" "$STAGE/docs"
+
+  # Operator documentation stays in the source checkout, outside the public webroot.
 
   # Zero-surprise replays on the deployment host shell into docker compose
   # using the root compose file plus the dedicated override. Keep only the
@@ -183,7 +185,7 @@ if [[ "$DRYRUN" -eq 0 ]]; then
   }
   rm -f -- "$GENERATED_ASSET_LIST"
 else
-  echo "[DRY-RUN] rsync Projekt → Stage (excl. /config.php, /storage, /build, /.git, /.DS_Store, /node_modules, /vendor, /easyappointments-*.zip, /tests, /docker)"
+  echo "[DRY-RUN] rsync Projekt → Stage (excl. /config.php, /storage, /build, /.git, /.DS_Store, /node_modules, /vendor, /easyappointments-*.zip, /tests, /docs, /docker)"
   echo "[DRY-RUN] Würde docker/compose.zero-surprise.yml sowie docker/php-fpm und docker/nginx/nginx.conf gezielt ins Stage kopieren"
   echo "[DRY-RUN] Würde das vollständige, aus Commit-Quellen und Vendor-Vertrag abgeleitete Runtime-Assetmanifest ins Stage kopieren"
 fi

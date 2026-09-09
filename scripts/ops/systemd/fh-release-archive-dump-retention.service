@@ -1,6 +1,6 @@
 [Unit]
 Description=Forscherhaus conservative release archive and dump retention
-Documentation=file:/var/www/html/easyappointments/docs/ops/production-release-archive-dump-retention.md
+Documentation=https://github.com/robinbeier/forscherhaus-appointments/blob/main/docs/ops/production-release-archive-dump-retention.md
 After=local-fs.target
 ConditionPathIsDirectory=/var/www/html/easyappointments
 ConditionPathIsDirectory=/root/releases
