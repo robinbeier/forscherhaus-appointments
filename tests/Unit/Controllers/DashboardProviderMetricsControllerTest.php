@@ -28,6 +28,87 @@ class DashboardProviderMetricsControllerTest extends TestCase
         self::assertSame(12, $controller->resolve([], ['class_size_default' => 12]));
     }
 
+    public function testBuildProviderDashboardPayloadKeepsZeroAndPositiveFallbackSlotLabels(): void
+    {
+        $providersModel = $this->createStub(\Providers_model::class);
+        $providersModel->method('find')->willReturnCallback(
+            static fn(int $id): array => [
+                'id' => $id,
+                'first_name' => 'Teacher',
+                'last_name' => (string) $id,
+                'email' => "teacher{$id}@example.org",
+            ],
+        );
+
+        $controller = new class extends Dashboard {
+            public function __construct() {}
+
+            public function build(int $providerId, array $metric): array
+            {
+                $this->metric = $metric;
+                return $this->buildProviderDashboardPayload(
+                    $providerId,
+                    new DateTimeImmutable('2026-04-15'),
+                    new DateTimeImmutable('2026-04-15'),
+                );
+            }
+
+            protected function collectProviderMetrics(
+                int $provider_id,
+                DateTimeImmutable $start,
+                DateTimeImmutable $end,
+            ): array {
+                return [$this->metric];
+            }
+
+            protected function loadProviderAppointments(
+                int $provider_id,
+                DateTimeImmutable $start,
+                DateTimeImmutable $end,
+            ): array {
+                return [];
+            }
+
+            private array $metric = [];
+        };
+        $controller->providers_model = $providersModel;
+
+        $zero = $controller->build(1, [
+            'provider_id' => 1,
+            'class_size_default' => 0,
+            'target' => 0,
+            'booked' => 0,
+            'open' => 0,
+            'has_explicit_target' => true,
+            'has_plan' => true,
+            'slots_required' => 2,
+        ]);
+        $missing = $controller->build(2, [
+            'provider_id' => 2,
+            'target' => 0,
+            'booked' => 0,
+            'open' => 0,
+            'has_explicit_target' => false,
+            'is_target_fallback' => true,
+            'has_plan' => true,
+        ]);
+        $fallback = $controller->build(3, [
+            'provider_id' => 3,
+            'target' => 12,
+            'booked' => 0,
+            'open' => 12,
+            'has_explicit_target' => false,
+            'is_target_fallback' => true,
+            'has_plan' => true,
+        ]);
+
+        $withTarget = lang('dashboard_teacher_pdf_slot_info_with_target') ?: '%s von %s Terminen gebucht';
+        $withoutTarget = lang('dashboard_teacher_pdf_slot_info_without_target') ?: '%s Termine gebucht';
+        self::assertSame(sprintf($withTarget, '0', '0'), $zero['progress']['slot_info_text']);
+        self::assertSame(sprintf($withoutTarget, '0'), $missing['progress']['slot_info_text']);
+        self::assertSame(sprintf($withTarget, '0', '12'), $fallback['progress']['slot_info_text']);
+    }
+
     protected function tearDown(): void
     {
         parent::tearDown();
