@@ -94,6 +94,57 @@ class AvailabilityAnalyticsTest extends TestCase
         $this->assertSame(['08:00', '09:00', '10:00'], $hours);
     }
 
+    public function testPartialBlockedPeriodsAreCombinedByExistingAvailabilityCalculation(): void
+    {
+        $cases = [
+            [[['08:00', '09:30'], ['09:30', '11:00']], []],
+            [[['08:00', '10:00'], ['09:00', '11:00']], []],
+            [[['08:00', '09:00'], ['10:00', '11:00']], ['09:00', '09:30']],
+        ];
+        foreach ($cases as [$periods, $expected]) {
+            $appointments = $this->createStub(Appointments_model::class);
+            $appointments->method('query')->willReturn($this->createAppointmentsQueryBuilder([]));
+            $unavailabilities = $this->createStub(Unavailabilities_model::class);
+            $unavailabilities->method('query')->willReturn($this->createAppointmentsQueryBuilder([]));
+            $blocked = $this->createMock(Blocked_periods_model::class);
+            $blocked->expects($this->once())->method('is_entire_date_blocked')->willReturn(false);
+            $blocked
+                ->expects($this->once())
+                ->method('get_for_period')
+                ->willReturn(
+                    array_map(
+                        static fn(array $period): array => [
+                            'start_datetime' => '2026-02-18 ' . $period[0] . ':00',
+                            'end_datetime' => '2026-02-18 ' . $period[1] . ':00',
+                        ],
+                        $periods,
+                    ),
+                );
+            $availability = new Availability($appointments, $unavailabilities, $blocked);
+            $service = [
+                'duration' => 30,
+                'attendants_number' => 1,
+                'availabilities_type' => AVAILABILITIES_TYPE_FIXED,
+                'buffer_before' => 0,
+                'buffer_after' => 0,
+            ];
+            $provider = [
+                'id' => 1,
+                'timezone' => 'Europe/Berlin',
+                'settings' => [
+                    'working_plan' => json_encode([
+                        'wednesday' => ['start' => '08:00', 'end' => '11:00', 'breaks' => []],
+                    ]),
+                    'working_plan_exceptions' => '{}',
+                ],
+            ];
+            self::assertSame(
+                $expected,
+                $availability->get_offered_hours_for_analysis('2026-02-18', $service, $provider),
+            );
+        }
+    }
+
     public function testGetOfferedHoursForAnalysisReturnsEmptyWhenEntireDateIsBlocked(): void
     {
         $appointmentsModel = $this->createMock(Appointments_model::class);

@@ -393,7 +393,9 @@ App.Utils.CalendarDefaultView = (function () {
         // Depending on where the user clicked the event (title or empty space) we
         // need to use different selectors to reach the parent element.
 
-        if ($target.hasClass('fc-unavailability')) {
+        if ($target.hasClass('fc-blocked-period')) {
+            $html = App.Utils.CalendarEventPopover.renderBlockedPeriod(info);
+        } else if ($target.hasClass('fc-unavailability')) {
             displayEdit =
                 $target.hasClass('fc-custom') && vars('privileges').appointments.edit === true ? '' : 'd-none';
             displayDelete =

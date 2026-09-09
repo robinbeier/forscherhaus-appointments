@@ -1145,7 +1145,9 @@ App.Utils.CalendarTableView = (function () {
         // reach the parent element.
         const $target = $(info.el);
 
-        if ($target.hasClass('fc-unavailability')) {
+        if ($target.hasClass('fc-blocked-period')) {
+            $html = App.Utils.CalendarEventPopover.renderBlockedPeriod(info);
+        } else if ($target.hasClass('fc-unavailability')) {
             displayEdit =
                 $target.hasClass('fc-custom') && vars('privileges').appointments.edit === true ? '' : 'd-none';
             displayDelete =
