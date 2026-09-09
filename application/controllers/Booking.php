@@ -474,7 +474,18 @@ class Booking extends EA_Controller
                         $exclude_appointment_id,
                     )
                 ) {
-                    throw new RuntimeException(lang('customer_is_already_booked'));
+                    $this->db->trans_rollback();
+                    $transaction_open = false;
+
+                    json_response(
+                        [
+                            'success' => false,
+                            'message' => lang('requested_hour_is_unavailable'),
+                        ],
+                        409,
+                    );
+
+                    return;
                 }
             }
 
