@@ -137,11 +137,16 @@ also requires an Apache reload. If PHP-FPM detection finds no unit, the
 - staged runtime config is generated for isolated predeploy replay
 - zero-surprise predeploy restore-dump replay passes
 - generated predeploy report validates
+- staged release code is root-controlled (`root:root`, directories `0755`,
+  regular files `0644`); operational shell scripts regain `0755`
+- writable runtime storage is owned by the web user, while the copied
+  `storage/sessions` subtree is excluded from every ownership and mode pass
+  so existing private session metadata is preserved
+- permission traversal uses `find -P`, rejects links in release code and
+  non-session runtime storage, and leaves session links/hardlinks untouched so
+  a release pass cannot mutate an outside target
 - stage and current live runtime config permissions satisfy the fail-closed
-  contract below after every generic ownership/mode pass
-- generic file permission passes exclude `storage/sessions`, preserving the
-  source modes copied by `rsync -a`; existing invalid session modes need the
-  separately authorized correction before deployment
+  contract below after the ownership/mode pass
 
 Archive extraction and the complete staged-file validation establish the release
 contents before the live switch. `--dry-run` prints the planned actions; use the
