@@ -122,8 +122,6 @@ class DeepRuntimeSuiteTest extends TestCase
             [
                 'readiness_login_page',
                 'auth_login_validate',
-                'ldap_settings_search',
-                'ldap_settings_search_missing_keyword',
                 'ldap_sso_success',
                 'ldap_sso_wrong_password',
                 'dashboard_metrics',

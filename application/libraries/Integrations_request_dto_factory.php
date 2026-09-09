@@ -12,14 +12,6 @@
  * ---------------------------------------------------------------------------- */
 
 /**
- * Typed LDAP search request DTO.
- */
-final class LdapSearchRequestDto
-{
-    public function __construct(public readonly string $keyword) {}
-}
-
-/**
  * Typed webhook CRUD request DTO.
  */
 final class WebhookCrudRequestDto
@@ -64,11 +56,6 @@ class Integrations_request_dto_factory
         $this->request_normalizer = $CI->request_normalizer;
     }
 
-    public function buildLdapSearchRequestDto(): LdapSearchRequestDto
-    {
-        return $this->createLdapSearchRequestDto(request('keyword'));
-    }
-
     public function buildWebhookCrudRequestDto(
         string $webhook_key = 'webhook',
         string $webhook_id_key = 'webhook_id',
@@ -81,11 +68,6 @@ class Integrations_request_dto_factory
             request($webhook_id_key),
             request($webhook_key),
         );
-    }
-
-    public function createLdapSearchRequestDto(mixed $keyword): LdapSearchRequestDto
-    {
-        return new LdapSearchRequestDto($this->normalizeRawStringNonNullCompat($keyword));
     }
 
     public function createWebhookCrudRequestDto(
@@ -120,20 +102,6 @@ class Integrations_request_dto_factory
         }
 
         return $this->request_normalizer->normalizeString($id, null, true);
-    }
-
-    private function normalizeSensitiveStringCompat(mixed $value): ?string
-    {
-        if ($value === null || is_array($value) || is_object($value)) {
-            return null;
-        }
-
-        return (string) $value;
-    }
-
-    private function normalizeRawStringNonNullCompat(mixed $value): string
-    {
-        return $this->normalizeSensitiveStringCompat($value) ?? '';
     }
 
     /**

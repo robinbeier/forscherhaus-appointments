@@ -1,7 +1,6 @@
 # LDAP
 
-This page documents the deterministic local LDAP contract that is used to test LDAP search, import, and SSO flows in
-Easy!Appointments.
+This page documents the deterministic local LDAP contract used by Easy!Appointments for LDAP login.
 
 > Note: This guide refers to the available Docker development configuration using docker-compose.yml
 
@@ -27,7 +26,7 @@ use LDAP-native tooling against the deterministic fixture instead of a repo-mana
 
 ## Local Bind Contract
 
-The deterministic admin bind for local inspection and app configuration is:
+The deterministic admin bind for local directory inspection is:
 
 - User DN: `cn=admin,dc=example,dc=org`
 - Password: `admin`
@@ -39,10 +38,10 @@ The deterministic readonly bind used by the local smoke is:
 
 The seeded people entries live below `ou=people,dc=example,dc=org`.
 
-## Expected App-Facing Attributes
+## Local Fixture Attributes
 
-The local fixture keeps the current app contract explicit. Search/import/SSO flows are expected to find these
-attributes on seeded entries:
+LDAP login uses the stored `ldap_dn` on the local user record and checks the submitted password against that entry.
+The standalone directory smoke additionally checks these attributes on the synthetic fixture:
 
 - `cn`
 - `sn`
@@ -62,69 +61,23 @@ The current deterministic seeded user is:
 
 After making sure that the local OpenLDAP server works, Easy!Appointments will be able to connect to it.
 
-For this you will need to go to the Backend > Settings > Integrations > LDAP and enable the integration from there. 
+Open Backend > Settings > Integrations > LDAP to configure the host and port and enable LDAP login.
 
-This settings page also requires some configuration for Easy!Appointments to be able to connect to the server and pull
-the right information.
-
-#### Host 
+#### Host
 
 The server host address, provide "openldap" for Docker or your own host or IP.
 
 #### Port
 
-The server port number, provider 389 for Docker or your own server port value.
-
-#### User DN 
-
-Enter the admin user domain (DN) value which is `cn=admin,dc=example,dc=org` for Docker or set your own server value.
-
-#### Password
-
-Enter the admin user password value which is `admin` for Docker or set your own server value.
-
-#### Base DN
-
-Enter the base domain (DN) value, provide `dc=example,dc=org` for Docker or a custom value as defined on your server.
-
-#### Filter 
-
-This field has a default value which will work in most cases and will allow you to filter the right records out of the
-LDAP directory. Change this if you need to filter the directory in a different way. The filter will interpolate the
-{{KEYWORD}} string with the actual keyword value for filtering the LDAP entries.
-
-#### Field Mapping
-
-In order to save some time while importing user records, you can define the field mapping so that the required values 
-are prefilled within the LDAP import modal. This is a key-value json object.
-
-## Importing Users
-
-After the configuration of LDAP is complete, you can use the "search" function of the same settings page to look for
-users (just submitting queries using the form).
-
-If the filter was right, you will be getting LDAP entries displayed on screen that can be imported into Easy!Appointments.
-
-Clicking the "Import" button a modal with a user form will be opened, allowing you to import this entry and change their
-information before doing that. 
-
-Backend users (admin/secretary/provider) require a local password before being imported. If you do not plan to use the
-local log in credentials then set a long random value instead.
-
-Make sure that the "LDAP DN" value is correct and points to the right entry on LDAP. Also the username will be used to
-detect the user, so you should keep the local username-aligned attribute deterministic. In the shipped fixture both
-`cn` and `uid` are `ada`.
+The server port number, provide 389 for Docker or your own server port value.
 
 ## LDAP SSO
 
-While SSO with LDAP on Easy!Appointments, the username will need to be matched for the SSO to work. Also, the LDAP DN
-value must be valid and point to the right record.
+For an existing local user, set the `ldap_dn` value through the supported user administration workflow so it points to
+the matching directory entry. When LDAP is enabled, Easy!Appointments first checks local credentials; if that does not
+match, it binds against the stored `ldap_dn` and logs the user in with the submitted LDAP password.
 
-The LDAP DN is a value that can also be manually set, either from the UI or from the API.
-
-If LDAP is enabled, Easy!Appointments will first try to check for the local credentials, but if this does not work, then
-the app will try to check the password against the LDAP entry and log the user in.
-
-*This document applies to Easy!Appointments v1.5.2.*
+The local fixture uses `uid=ada,ou=people,dc=example,dc=org` for the seeded user. The LDAP settings page retains only
+the integration switch, host, and port; directory inspection and user provisioning are outside that page.
 
 [Back](readme.md)

@@ -28,7 +28,7 @@ Prerequisites on host (required by `./scripts/setup-worktree.sh`):
 ./scripts/setup-worktree.sh
 docker compose up -d
 
-# when you need deterministic LDAP fixtures for search/import/SSO work
+# when you need deterministic LDAP fixtures for authentication work
 bash ./scripts/ldap/reset_directory.sh
 bash ./scripts/ldap/smoke.sh
 ```
