@@ -91,17 +91,20 @@ class General_settings extends EA_Controller
             $settings_request = $this->backofficeRequestDtoFactory()->buildSettingsRequestDto('general_settings');
             $settings = $settings_request->settings;
 
+            $validated_settings = [];
+
             foreach ($settings as $setting) {
-                $existing_setting = $this->settings_model
-                    ->query()
-                    ->where('name', $setting['name'])
-                    ->get()
-                    ->row_array();
+                $existing_setting = $this->settings_model->query()->where('name', $setting['name'])->get()->row_array();
 
                 if (!empty($existing_setting)) {
                     $setting['id'] = $existing_setting['id'];
                 }
 
+                $this->settings_model->validate($setting);
+                $validated_settings[] = $setting;
+            }
+
+            foreach ($validated_settings as $setting) {
                 $this->settings_model->save($setting);
             }
 
