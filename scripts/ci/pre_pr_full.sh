@@ -120,7 +120,7 @@ python3 scripts/docs/generate_codeowners_from_map.py --check
 GITHUB_EVENT_NAME=pull_request GITHUB_BASE_REF="$BASE_REF" python3 scripts/ci/check_component_boundaries.py
 
 echo_section "Frontend compiler regression tests"
-node --test tests/JavaScript/gulp_build.test.js tests/JavaScript/dashboard_zero_target.test.js
+node --test tests/JavaScript/gulp_build.test.js tests/JavaScript/dashboard_zero_target.test.js tests/JavaScript/blocked_periods.test.js
 
 echo_section "Refresh frontend assets"
 npm run build

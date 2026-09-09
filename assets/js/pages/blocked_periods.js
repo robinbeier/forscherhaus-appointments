@@ -169,17 +169,29 @@ App.Pages.BlockedPeriods = (function () {
          * Event: Start Date Time Input "Change"
          */
         $blockedPeriods.on('change', '#start-date-time', (event) => {
+            const startDateTimeObject = App.Utils.UI.getDateTimePickerValue($startDateTime);
             const endDateTimeObject = App.Utils.UI.getDateTimePickerValue($endDateTime);
 
-            if (!backupStartDateTimeObject || !endDateTimeObject) {
+            if (!backupStartDateTimeObject || !startDateTimeObject || !endDateTimeObject) {
                 return;
             }
 
-            const endDateTimeMoment = moment(endDateTimeObject);
             const backupStartDateTimeMoment = moment(backupStartDateTimeObject);
-            const diff = endDateTimeMoment.diff(backupStartDateTimeMoment);
-            const newEndDateTimeMoment = endDateTimeMoment.clone().add(diff, 'milliseconds');
+            const startDateTimeMoment = moment(startDateTimeObject);
+            const endDateTimeMoment = moment(endDateTimeObject);
+
+            if (
+                !backupStartDateTimeMoment.isValid() ||
+                !startDateTimeMoment.isValid() ||
+                !endDateTimeMoment.isValid()
+            ) {
+                return;
+            }
+
+            const duration = endDateTimeMoment.diff(backupStartDateTimeMoment);
+            const newEndDateTimeMoment = startDateTimeMoment.clone().add(duration, 'milliseconds');
             App.Utils.UI.setDateTimePickerValue($endDateTime, newEndDateTimeMoment.toDate());
+            backupStartDateTimeObject = startDateTimeMoment.toDate();
         });
     }
 
