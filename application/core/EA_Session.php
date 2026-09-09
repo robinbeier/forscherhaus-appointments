@@ -41,5 +41,33 @@
  */
 class EA_Session extends CI_Session
 {
-    //
+    public function __construct(array $params = [])
+    {
+        parent::__construct($params);
+
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            $this->enforceInactivityTimeout(time(), (int) config_item('sess_expiration'));
+        }
+    }
+
+    protected function enforceInactivityTimeout(int $now, int $expiration): void
+    {
+        if ($expiration <= 0) {
+            return;
+        }
+
+        $has_activity = array_key_exists('__ea_last_activity', $_SESSION);
+        $last_activity = $_SESSION['__ea_last_activity'] ?? null;
+        $invalid_activity = $has_activity && (!is_int($last_activity) || $last_activity <= 0 || $last_activity > $now);
+        $expired = is_int($last_activity) && $now - $last_activity >= $expiration;
+        $legacy_login = !$has_activity && !empty($_SESSION['user_id']);
+
+        if ($invalid_activity || $expired || $legacy_login) {
+            // Remove identity before rotation: destroying a file alone does not clear this request.
+            $_SESSION = [];
+            $this->sess_regenerate(true);
+        }
+
+        $_SESSION['__ea_last_activity'] = $now;
+    }
 }
