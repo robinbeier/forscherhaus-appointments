@@ -37,7 +37,9 @@ kuma_push_validate_private_file "$LOCK_FILE" || kuma_push_die "Unsafe private lo
 
 if command -v flock >/dev/null 2>&1; then
   if [[ ! -e "$LOCK_FILE" ]]; then
-    (set -o noclobber; : > "$LOCK_FILE") || kuma_push_die "Unable to create private lock file"
+    if ! (set -o noclobber; : > "$LOCK_FILE"); then
+      [[ -e "$LOCK_FILE" && ! -L "$LOCK_FILE" ]] || kuma_push_die "Unable to create private lock file"
+    fi
   fi
   kuma_push_validate_private_file "$LOCK_FILE" || kuma_push_die "Unsafe private lock file"
   exec 9>>"$LOCK_FILE"
