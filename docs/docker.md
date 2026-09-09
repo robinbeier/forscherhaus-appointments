@@ -248,6 +248,8 @@ bash ./scripts/ldap/reset_directory.sh
 bash ./scripts/ldap/smoke.sh
 ```
 
+The smoke check expects the `openldap` service to already be running; `reset_directory.sh` starts it before printing the smoke command.
+
 ## Restoring a Server Dump Locally
 
 Use this workflow when you want your local setup to run with a database dump from production/staging.
