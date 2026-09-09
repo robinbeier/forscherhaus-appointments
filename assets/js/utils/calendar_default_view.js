@@ -502,8 +502,7 @@ App.Utils.CalendarDefaultView = (function () {
                 ],
             });
         } else if ($target.hasClass('fc-working-plan-exception')) {
-            displayDelete =
-                $target.hasClass('fc-custom') && vars('privileges').appointments.delete === true ? 'me-2' : 'd-none';
+            displayDelete = $target.hasClass('fc-custom') && vars('privileges').users.edit === true ? 'me-2' : 'd-none';
 
             const {date, workingPlanException, provider} = info.event.extendedProps.data;
             const startTime = workingPlanException?.start;
