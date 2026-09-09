@@ -103,10 +103,7 @@ CSP considerations:
 - calendar pages load FullCalendar and FullCalendar Moment bundles;
 - dashboard pages load Chart.js and chartjs-chart-matrix;
 - several pages use inline `style=` for hidden controls, progress bars, and
-  dynamic layout state;
-- `ldap_settings.js` renders JSON into a template string for operator display;
-  this is not itself a CSP blocker, but it is a relevant UI behavior to keep in
-  a report-only pilot test matrix.
+  dynamic layout state.
 
 Risk: CSP enforcement without real browser coverage could break calendar,
 settings, dashboard, modal, or rich-text workflows.

@@ -121,7 +121,7 @@ return [
     ],
     [
         'file' => 'application/controllers/Ldap_settings.php',
-        'methods' => ['save', 'search'],
+        'methods' => ['save'],
     ],
     [
         'file' => 'application/controllers/Webhooks.php',

@@ -80,7 +80,7 @@ The CI pipeline also runs a deterministic integration smoke test for four determ
 1. `GET /login` + `POST /login/validate` + `POST /dashboard/metrics` + authenticated browser render of the dashboard summary card
 2. `GET /booking` + `POST /booking/get_available_hours` + `POST /booking/get_unavailable_dates`
 3. `GET /api/v1/appointments` (401 without auth), then authenticated `GET /api/v1/appointments` + `GET /api/v1/availabilities`
-4. `POST /ldap_settings/search` (hit + miss) plus LDAP-backed `POST /login/validate` (success + wrong password)
+4. LDAP-backed `POST /login/validate` (success + wrong password)
 
 Purpose:
 

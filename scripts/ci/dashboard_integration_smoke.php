@@ -122,66 +122,6 @@ try {
         });
     }
 
-    if (shouldRunConfiguredCheck($config, 'ldap_settings_search')) {
-        $runCheck('ldap_settings_search', static function () use ($client, $config): array {
-            $response = $client->post(
-                'ldap_settings/search',
-                ['keyword' => $config['ldap_search_keyword']],
-                $config['http_timeout'],
-                true,
-            );
-
-            GateAssertions::assertStatus($response->statusCode, 200, 'POST /ldap_settings/search');
-            $payload = GateAssertions::decodeJson($response->body, 'POST /ldap_settings/search');
-
-            if (!is_array($payload) || !array_is_list($payload)) {
-                throw new GateAssertionException('POST /ldap_settings/search payload must be a JSON array.');
-            }
-
-            $entry = dashboardIntegrationSmokeFindLdapEntryByDn($payload, $config['ldap_expected_dn']);
-            dashboardIntegrationSmokeAssertLdapGuardrailEntry($entry, $config);
-
-            return [
-                'http_status' => $response->statusCode,
-                'url' => $response->url,
-                'results' => count($payload),
-                'matched_dn' => $entry['dn'],
-            ];
-        });
-    }
-
-    if (shouldRunConfiguredCheck($config, 'ldap_settings_search_missing_keyword')) {
-        $runCheck('ldap_settings_search_missing_keyword', static function () use ($client, $config): array {
-            $response = $client->post(
-                'ldap_settings/search',
-                ['keyword' => $config['ldap_missing_keyword']],
-                $config['http_timeout'],
-                true,
-            );
-
-            GateAssertions::assertStatus($response->statusCode, 200, 'POST /ldap_settings/search (missing keyword)');
-            $payload = GateAssertions::decodeJson($response->body, 'POST /ldap_settings/search (missing keyword)');
-
-            if (!is_array($payload) || !array_is_list($payload)) {
-                throw new GateAssertionException(
-                    'POST /ldap_settings/search (missing keyword) payload must be a JSON array.',
-                );
-            }
-
-            if ($payload !== []) {
-                throw new GateAssertionException(
-                    'POST /ldap_settings/search (missing keyword) returned unexpected LDAP entries.',
-                );
-            }
-
-            return [
-                'http_status' => $response->statusCode,
-                'url' => $response->url,
-                'results' => 0,
-            ];
-        });
-    }
-
     if (shouldRunConfiguredCheck($config, 'ldap_sso_success')) {
         $runCheck('ldap_sso_success', static function () use ($config): array {
             $ldapClient = dashboardIntegrationSmokeCreateClient($config);
@@ -870,8 +810,6 @@ function integrationSmokeSupportedCheckIds(): array
     return [
         'readiness_login_page',
         'auth_login_validate',
-        'ldap_settings_search',
-        'ldap_settings_search_missing_keyword',
         'ldap_sso_success',
         'ldap_sso_wrong_password',
         'dashboard_metrics',
@@ -903,8 +841,6 @@ function integrationSmokeCheckDependencies(): array
     return [
         'readiness_login_page' => [],
         'auth_login_validate' => ['readiness_login_page'],
-        'ldap_settings_search' => ['auth_login_validate'],
-        'ldap_settings_search_missing_keyword' => ['auth_login_validate'],
         'ldap_sso_success' => [],
         'ldap_sso_wrong_password' => [],
         'dashboard_metrics' => ['auth_login_validate'],
@@ -979,12 +915,7 @@ function dashboardIntegrationSmokeRequiresLdapFixture(array $config): bool
  */
 function dashboardIntegrationSmokeLdapGuardrailCheckIds(): array
 {
-    return [
-        'ldap_settings_search',
-        'ldap_settings_search_missing_keyword',
-        'ldap_sso_success',
-        'ldap_sso_wrong_password',
-    ];
+    return ['ldap_sso_success', 'ldap_sso_wrong_password'];
 }
 
 /**
@@ -1139,60 +1070,6 @@ function dashboardIntegrationSmokeEnsureDirectory(string $directory): void
 }
 
 /**
- * @param array<int, mixed> $entries
- * @return array<string, mixed>
- */
-function dashboardIntegrationSmokeFindLdapEntryByDn(array $entries, string $expectedDn): array
-{
-    foreach ($entries as $entry) {
-        if (!is_array($entry)) {
-            continue;
-        }
-
-        if (($entry['dn'] ?? null) === $expectedDn) {
-            return $entry;
-        }
-    }
-
-    throw new GateAssertionException('LDAP search did not return the expected guardrail DN: ' . $expectedDn);
-}
-
-/**
- * @param array<string, mixed> $entry
- * @param array<string, mixed> $config
- */
-function dashboardIntegrationSmokeAssertLdapGuardrailEntry(array $entry, array $config): void
-{
-    $expectedFields = [
-        'dn' => $config['ldap_expected_dn'],
-        'cn' => $config['ldap_expected_cn'],
-        'givenname' => $config['ldap_expected_given_name'],
-        'sn' => $config['ldap_expected_sn'],
-        'mail' => $config['ldap_expected_mail'],
-        'telephonenumber' => $config['ldap_expected_phone'],
-    ];
-
-    foreach ($expectedFields as $field => $expectedValue) {
-        $actualValue = trim((string) ($entry[$field] ?? ''));
-
-        if ($actualValue === '') {
-            throw new GateAssertionException('LDAP guardrail entry misses field "' . $field . '".');
-        }
-
-        if ($actualValue !== $expectedValue) {
-            throw new GateAssertionException(
-                sprintf(
-                    'LDAP guardrail entry field "%s" mismatch: expected "%s", got "%s".',
-                    $field,
-                    $expectedValue,
-                    $actualValue,
-                ),
-            );
-        }
-    }
-}
-
-/**
  * @return array<string, mixed>
  */
 function dashboardIntegrationSmokePrepareLdapAppGuardrailFixture(string $repoRoot): array
@@ -1202,20 +1079,10 @@ function dashboardIntegrationSmokePrepareLdapAppGuardrailFixture(string $repoRoo
     $CI->load->helper('setting');
     $CI->load->model('admins_model');
 
-    $fieldMapping = json_encode(
-        LDAP_DEFAULT_FIELD_MAPPING,
-        JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
-    );
-
     setting([
         'ldap_is_active' => '1',
         'ldap_host' => 'openldap',
         'ldap_port' => '389',
-        'ldap_user_dn' => 'cn=admin,dc=example,dc=org',
-        'ldap_password' => 'admin',
-        'ldap_base_dn' => 'dc=example,dc=org',
-        'ldap_filter' => LDAP_DEFAULT_FILTER,
-        'ldap_field_mapping' => $fieldMapping,
     ]);
 
     $guardrailUsername = 'ada-ldap-guardrail';
@@ -1258,17 +1125,9 @@ function dashboardIntegrationSmokePrepareLdapAppGuardrailFixture(string $repoRoo
     $CI->admins_model->save($admin);
 
     return [
-        'ldap_search_keyword' => 'ada',
-        'ldap_missing_keyword' => 'missing-ldap-guardrail-user',
         'ldap_guardrail_username' => $guardrailUsername,
         'ldap_guardrail_directory_password' => 'ada-local-pass',
         'ldap_guardrail_wrong_password' => 'definitely-wrong-password',
-        'ldap_expected_dn' => $guardrailExpectedDn,
-        'ldap_expected_cn' => 'ada',
-        'ldap_expected_given_name' => 'Ada',
-        'ldap_expected_sn' => 'Lovelace',
-        'ldap_expected_mail' => $guardrailExpectedMail,
-        'ldap_expected_phone' => '+49 30 1234567',
     ];
 }
 
