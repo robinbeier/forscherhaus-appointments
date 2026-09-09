@@ -58,11 +58,11 @@ This host runs the production `forscherhaus-appointments` application.
 
 Canonical repo documentation:
 
-- `AGENTS.md`
-- `docs/ops/agent-operations.md`
-- `docs/observability.md`
-- `docs/uptime-kuma.md`
-- `docs/deployment.md`
+- [AGENTS.md](https://github.com/robinbeier/forscherhaus-appointments/blob/main/AGENTS.md)
+- [docs/ops/agent-operations.md](https://github.com/robinbeier/forscherhaus-appointments/blob/main/docs/ops/agent-operations.md)
+- [docs/observability.md](https://github.com/robinbeier/forscherhaus-appointments/blob/main/docs/observability.md)
+- [docs/uptime-kuma.md](https://github.com/robinbeier/forscherhaus-appointments/blob/main/docs/uptime-kuma.md)
+- [docs/deployment.md](https://github.com/robinbeier/forscherhaus-appointments/blob/main/docs/deployment.md)
 
 Default rule for agents:
 
