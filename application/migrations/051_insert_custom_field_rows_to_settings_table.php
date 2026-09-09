@@ -50,7 +50,7 @@ class Migration_Insert_custom_field_rows_to_settings_table extends EA_Migration
      */
     public function down(): void
     {
-        for ($i = 1; $i >= self::FIELD_NUMBER; $i++) {
+        for ($i = 1; $i <= self::FIELD_NUMBER; $i++) {
             $field_name = 'custom_field_' . $i;
 
             foreach (self::SETTINGS as $name => $default_value) {
