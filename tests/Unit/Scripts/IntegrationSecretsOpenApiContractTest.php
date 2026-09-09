@@ -23,9 +23,6 @@ final class IntegrationSecretsOpenApiContractTest extends TestCase
         self::assertIsArray($providerSettings);
         self::assertFalse(array_key_exists('googleToken', $providerSettings));
         self::assertFalse(array_key_exists('caldavPassword', $providerSettings));
-
-        $webhookProperties = $this->schemaProperties('WebhookRecord');
-        self::assertFalse(array_key_exists('secretToken', $webhookProperties));
     }
 
     public function testPayloadSchemasDeclareIntegrationCredentialsWriteOnly(): void
@@ -43,13 +40,6 @@ final class IntegrationSecretsOpenApiContractTest extends TestCase
 
         self::assertSame(65535, $providerSettings['googleToken']['maxLength'] ?? null);
         self::assertSame(256, $providerSettings['caldavPassword']['maxLength'] ?? null);
-
-        $webhookSecret = $this->schemaProperties('WebhookPayload')['secretToken'] ?? null;
-        self::assertIsArray($webhookSecret);
-        self::assertSame('string', $webhookSecret['type'] ?? null);
-        self::assertTrue(($webhookSecret['nullable'] ?? null) === true);
-        self::assertTrue(($webhookSecret['writeOnly'] ?? null) === true);
-        self::assertSame(512, $webhookSecret['maxLength'] ?? null);
     }
 
     public function testExamplesDoNotContainIntegrationCredentials(): void
@@ -63,11 +53,6 @@ final class IntegrationSecretsOpenApiContractTest extends TestCase
         self::assertIsArray($providerPayloadSettings);
         self::assertFalse(array_key_exists('googleToken', $providerPayloadSettings));
         self::assertFalse(array_key_exists('caldavPassword', $providerPayloadSettings));
-
-        $webhookRecord = $this->schemaExample('WebhookRecord');
-        $webhookPayload = $this->schemaExample('WebhookPayload');
-        self::assertFalse(array_key_exists('secretToken', $webhookRecord));
-        self::assertFalse(array_key_exists('secretToken', $webhookPayload));
     }
 
     /** @return array<string, mixed> */

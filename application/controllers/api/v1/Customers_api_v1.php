@@ -27,7 +27,6 @@ class Customers_api_v1 extends EA_Controller
 
         $this->load->library('api');
         $this->load->library('api_request_dto_factory');
-        $this->load->library('webhooks_client');
 
         $this->api->auth();
 
@@ -124,8 +123,6 @@ class Customers_api_v1 extends EA_Controller
 
             $created_customer = $this->customers_model->find($customer_id);
 
-            $this->webhooks_client->trigger(WEBHOOK_CUSTOMER_SAVE, $created_customer);
-
             $this->customers_model->api_encode($created_customer);
 
             json_response($created_customer, 201);
@@ -160,8 +157,6 @@ class Customers_api_v1 extends EA_Controller
 
             $updated_customer = $this->customers_model->find($customer_id);
 
-            $this->webhooks_client->trigger(WEBHOOK_CUSTOMER_SAVE, $updated_customer);
-
             $this->customers_model->api_encode($updated_customer);
 
             json_response($updated_customer);
@@ -189,8 +184,6 @@ class Customers_api_v1 extends EA_Controller
             $deleted_customer = $occurrences[0];
 
             $this->customers_model->delete($id);
-
-            $this->webhooks_client->trigger(WEBHOOK_CUSTOMER_DELETE, $deleted_customer);
 
             response('', 204);
         } catch (Throwable $e) {

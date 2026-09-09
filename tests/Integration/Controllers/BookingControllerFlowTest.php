@@ -290,7 +290,6 @@ class BookingControllerFlowTest extends TestCase
         $this->assertSame($winningAppointment, $this->fixtures->findAppointmentById((int) $winningAppointment['id']));
         $this->assertSame(1, $this->fixtures->countAppointmentsForCustomer((int) $winningCustomer['id']));
         $this->assertSame(0, $controller->notifications->savedCalls);
-        $this->assertSame(0, $controller->webhooks_client->calls);
     }
 
     public function testRegisterManageModeUpdatesExistingAppointment(): void
@@ -708,7 +707,6 @@ class BookingControllerFlowTest extends TestCase
         $this->assertSame($beforeAppointment, $this->fixtures->findAppointmentById($scenario['appointment_id']));
         $this->assertSame($beforeCustomer, $this->fixtures->findCustomerById($scenario['customer_id']));
         $this->assertSame(0, $controller->notifications->savedCalls);
-        $this->assertSame(0, $controller->webhooks_client->calls);
     }
 
     public function testAppointmentRaceDriftAfterIssuanceRejectsWithoutMutation(): void
@@ -758,7 +756,6 @@ class BookingControllerFlowTest extends TestCase
         $this->assertSame($beforeAppointment, $this->fixtures->findAppointmentById($scenario['appointment_id']));
         $this->assertSame($beforeCustomer, $this->fixtures->findCustomerById($scenario['customer_id']));
         $this->assertSame(0, $controller->notifications->savedCalls);
-        $this->assertSame(0, $controller->webhooks_client->calls);
 
         $this->resetRuntimeState('POST');
         $this->setReschedulePayload($scenario);
@@ -910,7 +907,6 @@ class BookingControllerFlowTest extends TestCase
         $this->wireBookingDependencies($controller, $injectCache);
 
         $controller->notifications = BookingFlowFixtures::createNoopNotifications();
-        $controller->webhooks_client = BookingFlowFixtures::createNoopWebhooksClient();
 
         return $controller;
     }
@@ -1015,7 +1011,6 @@ class BookingControllerFlowTest extends TestCase
         $this->assertSame($expectedAppointment, $this->fixtures->findAppointmentById($appointmentId));
         $this->assertSame($expectedCustomer, $this->fixtures->findCustomerById($customerId));
         $this->assertSame(0, $controller->notifications->savedCalls);
-        $this->assertSame(0, $controller->webhooks_client->calls);
     }
 
     private function wireBookingDependencies(Booking $controller, bool $injectCache = true): void

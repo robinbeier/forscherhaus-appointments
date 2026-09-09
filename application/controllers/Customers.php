@@ -60,7 +60,6 @@ class Customers extends EA_Controller
         $this->load->library('accounts');
         $this->load->library('permissions');
         $this->load->library('timezones');
-        $this->load->library('webhooks_client');
     }
 
     /**
@@ -251,8 +250,6 @@ class Customers extends EA_Controller
 
             $customer = $this->customers_model->find($customer_id);
 
-            $this->webhooks_client->trigger(WEBHOOK_CUSTOMER_SAVE, $customer);
-
             json_response([
                 'success' => true,
                 'id' => $customer_id,
@@ -289,8 +286,6 @@ class Customers extends EA_Controller
 
             $customer = $this->customers_model->find($customer_id);
 
-            $this->webhooks_client->trigger(WEBHOOK_CUSTOMER_SAVE, $customer);
-
             json_response([
                 'success' => true,
                 'id' => $customer_id,
@@ -322,8 +317,6 @@ class Customers extends EA_Controller
             $customer = $this->customers_model->find($customer_id);
 
             $this->customers_model->delete($customer_id);
-
-            $this->webhooks_client->trigger(WEBHOOK_CUSTOMER_DELETE, $customer);
 
             json_response([
                 'success' => true,

@@ -20,8 +20,6 @@ class CalendarCustomerAccessTest extends TestCase
 
     private object $notifications;
 
-    private object $webhooks;
-
     private ?int $syntheticSecretaryId = null;
 
     /** @var array<string> */
@@ -37,7 +35,6 @@ class CalendarCustomerAccessTest extends TestCase
         $this->fixtures->snapshotSettings(['limit_customer_access']);
         get_instance()->load->library('permissions');
         $this->notifications = BookingFlowFixtures::createNoopNotifications();
-        $this->webhooks = BookingFlowFixtures::createNoopWebhooksClient();
         $this->resetRuntimeState();
     }
 
@@ -104,7 +101,6 @@ class CalendarCustomerAccessTest extends TestCase
         $this->assertSame('Foreign', $this->customerLastName($foreignCustomerId));
         $this->assertSame($linkedCustomerId, $this->appointmentCustomerId($appointmentId));
         $this->assertSame(0, $this->notifications->savedCalls);
-        $this->assertSame(0, $this->webhooks->calls);
 
         // An appointment-only customer assignment must be checked as well.
         $this->postCalendarSavePayload(
@@ -116,7 +112,6 @@ class CalendarCustomerAccessTest extends TestCase
         $this->assertDeniedResponse();
         $this->assertSame($linkedCustomerId, $this->appointmentCustomerId($appointmentId));
         $this->assertSame(0, $this->notifications->savedCalls);
-        $this->assertSame(0, $this->webhooks->calls);
 
         // The reverse mismatch must also be rejected.
         $this->postCalendarSavePayload(
@@ -129,7 +124,6 @@ class CalendarCustomerAccessTest extends TestCase
         $this->assertSame('Linked', $this->customerLastName($linkedCustomerId));
         $this->assertSame($linkedCustomerId, $this->appointmentCustomerId($appointmentId));
         $this->assertSame(0, $this->notifications->savedCalls);
-        $this->assertSame(0, $this->webhooks->calls);
     }
 
     public function testProviderCanEditLinkedCustomerAndKeepAppointmentLinked(): void
@@ -196,7 +190,6 @@ class CalendarCustomerAccessTest extends TestCase
         $this->assertSame('Secretary Foreign', $this->customerLastName($foreignCustomerId));
         $this->assertSame($linkedCustomerId, $this->appointmentCustomerId($appointmentId));
         $this->assertSame(0, $this->notifications->savedCalls);
-        $this->assertSame(0, $this->webhooks->calls);
 
         $this->postCalendarSavePayload(
             [],
@@ -207,7 +200,6 @@ class CalendarCustomerAccessTest extends TestCase
         $this->assertDeniedResponse();
         $this->assertSame($linkedCustomerId, $this->appointmentCustomerId($appointmentId));
         $this->assertSame(0, $this->notifications->savedCalls);
-        $this->assertSame(0, $this->webhooks->calls);
 
         $this->postCalendarSavePayload(
             $this->customerPayload($linkedCustomerId, 'Secretary Changed'),
@@ -347,7 +339,6 @@ class CalendarCustomerAccessTest extends TestCase
         $controller->secretaries_model = $CI->secretaries_model;
         $controller->permissions = $CI->permissions;
         $controller->notifications = $this->notifications;
-        $controller->webhooks_client = $this->webhooks;
 
         return $controller;
     }

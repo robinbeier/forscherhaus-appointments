@@ -37,7 +37,6 @@ class CalendarEventPermissionsTest extends TestCase
     /** @var array<int> */
     private array $createdBlockedPeriodIds = [];
     private object $notifications;
-    private object $webhooks;
     private object $originalExceptions;
     private ?array $providerRoleSnapshot = null;
     private ?array $adminBlockedPeriodsSnapshot = null;
@@ -52,7 +51,6 @@ class CalendarEventPermissionsTest extends TestCase
         $this->fixtures->snapshotSettings(['limit_customer_access']);
         $this->fixtures->setSetting('limit_customer_access', '0');
         $this->notifications = BookingFlowFixtures::createNoopNotifications();
-        $this->webhooks = BookingFlowFixtures::createNoopWebhooksClient();
 
         $pair = $this->fixtures->resolveProviderServicePair();
         $this->providerId = $pair['provider_id'];
@@ -122,7 +120,6 @@ class CalendarEventPermissionsTest extends TestCase
         $this->assertDenied();
         $this->assertSame($this->unassignedProviderId, $this->storedProvider($appointmentId));
         $this->assertSame(0, $this->notifications->savedCalls);
-        $this->assertSame(0, $this->webhooks->calls);
     }
 
     public function testSecretaryCannotTransferStoredForeignAppointmentToAssignedProvider(): void
@@ -465,7 +462,6 @@ class CalendarEventPermissionsTest extends TestCase
         $controller->blocked_periods_model = $CI->blocked_periods_model;
         $controller->permissions = $CI->permissions;
         $controller->notifications = $this->notifications;
-        $controller->webhooks_client = $this->webhooks;
         return $controller;
     }
 

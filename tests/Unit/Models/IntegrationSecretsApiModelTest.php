@@ -5,13 +5,10 @@ namespace Tests\Unit\Models;
 use InvalidArgumentException;
 use Providers_model;
 use Tests\TestCase;
-use Webhooks_model;
 
 final class IntegrationSecretsApiModelTest extends TestCase
 {
     private Providers_model $providersModel;
-
-    private Webhooks_model $webhooksModel;
 
     protected function setUp(): void
     {
@@ -19,9 +16,7 @@ final class IntegrationSecretsApiModelTest extends TestCase
 
         $CI = &get_instance();
         $CI->load->model('providers_model');
-        $CI->load->model('webhooks_model');
         $this->providersModel = $CI->providers_model;
-        $this->webhooksModel = $CI->webhooks_model;
     }
 
     public function testProviderIntegrationCredentialsAcceptOnlyNullableStrings(): void
@@ -63,24 +58,6 @@ final class IntegrationSecretsApiModelTest extends TestCase
         }
     }
 
-    public function testWebhookSecretInputIsTypeAndLengthBounded(): void
-    {
-        foreach ([['synthetic-sensitive-value'], str_repeat('x', 513)] as $invalidValue) {
-            $webhook = ['secretToken' => $invalidValue];
-
-            try {
-                $this->webhooksModel->api_decode($webhook);
-                $this->fail('Expected the invalid webhook credential to be rejected.');
-            } catch (InvalidArgumentException $exception) {
-                $this->assertTrue(
-                    str_contains($exception->getMessage(), 'string or null') ||
-                        str_contains($exception->getMessage(), 'must not exceed 512 characters'),
-                );
-                $this->assertFalse(str_contains($exception->getMessage(), 'synthetic-sensitive-value'));
-            }
-        }
-    }
-
     public function testValidationErrorsDoNotContainCredentialValues(): void
     {
         $provider = [
@@ -89,24 +66,11 @@ final class IntegrationSecretsApiModelTest extends TestCase
                 'caldav_password' => 'synthetic-sensitive-value',
             ],
         ];
-        $webhook = ['secret_token' => 'synthetic-sensitive-value'];
-
-        foreach (
-            [fn() => $this->providersModel->validate($provider), fn() => $this->webhooksModel->validate($webhook)]
-            as $validate
-        ) {
-            try {
-                $validate();
-                $this->fail('Expected the incomplete record to be rejected.');
-            } catch (InvalidArgumentException $exception) {
-                $this->assertFalse(str_contains($exception->getMessage(), 'synthetic-sensitive-value'));
-            }
+        try {
+            $this->providersModel->validate($provider);
+            $this->fail('Expected the incomplete provider record to be rejected.');
+        } catch (InvalidArgumentException $exception) {
+            $this->assertFalse(str_contains($exception->getMessage(), 'synthetic-sensitive-value'));
         }
-    }
-
-    public function testWebhookCredentialIsNotAnApiResourceField(): void
-    {
-        $this->assertNull($this->webhooksModel->db_field('secretToken'));
-        $this->assertNull($this->webhooksModel->db_field('secret_token'));
     }
 }

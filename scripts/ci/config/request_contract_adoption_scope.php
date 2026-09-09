@@ -116,10 +116,6 @@ return [
         'methods' => ['save'],
     ],
     [
-        'file' => 'application/controllers/Webhooks.php',
-        'methods' => ['search', 'store', 'update', 'destroy', 'find'],
-    ],
-    [
         'file' => 'application/controllers/api/v1/Admins_api_v1.php',
         'methods' => ['index', 'show', 'store', 'update', 'destroy'],
     ],
@@ -161,10 +157,6 @@ return [
     ],
     [
         'file' => 'application/controllers/api/v1/Unavailabilities_api_v1.php',
-        'methods' => ['index', 'show', 'store', 'update', 'destroy'],
-    ],
-    [
-        'file' => 'application/controllers/api/v1/Webhooks_api_v1.php',
         'methods' => ['index', 'show', 'store', 'update', 'destroy'],
     ],
 ];

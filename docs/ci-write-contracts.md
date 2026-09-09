@@ -81,9 +81,9 @@ Deadlock entsteht.
 ## Write-only Integrationsgeheimnisse
 
 Die authentifizierte REST-v1-API behandelt
-`providers.settings.googleToken`, `providers.settings.caldavPassword` und
-`webhooks.secretToken` als reine Write-Inputs. Provider- und
-Webhook-Collection, -Detail, -Create- und -Update-Antworten durchlaufen vor
+`providers.settings.googleToken` und `providers.settings.caldavPassword`
+als reine Write-Inputs. Provider-Collection, -Detail, -Create- und
+-Update-Antworten durchlaufen vor
 jeder Query-Projektion dieselbe zentrale secret-freie API-Kodierung.
 `fields`, `with`, Suche und Sortierung dürfen die Werte daher weder direkt
 noch über alternative snake_case-Namen zurückholen.
@@ -94,8 +94,9 @@ es. Typ- und Längenfehler werden vor der Mutation mit wertfreien Meldungen
 abgelehnt. OpenAPI führt diese Felder nur in Payload-Schemas mit
 `writeOnly: true`; Record-Schemas und Beispiele enthalten sie nicht.
 Die Kalender-Synchronisierung ist entfernt; historische Kalenderfelder bleiben
-als Daten erhalten und aktivieren keine Synchronisierung. Webhook-Dispatch bleibt
-ein serverseitiger DB-Consumer und keine alternative REST-Leseoberfläche.
+als Daten erhalten und aktivieren keine Synchronisierung. Die ungenutzte
+Anwendungs-Webhook-Funktion ist entfernt; ihre historischen Tabellen und Daten
+bleiben ohne ausführbaren Verwaltungs- oder Versandweg erhalten.
 
 ## Evidence-Privacy-Vertrag
 

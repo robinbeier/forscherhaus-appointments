@@ -70,7 +70,6 @@ const PRIV_SERVICES = 'services';
 const PRIV_USERS = 'users';
 const PRIV_SYSTEM_SETTINGS = 'system_settings';
 const PRIV_USER_SETTINGS = 'user_settings';
-const PRIV_WEBHOOKS = 'webhooks';
 const PRIV_BLOCKED_PERIODS = 'blocked_periods';
 
 const DATE_FORMAT_DMY = 'DMY';
@@ -103,34 +102,6 @@ const LDAP_DEFAULT_FIELD_MAPPING = [
     'phone_number' => 'telephonenumber',
     'username' => 'cn',
 ];
-
-/*
-|--------------------------------------------------------------------------
-| Webhook Actions
-|--------------------------------------------------------------------------
-|
-| External application endpoints can subscribe to these webhook actions.  
-|
-*/
-
-const WEBHOOK_APPOINTMENT_SAVE = 'appointment_save';
-const WEBHOOK_APPOINTMENT_DELETE = 'appointment_delete';
-const WEBHOOK_UNAVAILABILITY_SAVE = 'unavailability_save';
-const WEBHOOK_UNAVAILABILITY_DELETE = 'unavailability_delete';
-const WEBHOOK_CUSTOMER_SAVE = 'customer_save';
-const WEBHOOK_CUSTOMER_DELETE = 'customer_delete';
-const WEBHOOK_SERVICE_SAVE = 'service_save';
-const WEBHOOK_SERVICE_DELETE = 'service_delete';
-const WEBHOOK_SERVICE_CATEGORY_SAVE = 'service_category_save';
-const WEBHOOK_SERVICE_CATEGORY_DELETE = 'service_category_delete';
-const WEBHOOK_PROVIDER_SAVE = 'provider_save';
-const WEBHOOK_PROVIDER_DELETE = 'provider_delete';
-const WEBHOOK_SECRETARY_SAVE = 'secretary_save';
-const WEBHOOK_SECRETARY_DELETE = 'secretary_delete';
-const WEBHOOK_ADMIN_SAVE = 'admin_save';
-const WEBHOOK_ADMIN_DELETE = 'admin_delete';
-const WEBHOOK_BLOCKED_PERIOD_SAVE = 'blocked_period_save';
-const WEBHOOK_BLOCKED_PERIOD_DELETE = 'blocked_period_delete';
 
 /* End of file constants.php */
 /* Location: ./application/config/constants.php */

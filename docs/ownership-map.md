@@ -281,19 +281,12 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
 - Ownership notes: Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.
 - Key files:
   - `application/controllers/Integrations.php`
-  - `application/libraries/Webhooks_client.php`
 - Path rules:
-  - `application/controllers/Webhooks.php` (exact_file)
   - `application/controllers/Integrations.php` (exact_file)
   - `application/controllers/Ldap_settings.php` (exact_file)
-  - `application/libraries/Webhooks_client.php` (exact_file)
   - `application/libraries/Ldap_client.php` (exact_file)
-  - `application/libraries/Integrations_request_dto_factory.php` (exact_file)
-  - `application/models/Webhooks_model.php` (exact_file)
   - `application/views/pages/integrations.php` (exact_file)
-  - `application/views/pages/webhooks.php` (exact_file)
   - `application/views/pages/ldap_settings.php` (exact_file)
-  - `assets/js/pages/webhooks.js` (exact_file)
   - `assets/js/pages/ldap_settings.js` (exact_file)
 
 ### `api-v1`

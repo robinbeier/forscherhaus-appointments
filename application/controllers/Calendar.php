@@ -81,7 +81,6 @@ class Calendar extends EA_Controller
         $this->load->library('notifications');
         $this->load->library('permissions');
         $this->load->library('timezones');
-        $this->load->library('webhooks_client');
     }
 
     /**
@@ -339,8 +338,6 @@ class Calendar extends EA_Controller
                 $manage_mode,
             );
 
-            $this->webhooks_client->trigger(WEBHOOK_APPOINTMENT_SAVE, $appointment);
-
             json_response([
                 'success' => true,
             ]);
@@ -445,8 +442,6 @@ class Calendar extends EA_Controller
                 $cancellation_reason,
             );
 
-            $this->webhooks_client->trigger(WEBHOOK_APPOINTMENT_DELETE, $appointment);
-
             json_response([
                 'success' => true,
             ]);
@@ -490,8 +485,6 @@ class Calendar extends EA_Controller
 
             $unavailability = $this->unavailabilities_model->find($unavailability_id);
 
-            $this->webhooks_client->trigger(WEBHOOK_UNAVAILABILITY_SAVE, $unavailability);
-
             json_response([
                 'success' => true,
                 'warnings' => $warnings,
@@ -521,8 +514,6 @@ class Calendar extends EA_Controller
             $provider = $this->providers_model->find($unavailability['id_users_provider']);
 
             $this->unavailabilities_model->delete($unavailability_id);
-
-            $this->webhooks_client->trigger(WEBHOOK_UNAVAILABILITY_DELETE, $unavailability);
 
             json_response([
                 'success' => true,

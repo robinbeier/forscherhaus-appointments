@@ -114,8 +114,6 @@ final class EntityStoreAuthorizationTest extends TestCase
         $customerEmail = 'store-auth-' . bin2hex(random_bytes(4)) . '@example.org';
         $_POST['customer'] = $this->customerPayload($customerEmail, 'Created');
         $customerController = $this->customersController();
-        $customerWebhook = BookingFlowFixtures::createNoopWebhooksClient();
-        $customerController->webhooks_client = $customerWebhook;
         $customerController->store();
 
         $customerResponse = $this->decodeJsonOutput();
@@ -129,7 +127,6 @@ final class EntityStoreAuthorizationTest extends TestCase
                 ->db->get_where('users', ['id' => $customerId])
                 ->row_array()['last_name'],
         );
-        self::assertSame(1, $customerWebhook->calls);
 
         $this->resetRuntimeState();
         $serviceName = 'Store auth ' . bin2hex(random_bytes(4));
@@ -148,8 +145,6 @@ final class EntityStoreAuthorizationTest extends TestCase
             'is_private' => 0,
         ];
         $serviceController = $this->servicesController();
-        $serviceWebhook = BookingFlowFixtures::createNoopWebhooksClient();
-        $serviceController->webhooks_client = $serviceWebhook;
         $serviceController->store();
 
         $serviceResponse = $this->decodeJsonOutput();
@@ -163,10 +158,9 @@ final class EntityStoreAuthorizationTest extends TestCase
                 ->db->get_where('services', ['id' => $serviceId])
                 ->row_array()['name'],
         );
-        self::assertSame(1, $serviceWebhook->calls);
     }
 
-    public function testExistingIdsAreRejectedWithoutMutationOrWebhook(): void
+    public function testExistingIdsAreRejectedWithoutMutation(): void
     {
         $pair = $this->fixtures->resolveProviderServicePair();
         $this->authenticateAsProvider($pair['provider_id']);
@@ -179,8 +173,6 @@ final class EntityStoreAuthorizationTest extends TestCase
 
         $_POST['customer'] = $this->customerPayload($customerEmail, 'Changed') + ['id' => $customerId];
         $customerController = $this->customersController();
-        $customerWebhook = BookingFlowFixtures::createNoopWebhooksClient();
-        $customerController->webhooks_client = $customerWebhook;
         $customerController->store();
 
         $customerResponse = $this->decodeJsonOutput();
@@ -192,7 +184,6 @@ final class EntityStoreAuthorizationTest extends TestCase
                 ->db->get_where('users', ['id' => $customerId])
                 ->row_array()['last_name'],
         );
-        self::assertSame(0, $customerWebhook->calls);
 
         $service = get_instance()
             ->db->get_where('services', ['id' => $pair['service_id']])
@@ -217,8 +208,6 @@ final class EntityStoreAuthorizationTest extends TestCase
             'is_private' => $service['is_private'],
         ];
         $serviceController = $this->servicesController();
-        $serviceWebhook = BookingFlowFixtures::createNoopWebhooksClient();
-        $serviceController->webhooks_client = $serviceWebhook;
         $serviceController->store();
 
         $serviceResponse = $this->decodeJsonOutput();
@@ -230,7 +219,6 @@ final class EntityStoreAuthorizationTest extends TestCase
                 ->db->get_where('services', ['id' => $pair['service_id']])
                 ->row_array()['name'],
         );
-        self::assertSame(0, $serviceWebhook->calls);
     }
 
     public function testExistingCustomerEmailWithoutIdCannotChangeExistingRecord(): void
@@ -246,8 +234,6 @@ final class EntityStoreAuthorizationTest extends TestCase
 
         $_POST['customer'] = $this->customerPayload($email, 'Changed');
         $controller = $this->customersController();
-        $webhook = BookingFlowFixtures::createNoopWebhooksClient();
-        $controller->webhooks_client = $webhook;
         $controller->store();
 
         $response = $this->decodeJsonOutput();
@@ -258,7 +244,6 @@ final class EntityStoreAuthorizationTest extends TestCase
                 ->db->get_where('users', ['id' => $customerId])
                 ->row_array()['last_name'],
         );
-        self::assertSame(0, $webhook->calls);
     }
 
     public function testAdminEditPathsRemainAvailable(): void
@@ -271,7 +256,6 @@ final class EntityStoreAuthorizationTest extends TestCase
         $customerId = $this->fixtures->createCustomer(['email' => $customerEmail, 'last_name' => 'Before']);
         $_POST['customer'] = $this->customerPayload($customerEmail, 'After') + ['id' => $customerId];
         $customerController = $this->customersController();
-        $customerController->webhooks_client = BookingFlowFixtures::createNoopWebhooksClient();
         $customerController->update();
         $response = $this->decodeJsonOutput();
         self::assertTrue($response['success'] ?? false, json_encode($response, JSON_THROW_ON_ERROR));
@@ -303,7 +287,6 @@ final class EntityStoreAuthorizationTest extends TestCase
             'is_private' => $service['is_private'],
         ];
         $serviceController = $this->servicesController();
-        $serviceController->webhooks_client = BookingFlowFixtures::createNoopWebhooksClient();
         $serviceController->update();
         $response = $this->decodeJsonOutput();
         self::assertTrue($response['success'] ?? false, json_encode($response, JSON_THROW_ON_ERROR));

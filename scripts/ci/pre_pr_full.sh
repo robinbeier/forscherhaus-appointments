@@ -57,7 +57,6 @@ pre_pr_full_should_include_ldap_guardrail() {
             application/helpers/*/*|\
             application/helpers/*/*/*|\
             application/libraries/Accounts.php|\
-            application/libraries/Integrations_request_dto_factory.php|\
             application/libraries/Auth_request_dto_factory.php|\
             application/views/pages/ldap_settings.php|\
             application/config/constants.php|\

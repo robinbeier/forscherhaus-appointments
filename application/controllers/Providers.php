@@ -77,7 +77,6 @@ class Providers extends EA_Controller
 
         $this->load->library('accounts');
         $this->load->library('timezones');
-        $this->load->library('webhooks_client');
 
         $this->optional_provider_setting_fields['working_plan'] = setting('company_working_plan');
     }
@@ -198,8 +197,6 @@ class Providers extends EA_Controller
 
             $provider = $this->providers_model->find($provider_id);
 
-            $this->webhooks_client->trigger(WEBHOOK_PROVIDER_SAVE, $provider);
-
             json_response([
                 'success' => true,
                 'id' => $provider_id,
@@ -265,8 +262,6 @@ class Providers extends EA_Controller
 
             $provider = $this->providers_model->find($provider_id);
 
-            $this->webhooks_client->trigger(WEBHOOK_PROVIDER_SAVE, $provider);
-
             json_response([
                 'success' => true,
                 'id' => $provider_id,
@@ -292,8 +287,6 @@ class Providers extends EA_Controller
             $provider = $this->providers_model->find($provider_id);
 
             $this->providers_model->delete($provider_id);
-
-            $this->webhooks_client->trigger(WEBHOOK_PROVIDER_DELETE, $provider);
 
             json_response([
                 'success' => true,

@@ -346,7 +346,6 @@ class BookingReadAvailabilityControllerFlowTest extends TestCase
         $this->wireBookingDependencies($controller);
 
         $controller->notifications = BookingFlowFixtures::createNoopNotifications();
-        $controller->webhooks_client = BookingFlowFixtures::createNoopWebhooksClient();
 
         return $controller;
     }

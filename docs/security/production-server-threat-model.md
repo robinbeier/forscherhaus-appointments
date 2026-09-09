@@ -38,7 +38,7 @@ App-Risiken, die stark an Serverkonfiguration haengen:
 - Monitoring-Integritaetsverlust durch geleakte Kuma Push-URLs oder
   Deep-Health-Token.
 - Vollstaendige Systemkompromittierung bei SSH/root-Kompromiss.
-- SSRF- oder interne Erreichbarkeit ueber Renderer-, Webhook- oder
+- SSRF- oder interne Erreichbarkeit ueber Renderer- oder
   Integrationsgrenzen.
 
 ## 2. Assets
@@ -68,7 +68,7 @@ App-Risiken, die stark an Serverkonfiguration haengen:
   hochsensitiv.
 - App zu Docker-PDF-Renderer: Renderer laeuft containerisiert und soll nur ueber
   die definierte lokale Grenze erreichbar sein.
-- App/Host zu LDAP und Webhooks: ausgehende
+- App/Host zu LDAP: ausgehende
   Netzwerkgrenzen koennen Daten oder Credentials exponieren, wenn falsch
   konfiguriert.
 - Kuma zu Health Endpoints und Push-Monitoren: Kuma liest HTTP/JSON-Signale und
@@ -134,7 +134,7 @@ App-Risiken, die stark an Serverkonfiguration haengen:
   unterdruecken oder interne Health-Informationen abrufen.
 - SSH/root wird kompromittiert. Impact: Totalverlust von Host, App, DB,
   Backups, Secrets, Monitoring und Deployment-Kette.
-- Renderer-, Webhook- oder Integrationspfade erlauben interne Erreichbarkeit.
+- Renderer- oder Integrationspfade erlauben interne Erreichbarkeit.
   Impact: SSRF- oder Datenexfiltrationspfade, besonders bei kompromittiertem
   Admin oder falsch gesetzten Outbound-Grenzen.
 - Log-Klassifizierung wird zu breit. Impact: echte Incidents werden als

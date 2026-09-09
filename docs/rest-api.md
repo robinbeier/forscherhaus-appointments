@@ -411,9 +411,9 @@ You can also try the GET requests with your browser by navigating to the respect
 
 #### Write-only integration credentials
 
-Provider `settings.googleToken` and `settings.caldavPassword`, and webhook
-`secretToken`, are write-only REST inputs. They are accepted only in the
-respective provider or webhook POST/PUT payload and are never returned by
+Provider `settings.googleToken` and `settings.caldavPassword` are write-only
+REST inputs. They are accepted only in the provider POST/PUT payload and are
+never returned by
 collection, detail, create, or update responses. Query parameters such as
 `fields`, `with`, search, and sorting cannot expose them.
 
@@ -422,7 +422,8 @@ Providing a string replaces the stored value; providing `null` clears it.
 Successful mutation responses never echo the submitted credential. This
 write-only REST boundary also protects retained legacy calendar credentials.
 Google/CalDAV synchronization has been removed; these retained fields do not
-enable it. Webhook dispatch continues to consume its stored credential server-side.
+enable it. The unused application webhook API and dispatch have been removed;
+historical webhook data is retained without an active application interface.
 
 ### Secretaries
 
