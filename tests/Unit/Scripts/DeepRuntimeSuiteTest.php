@@ -212,6 +212,68 @@ class DeepRuntimeSuiteTest extends TestCase
         self::assertNotSame('', $manifest['completed_at_utc']);
     }
 
+    public function testRunDeepRuntimeSuiteCliReturnsFailureAfterPersistingCompleteManifest(): void
+    {
+        $output = new CliOutputCapture();
+        $executedSuites = [];
+        $manifestPath = $this->tmpDir . '/manifest.json';
+
+        $exitCode = runDeepRuntimeSuiteCli(
+            [
+                'run_deep_runtime_suite.php',
+                '--suites=api-contract-openapi,booking-controller-flows',
+                '--report-dir=' . $this->tmpDir,
+            ],
+            static function (array $suite) use (&$executedSuites): int {
+                $executedSuites[] = $suite['id'];
+
+                return $suite['id'] === 'api-contract-openapi' ? 1 : 0;
+            },
+            $output->stdout,
+            $output->stderr,
+        );
+
+        self::assertSame(DEEP_RUNTIME_SUITE_EXIT_RUNTIME_ERROR, $exitCode, $output->diagnostic());
+        self::assertSame(['api-contract-openapi', 'booking-controller-flows'], $executedSuites);
+        self::assertStringContainsString('[FAIL] deep-runtime-suite api-contract-openapi', $output->stderrContents());
+
+        $manifest = json_decode((string) file_get_contents($manifestPath), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame(['api-contract-openapi', 'booking-controller-flows'], $manifest['requested_suites']);
+        self::assertCount(2, $manifest['suites']);
+        self::assertSame('contract_failure', $manifest['suites']['api-contract-openapi']['status']);
+        self::assertSame('pass', $manifest['suites']['booking-controller-flows']['status']);
+        self::assertNotSame('', $manifest['completed_at_utc']);
+    }
+
+    public function testRunDeepRuntimeSuiteCliReturnsSuccessWhenEverySuitePasses(): void
+    {
+        $output = new CliOutputCapture();
+        $executedSuites = [];
+
+        $exitCode = runDeepRuntimeSuiteCli(
+            [
+                'run_deep_runtime_suite.php',
+                '--suites=api-contract-openapi,booking-controller-flows',
+                '--report-dir=' . $this->tmpDir,
+            ],
+            static function (array $suite) use (&$executedSuites): int {
+                $executedSuites[] = $suite['id'];
+
+                return 0;
+            },
+            $output->stdout,
+            $output->stderr,
+        );
+
+        self::assertSame(DEEP_RUNTIME_SUITE_EXIT_SUCCESS, $exitCode, $output->diagnostic());
+        self::assertSame(['api-contract-openapi', 'booking-controller-flows'], $executedSuites);
+        self::assertStringContainsString(
+            '[PASS] deep-runtime-suite passed all 2 requested suite(s).',
+            $output->stdoutContents(),
+        );
+        self::assertSame('', $output->stderrContents());
+    }
+
     public function testParseDeepRuntimeSuiteCliOptionsSupportsBrowserOverrides(): void
     {
         $config = deepRuntimeSuiteDefaultConfig();

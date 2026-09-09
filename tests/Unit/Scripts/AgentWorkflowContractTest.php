@@ -163,7 +163,11 @@ class AgentWorkflowContractTest extends TestCase
             self::assertSame(['changes', 'deep-runtime-suite'], $job['needs'] ?? null, $jobName);
             self::assertSame('ubuntu-latest', $job['runs_on'] ?? null, $jobName);
             self::assertSame(35, $job['timeout_minutes'] ?? null, $jobName);
-            self::assertSame('deep-runtime-suite-artifacts', $job['evidence']['artifact'] ?? null, $jobName);
+            self::assertSame(
+                '${{ needs.deep-runtime-suite.outputs.artifact-name || \'missing-deep-runtime-artifact\' }}',
+                $job['evidence']['artifact'] ?? null,
+                $jobName,
+            );
             self::assertSame('storage/logs/ci/deep-runtime-suite', $job['evidence']['path'] ?? null, $jobName);
             self::assertSame(
                 'php scripts/ci/assert_deep_runtime_suite.php ' .

@@ -578,6 +578,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
+    outputs:
+      artifact-name: deep-runtime-suite-artifacts-${{ github.run_attempt }}
+
     steps:
       - name: Git clone
         uses: actions/checkout@v6
@@ -737,7 +740,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: deep-runtime-suite-artifacts
+          name: deep-runtime-suite-artifacts-${{ github.run_attempt }}
           path: storage/logs/ci/deep-runtime-suite
           if-no-files-found: error
       - name: Diagnostics (failure logs)
@@ -1081,7 +1084,7 @@ jobs:
       - name: Download deep runtime suite artifacts
         uses: actions/download-artifact@v8
         with:
-          name: deep-runtime-suite-artifacts
+          name: ${{ needs.deep-runtime-suite.outputs.artifact-name || 'missing-deep-runtime-artifact' }}
           path: storage/logs/ci/deep-runtime-suite
       - name: Assert API OpenAPI contract suite result
         run: php scripts/ci/assert_deep_runtime_suite.php --manifest=storage/logs/ci/deep-runtime-suite/manifest.json --suite=api-contract-openapi
@@ -1113,7 +1116,7 @@ jobs:
       - name: Download deep runtime suite artifacts
         uses: actions/download-artifact@v8
         with:
-          name: deep-runtime-suite-artifacts
+          name: ${{ needs.deep-runtime-suite.outputs.artifact-name || 'missing-deep-runtime-artifact' }}
           path: storage/logs/ci/deep-runtime-suite
       - name: Assert booking write-path suite result
         run: php scripts/ci/assert_deep_runtime_suite.php --manifest=storage/logs/ci/deep-runtime-suite/manifest.json --suite=write-contract-booking
@@ -1145,7 +1148,7 @@ jobs:
       - name: Download deep runtime suite artifacts
         uses: actions/download-artifact@v8
         with:
-          name: deep-runtime-suite-artifacts
+          name: ${{ needs.deep-runtime-suite.outputs.artifact-name || 'missing-deep-runtime-artifact' }}
           path: storage/logs/ci/deep-runtime-suite
       - name: Assert API write-path suite result
         run: php scripts/ci/assert_deep_runtime_suite.php --manifest=storage/logs/ci/deep-runtime-suite/manifest.json --suite=write-contract-api
@@ -1176,7 +1179,7 @@ jobs:
       - name: Download deep runtime suite artifacts
         uses: actions/download-artifact@v8
         with:
-          name: deep-runtime-suite-artifacts
+          name: ${{ needs.deep-runtime-suite.outputs.artifact-name || 'missing-deep-runtime-artifact' }}
           path: storage/logs/ci/deep-runtime-suite
       - name: Assert booking controller flow suite result
         run: php scripts/ci/assert_deep_runtime_suite.php --manifest=storage/logs/ci/deep-runtime-suite/manifest.json --suite=booking-controller-flows
@@ -1206,7 +1209,7 @@ jobs:
       - name: Download deep runtime suite artifacts
         uses: actions/download-artifact@v8
         with:
-          name: deep-runtime-suite-artifacts
+          name: ${{ needs.deep-runtime-suite.outputs.artifact-name || 'missing-deep-runtime-artifact' }}
           path: storage/logs/ci/deep-runtime-suite
       - name: Assert integration smoke suite result
         run: php scripts/ci/assert_deep_runtime_suite.php --manifest=storage/logs/ci/deep-runtime-suite/manifest.json --suite=integration-smoke

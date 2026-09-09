@@ -145,7 +145,6 @@ ci_docker_wait_for_service_exec php-fpm "pre-pr-full" php -v
 ci_docker_wait_for_easyappointments_mysql_connectivity "pre-pr-full"
 CI_DOCKER_INSTALL_SEED_MAX_ATTEMPTS=5 ci_docker_install_seed_instance "pre-pr-full" exec -T php-fpm php index.php console install
 
-DEEP_RUNTIME_MANIFEST="storage/logs/ci/deep-runtime-suite/manifest.json"
 # Keep runtime dependency upgrades, including Monolog, on the shared deep gate by default.
 DEEP_RUNTIME_SUITES=(
     api-contract-openapi
@@ -169,13 +168,6 @@ ci_docker_compose exec -T php-fpm php scripts/ci/run_deep_runtime_suite.php \
     --integration-smoke-browser-bootstrap-timeout="${INTEGRATION_SMOKE_BROWSER_BOOTSTRAP_TIMEOUT}" \
     --integration-smoke-browser-open-timeout="${INTEGRATION_SMOKE_BROWSER_OPEN_TIMEOUT}" \
     --report-dir=storage/logs/ci/deep-runtime-suite
-
-echo_section "Deep runtime verdicts"
-for suite in "${DEEP_RUNTIME_SUITES[@]}"; do
-    ci_docker_compose exec -T php-fpm php scripts/ci/assert_deep_runtime_suite.php \
-        --manifest="$DEEP_RUNTIME_MANIFEST" \
-        --suite="$suite"
-done
 
 if [[ "$RUN_COVERAGE" == "1" ]]; then
     echo_section "Coverage shard + delta gate"

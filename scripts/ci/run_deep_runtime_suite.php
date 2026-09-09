@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/assert_deep_runtime_suite.php';
+
 const DEEP_RUNTIME_SUITE_EXIT_SUCCESS = 0;
 const DEEP_RUNTIME_SUITE_EXIT_RUNTIME_ERROR = 1;
 
@@ -11,8 +13,11 @@ if (realpath((string) ($_SERVER['SCRIPT_FILENAME'] ?? '')) === __FILE__) {
 
 /**
  * @param array<int, string> $argv
+ * @param callable(array<string, mixed>):int|null $runner
+ * @param resource $stdout
+ * @param resource $stderr
  */
-function runDeepRuntimeSuiteCli(array $argv): int
+function runDeepRuntimeSuiteCli(array $argv, ?callable $runner = null, $stdout = STDOUT, $stderr = STDERR): int
 {
     $config = deepRuntimeSuiteDefaultConfig();
 
@@ -20,7 +25,7 @@ function runDeepRuntimeSuiteCli(array $argv): int
         parseDeepRuntimeSuiteCliOptions($argv, $config);
 
         if ($config['help'] === true) {
-            fwrite(STDOUT, deepRuntimeSuiteUsage());
+            fwrite($stdout, deepRuntimeSuiteUsage());
 
             return DEEP_RUNTIME_SUITE_EXIT_SUCCESS;
         }
@@ -29,23 +34,29 @@ function runDeepRuntimeSuiteCli(array $argv): int
         $suiteDefinitions = buildDeepRuntimeSuiteDefinitions($config);
         $manifest = runConfiguredDeepRuntimeSuites(
             $suiteDefinitions,
-            static fn(array $suite): int => executeDeepRuntimeSuiteCommand($suite),
+            $runner ?? static fn(array $suite): int => executeDeepRuntimeSuiteCommand($suite),
+            $stdout,
+            $stderr,
         );
         writeDeepRuntimeSuiteManifest($config['manifest_path'], $manifest);
 
+        fwrite($stdout, '[INFO] Manifest: ' . $config['manifest_path'] . PHP_EOL);
+
+        foreach ($manifest['requested_suites'] as $suiteId) {
+            assertDeepRuntimeSuiteResult($manifest, $suiteId);
+        }
+
         fwrite(
-            STDOUT,
+            $stdout,
             sprintf(
-                '[PASS] deep-runtime-suite wrote manifest for %d suite(s).%s',
+                '[PASS] deep-runtime-suite passed all %d requested suite(s).%s',
                 count($manifest['requested_suites']),
                 PHP_EOL,
             ),
         );
-        fwrite(STDOUT, '[INFO] Manifest: ' . $config['manifest_path'] . PHP_EOL);
-
         return DEEP_RUNTIME_SUITE_EXIT_SUCCESS;
     } catch (Throwable $e) {
-        fwrite(STDERR, '[ERROR] deep-runtime-suite failed: ' . $e->getMessage() . PHP_EOL);
+        fwrite($stderr, '[ERROR] deep-runtime-suite failed: ' . $e->getMessage() . PHP_EOL);
 
         return DEEP_RUNTIME_SUITE_EXIT_RUNTIME_ERROR;
     }

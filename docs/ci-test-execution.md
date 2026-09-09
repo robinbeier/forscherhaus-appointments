@@ -89,6 +89,21 @@ deep runtime and browser checks use the host PHP test server described in
 Use actual GitHub runs to compare elapsed time and covered statement lines;
 local full validation still uses Docker.
 
+## Deep runtime failures and reruns
+
+The shared deep runtime job prepares the environment once, runs every selected
+suite, and saves the complete manifest before checking its results. A failed
+suite also fails this executing job. GitHub's **Re-run failed jobs** therefore
+reruns the tests, rather than only rereading a failed report. Each executing
+attempt publishes its own named artifact, which the verdict jobs receive through
+the producer's output. Missing reports fail closed instead of falling back to an
+older attempt. Upload and cleanup still run on failure.
+
+The separate verdict jobs retain the individual blocking check names and read
+that manifest. They do not execute tests. If retrying one job manually, choose
+`deep-runtime-suite`, not an individual verdict job. Locally, the full gate uses
+the executing command's exit code and no longer repeats each verdict separately.
+
 ## Local quick and full checks
 
 `pre_pr_full.sh` runs `pre_pr_quick.sh` first and stops if it fails. The quick
