@@ -84,6 +84,7 @@
 /application/models/Services_model.php @robinbeier
 /application/models/Settings_model.php @robinbeier
 /application/models/Unavailabilities_model.php @robinbeier
+/application/models/Users_model.php @robinbeier
 /application/models/Webhooks_model.php @robinbeier
 /application/views/components/booking_* @robinbeier
 /application/views/components/jquery_compat_inline.php @robinbeier

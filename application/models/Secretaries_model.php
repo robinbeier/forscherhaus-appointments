@@ -91,17 +91,15 @@ class Secretaries_model extends EA_Model
         }
 
         // Make sure all required fields are provided.
-        if (
-            empty($secretary['first_name']) ||
-            empty($secretary['last_name']) ||
-            empty($secretary['email'])
-        ) {
-            throw new InvalidArgumentException('Not all required fields are provided: ' . print_r($secretary, true));
+        if (empty($secretary['first_name']) || empty($secretary['last_name']) || empty($secretary['email'])) {
+            throw new InvalidArgumentException(
+                'Not all required fields are provided for the secretary record: first name, last name, and email.',
+            );
         }
 
         // Validate the email address.
         if (!filter_var($secretary['email'], FILTER_VALIDATE_EMAIL)) {
-            throw new InvalidArgumentException('Invalid email address provided: ' . $secretary['email']);
+            throw new InvalidArgumentException('Invalid email address provided for the secretary record.');
         }
 
         // Validate secretary providers.
@@ -110,7 +108,7 @@ class Secretaries_model extends EA_Model
             foreach ($secretary['providers'] as $provider_id) {
                 if (!is_numeric($provider_id)) {
                     throw new InvalidArgumentException(
-                        'The provided secretary providers are invalid: ' . print_r($secretary, true),
+                        'The provided secretary providers are invalid; provider IDs must be numeric.',
                     );
                 }
             }

@@ -466,7 +466,7 @@ if ( ! function_exists('log_message'))
 		}
         
         if ($level === 'error') {
-            $trace = debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, 3);
+            $trace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 3);
 
             $filtered_trace = array_map(function ($entry) {
                 return array_filter(

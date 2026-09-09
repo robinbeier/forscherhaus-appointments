@@ -105,22 +105,34 @@ class Customers_model extends EA_Model
         $require_city = filter_var(setting('require_city'), FILTER_VALIDATE_BOOLEAN);
         $require_zip_code = filter_var(setting('require_zip_code'), FILTER_VALIDATE_BOOLEAN);
 
-        if (
-            (empty($customer['first_name']) && $require_first_name) ||
-            (empty($customer['last_name']) && $require_last_name) ||
-            (empty($customer['email']) && $require_email) ||
-            (empty($customer['phone_number']) && $require_phone_number) ||
-            (empty($customer['address']) && $require_address) ||
-            (empty($customer['city']) && $require_city) ||
-            (empty($customer['zip_code']) && $require_zip_code)
+        $missing_fields = [];
+        foreach (
+            [
+                'first name' => [$require_first_name, $customer['first_name'] ?? null],
+                'last name' => [$require_last_name, $customer['last_name'] ?? null],
+                'email' => [$require_email, $customer['email'] ?? null],
+                'phone number' => [$require_phone_number, $customer['phone_number'] ?? null],
+                'address' => [$require_address, $customer['address'] ?? null],
+                'city' => [$require_city, $customer['city'] ?? null],
+                'zip code' => [$require_zip_code, $customer['zip_code'] ?? null],
+            ]
+            as $field => [$required, $value]
         ) {
-            throw new InvalidArgumentException('Not all required fields are provided: ' . print_r($customer, true));
+            if ($required && empty($value)) {
+                $missing_fields[] = $field;
+            }
+        }
+
+        if ($missing_fields) {
+            throw new InvalidArgumentException(
+                'Not all required fields are provided for the customer record: ' . implode(', ', $missing_fields) . '.',
+            );
         }
 
         if (!empty($customer['email'])) {
             // Validate the email address.
             if (!filter_var($customer['email'], FILTER_VALIDATE_EMAIL)) {
-                throw new InvalidArgumentException('Invalid email address provided: ' . $customer['email']);
+                throw new InvalidArgumentException('Invalid email address provided for the customer record.');
             }
 
             // Make sure the email address is unique.
@@ -234,7 +246,7 @@ class Customers_model extends EA_Model
     public function find_record_id(array $customer): int
     {
         if (empty($customer['email'])) {
-            throw new InvalidArgumentException('The customer email was not provided: ' . print_r($customer, true));
+            throw new InvalidArgumentException('The customer email was not provided.');
         }
 
         $customer = $this->db

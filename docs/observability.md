@@ -27,6 +27,10 @@ Error and diagnostic data policy:
   logs, diagnostics, and monitor messages.
 - Use stable classifications and short non-reversible digests only when
   correlation is required.
+- The existing project trace customization in `system/core/Common.php` omits
+  argument values and object data. Preserve this explicitly approved local
+  security patch when updating CodeIgniter; `CoreErrorLoggingTest` checks the
+  real logger while retaining caller locations.
 - PDF renderer failures continue through ordinary application logging and
   release-gate checks; this document defines no separate endpoint
   categorization channel.

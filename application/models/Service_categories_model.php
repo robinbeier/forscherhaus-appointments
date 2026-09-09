@@ -79,7 +79,7 @@ class Service_categories_model extends EA_Model
         // Make sure all required fields are provided.
         if (empty($service_category['name'])) {
             throw new InvalidArgumentException(
-                'Not all required fields are provided: ' . print_r($service_category, true),
+                'Not all required fields are provided for the service-category record: name.',
             );
         }
     }

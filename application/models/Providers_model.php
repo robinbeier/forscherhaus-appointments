@@ -108,7 +108,7 @@ class Providers_model extends EA_Model
 
         // Validate the email address.
         if (!filter_var($provider['email'], FILTER_VALIDATE_EMAIL)) {
-            throw new InvalidArgumentException('Invalid email address provided: ' . $provider['email']);
+            throw new InvalidArgumentException('Invalid email address provided for the provider record.');
         }
 
         // Validate provider services.

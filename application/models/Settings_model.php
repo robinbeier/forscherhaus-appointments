@@ -77,7 +77,7 @@ class Settings_model extends EA_Model
 
         // Make sure all required fields are provided.
         if (empty($setting['name'])) {
-            throw new InvalidArgumentException('Not all required fields are provided: ' . print_r($setting, true));
+            throw new InvalidArgumentException('Not all required fields are provided for the setting record: name.');
         }
     }
 
