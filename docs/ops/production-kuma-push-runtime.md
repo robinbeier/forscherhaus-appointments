@@ -30,7 +30,8 @@ log targets, monitor identities or notification settings.
 Installed files remain regular, root:root, mode 0555 and single-link. Directories
 are root:root, mode 0755; ancestors must not be group/world writable. Reject
 symlinks, hard links, extra/missing files and unexpected hashes. Keep the Push
-environment and credentials host-local and protected.
+environment and credentials host-local and protected. The PDF check passes the
+password to its bundled gate through standard input, never process arguments.
 
 The PDF entrypoint uses only its bundled gate code. `KUMA_PDF_EXPORT_APP_ROOT`
 selects application data/config, never executable code. The historical

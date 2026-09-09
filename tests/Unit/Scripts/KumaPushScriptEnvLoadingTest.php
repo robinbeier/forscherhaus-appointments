@@ -64,6 +64,7 @@ final class KumaPushScriptEnvLoadingTest extends TestCase
                   exit 0
                 fi
 
+                cat > "$PHP_GATE_ARGS_FILE.stdin"
                 printf '%s\n' "$*" > "$PHP_GATE_ARGS_FILE"
                 printf '%s\n' "${RELEASE_GATE_REPO_ROOT:-}" > "$RELEASE_GATE_REPO_ROOT_FILE"
 
@@ -129,7 +130,9 @@ final class KumaPushScriptEnvLoadingTest extends TestCase
             self::assertStringContainsString('--max-pdf-duration-ms=12345', $phpArgs);
             self::assertStringContainsString('--require-nonempty-metrics=1', $phpArgs);
             self::assertStringContainsString('--username=monitor-user', $phpArgs);
-            self::assertStringContainsString('--password=monitor-pass', $phpArgs);
+            self::assertStringContainsString('--password-stdin', $phpArgs);
+            self::assertStringNotContainsString('monitor-pass', $phpArgs);
+            self::assertSame('monitor-pass', file_get_contents($phpGateArgsFile . '.stdin'));
             self::assertStringContainsString('--output-json=' . $reportPath, $phpArgs);
 
             $summaryArgs = file_get_contents($phpSummaryArgsFile);

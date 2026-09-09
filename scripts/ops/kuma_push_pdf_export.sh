@@ -45,11 +45,11 @@ cleanup() {
 trap cleanup EXIT
 
 set +e
-RELEASE_GATE_REPO_ROOT="$APP_ROOT" php "$GATE_SCRIPT" \
+printf '%s' "$PASSWORD" | RELEASE_GATE_REPO_ROOT="$APP_ROOT" php "$GATE_SCRIPT" \
   --base-url="$BASE_URL" \
   --index-page="$INDEX_PAGE" \
   --username="$USERNAME" \
-  --password="$PASSWORD" \
+  --password-stdin \
   --start-date="$start_date" \
   --end-date="$end_date" \
   --pdf-health-url="$PDF_HEALTH_URL" \

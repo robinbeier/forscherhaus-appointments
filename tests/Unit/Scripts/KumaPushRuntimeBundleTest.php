@@ -154,6 +154,9 @@ final class KumaPushRuntimeBundleTest extends TestCase
                 $gateLog,
             );
             self::assertStringContainsString('summary=-r', $gateLog);
+            self::assertStringContainsString('arg=--password-stdin', $gateLog);
+            self::assertStringNotContainsString('fixture-password', $gateLog);
+            self::assertStringContainsString('stdin_sha256=' . hash('sha256', 'fixture-password'), $gateLog);
             self::assertStringContainsString('RELEASE_GATE_REPO_ROOT=' . $appRoot, $gateLog);
             self::assertStringNotContainsString($fixture['source'] . '/scripts/release-gate', $gateLog);
             self::assertStringContainsString(
@@ -221,6 +224,15 @@ final class KumaPushRuntimeBundleTest extends TestCase
             escapeshellarg(PHP_BINARY) .
             " \"\$@\"; fi\n" .
             "printf 'gate=%s RELEASE_GATE_REPO_ROOT=%s\\n' \"\$1\" \"\${RELEASE_GATE_REPO_ROOT:-}\" >> " .
+            escapeshellarg($logPath) .
+            "\n" .
+            "printf 'arg=%s\\n' \"\$@\" >> " .
+            escapeshellarg($logPath) .
+            "\n" .
+            escapeshellarg(PHP_BINARY) .
+            ' -r ' .
+            escapeshellarg('echo "stdin_sha256=" . hash("sha256", stream_get_contents(STDIN)) . "\n";') .
+            ' >> ' .
             escapeshellarg($logPath) .
             "\n" .
             "output=''\nfor arg in \"\$@\"; do case \"\$arg\" in --output-json=*) output=\"\${arg#--output-json=}\" ;; esac; done\n" .

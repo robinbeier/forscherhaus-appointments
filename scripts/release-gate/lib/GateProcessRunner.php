@@ -27,6 +27,7 @@ final class GateProcessRunner
         ?string $workingDirectory = null,
         ?array $environment = null,
         int $timeoutSeconds = 60,
+        ?string $stdinPayload = null,
     ): array {
         if ($command === []) {
             throw new InvalidArgumentException('Command must not be empty.');
@@ -53,14 +54,27 @@ final class GateProcessRunner
             throw new RuntimeException('Could not start process: ' . self::formatCommand($command));
         }
 
-        fclose($pipes[0]);
+        stream_set_blocking($pipes[0], false);
         stream_set_blocking($pipes[1], false);
         stream_set_blocking($pipes[2], false);
+
+        $stdinOffset = 0;
+        $stdinLength = $stdinPayload === null ? 0 : strlen($stdinPayload);
+        $stdinOpen = $stdinPayload !== null && $stdinLength > 0;
+
+        if (!$stdinOpen) {
+            fclose($pipes[0]);
+        }
 
         while (true) {
             $status = proc_get_status($process);
             $running = is_array($status) && ($status['running'] ?? false);
             $elapsed = microtime(true) - $startedAt;
+
+            if (!$running && $stdinOpen) {
+                fclose($pipes[0]);
+                $stdinOpen = false;
+            }
 
             if ($elapsed >= $timeoutSeconds) {
                 $timedOut = true;
@@ -77,7 +91,9 @@ final class GateProcessRunner
                 $read[] = $pipes[2];
             }
 
-            if ($read !== []) {
+            $write = $stdinOpen ? [$pipes[0]] : null;
+
+            if ($read !== [] || $write !== null) {
                 $seconds = 0;
                 $microseconds = 0;
 
@@ -87,7 +103,6 @@ final class GateProcessRunner
                     $microseconds = (int) (($remaining - $seconds) * 1_000_000);
                 }
 
-                $write = null;
                 $except = null;
                 $selected = @stream_select($read, $write, $except, $seconds, $microseconds);
 
@@ -112,6 +127,22 @@ final class GateProcessRunner
                         $stderr .= $chunk;
                     }
                 }
+
+                if ($stdinOpen && is_array($write) && $write !== []) {
+                    $written = @fwrite($pipes[0], substr($stdinPayload, $stdinOffset));
+
+                    if ($written === false) {
+                        fclose($pipes[0]);
+                        $stdinOpen = false;
+                    } elseif (is_int($written) && $written > 0) {
+                        $stdinOffset += $written;
+
+                        if ($stdinOffset >= $stdinLength) {
+                            fclose($pipes[0]);
+                            $stdinOpen = false;
+                        }
+                    }
+                }
             } elseif (!$running) {
                 break;
             } else {
@@ -124,6 +155,11 @@ final class GateProcessRunner
         }
 
         if ($timedOut) {
+            if ($stdinOpen) {
+                fclose($pipes[0]);
+                $stdinOpen = false;
+            }
+
             @proc_terminate($process, 15);
             usleep(100_000);
 
@@ -133,6 +169,10 @@ final class GateProcessRunner
             if ($stillRunning) {
                 @proc_terminate($process, 9);
             }
+        }
+
+        if ($stdinOpen) {
+            fclose($pipes[0]);
         }
 
         $stdoutRemainder = stream_get_contents($pipes[1]);
