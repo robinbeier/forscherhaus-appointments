@@ -370,7 +370,7 @@ class Dashboard_metrics
 
         $int_value = (int) $value;
 
-        return $int_value > 0 ? $int_value : null;
+        return $int_value >= 0 ? $int_value : null;
     }
 
     protected function resolveTarget(array $provider, array $summary, ?int $class_size_default = null): array

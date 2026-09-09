@@ -13,6 +13,21 @@ require_once APPPATH . 'libraries/Dashboard_metrics.php';
 
 class DashboardProviderMetricsControllerTest extends TestCase
 {
+    public function testExplicitZeroClassSizeRemainsZeroInsteadOfUsingMetricFallback(): void
+    {
+        $controller = new class extends Dashboard {
+            public function __construct() {}
+
+            public function resolve(array $metric, array $provider): ?int
+            {
+                return $this->resolveClassSize($metric, $provider);
+            }
+        };
+
+        self::assertSame(0, $controller->resolve(['class_size_default' => 0, 'target' => 12], []));
+        self::assertSame(12, $controller->resolve([], ['class_size_default' => 12]));
+    }
+
     protected function tearDown(): void
     {
         parent::tearDown();

@@ -22,6 +22,31 @@ require_once APPPATH . 'libraries/Dashboard_metrics.php';
 
 class DashboardMetricsTest extends TestCase
 {
+    public function testExplicitZeroClassSizeIsAnExplicitZeroTarget(): void
+    {
+        $library = new class (
+            $this->createStub(Providers_model::class),
+            $this->createStub(Appointments_model::class),
+            $this->createStub(Provider_utilization::class),
+            $this->createStub(Services_model::class),
+            $this->createStub(Booking_slot_analytics::class),
+        ) extends Dashboard_metrics {
+            public function resolve(array $provider, array $summary): array
+            {
+                return $this->resolveTarget($provider, $summary, $this->extractClassSizeDefault($provider));
+            }
+
+            public function required(int $target, ?int $classSize): int
+            {
+                return $this->resolveRequiredSlots($target, $classSize);
+            }
+        };
+
+        self::assertSame([0, false], $library->resolve(['class_size_default' => 0], ['total' => 12]));
+        self::assertSame(2, $library->required(0, 0));
+        self::assertSame([12, true], $library->resolve([], ['total' => 12]));
+    }
+
     public function testSummarizeBuildsOverallBookingProgressTotals(): void
     {
         $library = new Dashboard_metrics(
