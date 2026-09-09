@@ -551,9 +551,7 @@ class Calendar extends EA_Controller
     public function delete_working_plan_exception(): void
     {
         try {
-            $required_permissions = can('edit', PRIV_CUSTOMERS);
-
-            if (!$required_permissions) {
+            if (cannot('edit', PRIV_USERS)) {
                 throw new RuntimeException('You do not have the required permissions for this task.');
             }
 
