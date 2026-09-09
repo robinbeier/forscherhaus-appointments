@@ -396,7 +396,8 @@ class Blocked_periods_model extends EA_Model
     }
 
     /**
-     * Check if a date is blocked by a blocked period.
+     * Check whether one blocked period covers the entire local day.
+     * Partial periods are subtracted by the normal availability calculation.
      *
      * @param string $date
      *
@@ -404,10 +405,14 @@ class Blocked_periods_model extends EA_Model
      */
     public function is_entire_date_blocked(string $date): bool
     {
+        $start = (new DateTimeImmutable($date))->setTime(0, 0);
+        $end = $start->modify('+1 day');
+
         return $this->query()
-            ->where('DATE(start_datetime) <=', $date)
-            ->where('DATE(end_datetime) >=', $date)
+            ->where('start_datetime <=', $start->format('Y-m-d H:i:s'))
+            ->where('end_datetime >=', $end->format('Y-m-d H:i:s'))
+            ->limit(1)
             ->get()
-            ->num_rows() > 1;
+            ->num_rows() > 0;
     }
 }

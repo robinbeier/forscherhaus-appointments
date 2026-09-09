@@ -131,10 +131,70 @@ App.Utils.CalendarEventPopover = (function () {
         return null; // Default behavior
     }
 
+    /**
+     * Render a read-only blocked-period event. Blocked periods do not have a provider
+     * and may omit notes when the current user is not authorized to view them.
+     *
+     * @param {Object} info The info object as passed from FullCalendar
+     * @return {Object} The rendered jQuery content.
+     */
+    function renderBlockedPeriod(info) {
+        const data = info.event.extendedProps.data || {};
+        const start = data.start_datetime || info.event.start;
+        const end = data.end_datetime || info.event.end || info.event.start;
+        const rows = [
+            $('<strong/>', {'class': 'd-inline-block me-2', text: lang('name')}),
+            $('<span/>', {text: data.name || info.event.title || ''}),
+            $('<br/>'),
+            $('<strong/>', {'class': 'd-inline-block me-2', text: lang('start')}),
+            $('<span/>', {
+                text: App.Utils.Date.format(
+                    moment(start).format('YYYY-MM-DD HH:mm:ss'),
+                    vars('date_format'),
+                    vars('time_format'),
+                    true,
+                ),
+            }),
+            $('<br/>'),
+            $('<strong/>', {'class': 'd-inline-block me-2', text: lang('end')}),
+            $('<span/>', {
+                text: App.Utils.Date.format(
+                    moment(end).format('YYYY-MM-DD HH:mm:ss'),
+                    vars('date_format'),
+                    vars('time_format'),
+                    true,
+                ),
+            }),
+            $('<br/>'),
+        ];
+
+        if (Object.prototype.hasOwnProperty.call(data, 'notes') && data.notes !== null) {
+            rows.push(
+                $('<strong/>', {'class': 'd-inline-block me-2', text: lang('notes')}),
+                $('<span/>', {text: data.notes}),
+                $('<br/>'),
+            );
+        }
+
+        rows.push(
+            $('<hr/>'),
+            $('<div/>', {
+                'class': 'd-flex justify-content-center',
+                html: $('<button/>', {
+                    'class': 'close-popover btn btn-outline-secondary',
+                    html: [$('<i/>', {'class': 'fas fa-ban me-2'}), $('<span/>', {text: lang('close')})],
+                }),
+            }),
+        );
+
+        return $('<div/>', {html: rows});
+    }
+
     return {
         renderPhoneIcon,
         renderMapIcon,
         renderMailIcon,
         renderCustomContent,
+        renderBlockedPeriod,
     };
 })();
