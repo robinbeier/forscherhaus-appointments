@@ -236,7 +236,9 @@ and representative application exports; check fonts, pagination, and landscape
 output as well as successful HTTP responses. Repository changes do not replace
 the production renderer until a separately approved rebuild/deployment.
 
-Openldap is configured to run through the `openldap` container and ports `389` and `636`.
+OpenLDAP runs in the `openldap` container. Host ports `389` and `636` bind only to
+`127.0.0.1`, so the development fixture is not exposed to the local network.
+Containers continue to connect through `openldap:389` on the Compose network.
 
 The default Docker stack no longer bundles phpLDAPadmin. Use the deterministic LDAP reset/smoke helpers and standard
 LDAP clients against the local fixture instead.

@@ -62,8 +62,8 @@ services:
         image: vegardit/openldap@sha256:efa7cff027fa2ac503b073161849f93e4ccaaa1b9ac0a9788814865032952564
         hostname: openldap
         ports:
-            - '389:389'
-            - '636:636'
+            - '127.0.0.1:389:389'
+            - '127.0.0.1:636:636'
         volumes:
             - ./docker/ldap/vegardit/init_org_tree.ldif:/opt/ldifs/init_org_tree.ldif:ro
             - ./docker/ldap/vegardit/init_org_entries.ldif:/opt/ldifs/init_org_entries.ldif:ro
