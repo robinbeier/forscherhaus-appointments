@@ -27,7 +27,6 @@ class Providers_api_v1 extends EA_Controller
 
         $this->load->library('api');
         $this->load->library('api_request_dto_factory');
-        $this->load->library('webhooks_client');
 
         $this->api->auth();
 
@@ -136,8 +135,6 @@ class Providers_api_v1 extends EA_Controller
 
             $created_provider = $this->providers_model->find($provider_id);
 
-            $this->webhooks_client->trigger(WEBHOOK_PROVIDER_SAVE, $created_provider);
-
             $this->providers_model->api_encode($created_provider);
 
             json_response($created_provider, 201);
@@ -172,8 +169,6 @@ class Providers_api_v1 extends EA_Controller
 
             $updated_provider = $this->providers_model->find($provider_id);
 
-            $this->webhooks_client->trigger(WEBHOOK_PROVIDER_SAVE, $updated_provider);
-
             $this->providers_model->api_encode($updated_provider);
 
             json_response($updated_provider);
@@ -201,8 +196,6 @@ class Providers_api_v1 extends EA_Controller
             $deleted_provider = $occurrences[0];
 
             $this->providers_model->delete($id);
-
-            $this->webhooks_client->trigger(WEBHOOK_PROVIDER_DELETE, $deleted_provider);
 
             response('', 204);
         } catch (Throwable $e) {

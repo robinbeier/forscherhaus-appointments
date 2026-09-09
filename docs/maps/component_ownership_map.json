@@ -654,7 +654,7 @@
     {
       "component_id": "integrations-sync",
       "role": "Integrations & Sync",
-      "summary": "External integration adapters (LDAP and webhooks).",
+      "summary": "Retained integration settings and LDAP adapter.",
       "primary_handle": "@robinbeier",
       "secondary_handle": "@robinbeier",
       "ownership_mode": "single-owner",
@@ -664,10 +664,6 @@
       "ownership_notes": "Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.",
       "path_rules": [
         {
-          "path": "application/controllers/Webhooks.php",
-          "match": "exact_file"
-        },
-        {
           "path": "application/controllers/Integrations.php",
           "match": "exact_file"
         },
@@ -676,19 +672,7 @@
           "match": "exact_file"
         },
         {
-          "path": "application/libraries/Webhooks_client.php",
-          "match": "exact_file"
-        },
-        {
           "path": "application/libraries/Ldap_client.php",
-          "match": "exact_file"
-        },
-        {
-          "path": "application/libraries/Integrations_request_dto_factory.php",
-          "match": "exact_file"
-        },
-        {
-          "path": "application/models/Webhooks_model.php",
           "match": "exact_file"
         },
         {
@@ -696,15 +680,7 @@
           "match": "exact_file"
         },
         {
-          "path": "application/views/pages/webhooks.php",
-          "match": "exact_file"
-        },
-        {
           "path": "application/views/pages/ldap_settings.php",
-          "match": "exact_file"
-        },
-        {
-          "path": "assets/js/pages/webhooks.js",
           "match": "exact_file"
         },
         {
@@ -713,8 +689,7 @@
         }
       ],
       "key_files": [
-        "application/controllers/Integrations.php",
-        "application/libraries/Webhooks_client.php"
+        "application/controllers/Integrations.php"
       ],
       "depends_on": [
         "auth-session",

@@ -121,7 +121,7 @@ connection is the final release boundary.
 
 Consent, customer, appointment, and generated buffer writes happen inside that
 outer transaction. Any exception or failed check rolls the transaction back.
-Notifications and webhooks run only after commit, preserving
+Notifications run only after commit, preserving
 their existing behavior without allowing them to weaken the authority gate.
 
 ## Rejection contract
@@ -135,7 +135,7 @@ For every rejected existing-appointment request:
 
 - the appointment row is unchanged by the request;
 - the customer row is unchanged by the request;
-- no consent, notification, or webhook side effect runs; and
+- no consent or notification side effect runs; and
 - existing CAPTCHA, availability, overlap, buffer, provider-smoke, and
   booking-conflict behavior remains in force.
 

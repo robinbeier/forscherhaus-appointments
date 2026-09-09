@@ -140,8 +140,6 @@ route_api_resource($route, 'services', 'api/v1/');
 
 route_api_resource($route, 'unavailabilities', 'api/v1/');
 
-route_api_resource($route, 'webhooks', 'api/v1/');
-
 route_api_resource($route, 'blocked_periods', 'api/v1/');
 
 $route['api/v1/settings']['get'] = 'api/v1/settings_api_v1/index';

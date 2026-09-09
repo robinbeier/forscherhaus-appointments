@@ -33,7 +33,6 @@ class Booking_cancellation extends EA_Controller
         $this->load->model('customers_model');
 
         $this->load->library('notifications');
-        $this->load->library('webhooks_client');
     }
 
     /**
@@ -110,8 +109,6 @@ class Booking_cancellation extends EA_Controller
                 $settings,
                 $cancellation_reason,
             );
-
-            $this->webhooks_client->trigger(WEBHOOK_APPOINTMENT_DELETE, $appointment);
         } catch (Throwable $e) {
             log_message('error', 'Booking Cancellation Exception: ' . $e->getMessage());
         }

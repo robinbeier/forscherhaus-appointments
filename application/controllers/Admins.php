@@ -60,7 +60,6 @@ class Admins extends EA_Controller
 
         $this->load->library('accounts');
         $this->load->library('timezones');
-        $this->load->library('webhooks_client');
     }
 
     /**
@@ -157,8 +156,6 @@ class Admins extends EA_Controller
 
             $admin = $this->admins_model->find($admin_id);
 
-            $this->webhooks_client->trigger(WEBHOOK_ADMIN_SAVE, $admin);
-
             json_response([
                 'success' => true,
                 'id' => $admin_id,
@@ -214,8 +211,6 @@ class Admins extends EA_Controller
 
             $admin = $this->admins_model->find($admin_id);
 
-            $this->webhooks_client->trigger(WEBHOOK_ADMIN_SAVE, $admin);
-
             json_response([
                 'success' => true,
                 'id' => $admin_id,
@@ -241,8 +236,6 @@ class Admins extends EA_Controller
             $admin = $this->admins_model->find($admin_id);
 
             $this->admins_model->delete($admin_id);
-
-            $this->webhooks_client->trigger(WEBHOOK_ADMIN_DELETE, $admin);
 
             json_response([
                 'success' => true,

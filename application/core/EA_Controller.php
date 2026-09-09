@@ -54,7 +54,6 @@ require_once __DIR__ . '/Customers_ui_smoke_access_policy.php';
  * @property Settings_model $settings_model
  * @property Unavailabilities_model $unavailabilities_model
  * @property Users_model $users_model
- * @property Webhooks_model $webhooks_model
  * @property Blocked_periods_model $blocked_periods_model
  *
  * @property Accounts $accounts
@@ -68,7 +67,6 @@ require_once __DIR__ . '/Customers_ui_smoke_access_policy.php';
  * @property Notifications $notifications
  * @property Permissions $permissions
  * @property Timezones $timezones
- * @property Webhooks_client $webhooks_client
  */
 class EA_Controller extends CI_Controller
 {

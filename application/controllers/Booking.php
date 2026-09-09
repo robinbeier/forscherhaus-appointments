@@ -78,7 +78,6 @@ class Booking extends EA_Controller
         $this->load->library('timezones');
         $this->load->library('notifications');
         $this->load->library('availability');
-        $this->load->library('webhooks_client');
         $this->load->library('booking_request_dto_factory');
         $this->load->library('reschedule_authority');
     }
@@ -564,8 +563,6 @@ class Booking extends EA_Controller
                 $settings,
                 $authority_claim instanceof RescheduleAuthorityClaim,
             );
-
-            $this->webhooks_client->trigger(WEBHOOK_APPOINTMENT_SAVE, $appointment);
 
             $response = [
                 'appointment_id' => $appointment['id'],

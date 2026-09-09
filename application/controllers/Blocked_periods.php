@@ -38,7 +38,6 @@ class Blocked_periods extends EA_Controller
 
         $this->load->library('accounts');
         $this->load->library('timezones');
-        $this->load->library('webhooks_client');
     }
 
     /**
@@ -130,8 +129,6 @@ class Blocked_periods extends EA_Controller
 
             $blocked_period = $this->blocked_periods_model->find($blocked_period_id);
 
-            $this->webhooks_client->trigger(WEBHOOK_BLOCKED_PERIOD_SAVE, $blocked_period);
-
             json_response([
                 'success' => true,
                 'id' => $blocked_period_id,
@@ -183,8 +180,6 @@ class Blocked_periods extends EA_Controller
 
             $blocked_period = $this->blocked_periods_model->find($blocked_period_id);
 
-            $this->webhooks_client->trigger(WEBHOOK_BLOCKED_PERIOD_SAVE, $blocked_period);
-
             json_response([
                 'success' => true,
                 'id' => $blocked_period_id,
@@ -210,8 +205,6 @@ class Blocked_periods extends EA_Controller
             $blocked_period = $this->blocked_periods_model->find($blocked_period_id);
 
             $this->blocked_periods_model->delete($blocked_period_id);
-
-            $this->webhooks_client->trigger(WEBHOOK_BLOCKED_PERIOD_DELETE, $blocked_period);
 
             json_response([
                 'success' => true,

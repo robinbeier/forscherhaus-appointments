@@ -18,7 +18,7 @@ This map defines component boundaries, path ownership scope, and dependency edge
 | `dashboard-exports` | Dashboard & Exports | scheduling-backoffice, people-services-admin, shared-core | 11 | 3 |
 | `people-services-admin` | People, Providers, Services | integrations-sync, scheduling-backoffice, settings-compliance, shared-core | 24 | 3 |
 | `settings-compliance` | Settings & Compliance | auth-session, integrations-sync, people-services-admin, scheduling-backoffice, shared-core | 27 | 3 |
-| `integrations-sync` | Integrations & Sync | auth-session, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 12 | 2 |
+| `integrations-sync` | Integrations & Sync | auth-session, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 6 | 1 |
 | `api-v1` | REST API v1 | auth-session, integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 5 | 3 |
 | `shared-core` | Shared Core | None | 10 | 2 |
 | `platform-quality-tooling` | Platform, CI, Release Gates | api-v1, booking-public, dashboard-exports, installation-bootstrap, people-services-admin, settings-compliance, shared-core | 19 | 11 |
@@ -279,7 +279,7 @@ Key files:
 
 ### `integrations-sync` - Integrations & Sync
 
-External integration adapters (LDAP and webhooks).
+Retained integration settings and LDAP adapter.
 
 Dependencies:
 - `auth-session`
@@ -289,22 +289,15 @@ Dependencies:
 - `shared-core`
 
 Path rules:
-- `application/controllers/Webhooks.php` (exact_file)
 - `application/controllers/Integrations.php` (exact_file)
 - `application/controllers/Ldap_settings.php` (exact_file)
-- `application/libraries/Webhooks_client.php` (exact_file)
 - `application/libraries/Ldap_client.php` (exact_file)
-- `application/libraries/Integrations_request_dto_factory.php` (exact_file)
-- `application/models/Webhooks_model.php` (exact_file)
 - `application/views/pages/integrations.php` (exact_file)
-- `application/views/pages/webhooks.php` (exact_file)
 - `application/views/pages/ldap_settings.php` (exact_file)
-- `assets/js/pages/webhooks.js` (exact_file)
 - `assets/js/pages/ldap_settings.js` (exact_file)
 
 Key files:
 - `application/controllers/Integrations.php`
-- `application/libraries/Webhooks_client.php`
 
 ### `api-v1` - REST API v1
 

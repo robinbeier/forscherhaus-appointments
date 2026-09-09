@@ -63,7 +63,6 @@ deptrac:
             - Settings_model
             - Unavailabilities_model
             - Users_model
-            - Webhooks_model
             - Blocked_periods_model
             - Accounts
             - Api
@@ -76,4 +75,3 @@ deptrac:
             - Notifications
             - Permissions
             - Timezones
-            - Webhooks_client

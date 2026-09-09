@@ -4,28 +4,25 @@ namespace Tests\Integration\Controllers;
 
 use Api;
 use Providers_api_v1;
+use PHPUnit\Framework\Attributes\PreserveGlobalState;
+use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 use Tests\TestCase;
-use Webhooks_api_v1;
 
 require_once APPPATH . 'libraries/Api.php';
 require_once APPPATH . 'controllers/api/v1/Providers_api_v1.php';
-require_once APPPATH . 'controllers/api/v1/Webhooks_api_v1.php';
 
 /**
  * Endpoint-near regression coverage for write-only integration credentials.
  *
- * @runTestsInSeparateProcesses
- * @preserveGlobalState disabled
  */
+#[RunTestsInSeparateProcesses]
+#[PreserveGlobalState(false)]
 final class ApiIntegrationSecretsWriteOnlyFlowTest extends TestCase
 {
     private object $CI;
 
     /** @var array<int> */
     private array $providerIds = [];
-
-    /** @var array<int> */
-    private array $webhookIds = [];
 
     protected function setUp(): void
     {
@@ -38,10 +35,6 @@ final class ApiIntegrationSecretsWriteOnlyFlowTest extends TestCase
 
     protected function tearDown(): void
     {
-        foreach ($this->webhookIds as $id) {
-            $this->CI->db->delete('webhooks', ['id' => $id]);
-        }
-
         foreach ($this->providerIds as $id) {
             $this->CI->db->delete('services_providers', ['id_users' => $id]);
             $this->CI->db->delete('user_settings', ['id_users' => $id]);
@@ -125,62 +118,6 @@ final class ApiIntegrationSecretsWriteOnlyFlowTest extends TestCase
         $this->assertTrue(($afterConvergedWrite['caldav_password'] ?? null) === 'rotated-caldav');
     }
 
-    public function testWebhookReadsAndWriteResponsesNeverExposeSecrets(): void
-    {
-        $webhookId = $this->createWebhook();
-
-        $_GET = ['length' => '100', 'page' => '1'];
-        $this->createWebhooksController()->index();
-        $this->assertWebhookSecretsAbsentFromList($this->decodeJsonOutput());
-
-        $this->resetRequest();
-        $this->createWebhooksController()->show($webhookId);
-        $this->assertWebhookSecretsAbsent($this->decodeJsonOutput());
-
-        $this->resetRequest();
-        $_GET = ['fields' => 'secretToken,secret_token'];
-        $this->createWebhooksController()->show($webhookId);
-        $this->assertWebhookSecretsAbsent($this->decodeJsonOutput());
-
-        $this->resetRequest();
-        $_GET = ['q' => 'Synthetic'];
-        $this->createWebhooksController()->index();
-        $this->assertWebhookSecretsAbsentFromList($this->decodeJsonOutput());
-
-        $this->resetRequest();
-        $this->setPostPayload([
-            'name' => 'Synthetic webhook rotated',
-            'url' => 'https://example.org/hook',
-            'secretToken' => 'rotated-webhook-secret',
-        ]);
-        $this->createWebhooksController()->update($webhookId);
-        $this->assertWebhookSecretsAbsent($this->decodeJsonOutput());
-    }
-
-    public function testWebhookUpdatesPreserveOmittedSecretAndAcceptExplicitRotation(): void
-    {
-        $webhookId = $this->createWebhook();
-        $before = (string) $this->CI->db->get_where('webhooks', ['id' => $webhookId])->row()->secret_token;
-
-        $this->setPostPayload(['name' => 'Synthetic webhook unchanged']);
-        $this->createWebhooksController()->update($webhookId);
-        $this->assertWebhookSecretsAbsent($this->decodeJsonOutput());
-        $afterOmitted = (string) $this->CI->db->get_where('webhooks', ['id' => $webhookId])->row()->secret_token;
-        $this->assertTrue($afterOmitted === $before);
-
-        $this->setPostPayload(['secretToken' => 'rotated-webhook-secret']);
-        $this->createWebhooksController()->update($webhookId);
-        $this->assertWebhookSecretsAbsent($this->decodeJsonOutput());
-        $afterRotation = (string) $this->CI->db->get_where('webhooks', ['id' => $webhookId])->row()->secret_token;
-        $this->assertTrue($afterRotation === 'rotated-webhook-secret');
-
-        $this->setPostPayload(['secretToken' => 'rotated-webhook-secret']);
-        $this->createWebhooksController()->update($webhookId);
-        $this->assertWebhookSecretsAbsent($this->decodeJsonOutput());
-        $afterConvergedWrite = (string) $this->CI->db->get_where('webhooks', ['id' => $webhookId])->row()->secret_token;
-        $this->assertTrue($afterConvergedWrite === 'rotated-webhook-secret');
-    }
-
     public function testExplicitNullClearsStoredCredentialsWithoutEchoingThem(): void
     {
         $providerId = $this->createProvider();
@@ -199,13 +136,6 @@ final class ApiIntegrationSecretsWriteOnlyFlowTest extends TestCase
         $this->assertTrue(
             array_key_exists('caldav_password', $providerSettings) && $providerSettings['caldav_password'] === null,
         );
-
-        $webhookId = $this->createWebhook();
-        $this->setPostPayload(['secretToken' => null]);
-        $this->createWebhooksController()->update($webhookId);
-        $this->assertWebhookSecretsAbsent($this->decodeJsonOutput());
-        $webhook = $this->CI->db->get_where('webhooks', ['id' => $webhookId])->row_array();
-        $this->assertTrue(array_key_exists('secret_token', $webhook) && $webhook['secret_token'] === null);
     }
 
     public function testInvalidProviderCredentialTypeIsRejectedWithoutMutation(): void
@@ -230,24 +160,6 @@ final class ApiIntegrationSecretsWriteOnlyFlowTest extends TestCase
         $this->assertTrue(($afterProvider['notes'] ?? null) === ($beforeProvider['notes'] ?? null));
         $this->assertTrue(($afterSettings['google_token'] ?? null) === ($beforeSettings['google_token'] ?? null));
         $this->assertTrue(($afterSettings['caldav_password'] ?? null) === ($beforeSettings['caldav_password'] ?? null));
-    }
-
-    public function testInvalidWebhookCredentialLengthIsRejectedWithoutMutation(): void
-    {
-        $webhookId = $this->createWebhook();
-        $before = $this->CI->db->get_where('webhooks', ['id' => $webhookId])->row_array();
-
-        $this->setPostPayload([
-            'name' => 'must not be persisted',
-            'secretToken' => str_repeat('x', 513),
-        ]);
-        $this->createWebhooksController()->update($webhookId);
-        $response = $this->decodeJsonOutput();
-        $after = $this->CI->db->get_where('webhooks', ['id' => $webhookId])->row_array();
-
-        $this->assertTrue(($response['success'] ?? null) === false);
-        $this->assertTrue(($after['name'] ?? null) === ($before['name'] ?? null));
-        $this->assertTrue(($after['secret_token'] ?? null) === ($before['secret_token'] ?? null));
     }
 
     private function createProvider(): int
@@ -290,24 +202,6 @@ final class ApiIntegrationSecretsWriteOnlyFlowTest extends TestCase
         return $this->CI->db->get_where('user_settings', ['id_users' => $id])->row_array();
     }
 
-    private function createWebhook(): int
-    {
-        $this->setPostPayload([
-            'name' => 'Synthetic webhook',
-            'url' => 'https://example.org/hook',
-            'actions' => 'synthetic_action',
-            'secretToken' => 'initial-webhook-secret',
-        ]);
-        $this->createWebhooksController()->store();
-        $response = $this->decodeJsonOutput();
-        $this->assertWebhookSecretsAbsent($response);
-        $id = (int) ($response['id'] ?? 0);
-        $this->assertGreaterThan(0, $id);
-        $this->webhookIds[] = $id;
-
-        return $id;
-    }
-
     private function assertProviderSecretsAbsentFromList(array $providers): void
     {
         foreach ($providers as $provider) {
@@ -326,21 +220,6 @@ final class ApiIntegrationSecretsWriteOnlyFlowTest extends TestCase
         $this->assertFalse(is_array($settings) && array_key_exists('caldav_password', $settings));
     }
 
-    private function assertWebhookSecretsAbsentFromList(array $webhooks): void
-    {
-        foreach ($webhooks as $webhook) {
-            if (is_array($webhook)) {
-                $this->assertWebhookSecretsAbsent($webhook);
-            }
-        }
-    }
-
-    private function assertWebhookSecretsAbsent(array $webhook): void
-    {
-        $this->assertFalse(array_key_exists('secretToken', $webhook));
-        $this->assertFalse(array_key_exists('secret_token', $webhook));
-    }
-
     private function createProvidersController(): Providers_api_v1
     {
         $controller = new class extends Providers_api_v1 {
@@ -353,27 +232,7 @@ final class ApiIntegrationSecretsWriteOnlyFlowTest extends TestCase
         $controller->output = $this->CI->output;
         $controller->providers_model = $this->CI->providers_model;
         $controller->api_request_dto_factory = $this->CI->api_request_dto_factory;
-        $controller->webhooks_client = new class {
-            public function trigger(...$args): void {}
-        };
         $controller->api = $this->authenticatedApi('providers_model');
-
-        return $controller;
-    }
-
-    private function createWebhooksController(): Webhooks_api_v1
-    {
-        $controller = new class extends Webhooks_api_v1 {
-            public function __construct() {}
-        };
-        $this->CI->load->model('webhooks_model');
-        $this->CI->load->library('api_request_dto_factory');
-        $controller->load = $this->CI->load;
-        $controller->input = $this->CI->input;
-        $controller->output = $this->CI->output;
-        $controller->webhooks_model = $this->CI->webhooks_model;
-        $controller->api_request_dto_factory = $this->CI->api_request_dto_factory;
-        $controller->api = $this->authenticatedApi('webhooks_model');
 
         return $controller;
     }

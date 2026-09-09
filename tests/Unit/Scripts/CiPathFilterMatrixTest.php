@@ -120,6 +120,21 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertFalse($matches['write_contract_api']);
     }
 
+    public function testRetainedIntegrationTestChangesTriggerCoverageGate(): void
+    {
+        foreach (
+            [
+                'tests/Integration/Controllers/ApiIntegrationSecretsWriteOnlyFlowTest.php',
+                'tests/Integration/Controllers/CalendarProviderDataTest.php',
+                'tests/Integration/Controllers/EntityStoreAuthorizationTest.php',
+                'tests/Integration/Controllers/CalendarEventPermissionsTest.php',
+            ]
+            as $path
+        ) {
+            self::assertTrue($this->applyFilters([$path])['coverage_required'], $path);
+        }
+    }
+
     public function testBookingControllerChangeKeepsRuntimeAndCoverageProtection(): void
     {
         $matches = $this->applyFilters(['application/controllers/Booking.php']);
@@ -479,21 +494,6 @@ class CiPathFilterMatrixTest extends TestCase
 
         self::assertFalse($matches['request_contracts_required']);
         self::assertFalse($matches['coverage_required']);
-        self::assertFalse($matches['pdf_renderer_tests_required']);
-        self::assertFalse($matches['api_contract']);
-        self::assertTrue($matches['booking_flows']);
-        self::assertTrue($matches['integration_smoke']);
-        self::assertTrue($matches['ldap_guardrail_required']);
-        self::assertTrue($matches['write_contract_booking']);
-        self::assertTrue($matches['write_contract_api']);
-    }
-
-    public function testIntegrationsRequestDtoFactoryChangeTriggersLdapGuardrailFilter(): void
-    {
-        $matches = $this->applyFilters(['application/libraries/Integrations_request_dto_factory.php']);
-
-        self::assertTrue($matches['request_contracts_required']);
-        self::assertTrue($matches['coverage_required']);
         self::assertFalse($matches['pdf_renderer_tests_required']);
         self::assertFalse($matches['api_contract']);
         self::assertTrue($matches['booking_flows']);
