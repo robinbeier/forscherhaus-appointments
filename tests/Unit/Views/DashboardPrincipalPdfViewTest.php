@@ -40,6 +40,27 @@ class DashboardPrincipalPdfViewTest extends TestCase
         self::assertStringNotContainsString('Buchungsziel erreicht', $output);
     }
 
+    public function testExplicitZeroTargetIsRenderedAsAClassTarget(): void
+    {
+        $output = $this->render(
+            [
+                $this->metric([
+                    'target_raw' => 0,
+                    'booked_raw' => 0,
+                    'booked_appointments_raw' => 0,
+                    'has_explicit_target' => true,
+                    'is_target_fallback' => false,
+                ]),
+            ],
+            ['appointment_count_total' => 0, 'explicit_target_total' => 0, 'explicit_target_complete' => true],
+        );
+
+        self::assertStringContainsString('>0</div><div class="label">Benötigte Termine', $output);
+        self::assertStringContainsString('Buchungsziel erreicht', $output);
+        self::assertStringNotContainsString('Automatische Zielgröße', $output);
+        self::assertStringNotContainsString('Kein Klassenziel bewertet', $output);
+    }
+
     public function testTrueAppointmentCountDoesNotBecomeAClaimAboutReachedFamilies(): void
     {
         $output = $this->render(

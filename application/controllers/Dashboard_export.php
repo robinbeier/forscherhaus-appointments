@@ -614,6 +614,7 @@ class Dashboard_export extends EA_Controller
             $rounded_percent = round($fill_rate_percent);
 
             $target = (int) ($metric['target'] ?? 0);
+            $has_explicit_target = !empty($metric['has_explicit_target']);
             $booked = (int) ($metric['booked'] ?? 0);
             $booked_appointments =
                 array_key_exists('booked_appointments', $metric) && is_int($metric['booked_appointments'])
@@ -657,7 +658,7 @@ class Dashboard_export extends EA_Controller
                 $status_label = lang('dashboard_booking_goal_missed') ?: 'Buchungsziel verfehlt';
             }
 
-            if ($is_zero_target) {
+            if ($is_zero_target && !$has_explicit_target) {
                 $status_variant = 'muted';
                 $status_label = lang('dashboard_no_target') ?: 'Kein Ziel';
             }
@@ -683,7 +684,7 @@ class Dashboard_export extends EA_Controller
                     ? 'Automatische Zielgröße'
                     : 'Klassengröße',
                 'has_plan' => !empty($metric['has_plan']),
-                'has_explicit_target' => !empty($metric['has_explicit_target']),
+                'has_explicit_target' => $has_explicit_target,
                 'is_zero_target' => $is_zero_target,
                 'threshold_percent' => $threshold * 100,
                 'threshold_absolute' => $threshold_target,
@@ -1371,6 +1372,7 @@ class Dashboard_export extends EA_Controller
             }
 
             $target = max(0, (int) ($metric['target_raw'] ?? ($raw['target'] ?? 0)));
+            $has_explicit_target = !empty($metric['has_explicit_target'] ?? ($raw['has_explicit_target'] ?? false));
             $booked = max(0, (int) ($metric['booked_raw'] ?? ($raw['booked'] ?? 0)));
             $open = max(0, (int) ($metric['open_raw'] ?? ($raw['open'] ?? $target - $booked)));
 
@@ -1413,7 +1415,7 @@ class Dashboard_export extends EA_Controller
                 'provider_id' => $provider_id,
                 'provider_name' => (string) ($metric['provider_name'] ?? ''),
                 'target' => $target,
-                'target_formatted' => $target > 0 ? $this->formatNumber($target) : '—',
+                'target_formatted' => $has_explicit_target || $target > 0 ? $this->formatNumber($target) : '—',
                 'booked' => $booked,
                 'booked_formatted' => $this->formatNumber($booked),
                 'booked_percent_formatted' => $fill_rate_percent,
@@ -1433,7 +1435,7 @@ class Dashboard_export extends EA_Controller
                     'open_percent' => $progress_open,
                 ],
                 'slot_info_text' =>
-                    $target > 0
+                    $has_explicit_target || $target > 0
                         ? sprintf($slotInfoWithTarget, $this->formatNumber($booked), $this->formatNumber($target))
                         : sprintf($slotInfoWithoutTarget, $this->formatNumber($booked)),
             ];

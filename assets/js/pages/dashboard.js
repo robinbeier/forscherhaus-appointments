@@ -1186,7 +1186,7 @@ App.Pages.Dashboard = (function () {
 
                                 if (context.datasetIndex === 0) {
                                     const percent = target > 0 ? ((bookedValue / target) * 100).toFixed(1) : '0.0';
-                                    const targetLabel = target > 0 ? target : '—';
+                                    const targetLabel = metric.has_explicit_target || target > 0 ? target : '—';
 
                                     return `${context.dataset.label}: ${bookedValue}/${targetLabel} (${percent}%)`;
                                 }
@@ -1214,9 +1214,9 @@ App.Pages.Dashboard = (function () {
 
         visibleMetrics.forEach((item) => {
             const fillPercentage = item.target > 0 ? (item.fill_rate * 100).toFixed(1) : '0.0';
-            const remaining = item.target > 0 ? item.open : '—';
+            const remaining = item.has_explicit_target || item.target > 0 ? item.open : '—';
             const explicitTarget =
-                typeof item.class_size_default === 'number' && item.class_size_default > 0
+                item.has_explicit_target && typeof item.class_size_default === 'number' && item.class_size_default >= 0
                     ? item.class_size_default
                     : null;
             const $row = $('<tr/>', {
