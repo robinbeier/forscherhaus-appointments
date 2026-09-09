@@ -120,6 +120,21 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertFalse($matches['write_contract_api']);
     }
 
+    public function testRetainedIntegrationTestChangesTriggerCoverageGate(): void
+    {
+        foreach (
+            [
+                'tests/Integration/Controllers/ApiIntegrationSecretsWriteOnlyFlowTest.php',
+                'tests/Integration/Controllers/CalendarProviderDataTest.php',
+                'tests/Integration/Controllers/EntityStoreAuthorizationTest.php',
+                'tests/Integration/Controllers/CalendarEventPermissionsTest.php',
+            ]
+            as $path
+        ) {
+            self::assertTrue($this->applyFilters([$path])['coverage_required'], $path);
+        }
+    }
+
     public function testBookingControllerChangeKeepsRuntimeAndCoverageProtection(): void
     {
         $matches = $this->applyFilters(['application/controllers/Booking.php']);
