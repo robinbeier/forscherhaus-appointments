@@ -10,7 +10,7 @@
             "source": "scripts/ops/kuma_push_app_logs.sh",
             "install": "scripts/ops/kuma_push_app_logs.sh",
             "role": "entrypoint",
-            "sha256": "ebff42c82930c99926b97ddb3f6855fa2625edbdc2693d74e6f2974af504bad4"
+            "sha256": "d569ef1343c60f38196ae047942da38cd64c0e2ce301d8698b3224335321c3f9"
         },
         {
             "source": "scripts/ops/kuma_push_backup_creation.sh",
@@ -34,13 +34,13 @@
             "source": "scripts/ops/kuma_push_pdf_export.sh",
             "install": "scripts/ops/kuma_push_pdf_export.sh",
             "role": "entrypoint",
-            "sha256": "f6a91e46dbb61924b5a4a9d83442b07804adb2644c8f38483586f8541d1ce9c4"
+            "sha256": "344e02039d569415cb68032843f45baf36178f3a1f43d080a281f5a7f3a5cb32"
         },
         {
             "source": "scripts/ops/lib/kuma_push_common.sh",
             "install": "scripts/ops/lib/kuma_push_common.sh",
             "role": "shell_library",
-            "sha256": "b6bde394c17eed0163e17cdaee02d88f0d6457a57a0688b342ad14cede120fc3"
+            "sha256": "f10665edccf5a28540f3cbf5cd90bb9000b7c052901574ecc68cb0e05bc7ee56"
         },
         {
             "source": "scripts/ops/lib/app_log_classification.sh",

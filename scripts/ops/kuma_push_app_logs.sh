@@ -21,10 +21,28 @@ THRESHOLD="${KUMA_APP_LOG_ERROR_THRESHOLD:-0}"
 
 kuma_push_require_env KUMA_PUSH_URL_APP_LOGS
 
-mkdir -p "$STATE_DIR"
+STATE_DIR="$(kuma_push_prepare_private_directory "$STATE_DIR")" || kuma_push_die "Unsafe private state directory"
+STATE_FILE="${STATE_DIR}/app-logs.state"
+if [[ -n "${KUMA_APP_LOG_LOCK_FILE:-}" ]]; then
+  lock_parent="$(dirname -- "$KUMA_APP_LOG_LOCK_FILE")"
+  lock_leaf="$(basename -- "$KUMA_APP_LOG_LOCK_FILE")"
+  [[ "$lock_leaf" != . && "$lock_leaf" != .. && -n "$lock_leaf" ]] || kuma_push_die "Unsafe private lock file path"
+  lock_parent="$(kuma_push_prepare_private_directory "$lock_parent")" || kuma_push_die "Unsafe private lock directory"
+  LOCK_FILE="${lock_parent}/${lock_leaf}"
+else
+  LOCK_FILE="${STATE_DIR}/app-logs.lock"
+fi
+kuma_push_validate_private_file "$STATE_FILE" || kuma_push_die "Unsafe private state file"
+kuma_push_validate_private_file "$LOCK_FILE" || kuma_push_die "Unsafe private lock file"
 
 if command -v flock >/dev/null 2>&1; then
-  exec 9>"$LOCK_FILE"
+  if [[ ! -e "$LOCK_FILE" ]]; then
+    if ! (set -o noclobber; : > "$LOCK_FILE"); then
+      [[ -e "$LOCK_FILE" && ! -L "$LOCK_FILE" ]] || kuma_push_die "Unable to create private lock file"
+    fi
+  fi
+  kuma_push_validate_private_file "$LOCK_FILE" || kuma_push_die "Unsafe private lock file"
+  exec 9>>"$LOCK_FILE"
   if ! flock -n 9; then
     msg="OK app log monitor already running: $(basename "$LOCK_FILE")"
     kuma_push_log "$msg"
@@ -44,6 +62,7 @@ current_size="$(kuma_push_stat_size "$LOG_FILE")"
 
 if [[ ! -f "$STATE_FILE" ]]; then
   printf '%s|%s|%s\n' "$LOG_FILE" "$current_inode" "$current_size" > "$STATE_FILE"
+  kuma_push_validate_private_file "$STATE_FILE" || kuma_push_die "Unsafe private state file"
   msg="OK primed app log monitor at $(basename "$LOG_FILE") size=${current_size}"
   kuma_push_send "$KUMA_PUSH_URL_APP_LOGS" "up" "$msg" "1"
   kuma_push_log "$msg"
@@ -53,11 +72,15 @@ fi
 IFS='|' read -r previous_file previous_inode previous_offset < "$STATE_FILE" || true
 previous_offset="${previous_offset:-0}"
 
-tmp_delta="$(mktemp)"
+tmp_dir="$(mktemp -d "$STATE_DIR/delta.XXXXXX")" || kuma_push_die "Unable to create private app-log workspace"
+tmp_delta="$tmp_dir/delta"
+tmp_filtered="$tmp_dir/filtered"
 cleanup() {
-  rm -f "$tmp_delta"
+  rm -f "$tmp_delta" "$tmp_filtered"
+  rmdir "$tmp_dir" 2>/dev/null || true
 }
 trap cleanup EXIT
+(umask 077; : > "$tmp_delta"; : > "$tmp_filtered") || kuma_push_die "Unable to create private app-log workspace files"
 
 if [[ "$previous_file" == "$LOG_FILE" && "$previous_inode" == "$current_inode" && "$current_size" -ge "$previous_offset" ]]; then
   if (( previous_offset < current_size )); then
@@ -69,10 +92,11 @@ else
   cp "$LOG_FILE" "$tmp_delta"
 fi
 
-app_log_filter_actionable_file "$tmp_delta" "${tmp_delta}.filtered" "$IGNORE_REGEX"
-mv "${tmp_delta}.filtered" "$tmp_delta"
+app_log_filter_actionable_file "$tmp_delta" "$tmp_filtered" "$IGNORE_REGEX"
+mv "$tmp_filtered" "$tmp_delta"
 
 printf '%s|%s|%s\n' "$LOG_FILE" "$current_inode" "$current_size" > "$STATE_FILE"
+kuma_push_validate_private_file "$STATE_FILE" || kuma_push_die "Unsafe private state file"
 
 new_errors="$(grep -cF "$PATTERN" "$tmp_delta" || true)"
 new_errors="${new_errors:-0}"

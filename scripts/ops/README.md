@@ -146,6 +146,9 @@ Optional PDF export env:
 - `KUMA_PDF_EXPORT_BASE_URL` default `http://localhost`
 - `KUMA_PDF_EXPORT_INDEX_PAGE` default `index.php`
 - `KUMA_PDF_EXPORT_CREDENTIALS_FILE` default `/etc/fh/release-gate-admin.env`
+- `KUMA_PDF_EXPORT_OUTPUT_DIR` defaults to `KUMA_PUSH_STATE_DIR`, or
+  `/var/tmp/kuma-push-state` when unset. The report belongs outside the
+  application-writable tree, in a private directory owned by the monitor user.
 - `KUMA_PDF_EXPORT_USERNAME` overrides `USERNAME`
 - `KUMA_PDF_EXPORT_PASSWORD` overrides `PASSWORD`
 - `KUMA_PDF_EXPORT_PDF_HEALTH_URL` default `http://127.0.0.1:3003/healthz`
@@ -174,6 +177,11 @@ App log script behavior:
 - does not ignore all 404s, all warnings, or all rate-limit-related errors;
   genuine unclassified app errors must still turn monitor `#9` red
 - uses an exclusive lock around the state file so a staggered second cron run cannot race the primary per-minute run
+- keeps its cursor and lock in the private `KUMA_PUSH_STATE_DIR` (default
+  `/var/tmp/kuma-push-state`). Existing unsafe directories, links, hardlinks or
+  file permissions are rejected without changing their targets. The PDF report
+  uses the same private-storage checks; operators must review an unsafe existing
+  path instead of having the monitor silently replace or chmod it.
 - production currently runs `kuma_push_app_logs.sh` twice per minute: once on the minute and once with a `sleep 30` offset for faster recovery on monitor `#9`
 
 `prod_logs_summary.sh` and `prod_validate_after_change.sh` use the same built-in
