@@ -11,14 +11,16 @@ if (realpath((string) ($_SERVER['SCRIPT_FILENAME'] ?? '')) === __FILE__) {
 
 /**
  * @param array<int, string> $argv
+ * @param resource $stdout
+ * @param resource $stderr
  */
-function runAssertDeepRuntimeSuiteCli(array $argv): int
+function runAssertDeepRuntimeSuiteCli(array $argv, $stdout = STDOUT, $stderr = STDERR): int
 {
     try {
         $config = parseAssertDeepRuntimeSuiteCliOptions($argv);
 
         if ($config['help'] === true) {
-            fwrite(STDOUT, assertDeepRuntimeSuiteUsage());
+            fwrite($stdout, assertDeepRuntimeSuiteUsage());
 
             return ASSERT_DEEP_RUNTIME_SUITE_EXIT_SUCCESS;
         }
@@ -28,7 +30,7 @@ function runAssertDeepRuntimeSuiteCli(array $argv): int
 
         $suite = $manifest['suites'][$config['suite']];
         fwrite(
-            STDOUT,
+            $stdout,
             sprintf(
                 '[PASS] deep-runtime verdict %s (%ss)%s',
                 $config['suite'],
@@ -39,7 +41,7 @@ function runAssertDeepRuntimeSuiteCli(array $argv): int
 
         return ASSERT_DEEP_RUNTIME_SUITE_EXIT_SUCCESS;
     } catch (Throwable $e) {
-        fwrite(STDERR, '[FAIL] deep-runtime verdict failed: ' . $e->getMessage() . PHP_EOL);
+        fwrite($stderr, '[FAIL] deep-runtime verdict failed: ' . $e->getMessage() . PHP_EOL);
 
         return ASSERT_DEEP_RUNTIME_SUITE_EXIT_FAILURE;
     }

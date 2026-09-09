@@ -12,8 +12,10 @@ if (realpath((string) ($_SERVER['SCRIPT_FILENAME'] ?? '')) === __FILE__) {
 
 /**
  * @param array<int, string> $argv
+ * @param resource $stdout
+ * @param resource $stderr
  */
-function runCoverageDeltaCli(array $argv): int
+function runCoverageDeltaCli(array $argv, $stdout = STDOUT, $stderr = STDERR): int
 {
     $config = coverageDeltaDefaultConfig();
 
@@ -29,7 +31,7 @@ function runCoverageDeltaCli(array $argv): int
         parseCoverageDeltaCliOptions($argv, $config);
 
         if ($config['help'] === true) {
-            fwrite(STDOUT, coverageDeltaUsage());
+            fwrite($stdout, coverageDeltaUsage());
 
             return COVERAGE_DELTA_EXIT_SUCCESS;
         }
@@ -61,13 +63,13 @@ function runCoverageDeltaCli(array $argv): int
 
         if ($evaluation['status'] === 'pass') {
             $exitCode = COVERAGE_DELTA_EXIT_SUCCESS;
-            fwrite(STDOUT, '[PASS] coverage-delta ' . $summary . PHP_EOL);
+            fwrite($stdout, '[PASS] coverage-delta ' . $summary . PHP_EOL);
         } else {
             $exitCode = COVERAGE_DELTA_EXIT_ASSERTION_FAILURE;
-            fwrite(STDERR, '[FAIL] coverage-delta ' . $summary . PHP_EOL);
+            fwrite($stderr, '[FAIL] coverage-delta ' . $summary . PHP_EOL);
 
             foreach ($evaluation['messages'] as $message) {
-                fwrite(STDERR, ' - ' . $message . PHP_EOL);
+                fwrite($stderr, ' - ' . $message . PHP_EOL);
             }
         }
     } catch (Throwable $e) {
@@ -76,15 +78,15 @@ function runCoverageDeltaCli(array $argv): int
             'message' => $e->getMessage(),
             'exception' => get_class($e),
         ];
-        fwrite(STDERR, '[ERROR] coverage-delta check failed: ' . $e->getMessage() . PHP_EOL);
+        fwrite($stderr, '[ERROR] coverage-delta check failed: ' . $e->getMessage() . PHP_EOL);
         $exitCode = COVERAGE_DELTA_EXIT_RUNTIME_ERROR;
     }
 
     try {
         writeCoverageDeltaReport($config['output_json'], $report);
-        fwrite(STDOUT, '[INFO] Report: ' . $config['output_json'] . PHP_EOL);
+        fwrite($stdout, '[INFO] Report: ' . $config['output_json'] . PHP_EOL);
     } catch (Throwable $e) {
-        fwrite(STDERR, '[WARN] Failed to write coverage-delta report: ' . $e->getMessage() . PHP_EOL);
+        fwrite($stderr, '[WARN] Failed to write coverage-delta report: ' . $e->getMessage() . PHP_EOL);
 
         if ($exitCode === COVERAGE_DELTA_EXIT_SUCCESS) {
             $exitCode = COVERAGE_DELTA_EXIT_RUNTIME_ERROR;

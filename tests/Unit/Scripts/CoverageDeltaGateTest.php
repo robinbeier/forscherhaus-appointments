@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit\Scripts;
 
 use PHPUnit\Framework\TestCase;
+use Tests\Support\CliOutputCapture;
 
 require_once __DIR__ . '/../../../scripts/ci/check_coverage_delta.php';
 
@@ -32,6 +33,7 @@ class CoverageDeltaGateTest extends TestCase
 
     public function testRunCoverageDeltaCliPassesWhenCoverageMeetsPolicy(): void
     {
+        $output = new CliOutputCapture();
         $policyFile = $this->writePolicy(
             [
                 'baseline_line_coverage_pct' => 4.19,
@@ -44,19 +46,26 @@ class CoverageDeltaGateTest extends TestCase
 
         $outputFile = $this->tmpDir . '/coverage-pass.json';
 
-        $exitCode = runCoverageDeltaCli([
-            'check_coverage_delta.php',
-            '--clover=' . $this->fixturePath('clover-high.xml'),
-            '--policy=' . $policyFile,
-            '--output-json=' . $outputFile,
-        ]);
+        $exitCode = runCoverageDeltaCli(
+            [
+                'check_coverage_delta.php',
+                '--clover=' . $this->fixturePath('clover-high.xml'),
+                '--policy=' . $policyFile,
+                '--output-json=' . $outputFile,
+            ],
+            $output->stdout,
+            $output->stderr,
+        );
 
-        self::assertSame(COVERAGE_DELTA_EXIT_SUCCESS, $exitCode);
+        self::assertSame(COVERAGE_DELTA_EXIT_SUCCESS, $exitCode, $output->diagnostic());
+        self::assertStringContainsString('[PASS] coverage-delta', $output->stdoutContents());
+        self::assertSame('', $output->stderrContents());
         self::assertSame('pass', $this->readReport($outputFile)['status']);
     }
 
     public function testRunCoverageDeltaCliFailsWhenDropExceedsAllowedDelta(): void
     {
+        $output = new CliOutputCapture();
         $policyFile = $this->writePolicy(
             [
                 'baseline_line_coverage_pct' => 10.0,
@@ -69,16 +78,22 @@ class CoverageDeltaGateTest extends TestCase
 
         $outputFile = $this->tmpDir . '/coverage-delta-fail.json';
 
-        $exitCode = runCoverageDeltaCli([
-            'check_coverage_delta.php',
-            '--clover=' . $this->fixturePath('clover-low.xml'),
-            '--policy=' . $policyFile,
-            '--output-json=' . $outputFile,
-        ]);
+        $exitCode = runCoverageDeltaCli(
+            [
+                'check_coverage_delta.php',
+                '--clover=' . $this->fixturePath('clover-low.xml'),
+                '--policy=' . $policyFile,
+                '--output-json=' . $outputFile,
+            ],
+            $output->stdout,
+            $output->stderr,
+        );
 
         $report = $this->readReport($outputFile);
 
-        self::assertSame(COVERAGE_DELTA_EXIT_ASSERTION_FAILURE, $exitCode);
+        self::assertSame(COVERAGE_DELTA_EXIT_ASSERTION_FAILURE, $exitCode, $output->diagnostic());
+        self::assertStringContainsString('[FAIL] coverage-delta', $output->stderrContents());
+        self::assertStringContainsString('[INFO] Report:', $output->stdoutContents());
         self::assertSame('fail', $report['status']);
         self::assertFalse($report['checks']['delta_pass']);
         self::assertTrue($report['checks']['absolute_min_pass']);
@@ -86,6 +101,7 @@ class CoverageDeltaGateTest extends TestCase
 
     public function testRunCoverageDeltaCliFailsWhenAbsoluteMinimumIsViolated(): void
     {
+        $output = new CliOutputCapture();
         $policyFile = $this->writePolicy(
             [
                 'baseline_line_coverage_pct' => 4.19,
@@ -98,16 +114,21 @@ class CoverageDeltaGateTest extends TestCase
 
         $outputFile = $this->tmpDir . '/coverage-absolute-fail.json';
 
-        $exitCode = runCoverageDeltaCli([
-            'check_coverage_delta.php',
-            '--clover=' . $this->fixturePath('clover-low.xml'),
-            '--policy=' . $policyFile,
-            '--output-json=' . $outputFile,
-        ]);
+        $exitCode = runCoverageDeltaCli(
+            [
+                'check_coverage_delta.php',
+                '--clover=' . $this->fixturePath('clover-low.xml'),
+                '--policy=' . $policyFile,
+                '--output-json=' . $outputFile,
+            ],
+            $output->stdout,
+            $output->stderr,
+        );
 
         $report = $this->readReport($outputFile);
 
-        self::assertSame(COVERAGE_DELTA_EXIT_ASSERTION_FAILURE, $exitCode);
+        self::assertSame(COVERAGE_DELTA_EXIT_ASSERTION_FAILURE, $exitCode, $output->diagnostic());
+        self::assertStringContainsString('[FAIL] coverage-delta', $output->stderrContents());
         self::assertSame('fail', $report['status']);
         self::assertFalse($report['checks']['absolute_min_pass']);
         self::assertTrue($report['checks']['delta_pass']);
@@ -115,47 +136,55 @@ class CoverageDeltaGateTest extends TestCase
 
     public function testRunCoverageDeltaCliFailsForMalformedCloverInput(): void
     {
+        $output = new CliOutputCapture();
         $malformedClover = $this->tmpDir . '/clover-malformed.xml';
         file_put_contents($malformedClover, '<coverage><project>');
 
         $outputFile = $this->tmpDir . '/coverage-runtime-error.json';
 
-        $exitCode = runCoverageDeltaCli([
-            'check_coverage_delta.php',
-            '--clover=' . $malformedClover,
-            '--policy=' .
-            $this->writePolicy(
-                [
-                    'baseline_line_coverage_pct' => 4.19,
-                    'max_drop_pct_points' => 0.2,
-                    'absolute_min_line_coverage_pct' => 3.99,
-                    'epsilon_pct_points' => 0.02,
-                ],
-                'policy-malformed.php',
-            ),
-            '--output-json=' . $outputFile,
-        ]);
+        $exitCode = runCoverageDeltaCli(
+            [
+                'check_coverage_delta.php',
+                '--clover=' . $malformedClover,
+                '--policy=' .
+                $this->writePolicy(
+                    [
+                        'baseline_line_coverage_pct' => 4.19,
+                        'max_drop_pct_points' => 0.2,
+                        'absolute_min_line_coverage_pct' => 3.99,
+                        'epsilon_pct_points' => 0.02,
+                    ],
+                    'policy-malformed.php',
+                ),
+                '--output-json=' . $outputFile,
+            ],
+            $output->stdout,
+            $output->stderr,
+        );
 
         $report = $this->readReport($outputFile);
 
-        self::assertSame(COVERAGE_DELTA_EXIT_RUNTIME_ERROR, $exitCode);
+        self::assertSame(COVERAGE_DELTA_EXIT_RUNTIME_ERROR, $exitCode, $output->diagnostic());
+        self::assertStringContainsString('[ERROR] coverage-delta check failed:', $output->stderrContents());
         self::assertSame('error', $report['status']);
         self::assertStringContainsString('Failed to parse Clover XML', (string) $report['error']['message']);
     }
 
     public function testRunCoverageDeltaCliFailsForInvalidCliOption(): void
     {
+        $output = new CliOutputCapture();
         $outputFile = $this->tmpDir . '/coverage-invalid-option.json';
 
-        $exitCode = runCoverageDeltaCli([
-            'check_coverage_delta.php',
-            '--output-json=' . $outputFile,
-            '--invalid-option',
-        ]);
+        $exitCode = runCoverageDeltaCli(
+            ['check_coverage_delta.php', '--output-json=' . $outputFile, '--invalid-option'],
+            $output->stdout,
+            $output->stderr,
+        );
 
         $report = $this->readReport($outputFile);
 
-        self::assertSame(COVERAGE_DELTA_EXIT_RUNTIME_ERROR, $exitCode);
+        self::assertSame(COVERAGE_DELTA_EXIT_RUNTIME_ERROR, $exitCode, $output->diagnostic());
+        self::assertStringContainsString('[ERROR] coverage-delta check failed:', $output->stderrContents());
         self::assertSame('error', $report['status']);
         self::assertStringContainsString('Unknown CLI option', (string) $report['error']['message']);
     }

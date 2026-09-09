@@ -11,8 +11,10 @@ if (realpath((string) ($_SERVER['SCRIPT_FILENAME'] ?? '')) === __FILE__) {
 
 /**
  * @param array<int, string> $argv
+ * @param resource $stdout
+ * @param resource $stderr
  */
-function runCoverageShardMergeCli(array $argv): int
+function runCoverageShardMergeCli(array $argv, $stdout = STDOUT, $stderr = STDERR): int
 {
     $config = coverageShardMergeDefaultConfig();
     $report = [
@@ -27,7 +29,7 @@ function runCoverageShardMergeCli(array $argv): int
         parseCoverageShardMergeCliOptions($argv, $config);
 
         if ($config['help'] === true) {
-            fwrite(STDOUT, coverageShardMergeUsage());
+            fwrite($stdout, coverageShardMergeUsage());
 
             return COVERAGE_SHARD_MERGE_EXIT_SUCCESS;
         }
@@ -60,7 +62,7 @@ function runCoverageShardMergeCli(array $argv): int
             'files_merged' => count($config['inputs']),
         ];
 
-        fwrite(STDOUT, '[PASS] coverage-shard-merge merged ' . count($config['inputs']) . ' inputs.' . PHP_EOL);
+        fwrite($stdout, '[PASS] coverage-shard-merge merged ' . count($config['inputs']) . ' inputs.' . PHP_EOL);
         $exitCode = COVERAGE_SHARD_MERGE_EXIT_SUCCESS;
     } catch (Throwable $e) {
         $report['status'] = 'error';
@@ -69,7 +71,7 @@ function runCoverageShardMergeCli(array $argv): int
             'exception' => get_class($e),
         ];
 
-        fwrite(STDERR, '[ERROR] coverage-shard-merge failed: ' . $e->getMessage() . PHP_EOL);
+        fwrite($stderr, '[ERROR] coverage-shard-merge failed: ' . $e->getMessage() . PHP_EOL);
         $exitCode = COVERAGE_SHARD_MERGE_EXIT_RUNTIME_ERROR;
     }
 
@@ -86,9 +88,9 @@ function runCoverageShardMergeCli(array $argv): int
                 throw new RuntimeException('Failed to write coverage shard merge report: ' . $config['output_json']);
             }
 
-            fwrite(STDOUT, '[INFO] Report: ' . $config['output_json'] . PHP_EOL);
+            fwrite($stdout, '[INFO] Report: ' . $config['output_json'] . PHP_EOL);
         } catch (Throwable $e) {
-            fwrite(STDERR, '[WARN] Failed to write coverage shard merge report: ' . $e->getMessage() . PHP_EOL);
+            fwrite($stderr, '[WARN] Failed to write coverage shard merge report: ' . $e->getMessage() . PHP_EOL);
 
             if ($exitCode === COVERAGE_SHARD_MERGE_EXIT_SUCCESS) {
                 $exitCode = COVERAGE_SHARD_MERGE_EXIT_RUNTIME_ERROR;
