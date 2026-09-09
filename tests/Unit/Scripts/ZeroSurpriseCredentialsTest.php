@@ -84,7 +84,7 @@ class ZeroSurpriseCredentialsTest extends TestCase
 
             $this->assertSame('school-day-default', $resolved['profile_name']);
             $this->assertSame('', $resolved['index_page']);
-            $this->assertSame('2026-02-18', $resolved['start_date']);
+            $this->assertSame('2026-03-16', $resolved['start_date']);
             $this->assertSame('2026-03-20', $resolved['end_date']);
             $this->assertSame(14, $resolved['booking_search_days']);
             $this->assertSame(1, $resolved['retry_count']);
@@ -115,7 +115,7 @@ class ZeroSurpriseCredentialsTest extends TestCase
         $this->assertSame('', $resolved['index_page']);
         $this->assertSame('administrator', $resolved['username']);
         $this->assertSame('  keep-spaces  ', $resolved['password']);
-        $this->assertSame('2026-02-18', $resolved['start_date']);
+        $this->assertSame('2026-03-16', $resolved['start_date']);
         $this->assertSame('2026-03-20', $resolved['end_date']);
     }
 

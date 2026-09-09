@@ -12,6 +12,8 @@ This release gate runs a strict end-to-end replay of the critical dashboard chai
 
 It is designed to catch runtime regressions that unit tests can miss, without changing production request handlers.
 
+Dashboard periods must stay within one Monday-to-Friday school week; single weekdays are supported.
+
 ## Scope
 
 - Read-mostly replay only.
@@ -32,8 +34,8 @@ composer release:gate:dashboard -- \
   --index-page=index.php \
   --username="$EA_GATE_USERNAME" \
   --password="$EA_GATE_PASSWORD" \
-  --start-date=2026-02-01 \
-  --end-date=2026-03-03 \
+  --start-date=2026-02-02 \
+  --end-date=2026-02-06 \
   --statuses=Booked \
   --pdf-health-url=http://localhost:3003/healthz
 ```
@@ -99,7 +101,7 @@ for attempt in 1 2 3; do docker compose exec -T php-fpm php index.php console in
 docker compose exec -T php-fpm php scripts/ci/dashboard_integration_smoke.php \
   --base-url=http://nginx --index-page=index.php \
   --username=administrator --password=administrator \
-  --start-date=2026-01-01 --end-date=2026-01-31
+  --start-date=2026-01-12 --end-date=2026-01-16
 ```
 
 Smoke exit codes:

@@ -34,7 +34,7 @@
             "source": "scripts/ops/kuma_push_pdf_export.sh",
             "install": "scripts/ops/kuma_push_pdf_export.sh",
             "role": "entrypoint",
-            "sha256": "4ae3ae3068c388e71626ca96feb04e7db055b28cac23dcc775db4a47bf5778e0"
+            "sha256": "f6a91e46dbb61924b5a4a9d83442b07804adb2644c8f38483586f8541d1ce9c4"
         },
         {
             "source": "scripts/ops/lib/kuma_push_common.sh",

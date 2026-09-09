@@ -149,7 +149,10 @@ Optional PDF export env:
 - `KUMA_PDF_EXPORT_USERNAME` overrides `USERNAME`
 - `KUMA_PDF_EXPORT_PASSWORD` overrides `PASSWORD`
 - `KUMA_PDF_EXPORT_PDF_HEALTH_URL` default `http://127.0.0.1:3003/healthz`
-- `KUMA_PDF_EXPORT_WINDOW_DAYS` default `30`
+- The PDF gate uses the latest completed Monday-to-Friday school week (UTC).
+  The former `KUMA_PDF_EXPORT_WINDOW_DAYS` setting is no longer used.
+  Deploy the updated monitoring runtime together with the school-week validation;
+  older installed runtimes still request a 30-day range.
 
 App log script behavior:
 

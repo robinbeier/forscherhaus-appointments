@@ -101,6 +101,17 @@ final class ZeroSurpriseProfile
 
         $type = (string) ($window['type'] ?? '');
 
+        if ($type === 'completed_school_week') {
+            $now = ($nowUtc ?? new DateTimeImmutable('now', new DateTimeZone('UTC')))->setTimezone($timezoneOverride);
+            $daysSinceFriday = ((int) $now->format('N') + 2) % 7;
+            $end = $now->sub(new DateInterval('P' . $daysSinceFriday . 'D'));
+
+            return [
+                'start_date' => $end->sub(new DateInterval('P4D'))->format('Y-m-d'),
+                'end_date' => $end->format('Y-m-d'),
+            ];
+        }
+
         if ($type === 'trailing_days') {
             $days = self::normalizePositiveInt(
                 $window['days'] ?? null,
@@ -201,6 +212,10 @@ final class ZeroSurpriseProfile
         $type = trim((string) ($window['type'] ?? ''));
         if ($type === '') {
             throw new InvalidArgumentException('Profile window.type must not be empty: ' . $profileName);
+        }
+
+        if ($type === 'completed_school_week') {
+            return ['type' => $type];
         }
 
         if ($type === 'trailing_days') {

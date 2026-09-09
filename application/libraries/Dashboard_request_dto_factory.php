@@ -16,9 +16,7 @@
  */
 final class DashboardPeriodRequestDto
 {
-    public function __construct(public readonly DateTimeImmutable $start, public readonly DateTimeImmutable $end)
-    {
-    }
+    public function __construct(public readonly DateTimeImmutable $start, public readonly DateTimeImmutable $end) {}
 }
 
 /**
@@ -34,8 +32,7 @@ final class DashboardFilterRequestDto
         public readonly array $statuses,
         public readonly ?int $serviceId,
         public readonly array $providerIds,
-    ) {
-    }
+    ) {}
 }
 
 /**
@@ -43,9 +40,7 @@ final class DashboardFilterRequestDto
  */
 final class DashboardThresholdRequestDto
 {
-    public function __construct(public readonly float $threshold)
-    {
-    }
+    public function __construct(public readonly float $threshold) {}
 }
 
 /**
@@ -56,8 +51,7 @@ final class DashboardMetricsRequestDto
     public function __construct(
         public readonly DashboardPeriodRequestDto $period,
         public readonly DashboardFilterRequestDto $filters,
-    ) {
-    }
+    ) {}
 }
 
 /**
@@ -65,9 +59,7 @@ final class DashboardMetricsRequestDto
  */
 final class DashboardProviderMetricsRequestDto
 {
-    public function __construct(public readonly DashboardPeriodRequestDto $period)
-    {
-    }
+    public function __construct(public readonly DashboardPeriodRequestDto $period) {}
 }
 
 /**
@@ -79,8 +71,7 @@ final class DashboardExportRequestDto
         public readonly DashboardPeriodRequestDto $period,
         public readonly DashboardFilterRequestDto $filters,
         public readonly DashboardThresholdRequestDto $threshold,
-    ) {
-    }
+    ) {}
 }
 
 /**
@@ -169,14 +160,19 @@ class Dashboard_request_dto_factory
             throw new InvalidArgumentException($this->getPeriodValidationMessage());
         }
 
-        $start = DateTimeImmutable::createFromFormat('Y-m-d', $start_input);
-        $end = DateTimeImmutable::createFromFormat('Y-m-d', $end_input);
+        $start = DateTimeImmutable::createFromFormat('!Y-m-d', $start_input);
+        $end = DateTimeImmutable::createFromFormat('!Y-m-d', $end_input);
 
         if (!$start || $start->format('Y-m-d') !== $start_input || !$end || $end->format('Y-m-d') !== $end_input) {
             throw new InvalidArgumentException($this->getPeriodValidationMessage());
         }
 
-        if ($start > $end) {
+        if (
+            $start > $end ||
+            (int) $start->format('N') > 5 ||
+            (int) $end->format('N') > 5 ||
+            $start->format('o-W') !== $end->format('o-W')
+        ) {
             throw new InvalidArgumentException($this->getPeriodValidationMessage());
         }
 

@@ -570,7 +570,10 @@ App.Pages.Dashboard = (function () {
         });
 
         setDefaultStatuses();
-        App.Utils.UI.initializeDatePicker($dateRange, {mode: 'range'});
+        App.Utils.UI.initializeDatePicker($dateRange, {
+            mode: 'range',
+            disable: [(date) => date.getDay() === 0 || date.getDay() === 6],
+        });
         datePicker = $dateRange[0]?._flatpickr;
 
         applyInitialRange();
@@ -634,15 +637,8 @@ App.Pages.Dashboard = (function () {
             return;
         }
 
-        const firstWeekdayId = App.Utils.Date.getWeekdayId(vars('first_weekday'));
-        const today = moment();
-        const start = moment(today);
-
-        while (start.day() !== firstWeekdayId) {
-            start.subtract(1, 'day');
-        }
-
-        const end = moment(start).add(6, 'days');
+        const start = moment().startOf('isoWeek');
+        const end = moment(start).add(4, 'days');
 
         datePicker.setDate([start.toDate(), end.toDate()], true);
     }
@@ -655,7 +651,11 @@ App.Pages.Dashboard = (function () {
         const savedStart = moment(savedRangeStart, 'YYYY-MM-DD', true);
         const savedEnd = moment(savedRangeEnd, 'YYYY-MM-DD', true);
 
-        if (savedStart.isValid() && savedEnd.isValid() && !savedStart.isAfter(savedEnd)) {
+        if (
+            savedStart.isValid() &&
+            savedEnd.isValid() &&
+            App.Utils.Date.isSchoolWeekRange(savedStart.format('YYYY-MM-DD'), savedEnd.format('YYYY-MM-DD'))
+        ) {
             datePicker.setDate([savedStart.toDate(), savedEnd.toDate()], true);
             return;
         }
@@ -1057,13 +1057,17 @@ App.Pages.Dashboard = (function () {
     }
 
     function getSelectedRange() {
-        if (!datePicker || !Array.isArray(datePicker.selectedDates) || datePicker.selectedDates.length < 2) {
+        if (!datePicker || !Array.isArray(datePicker.selectedDates) || !datePicker.selectedDates.length) {
             return null;
         }
 
         const sorted = [...datePicker.selectedDates].sort((a, b) => a - b);
         const start = moment(sorted[0]).format('YYYY-MM-DD');
         const end = moment(sorted[sorted.length - 1]).format('YYYY-MM-DD');
+
+        if (!App.Utils.Date.isSchoolWeekRange(start, end)) {
+            return null;
+        }
 
         return {
             start,

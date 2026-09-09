@@ -6,8 +6,7 @@ return [
     'school-day-default' => [
         'timezone' => 'Europe/Berlin',
         'window' => [
-            'type' => 'trailing_days',
-            'days' => 30,
+            'type' => 'completed_school_week',
         ],
         'booking_search_days' => 14,
         'retry_count' => 1,

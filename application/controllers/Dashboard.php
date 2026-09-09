@@ -194,6 +194,8 @@ class Dashboard extends EA_Controller
                 'metrics' => $metrics,
                 'summary' => $this->buildAdminSummary($summary, $threshold),
             ]);
+        } catch (InvalidArgumentException $e) {
+            json_response(['success' => false, 'message' => $e->getMessage()], 422);
         } catch (Throwable $e) {
             json_exception($e);
         }

@@ -121,7 +121,7 @@ python3 scripts/docs/generate_codeowners_from_map.py --check
 GITHUB_EVENT_NAME=pull_request GITHUB_BASE_REF="$BASE_REF" python3 scripts/ci/check_component_boundaries.py
 
 echo_section "Frontend compiler regression tests"
-node --test tests/JavaScript/gulp_build.test.js
+node --test tests/JavaScript/gulp_build.test.js tests/JavaScript/dashboard_date_range.test.js
 
 echo_section "Refresh frontend assets"
 npm run build
@@ -163,7 +163,7 @@ ci_docker_compose exec -T php-fpm php scripts/ci/run_deep_runtime_suite.php \
     --openapi-spec=/var/www/html/openapi.yml \
     --username=administrator --password=administrator \
     --booking-search-days=14 --retry-count=1 \
-    --start-date=2026-01-01 --end-date=2026-01-31 \
+    --start-date=2026-01-12 --end-date=2026-01-16 \
     --integration-smoke-include-ldap="${INTEGRATION_SMOKE_INCLUDE_LDAP}" \
     --integration-smoke-browser-bootstrap-timeout="${INTEGRATION_SMOKE_BROWSER_BOOTSTRAP_TIMEOUT}" \
     --integration-smoke-browser-open-timeout="${INTEGRATION_SMOKE_BROWSER_OPEN_TIMEOUT}" \

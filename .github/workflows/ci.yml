@@ -450,7 +450,7 @@ jobs:
         run: ./scripts/ci/js-lint-changed.sh
       - name: Frontend compiler regression tests
         if: steps.js_changes.outputs.needs_node == 'true'
-        run: node --test tests/JavaScript/gulp_build.test.js
+        run: node --test tests/JavaScript/gulp_build.test.js tests/JavaScript/dashboard_date_range.test.js
 
   phpstan-application:
     needs:
@@ -731,7 +731,7 @@ jobs:
           --openapi-spec=openapi.yml
           --username=administrator --password=administrator
           --booking-search-days=14 --retry-count=1
-          --start-date=2026-01-01 --end-date=2026-01-31
+          --start-date=2026-01-12 --end-date=2026-01-16
           --integration-smoke-include-ldap=${{ steps.ldap_guardrail.outputs.include_ldap }}
           --integration-smoke-browser-bootstrap-timeout=900
           --integration-smoke-browser-evidence=${{ github.event_name == 'push' && 'always' || 'on-failure' }}

@@ -399,8 +399,8 @@ final class Provider_ui_smoke_fixture
             [
                 'salt' => $salt,
                 'password' => $password_hash,
-                'dashboard_range_start' => '2099-02-01',
-                'dashboard_range_end' => '2099-02-28',
+                'dashboard_range_start' => '2099-02-09',
+                'dashboard_range_end' => '2099-02-13',
             ],
             ['id_users' => $provider_id],
             true,

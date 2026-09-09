@@ -41,7 +41,7 @@ class CiWorkflowContractTest extends TestCase
         self::assertSame('./scripts/ci/js-lint-changed.sh', $this->stepRun($steps, 'ESLint changed JS files'));
         self::assertSame("steps.js_changes.outputs.has_changes == 'true'", $steps['ESLint changed JS files']['if']);
         self::assertSame(
-            'node --test tests/JavaScript/gulp_build.test.js',
+            'node --test tests/JavaScript/gulp_build.test.js tests/JavaScript/dashboard_date_range.test.js',
             $this->stepRun($steps, 'Frontend compiler regression tests'),
         );
     }
@@ -245,8 +245,8 @@ class CiWorkflowContractTest extends TestCase
             [
                 '--booking-search-days=14',
                 '--retry-count=1',
-                '--start-date=2026-01-01',
-                '--end-date=2026-01-31',
+                '--start-date=2026-01-12',
+                '--end-date=2026-01-16',
                 '--integration-smoke-browser-bootstrap-timeout=900',
             ]
             as $profileInput

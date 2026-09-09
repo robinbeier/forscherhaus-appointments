@@ -30,8 +30,8 @@ Replay and canary default to the versioned profile `school-day-default`.
 Profile defaults:
 
 - `timezone = Europe/Berlin`
-- `window.type = trailing_days`
-- `window.days = 30`
+- `window.type = completed_school_week`: latest Monday-to-Friday range ending no later than today in the configured timezone.
+- Explicit date overrides must also fit within one Monday-to-Friday week.
 - `booking_search_days = 14`
 - `retry_count = 1`
 - `max_pdf_duration_ms = 30000`
@@ -70,8 +70,8 @@ base_url = http://localhost
 index_page = index.php
 username = administrator
 password = administrator
-start_date = 2026-01-01
-end_date = 2026-01-31
+start_date = 2026-01-12
+end_date = 2026-01-16
 booking_search_days = 14
 retry_count = 1
 max_pdf_duration_ms = 30000
