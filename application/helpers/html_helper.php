@@ -190,6 +190,11 @@ if (!function_exists('pure_html')) {
     function pure_html(string $markup): string
     {
         $config = HTMLPurifier_Config::createDefault();
+        $cache_path = rtrim((string) config('cache_path', ''), DIRECTORY_SEPARATOR);
+
+        if ($cache_path !== '') {
+            $config->set('Cache.SerializerPath', $cache_path);
+        }
 
         $purifier = new HTMLPurifier($config);
 
