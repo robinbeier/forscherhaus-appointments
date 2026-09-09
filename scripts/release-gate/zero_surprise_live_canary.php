@@ -73,7 +73,7 @@ try {
             '--base-url=' . $credentials['base_url'],
             '--index-page=' . $credentials['index_page'],
             '--username=' . $credentials['username'],
-            '--password=' . $credentials['password'],
+            '--password-stdin',
             '--booking-search-days=' . $credentials['booking_search_days'],
             '--retry-count=' . $credentials['retry_count'],
             '--timezone=' . $credentials['timezone'],
@@ -82,6 +82,7 @@ try {
         ],
         $repoRoot,
         $deadlineAt,
+        $credentials['password'],
     );
 
     $report->addStep(
@@ -107,7 +108,7 @@ try {
             '--base-url=' . $credentials['base_url'],
             '--index-page=' . $credentials['index_page'],
             '--username=' . $credentials['username'],
-            '--password=' . $credentials['password'],
+            '--password-stdin',
             '--start-date=' . $credentials['start_date'],
             '--end-date=' . $credentials['end_date'],
             '--max-pdf-duration-ms=' . $credentials['max_pdf_duration_ms'],
@@ -118,7 +119,13 @@ try {
             $dashboardCommand[] = '--pdf-health-url=' . $credentials['pdf_health_url'];
         }
 
-        $dashboardStep = runCanaryStep('dashboard_replay', $dashboardCommand, $repoRoot, $deadlineAt);
+        $dashboardStep = runCanaryStep(
+            'dashboard_replay',
+            $dashboardCommand,
+            $repoRoot,
+            $deadlineAt,
+            $credentials['password'],
+        );
 
         $report->addStep(
             'dashboard_replay',
@@ -333,8 +340,13 @@ function validateDate(string $value, string $name): void
  * @param array<int, string> $command
  * @return array<string, mixed>
  */
-function runCanaryStep(string $stepName, array $command, string $repoRoot, float $deadlineAt): array
-{
+function runCanaryStep(
+    string $stepName,
+    array $command,
+    string $repoRoot,
+    float $deadlineAt,
+    ?string $stdinPayload = null,
+): array {
     $remainingSeconds = (int) ceil($deadlineAt - microtime(true));
 
     if ($remainingSeconds <= 0) {
@@ -349,7 +361,7 @@ function runCanaryStep(string $stepName, array $command, string $repoRoot, float
         ];
     }
 
-    $result = GateProcessRunner::run($command, $repoRoot, null, $remainingSeconds);
+    $result = GateProcessRunner::run($command, $repoRoot, null, $remainingSeconds, $stdinPayload);
 
     $exitCode = (int) ($result['exit_code'] ?? 1);
     $timedOut = (bool) ($result['timed_out'] ?? false);

@@ -87,7 +87,7 @@ if (!defined('ZERO_SURPRISE_REPLAY_TEST_MODE')) {
                 '--base-url=' . $config['base_url'],
                 '--index-page=' . $config['index_page'],
                 '--username=' . $config['username'],
-                '--password=' . $config['password'],
+                '--password-stdin',
                 '--booking-search-days=' . $config['booking_search_days'],
                 '--retry-count=' . $config['retry_count'],
                 '--run-id=' . buildRunId($config['release_id']),
@@ -95,7 +95,7 @@ if (!defined('ZERO_SURPRISE_REPLAY_TEST_MODE')) {
                 '--output-json=' . $bookingReportPath,
             ]);
 
-            $bookingStep = runExternalStep($bookingCommand, $repoRoot, 900);
+            $bookingStep = runExternalStep($bookingCommand, $repoRoot, 900, $config['password']);
             $report->addStep(
                 'booking_write_replay',
                 $bookingStep['status'],
@@ -119,14 +119,14 @@ if (!defined('ZERO_SURPRISE_REPLAY_TEST_MODE')) {
                 '--base-url=' . $config['base_url'],
                 '--index-page=' . $config['index_page'],
                 '--username=' . $config['username'],
-                '--password=' . $config['password'],
+                '--password-stdin',
                 '--start-date=' . $config['start_date'],
                 '--end-date=' . $config['end_date'],
                 '--max-pdf-duration-ms=' . $config['max_pdf_duration_ms'],
                 '--output-json=' . $dashboardReportPath,
             ]);
 
-            $dashboardStep = runExternalStep($dashboardCommand, $repoRoot, 900);
+            $dashboardStep = runExternalStep($dashboardCommand, $repoRoot, 900, $config['password']);
             $report->addStep(
                 'dashboard_replay',
                 $dashboardStep['status'],
@@ -579,9 +579,9 @@ function runReplayTeardown(
  * @param array<int, string> $command
  * @return array<string, mixed>
  */
-function runExternalStep(array $command, string $repoRoot, int $timeoutSeconds): array
+function runExternalStep(array $command, string $repoRoot, int $timeoutSeconds, ?string $stdinPayload = null): array
 {
-    $result = GateProcessRunner::run($command, $repoRoot, null, $timeoutSeconds);
+    $result = GateProcessRunner::run($command, $repoRoot, null, $timeoutSeconds, $stdinPayload);
 
     $exitCode = (int) ($result['exit_code'] ?? 1);
     $timedOut = (bool) ($result['timed_out'] ?? false);
