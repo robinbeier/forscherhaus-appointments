@@ -160,6 +160,7 @@ Optional PDF export env:
 App log script behavior:
 
 - tracks only newly appended bytes in the current daily app log (the application logger and monitor use UTC date boundaries; business timezone formatting remains unchanged)
+- resumes across a copied log only when the consumed prefix digest matches; otherwise it reprocesses the replacement conservatively
 - primes itself on first run to avoid an immediate false alarm from historical log lines
 - applies a built-in narrow classifier for known scanner/proxy noise that has
   been proven not to represent app downtime, currently:
