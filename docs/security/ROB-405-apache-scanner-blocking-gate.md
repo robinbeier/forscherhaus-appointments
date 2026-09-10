@@ -21,6 +21,30 @@ This decision preserves the Apache path-blocking intention while removing the
 unnecessary scanner-IP jail and its installation procedure. It does not authorize
 or document a live Apache, Fail2ban, firewall, or SSH change.
 
+## Apache Guard Maintenance Reference
+
+Keep the existing Apache guard in vhost context before redirect or proxy rules,
+including the default and unmatched host vhosts, so rejected probes cannot
+become redirects or reach application routing:
+
+```apache
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    RewriteCond %{REQUEST_URI} (^|/)(\.env($|[./_~-])|\.environment$|\.git(/|$)|wp-admin(/|$)|wp-config\.php$|wp-login\.php$|xmlrpc\.php$|phpinfo\.php$|server-status$|vendor/phpunit|boaform|HNAP1|cgi-bin) [NC,OR]
+    RewriteCond %{QUERY_STRING} (^|&)(page=phpinfo|phpinfo=1)(&|$) [NC]
+    RewriteRule ^ - [F]
+</IfModule>
+```
+
+For an approved maintenance change, back up the existing Apache files first,
+run `apache2ctl configtest`, and reload Apache only after the test passes. Run
+the redacted checks in [production operations](../ops/agent-operations.md)
+afterward and record status classes only. If a check fails, restore the prior
+files, rerun `apache2ctl configtest`, and reload the restored configuration.
+This reference does not claim that the live guard is currently installed or
+verified.
+
 For the current repository-side operational boundaries and redacted checks,
 see [production operations](../ops/agent-operations.md) and the
 [monitoring tools](../../scripts/ops/README.md). A repository decision or
