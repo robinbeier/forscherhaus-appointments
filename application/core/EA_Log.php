@@ -41,5 +41,20 @@
  */
 class EA_Log extends CI_Log
 {
-    //
+    /**
+     * Write application logs using the UTC date boundary shared by operations monitors.
+     *
+     * The application timezone is restored even when the parent logger fails.
+     */
+    public function write_log($level, $msg)
+    {
+        $previous_timezone = date_default_timezone_get();
+        date_default_timezone_set('UTC');
+
+        try {
+            return parent::write_log($level, $msg);
+        } finally {
+            date_default_timezone_set($previous_timezone);
+        }
+    }
 }
