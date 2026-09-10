@@ -207,6 +207,7 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
   - `application/controllers/Secretaries.php` (exact_file)
   - `application/controllers/Services.php` (exact_file)
   - `application/controllers/Service_categories.php` (exact_file)
+  - `application/libraries/Permissions.php` (exact_file)
   - `application/models/Providers_model.php` (exact_file)
   - `application/models/Customers_model.php` (exact_file)
   - `application/models/Admins_model.php` (exact_file)
