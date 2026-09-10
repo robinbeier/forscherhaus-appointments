@@ -5,6 +5,7 @@ namespace Tests\Unit\Libraries;
 use PHPUnit\Framework\TestCase;
 use ReflectionClass;
 use ReflectionProperty;
+use RescheduleAuthorityClaim;
 use Reschedule_authority;
 
 require_once APPPATH . 'libraries/Reschedule_authority.php';
@@ -47,6 +48,58 @@ final class RescheduleAuthorityLockOrderTest extends TestCase
         $this->assertSame(10, $acquireQueries[0]['bindings'][1]);
     }
 
+    public function testVerifyLockedStateLocksAllParentsBeforeAppointment(): void
+    {
+        $database = new RescheduleAuthorityLockOrderFakeDatabase();
+        $database->appointmentSnapshot = [
+            'id' => 99,
+            'id_users_customer' => 20,
+            'id_users_provider' => 30,
+            'id_services' => 40,
+            'is_unavailability' => 0,
+        ];
+        $database->lockedAppointment = $database->appointmentSnapshot;
+        $authority = $this->createAuthority($database);
+
+        try {
+            $authority->verifyLockedState(new RescheduleAuthorityClaim(99, 999, 'snapshot'), 10, 50);
+            $this->fail('Expected the mismatched claim to be rejected.');
+        } catch (\RescheduleAuthorityException $exception) {
+            $this->assertSame('canonical-identity-mismatch', $exception->getMessage());
+        }
+
+        $appointmentQueryIndex = null;
+        foreach ($database->queries as $index => $query) {
+            if (str_contains($query['sql'], 'FROM `ea_appointments`')) {
+                $appointmentQueryIndex = $index;
+                break;
+            }
+        }
+
+        $this->assertNotNull($appointmentQueryIndex);
+        $this->assertStringContainsString('FROM `ea_users`', $database->queries[0]['sql']);
+        $this->assertSame([10, 20, 30], $database->queries[0]['bindings']);
+        $this->assertGreaterThan(0, $appointmentQueryIndex);
+    }
+
+    public function testVerifyLockedStateRejectsStructuralSnapshotDriftAfterParentLocks(): void
+    {
+        $database = new RescheduleAuthorityLockOrderFakeDatabase();
+        $database->appointmentSnapshot = [
+            'id' => 99,
+            'id_users_customer' => 20,
+            'id_users_provider' => 30,
+            'id_services' => 40,
+            'is_unavailability' => 0,
+        ];
+        $database->lockedAppointment = [...$database->appointmentSnapshot, 'id_users_provider' => 31];
+        $authority = $this->createAuthority($database);
+
+        $this->expectException(\RescheduleAuthorityException::class);
+        $this->expectExceptionMessage('canonical-identity-mismatch');
+        $authority->verifyLockedState(new RescheduleAuthorityClaim(99, 20, 'snapshot'), 30, 40);
+    }
+
     private function createAuthority(RescheduleAuthorityLockOrderFakeDatabase $database): Reschedule_authority
     {
         $reflection = new ReflectionClass(Reschedule_authority::class);
@@ -61,6 +114,12 @@ final class RescheduleAuthorityLockOrderTest extends TestCase
 final class RescheduleAuthorityLockOrderFakeDatabase
 {
     public string $database = 'unit-test';
+
+    /** @var array<string, mixed> */
+    public array $appointmentSnapshot = [];
+
+    /** @var array<string, mixed> */
+    public array $lockedAppointment = [];
 
     /**
      * @var array<int, array{sql:string,bindings:array<int, mixed>}>
@@ -94,7 +153,10 @@ final class RescheduleAuthorityLockOrderFakeDatabase
 
         $row = [];
 
-        if (str_contains($sql, 'GET_LOCK')) {
+        if (str_contains($sql, 'FROM `ea_appointments`')) {
+            $row = $this->lockedAppointment;
+            $rowCount = $row === [] ? 0 : 1;
+        } elseif (str_contains($sql, 'GET_LOCK')) {
             $row = ['acquired' => 1];
         } elseif (str_contains($sql, 'RELEASE_LOCK')) {
             $row = ['released' => 1];
@@ -108,6 +170,13 @@ final class RescheduleAuthorityLockOrderFakeDatabase
      */
     public function get_where(string $table, array $where): RescheduleAuthorityLockOrderFakeQuery
     {
+        if ($table === 'appointments') {
+            return new RescheduleAuthorityLockOrderFakeQuery(
+                $this->appointmentSnapshot === [] ? 0 : 1,
+                $this->appointmentSnapshot,
+            );
+        }
+
         return new RescheduleAuthorityLockOrderFakeQuery(1, []);
     }
 }
