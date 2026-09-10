@@ -357,21 +357,31 @@ final class CalendarCombinedAuthorizationTest extends TestCase
     public function testManageModeLocksUserParentsBeforeAppointment(): void
     {
         $pair = $this->fixtures->resolveProviderServicePair();
-        $customer = $this->fixtures->createCustomer();
+        $editedCustomer = $this->fixtures->createCustomer();
+        $appointmentCustomer = $this->fixtures->createCustomer();
         $appointment = $this->fixtures->createAppointment(
             $pair['provider_id'],
-            $customer,
+            $appointmentCustomer,
             $pair['service_id'],
             new DateTimeImmutable('2035-05-07 09:00:00'),
         );
+        $this->fixtures->setSetting('limit_customer_access', '0');
+        $this->setRolePrivileges(DB_SLUG_PROVIDER, 'customers', PRIV_VIEW | PRIV_EDIT);
         $this->setRolePrivileges(DB_SLUG_PROVIDER, 'appointments', PRIV_VIEW | PRIV_EDIT);
         $this->authenticate($pair['provider_id'], DB_SLUG_PROVIDER);
         $controller = $this->controller();
-        $this->post([], $this->appointmentPayload($appointment, $pair['provider_id'], $pair['service_id'], $customer));
+        $this->post(
+            $this->customerPayload($editedCustomer, 'Edited'),
+            $this->appointmentPayload($appointment, $pair['provider_id'], $pair['service_id'], $appointmentCustomer),
+        );
 
         $controller->save_appointment();
 
         $this->assertSame(['parents', 'appointment'], $controller->lockOrder);
+        $expectedParentIds = [$editedCustomer, $appointmentCustomer, $pair['provider_id']];
+        sort($expectedParentIds, SORT_NUMERIC);
+        $this->assertSame($expectedParentIds, $controller->lockedParentIds);
+        $this->assertTrue($controller->parentLockTransactionActive);
     }
 
     private function controller(): Calendar
@@ -386,12 +396,25 @@ final class CalendarCombinedAuthorizationTest extends TestCase
         $controller = new class extends Calendar {
             /** @var list<string> */
             public array $lockOrder = [];
+            /** @var list<int> */
+            public array $lockedParentIds = [];
+            public bool $parentLockTransactionActive = false;
 
             public function __construct() {}
 
             protected function lock_calendar_parent_users(array $user_ids): void
             {
                 $this->lockOrder[] = 'parents';
+                $this->parentLockTransactionActive = get_instance()->db->trans_active();
+                $this->lockedParentIds = array_values(
+                    array_unique(
+                        array_filter(
+                            array_map(static fn($user_id): int => (int) $user_id, $user_ids),
+                            static fn(int $user_id): bool => $user_id > 0,
+                        ),
+                    ),
+                );
+                sort($this->lockedParentIds, SORT_NUMERIC);
                 parent::lock_calendar_parent_users($user_ids);
             }
 
