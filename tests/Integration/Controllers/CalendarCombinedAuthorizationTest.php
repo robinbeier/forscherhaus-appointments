@@ -402,20 +402,33 @@ final class CalendarCombinedAuthorizationTest extends TestCase
 
             public function __construct() {}
 
-            protected function lock_calendar_parent_users(array $user_ids): void
-            {
+            protected function lock_calendar_update_parents(
+                array $current_appointment,
+                array $requested_appointment,
+                array $additional_user_ids = [],
+            ): void {
                 $this->lockOrder[] = 'parents';
                 $this->parentLockTransactionActive = get_instance()->db->trans_active();
                 $this->lockedParentIds = array_values(
                     array_unique(
                         array_filter(
-                            array_map(static fn($user_id): int => (int) $user_id, $user_ids),
+                            array_map(static fn($user_id): int => (int) $user_id, [
+                                $current_appointment['id_users_customer'] ?? null,
+                                $current_appointment['id_users_provider'] ?? null,
+                                $requested_appointment['id_users_customer'] ?? null,
+                                $requested_appointment['id_users_provider'] ?? null,
+                                ...$additional_user_ids,
+                            ]),
                             static fn(int $user_id): bool => $user_id > 0,
                         ),
                     ),
                 );
                 sort($this->lockedParentIds, SORT_NUMERIC);
-                parent::lock_calendar_parent_users($user_ids);
+                parent::lock_calendar_update_parents(
+                    $current_appointment,
+                    $requested_appointment,
+                    $additional_user_ids,
+                );
             }
 
             protected function lock_appointment(int $appointment_id): array

@@ -101,7 +101,37 @@ final class RescheduleAuthorityLockOrderTest extends TestCase
         $authority->verifyLockedState(new RescheduleAuthorityClaim(99, 20, 'snapshot'), 30, 40);
     }
 
-    private function createAuthority(RescheduleAuthorityLockOrderFakeDatabase $database): Reschedule_authority
+    public function testVerifyLockedStateUsesCurrentReadsForAllPostLockValidation(): void
+    {
+        $database = new RescheduleAuthorityCurrentReadFakeDatabase();
+        $authority = $this->createAuthority($database);
+        $reflection = new ReflectionClass(Reschedule_authority::class);
+        $loadState = $reflection->getMethod('loadStateFromAppointment');
+        $currentState = $loadState->invoke($authority, $database->lockedAppointment, true);
+        $database->queries = [];
+
+        $state = $authority->verifyLockedState(
+            new RescheduleAuthorityClaim(99, 20, $currentState->snapshotDigest),
+            30,
+            40,
+        );
+
+        $this->assertSame($currentState->snapshotDigest, $state->snapshotDigest);
+        $appointmentQueryIndex = null;
+        foreach ($database->queries as $index => $query) {
+            if (str_contains($query['sql'], 'FROM `ea_appointments`')) {
+                $appointmentQueryIndex = $index;
+                break;
+            }
+        }
+
+        $this->assertNotNull($appointmentQueryIndex);
+        foreach (array_slice($database->queries, $appointmentQueryIndex + 1) as $query) {
+            $this->assertStringContainsString('FOR UPDATE', $query['sql']);
+        }
+    }
+
+    private function createAuthority(object $database): Reschedule_authority
     {
         $reflection = new ReflectionClass(Reschedule_authority::class);
         $authority = $reflection->newInstanceWithoutConstructor();
@@ -179,6 +209,142 @@ final class RescheduleAuthorityLockOrderFakeDatabase
         }
 
         return new RescheduleAuthorityLockOrderFakeQuery(1, []);
+    }
+}
+
+final class RescheduleAuthorityCurrentReadFakeDatabase
+{
+    public string $database = 'unit-test';
+
+    /** @var array<int, array{sql:string,bindings:array<int, mixed>}> */
+    public array $queries = [];
+
+    /** @var array<string, mixed> */
+    public array $appointmentSnapshot = [
+        'id' => 99,
+        'id_users_customer' => 20,
+        'id_users_provider' => 30,
+        'id_services' => 40,
+        'is_unavailability' => 0,
+    ];
+
+    /** @var array<string, mixed> */
+    public array $lockedAppointment = [
+        'id' => 99,
+        'hash' => 'current-hash',
+        'start_datetime' => '2035-01-01 09:00:00',
+        'end_datetime' => '2035-01-01 09:25:00',
+        'location' => 'current',
+        'notes' => 'current',
+        'color' => '#ffffff',
+        'status' => 'booked',
+        'is_unavailability' => 0,
+        'id_users_provider' => 30,
+        'id_users_customer' => 20,
+        'id_services' => 40,
+        'update_datetime' => '2035-01-01 08:00:00',
+    ];
+
+    /** @var array<string, array<int, array<string, mixed>> */
+    private array $currentRows = [
+        'users' => [
+            20 => ['id' => 20, 'first_name' => 'Current customer', 'id_roles' => 3, 'update_datetime' => '2'],
+            30 => ['id' => 30, 'first_name' => 'Current provider', 'id_roles' => 2, 'update_datetime' => '2'],
+        ],
+        'services' => [40 => ['id' => 40, 'name' => 'Current service', 'duration' => 25, 'update_datetime' => '2']],
+        'user_settings' => [30 => ['id_users' => 30, 'working_plan' => '{}', 'working_plan_exceptions' => '{}']],
+    ];
+
+    /** @var array<string, array<int, array<string, mixed>> */
+    private array $staleRows = [
+        'users' => [20 => ['id' => 20, 'first_name' => 'Stale customer']],
+        'services' => [40 => ['id' => 40, 'name' => 'Stale service']],
+        'user_settings' => [30 => ['id_users' => 30, 'working_plan' => '{"stale":true}']],
+    ];
+
+    /**
+     * @param array<int, mixed> $bindings
+     */
+    public function query(string $sql, array $bindings = []): RescheduleAuthorityCurrentReadFakeQuery
+    {
+        $this->queries[] = ['sql' => $sql, 'bindings' => $bindings];
+
+        if (str_contains($sql, 'FROM `ea_appointments`')) {
+            return new RescheduleAuthorityCurrentReadFakeQuery(1, $this->lockedAppointment);
+        }
+
+        if (str_contains($sql, 'FROM `ea_services_providers`')) {
+            $rows = [['id_services' => 40]];
+            return new RescheduleAuthorityCurrentReadFakeQuery(count($rows), [], $rows);
+        }
+
+        foreach (array_keys($this->currentRows) as $table) {
+            if (!str_contains($sql, 'FROM `ea_' . $table . '`')) {
+                continue;
+            }
+
+            $rows = $this->currentRows[$table];
+            if (str_contains($sql, 'WHERE `id` = ?') || str_contains($sql, 'WHERE `id_users` = ?')) {
+                $row = $rows[(int) ($bindings[0] ?? 0)] ?? [];
+                return new RescheduleAuthorityCurrentReadFakeQuery($row === [] ? 0 : 1, $row);
+            }
+
+            return new RescheduleAuthorityCurrentReadFakeQuery(count($bindings), []);
+        }
+
+        return new RescheduleAuthorityCurrentReadFakeQuery(0, []);
+    }
+
+    public function dbprefix(string $table): string
+    {
+        return 'ea_' . $table;
+    }
+
+    /**
+     * @param array<string, int> $where
+     */
+    public function get_where(string $table, array $where): RescheduleAuthorityCurrentReadFakeQuery
+    {
+        if ($table === 'appointments') {
+            return new RescheduleAuthorityCurrentReadFakeQuery(1, $this->appointmentSnapshot);
+        }
+
+        $row = $this->staleRows[$table][(int) array_values($where)[0]] ?? [];
+        return new RescheduleAuthorityCurrentReadFakeQuery($row === [] ? 0 : 1, $row);
+    }
+}
+
+final class RescheduleAuthorityCurrentReadFakeQuery
+{
+    /**
+     * @param array<string, mixed> $row
+     * @param array<int, array<string, mixed>> $rows
+     */
+    public function __construct(
+        private readonly int $rowCount,
+        private readonly array $row,
+        private readonly array $rows = [],
+    ) {}
+
+    public function num_rows(): int
+    {
+        return $this->rowCount;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function row_array(): array
+    {
+        return $this->row;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function result_array(): array
+    {
+        return $this->rows;
     }
 }
 

@@ -254,12 +254,8 @@ class Calendar extends EA_Controller
 
             try {
                 if ($manage_mode) {
-                    $this->lock_calendar_parent_users([
+                    $this->lock_calendar_update_parents($stored_appointment, $appointment_data, [
                         $customer_data['id'] ?? null,
-                        $appointment_data['id_users_customer'] ?? null,
-                        $appointment_data['id_users_provider'] ?? null,
-                        $stored_appointment['id_users_customer'] ?? null,
-                        $stored_appointment['id_users_provider'] ?? null,
                     ]);
                     $locked_appointment = $this->lock_appointment((int) $appointment_data['id']);
 
@@ -415,33 +411,16 @@ class Calendar extends EA_Controller
         return $role_slug !== DB_SLUG_PROVIDER || $user_id === $provider_id;
     }
 
-    protected function lock_calendar_parent_users(array $user_ids): void
-    {
-        $user_ids = array_values(
-            array_unique(
-                array_filter(
-                    array_map(static fn($user_id): int => (int) $user_id, $user_ids),
-                    static fn(int $user_id): bool => $user_id > 0,
-                ),
-            ),
+    protected function lock_calendar_update_parents(
+        array $current_appointment,
+        array $requested_appointment,
+        array $additional_user_ids = [],
+    ): void {
+        $this->appointments_model->lock_update_parents(
+            $current_appointment,
+            $requested_appointment,
+            $additional_user_ids,
         );
-
-        if ($user_ids === []) {
-            return;
-        }
-
-        sort($user_ids, SORT_NUMERIC);
-        $placeholders = implode(', ', array_fill(0, count($user_ids), '?'));
-        $this->db
-            ->query(
-                'SELECT `id` FROM `' .
-                    $this->db->dbprefix('users') .
-                    '` WHERE `id` IN (' .
-                    $placeholders .
-                    ') ORDER BY `id` ASC FOR UPDATE',
-                $user_ids,
-            )
-            ->result_array();
     }
 
     protected function lock_appointment(int $appointment_id): array

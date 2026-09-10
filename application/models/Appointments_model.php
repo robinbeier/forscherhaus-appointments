@@ -268,6 +268,7 @@ class Appointments_model extends EA_Model
 
         try {
             $original_appointment = $this->find((int) $appointment['id']);
+            $this->lock_update_parents($original_appointment, $appointment);
             $appointment['update_datetime'] = date('Y-m-d H:i:s');
 
             if (!$this->db->update('appointments', $appointment, ['id' => $appointment['id']])) {
@@ -287,6 +288,83 @@ class Appointments_model extends EA_Model
             $this->db->trans_rollback();
 
             throw $exception;
+        }
+    }
+
+    /**
+     * Lock the foreign-key parents used by an appointment update before the
+     * appointment row can be locked or changed.
+     *
+     * @param array<string, mixed> $current_appointment
+     * @param array<string, mixed> $requested_appointment
+     */
+    public function lock_update_parents(
+        array $current_appointment,
+        array $requested_appointment,
+        array $additional_user_ids = [],
+    ): void {
+        $user_ids = $this->sorted_parent_ids([
+            $current_appointment['id_users_customer'] ?? null,
+            $current_appointment['id_users_provider'] ?? null,
+            $requested_appointment['id_users_customer'] ?? null,
+            $requested_appointment['id_users_provider'] ?? null,
+            ...$additional_user_ids,
+        ]);
+        $service_ids = $this->sorted_parent_ids([
+            $current_appointment['id_services'] ?? null,
+            $requested_appointment['id_services'] ?? null,
+        ]);
+
+        $this->lock_parent_rows('users', 'id', $user_ids);
+        $this->lock_parent_rows('services', 'id', $service_ids);
+    }
+
+    /**
+     * @param array<int, mixed> $values
+     * @return array<int, int>
+     */
+    private function sorted_parent_ids(array $values): array
+    {
+        $ids = array_values(
+            array_unique(
+                array_filter(
+                    array_map(static fn($value): int => (int) $value, $values),
+                    static fn(int $value): bool => $value > 0,
+                ),
+            ),
+        );
+        sort($ids, SORT_NUMERIC);
+
+        return $ids;
+    }
+
+    /**
+     * @param array<int, int> $ids
+     */
+    private function lock_parent_rows(string $table, string $field, array $ids): void
+    {
+        if ($ids === []) {
+            return;
+        }
+
+        $placeholders = implode(', ', array_fill(0, count($ids), '?'));
+        $query = $this->db->query(
+            'SELECT `' .
+                $field .
+                '` FROM `' .
+                $this->db->dbprefix($table) .
+                '` WHERE `' .
+                $field .
+                '` IN (' .
+                $placeholders .
+                ') ORDER BY `' .
+                $field .
+                '` ASC FOR UPDATE',
+            $ids,
+        );
+
+        if ($query->num_rows() !== count($ids)) {
+            throw new RuntimeException('Appointment parent record was not found.');
         }
     }
 
