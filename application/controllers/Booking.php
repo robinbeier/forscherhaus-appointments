@@ -244,6 +244,11 @@ class Booking extends EA_Controller
             $appointment = $results[0];
             $provider = $this->providers_model->find($appointment['id_users_provider']);
             $customer = $this->customers_model->find($appointment['id_users_customer']);
+
+            // Only expose the fields required by the public booking page.
+            $this->providers_model->only($provider, $this->allowed_provider_fields);
+            $this->customers_model->only($customer, $this->allowed_customer_fields);
+
             $this->rescheduleAuthority()->issue((int) $appointment['id']);
             $customer_token = $this->createCustomerToken((int) $customer['id']);
         } else {
