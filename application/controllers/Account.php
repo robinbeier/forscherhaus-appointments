@@ -106,6 +106,12 @@ class Account extends EA_Controller
      */
     public function save(): void
     {
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+            json_response(['success' => false, 'message' => 'Method Not Allowed'], 405, ['Allow: POST']);
+
+            return;
+        }
+
         try {
             if (cannot('edit', PRIV_USER_SETTINGS)) {
                 throw new RuntimeException('You do not have the required permissions for this task.');
