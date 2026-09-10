@@ -253,6 +253,17 @@ class Calendar extends EA_Controller
             $this->db->trans_begin();
 
             try {
+                if ($manage_mode) {
+                    $locked_appointment = $this->lock_appointment((int) $appointment_data['id']);
+
+                    if (
+                        !$this->has_event_permissions((int) $locked_appointment['id_users_provider']) ||
+                        !$this->has_event_permissions((int) $appointment_data['id_users_provider'])
+                    ) {
+                        throw new RuntimeException('You do not have the required permissions for this task.', 403);
+                    }
+                }
+
                 // Save customer changes to the database.
                 if ($customer_data) {
                     $customer = $customer_data;
@@ -362,6 +373,10 @@ class Calendar extends EA_Controller
 
     protected function get_appointment_save_expected_error_status(Throwable $e): ?int
     {
+        if ($e->getCode() === 403 && $e->getMessage() === 'You do not have the required permissions for this task.') {
+            return 403;
+        }
+
         $expected_conflict_messages = [
             lang('buffer_conflict_error'),
             lang('buffer_outside_schedule_error'),
@@ -373,6 +388,13 @@ class Calendar extends EA_Controller
 
     private function check_event_permissions(int $provider_id): void
     {
+        if (!$this->has_event_permissions($provider_id)) {
+            abort(403);
+        }
+    }
+
+    private function has_event_permissions(int $provider_id): bool
+    {
         $user_id = (int) session('user_id');
         $role_slug = session('role_slug');
 
@@ -380,12 +402,27 @@ class Calendar extends EA_Controller
             $role_slug === DB_SLUG_SECRETARY &&
             !$this->secretaries_model->is_provider_supported($user_id, $provider_id)
         ) {
-            abort(403);
+            return false;
         }
 
-        if ($role_slug === DB_SLUG_PROVIDER && $user_id !== $provider_id) {
-            abort(403);
+        return $role_slug !== DB_SLUG_PROVIDER || $user_id === $provider_id;
+    }
+
+    private function lock_appointment(int $appointment_id): array
+    {
+        $appointment = $this->db
+            ->query('SELECT * FROM `' . $this->db->dbprefix('appointments') . '` WHERE `id` = ? FOR UPDATE', [
+                $appointment_id,
+            ])
+            ->row_array();
+
+        if (!$appointment) {
+            throw new InvalidArgumentException(
+                'The provided appointment ID was not found in the database: ' . $appointment_id,
+            );
         }
+
+        return $appointment;
     }
 
     /**
