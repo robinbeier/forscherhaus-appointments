@@ -736,6 +736,7 @@ jobs:
           --start-date=2026-01-12 --end-date=2026-01-16
           --integration-smoke-include-ldap=${{ steps.ldap_guardrail.outputs.include_ldap }}
           --integration-smoke-browser-bootstrap-timeout=900
+          --integration-smoke-browser-open-timeout=60
           --integration-smoke-browser-evidence=${{ github.event_name == 'push' && 'always' || 'on-failure' }}
           --report-dir=storage/logs/ci/deep-runtime-suite
       - name: Upload deep runtime suite artifacts
