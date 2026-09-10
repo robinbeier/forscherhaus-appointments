@@ -19,6 +19,27 @@ PATTERN="${KUMA_APP_LOG_PATTERN:-ERROR - }"
 IGNORE_REGEX="${KUMA_APP_LOG_IGNORE_REGEX:-}"
 THRESHOLD="${KUMA_APP_LOG_ERROR_THRESHOLD:-0}"
 
+kuma_push_sha256_file_prefix() {
+  local path="$1"
+  local byte_count="$2"
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    if (( byte_count == 0 )); then
+      printf '' | sha256sum | awk '{print $1}'
+    else
+      head -c "$byte_count" "$path" | sha256sum | awk '{print $1}'
+    fi
+  elif command -v shasum >/dev/null 2>&1; then
+    if (( byte_count == 0 )); then
+      printf '' | shasum -a 256 | awk '{print $1}'
+    else
+      head -c "$byte_count" "$path" | shasum -a 256 | awk '{print $1}'
+    fi
+  else
+    return 1
+  fi
+}
+
 kuma_push_require_env KUMA_PUSH_URL_APP_LOGS
 
 STATE_DIR="$(kuma_push_prepare_private_directory "$STATE_DIR")" || kuma_push_die "Unsafe private state directory"
@@ -60,43 +81,98 @@ fi
 current_inode="$(kuma_push_stat_dev_inode "$LOG_FILE")"
 current_size="$(kuma_push_stat_size "$LOG_FILE")"
 
-if [[ ! -f "$STATE_FILE" ]]; then
-  printf '%s|%s|%s\n' "$LOG_FILE" "$current_inode" "$current_size" > "$STATE_FILE"
-  kuma_push_validate_private_file "$STATE_FILE" || kuma_push_die "Unsafe private state file"
-  msg="OK primed app log monitor at $(basename "$LOG_FILE") size=${current_size}"
-  kuma_push_send "$KUMA_PUSH_URL_APP_LOGS" "up" "$msg" "1"
-  kuma_push_log "$msg"
-  exit 0
+previous_file=""
+previous_inode=""
+previous_offset=0
+previous_prefix_sha256=""
+if [[ -f "$STATE_FILE" ]]; then
+  IFS='|' read -r previous_file previous_inode previous_offset < "$STATE_FILE" || true
+  read -r previous_prefix_sha256 < <(sed -n '2p' "$STATE_FILE") || true
 fi
-
-IFS='|' read -r previous_file previous_inode previous_offset < "$STATE_FILE" || true
 previous_offset="${previous_offset:-0}"
 
 tmp_dir="$(mktemp -d "$STATE_DIR/delta.XXXXXX")" || kuma_push_die "Unable to create private app-log workspace"
 tmp_delta="$tmp_dir/delta"
 tmp_filtered="$tmp_dir/filtered"
+tmp_hash="$tmp_dir/hash"
+tmp_hash_pipe="$tmp_dir/hash.pipe"
 cleanup() {
-  rm -f "$tmp_delta" "$tmp_filtered"
+  rm -f "$tmp_delta" "$tmp_filtered" "$tmp_hash" "$tmp_hash_pipe"
   rmdir "$tmp_dir" 2>/dev/null || true
 }
 trap cleanup EXIT
-(umask 077; : > "$tmp_delta"; : > "$tmp_filtered") || kuma_push_die "Unable to create private app-log workspace files"
+(umask 077; : > "$tmp_delta"; : > "$tmp_filtered"; : > "$tmp_hash"; mkfifo "$tmp_hash_pipe") || kuma_push_die "Unable to create private app-log workspace files"
 
-if [[ "$previous_file" == "$LOG_FILE" && "$previous_inode" == "$current_inode" && "$current_size" -ge "$previous_offset" ]]; then
-  if (( previous_offset < current_size )); then
-    tail -c "+$((previous_offset + 1))" "$LOG_FILE" > "$tmp_delta"
-  else
-    : > "$tmp_delta"
+read_inode="$(kuma_push_stat_dev_inode "$LOG_FILE")"
+read_size="$(kuma_push_stat_size "$LOG_FILE")"
+[[ "$read_inode" == "$current_inode" && "$read_size" -ge "$current_size" ]] || kuma_push_die "App log changed while snapshotting"
+
+can_resume=0
+if [[ "$previous_file" == "$LOG_FILE" && "$current_size" -ge "$previous_offset" ]]; then
+  if [[ "$previous_inode" == "$current_inode" ]]; then
+    can_resume=1
+  elif [[ "$previous_prefix_sha256" =~ ^[a-f0-9]{64}$ ]]; then
+    current_prefix_sha256="$(kuma_push_sha256_file_prefix "$LOG_FILE" "$previous_offset")" || kuma_push_die "Unable to hash app log prefix"
+    [[ "$current_prefix_sha256" == "$previous_prefix_sha256" ]] && can_resume=1
   fi
+fi
+
+prefix_sha256=""
+if [[ "$can_resume" -eq 1 && "$previous_inode" == "$current_inode" && "$current_size" -eq "$previous_offset" && "$previous_prefix_sha256" =~ ^[a-f0-9]{64}$ ]]; then
+  prefix_sha256="$previous_prefix_sha256"
+  : > "$tmp_delta"
 else
-  cp "$LOG_FILE" "$tmp_delta"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum < "$tmp_hash_pipe" > "$tmp_hash" &
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 < "$tmp_hash_pipe" > "$tmp_hash" &
+  else
+    kuma_push_die "Unable to hash app log prefix"
+  fi
+  hash_pid="$!"
+  if [[ ! -f "$STATE_FILE" ]]; then
+    delta_offset="$current_size"
+  elif [[ "$can_resume" -eq 1 ]]; then
+    delta_offset="$previous_offset"
+  else
+    delta_offset=0
+  fi
+  set +e
+  if (( current_size == 0 )); then
+    printf '' | tee "$tmp_hash_pipe" > "$tmp_delta"
+  else
+    head -c "$current_size" "$LOG_FILE" | tee "$tmp_hash_pipe" | tail -c "+$((delta_offset + 1))" > "$tmp_delta"
+  fi
+  stream_status="$?"
+  wait "$hash_pid"
+  hash_status="$?"
+  set -e
+  [[ "$stream_status" -eq 0 && "$hash_status" -eq 0 ]] || kuma_push_die "App log read was incomplete"
+  prefix_sha256="$(awk '{print $1}' "$tmp_hash")"
+  [[ "$prefix_sha256" =~ ^[a-f0-9]{64}$ ]] || kuma_push_die "Unable to hash app log prefix"
+  delta_size="$(kuma_push_stat_size "$tmp_delta")"
+  expected_delta_size=$((current_size - delta_offset))
+  [[ "$delta_size" -eq "$expected_delta_size" ]] || kuma_push_die "App log read was incomplete"
+  read_inode="$(kuma_push_stat_dev_inode "$LOG_FILE")"
+  read_size="$(kuma_push_stat_size "$LOG_FILE")"
+  [[ "$read_inode" == "$current_inode" && "$read_size" -ge "$current_size" ]] || kuma_push_die "App log changed while snapshotting"
+  if [[ "$can_resume" -eq 1 && "$previous_inode" != "$current_inode" ]]; then
+    current_prefix_sha256="$(kuma_push_sha256_file_prefix "$LOG_FILE" "$previous_offset")" || kuma_push_die "Unable to hash app log prefix"
+    [[ "$current_prefix_sha256" == "$previous_prefix_sha256" ]] || kuma_push_die "App log changed while snapshotting"
+  fi
+fi
+
+if [[ ! -f "$STATE_FILE" ]]; then
+  msg="OK primed app log monitor at $(basename "$LOG_FILE") size=${current_size}"
+  kuma_push_send "$KUMA_PUSH_URL_APP_LOGS" "up" "$msg" "1"
+  printf '%s|%s|%s\n%s\n' "$LOG_FILE" "$current_inode" "$current_size" "$prefix_sha256" > "$STATE_FILE"
+  kuma_push_validate_private_file "$STATE_FILE" || kuma_push_die "Unsafe private state file"
+  kuma_push_log "$msg"
+  exit 0
 fi
 
 app_log_filter_actionable_file "$tmp_delta" "$tmp_filtered" "$IGNORE_REGEX"
 mv "$tmp_filtered" "$tmp_delta"
-
-printf '%s|%s|%s\n' "$LOG_FILE" "$current_inode" "$current_size" > "$STATE_FILE"
-kuma_push_validate_private_file "$STATE_FILE" || kuma_push_die "Unsafe private state file"
 
 new_errors="$(grep -cF "$PATTERN" "$tmp_delta" || true)"
 new_errors="${new_errors:-0}"
@@ -111,4 +187,6 @@ else
   kuma_push_send "$KUMA_PUSH_URL_APP_LOGS" "up" "$msg" "1"
 fi
 
+printf '%s|%s|%s\n%s\n' "$LOG_FILE" "$current_inode" "$current_size" "$prefix_sha256" > "$STATE_FILE"
+kuma_push_validate_private_file "$STATE_FILE" || kuma_push_die "Unsafe private state file"
 kuma_push_log "$msg"
