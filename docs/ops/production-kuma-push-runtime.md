@@ -88,10 +88,15 @@ incompatibility requires the coordinated directory exchange below.
    change-lock identity, staging, and the expected target identity, hash and
    metadata. Never write the installed file in place. Publish the validated file
    by atomic rename, or the complete directory by atomic directory exchange, on
-   the same filesystem. Durably sync staged content and the publication. Revalidate the complete installed
-   payload against the target manifest, metadata, changed monitor behavior,
-   bundled PDF execution and exact original cron configuration. For a coordinated
-   exchange, restore paused invocations only after these checks. Do not overwrite
+   the same filesystem. Durably sync staged content and the publication.
+   Revalidate the complete installed payload against the target manifest,
+   metadata and exact original cron configuration. For a single-file exchange,
+   validate the changed behavior without competing with scheduled invocations:
+   use isolated outputs for any manual check, then await fresh regular results
+   in postflight. Do not launch an additional bundled PDF check while cron is
+   active. For a coordinated exchange, validate changed monitor behavior and
+   bundled PDF execution while the invocations remain paused; restore them only
+   after these checks. Do not overwrite
    a concurrently changed cron object; verify its identity and expected bytes
    before any replacement.
 4. **Validate or return.** Check normal production health/log summaries and wait
