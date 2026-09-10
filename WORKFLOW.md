@@ -190,6 +190,11 @@ Rules:
   writes, record the complete path before editing:
   `route -> request classification -> server-side authority -> locks and
 transaction -> mutation -> post-commit effects`.
+- For changes to stored values or runtime resources, trace representative edge
+  cases through the affected producers and consumers before editing: for
+  example, missing/zero/positive targets through calculation and UI/export, or
+  cache preparation through use by the runtime user. Reuse existing tests;
+  no separate checklist or report is needed.
 - Record the current understanding in the workpad when Linear is involved.
 - Keep milestones tight, but once a local diff exists continue toward
   validation and commit rather than re-planning the same change.
