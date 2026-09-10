@@ -203,6 +203,16 @@ jobs:
               - '.github/workflows/ci.yml'
             integration_smoke:
               - 'application/**'
+              - 'assets/**'
+              - 'system/**'
+              - 'config-sample.php'
+              - 'docker-compose.yml'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'gulpfile.js'
+              - 'babel.config.json'
+              - 'resources/vendor/**'
+              - 'scripts/postinstall-assets.js'
               - 'config/**'
               - 'database/**'
               - 'docker/compose.ci-local.yml'
@@ -219,6 +229,9 @@ jobs:
               - 'scripts/ci/lib/BrowserRuntimeEvidence.php'
               - 'scripts/ci/lib/DashboardSummaryBrowserCheck.php'
               - 'scripts/ci/lib/CheckSelection.php'
+              - 'scripts/ci/lib/local_full_gate_selection.sh'
+              - 'scripts/ci/pre_pr_full.sh'
+              - 'scripts/ci/select_local_full_gate.php'
               - 'scripts/release-gate/**'
               - 'composer.json'
               - 'composer.lock'
@@ -723,6 +736,7 @@ jobs:
           --start-date=2026-01-12 --end-date=2026-01-16
           --integration-smoke-include-ldap=${{ steps.ldap_guardrail.outputs.include_ldap }}
           --integration-smoke-browser-bootstrap-timeout=900
+          --integration-smoke-browser-open-timeout=60
           --integration-smoke-browser-evidence=${{ github.event_name == 'push' && 'always' || 'on-failure' }}
           --report-dir=storage/logs/ci/deep-runtime-suite
       - name: Upload deep runtime suite artifacts

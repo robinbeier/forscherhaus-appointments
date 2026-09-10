@@ -261,7 +261,7 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertTrue($matches['pdf_renderer_tests_required']);
         self::assertFalse($matches['api_contract']);
         self::assertFalse($matches['booking_flows']);
-        self::assertFalse($matches['integration_smoke']);
+        self::assertTrue($matches['integration_smoke']);
         self::assertTrue($matches['ldap_guardrail_required']);
         self::assertFalse($matches['write_contract_booking']);
         self::assertFalse($matches['write_contract_api']);
@@ -443,6 +443,84 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertFalse($matches['write_contract_api']);
     }
 
+    public function testLocalFullGateSelectorReusesIntegrationSmokeFilterForOperationsOnlyChanges(): void
+    {
+        $result = $this->runLocalSelector(['scripts/ops/kuma_push_app_logs.sh', 'docs/observability.md']);
+
+        self::assertSame(0, $result['status']);
+        self::assertSame("false\n", $result['stdout']);
+    }
+
+    public function testLocalFullGateSelectorIncludesSelectorChangesInSmokeScope(): void
+    {
+        $result = $this->runLocalSelector(['scripts/ci/select_local_full_gate.php']);
+
+        self::assertSame(0, $result['status']);
+        self::assertSame("true\n", $result['stdout']);
+    }
+
+    public function testLocalAndHostedSmokeKeepFrontendAndRuntimeInputs(): void
+    {
+        foreach (
+            [
+                'assets/js/pages/booking.js',
+                'assets/css/themes/default.scss',
+                'system/core/CodeIgniter.php',
+                'docker-compose.yml',
+                'config-sample.php',
+                'package.json',
+                'package-lock.json',
+                'gulpfile.js',
+                'babel.config.json',
+                'resources/vendor/qrcode/qrcode.min.js',
+                'scripts/postinstall-assets.js',
+                'scripts/ci/pre_pr_full.sh',
+            ]
+            as $path
+        ) {
+            self::assertTrue($this->applyFilters([$path])['integration_smoke'], $path);
+            $result = $this->runLocalSelector([$path]);
+            self::assertSame(0, $result['status'], $result['stderr']);
+            self::assertSame("true\n", $result['stdout'], $path);
+        }
+    }
+
+    public function testLocalSelectorRejectsUnsupportedGlobEvenForUnrelatedPaths(): void
+    {
+        $workflow = tempnam(sys_get_temp_dir(), 'ci-workflow-');
+        self::assertNotFalse($workflow);
+        file_put_contents(
+            $workflow,
+            "jobs:\n  changes:\n    steps:\n      - id: filter\n        with:\n          filters: |\n            integration_smoke:\n              - 'application/[ab].php'\n",
+        );
+        try {
+            $result = $this->runLocalSelector(['notes.md'], $workflow);
+        } finally {
+            unlink($workflow);
+        }
+        self::assertSame(1, $result['status']);
+        self::assertStringContainsString('Unsupported integration_smoke filter pattern', $result['stderr']);
+    }
+
+    public function testLocalFullGateSelectorFailsClosedForInvalidFilter(): void
+    {
+        $workflow = tempnam(sys_get_temp_dir(), 'ci-workflow-');
+        self::assertNotFalse($workflow);
+        file_put_contents(
+            $workflow,
+            "jobs:\n  changes:\n    steps:\n      - id: filter\n        with:\n          filters: |\n            integration_smoke:\n              - !invalid\n",
+        );
+
+        try {
+            $result = $this->runLocalSelector(['application/controllers/Booking.php'], $workflow);
+        } finally {
+            unlink($workflow);
+        }
+
+        self::assertSame(1, $result['status']);
+        self::assertStringContainsString('Selection failed:', $result['stderr']);
+    }
+
     public function testLdapConstantsChangeTriggersLdapGuardrailFilter(): void
     {
         $matches = $this->applyFilters(['application/config/constants.php']);
@@ -620,6 +698,27 @@ class CiPathFilterMatrixTest extends TestCase
     private function workflowPath(): string
     {
         return __DIR__ . '/../../../.github/workflows/ci.yml';
+    }
+
+    /** @param array<int, string> $paths @return array{status:int,stdout:string,stderr:string} */
+    private function runLocalSelector(array $paths, ?string $workflow = null): array
+    {
+        $workflow ??= $this->workflowPath();
+        $process = proc_open(
+            [PHP_BINARY, 'scripts/ci/select_local_full_gate.php', '--workflow=' . $workflow],
+            [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            $pipes,
+            dirname(__DIR__, 3),
+        );
+        self::assertIsResource($process);
+        fwrite($pipes[0], implode("\0", $paths) . "\0");
+        fclose($pipes[0]);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+
+        return ['status' => proc_close($process), 'stdout' => $stdout, 'stderr' => $stderr];
     }
 
     private function extractJobBlock(string $workflow, string $jobName, string $nextJobName): string

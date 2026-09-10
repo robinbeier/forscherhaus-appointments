@@ -5,6 +5,7 @@ ROOT_DIR="$(git rev-parse --show-toplevel)"
 cd "$ROOT_DIR"
 source ./scripts/ci/git_helpers.sh
 source ./scripts/ci/docker_compose_helpers.sh
+source ./scripts/ci/lib/local_full_gate_selection.sh
 
 BASE_REF="${PRE_PR_BASE_REF:-main}"
 RUN_COVERAGE="${PRE_PR_RUN_COVERAGE:-0}"
@@ -91,6 +92,10 @@ require_cmd python3
 # Keep changed-file checks deterministic against current base branch state.
 git_ci_refresh_base_ref_if_safe "$BASE_REF" "pre-pr-full"
 
+echo_section "Resolve local full-gate scope"
+RUN_INTEGRATION_SMOKE="$(pre_pr_full_should_run_integration_smoke "$BASE_REF")"
+echo "[pre-pr-full] Integration smoke required by changed paths: ${RUN_INTEGRATION_SMOKE}"
+
 echo_section "Run quick pre-PR gate"
 SKIP_LOCAL_DEPS_BOOTSTRAP=1 PRE_PR_BASE_REF="$BASE_REF" bash ./scripts/ci/pre_pr_quick.sh
 
@@ -122,8 +127,10 @@ GITHUB_EVENT_NAME=pull_request GITHUB_BASE_REF="$BASE_REF" python3 scripts/ci/ch
 echo_section "Frontend compiler regression tests"
 node --test tests/JavaScript/gulp_build.test.js tests/JavaScript/dashboard_date_range.test.js tests/JavaScript/dashboard_zero_target.test.js tests/JavaScript/blocked_periods.test.js
 
-echo_section "Refresh frontend assets"
-npm run build
+if [[ "$RUN_INTEGRATION_SMOKE" == "true" ]]; then
+    echo_section "Refresh frontend assets"
+    npm run build
+fi
 
 echo_section "Start integration stack"
 INTEGRATION_SMOKE_INCLUDE_LDAP=0
@@ -150,8 +157,10 @@ DEEP_RUNTIME_SUITES=(
     write-contract-booking
     write-contract-api
     booking-controller-flows
-    integration-smoke
 )
+if [[ "$RUN_INTEGRATION_SMOKE" == "true" ]]; then
+    DEEP_RUNTIME_SUITES+=(integration-smoke)
+fi
 
 echo_section "Deep runtime suite"
 rm -rf storage/logs/ci/deep-runtime-suite
