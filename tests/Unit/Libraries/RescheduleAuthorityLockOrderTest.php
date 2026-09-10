@@ -68,18 +68,19 @@ final class RescheduleAuthorityLockOrderTest extends TestCase
             $this->assertSame('canonical-identity-mismatch', $exception->getMessage());
         }
 
-        $appointmentQueryIndex = null;
-        foreach ($database->queries as $index => $query) {
-            if (str_contains($query['sql'], 'FROM `ea_appointments`')) {
-                $appointmentQueryIndex = $index;
-                break;
-            }
-        }
-
-        $this->assertNotNull($appointmentQueryIndex);
+        $this->assertCount(6, $database->queries);
         $this->assertStringContainsString('FROM `ea_users`', $database->queries[0]['sql']);
         $this->assertSame([10, 20, 30], $database->queries[0]['bindings']);
-        $this->assertGreaterThan(0, $appointmentQueryIndex);
+        $this->assertStringContainsString('FROM `ea_services`', $database->queries[1]['sql']);
+        $this->assertSame([40, 50], $database->queries[1]['bindings']);
+        $this->assertStringContainsString('FROM `ea_user_settings`', $database->queries[2]['sql']);
+        $this->assertSame([10, 30], $database->queries[2]['bindings']);
+        $this->assertStringContainsString('FROM `ea_services_providers`', $database->queries[3]['sql']);
+        $this->assertSame([10], $database->queries[3]['bindings']);
+        $this->assertStringContainsString('FROM `ea_services_providers`', $database->queries[4]['sql']);
+        $this->assertSame([30], $database->queries[4]['bindings']);
+        $this->assertStringContainsString('FROM `ea_appointments`', $database->queries[5]['sql']);
+        $this->assertSame([99], $database->queries[5]['bindings']);
     }
 
     public function testVerifyLockedStateRejectsStructuralSnapshotDriftAfterParentLocks(): void
