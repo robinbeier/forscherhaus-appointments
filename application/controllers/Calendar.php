@@ -254,6 +254,13 @@ class Calendar extends EA_Controller
 
             try {
                 if ($manage_mode) {
+                    $this->lock_calendar_parent_users([
+                        $customer_data['id'] ?? null,
+                        $appointment_data['id_users_customer'] ?? null,
+                        $appointment_data['id_users_provider'] ?? null,
+                        $stored_appointment['id_users_customer'] ?? null,
+                        $stored_appointment['id_users_provider'] ?? null,
+                    ]);
                     $locked_appointment = $this->lock_appointment((int) $appointment_data['id']);
 
                     if (
@@ -408,7 +415,36 @@ class Calendar extends EA_Controller
         return $role_slug !== DB_SLUG_PROVIDER || $user_id === $provider_id;
     }
 
-    private function lock_appointment(int $appointment_id): array
+    protected function lock_calendar_parent_users(array $user_ids): void
+    {
+        $user_ids = array_values(
+            array_unique(
+                array_filter(
+                    array_map(static fn($user_id): int => (int) $user_id, $user_ids),
+                    static fn(int $user_id): bool => $user_id > 0,
+                ),
+            ),
+        );
+
+        if ($user_ids === []) {
+            return;
+        }
+
+        sort($user_ids, SORT_NUMERIC);
+        $placeholders = implode(', ', array_fill(0, count($user_ids), '?'));
+        $this->db
+            ->query(
+                'SELECT `id` FROM `' .
+                    $this->db->dbprefix('users') .
+                    '` WHERE `id` IN (' .
+                    $placeholders .
+                    ') ORDER BY `id` ASC FOR UPDATE',
+                $user_ids,
+            )
+            ->result_array();
+    }
+
+    protected function lock_appointment(int $appointment_id): array
     {
         $appointment = $this->db
             ->query('SELECT * FROM `' . $this->db->dbprefix('appointments') . '` WHERE `id` = ? FOR UPDATE', [

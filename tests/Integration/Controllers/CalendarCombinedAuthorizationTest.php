@@ -354,6 +354,26 @@ final class CalendarCombinedAuthorizationTest extends TestCase
         );
     }
 
+    public function testManageModeLocksUserParentsBeforeAppointment(): void
+    {
+        $pair = $this->fixtures->resolveProviderServicePair();
+        $customer = $this->fixtures->createCustomer();
+        $appointment = $this->fixtures->createAppointment(
+            $pair['provider_id'],
+            $customer,
+            $pair['service_id'],
+            new DateTimeImmutable('2035-05-07 09:00:00'),
+        );
+        $this->setRolePrivileges(DB_SLUG_PROVIDER, 'appointments', PRIV_VIEW | PRIV_EDIT);
+        $this->authenticate($pair['provider_id'], DB_SLUG_PROVIDER);
+        $controller = $this->controller();
+        $this->post([], $this->appointmentPayload($appointment, $pair['provider_id'], $pair['service_id'], $customer));
+
+        $controller->save_appointment();
+
+        $this->assertSame(['parents', 'appointment'], $controller->lockOrder);
+    }
+
     private function controller(): Calendar
     {
         $CI = &get_instance();
@@ -364,7 +384,22 @@ final class CalendarCombinedAuthorizationTest extends TestCase
             $CI->load->model($model);
         }
         $controller = new class extends Calendar {
+            /** @var list<string> */
+            public array $lockOrder = [];
+
             public function __construct() {}
+
+            protected function lock_calendar_parent_users(array $user_ids): void
+            {
+                $this->lockOrder[] = 'parents';
+                parent::lock_calendar_parent_users($user_ids);
+            }
+
+            protected function lock_appointment(int $appointment_id): array
+            {
+                $this->lockOrder[] = 'appointment';
+                return parent::lock_appointment($appointment_id);
+            }
         };
         foreach (
             [
