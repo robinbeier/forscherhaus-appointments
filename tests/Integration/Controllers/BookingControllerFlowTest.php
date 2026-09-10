@@ -121,6 +121,7 @@ class BookingControllerFlowTest extends TestCase
         $this->assertNotNull($appointment);
         $this->assertSame((int) $response['appointment_id'], (int) $appointment['id']);
         $this->assertSame((string) $response['appointment_hash'], (string) $appointment['hash']);
+        $this->assertMatchesRegularExpression('/^[a-f0-9]{64}$/D', $appointment['hash']);
         $this->assertSame($pair['provider_id'], (int) $appointment['id_users_provider']);
         $this->assertSame($pair['service_id'], (int) $appointment['id_services']);
         $this->assertTrue($this->fixtures->customerExistsByEmail($customerEmail));
@@ -311,6 +312,8 @@ class BookingControllerFlowTest extends TestCase
             $pair['service_id'],
             $initialStart,
         );
+
+        $this->fixtures->updateAppointment($appointmentId, ['hash' => 'LegacyLink12']);
 
         $existing = $this->fixtures->findAppointmentById($appointmentId);
         $this->assertNotNull($existing);

@@ -231,7 +231,7 @@ class Appointments_model extends EA_Model
             $appointment['book_datetime'] = date('Y-m-d H:i:s');
             $appointment['create_datetime'] = date('Y-m-d H:i:s');
             $appointment['update_datetime'] = date('Y-m-d H:i:s');
-            $appointment['hash'] = random_string('alnum', 12);
+            $appointment['hash'] = bin2hex(random_bytes(32));
 
             if (!$this->db->insert('appointments', $appointment)) {
                 throw new RuntimeException('Could not insert appointment.');
