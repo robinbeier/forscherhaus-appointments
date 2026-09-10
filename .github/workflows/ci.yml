@@ -210,6 +210,8 @@ jobs:
               - 'package.json'
               - 'package-lock.json'
               - 'gulpfile.js'
+              - 'babel.config.json'
+              - 'resources/vendor/**'
               - 'scripts/postinstall-assets.js'
               - 'config/**'
               - 'database/**'

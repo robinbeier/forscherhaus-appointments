@@ -471,6 +471,8 @@ class CiPathFilterMatrixTest extends TestCase
                 'package.json',
                 'package-lock.json',
                 'gulpfile.js',
+                'babel.config.json',
+                'resources/vendor/qrcode/qrcode.min.js',
                 'scripts/postinstall-assets.js',
                 'scripts/ci/pre_pr_full.sh',
             ]
