@@ -405,6 +405,7 @@ function runDashboardSummaryBrowserCheck(array $config): array
             'executable_path' => (string) (getenv('PLAYWRIGHT_MCP_EXECUTABLE_PATH') ?: ''),
             'headed' => (bool) $config['headed'],
             'launch_timeout' => (int) $config['open_timeout'],
+            'check_timeout' => (int) $config['open_timeout'] + 15,
         ],
         JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
     );
@@ -413,7 +414,8 @@ function runDashboardSummaryBrowserCheck(array $config): array
         ['node', $runnerPath],
         $config['repo_root'],
         null,
-        $config['open_timeout'] * 2 + 15,
+        // Preserve the former separate 10-second close budget as well.
+        $config['open_timeout'] * 2 + 25,
         $runnerInput,
     );
     assertPlaywrightCommandSucceeded($result, 'Render dashboard summary in browser');

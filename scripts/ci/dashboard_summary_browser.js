@@ -50,17 +50,30 @@ const main = async () => {
 
     stage = 'launch';
     browser = await browserType.launch(launchOptions);
-    stage = 'context';
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    const runCode = eval(`(${input.snippet})`);
+    let checkTimer;
+    try {
+        await Promise.race([
+            (async () => {
+                stage = 'context';
+                const context = await browser.newContext();
+                const page = await context.newPage();
+                const runCode = eval(`(${input.snippet})`);
 
-    if (typeof runCode !== 'function') {
-        throw new Error('Dashboard summary browser snippet did not evaluate to a function.');
+                if (typeof runCode !== 'function') {
+                    throw new Error('Dashboard summary browser snippet did not evaluate to a function.');
+                }
+
+                stage = 'dashboard assertions';
+                await runCode(page);
+            })(),
+            new Promise((_, reject) => {
+                const timeout = Number(input.check_timeout) > 0 ? Number(input.check_timeout) * 1000 : 35000;
+                checkTimer = setTimeout(() => reject(new Error('Dashboard browser check timed out.')), timeout);
+            }),
+        ]);
+    } finally {
+        clearTimeout(checkTimer);
     }
-
-    stage = 'dashboard assertions';
-    await runCode(page);
 };
 
 main()

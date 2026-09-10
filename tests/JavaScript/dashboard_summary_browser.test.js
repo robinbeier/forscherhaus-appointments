@@ -118,3 +118,10 @@ test('SIGTERM during a check closes the browser and stays nonzero', () => {
     assert.equal(result.status, 143, result.stderr);
     assert.equal(record.closed, true);
 });
+
+test('check timeout stays separate from browser launch and closes the browser', () => {
+    const {result, record} = runRunner('async () => { await new Promise(() => {}); }', {check_timeout: 0.02});
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /check timed out/);
+    assert.equal(record.closed, true);
+});
