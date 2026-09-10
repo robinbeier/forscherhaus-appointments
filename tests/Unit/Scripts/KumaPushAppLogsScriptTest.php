@@ -34,6 +34,14 @@ class KumaPushAppLogsScriptTest extends TestCase
 
                 printf 'ERROR - old copied failure\n' > "$KUMA_APP_LOG_FILE"
                 bash scripts/ops/kuma_push_app_logs.sh
+                cat > "$fixture/bin/head" <<'HEAD'
+                #!/usr/bin/env bash
+                exit 99
+                HEAD
+                chmod 755 "$fixture/bin/head"
+                output="$(bash scripts/ops/kuma_push_app_logs.sh)"
+                [[ "$output" == *'OK new_app_errors=0'* ]]
+                rm "$fixture/bin/head"
                 mv "$KUMA_APP_LOG_FILE" "$fixture/old.php"
                 cp "$fixture/old.php" "$fixture/replacement.php"
                 printf 'ERROR - copied-file failure\n' >> "$fixture/replacement.php"
@@ -59,6 +67,9 @@ class KumaPushAppLogsScriptTest extends TestCase
                 [[ "$output" == *'OK primed app log monitor'* ]]
                 IFS='|' read -r _ legacy_inode legacy_size < "$KUMA_PUSH_STATE_DIR/app-logs.state"
                 printf '%s|%s|%s\n' "$KUMA_APP_LOG_FILE" "$legacy_inode" "$legacy_size" > "$KUMA_PUSH_STATE_DIR/app-logs.state"
+                output="$(bash scripts/ops/kuma_push_app_logs.sh)"
+                [[ "$output" == *'OK new_app_errors=0'* ]]
+                printf '%s|%s|%s\n' "$KUMA_APP_LOG_FILE" "$legacy_inode" "$legacy_size" > "$KUMA_PUSH_STATE_DIR/app-logs.state"
                 mv "$KUMA_APP_LOG_FILE" "$fixture/old-same-size.php"
                 printf 'ERROR - new!\n' > "$KUMA_APP_LOG_FILE"
                 output="$(bash scripts/ops/kuma_push_app_logs.sh)"
@@ -70,6 +81,9 @@ class KumaPushAppLogsScriptTest extends TestCase
                 printf 'long prefix before truncation\n' > "$KUMA_APP_LOG_FILE"
                 bash scripts/ops/kuma_push_app_logs.sh
                 printf 'ERROR - after truncation\n' > "$KUMA_APP_LOG_FILE"
+                output="$(bash scripts/ops/kuma_push_app_logs.sh)"
+                [[ "$output" == *'CRIT new_app_errors=1'* ]]
+                : > "$KUMA_PUSH_STATE_DIR/app-logs.state"
                 output="$(bash scripts/ops/kuma_push_app_logs.sh)"
                 [[ "$output" == *'CRIT new_app_errors=1'* ]]
                 BASH
@@ -97,6 +111,10 @@ class KumaPushAppLogsScriptTest extends TestCase
                 printf '# synthetic environment\n' > "$fixture/env"
                 cat > "$fixture/bin/curl" <<'CURL'
                 #!/usr/bin/env bash
+                for entry in "$KUMA_PUSH_STATE_DIR"/delta.*/*; do
+                  [[ -f "$entry" ]] || continue
+                  (( $(wc -c < "$entry") <= 512 )) || exit 98
+                done
                 [[ "${FAIL_PUSH:-0}" == 1 ]] && exit 1
                 exit 0
                 CURL
@@ -106,7 +124,7 @@ class KumaPushAppLogsScriptTest extends TestCase
                 export KUMA_PUSH_URL_APP_LOGS='https://kuma.example/app'
                 export KUMA_APP_LOG_FILE="$fixture/log.php"
                 export KUMA_PUSH_STATE_DIR="$fixture/state"
-                printf 'stable prefix\n' > "$KUMA_APP_LOG_FILE"
+                printf '%4096s\n' '' > "$KUMA_APP_LOG_FILE"
                 bash scripts/ops/kuma_push_app_logs.sh
                 cp "$KUMA_PUSH_STATE_DIR/app-logs.state" "$fixture/state-before"
                 printf 'ERROR - retry this failure\n' >> "$KUMA_APP_LOG_FILE"
@@ -114,6 +132,18 @@ class KumaPushAppLogsScriptTest extends TestCase
                 ! bash scripts/ops/kuma_push_app_logs.sh
                 cmp -s "$fixture/state-before" "$KUMA_PUSH_STATE_DIR/app-logs.state"
                 unset FAIL_PUSH
+                cat > "$fixture/bin/sha256sum" <<'HASH'
+                #!/usr/bin/env bash
+                cat >/dev/null
+                exit 71
+                HASH
+                chmod 755 "$fixture/bin/sha256sum"
+                if output="$(bash scripts/ops/kuma_push_app_logs.sh 2>&1)"; then
+                  exit 1
+                fi
+                [[ "$output" == *'App log read was incomplete'* ]]
+                cmp -s "$fixture/state-before" "$KUMA_PUSH_STATE_DIR/app-logs.state"
+                rm "$fixture/bin/sha256sum"
                 output="$(bash scripts/ops/kuma_push_app_logs.sh)"
                 [[ "$output" == *'CRIT new_app_errors=1'* ]]
                 output="$(bash scripts/ops/kuma_push_app_logs.sh)"
