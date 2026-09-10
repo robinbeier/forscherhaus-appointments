@@ -14,6 +14,27 @@ use function ReleaseGate\normalizeCookieRecordsForPlaywright;
 
 class DashboardIntegrationSmokeTest extends TestCase
 {
+    public function testDirectDashboardBrowserRunnerJavaScriptContract(): void
+    {
+        $repositoryRoot = dirname(__DIR__, 3);
+        $process = proc_open(
+            ['node', '--test', 'tests/JavaScript/dashboard_summary_browser.test.js'],
+            [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            $pipes,
+            $repositoryRoot,
+        );
+
+        self::assertIsResource($process);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+
+        self::assertSame(0, proc_close($process), trim($stdout . PHP_EOL . $stderr));
+        self::assertMatchesRegularExpression('/(?:#|ℹ) tests [1-9]\d*/', $stdout);
+        self::assertMatchesRegularExpression('/(?:#|ℹ) fail 0/', $stdout);
+    }
+
     public function testBuildRunCodeSnippetUsesPlaywrightFunctionSignature(): void
     {
         $snippet = dashboardSummaryBrowserBuildRunCodeSnippet($this->browserSnippetConfig());

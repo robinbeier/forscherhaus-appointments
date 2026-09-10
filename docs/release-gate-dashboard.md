@@ -146,10 +146,15 @@ required Linux browser dependencies inside the validation container. This keeps
 the dashboard browser checks portable across Linux architectures, including
 local arm64 runs.
 
-The dashboard summary browser check emits its `run-code` payload with the
-repo-owned `__DASHBOARD_SUMMARY_BROWSER_CHECK__` prefix. The parser reads that
-marker directly instead of relying on undocumented stdout framing from the
-upstream Playwright CLI. The wrapper pins `PLAYWRIGHT_MCP_OUTPUT_MODE=stdout`
-for these gate runs so the repo keeps reading the sentinel from stdout in the
-current Playwright CLI behavior, even if the host environment configures
-Playwright CLI output differently.
+The dashboard summary check runs the existing browser assertions in one direct
+Playwright Node process. It launches the configured browser, runs the dashboard
+snippet and closes the browser without a CLI daemon, named session or separate
+`open about:blank` command. Session cookies and the generated snippet travel on
+stdin, not command arguments. The existing installation wrapper is still used
+for browser preparation; optional booking-page evidence retains its CLI path.
+
+The summary check preserves the repo-owned
+`__DASHBOARD_SUMMARY_BROWSER_CHECK__` payload and all PHP assertions. Browser
+launch and check execution remain bounded; failures must remain failures.
+This removes an unnecessary startup layer, but the old CI artifacts do not
+establish the exact cause of the intermittent daemon startup timeout.

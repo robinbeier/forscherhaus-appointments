@@ -398,6 +398,12 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertFalse($matches['write_contract_api']);
     }
 
+    public function testDirectDashboardBrowserRunnerChangeTriggersIntegrationSmoke(): void
+    {
+        $matches = $this->applyFilters(['scripts/ci/dashboard_summary_browser.js']);
+        self::assertTrue($matches['integration_smoke']);
+    }
+
     public function testDashboardSummaryBrowserCheckLibraryChangeTriggersIntegrationSmoke(): void
     {
         $matches = $this->applyFilters(['scripts/ci/lib/DashboardSummaryBrowserCheck.php']);

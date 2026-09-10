@@ -227,6 +227,7 @@ jobs:
               - 'scripts/ci/git_helpers.sh'
               - 'scripts/ci/docker_compose_helpers.sh'
               - 'scripts/ci/lib/BrowserRuntimeEvidence.php'
+              - 'scripts/ci/dashboard_summary_browser.js'
               - 'scripts/ci/lib/DashboardSummaryBrowserCheck.php'
               - 'scripts/ci/lib/CheckSelection.php'
               - 'scripts/ci/lib/local_full_gate_selection.sh'
