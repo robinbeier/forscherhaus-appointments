@@ -39,8 +39,10 @@ become redirects or reach application routing:
 
 For an approved maintenance change, back up the existing Apache files first,
 run `apache2ctl configtest`, and reload Apache only after the test passes. Run
-the redacted checks in [production operations](../ops/agent-operations.md)
-afterward and record status classes only. If a check fails, restore the prior
+`bash scripts/ops/prod_validate_after_change.sh --require-scanner-blocking`
+afterward, following the access and redaction rules in
+[production operations](../ops/agent-operations.md). This makes scanner-path
+and default-host failures blocking; record status classes only. If a check fails, restore the prior
 files, rerun `apache2ctl configtest`, and reload the restored configuration.
 This reference does not claim that the live guard is currently installed or
 verified.

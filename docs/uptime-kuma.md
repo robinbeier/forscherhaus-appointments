@@ -103,8 +103,10 @@ retiring the monitor does not stop services or remove those diagnostic checks.
 The `Security - Scanner Activity` Push monitor counted matching access-log
 requests, including blocked bursts from multiple sources. A `2xx` response did
 not prove disclosure, and a blocked burst did not by itself require action.
-Retire that continuous alert, while retaining Apache/Fail2ban protection and the
+Retire that continuous alert, while retaining Apache path rejection and the
 fixed scanner-path checks used by `prod_doctor.sh` and post-change validation.
+The separate scanner-IP Fail2ban jail is also retired; SSH and other Fail2ban
+protection remain intact. See the [scanner protection decision](security/ROB-405-apache-scanner-blocking-gate.md).
 Logs remain available for focused incident diagnosis; retiring the alarm does
 not resolve any independently identified security finding.
 
