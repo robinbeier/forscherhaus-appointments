@@ -11,7 +11,7 @@ source "$SCRIPT_DIR/lib/app_log_classification.sh"
 kuma_push_load_env_file
 
 APP_ROOT="${KUMA_APP_ROOT:-/var/www/html/easyappointments}"
-LOG_FILE="${KUMA_APP_LOG_FILE:-${APP_ROOT}/storage/logs/log-$(date +%F).php}"
+LOG_FILE="${KUMA_APP_LOG_FILE:-${APP_ROOT}/storage/logs/log-$(date -u +%F).php}"
 STATE_DIR="${KUMA_PUSH_STATE_DIR:-/var/tmp/kuma-push-state}"
 STATE_FILE="${STATE_DIR}/app-logs.state"
 LOCK_FILE="${KUMA_APP_LOG_LOCK_FILE:-${STATE_DIR}/app-logs.lock}"
