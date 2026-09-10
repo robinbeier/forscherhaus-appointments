@@ -100,7 +100,13 @@ incompatibility requires the coordinated directory exchange below.
    a concurrently changed cron object; verify its identity and expected bytes
    before any replacement.
 4. **Validate or return.** Check normal production health/log summaries and wait
-   for fresh regular monitor results, including slower Push monitors. On a known
+   for regular monitor results, including slower Push monitors. For the changed
+   entrypoint, establish that the confirming invocation started after publication;
+   a result timestamp alone is insufficient because a running old invocation may
+   finish later. Use bounded process observation to distinguish pre-existing
+   calls and the subsequent scheduled invocation; if attribution is uncertain,
+   do not declare success. Apply the same requirement after rollback so recovery
+   actually exercises the restored version. On a known
    failure, restore the verified old file by the same guarded atomic exchange;
    cron remains untouched for the single-file path. For a coordinated failure,
    pause/drain the invocations again and restore the old directory and exact
