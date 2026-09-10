@@ -12,6 +12,7 @@ require_once __DIR__ . '/DashboardSummaryBrowserCheck.php';
 
 use ReleaseGate\GateAssertionException;
 use ReleaseGate\GateProcessRunner;
+use function ReleaseGate\resolveConfiguredPlaywrightBrowser;
 use Throwable;
 use function ReleaseGate\buildPlaywrightSessionArguments;
 use function ReleaseGate\prepareConfiguredPlaywrightCommandArguments;
@@ -366,7 +367,6 @@ function collectBookingPageBrowserEvidence(array $config): array
 function runDashboardSummaryBrowserCheck(array $config): array
 {
     $artifactsDir = rtrim($config['artifacts_dir'], '/');
-    $sessionId = buildBrowserRuntimeEvidenceSessionId();
     $runCodeSnippet = \dashboardSummaryBrowserBuildRunCodeSnippet([
         'target_url' => $config['target_url'],
         'session_cookies' => \ReleaseGate\normalizeCookieRecordsForPlaywright(
@@ -395,20 +395,30 @@ function runDashboardSummaryBrowserCheck(array $config): array
     );
     assertPlaywrightCommandSucceeded($bootstrap, 'Bootstrap Playwright CLI');
 
-    try {
-        $result = runPwcliCommand($config, $sessionId, ['open', 'about:blank'], $config['open_timeout']);
-        assertPlaywrightCommandSucceeded($result, 'Open browser for dashboard summary render');
+    $runnerPath = $config['repo_root'] . '/scripts/ci/dashboard_summary_browser.js';
+    ensureFileReadable($runnerPath, 'Dashboard summary browser runner');
 
-        $result = runPwcliCommand($config, $sessionId, ['run-code', $runCodeSnippet], $config['open_timeout'] + 15);
-        assertPlaywrightCommandSucceeded($result, 'Render dashboard summary in browser');
+    $runnerInput = json_encode(
+        [
+            'snippet' => $runCodeSnippet,
+            'browser' => resolveConfiguredPlaywrightBrowser(),
+            'executable_path' => (string) (getenv('PLAYWRIGHT_MCP_EXECUTABLE_PATH') ?: ''),
+            'headed' => (bool) $config['headed'],
+            'launch_timeout' => (int) $config['open_timeout'],
+        ],
+        JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+    );
 
-        return \dashboardSummaryBrowserAssertPayload(\dashboardSummaryBrowserParseRunCodeResult($result));
-    } finally {
-        try {
-            runPwcliCommand($config, $sessionId, ['close'], 10);
-        } catch (Throwable) {
-        }
-    }
+    $result = GateProcessRunner::run(
+        ['node', $runnerPath],
+        $config['repo_root'],
+        null,
+        $config['open_timeout'] * 2 + 15,
+        $runnerInput,
+    );
+    assertPlaywrightCommandSucceeded($result, 'Render dashboard summary in browser');
+
+    return \dashboardSummaryBrowserAssertPayload(\dashboardSummaryBrowserParseRunCodeResult($result));
 }
 
 function shouldCollectBrowserRuntimeEvidence(string $mode, bool $suiteFailed): bool
