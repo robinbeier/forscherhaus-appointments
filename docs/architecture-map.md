@@ -16,7 +16,7 @@ This map defines component boundaries, path ownership scope, and dependency edge
 | `booking-lifecycle` | Booking Confirmation/Cancellation | booking-public, integrations-sync, people-services-admin, scheduling-backoffice, shared-core | 5 | 3 |
 | `scheduling-backoffice` | Calendar & Scheduling | integrations-sync, people-services-admin, settings-compliance, shared-core | 19 | 5 |
 | `dashboard-exports` | Dashboard & Exports | scheduling-backoffice, people-services-admin, shared-core | 11 | 3 |
-| `people-services-admin` | People, Providers, Services | integrations-sync, scheduling-backoffice, settings-compliance, shared-core | 24 | 3 |
+| `people-services-admin` | People, Providers, Services | integrations-sync, scheduling-backoffice, settings-compliance, shared-core | 25 | 3 |
 | `settings-compliance` | Settings & Compliance | auth-session, integrations-sync, people-services-admin, scheduling-backoffice, shared-core | 27 | 3 |
 | `integrations-sync` | Integrations & Sync | auth-session, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 6 | 1 |
 | `api-v1` | REST API v1 | auth-session, integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 5 | 3 |
@@ -208,6 +208,7 @@ Path rules:
 - `application/controllers/Secretaries.php` (exact_file)
 - `application/controllers/Services.php` (exact_file)
 - `application/controllers/Service_categories.php` (exact_file)
+- `application/libraries/Permissions.php` (exact_file)
 - `application/models/Providers_model.php` (exact_file)
 - `application/models/Customers_model.php` (exact_file)
 - `application/models/Admins_model.php` (exact_file)

@@ -62,6 +62,7 @@
 /application/libraries/Ldap_client.php @robinbeier
 /application/libraries/Notifications.php @robinbeier
 /application/libraries/Pdf_renderer.php @robinbeier
+/application/libraries/Permissions.php @robinbeier
 /application/libraries/Provider_ui_smoke_fixture.php @robinbeier
 /application/libraries/Provider_utilization.php @robinbeier
 /application/libraries/Request_normalizer.php @robinbeier

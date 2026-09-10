@@ -87,13 +87,7 @@ class Customers_model extends EA_Model
     {
         // If a customer ID is provided then check whether the record really exists in the database.
         if (!empty($customer['id'])) {
-            $count = $this->db->get_where('users', ['id' => $customer['id']])->num_rows();
-
-            if (!$count) {
-                throw new InvalidArgumentException(
-                    'The provided customer ID does not exist in the database: ' . $customer['id'],
-                );
-            }
+            $this->assert_customer_exists((int) $customer['id']);
         }
 
         // Make sure all required fields are provided.
@@ -300,8 +294,17 @@ class Customers_model extends EA_Model
     {
         $customer['update_datetime'] = date('Y-m-d H:i:s');
 
-        if (!$this->db->update('users', $customer, ['id' => $customer['id']])) {
+        $updated = $this->db->update('users', $customer, [
+            'id' => $customer['id'],
+            'id_roles' => $this->get_customer_role_id(),
+        ]);
+
+        if (!$updated) {
             throw new RuntimeException('Could not update customer.');
+        }
+
+        if ($this->db->affected_rows() === 0) {
+            $this->assert_customer_exists_for_update((int) $customer['id']);
         }
 
         return $customer['id'];
@@ -321,9 +324,18 @@ class Customers_model extends EA_Model
         }
 
         try {
+            $customer_role_id = $this->get_customer_role_id();
+            $this->assert_customer_exists_for_update($customer_id);
+
             $this->delete_buffer_blocks_for_customer($customer_id);
 
-            $this->db->delete('users', ['id' => $customer_id]);
+            if (!$this->db->delete('users', ['id' => $customer_id, 'id_roles' => $customer_role_id])) {
+                throw new RuntimeException('Could not delete customer.');
+            }
+
+            if ($this->db->affected_rows() !== 1) {
+                throw new RuntimeException('Customer role changed during deletion.');
+            }
 
             if (!$this->db->trans_commit()) {
                 throw new RuntimeException('Could not commit customer delete transaction.');
@@ -371,7 +383,9 @@ class Customers_model extends EA_Model
      */
     public function find(int $customer_id): array
     {
-        $customer = $this->db->get_where('users', ['id' => $customer_id])->row_array();
+        $customer = $this->db
+            ->get_where('users', ['id' => $customer_id, 'id_roles' => $this->get_customer_role_id()])
+            ->row_array();
 
         if (!$customer) {
             throw new InvalidArgumentException(
@@ -405,7 +419,10 @@ class Customers_model extends EA_Model
         }
 
         // Check whether the customer exists.
-        $query = $this->db->get_where('users', ['id' => $customer_id]);
+        $query = $this->db->get_where('users', [
+            'id' => $customer_id,
+            'id_roles' => $this->get_customer_role_id(),
+        ]);
 
         if (!$query->num_rows()) {
             throw new InvalidArgumentException(
@@ -435,6 +452,42 @@ class Customers_model extends EA_Model
         $role_id = $this->get_customer_role_id();
 
         return $this->db->from('users')->where('id_roles', $role_id);
+    }
+
+    /**
+     * Assert that a user record belongs to the customer resource.
+     */
+    private function assert_customer_exists(int $customer_id): void
+    {
+        $count = $this->db
+            ->get_where('users', ['id' => $customer_id, 'id_roles' => $this->get_customer_role_id()])
+            ->num_rows();
+
+        if (!$count) {
+            throw new InvalidArgumentException(
+                'The provided customer ID does not exist in the database: ' . $customer_id,
+            );
+        }
+    }
+
+    /**
+     * Assert against the current database state and lock the customer row for the active transaction.
+     */
+    private function assert_customer_exists_for_update(int $customer_id): void
+    {
+        $users_table = $this->db->dbprefix('users');
+        $customer = $this->db
+            ->query('SELECT `id` FROM `' . $users_table . '` WHERE `id` = ? AND `id_roles` = ? FOR UPDATE', [
+                $customer_id,
+                $this->get_customer_role_id(),
+            ])
+            ->row_array();
+
+        if (!$customer) {
+            throw new InvalidArgumentException(
+                'The provided customer ID was not found in the database: ' . $customer_id,
+            );
+        }
     }
 
     /**

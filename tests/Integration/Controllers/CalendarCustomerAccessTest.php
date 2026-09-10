@@ -244,6 +244,145 @@ class CalendarCustomerAccessTest extends TestCase
         return ['admin' => [DB_SLUG_ADMIN, '1'], 'unlimited provider' => [DB_SLUG_PROVIDER, '0']];
     }
 
+    #[DataProvider('unrestrictedCustomerAccessCases')]
+    public function testStaffRowsAreNeverAcceptedAsCustomers(string $roleSlug, string $limit): void
+    {
+        $pair = $this->fixtures->resolveProviderServicePair();
+        $customerId = $this->fixtures->createCustomer(['last_name' => 'Customer']);
+        $providerRole = get_instance()
+            ->db->get_where('roles', ['slug' => DB_SLUG_PROVIDER])
+            ->row_array();
+        $this->assertNotEmpty($providerRole);
+        $staffId = $this->fixtures->createCustomer([
+            'id_roles' => (int) $providerRole['id'],
+            'last_name' => 'Staff',
+            'email' => 'calendar-staff-' . bin2hex(random_bytes(4)) . '@example.org',
+        ]);
+        $appointmentId = $this->fixtures->createAppointment(
+            $pair['provider_id'],
+            $customerId,
+            $pair['service_id'],
+            new DateTimeImmutable('2035-02-16 09:00:00'),
+        );
+        $userId = $roleSlug === DB_SLUG_ADMIN ? $this->userIdForRole($roleSlug) : $pair['provider_id'];
+
+        $this->fixtures->setSetting('limit_customer_access', $limit);
+        $this->authenticateAsUser($userId, $roleSlug);
+
+        $this->assertFalse(get_instance()->permissions->has_customer_access($userId, $staffId));
+        $this->postCalendarSavePayload(
+            $this->customerPayload($staffId, 'Changed'),
+            $this->appointmentPayload($appointmentId, $pair['provider_id'], $pair['service_id'], $customerId),
+        );
+        $this->createCalendarController()->save_appointment();
+
+        $this->assertDeniedResponse();
+        $this->assertSame('Staff', $this->customerLastName($staffId));
+        $this->assertSame($customerId, $this->appointmentCustomerId($appointmentId));
+        $this->assertSame(0, $this->notifications->savedCalls);
+
+        get_instance()->load->model('customers_model');
+        $this->assertRejectsStaffRow(fn() => get_instance()->customers_model->find($staffId));
+        $this->assertRejectsStaffRow(
+            fn() => get_instance()->customers_model->save($this->customerPayload($staffId, 'Changed')),
+        );
+        $this->assertRejectsStaffRow(fn() => get_instance()->customers_model->delete($staffId));
+        $this->assertSame('Staff', $this->customerLastName($staffId));
+    }
+
+    public function testCustomerDeleteRollsBackIfRoleChangesInsideTransaction(): void
+    {
+        $pair = $this->fixtures->resolveProviderServicePair();
+        $customerId = $this->fixtures->createCustomer();
+        $appointmentId = $this->fixtures->createAppointment(
+            $pair['provider_id'],
+            $customerId,
+            $pair['service_id'],
+            new DateTimeImmutable('2035-02-17 09:00:00'),
+        );
+        $providerRole = get_instance()
+            ->db->get_where('roles', ['slug' => DB_SLUG_PROVIDER])
+            ->row_array();
+        $this->assertNotEmpty($providerRole);
+
+        get_instance()->load->model('customers_model');
+        $model = new class ((int) $providerRole['id']) extends \Customers_model {
+            public function __construct(private readonly int $replacementRoleId)
+            {
+                parent::__construct();
+            }
+
+            protected function delete_buffer_blocks_for_customer(int $customer_id): void
+            {
+                $this->db->update('users', ['id_roles' => $this->replacementRoleId], ['id' => $customer_id]);
+                parent::delete_buffer_blocks_for_customer($customer_id);
+            }
+        };
+
+        try {
+            $model->delete($customerId);
+            $this->fail('Customer deletion should fail when the role changes during the transaction.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('Customer role changed during deletion.', $exception->getMessage());
+        }
+
+        $customerRole = get_instance()
+            ->db->get_where('roles', ['slug' => DB_SLUG_CUSTOMER])
+            ->row_array();
+        $this->assertSame(
+            (int) $customerRole['id'],
+            (int) get_instance()
+                ->db->get_where('users', ['id' => $customerId])
+                ->row_array()['id_roles'],
+        );
+        $this->assertSame(
+            1,
+            get_instance()
+                ->db->get_where('appointments', ['id' => $appointmentId])
+                ->num_rows(),
+        );
+    }
+
+    public function testCustomerUpdateFailsIfRoleChangesAfterValidation(): void
+    {
+        $customerId = $this->fixtures->createCustomer(['last_name' => 'Before']);
+        $providerRole = get_instance()
+            ->db->get_where('roles', ['slug' => DB_SLUG_PROVIDER])
+            ->row_array();
+        $this->assertNotEmpty($providerRole);
+        $secondaryDatabase = get_instance()->load->database('', true);
+
+        get_instance()->load->model('customers_model');
+        $model = new class ($secondaryDatabase, (int) $providerRole['id']) extends \Customers_model {
+            public function __construct(
+                private readonly \CI_DB_query_builder $secondaryDatabase,
+                private readonly int $replacementRoleId,
+            ) {
+                parent::__construct();
+            }
+
+            public function validate(array $customer): void
+            {
+                parent::validate($customer);
+                $this->secondaryDatabase->update(
+                    'users',
+                    ['id_roles' => $this->replacementRoleId],
+                    ['id' => $customer['id']],
+                );
+            }
+        };
+
+        $this->assertTrue(get_instance()->db->trans_begin());
+
+        try {
+            $this->assertRejectsStaffRow(fn() => $model->save($this->customerPayload($customerId, 'After')));
+            $this->assertSame('Before', $this->customerLastName($customerId));
+        } finally {
+            get_instance()->db->trans_rollback();
+            $secondaryDatabase->close();
+        }
+    }
+
     public function testLimitedProviderCanCreateUniqueCustomerThroughCalendarSave(): void
     {
         $pair = $this->fixtures->resolveProviderServicePair();
@@ -478,6 +617,16 @@ class CalendarCustomerAccessTest extends TestCase
         $response = $this->decodeJsonOutput();
         $this->assertFalse($response['success'] ?? true);
         $this->assertSame('You do not have the required permissions for this task.', $response['message'] ?? null);
+    }
+
+    private function assertRejectsStaffRow(callable $operation): void
+    {
+        try {
+            $operation();
+            $this->fail('Staff rows must not be accepted by the customer model.');
+        } catch (\InvalidArgumentException) {
+            $this->addToAssertionCount(1);
+        }
     }
 
     private function customerLastName(int $customerId): string

@@ -433,6 +433,10 @@
           "match": "exact_file"
         },
         {
+          "path": "application/libraries/Permissions.php",
+          "match": "exact_file"
+        },
+        {
           "path": "application/models/Providers_model.php",
           "match": "exact_file"
         },

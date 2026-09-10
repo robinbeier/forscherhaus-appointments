@@ -54,6 +54,17 @@ class Permissions
      */
     public function has_customer_access(int $user_id, int $customer_id): bool
     {
+        try {
+            $customer_role_id = $this->CI->users_model->value($customer_id, 'id_roles');
+            $customer_role_slug = $this->CI->roles_model->value($customer_role_id, 'slug');
+        } catch (InvalidArgumentException) {
+            return false;
+        }
+
+        if ($customer_role_slug !== DB_SLUG_CUSTOMER) {
+            return false;
+        }
+
         $role_id = $this->CI->users_model->value($user_id, 'id_roles');
 
         $role_slug = $this->CI->roles_model->value($role_id, 'slug');
