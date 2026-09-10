@@ -507,7 +507,10 @@ final class DeployStableResultTest extends TestCase
               cp -a --no-preserve=links -- "$3/." "$4/"
             }
             mkdir -p "$APP/storage/sessions" "$STAGE_ROOT/storage" "$fixture/outside"
-            mkdir -p "$STAGE_ROOT/application" "$STAGE_ROOT/storage/logs"
+            mkdir -p "$STAGE_ROOT/application" "$STAGE_ROOT/storage/logs" "$STAGE_ROOT/storage/cache"
+            mkdir -p "$STAGE_ROOT/application/helpers" "$STAGE_ROOT/vendor/ezyang/htmlpurifier"
+            cp -a --no-preserve=links "$PWD/application/helpers/html_helper.php" "$STAGE_ROOT/application/helpers/html_helper.php"
+            cp -a --no-preserve=links "$PWD/vendor/ezyang/htmlpurifier/library" "$STAGE_ROOT/vendor/ezyang/htmlpurifier/"
             printf 'code\n' > "$STAGE_ROOT/application/index.php"
             printf 'runtime\n' > "$STAGE_ROOT/storage/logs/runtime.log"
             printf 'config\n' > "$STAGE_ROOT/config.php"
@@ -543,6 +546,21 @@ final class DeployStableResultTest extends TestCase
             [[ "$(stat -c '%a' "$STAGE_ROOT/storage/logs/runtime.log")" == 644 ]]
             runuser -u www-data -- test -w "$STAGE_ROOT/storage/logs/runtime.log"
             runuser -u www-data -- sh -c "printf 'appended\\n' >> '$STAGE_ROOT/storage/logs/runtime.log'"
+            pure_html_output="$(runuser -u www-data -- env STAGE_ROOT="$STAGE_ROOT" php -d display_errors=stderr -d log_errors=0 -r '
+              define("BASEPATH", getenv("STAGE_ROOT") . "/system/");
+              set_error_handler(static function (int $severity, string $message, string $file, int $line): never {
+                throw new ErrorException($message, 0, $severity, $file, $line);
+              });
+              require getenv("STAGE_ROOT") . "/vendor/ezyang/htmlpurifier/library/HTMLPurifier.auto.php";
+              function config(string $key, mixed $default = null): mixed {
+                return $key === "cache_path" ? getenv("STAGE_ROOT") . "/storage/cache" : $default;
+              }
+              require getenv("STAGE_ROOT") . "/application/helpers/html_helper.php";
+              echo pure_html("<p>Allowed</p><script>alert(1)</script>");
+            ')"
+            [[ "$pure_html_output" == '<p>Allowed</p>' ]]
+            find "$STAGE_ROOT/storage/cache" -type f -print -quit | grep -q .
+            ! runuser -u www-data -- test -w "$STAGE_ROOT/vendor/ezyang/htmlpurifier/library/HTMLPurifier/DefinitionCache/Serializer"
             ! runuser -u www-data -- test -w "$STAGE_ROOT/application/index.php"
             ! runuser -u www-data -- sh -c "printf 'must-not-write\\n' > '$STAGE_ROOT/application/index.php'"
             [[ "$(stat -c '%a' "$STAGE_ROOT/storage/sessions/ea_session_outside_hard")" == 600 ]]
