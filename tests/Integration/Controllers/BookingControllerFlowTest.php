@@ -841,6 +841,94 @@ class BookingControllerFlowTest extends TestCase
         $this->assertSame($customerId, (int) $customerData['id']);
     }
 
+    public function testRescheduleProjectsProviderAndCustomerDataForPublicViews(): void
+    {
+        $pair = $this->fixtures->resolveProviderServicePair();
+        $customerId = $this->fixtures->createCustomer([
+            'first_name' => 'Projection',
+            'last_name' => 'Customer',
+            'email' => 'projection-' . bin2hex(random_bytes(4)) . '@example.org',
+            'phone_number' => '+49123456789',
+            'ldap_dn' => 'customer-internal-sentinel',
+        ]);
+        $appointmentId = $this->fixtures->createAppointment(
+            $pair['provider_id'],
+            $customerId,
+            $pair['service_id'],
+            new DateTimeImmutable('+2 days 10:00:00'),
+        );
+
+        $CI = &get_instance();
+        $providerSettings = $CI->db
+            ->select('google_token, caldav_password')
+            ->get_where('user_settings', ['id_users' => $pair['provider_id']])
+            ->row_array();
+        $providerUser = $CI->db
+            ->select('first_name, last_name, timezone, room, ldap_dn')
+            ->get_where('users', ['id' => $pair['provider_id']])
+            ->row_array();
+        $customerUser = $CI->db
+            ->select('ldap_dn')
+            ->get_where('users', ['id' => $customerId])
+            ->row_array();
+
+        try {
+            $CI->db->update(
+                'user_settings',
+                [
+                    'google_token' => 'provider-google-token-sentinel',
+                    'caldav_password' => 'provider-caldav-password-sentinel',
+                ],
+                ['id_users' => $pair['provider_id']],
+            );
+            $CI->db->update('users', ['ldap_dn' => 'provider-internal-sentinel'], ['id' => $pair['provider_id']]);
+
+            $appointment = $this->fixtures->findAppointmentById($appointmentId);
+            $this->assertNotNull($appointment);
+
+            $controller = $this->createBookingControllerWithForcedAvailability($pair['provider_id']);
+            $controller->reschedule($appointment['hash']);
+
+            foreach ([script_vars('provider_data'), html_vars('provider_data')] as $providerData) {
+                $this->assertIsArray($providerData);
+                $this->assertStringNotContainsString('provider-google-token-sentinel', json_encode($providerData));
+                $this->assertStringNotContainsString('provider-caldav-password-sentinel', json_encode($providerData));
+                $this->assertSame($pair['provider_id'], (int) $providerData['id']);
+                $this->assertSame($providerUser['first_name'], $providerData['first_name']);
+                $this->assertSame($providerUser['last_name'], $providerData['last_name']);
+                $this->assertSame($providerUser['timezone'], $providerData['timezone']);
+                $this->assertSame($providerUser['room'], $providerData['room']);
+                $this->assertIsArray($providerData['services']);
+                $this->assertContains($pair['service_id'], array_map('intval', $providerData['services']));
+                $this->assertArrayNotHasKey('email', $providerData);
+                $this->assertArrayNotHasKey('ldap_dn', $providerData);
+                $this->assertArrayNotHasKey('settings', $providerData);
+            }
+
+            foreach ([script_vars('customer_data'), html_vars('customer_data')] as $customerData) {
+                $this->assertStringNotContainsString('customer-internal-sentinel', json_encode($customerData));
+                $this->assertSame($customerId, (int) $customerData['id']);
+                $this->assertSame('Projection', $customerData['first_name']);
+                $this->assertSame('Customer', $customerData['last_name']);
+                $this->assertArrayHasKey('email', $customerData);
+                $this->assertSame('+49123456789', $customerData['phone_number']);
+                $this->assertArrayNotHasKey('id_roles', $customerData);
+                $this->assertArrayNotHasKey('ldap_dn', $customerData);
+            }
+        } finally {
+            $CI->db->update(
+                'user_settings',
+                [
+                    'google_token' => $providerSettings['google_token'] ?? null,
+                    'caldav_password' => $providerSettings['caldav_password'] ?? null,
+                ],
+                ['id_users' => $pair['provider_id']],
+            );
+            $CI->db->update('users', ['ldap_dn' => $providerUser['ldap_dn'] ?? null], ['id' => $pair['provider_id']]);
+            $CI->db->update('users', ['ldap_dn' => $customerUser['ldap_dn'] ?? null], ['id' => $customerId]);
+        }
+    }
+
     public function testRescheduleBootstrapsCacheWhenRateLimitBypassSkippedIt(): void
     {
         $pair = $this->fixtures->resolveProviderServicePair();
