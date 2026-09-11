@@ -69,6 +69,9 @@ final class RescheduleAuthorityLockOrderTest extends TestCase
         }
 
         $this->assertCount(6, $database->queries);
+        foreach ($database->queries as $query) {
+            $this->assertStringContainsString('FOR UPDATE', $query['sql']);
+        }
         $this->assertStringContainsString('FROM `ea_users`', $database->queries[0]['sql']);
         $this->assertSame([10, 20, 30], $database->queries[0]['bindings']);
         $this->assertStringContainsString('FROM `ea_services`', $database->queries[1]['sql']);

@@ -24,7 +24,7 @@ final class ServicesModelLockOrderTest extends TestCase
             $CI->db = $originalDb;
         }
 
-        $this->assertCount(2, $database->queries);
+        $this->assertSame(['begin', 'service_lock', 'buffer_cleanup', 'delete_services', 'commit'], $database->events);
         $this->assertStringContainsString('FROM `ea_services`', $database->queries[0]['sql']);
         $this->assertStringContainsString('FOR UPDATE', $database->queries[0]['sql']);
         $this->assertSame([42], $database->queries[0]['bindings']);
@@ -48,7 +48,7 @@ final class ServicesModelLockOrderTest extends TestCase
             $CI->db = $originalDb;
         }
 
-        $this->assertCount(2, $database->queries);
+        $this->assertSame(['begin', 'service_lock', 'buffer_cleanup', 'delete_services', 'commit'], $database->events);
         $this->assertStringContainsString('FROM `ea_services`', $database->queries[0]['sql']);
         $this->assertStringContainsString('FOR UPDATE', $database->queries[0]['sql']);
         $this->assertStringContainsString('DELETE `buffer_blocks`', $database->queries[1]['sql']);
@@ -62,6 +62,8 @@ final class ServicesModelLockOrderFakeDatabase
     public array $queries = [];
     /** @var array<int, string> */
     public array $deletes = [];
+    /** @var list<string> */
+    public array $events = [];
     public bool $serviceExists = true;
 
     public function dbprefix(string $table): string
@@ -71,16 +73,19 @@ final class ServicesModelLockOrderFakeDatabase
 
     public function trans_begin(): bool
     {
+        $this->events[] = 'begin';
         return true;
     }
 
     public function trans_commit(): bool
     {
+        $this->events[] = 'commit';
         return true;
     }
 
     public function trans_rollback(): bool
     {
+        $this->events[] = 'rollback';
         return true;
     }
 
@@ -92,9 +97,11 @@ final class ServicesModelLockOrderFakeDatabase
         $this->queries[] = ['sql' => $sql, 'bindings' => $bindings];
 
         if (str_contains($sql, 'FROM `ea_services`')) {
+            $this->events[] = 'service_lock';
             return new ServicesModelLockOrderFakeQuery($this->serviceExists ? 1 : 0);
         }
 
+        $this->events[] = 'buffer_cleanup';
         return new ServicesModelLockOrderFakeQuery(0);
     }
 
@@ -104,6 +111,7 @@ final class ServicesModelLockOrderFakeDatabase
     public function delete(string $table, array $where = []): bool
     {
         $this->deletes[] = $table;
+        $this->events[] = 'delete_' . $table;
         return true;
     }
 }
