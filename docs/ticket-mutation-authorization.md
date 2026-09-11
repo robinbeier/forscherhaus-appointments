@@ -23,6 +23,7 @@ Read-only-Diagnose und Review: <JA|NEIN|NICHT ERTEILT>
 Lokale Dateien ändern und lokale Tests ausführen: <JA|NEIN|NICHT ERTEILT>
 Linear-Codex-Workpad aktualisieren: <JA|NEIN|NICHT ERTEILT>
 Linear-Status ändern: <JA|NEIN|NICHT ERTEILT>
+Veröffentlichten PR-Link am Linear-Issue anhängen: <JA|NEIN|NICHT ERTEILT>
 Commit erstellen: <JA|NEIN|NICHT ERTEILT>
 Push ausführen: <JA|NEIN|NICHT ERTEILT>
 PR erstellen und Beschreibung schreiben: <JA|NEIN|NICHT ERTEILT>
