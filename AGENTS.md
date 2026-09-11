@@ -73,7 +73,8 @@ bash ./scripts/ci/pre_pr_quick.sh
 - `DB_HOST='mysql'` is the Docker-default path; host-side PHP needs host-compatible DB config.
 - With host PHP and Docker PDF renderer, set `PDF_RENDERER_URL=http://localhost:3003`.
 - Use a unique Docker Compose project name per worktree.
-- Prefer `docker compose run --rm php-fpm composer deptrac:analyze` over host `composer deptrac:analyze`.
+- For standalone checks in temporary worktrees, use `bash scripts/ci/run_focused_test.sh SERVICE COMMAND [ARG ...]` (`php-fpm` or `pdf-renderer`, no dependencies); it owns and cleans its temporary project. Use the full gate for database-dependent tests.
+- Prefer `bash scripts/ci/run_focused_test.sh php-fpm composer deptrac:analyze` over host `composer deptrac:analyze`. Raw `docker compose run --rm` removes its container, not its network.
 - Hook setup and refresh: see the [README hook note](README.md#git-hooks).
 - `bash ./scripts/ci/pre_pr_full.sh` enables LDAP guardrails only when LDAP/runtime paths changed; override explicitly via `PRE_PR_INCLUDE_LDAP_GUARDRAIL=1` or `0`.
 - On cold local Docker stacks, `bash ./scripts/ci/pre_pr_full.sh` may need longer Playwright startup via `PRE_PR_INTEGRATION_SMOKE_BROWSER_BOOTSTRAP_TIMEOUT=600` and `PRE_PR_INTEGRATION_SMOKE_BROWSER_OPEN_TIMEOUT=60`.
