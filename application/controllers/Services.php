@@ -216,12 +216,7 @@ class Services extends EA_Controller
             }
 
             try {
-                $buffer_values_changed = false;
-                $service_id = $this->services_model->save($service, $buffer_values_changed, $existing_service ?? null);
-
-                if ($buffer_values_changed) {
-                    $this->appointments_model->sync_service_buffer_unavailabilities($service_id);
-                }
+                $service_id = $this->services_model->save($service, $existing_service ?? null);
 
                 if (!$this->db->trans_commit()) {
                     throw new RuntimeException('Could not commit service transaction.');

@@ -3,7 +3,6 @@
 namespace Tests\Unit\Models;
 
 use PHPUnit\Framework\TestCase;
-use ReflectionClass;
 use Services_model;
 
 require_once APPPATH . 'models/Services_model.php';
@@ -22,23 +21,27 @@ final class ServicesModelLockOrderTest extends TestCase
         $CI = &get_instance();
         $originalDb = $CI->db;
         $CI->db = $database;
-        $model = (new ReflectionClass(Services_model::class))->newInstanceWithoutConstructor();
-        $update = (new ReflectionClass(Services_model::class))->getMethod('update');
-        $bufferValuesChanged = null;
+        $model = new ServicesModelLockOrderTestModel();
 
         try {
-            $arguments = [
+            $model->callUpdate(
                 ['id' => 42, 'name' => 'Updated', 'buffer_before' => 0, 'buffer_after' => 20],
-                &$bufferValuesChanged,
                 ['buffer_before' => 0, 'buffer_after' => 0],
-            ];
-            $update->invokeArgs($model, $arguments);
+            );
         } finally {
             $CI->db = $originalDb;
         }
 
         $this->assertSame(
-            ['provider_snapshot', 'user_lock', 'user_lock', 'service_current', 'provider_current', 'update_services'],
+            [
+                'provider_snapshot',
+                'user_lock',
+                'user_lock',
+                'service_current',
+                'provider_current',
+                'update_services',
+                'buffer_sync',
+            ],
             $database->events,
         );
         $this->assertSame([10, 30], $database->userLockIds);
@@ -51,7 +54,6 @@ final class ServicesModelLockOrderTest extends TestCase
         $this->assertSame([30], $database->queries[2]['bindings']);
         $this->assertStringContainsString('FOR UPDATE', $database->queries[3]['sql']);
         $this->assertSame([42], $database->queries[3]['bindings']);
-        $this->assertTrue($bufferValuesChanged);
     }
 
     public function testUpdateAbortsAfterProviderDriftWithoutFurtherWrites(): void
@@ -63,18 +65,14 @@ final class ServicesModelLockOrderTest extends TestCase
         $CI = &get_instance();
         $originalDb = $CI->db;
         $CI->db = $database;
-        $model = (new ReflectionClass(Services_model::class))->newInstanceWithoutConstructor();
-        $update = (new ReflectionClass(Services_model::class))->getMethod('update');
-        $bufferValuesChanged = null;
+        $model = new ServicesModelLockOrderTestModel();
 
         try {
             try {
-                $arguments = [
+                $model->callUpdate(
                     ['id' => 42, 'name' => 'Updated', 'buffer_before' => 0, 'buffer_after' => 20],
-                    &$bufferValuesChanged,
                     ['buffer_before' => 0, 'buffer_after' => 0],
-                ];
-                $update->invokeArgs($model, $arguments);
+                );
                 $this->fail('Expected provider drift to abort the update.');
             } catch (\RuntimeException $exception) {
                 $this->assertSame('Service appointments changed during update.', $exception->getMessage());
@@ -94,7 +92,7 @@ final class ServicesModelLockOrderTest extends TestCase
         $CI = &get_instance();
         $originalDb = $CI->db;
         $CI->db = $database;
-        $model = (new ReflectionClass(Services_model::class))->newInstanceWithoutConstructor();
+        $model = new ServicesModelLockOrderTestModel();
 
         try {
             $model->lock_buffer_sync_parents(42);
@@ -120,17 +118,13 @@ final class ServicesModelLockOrderTest extends TestCase
         $CI = &get_instance();
         $originalDb = $CI->db;
         $CI->db = $database;
-        $model = (new ReflectionClass(Services_model::class))->newInstanceWithoutConstructor();
-        $update = (new ReflectionClass(Services_model::class))->getMethod('update');
-        $bufferValuesChanged = null;
+        $model = new ServicesModelLockOrderTestModel();
 
         try {
-            $arguments = [
-                ['id' => 42, 'name' => 'Updated'],
-                &$bufferValuesChanged,
-                ['buffer_before' => 25, 'buffer_after' => 35],
-            ];
-            $this->assertSame(42, $update->invokeArgs($model, $arguments));
+            $this->assertSame(
+                42,
+                $model->callUpdate(['id' => 42, 'name' => 'Updated'], ['buffer_before' => 25, 'buffer_after' => 35]),
+            );
         } finally {
             $CI->db = $originalDb;
         }
@@ -140,7 +134,6 @@ final class ServicesModelLockOrderTest extends TestCase
         $this->assertStringContainsString('FOR UPDATE', $database->queries[0]['sql']);
         $this->assertSame(25, $database->updatedData['buffer_before']);
         $this->assertSame(35, $database->updatedData['buffer_after']);
-        $this->assertFalse($bufferValuesChanged);
         $this->assertSame(['services'], $database->updates);
     }
 
@@ -151,28 +144,51 @@ final class ServicesModelLockOrderTest extends TestCase
         $CI = &get_instance();
         $originalDb = $CI->db;
         $CI->db = $database;
-        $model = (new ReflectionClass(Services_model::class))->newInstanceWithoutConstructor();
-        $update = (new ReflectionClass(Services_model::class))->getMethod('update');
-        $bufferValuesChanged = null;
+        $model = new ServicesModelLockOrderTestModel();
 
         try {
-            $arguments = [
-                ['id' => 42, 'name' => 'Updated', 'buffer_before' => 1, 'buffer_after' => 2],
-                &$bufferValuesChanged,
-                ['buffer_before' => 25, 'buffer_after' => 35],
-            ];
-            $this->assertSame(42, $update->invokeArgs($model, $arguments));
+            $this->assertSame(
+                42,
+                $model->callUpdate(
+                    ['id' => 42, 'name' => 'Updated', 'buffer_before' => 1, 'buffer_after' => 2],
+                    ['buffer_before' => 25, 'buffer_after' => 35],
+                ),
+            );
         } finally {
             $CI->db = $originalDb;
         }
 
-        $this->assertTrue($bufferValuesChanged);
         $this->assertSame(1, $database->updatedData['buffer_before']);
         $this->assertSame(2, $database->updatedData['buffer_after']);
         $this->assertSame(
-            ['provider_snapshot', 'service_current', 'provider_current', 'update_services'],
+            ['provider_snapshot', 'service_current', 'provider_current', 'update_services', 'buffer_sync'],
             $database->events,
         );
+    }
+
+    public function testNeutralUpdateAbortsWhenCurrentBufferValuesDrifted(): void
+    {
+        $database = new ServicesModelLockOrderFakeDatabase();
+        $database->serviceRow = ['buffer_before' => 25, 'buffer_after' => 40];
+        $CI = &get_instance();
+        $originalDb = $CI->db;
+        $CI->db = $database;
+        $model = new ServicesModelLockOrderTestModel();
+
+        try {
+            $model->callUpdate(
+                ['id' => 42, 'name' => 'Updated', 'buffer_before' => 25, 'buffer_after' => 35],
+                ['buffer_before' => 25, 'buffer_after' => 35],
+            );
+            $this->fail('Expected concurrent buffer drift to abort the neutral update.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('Service buffer values changed concurrently.', $exception->getMessage());
+        } finally {
+            $CI->db = $originalDb;
+        }
+
+        $this->assertSame(['service_current'], $database->events);
+        $this->assertSame([], $database->updates);
     }
 
     public function testStandaloneSparseUpdateOwnsTransactionAndCommits(): void
@@ -183,18 +199,14 @@ final class ServicesModelLockOrderTest extends TestCase
         $CI = &get_instance();
         $originalDb = $CI->db;
         $CI->db = $database;
-        $model = (new ReflectionClass(Services_model::class))->newInstanceWithoutConstructor();
-        $update = (new ReflectionClass(Services_model::class))->getMethod('update');
-        $bufferValuesChanged = null;
+        $model = new ServicesModelLockOrderTestModel();
 
         try {
-            $arguments = [['id' => 42, 'name' => 'Updated'], &$bufferValuesChanged, null];
-            $this->assertSame(42, $update->invokeArgs($model, $arguments));
+            $this->assertSame(42, $model->callUpdate(['id' => 42, 'name' => 'Updated']));
         } finally {
             $CI->db = $originalDb;
         }
 
-        $this->assertFalse($bufferValuesChanged);
         $this->assertSame(['begin', 'service_current', 'update_services', 'commit'], $database->events);
     }
 
@@ -206,17 +218,10 @@ final class ServicesModelLockOrderTest extends TestCase
         $CI = &get_instance();
         $originalDb = $CI->db;
         $CI->db = $database;
-        $model = (new ReflectionClass(Services_model::class))->newInstanceWithoutConstructor();
-        $update = (new ReflectionClass(Services_model::class))->getMethod('update');
-        $bufferValuesChanged = null;
+        $model = new ServicesModelLockOrderTestModel();
 
         try {
-            $arguments = [
-                ['id' => 42, 'name' => 'Updated', 'buffer_before' => 1, 'buffer_after' => 2],
-                &$bufferValuesChanged,
-                null,
-            ];
-            $update->invokeArgs($model, $arguments);
+            $model->callUpdate(['id' => 42, 'name' => 'Updated', 'buffer_before' => 1, 'buffer_after' => 2]);
             $this->fail('Expected the standalone buffer change to abort.');
         } catch (\RuntimeException $exception) {
             $this->assertSame(
@@ -227,7 +232,6 @@ final class ServicesModelLockOrderTest extends TestCase
             $CI->db = $originalDb;
         }
 
-        $this->assertTrue($bufferValuesChanged);
         $this->assertSame(['begin', 'service_current', 'rollback'], $database->events);
         $this->assertSame([], $database->updates);
     }
@@ -240,7 +244,7 @@ final class ServicesModelLockOrderTest extends TestCase
         $CI->db = $database;
 
         try {
-            $model = (new ReflectionClass(Services_model::class))->newInstanceWithoutConstructor();
+            $model = new ServicesModelLockOrderTestModel();
             $model->delete(42);
         } finally {
             $CI->db = $originalDb;
@@ -270,7 +274,7 @@ final class ServicesModelLockOrderTest extends TestCase
         $CI->db = $database;
 
         try {
-            $model = (new ReflectionClass(Services_model::class))->newInstanceWithoutConstructor();
+            $model = new ServicesModelLockOrderTestModel();
             $model->delete(42);
         } finally {
             $CI->db = $originalDb;
@@ -286,6 +290,22 @@ final class ServicesModelLockOrderTest extends TestCase
         $this->assertStringContainsString('FOR UPDATE', $database->queries[1]['sql']);
         $this->assertStringContainsString('DELETE `buffer_blocks`', $database->queries[2]['sql']);
         $this->assertSame(['services'], $database->deletes);
+    }
+}
+
+final class ServicesModelLockOrderTestModel extends Services_model
+{
+    public function __construct() {}
+
+    /** @param array<string, mixed>|null $expectedBufferValues */
+    public function callUpdate(array $service, ?array $expectedBufferValues = null): int
+    {
+        return $this->update($service, $expectedBufferValues);
+    }
+
+    protected function sync_service_buffer_unavailabilities(int $service_id): void
+    {
+        get_instance()->db->events[] = 'buffer_sync';
     }
 }
 

@@ -57,26 +57,21 @@ class Services_model extends EA_Model
      * Save (insert or update) a service.
      *
      * @param array $service Associative array with the service data.
-     * @param bool|null $buffer_values_changed Set to whether the locked current buffer values changed.
      * @param array|null $expected_buffer_values Buffer values read before the transaction, when updating them.
      *
      * @return int Returns the service ID.
      *
      * @throws InvalidArgumentException
      */
-    public function save(
-        array $service,
-        ?bool &$buffer_values_changed = null,
-        ?array $expected_buffer_values = null,
-    ): int {
-        $buffer_values_changed = false;
+    public function save(array $service, ?array $expected_buffer_values = null): int
+    {
         $this->validate($service);
         $service = $this->normalize_buffer_values($service);
 
         if (empty($service['id'])) {
             return $this->insert($service);
         } else {
-            return $this->update($service, $buffer_values_changed, $expected_buffer_values);
+            return $this->update($service, $expected_buffer_values);
         }
     }
 
@@ -244,18 +239,14 @@ class Services_model extends EA_Model
      * Update an existing service.
      *
      * @param array $service Associative array with the service data.
-     * @param bool|null $buffer_values_changed Set to whether the locked current buffer values changed.
      * @param array|null $expected_buffer_values Buffer values read before the transaction, when updating them.
      *
      * @return int Returns the service ID.
      *
      * @throws RuntimeException
      */
-    protected function update(
-        array $service,
-        ?bool &$buffer_values_changed = null,
-        ?array $expected_buffer_values = null,
-    ): int {
+    protected function update(array $service, ?array $expected_buffer_values = null): int
+    {
         $service_id = (int) $service['id'];
         $owns_transaction = false;
 
@@ -336,6 +327,10 @@ class Services_model extends EA_Model
                 throw new RuntimeException('Could not update service.');
             }
 
+            if ($buffer_values_changed) {
+                $this->sync_service_buffer_unavailabilities($service_id);
+            }
+
             if ($owns_transaction && !$this->db->trans_commit()) {
                 throw new RuntimeException('Could not commit service update transaction.');
             }
@@ -347,6 +342,15 @@ class Services_model extends EA_Model
         }
 
         return $service_id;
+    }
+
+    /**
+     * Regenerate appointment buffers inside the caller's service transaction.
+     */
+    protected function sync_service_buffer_unavailabilities(int $service_id): void
+    {
+        $this->load->model('appointments_model');
+        $this->appointments_model->sync_service_buffer_unavailabilities($service_id);
     }
 
     /**

@@ -69,11 +69,7 @@ class ServicesModelUpdateTest extends TestCase
             $existing_service['buffer_before'] = 25;
             $existing_service['buffer_after'] = 35;
 
-            get_instance()->db->trans_begin();
-            $buffer_values_changed = false;
-            $this->servicesModel->save($existing_service, $buffer_values_changed, $expected_buffer_values);
-            $this->assertTrue($buffer_values_changed);
-            get_instance()->db->trans_commit();
+            $this->saveServiceAtomically($existing_service, $expected_buffer_values);
 
             $saved_service = $this->servicesModel->find($service_id);
 
@@ -122,11 +118,7 @@ class ServicesModelUpdateTest extends TestCase
             $existing_service['buffer_before'] = null;
             $existing_service['buffer_after'] = null;
 
-            get_instance()->db->trans_begin();
-            $buffer_values_changed = false;
-            $this->servicesModel->save($existing_service, $buffer_values_changed, $expected_buffer_values);
-            $this->assertTrue($buffer_values_changed);
-            get_instance()->db->trans_commit();
+            $this->saveServiceAtomically($existing_service, $expected_buffer_values);
 
             $saved_service = $this->servicesModel->find($service_id);
 
@@ -214,5 +206,27 @@ class ServicesModelUpdateTest extends TestCase
         );
 
         return $this->servicesModel->save($service);
+    }
+
+    /**
+     * @param array<string, mixed> $service
+     * @param array<string, mixed> $expectedBufferValues
+     */
+    private function saveServiceAtomically(array $service, array $expectedBufferValues): void
+    {
+        $database = get_instance()->db;
+        if (!$database->trans_begin()) {
+            $this->fail('Could not start service test transaction.');
+        }
+
+        try {
+            $this->servicesModel->save($service, $expectedBufferValues);
+            if (!$database->trans_commit()) {
+                throw new \RuntimeException('Could not commit service test transaction.');
+            }
+        } catch (\Throwable $exception) {
+            $database->trans_rollback();
+            throw $exception;
+        }
     }
 }
