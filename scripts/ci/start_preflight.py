@@ -158,7 +158,8 @@ def preflight(argv=None, runner=_run):
     if project and compose_available:
         code, raw, _ = probe(compose + ["config", "--format", "json"], env=runtime_env)
         config = _json(raw) if code == 0 else None
-    if not isinstance(config, dict) or not isinstance(config.get("services"), dict):
+    config_resolved = isinstance(config, dict) and isinstance(config.get("services"), dict)
+    if not config_resolved:
         add("compose-config", "blocked", "resolved Compose configuration unavailable or invalid", "Compose configuration access")
         config = {"services": {}}
     else:
@@ -166,10 +167,12 @@ def preflight(argv=None, runner=_run):
 
     planned = list(dict.fromkeys(args.service or ["php-fpm", "mysql", "nginx"]))
     services = config["services"]
+    selected_services_resolved = config_resolved
     # Include dependencies that Compose starts for the selected services.
     for name in planned:
         service = services.get(name)
         if not isinstance(service, dict):
+            selected_services_resolved = False
             add("services", "blocked", "a selected or required service is undefined", "Compose service selection")
             continue
         dependencies = service.get("depends_on", {})
@@ -235,7 +238,9 @@ def preflight(argv=None, runner=_run):
         add("images", "unknown", f"{missing_pull} pull image(s) unavailable", "Docker image pull/network access")
     if missing_build:
         add("images", "unknown", f"{missing_build} build image(s) unavailable", "Docker build/dependency access")
-    if daemon and not missing_pull and not missing_build:
+    if not selected_services_resolved:
+        add("images", "unknown", "planned image requirements could not be resolved")
+    elif daemon and not missing_pull and not missing_build:
         add("images", "ready", "no missing planned images observed")
     for kind, key in sorted(resources):
         definition = config.get(kind + "s", {}).get(key, {})
@@ -249,7 +254,9 @@ def preflight(argv=None, runner=_run):
         add("docker-" + kind, "ready" if not code else ("blocked" if external else "unknown"),
             "resource exists" if not code else ("required external resource unavailable" if external else "internal resource must be created by the normal workflow"),
             None if not code else ("External Docker resource preparation" if external else "Local Docker resource creation"))
-    if not ports:
+    if not selected_services_resolved:
+        add("ports", "unknown", "planned host-port requirements could not be resolved")
+    elif not ports:
         add("ports", "ready", "selected services have no observed published host ports")
     for protocol in sorted({protocol for protocol, _ in ports}):
         command = ["lsof", "-nP", "-iTCP", "-sTCP:LISTEN", "-F", "n"] if protocol == "tcp" else ["lsof", "-nP", "-iUDP", "-F", "n"]

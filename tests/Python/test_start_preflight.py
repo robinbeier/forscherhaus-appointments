@@ -187,11 +187,17 @@ class StartPreflightTest(unittest.TestCase):
         self.assertNotIn("PRIVATE", json.dumps(report))
 
     def test_invalid_service_and_malformed_config_fail_closed(self):
-        self.assertEqual(self.run_preflight("--service", "missing")[0], 1)
-        self.runner.config = ["PRIVATE malformed config"]
-        code, report = self.run_preflight()
+        code, report = self.run_preflight("--service", "missing")
         self.assertEqual(code, 1)
-        self.assertNotIn("PRIVATE", json.dumps(report))
+        for category in ("ports", "images"):
+            self.assertEqual(self.statuses(report, category), ["unknown"])
+        for configuration in (["PRIVATE malformed config"], {"services": {}}):
+            self.runner.config = configuration
+            code, report = self.run_preflight()
+            self.assertEqual(code, 1)
+            self.assertNotIn("PRIVATE", json.dumps(report))
+            for category in ("ports", "images"):
+                self.assertEqual(self.statuses(report, category), ["unknown"])
 
     def test_readonly_command_inventory_no_pycache_and_optional_github(self):
         before = set(self.root.rglob("*"))
