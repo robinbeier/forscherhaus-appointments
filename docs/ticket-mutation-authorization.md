@@ -26,15 +26,17 @@ Linear-Status ändern: <JA|NEIN|NICHT ERTEILT>
 Veröffentlichten PR-Link am Linear-Issue anhängen: <JA|NEIN|NICHT ERTEILT>
 Commit erstellen: <JA|NEIN|NICHT ERTEILT>
 Push ausführen: <JA|NEIN|NICHT ERTEILT>
-PR erstellen und Beschreibung schreiben: <JA|NEIN|NICHT ERTEILT>
+PR erstellen und Titel/Beschreibung aktualisieren: <JA|NEIN|NICHT ERTEILT>
+Code-/Security-Reviews dieses PRs anfordern (auch Trigger-Kommentar): <JA|NEIN|NICHT ERTEILT>
+CI-Checks dieses PRs/Heads begrenzt wiederholen: <JA|NEIN|NICHT ERTEILT>
 Auf Review-Kommentare dieses PRs antworten: <JA|NEIN|NICHT ERTEILT>
 Review-Thread dieses PRs auflösen: <JA|NEIN|NICHT ERTEILT>
 SHA-gebundener Merge des final geprüften PR-Heads: <JA|NEIN|NICHT ERTEILT>
 Optionale Einschränkung auf einen bestimmten Commit: <SHA oder keine>
 ```
 
-Die Felder für Workpad und Review-Antworten erlauben jeweils nur diese
-Kommentare am bezeichneten Ticket beziehungsweise PR. Andere Nachrichten
+Die Felder für Workpad, Review-Anforderung und Review-Antworten erlauben
+jeweils nur diese Kommentare am bezeichneten Ticket beziehungsweise PR. Andere Nachrichten
 oder externe Kommunikation benötigen einen eigenen Auftrag. Plattformseitige aktuelle Bestätigungen und
 Freigabeprüfungen gelten weiterhin; diese Vorlage umgeht keine Policy,
 erteilt keine Credentials und erweitert keine Toolrechte.
@@ -52,6 +54,11 @@ erteilt keine Credentials und erweitert keine Toolrechte.
 - Eine materielle Erweiterung über den vereinbarten Auftrag hinaus braucht
   eine gezielte zusätzliche Freigabe. Übliche Dateiänderungen innerhalb des
   bereits autorisierten Scopes werden selbstständig umgesetzt.
+- Die CI-Wiederholungsfreigabe gilt nur für den bezeichneten PR und den jeweils
+  geprüften Head nach Diagnose eines nachgewiesenen vorübergehenden
+  Infrastrukturfehlers, höchstens dreimal pro Head gemäß `WORKFLOW.md`.
+  Ungeklärte Testfehler werden nicht automatisch wiederholt. Review-Anforderungen
+  erlauben keine sonstigen Nachrichten oder Erweiterung von Reviewer-Rechten.
 - Alle bestehenden Tests, Reviews und Exact-Head-Gates bleiben erforderlich.
   Es gibt keine vorausgefüllte Auto-Freigabe.
 - Vor einer noch nicht freigegebenen Mutation wird, soweit möglich, zuerst ein
