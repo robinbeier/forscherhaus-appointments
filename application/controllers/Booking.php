@@ -746,7 +746,9 @@ class Booking extends EA_Controller
     protected function begin_public_booking_transaction(bool $reschedule): bool
     {
         if ($reschedule) {
-            $this->db->query('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
+            if ($this->db->query('SET TRANSACTION ISOLATION LEVEL READ COMMITTED') === false) {
+                return false;
+            }
         }
 
         return $this->db->trans_begin();

@@ -412,6 +412,7 @@ class BookingControllerFlowTest extends TestCase
         ) extends Booking {
             private bool $injected = false;
             public ?int $conflictAppointmentId = null;
+            public ?bool $rescheduleIsolationRequested = null;
 
             public function __construct(
                 private readonly int $forcedProviderId,
@@ -421,6 +422,13 @@ class BookingControllerFlowTest extends TestCase
                 private readonly DateTimeImmutable $startAt,
                 private readonly DateTimeImmutable $endAt,
             ) {}
+
+            protected function begin_public_booking_transaction(bool $reschedule): bool
+            {
+                $this->rescheduleIsolationRequested = $reschedule;
+
+                return parent::begin_public_booking_transaction($reschedule);
+            }
 
             protected function check_datetime_availability(array $appointment): ?int
             {
@@ -457,6 +465,7 @@ class BookingControllerFlowTest extends TestCase
 
         try {
             $controller->register();
+            $this->assertTrue($controller->rescheduleIsolationRequested);
             $response = json_decode(get_instance()->output->get_output(), true);
             $this->assertFalse($response['success'] ?? true);
             $this->assertSame(lang('requested_hour_is_unavailable'), $response['message'] ?? null);
