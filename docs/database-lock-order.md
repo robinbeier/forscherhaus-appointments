@@ -104,4 +104,5 @@ These tests observe production method calls and SQL through test doubles or
 DB integration. Swapping the observed parent/child operations or dropping the
 asserted ordering clause fails the corresponding contract test. They are not
 proof of every physical InnoDB index/gap lock or every concurrent schedule;
-deterministic two-connection coverage is tracked separately in ROB-554.
+the [two-connection test harness](two-connection-test-harness.md) provides
+focused administrative consistency and parent-lock contention references.
