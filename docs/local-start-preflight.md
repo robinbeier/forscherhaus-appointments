@@ -1,6 +1,7 @@
 # Read-only local start preflight
 
-Run this before setup, branch synchronization, local gates or publication:
+For agent worktrees, run this before setup, branch synchronization, local CI
+gates or publication:
 
 ```bash
 python3 scripts/ci/start_preflight.py
@@ -9,6 +10,13 @@ python3 scripts/ci/start_preflight.py
 The command inspects the local checkout and prerequisites without modifying
 Git, Docker, Linear or GitHub. It never fetches, pushes, creates a worktree,
 installs hooks, builds/pulls images, starts services or creates networks/volumes.
+
+Resolve each prerequisite before its affected operation, not before the operation
+that establishes it. On a fresh clone, a missing managed hook is a commit blocker;
+run the normal authorized `./scripts/setup-worktree.sh` to install it, then rerun
+the preflight. Do not commit until the managed executable hook is confirmed.
+An existing custom hook still requires the documented hook-installation workflow;
+the preflight does not authorize overwriting it.
 Run `./scripts/setup-worktree.sh` and the existing CI helpers only after resolving
 the relevant prerequisites through the normal runtime approval path.
 
@@ -31,11 +39,20 @@ accessibility are separate observations.
 snapshot, not proof that the remote has no newer commits. The preflight does
 not refresh it; use the normal authorized fetch/sync workflow afterward.
 
+Git metadata and writable bind mounts are checked conservatively as subtrees:
+a declared read-only descendant also blocks a whole-tree readiness claim. The
+report does not guess whether a particular commit will need that descendant.
+
 ## Docker scope
 
 Daemon probes require a confirmed local Unix/named-pipe Docker endpoint. A
 remote or unresolved context is reported as blocked and is not contacted; select
 the intended local context through the normal operator workflow.
+
+This mode describes the local CI helper stack, not the normal Quickstart
+`docker compose up -d` operation. It does not certify that ordinary project's
+containers, published ports or all-service image requirements. Use it with the
+local pre-PR gate workflow described here.
 
 The default planned services are `php-fpm`, `mysql` and `nginx`. Repeat `--service`
 to select the services for the planned operation, including `openldap` for LDAP

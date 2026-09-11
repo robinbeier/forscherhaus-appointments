@@ -24,10 +24,11 @@ Prerequisites on host (required by `./scripts/setup-worktree.sh`):
 - Node.js `>=24.0.0` plus `npm`/`npx`
 - Docker + Docker Compose
 
-Before setup, use the [read-only start preflight](docs/local-start-preflight.md)
-to inspect worktree, Git, Docker and declared permission prerequisites:
-`python3 scripts/ci/start_preflight.py`. It requires Python 3 and does not grant
-permissions or start services.
+For agent worktrees and local pre-PR gates, the
+[read-only start preflight](docs/local-start-preflight.md) inspects Git and the
+isolated, portless CI Docker stack. It does not inspect the ordinary Docker
+project, published ports or all services started by the Quickstart below.
+Use the Quickstart setup to install dependencies and managed hooks.
 
 ```bash
 ./scripts/setup-worktree.sh

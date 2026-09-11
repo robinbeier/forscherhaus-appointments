@@ -71,13 +71,13 @@ def preflight(argv=None, runner=_run):
         code, out, _ = probe(["git", *arguments])
         return out.decode(errors="replace").strip() if code == 0 else None
 
-    def boundary(category, target):
+    def boundary(category, target, recursive=False):
         if target is None:
             add(category, "unknown", "target could not be resolved", "Git metadata access")
             return
         target = _path(target)
-        if any(_inside(target, root) for root in readonly):
-            add(category, "blocked", "target is inside a declared read-only exclusion", "Local/Git write permission")
+        if any(_inside(target, root) or (recursive and _inside(root, target)) for root in readonly):
+            add(category, "blocked", "target overlaps a declared read-only exclusion", "Local/Git write permission")
         elif not writable:
             add(category, "unknown", "writable roots were not declared", "Runtime write-boundary information")
         elif not any(_inside(target, root) for root in writable):
@@ -98,8 +98,8 @@ def preflight(argv=None, runner=_run):
     add("git", "ready" if repo_value and git_dir and common else "blocked",
         "worktree and both Git metadata paths resolved" if repo_value and git_dir and common else "Git repository metadata unavailable")
     boundary("worktree-write", repo if repo_value else None)
-    boundary("git-dir-write", git_dir)
-    boundary("git-common-write", common)
+    boundary("git-dir-write", git_dir, recursive=True)
+    boundary("git-common-write", common, recursive=True)
     branch = git("symbolic-ref", "--quiet", "--short", "HEAD")
     add("branch", "ready" if branch else "unknown", "attached branch" if branch else "detached HEAD or branch unavailable")
     base = git("rev-parse", "--verify", "--end-of-options", args.base_ref + "^{commit}")
@@ -220,7 +220,7 @@ def preflight(argv=None, runner=_run):
             if not isinstance(mount, dict):
                 add("mounts", "unknown", "unsupported mount representation")
             elif mount.get("type") == "bind" and mount.get("source") and not mount.get("read_only"):
-                boundary("bind-write", mount["source"])
+                boundary("bind-write", mount["source"], recursive=True)
             elif mount.get("type") == "volume" and mount.get("source"):
                 resources.add(("volume", mount["source"]))
         networks = service.get("networks", {"default": {}})

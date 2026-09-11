@@ -190,7 +190,10 @@ Rules:
 - Before the first mutation, run the [read-only start preflight](docs/local-start-preflight.md)
   with the writable roots and network policy actually supplied by the runtime.
   Keep unobservable permissions unknown; resolve the concrete prerequisites
-  before setup, sync, tests or publication. The report is not authorization.
+  before the affected operation. Missing managed hooks are repaired by the normal
+  authorized setup; rerun the preflight afterward and require managed hooks before
+  committing. Docker observations cover the local CI helper stack, not ordinary
+  Quickstart `docker compose up -d`. The report is not authorization.
 - If the current branch already exists, sync it before editing.
 - Reproduce the problem or gather concrete evidence before changing code.
 - For authority-, secret-, identity-, transaction-, or concurrency-sensitive

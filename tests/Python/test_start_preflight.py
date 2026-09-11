@@ -116,6 +116,19 @@ class StartPreflightTest(unittest.TestCase):
         self.assertEqual(self.statuses(report, "git-dir-write"), ["blocked"])
         self.assertEqual(self.statuses(report, "git-common-write"), ["blocked"])
 
+    def test_readonly_git_descendants_prevent_whole_tree_readiness(self):
+        for descendant in (self.runner.common / "objects", self.runner.common / "refs",
+                           self.runner.git_dir / "index", self.runner.common / "unrelated-cache"):
+            with self.subTest(descendant=descendant):
+                code, report = self.run_preflight("--writable-root", str(self.root),
+                                                  "--read-only-root", str(descendant))
+                self.assertEqual(code, 1)
+                self.assertEqual(self.statuses(report, "git-common-write"), ["blocked"])
+        code, report = self.run_preflight("--writable-root", str(self.root),
+                                          "--read-only-root", str(self.root / "other"))
+        self.assertEqual(code, 0)
+        self.assertEqual(self.statuses(report, "git-common-write"), ["ready"])
+
     def test_symlink_does_not_hide_outside_common_directory(self):
         link = self.runner.repo / "linked-git"
         link.symlink_to(self.runner.common, target_is_directory=True)
