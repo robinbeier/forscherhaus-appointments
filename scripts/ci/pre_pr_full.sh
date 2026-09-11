@@ -3,6 +3,11 @@ set -euo pipefail
 
 ROOT_DIR="$(git rev-parse --show-toplevel)"
 cd "$ROOT_DIR"
+# The outer process retains complete evidence and preserves the child gate exit.
+if [[ "${PRE_PR_SUMMARY_CHILD:-0}" != "1" ]]; then
+    exec python3 -B scripts/ci/run_gate_with_summary.py --label local-full -- \
+        env PRE_PR_SUMMARY_CHILD=1 bash "$ROOT_DIR/scripts/ci/pre_pr_full.sh" "$@"
+fi
 source ./scripts/ci/git_helpers.sh
 source ./scripts/ci/docker_compose_helpers.sh
 source ./scripts/ci/lib/local_full_gate_selection.sh

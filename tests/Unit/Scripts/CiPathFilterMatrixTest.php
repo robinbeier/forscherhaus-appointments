@@ -232,8 +232,14 @@ class CiPathFilterMatrixTest extends TestCase
         foreach (['Setup Node.js', 'Install Node.js dependencies', 'Build runtime assets'] as $name) {
             self::assertSame("needs.changes.outputs.integration_smoke == 'true'", $steps[$name]['if'], $name);
         }
-        self::assertSame('npm ci --ignore-scripts --no-audit --no-fund', $steps['Install Node.js dependencies']['run']);
-        self::assertSame('npm run build', $steps['Build runtime assets']['run']);
+        self::assertSame(
+            'npm ci --ignore-scripts --no-audit --no-fund',
+            $this->gateBody($steps['Install Node.js dependencies']['run'], 'deep-runtime-suite-4'),
+        );
+        self::assertSame(
+            'npm run build',
+            $this->gateBody($steps['Build runtime assets']['run'], 'deep-runtime-suite-5'),
+        );
         self::assertStringNotContainsString('npx gulp scripts', $deepRuntimeJob);
     }
 
@@ -704,6 +710,18 @@ class CiPathFilterMatrixTest extends TestCase
     private function workflowPath(): string
     {
         return __DIR__ . '/../../../.github/workflows/ci.yml';
+    }
+
+    private function gateBody(mixed $run, string $label): string
+    {
+        self::assertIsString($run);
+        $run = trim($run);
+        $prefix = "python3 -B scripts/ci/run_gate_with_summary.py --label {$label} -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'\n";
+        $suffix = "\nROB557_GATE_COMMAND";
+        self::assertStringStartsWith($prefix, $run);
+        self::assertStringEndsWith($suffix, $run);
+
+        return substr($run, strlen($prefix), -strlen($suffix));
     }
 
     /** @param array<int, string> $paths @return array{status:int,stdout:string,stderr:string} */

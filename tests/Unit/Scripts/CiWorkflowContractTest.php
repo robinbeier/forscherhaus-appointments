@@ -20,6 +20,8 @@ class CiWorkflowContractTest extends TestCase
                 'Install npm dependencies',
                 'ESLint changed JS files',
                 'Frontend compiler regression tests',
+                'Gate diagnostic summary',
+                'Upload gate diagnostic evidence',
             ],
             array_keys($steps),
         );
@@ -27,7 +29,7 @@ class CiWorkflowContractTest extends TestCase
         self::assertArrayNotHasKey('if', $steps['Check frontend validation inputs']);
         self::assertSame(
             './scripts/ci/js-lint-changed.sh --check-only',
-            $this->stepRun($steps, 'Check frontend validation inputs'),
+            $this->gateBody($steps, 'Check frontend validation inputs', 'js-lint-changed-1'),
         );
         foreach (['Setup Node.js', 'Install npm dependencies', 'Frontend compiler regression tests'] as $name) {
             self::assertSame("steps.js_changes.outputs.needs_node == 'true'", $steps[$name]['if']);
@@ -35,14 +37,17 @@ class CiWorkflowContractTest extends TestCase
         }
         self::assertSame(
             'npm ci --ignore-scripts --no-audit --no-fund',
-            $this->stepRun($steps, 'Install npm dependencies'),
+            $this->gateBody($steps, 'Install npm dependencies', 'js-lint-changed-2'),
         );
         self::assertSame($steps['Check frontend validation inputs']['env'], $steps['ESLint changed JS files']['env']);
-        self::assertSame('./scripts/ci/js-lint-changed.sh', $this->stepRun($steps, 'ESLint changed JS files'));
+        self::assertSame(
+            './scripts/ci/js-lint-changed.sh',
+            $this->gateBody($steps, 'ESLint changed JS files', 'js-lint-changed-3'),
+        );
         self::assertSame("steps.js_changes.outputs.has_changes == 'true'", $steps['ESLint changed JS files']['if']);
         self::assertSame(
             'node --test tests/JavaScript/gulp_build.test.js tests/JavaScript/dashboard_date_range.test.js tests/JavaScript/dashboard_zero_target.test.js tests/JavaScript/blocked_periods.test.js',
-            $this->stepRun($steps, 'Frontend compiler regression tests'),
+            $this->gateBody($steps, 'Frontend compiler regression tests', 'js-lint-changed-4'),
         );
     }
 
@@ -105,12 +110,15 @@ class CiWorkflowContractTest extends TestCase
         );
         self::assertStringContainsString('grep -Fq "const DB_HOST = \'127.0.0.1\';" config.php', $prepare);
 
-        self::assertSame('docker compose up -d mysql', $this->stepRun($steps, 'Start build-test database'));
+        self::assertSame(
+            'docker compose up -d mysql',
+            $this->gateBody($steps, 'Start build-test database', 'build-test-1'),
+        );
         self::assertSame(['changes'], $job['needs'] ?? null);
         self::assertSame("needs.changes.outputs.runtime_checks_required == 'true'", $job['if'] ?? null);
         self::assertSame(
             'bash scripts/ci/wait_for_mysql_readiness.sh',
-            $this->stepRun($steps, 'Wait for build-test MySQL readiness'),
+            $this->gateBody($steps, 'Wait for build-test MySQL readiness', 'build-test-5'),
         );
 
         $installDatabase = $this->stepRun($steps, 'Install deterministic build-test instance');
@@ -156,14 +164,21 @@ class CiWorkflowContractTest extends TestCase
             self::assertArrayNotHasKey('continue-on-error', $step);
         }
         self::assertSame(
-            ['Git clone', 'Setup PHP', 'Install dependencies', 'Root deployment regression tests'],
+            [
+                'Git clone',
+                'Setup PHP',
+                'Install dependencies',
+                'Root deployment regression tests',
+                'Gate diagnostic summary',
+                'Upload gate diagnostic evidence',
+            ],
             array_keys($rootSteps),
         );
         self::assertSame(
             'composer install --no-interaction --no-progress',
-            $this->stepRun($rootSteps, 'Install dependencies'),
+            $this->gateBody($rootSteps, 'Install dependencies', 'root-deployment-tests-1'),
         );
-        $rootDeployment = $this->stepRun($rootSteps, 'Root deployment regression tests');
+        $rootDeployment = $this->gateBody($rootSteps, 'Root deployment regression tests', 'root-deployment-tests-2');
         self::assertSame('bash scripts/ci/run_root_deployment_regressions.sh', $rootDeployment);
         $rootDeploymentScript = (string) file_get_contents(
             __DIR__ . '/../../../scripts/ci/run_root_deployment_regressions.sh',
@@ -208,7 +223,7 @@ class CiWorkflowContractTest extends TestCase
         self::assertSame('always()', $cleanup['if'] ?? null);
         self::assertSame(
             'docker compose down -v --remove-orphans',
-            $this->stepRun($steps, 'Cleanup build-test database'),
+            $this->gateBody($steps, 'Cleanup build-test database', 'build-test-9'),
         );
     }
 
@@ -226,8 +241,8 @@ class CiWorkflowContractTest extends TestCase
         self::assertIsInt($seedIndex);
         self::assertLessThan($setupIndex, $serviceIndex);
         self::assertLessThan($seedIndex, $readinessIndex);
-        $installBrowser = $this->stepRun($steps, 'Install Playwright smoke browser');
-        $deepRuntime = $this->stepRun($steps, 'Run deep runtime suite');
+        $installBrowser = $this->gateBody($steps, 'Install Playwright smoke browser', 'deep-runtime-suite-12');
+        $deepRuntime = $this->gateBody($steps, 'Run deep runtime suite', 'deep-runtime-suite-13');
 
         self::assertStringContainsString(
             'bash scripts/release-gate/playwright/playwright_cli.sh install-browser',
@@ -317,7 +332,7 @@ class CiWorkflowContractTest extends TestCase
         self::assertSame('composer:v2', $setupPhp['with']['tools'] ?? null);
         self::assertSame(
             'composer install --no-interaction --no-progress',
-            $this->stepRun($steps, 'Install Composer dependencies'),
+            $this->gateBody($steps, 'Install Composer dependencies', 'coverage-shard-integration-2'),
         );
         self::assertArrayNotHasKey('Download deterministic seed snapshot artifact', $steps);
         self::assertArrayNotHasKey('Import deterministic seed snapshot', $steps);
@@ -331,7 +346,10 @@ class CiWorkflowContractTest extends TestCase
             $prepare,
         );
         self::assertStringContainsString('grep -Fq "const DB_HOST = \'127.0.0.1\';" config.php', $prepare);
-        self::assertSame('docker compose up -d mysql', $this->stepRun($steps, 'Start coverage shard services'));
+        self::assertSame(
+            'docker compose up -d mysql',
+            $this->gateBody($steps, 'Start coverage shard services', 'coverage-shard-integration-1'),
+        );
         $prepareIndex = array_search('Prepare root test configuration', $stepNames, true);
         $readinessIndex = array_search('Wait for MySQL readiness', $stepNames, true);
         $installIndex = array_search('Install deterministic seed instance', $stepNames, true);
@@ -357,7 +375,7 @@ class CiWorkflowContractTest extends TestCase
         self::assertStringContainsString('console install failed after 3 attempts.', $install);
         self::assertStringContainsString('exit 1', $install);
 
-        $coverage = $this->stepRun($steps, 'Run coverage shard (integration)');
+        $coverage = $this->gateBody($steps, 'Run coverage shard (integration)', 'coverage-shard-integration-6');
         self::assertSame('composer test:coverage:integration-shard', $coverage);
 
         $diagnostics = $this->stepRun($steps, 'Diagnostics (failure logs)');
@@ -407,5 +425,16 @@ class CiWorkflowContractTest extends TestCase
         self::assertIsString($steps[$stepName]['run'] ?? null);
 
         return trim($steps[$stepName]['run']);
+    }
+
+    private function gateBody(array $steps, string $stepName, string $label): string
+    {
+        $run = $this->stepRun($steps, $stepName);
+        $prefix = "python3 -B scripts/ci/run_gate_with_summary.py --label {$label} -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'\n";
+        $suffix = "\nROB557_GATE_COMMAND";
+        self::assertStringStartsWith($prefix, $run, $stepName);
+        self::assertStringEndsWith($suffix, $run, $stepName);
+
+        return substr($run, strlen($prefix), -strlen($suffix));
     }
 }
