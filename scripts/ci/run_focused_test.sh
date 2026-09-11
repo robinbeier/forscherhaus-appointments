@@ -46,6 +46,10 @@ trap 'exit 143' TERM
 # Initialize in the parent so its EXIT handler retains the exact command and
 # data path even when Docker fails during resource creation.
 ci_docker_init_compose focused-test
+if [[ "${EA_LOCAL_CI_PORTLESS_COMPOSE:-1}" == "0" ]]; then
+    # Pin the canonical file even if a local .env defines COMPOSE_FILE.
+    CI_DOCKER_COMPOSE_CMD+=(-f "$ROOT_DIR/docker-compose.yml")
+fi
 CI_DOCKER_STACK_STARTED=1
 "${CI_DOCKER_COMPOSE_CMD[@]}" run --rm --no-deps -T "$@" &
 child_pid=$!

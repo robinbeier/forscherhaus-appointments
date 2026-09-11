@@ -98,6 +98,8 @@ exit 0
         lines = self.log_lines()
         self.assertTrue(any(" run " in f" {line} " for line in lines))
         self.assertFalse(any("compose.ci-local.yml" in line for line in lines))
+        run = next(line for line in lines if " run " in f" {line} ")
+        self.assertIn(f"-f {self.root.resolve() / 'docker-compose.yml'}", run)
         self.assertFalse(any("--service-ports" in line for line in lines))
         self.assertEqual(sum(" down " in f" {line} " for line in lines), 1)
 
