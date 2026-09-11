@@ -29,6 +29,7 @@ This file stays intentionally short. It is a map, not a second runbook.
 | Gate results and warning evidence | `docs/gate-diagnostic-summary.md`, `scripts/ci/run_gate_with_summary.py` | Shared local/CI summaries, complete raw logs and exact warning-baseline comparison. |
 | CI gate semantics and job wiring | `.github/workflows/ci.yml` | Ground truth for job triggers, blocking status, and artifacts. |
 | Standard review and landing | `WORKFLOW.md`, `code_review.md` | One independent reviewer, risk-based specialists, current blocking CI, and authorized merge of the reviewed head. |
+| Reviewer runtime availability and fallback | `docs/reviewer-runtime-preflight.md` | Live capability/startup checks before a diff, equivalent coverage, exact base/head and enforced read-only boundaries. |
 | Local/CI root-host test prerequisites | [Docker test guidance](docker.md#linux-roothost-tests) | Local skips, required Linux CI checks, and focused diagnosis. |
 | CI test execution and timing comparisons | `docs/ci-test-execution.md` | Main tests, application coverage, and direct GitHub job timing. |
 | Observability runtime ownership | `docs/observability.md` | Runtime split between release gates, Kuma, application logs, and diagnostics. |
