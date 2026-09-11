@@ -386,6 +386,13 @@ before marking an associated issue `Done`.
 
 ## Working Within the Agreed Scope
 
+Use the [ticket-bound authorization template](docs/ticket-mutation-authorization.md)
+when a start or handoff needs explicit action boundaries. Reuse existing session
+authorization; an empty template neither grants nor revokes permission. Prepare
+the concrete result before asking one scoped question for genuinely missing
+actions, while continuing independent authorized work. The template never
+bypasses current platform approvals or grants production/deployment authority.
+
 Once implementation and PR creation are authorized, continue with local edits,
 relevant tests, independent review, corrections, commit, and publication without
 requesting approval for each routine step. Collect findings into one correction
