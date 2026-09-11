@@ -159,6 +159,37 @@ exit 0
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(any(" down " in f" {line} " for line in self.log_lines()))
 
+    def test_rootful_fallback_is_scoped_and_cannot_hide_failure(self):
+        for fallback_status in (0, 19):
+            with self.subTest(fallback_status=fallback_status):
+                data = self.root / f"rootful-{fallback_status}"
+                data.mkdir()
+                (data / "mysql-owned").write_text("synthetic")
+                command = r'''source scripts/ci/docker_compose_helpers.sh
+CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH="$FIXTURE_DATA"
+CI_DOCKER_MYSQL_DATA_CREATED=1
+CI_DOCKER_COMPOSE_CMD=(fixture_compose)
+fixture_compose() { printf '%s' '{"services":{"mysql":{"image":"mysql:fixture"}}}'; }
+rm() { return 1; }
+docker() {
+    printf '%s\n' "$*" >> "$FAKE_DOCKER_LOG"
+    if [[ "$1" == image ]]; then printf 'sha256:fixture'; return 0; fi
+    if [[ "$FALLBACK_STATUS" != 0 ]]; then return "$FALLBACK_STATUS"; fi
+    find "$FIXTURE_DATA" -mindepth 1 -delete
+}
+ci_docker_remove_owned_mysql_data
+'''
+                result = subprocess.run(["bash", "-c", command], cwd=self.root,
+                    env=dict(self.env, FIXTURE_DATA=str(data), FALLBACK_STATUS=str(fallback_status)),
+                    capture_output=True, text=True)
+                self.assertEqual(result.returncode == 0, fallback_status == 0, result.stderr)
+                self.assertEqual(data.exists(), fallback_status != 0)
+                invocation = next(line for line in reversed(self.log_lines()) if line.startswith("run "))
+                self.assertIn("--pull=never --network none --read-only --user 0", invocation)
+                self.assertIn(f"type=bind,source={data},target=/cleanup", invocation)
+                self.assertIn("--cap-drop ALL", invocation)
+                self.assertNotIn("--privileged", invocation)
+
     def test_existing_bind_data_is_not_adopted_or_removed(self):
         data = self.root / "docker/.ci-mysql/retained-test"
         data.mkdir(parents=True)

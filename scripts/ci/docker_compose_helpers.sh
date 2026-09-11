@@ -335,6 +335,34 @@ ci_docker_install_seed_instance() {
     return 1
 }
 
+ci_docker_remove_owned_mysql_data() {
+    local data_path="${CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH:-}"
+    [[ -n "$data_path" ]] || return 0
+    if [[ "$CI_DOCKER_MYSQL_DATA_CREATED" != "1" || -L "$data_path" ]]; then
+        echo "[${CI_DOCKER_LOG_PREFIX:-ci-docker}] Retaining MySQL data not created by this run." >&2
+        return 1
+    fi
+    if rm -rf "$data_path" >/dev/null 2>&1; then
+        return 0
+    fi
+
+    # Native rootful Docker can leave files owned by the container's MySQL UID.
+    # Use the already-local MySQL image, no network, and only the exact owned
+    # bind directory. This creates no Compose network and never pulls an image.
+    local mysql_image mysql_image_id
+    mysql_image="$("${CI_DOCKER_COMPOSE_CMD[@]}" config --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["mysql"]["image"])')" || return 1
+    mysql_image_id="$(docker image inspect --format '{{.Id}}' "$mysql_image" 2>/dev/null)" || return 1
+    if ! docker run --rm --pull=never --network none --read-only --user 0 \
+        --cap-drop ALL --cap-add DAC_OVERRIDE --cap-add FOWNER \
+        --security-opt no-new-privileges \
+        --mount "type=bind,source=${data_path},target=/cleanup" \
+        --entrypoint /bin/sh "$mysql_image_id" \
+        -c 'find /cleanup -xdev -mindepth 1 -delete' >/dev/null 2>&1; then
+        return 1
+    fi
+    rmdir "$data_path"
+}
+
 ci_docker_cleanup_stack() {
     if [[ "${CI_DOCKER_STACK_STARTED:-0}" != "1" ]]; then
         # Image/config preparation can create our empty data directory before
@@ -364,11 +392,8 @@ ci_docker_cleanup_stack() {
     if ! "${CI_DOCKER_COMPOSE_CMD[@]}" down -v --remove-orphans >/dev/null 2>&1; then
         echo "[${CI_DOCKER_LOG_PREFIX:-ci-docker}] Compose stack cleanup failed." >&2
         cleanup_status=1
-    elif [[ -n "${CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH:-}" && "$CI_DOCKER_MYSQL_DATA_CREATED" != "1" ]]; then
-        echo "[${CI_DOCKER_LOG_PREFIX:-ci-docker}] Retaining MySQL data not created by this run." >&2
-        cleanup_status=1
-    elif [[ -n "${CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH:-}" ]] && ! rm -rf "${CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH}" >/dev/null 2>&1; then
-        echo "[${CI_DOCKER_LOG_PREFIX:-ci-docker}] Temporary MySQL data cleanup failed." >&2
+    elif ! ci_docker_remove_owned_mysql_data; then
+        echo "[${CI_DOCKER_LOG_PREFIX:-ci-docker}] Temporary MySQL data cleanup failed; retaining remaining data." >&2
         cleanup_status=1
     fi
 

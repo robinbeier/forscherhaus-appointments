@@ -156,7 +156,11 @@ The pre-PR gates also refuse to adopt a project with existing containers
 (including stopped ones), networks, volumes or retained MySQL bind data for automatic teardown. Keep
 such a retained environment intact and choose a fresh test project instead.
 Cleanup errors fail an otherwise successful run; an original test failure
-keeps its exit code. Database files are retained when stopping the stack fails.
+keeps its exit code. Database files are retained when stopping the stack fails. If native Linux
+container ownership prevents host-side deletion after a successful stop, cleanup
+uses the already-local MySQL image with no network and only the exact owned data
+directory mounted. It never pulls an image, uses privileged mode, or mounts the
+Docker socket. A failed fallback remains a visible cleanup failure.
 The focused wrapper handles HUP/INT/TERM; SIGKILL, host shutdown and Docker
 failure can prevent cleanup. After such interruptions, inspect project labels,
 all container references and the original test checkout before removing exact
