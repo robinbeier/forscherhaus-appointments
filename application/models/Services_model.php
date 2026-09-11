@@ -58,13 +58,17 @@ class Services_model extends EA_Model
      *
      * @param array $service Associative array with the service data.
      * @param bool|null $buffer_values_changed Set to whether the locked current buffer values changed.
+     * @param array|null $expected_buffer_values Buffer values read before the transaction, when updating them.
      *
      * @return int Returns the service ID.
      *
      * @throws InvalidArgumentException
      */
-    public function save(array $service, ?bool &$buffer_values_changed = null): int
-    {
+    public function save(
+        array $service,
+        ?bool &$buffer_values_changed = null,
+        ?array $expected_buffer_values = null,
+    ): int {
         $buffer_values_changed = false;
         $this->validate($service);
         $service = $this->normalize_buffer_values($service);
@@ -72,7 +76,7 @@ class Services_model extends EA_Model
         if (empty($service['id'])) {
             return $this->insert($service);
         } else {
-            return $this->update($service, $buffer_values_changed);
+            return $this->update($service, $buffer_values_changed, $expected_buffer_values);
         }
     }
 
@@ -241,13 +245,17 @@ class Services_model extends EA_Model
      *
      * @param array $service Associative array with the service data.
      * @param bool|null $buffer_values_changed Set to whether the locked current buffer values changed.
+     * @param array|null $expected_buffer_values Buffer values read before the transaction, when updating them.
      *
      * @return int Returns the service ID.
      *
      * @throws RuntimeException
      */
-    protected function update(array $service, ?bool &$buffer_values_changed = null): int
-    {
+    protected function update(
+        array $service,
+        ?bool &$buffer_values_changed = null,
+        ?array $expected_buffer_values = null,
+    ): int {
         $service_id = (int) $service['id'];
         $owns_transaction = false;
 
@@ -259,19 +267,68 @@ class Services_model extends EA_Model
         }
 
         try {
-            // Full service payloads can be stale by the time the transaction starts.
-            // Always establish the global parent order before comparing buffers.
-            $current_service = $this->lock_buffer_sync_parents($service_id);
+            $buffer_fields = ['buffer_before', 'buffer_after'];
+            $buffer_change_requested = $expected_buffer_values !== null;
 
-            foreach (['buffer_before', 'buffer_after'] as $field) {
+            if ($buffer_change_requested) {
+                $buffer_change_requested = false;
+                foreach ($buffer_fields as $field) {
+                    $requested_value = array_key_exists($field, $service)
+                        ? (int) $service[$field]
+                        : (int) ($expected_buffer_values[$field] ?? 0);
+                    if ($requested_value !== (int) ($expected_buffer_values[$field] ?? 0)) {
+                        $buffer_change_requested = true;
+                        break;
+                    }
+                }
+            }
+
+            if ($buffer_change_requested) {
+                $current_service = $this->lock_buffer_sync_parents($service_id);
+            } else {
+                $current_service = $this->db
+                    ->query(
+                        'SELECT `buffer_before`, `buffer_after` FROM `' .
+                            $this->db->dbprefix('services') .
+                            '` WHERE `id` = ? FOR UPDATE',
+                        [$service_id],
+                    )
+                    ->row_array();
+            }
+
+            if (!$current_service) {
+                throw new InvalidArgumentException(
+                    'The provided service ID does not exist in the database: ' . $service_id,
+                );
+            }
+
+            if ($expected_buffer_values !== null) {
+                foreach ($buffer_fields as $field) {
+                    if ((int) ($current_service[$field] ?? 0) !== (int) ($expected_buffer_values[$field] ?? 0)) {
+                        throw new RuntimeException('Service buffer values changed concurrently.');
+                    }
+                }
+            }
+
+            foreach ($buffer_fields as $field) {
                 if (!array_key_exists($field, $service)) {
                     $service[$field] = $current_service[$field] ?? 0;
                 }
             }
 
-            $buffer_values_changed =
-                (int) ($current_service['buffer_before'] ?? 0) !== (int) ($service['buffer_before'] ?? 0) ||
-                (int) ($current_service['buffer_after'] ?? 0) !== (int) ($service['buffer_after'] ?? 0);
+            $buffer_values_changed = false;
+            foreach ($buffer_fields as $field) {
+                if ((int) ($current_service[$field] ?? 0) !== (int) ($service[$field] ?? 0)) {
+                    $buffer_values_changed = true;
+                    break;
+                }
+            }
+
+            if ($buffer_values_changed && (!$buffer_change_requested || $owns_transaction)) {
+                throw new RuntimeException(
+                    'Service buffer changes require expected values and an outer transaction for atomic synchronization.',
+                );
+            }
 
             $service['update_datetime'] = date('Y-m-d H:i:s');
 

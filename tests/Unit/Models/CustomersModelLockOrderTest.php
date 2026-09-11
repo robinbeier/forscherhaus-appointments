@@ -28,6 +28,9 @@ final class CustomersModelLockOrderTest extends TestCase
             ['begin', 'customer_lock', 'appointment_lock', 'buffer_cleanup', 'delete_users', 'commit'],
             $database->events,
         );
+        $this->assertStringContainsString('FROM `ea_users`', $database->queries[0]['sql']);
+        $this->assertStringContainsString('FOR UPDATE', $database->queries[0]['sql']);
+        $this->assertSame([42, 7], $database->queries[0]['bindings']);
         $this->assertStringContainsString('ORDER BY `id` FOR UPDATE', $database->queries[1]['sql']);
         $this->assertSame([42], $database->queries[1]['bindings']);
         $this->assertStringContainsString('DELETE `buffer_blocks`', $database->queries[2]['sql']);

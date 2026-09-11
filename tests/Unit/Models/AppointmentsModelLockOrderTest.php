@@ -108,6 +108,9 @@ final class AppointmentsModelLockOrderTest extends TestCase
             ['begin', 'appointment_lock', 'buffer_delete', 'appointment_delete', 'commit'],
             $database->events,
         );
+        $this->assertStringContainsString('FROM `ea_appointments`', $database->queries[0]['sql']);
+        $this->assertStringContainsString('FOR UPDATE', $database->queries[0]['sql']);
+        $this->assertSame([99], $database->queries[0]['bindings']);
     }
 
     public function testBufferSyncReadsCurrentServiceUnderLock(): void
@@ -140,6 +143,52 @@ final class AppointmentsModelLockOrderTest extends TestCase
         $this->assertSame([50], $database->queries[0]['bindings']);
     }
 
+    public function testStandaloneServiceBufferSyncKeepsOrderedLocksInOneTransaction(): void
+    {
+        $database = new AppointmentsModelLockOrderFakeDatabase();
+        $database->appointment = [
+            'id' => 99,
+            'id_users_customer' => 30,
+            'id_users_provider' => 20,
+            'id_services' => 50,
+            'is_unavailability' => false,
+            'start_datetime' => '2035-02-17 09:00:00',
+            'end_datetime' => '2035-02-17 09:30:00',
+        ];
+        $database->service = [
+            'id' => 50,
+            'buffer_before' => 0,
+            'buffer_after' => 0,
+            'attendants_number' => 1,
+        ];
+        $CI = &get_instance();
+        $originalDb = $CI->db;
+        $originalServicesModel = $CI->services_model ?? null;
+        $CI->db = $database;
+        $CI->services_model = new AppointmentsModelLockOrderFakeServicesModel($database);
+
+        try {
+            $this->createModel()->sync_service_buffer_unavailabilities(50);
+        } finally {
+            $CI->db = $originalDb;
+            $CI->services_model = $originalServicesModel;
+        }
+
+        $this->assertSame(
+            [
+                'begin',
+                'buffer_parent_locks',
+                'appointment_lock',
+                'buffer_batch_delete',
+                'services_lock',
+                'buffer_delete',
+                'commit',
+            ],
+            $database->events,
+        );
+        $this->assertStringContainsString('FOR UPDATE', $database->queries[0]['sql']);
+    }
+
     private function createModel(): Appointments_model
     {
         $reflection = new ReflectionClass(Appointments_model::class);
@@ -156,6 +205,9 @@ final class AppointmentsModelLockOrderFakeDatabase
     public array $events = [];
     /** @var array<string, mixed> */
     public array $appointment = ['id' => 99, 'id_users_customer' => 30, 'id_users_provider' => 20, 'id_services' => 50];
+    /** @var array<string, mixed> */
+    public array $service = ['id' => 50, 'buffer_before' => 0, 'buffer_after' => 0, 'attendants_number' => 1];
+    private bool $usedWhereIn = false;
 
     public function dbprefix(string $table): string
     {
@@ -176,7 +228,7 @@ final class AppointmentsModelLockOrderFakeDatabase
         $this->events[] = $table . '_lock';
         $rowCount = $table === $this->missingTable ? count($bindings) - 1 : count($bindings);
 
-        return new AppointmentsModelLockOrderFakeQuery($rowCount);
+        return new AppointmentsModelLockOrderFakeQuery($rowCount, $table === 'services' ? $this->service : []);
     }
 
     public function trans_begin(): bool
@@ -210,8 +262,70 @@ final class AppointmentsModelLockOrderFakeDatabase
 
     public function delete(?string $table = null, array $where = []): bool
     {
-        $this->events[] = $table === 'appointments' && $where === [] ? 'buffer_delete' : 'appointment_delete';
+        if ($this->usedWhereIn) {
+            $this->events[] = 'buffer_batch_delete';
+            $this->usedWhereIn = false;
+        } else {
+            $this->events[] = $table === 'appointments' && $where === [] ? 'buffer_delete' : 'appointment_delete';
+        }
         return true;
+    }
+
+    public function select(string $fields): self
+    {
+        return $this;
+    }
+
+    public function from(string $table): self
+    {
+        return $this;
+    }
+
+    public function join(string $table, string $condition, string $type = ''): self
+    {
+        return $this;
+    }
+
+    public function group_start(): self
+    {
+        return $this;
+    }
+
+    public function or_where(string $field, mixed $value = null, bool $escape = true): self
+    {
+        return $this;
+    }
+
+    public function group_end(): self
+    {
+        return $this;
+    }
+
+    public function group_by(string $field): self
+    {
+        return $this;
+    }
+
+    public function order_by(string $field, string $direction = ''): self
+    {
+        return $this;
+    }
+
+    public function get_compiled_select(): string
+    {
+        return 'SELECT appointments.* FROM `ea_appointments`';
+    }
+
+    public function escape(mixed $value): string
+    {
+        return "'" . (string) $value . "'";
+    }
+
+    /** @param list<int> $values */
+    public function where_in(string $field, array $values): self
+    {
+        $this->usedWhereIn = true;
+        return $this;
     }
 
     /**
@@ -220,6 +334,18 @@ final class AppointmentsModelLockOrderFakeDatabase
     public function get_where(string $table, array $where): AppointmentsModelLockOrderFakeQuery
     {
         return new AppointmentsModelLockOrderFakeQuery(1, $this->appointment);
+    }
+}
+
+final class AppointmentsModelLockOrderFakeServicesModel
+{
+    public function __construct(private readonly AppointmentsModelLockOrderFakeDatabase $database) {}
+
+    /** @return array<string, mixed> */
+    public function lock_buffer_sync_parents(int $serviceId): array
+    {
+        $this->database->events[] = 'buffer_parent_locks';
+        return $this->database->service;
     }
 }
 
@@ -237,5 +363,11 @@ final class AppointmentsModelLockOrderFakeQuery
     public function row_array(): array
     {
         return $this->row;
+    }
+
+    /** @return list<array<string, mixed>> */
+    public function result_array(): array
+    {
+        return $this->row === [] ? [] : [$this->row];
     }
 }

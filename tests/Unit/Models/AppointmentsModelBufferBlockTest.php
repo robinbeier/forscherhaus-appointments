@@ -84,14 +84,14 @@ class AppointmentsModelBufferBlockTest extends TestCase
                 $this->assertCount(0, $this->getBufferBlocks($appointment_id));
 
                 $service = $this->servicesModel->find($service_id);
+                $expected_buffer_values = $service;
                 $service['buffer_after'] = EVENT_MINIMUM_DURATION;
                 get_instance()->db->trans_begin();
                 $buffer_values_changed = false;
-                $this->servicesModel->save($service, $buffer_values_changed);
+                $this->servicesModel->save($service, $buffer_values_changed, $expected_buffer_values);
                 $this->assertTrue($buffer_values_changed);
-                get_instance()->db->trans_commit();
-
                 $this->appointmentsModel->sync_service_buffer_unavailabilities($service_id);
+                get_instance()->db->trans_commit();
 
                 $buffer_blocks = $this->getBufferBlocks($appointment_id);
 
@@ -148,15 +148,15 @@ class AppointmentsModelBufferBlockTest extends TestCase
             }
 
             $service = $this->servicesModel->find($service_id);
+            $expected_buffer_values = $service;
             $service['buffer_before'] = 0;
             $service['buffer_after'] = EVENT_MINIMUM_DURATION;
             get_instance()->db->trans_begin();
             $buffer_values_changed = false;
-            $this->servicesModel->save($service, $buffer_values_changed);
+            $this->servicesModel->save($service, $buffer_values_changed, $expected_buffer_values);
             $this->assertTrue($buffer_values_changed);
-            get_instance()->db->trans_commit();
-
             $this->appointmentsModel->sync_service_buffer_unavailabilities($service_id);
+            get_instance()->db->trans_commit();
 
             foreach ([0, 1] as $index) {
                 $appointment_id = $appointment_ids[$index];
@@ -242,14 +242,14 @@ class AppointmentsModelBufferBlockTest extends TestCase
                 );
 
                 $service = $this->servicesModel->find($service_id);
+                $expected_buffer_values = $service;
                 $service['buffer_after'] = 0;
                 get_instance()->db->trans_begin();
                 $buffer_values_changed = false;
-                $this->servicesModel->save($service, $buffer_values_changed);
+                $this->servicesModel->save($service, $buffer_values_changed, $expected_buffer_values);
                 $this->assertTrue($buffer_values_changed);
-                get_instance()->db->trans_commit();
-
                 $this->appointmentsModel->sync_service_buffer_unavailabilities($service_id);
+                get_instance()->db->trans_commit();
 
                 $this->assertCount(0, $this->getBufferBlocks($appointment_id));
             } finally {
@@ -327,14 +327,14 @@ class AppointmentsModelBufferBlockTest extends TestCase
                     );
 
                     $service = $this->servicesModel->find($service_id);
+                    $expected_buffer_values = $service;
                     $service['buffer_after'] = EVENT_MINIMUM_DURATION;
                     get_instance()->db->trans_begin();
                     $buffer_values_changed = false;
-                    $this->servicesModel->save($service, $buffer_values_changed);
+                    $this->servicesModel->save($service, $buffer_values_changed, $expected_buffer_values);
                     $this->assertTrue($buffer_values_changed);
-                    get_instance()->db->trans_commit();
-
                     $this->appointmentsModel->sync_service_buffer_unavailabilities($service_id);
+                    get_instance()->db->trans_commit();
 
                     $buffer_blocks = $this->getBufferBlocks($appointment_id);
 
