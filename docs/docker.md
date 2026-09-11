@@ -148,7 +148,7 @@ bash scripts/ci/run_focused_test.sh pdf-renderer npm test
 The wrapper assigns a unique local Compose project and temporary MySQL data
 path, then removes only that project after the run. It rejects caller-supplied
 project, Compose configuration or data-path overrides so a focused run cannot
-clean up another stack. Only `php-fpm` and `pdf-renderer` are supported, with
+clean up another stack. Compose v1 automatically uses the canonical base configuration because it cannot parse the v2 override; `run` still publishes no service ports. Only `php-fpm` and `pdf-renderer` are supported, with
 `--no-deps`: use this for standalone script/unit tests or renderer tests. Use
 the full gate for tests requiring a seeded database or multiple services.
 

@@ -8,12 +8,19 @@ if [[ "$#" -lt 2 ]]; then
     exit 2
 fi
 case "$1" in php-fpm|pdf-renderer) ;; *) echo "Unsupported focused-test service." >&2; exit 2 ;; esac
-if [[ -n "${CI_DOCKER_COMPOSE_PROJECT_NAME:-}" || -n "${COMPOSE_PROJECT_NAME:-}" || -n "${COMPOSE_FILE:-}" || -n "${EA_MYSQL_DATA_PATH:-}" || -n "${EA_LOCAL_CI_COMPOSE_OVERRIDE_PATH:-}" || "${EA_LOCAL_CI_PORTLESS_COMPOSE:-1}" != "1" ]]; then
+if [[ -n "${CI_DOCKER_COMPOSE_PROJECT_NAME:-}" || -n "${COMPOSE_PROJECT_NAME:-}" || -n "${COMPOSE_FILE:-}" || -n "${EA_MYSQL_DATA_PATH:-}" || -n "${EA_LOCAL_CI_COMPOSE_OVERRIDE_PATH:-}" || ( "${EA_LOCAL_CI_PORTLESS_COMPOSE:-1}" != "1" && "${EA_LOCAL_CI_PORTLESS_COMPOSE:-1}" != "0" ) ]]; then
     echo "[focused-test] Refusing caller-supplied Compose project, configuration or data path." >&2
     exit 2
 fi
 source ./scripts/ci/docker_compose_helpers.sh
 CI_DOCKER_LOG_PREFIX="focused-test"
+# Compose v1 cannot parse the v2-only !reset override. The canonical base
+# configuration is safe here: run does not publish service ports unless
+# --service-ports is requested, and this runner never supplies that flag.
+if ! docker compose version >/dev/null 2>&1 && command -v docker-compose >/dev/null 2>&1; then
+    EA_LOCAL_CI_PORTLESS_COMPOSE=0
+    export EA_LOCAL_CI_PORTLESS_COMPOSE
+fi
 # Each invocation owns a different project, even within the same worktree.
 CI_DOCKER_COMPOSE_PROJECT_NAME="fh-focused-$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
 export CI_DOCKER_COMPOSE_PROJECT_NAME

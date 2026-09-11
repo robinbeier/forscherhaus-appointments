@@ -34,7 +34,11 @@ if [[ "$1" == container || "$1" == network || "$1" == volume ]]; then
   [[ "${FAKE_EXISTING_RESOURCES:-0}" == 1 ]] && printf 'existing-id\n'
   exit 0
 fi
-if [[ "$1" == compose && "$*" == *' version'* ]]; then exit 0; fi
+if [[ "$1" == compose && "$*" == *' version'* ]]; then
+  [[ "${FAKE_COMPOSE_V1:-0}" == 1 ]] && exit 1
+  exit 0
+fi
+if [[ "${FAKE_COMPOSE_V1:-0}" == 1 && "$*" == *compose.ci-local.yml* ]]; then exit 87; fi
 if [[ "$1" == compose && "$*" == *' down '* ]]; then exit "${FAKE_CLEANUP_STATUS:-0}"; fi
 if [[ "$1" == compose && "$*" == *' run '* ]]; then
   if [[ "${FAKE_RUN_MODE:-}" == signal ]]; then exec sleep 30; fi
@@ -44,6 +48,9 @@ exit 0
 """
         )
         os.chmod(fake, 0o755)
+        legacy = fakebin / "docker-compose"
+        legacy.write_text('#!/usr/bin/env bash\nexec "$(dirname "$0")/docker" compose "$@"\n')
+        legacy.chmod(0o755)
         self.env = dict(os.environ)
         self.env.update(
             PATH=f"{fakebin}:{self.env.get('PATH', '')}",
@@ -82,6 +89,17 @@ exit 0
         down = [line for line in self.log_lines() if " down " in f" {line} "]
         self.assertEqual(len(down), 1)
         self.assertEqual(len({line.split(" -p ")[1].split()[0] for line in down}), 1)
+
+    def test_compose_v1_uses_base_configuration_without_published_ports(self):
+        (self.root / "docker").mkdir()
+        (self.root / "docker/compose.ci-local.yml").write_text("services: {mysql: {ports: !reset []}}")
+        result = self.run_wrapper("php-fpm", "php", "-v", FAKE_COMPOSE_V1="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        lines = self.log_lines()
+        self.assertTrue(any(" run " in f" {line} " for line in lines))
+        self.assertFalse(any("compose.ci-local.yml" in line for line in lines))
+        self.assertFalse(any("--service-ports" in line for line in lines))
+        self.assertEqual(sum(" down " in f" {line} " for line in lines), 1)
 
     def test_command_failure_preserves_status_and_still_cleans(self):
         result = self.run_wrapper("php-fpm", "php", "-v", FAKE_RUN_STATUS="23")
