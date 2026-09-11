@@ -20,6 +20,7 @@ This file stays intentionally short. It is a map, not a second runbook.
 | --- | --- | --- |
 | Local onboarding and quickstart | `README.md` | Operator-first entry point. |
 | Agent runtime and issue-to-merge state model | `WORKFLOW.md` | Single source for active agent behavior. |
+| Ticket-bound mutation authorization | `docs/ticket-mutation-authorization.md` | Explicit per-action scope, existing grants, exclusions and current platform approvals. |
 | Machine-readable workflow and CI invariants | `.codex/contracts/agent-workflow.json` | Structured exact-head, review, public-write, evidence, and blocking-job contract. |
 | Model-aware implementation delegation | `WORKFLOW.md`, `.codex/agents/implementation-worker.toml` | Primary-agent authority plus the pinned Luna worker boundary. |
 | Controlled parallel implementation | `WORKFLOW.md` | Explicit disjoint local ownership with primary-owned integration and publication. |
