@@ -268,6 +268,7 @@ class Services_model extends EA_Model
         }
 
         try {
+            $this->lock_service_parent($service_id);
             $this->delete_buffer_blocks_for_service($service_id);
 
             $this->db->delete('services', ['id' => $service_id]);
@@ -280,6 +281,16 @@ class Services_model extends EA_Model
 
             throw $exception;
         }
+    }
+
+    /**
+     * Lock the service parent before touching generated appointment buffers.
+     */
+    protected function lock_service_parent(int $service_id): void
+    {
+        $this->db->query('SELECT `id` FROM `' . $this->db->dbprefix('services') . '` WHERE `id` = ? FOR UPDATE', [
+            $service_id,
+        ]);
     }
 
     /**
