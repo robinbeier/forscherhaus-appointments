@@ -354,6 +354,70 @@ final class CalendarCombinedAuthorizationTest extends TestCase
         );
     }
 
+    public function testAdminStructuralParentDriftIsConflictAndDoesNotNotify(): void
+    {
+        $pair = $this->fixtures->resolveProviderServicePair();
+        $foreignProvider = $this->createProvider($pair['service_id']);
+        $customer = $this->fixtures->createCustomer(['last_name' => 'Before']);
+        $appointment = $this->fixtures->createAppointment(
+            $pair['provider_id'],
+            $customer,
+            $pair['service_id'],
+            new DateTimeImmutable('2035-05-08 09:00:00'),
+        );
+        $secondary = get_instance()->load->database('', true);
+        $this->fixtures->setSetting('limit_customer_access', '0');
+        $admin = $this->userIdForRole(DB_SLUG_ADMIN);
+        $this->authenticate($admin, DB_SLUG_ADMIN);
+        $permissions = new class (get_instance()->permissions, $secondary, $appointment, $foreignProvider) {
+            public bool $reassigned = false;
+
+            public function __construct(
+                private object $permissions,
+                private object $secondary,
+                private int $appointmentId,
+                private int $foreignProvider,
+            ) {}
+
+            public function has_customer_access(int $userId, int $customerId): bool
+            {
+                $allowed = $this->permissions->has_customer_access($userId, $customerId);
+
+                if (!$this->reassigned) {
+                    $this->reassigned = $this->secondary->update(
+                        'appointments',
+                        ['id_users_provider' => $this->foreignProvider],
+                        ['id' => $this->appointmentId],
+                    );
+                }
+
+                return $allowed;
+            }
+        };
+        $controller = $this->controller();
+        $controller->permissions = $permissions;
+        $this->post(
+            [],
+            $this->appointmentPayload(
+                $appointment,
+                $pair['provider_id'],
+                $pair['service_id'],
+                $customer,
+                '2035-05-08 10:00:00',
+            ),
+        );
+
+        $controller->save_appointment();
+        $secondary->close();
+
+        $this->assertSame(409, get_instance()->output->statusCode);
+        $this->assertSame(lang('requested_hour_is_unavailable'), $this->decode()['message'] ?? null);
+        $stored = $this->storedAppointment($appointment);
+        $this->assertSame($foreignProvider, (int) $stored['id_users_provider']);
+        $this->assertSame('2035-05-08 09:00:00', $stored['start_datetime']);
+        $this->assertSame(0, $this->notifications->savedCalls);
+    }
+
     public function testManageModeLocksUserParentsBeforeAppointment(): void
     {
         $pair = $this->fixtures->resolveProviderServicePair();

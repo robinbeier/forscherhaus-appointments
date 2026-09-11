@@ -265,6 +265,10 @@ class Calendar extends EA_Controller
                     ) {
                         throw new RuntimeException('You do not have the required permissions for this task.', 403);
                     }
+
+                    if ($this->appointment_parent_ids_changed($stored_appointment, $locked_appointment)) {
+                        throw new RuntimeException(lang('requested_hour_is_unavailable'));
+                    }
                 }
 
                 // Save customer changes to the database.
@@ -438,6 +442,17 @@ class Calendar extends EA_Controller
         }
 
         return $appointment;
+    }
+
+    private function appointment_parent_ids_changed(array $stored_appointment, array $locked_appointment): bool
+    {
+        foreach (['id_users_customer', 'id_users_provider', 'id_services'] as $field) {
+            if ((int) ($stored_appointment[$field] ?? 0) !== (int) ($locked_appointment[$field] ?? 0)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
