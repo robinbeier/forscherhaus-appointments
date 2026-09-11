@@ -429,6 +429,10 @@ class Booking extends EA_Controller
                 );
             }
 
+            // Recompute the requested end from the server-side service duration
+            // before any post-lock overlap decision can use the range.
+            $appointment['end_datetime'] = $this->appointments_model->calculate_end_datetime($appointment);
+
             // The provider row lock serializes public writes for this target;
             // rerun the existing availability boundary after acquiring it.
             $locked_provider_id = $this->check_datetime_availability($appointment);
@@ -480,8 +484,6 @@ class Booking extends EA_Controller
             } elseif ($existing_customer_id !== null) {
                 $customer['id'] = $existing_customer_id;
             }
-
-            $appointment['end_datetime'] = $this->appointments_model->calculate_end_datetime($appointment);
 
             if (!empty($customer['id'])) {
                 $exclude_appointment_id =

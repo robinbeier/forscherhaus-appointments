@@ -134,6 +134,19 @@ final class RescheduleAuthorityLockOrderTest extends TestCase
         }
     }
 
+    public function testProviderOverlapUsesStrictBoundsForBackToBackAppointments(): void
+    {
+        $database = new RescheduleAuthorityLockOrderFakeDatabase();
+        $authority = $this->createAuthority($database);
+
+        $authority->providerHasOverlap(30, '2035-01-01 10:00:00', '2035-01-01 10:25:00', null);
+
+        $query = end($database->queries);
+        $this->assertIsArray($query);
+        $this->assertStringContainsString('`start_datetime` < ?', $query['sql']);
+        $this->assertStringContainsString('`end_datetime` > ?', $query['sql']);
+    }
+
     private function createAuthority(object $database): Reschedule_authority
     {
         $reflection = new ReflectionClass(Reschedule_authority::class);

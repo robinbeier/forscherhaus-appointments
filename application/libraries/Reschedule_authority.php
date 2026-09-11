@@ -455,7 +455,7 @@ class Reschedule_authority
         $sql =
             'SELECT `id` FROM `' .
             $table .
-            '` WHERE `id_users_provider` = ? AND `start_datetime` <= ? AND `end_datetime` >= ?';
+            '` WHERE `id_users_provider` = ? AND `start_datetime` < ? AND `end_datetime` > ?';
         $bindings = [$provider_id, $end_datetime, $start_datetime];
 
         if ($exclude_appointment_id !== null) {

@@ -402,7 +402,6 @@ class BookingControllerFlowTest extends TestCase
         $startAt = new DateTimeImmutable(sprintf('+4 days %02d:00:00', ($scenario['hour'] + 2) % 24));
         $endAt = $startAt->add(new DateInterval('PT' . EVENT_MINIMUM_DURATION . 'M'));
         $secondary = get_instance()->load->database('', true);
-        $conflictAppointmentId = null;
         $controller = new class (
             $scenario['provider_id'],
             $secondary,
@@ -427,10 +426,12 @@ class BookingControllerFlowTest extends TestCase
             {
                 if (!$this->injected) {
                     $now = date('Y-m-d H:i:s');
+                    $conflictStartAt = $this->startAt->add(new DateInterval('PT10M'));
+                    $conflictEndAt = $this->endAt->add(new DateInterval('PT10M'));
                     $this->secondary->insert('appointments', [
                         'book_datetime' => $now,
-                        'start_datetime' => $this->startAt->format('Y-m-d H:i:s'),
-                        'end_datetime' => $this->endAt->format('Y-m-d H:i:s'),
+                        'start_datetime' => $conflictStartAt->format('Y-m-d H:i:s'),
+                        'end_datetime' => $conflictEndAt->format('Y-m-d H:i:s'),
                         'notes' => 'Concurrent provider conflict',
                         'hash' => 'concurrent-' . bin2hex(random_bytes(6)),
                         'is_unavailability' => false,
@@ -450,6 +451,9 @@ class BookingControllerFlowTest extends TestCase
         $this->wireBookingDependencies($controller);
         $controller->notifications = BookingFlowFixtures::createNoopNotifications();
         $this->setReschedulePayload($scenario, true, $scenario['appointment_id'], $scenario['customer_id'], [], 2);
+        $_POST['post_data']['appointment']['end_datetime'] = $startAt
+            ->add(new DateInterval('PT5M'))
+            ->format('Y-m-d H:i:s');
 
         try {
             $controller->register();
@@ -463,6 +467,35 @@ class BookingControllerFlowTest extends TestCase
             if ($controller->conflictAppointmentId !== null) {
                 get_instance()->db->delete('appointments', ['id' => $controller->conflictAppointmentId]);
             }
+        }
+    }
+
+    public function testProviderOverlapAllowsBackToBackRescheduleBoundary(): void
+    {
+        $scenario = $this->createRescheduleScenario(12);
+        $startAt = new DateTimeImmutable('2035-01-01 10:00:00');
+        $endAt = $startAt->add(new DateInterval('PT' . EVENT_MINIMUM_DURATION . 'M'));
+        $this->fixtures->createAppointment(
+            $scenario['provider_id'],
+            $scenario['customer_id'],
+            $scenario['service_id'],
+            $endAt,
+            $endAt->add(new DateInterval('PT25M')),
+            'Back-to-back boundary',
+        );
+
+        $this->assertTrue(get_instance()->db->trans_begin());
+        try {
+            $this->assertFalse(
+                get_instance()->reschedule_authority->providerHasOverlap(
+                    $scenario['provider_id'],
+                    $startAt->format('Y-m-d H:i:s'),
+                    $endAt->format('Y-m-d H:i:s'),
+                    null,
+                ),
+            );
+        } finally {
+            get_instance()->db->trans_rollback();
         }
     }
 
