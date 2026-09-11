@@ -380,6 +380,67 @@ class CiDockerComposeHelpersTest extends TestCase
         self::assertStringContainsString('console install failed after 5 attempts.', $result['stderr']);
     }
 
+    public function testCleanupBeforeComposeStartupDoesNotInitializeOrInvokeCompose(): void
+    {
+        $result = $this->runShellScript(
+            <<<'BASH'
+            set -euo pipefail
+            source "$REPO_ROOT/scripts/ci/docker_compose_helpers.sh"
+            ci_docker_init_compose() { printf 'initialized'; return 99; }
+            ci_docker_cleanup_stack
+            BASH
+            ,
+            '',
+        );
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertSame('', $result['stdout']);
+    }
+
+    public function testCleanupReportsComposeFailureAndDoesNotRemoveDataPath(): void
+    {
+        $result = $this->runShellScript(
+            <<<'BASH'
+            set -euo pipefail
+            source "$REPO_ROOT/scripts/ci/docker_compose_helpers.sh"
+            CI_DOCKER_COMPOSE_CMD=(fixture_compose)
+            CI_DOCKER_PROJECT_OWNED=1
+            CI_DOCKER_STACK_STARTED=1
+            CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH="$REPO_ROOT/.ci-test-mysql"
+            mkdir -p "$CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH"
+            fixture_compose() { printf 'down-called'; return 23; }
+            if ci_docker_cleanup_stack; then
+              exit 99
+            fi
+            test -d "$CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH"
+            rm -rf "$CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH"
+            BASH
+            ,
+            '',
+        );
+
+        self::assertSame(0, $result['exit_code']);
+        self::assertStringContainsString('Compose stack cleanup failed.', $result['stderr']);
+    }
+
+    public function testComposeResourceFailureMarksProjectForCleanup(): void
+    {
+        $result = $this->runShellScript(
+            <<<'BASH'
+            set -euo pipefail
+            source "$REPO_ROOT/scripts/ci/docker_compose_helpers.sh"
+            ci_docker_init_compose() { CI_DOCKER_COMPOSE_CMD=(fixture_compose); CI_DOCKER_PROJECT_OWNED=1; }
+            fixture_compose() { return 23; }
+            ci_docker_compose up -d mysql || true
+            test "$CI_DOCKER_STACK_STARTED" = 1
+            BASH
+            ,
+            '',
+        );
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+    }
+
     /**
      * @return array{exit_code:int,stdout:string,stderr:string}
      */

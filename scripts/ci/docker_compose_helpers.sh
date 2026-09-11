@@ -2,6 +2,10 @@
 
 CI_DOCKER_COMPOSE_CMD=()
 CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH=""
+CI_DOCKER_STACK_STARTED=0
+CI_DOCKER_PROJECT_OWNED=0
+CI_DOCKER_MYSQL_DATA_CREATED=0
+CI_DOCKER_MYSQL_CLEANUP_IMAGE_ID=""
 
 ci_docker_require_cmd() {
     if ! command -v "$1" >/dev/null 2>&1; then
@@ -46,6 +50,44 @@ ci_docker_ensure_compose_project_name() {
     export CI_DOCKER_COMPOSE_PROJECT_NAME
 }
 
+# Only opt-in lifecycle callers claim a fresh project. Existing resources are
+# never adopted for teardown, including resources of stopped containers.
+ci_docker_claim_fresh_project() {
+    ci_docker_ensure_compose_project_name
+    local resource_kind existing
+    if [[ ! "$CI_DOCKER_COMPOSE_PROJECT_NAME" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+        echo "[${CI_DOCKER_LOG_PREFIX:-ci-docker}] Invalid temporary project identity." >&2
+        return 1
+    fi
+    for resource_kind in container network volume; do
+        if [[ "$resource_kind" == "container" ]]; then
+            existing="$(docker container ls -aq --filter "label=com.docker.compose.project=${CI_DOCKER_COMPOSE_PROJECT_NAME}")" || return 1
+        else
+            existing="$(docker "$resource_kind" ls -q --filter "label=com.docker.compose.project=${CI_DOCKER_COMPOSE_PROJECT_NAME}")" || return 1
+        fi
+        if [[ -n "$existing" ]]; then
+            echo "[${CI_DOCKER_LOG_PREFIX:-ci-docker}] Refusing to adopt an existing Compose project for cleanup." >&2
+            return 1
+        fi
+    done
+    # Also protect resources with a matching generated name but missing labels.
+    existing="$(docker container ls -aq --filter "name=^/${CI_DOCKER_COMPOSE_PROJECT_NAME}[-_]")" || return 1
+    [[ -z "$existing" ]] || return 1
+    existing="$(docker network ls -q --filter "name=^${CI_DOCKER_COMPOSE_PROJECT_NAME}_")" || return 1
+    [[ -z "$existing" ]] || return 1
+    existing="$(docker volume ls -q --filter "name=^${CI_DOCKER_COMPOSE_PROJECT_NAME}_")" || return 1
+    [[ -z "$existing" ]] || return 1
+    local expected_data_path
+    expected_data_path="$(ci_docker_repo_root)/docker/.ci-mysql/$(ci_docker_slugify "$CI_DOCKER_COMPOSE_PROJECT_NAME")"
+    if [[ -n "${EA_MYSQL_DATA_PATH:-}" && "$CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH" != "$expected_data_path" ]] ||
+        { [[ -e "$expected_data_path" || -L "$expected_data_path" ]] &&
+          [[ "$CI_DOCKER_MYSQL_DATA_CREATED" != "1" || "$CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH" != "$expected_data_path" ]]; }; then
+        echo "[${CI_DOCKER_LOG_PREFIX:-ci-docker}] Refusing to adopt existing or caller-supplied MySQL data." >&2
+        return 1
+    fi
+    CI_DOCKER_PROJECT_OWNED=1
+}
+
 ci_docker_configure_mysql_data_path() {
     if [[ -n "${EA_MYSQL_DATA_PATH:-}" ]]; then
         CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH=""
@@ -64,7 +106,13 @@ ci_docker_configure_mysql_data_path() {
 
     project_data_dir="${repo_root}/docker/.ci-mysql/${project_data_dir_key}"
 
-    mkdir -p "${project_data_dir}"
+    mkdir -p "${repo_root}/docker/.ci-mysql" || return
+    if mkdir "${project_data_dir}" 2>/dev/null; then
+        CI_DOCKER_MYSQL_DATA_CREATED=1
+    elif [[ "$CI_DOCKER_PROJECT_OWNED" == "1" ]]; then
+        echo "[${CI_DOCKER_LOG_PREFIX:-ci-docker}] Refusing data directory that appeared after the fresh-project check." >&2
+        return 1
+    fi
 
     EA_MYSQL_DATA_PATH="./docker/.ci-mysql/${project_data_dir_key}"
     export EA_MYSQL_DATA_PATH
@@ -105,7 +153,7 @@ ci_docker_init_compose() {
     fi
 
     ci_docker_require_cmd docker "$log_prefix"
-    ci_docker_prepare_runtime
+    ci_docker_prepare_runtime || return
 
     if docker compose version >/dev/null 2>&1; then
         CI_DOCKER_COMPOSE_CMD=(docker compose)
@@ -161,6 +209,15 @@ ci_docker_compose() {
             esac
         done
     fi
+    local compose_action="${1:-}"
+    case "$compose_action" in
+        create|exec|restart|run|start|up)
+            # Mark the project before invoking Docker so a partial resource
+            # creation is still eligible for teardown after a failed command.
+            CI_DOCKER_STACK_STARTED=1
+            ;;
+    esac
+
     "${CI_DOCKER_COMPOSE_CMD[@]}" "$@"
 }
 
@@ -279,9 +336,86 @@ ci_docker_install_seed_instance() {
     return 1
 }
 
-ci_docker_cleanup_stack() {
-    ci_docker_compose down -v --remove-orphans >/dev/null 2>&1 || true
-    if [[ -n "${CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH:-}" ]]; then
-        rm -rf "${CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH}" >/dev/null 2>&1 || true
+ci_docker_remove_owned_mysql_data() {
+    local data_path="${CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH:-}"
+    [[ -n "$data_path" ]] || return 0
+    if [[ "$CI_DOCKER_MYSQL_DATA_CREATED" != "1" || -L "$data_path" ]]; then
+        echo "[${CI_DOCKER_LOG_PREFIX:-ci-docker}] Retaining MySQL data not created by this run." >&2
+        return 1
     fi
+    if rm -rf "$data_path" >/dev/null 2>&1; then
+        return 0
+    fi
+
+    # Native rootful Docker can leave files owned by the container's MySQL UID.
+    # Use the already-local MySQL image, no network, and only the exact owned
+    # bind directory. This creates no Compose network and never pulls an image.
+    local mysql_image_id="$CI_DOCKER_MYSQL_CLEANUP_IMAGE_ID"
+    if [[ -z "$mysql_image_id" ]]; then
+        echo "[${CI_DOCKER_LOG_PREFIX:-ci-docker}] No image ID from this run's MySQL container; retaining data." >&2
+        return 1
+    fi
+    if ! docker run --rm --pull=never --network none --read-only --user 0 \
+        --cap-drop ALL --cap-add DAC_OVERRIDE --cap-add FOWNER \
+        --security-opt no-new-privileges \
+        --mount "type=bind,source=${data_path},target=/cleanup" \
+        --entrypoint /bin/sh "$mysql_image_id" \
+        -c 'find /cleanup -xdev -mindepth 1 -delete' >/dev/null 2>&1; then
+        return 1
+    fi
+    rmdir "$data_path"
+}
+
+ci_docker_cleanup_stack() {
+    if [[ "${CI_DOCKER_STACK_STARTED:-0}" != "1" ]]; then
+        # Image/config preparation can create our empty data directory before
+        # any container command runs. Remove only that empty, owned directory.
+        if [[ "$CI_DOCKER_PROJECT_OWNED" == "1" && "$CI_DOCKER_MYSQL_DATA_CREATED" == "1" && -n "$CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH" ]]; then
+            if ! rmdir "$CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH" 2>/dev/null; then
+                echo "[${CI_DOCKER_LOG_PREFIX:-ci-docker}] Could not remove empty runtime preparation directory; retaining it." >&2
+                return 1
+            fi
+            CI_DOCKER_MYSQL_DATA_CREATED=0
+        fi
+        return 0
+    fi
+
+    if [[ "${CI_DOCKER_PROJECT_OWNED:-0}" != "1" ]]; then
+        echo "[${CI_DOCKER_LOG_PREFIX:-ci-docker}] Refusing cleanup for a project not claimed by this run." >&2
+        return 1
+    fi
+
+    local cleanup_status=0
+
+    if [[ "${#CI_DOCKER_COMPOSE_CMD[@]}" -eq 0 ]]; then
+        echo "[${CI_DOCKER_LOG_PREFIX:-ci-docker}] Cannot clean up: Compose command was not initialized." >&2
+        return 1
+    fi
+
+    # Capture the immutable image before down removes the container. Engine
+    # inspection works with both supported Compose implementations and includes
+    # stopped containers. No configuration parsing or image pull is needed.
+    local mysql_container_ids mysql_container_id
+    CI_DOCKER_MYSQL_CLEANUP_IMAGE_ID=""
+    if [[ "$CI_DOCKER_MYSQL_DATA_CREATED" == "1" ]]; then
+        mysql_container_ids="$(docker container ls -aq \
+            --filter "label=com.docker.compose.project=${CI_DOCKER_COMPOSE_PROJECT_NAME}" \
+            --filter 'label=com.docker.compose.service=mysql' 2>/dev/null)" || mysql_container_ids=""
+        while IFS= read -r mysql_container_id; do
+            [[ -n "$mysql_container_id" ]] || continue
+            CI_DOCKER_MYSQL_CLEANUP_IMAGE_ID="$(docker container inspect --format '{{.Image}}' "$mysql_container_id" 2>/dev/null)" || continue
+            break
+        done <<< "$mysql_container_ids"
+    fi
+
+    if ! "${CI_DOCKER_COMPOSE_CMD[@]}" down -v --remove-orphans >/dev/null 2>&1; then
+        echo "[${CI_DOCKER_LOG_PREFIX:-ci-docker}] Compose stack cleanup failed." >&2
+        cleanup_status=1
+    elif ! ci_docker_remove_owned_mysql_data; then
+        echo "[${CI_DOCKER_LOG_PREFIX:-ci-docker}] Temporary MySQL data cleanup failed; retaining remaining data." >&2
+        cleanup_status=1
+    fi
+
+    CI_DOCKER_STACK_STARTED=0
+    return "$cleanup_status"
 }
