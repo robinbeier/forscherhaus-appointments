@@ -46,11 +46,22 @@ class PrePrCiComposeReadinessTest extends TestCase
         self::assertStringContainsString('local max_attempts="${CI_DOCKER_INSTALL_SEED_MAX_ATTEMPTS:-3}"', $helper);
     }
 
+    public function testGateCleanupPreservesFailureStatusAndHandlesSignals(): void
+    {
+        foreach (['scripts/ci/pre_pr_quick.sh', 'scripts/ci/pre_pr_full.sh'] as $path) {
+            $script = $this->readScript($path);
+
+            self::assertStringContainsString('trap cleanup_on_exit EXIT', $script);
+            self::assertStringContainsString("trap 'exit 130' INT", $script);
+            self::assertStringContainsString('if [[ "$gate_status" -ne 0 ]]; then', $script);
+        }
+    }
+
     public function testFullGateCleansUpWhenItsFirstPostQuickComposeFails(): void
     {
         $script = $this->readScript('scripts/ci/pre_pr_full.sh');
         $quick = strpos($script, 'bash ./scripts/ci/pre_pr_quick.sh');
-        $trap = strpos($script, 'trap cleanup_stack EXIT', $quick);
+        $trap = strpos($script, 'trap cleanup_on_exit EXIT', $quick);
         $firstCompose = strpos($script, 'ci_docker_compose run --rm php-fpm composer', $quick);
 
         self::assertNotFalse($quick);
@@ -58,7 +69,10 @@ class PrePrCiComposeReadinessTest extends TestCase
         self::assertNotFalse($firstCompose);
         self::assertLessThan($firstCompose, $trap);
 
-        $cleanup = $this->extractFunction($script, 'cleanup_stack');
+        $cleanup =
+            $this->extractFunction($script, 'cleanup_stack') .
+            "\n" .
+            $this->extractFunction($script, 'cleanup_on_exit');
         $afterQuick = strpos($script, "\n", $quick) + 1;
         $afterCompose = strpos($script, "\n", $firstCompose);
         $startup = substr($script, $afterQuick, $afterCompose - $afterQuick);
@@ -71,6 +85,7 @@ class PrePrCiComposeReadinessTest extends TestCase
         set -euo pipefail
         CI_DOCKER_COMPOSE_PROJECT_NAME=fixture-project
         echo_section() { :; }
+        ci_docker_claim_fresh_project() { :; }
         ci_docker_compose() { echo "compose:\$*:project=\${CI_DOCKER_COMPOSE_PROJECT_NAME}" >>"\${LOG_PATH}"; return 17; }
         ci_docker_cleanup_stack() { echo "cleanup:project=\${CI_DOCKER_COMPOSE_PROJECT_NAME}" >>"\${LOG_PATH}"; }
         {$cleanup}

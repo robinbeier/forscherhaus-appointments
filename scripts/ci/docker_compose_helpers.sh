@@ -2,6 +2,8 @@
 
 CI_DOCKER_COMPOSE_CMD=()
 CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH=""
+CI_DOCKER_STACK_STARTED=0
+CI_DOCKER_PROJECT_OWNED=0
 
 ci_docker_require_cmd() {
     if ! command -v "$1" >/dev/null 2>&1; then
@@ -44,6 +46,36 @@ ci_docker_ensure_compose_project_name() {
     git_dir_checksum="$(printf '%s' "${git_identity_path}" | cksum | awk '{print $1}')"
     CI_DOCKER_COMPOSE_PROJECT_NAME="${repo_slug}-local-ci-${git_dir_checksum}"
     export CI_DOCKER_COMPOSE_PROJECT_NAME
+}
+
+# Only opt-in lifecycle callers claim a fresh project. Existing resources are
+# never adopted for teardown, including resources of stopped containers.
+ci_docker_claim_fresh_project() {
+    ci_docker_ensure_compose_project_name
+    local resource_kind existing
+    if [[ ! "$CI_DOCKER_COMPOSE_PROJECT_NAME" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+        echo "[${CI_DOCKER_LOG_PREFIX:-ci-docker}] Invalid temporary project identity." >&2
+        return 1
+    fi
+    for resource_kind in container network volume; do
+        if [[ "$resource_kind" == "container" ]]; then
+            existing="$(docker container ls -aq --filter "label=com.docker.compose.project=${CI_DOCKER_COMPOSE_PROJECT_NAME}")" || return 1
+        else
+            existing="$(docker "$resource_kind" ls -q --filter "label=com.docker.compose.project=${CI_DOCKER_COMPOSE_PROJECT_NAME}")" || return 1
+        fi
+        if [[ -n "$existing" ]]; then
+            echo "[${CI_DOCKER_LOG_PREFIX:-ci-docker}] Refusing to adopt an existing Compose project for cleanup." >&2
+            return 1
+        fi
+    done
+    # Also protect resources with a matching generated name but missing labels.
+    existing="$(docker container ls -aq --filter "name=^/${CI_DOCKER_COMPOSE_PROJECT_NAME}[-_]")" || return 1
+    [[ -z "$existing" ]] || return 1
+    existing="$(docker network ls -q --filter "name=^${CI_DOCKER_COMPOSE_PROJECT_NAME}_")" || return 1
+    [[ -z "$existing" ]] || return 1
+    existing="$(docker volume ls -q --filter "name=^${CI_DOCKER_COMPOSE_PROJECT_NAME}_")" || return 1
+    [[ -z "$existing" ]] || return 1
+    CI_DOCKER_PROJECT_OWNED=1
 }
 
 ci_docker_configure_mysql_data_path() {
@@ -161,6 +193,15 @@ ci_docker_compose() {
             esac
         done
     fi
+    local compose_action="${1:-}"
+    case "$compose_action" in
+        create|exec|restart|run|start|up)
+            # Mark the project before invoking Docker so a partial resource
+            # creation is still eligible for teardown after a failed command.
+            CI_DOCKER_STACK_STARTED=1
+            ;;
+    esac
+
     "${CI_DOCKER_COMPOSE_CMD[@]}" "$@"
 }
 
@@ -280,8 +321,30 @@ ci_docker_install_seed_instance() {
 }
 
 ci_docker_cleanup_stack() {
-    ci_docker_compose down -v --remove-orphans >/dev/null 2>&1 || true
-    if [[ -n "${CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH:-}" ]]; then
-        rm -rf "${CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH}" >/dev/null 2>&1 || true
+    if [[ "${CI_DOCKER_STACK_STARTED:-0}" != "1" ]]; then
+        return 0
     fi
+
+    if [[ "${CI_DOCKER_PROJECT_OWNED:-0}" != "1" ]]; then
+        echo "[${CI_DOCKER_LOG_PREFIX:-ci-docker}] Refusing cleanup for a project not claimed by this run." >&2
+        return 1
+    fi
+
+    local cleanup_status=0
+
+    if [[ "${#CI_DOCKER_COMPOSE_CMD[@]}" -eq 0 ]]; then
+        echo "[${CI_DOCKER_LOG_PREFIX:-ci-docker}] Cannot clean up: Compose command was not initialized." >&2
+        return 1
+    fi
+
+    if ! "${CI_DOCKER_COMPOSE_CMD[@]}" down -v --remove-orphans >/dev/null 2>&1; then
+        echo "[${CI_DOCKER_LOG_PREFIX:-ci-docker}] Compose stack cleanup failed." >&2
+        cleanup_status=1
+    elif [[ -n "${CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH:-}" ]] && ! rm -rf "${CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH}" >/dev/null 2>&1; then
+        echo "[${CI_DOCKER_LOG_PREFIX:-ci-docker}] Temporary MySQL data cleanup failed." >&2
+        cleanup_status=1
+    fi
+
+    CI_DOCKER_STACK_STARTED=0
+    return "$cleanup_status"
 }

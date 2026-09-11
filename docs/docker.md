@@ -59,6 +59,14 @@ arguments in a Compose override to include them in the shared identity. Remote p
 are not detected automatically. Normal cleanup still removes only the local
 project's containers and test data; images are retained for reuse.
 
+The local pre-PR gates mark a temporary project before each resource-creating
+Compose command. Their exit traps clean only a project that this run attempted
+to start, so a prerequisite failure cannot initialize a fresh Compose project
+during teardown. Cleanup failures fail an otherwise successful gate while
+preserving the original gate status when the gate already failed. Cleanup
+also requires a successful fresh-project check before accepting teardown
+ownership. A caller-supplied ownership flag is not accepted from the environment.
+
 ## Local configuration
 
 Keep the root `config.php` local. If it is missing, the worktree setup,
@@ -131,10 +139,28 @@ For job preparation and the split from general tests, see
 For focused local diagnosis:
 
 ```bash
-docker compose run --rm --no-deps php-fpm \
-  php vendor/bin/phpunit --no-configuration --bootstrap vendor/autoload.php \
+bash scripts/ci/run_focused_test.sh php-fpm php vendor/bin/phpunit \
+  --no-configuration --bootstrap vendor/autoload.php \
   tests/Unit/Scripts/RootHostTestPrerequisitesTest.php
+bash scripts/ci/run_focused_test.sh pdf-renderer npm test
 ```
+
+The wrapper assigns a unique local Compose project and temporary MySQL data
+path, then removes only that project after the run. It rejects caller-supplied
+project, Compose configuration or data-path overrides so a focused run cannot
+clean up another stack. Only `php-fpm` and `pdf-renderer` are supported, with
+`--no-deps`: use this for standalone script/unit tests or renderer tests. Use
+the full gate for tests requiring a seeded database or multiple services.
+
+The pre-PR gates also refuse to adopt a project with existing containers
+(including stopped ones), networks or volumes for automatic teardown. Keep
+such a retained environment intact and choose a fresh test project instead.
+Cleanup errors fail an otherwise successful run; an original test failure
+keeps its exit code. Database files are retained when stopping the stack fails.
+The focused wrapper handles HUP/INT/TERM; SIGKILL, host shutdown and Docker
+failure can prevent cleanup. After such interruptions, inspect project labels,
+all container references and the original test checkout before removing exact
+orphaned test networks. Never use a global prune as the recovery step.
 
 ## PHP 8.5 Preview Smoke
 

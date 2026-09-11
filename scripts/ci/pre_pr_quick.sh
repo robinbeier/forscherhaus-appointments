@@ -24,8 +24,30 @@ echo_section() {
 }
 
 cleanup_stack() {
-    ci_docker_cleanup_stack
+    local gate_status="${1:-$?}"
+    local cleanup_status=0
+
+    ci_docker_cleanup_stack || cleanup_status=$?
+    if [[ "$gate_status" -ne 0 ]]; then
+        return "$gate_status"
+    fi
+    return "$cleanup_status"
 }
+
+cleanup_on_exit() {
+    local gate_status=$?
+    local cleanup_status=0
+
+    cleanup_stack "$gate_status" || cleanup_status=$?
+    if [[ "$gate_status" -ne 0 ]]; then
+        exit "$gate_status"
+    fi
+    exit "$cleanup_status"
+}
+
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 ensure_local_config() {
     if [[ -f config.php ]]; then
@@ -74,7 +96,8 @@ git diff --quiet --exit-code -- package.json package-lock.json || {
 }
 
 echo_section "Start quick gate database service"
-trap cleanup_stack EXIT
+ci_docker_claim_fresh_project
+trap cleanup_on_exit EXIT
 ci_docker_compose up -d mysql php-fpm
 ci_docker_wait_for_mysql_readiness "pre-pr-quick"
 ci_docker_wait_for_service_exec php-fpm "pre-pr-quick" php -v
@@ -96,8 +119,8 @@ echo_section "Architecture ownership gate"
 python3 scripts/docs/generate_architecture_ownership_docs.py --check
 GITHUB_EVENT_NAME=pull_request GITHUB_BASE_REF="$BASE_REF" python3 scripts/ci/check_architecture_ownership_map.py
 
-cleanup_stack
 trap - EXIT
+cleanup_stack
 
 echo
 echo "[pre-pr-quick] All checks passed."

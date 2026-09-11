@@ -33,8 +33,30 @@ echo_section() {
 }
 
 cleanup_stack() {
-    ci_docker_cleanup_stack
+    local gate_status="${1:-$?}"
+    local cleanup_status=0
+
+    ci_docker_cleanup_stack || cleanup_status=$?
+    if [[ "$gate_status" -ne 0 ]]; then
+        return "$gate_status"
+    fi
+    return "$cleanup_status"
 }
+
+cleanup_on_exit() {
+    local gate_status=$?
+    local cleanup_status=0
+
+    cleanup_stack "$gate_status" || cleanup_status=$?
+    if [[ "$gate_status" -ne 0 ]]; then
+        exit "$gate_status"
+    fi
+    exit "$cleanup_status"
+}
+
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 pre_pr_full_should_include_ldap_guardrail() {
     local changed_paths
@@ -107,7 +129,8 @@ SKIP_LOCAL_DEPS_BOOTSTRAP=1 PRE_PR_BASE_REF="$BASE_REF" bash ./scripts/ci/pre_pr
 # The quick gate owns and cleans up its own stack. Install the full-gate trap
 # before the first compose command that follows it, while still avoiding a
 # down call when a pre-runtime prerequisite fails.
-trap cleanup_stack EXIT
+ci_docker_claim_fresh_project
+trap cleanup_on_exit EXIT
 
 echo_section "Request contract static-analysis gate"
 ci_docker_compose run --rm php-fpm composer phpstan:request-contracts:l1
