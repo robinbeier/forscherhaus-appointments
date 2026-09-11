@@ -5,6 +5,7 @@ CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH=""
 CI_DOCKER_STACK_STARTED=0
 CI_DOCKER_PROJECT_OWNED=0
 CI_DOCKER_MYSQL_DATA_CREATED=0
+CI_DOCKER_MYSQL_CLEANUP_IMAGE_ID=""
 
 ci_docker_require_cmd() {
     if ! command -v "$1" >/dev/null 2>&1; then
@@ -349,9 +350,11 @@ ci_docker_remove_owned_mysql_data() {
     # Native rootful Docker can leave files owned by the container's MySQL UID.
     # Use the already-local MySQL image, no network, and only the exact owned
     # bind directory. This creates no Compose network and never pulls an image.
-    local mysql_image mysql_image_id
-    mysql_image="$("${CI_DOCKER_COMPOSE_CMD[@]}" config --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["mysql"]["image"])')" || return 1
-    mysql_image_id="$(docker image inspect --format '{{.Id}}' "$mysql_image" 2>/dev/null)" || return 1
+    local mysql_image_id="$CI_DOCKER_MYSQL_CLEANUP_IMAGE_ID"
+    if [[ -z "$mysql_image_id" ]]; then
+        echo "[${CI_DOCKER_LOG_PREFIX:-ci-docker}] No image ID from this run's MySQL container; retaining data." >&2
+        return 1
+    fi
     if ! docker run --rm --pull=never --network none --read-only --user 0 \
         --cap-drop ALL --cap-add DAC_OVERRIDE --cap-add FOWNER \
         --security-opt no-new-privileges \
@@ -387,6 +390,22 @@ ci_docker_cleanup_stack() {
     if [[ "${#CI_DOCKER_COMPOSE_CMD[@]}" -eq 0 ]]; then
         echo "[${CI_DOCKER_LOG_PREFIX:-ci-docker}] Cannot clean up: Compose command was not initialized." >&2
         return 1
+    fi
+
+    # Capture the immutable image before down removes the container. Engine
+    # inspection works with both supported Compose implementations and includes
+    # stopped containers. No configuration parsing or image pull is needed.
+    local mysql_container_ids mysql_container_id
+    CI_DOCKER_MYSQL_CLEANUP_IMAGE_ID=""
+    if [[ "$CI_DOCKER_MYSQL_DATA_CREATED" == "1" ]]; then
+        mysql_container_ids="$(docker container ls -aq \
+            --filter "label=com.docker.compose.project=${CI_DOCKER_COMPOSE_PROJECT_NAME}" \
+            --filter 'label=com.docker.compose.service=mysql' 2>/dev/null)" || mysql_container_ids=""
+        while IFS= read -r mysql_container_id; do
+            [[ -n "$mysql_container_id" ]] || continue
+            CI_DOCKER_MYSQL_CLEANUP_IMAGE_ID="$(docker container inspect --format '{{.Image}}' "$mysql_container_id" 2>/dev/null)" || continue
+            break
+        done <<< "$mysql_container_ids"
     fi
 
     if ! "${CI_DOCKER_COMPOSE_CMD[@]}" down -v --remove-orphans >/dev/null 2>&1; then

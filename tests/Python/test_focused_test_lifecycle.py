@@ -168,6 +168,7 @@ exit 0
                 command = r'''source scripts/ci/docker_compose_helpers.sh
 CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH="$FIXTURE_DATA"
 CI_DOCKER_MYSQL_DATA_CREATED=1
+CI_DOCKER_MYSQL_CLEANUP_IMAGE_ID=sha256:fixture
 CI_DOCKER_COMPOSE_CMD=(fixture_compose)
 fixture_compose() { printf '%s' '{"services":{"mysql":{"image":"mysql:fixture"}}}'; }
 rm() { return 1; }
@@ -189,6 +190,44 @@ ci_docker_remove_owned_mysql_data
                 self.assertIn(f"type=bind,source={data},target=/cleanup", invocation)
                 self.assertIn("--cap-drop ALL", invocation)
                 self.assertNotIn("--privileged", invocation)
+
+    def test_cleanup_captures_mysql_image_before_v1_compatible_down(self):
+        data = self.root / "native-data"
+        data.mkdir()
+        (data / "mysql-owned").write_text("synthetic")
+        command = r'''source scripts/ci/docker_compose_helpers.sh
+CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH="$FIXTURE_DATA"
+CI_DOCKER_MYSQL_DATA_CREATED=1
+CI_DOCKER_PROJECT_OWNED=1
+CI_DOCKER_STACK_STARTED=1
+CI_DOCKER_COMPOSE_PROJECT_NAME=fixture-project
+CI_DOCKER_COMPOSE_CMD=(fixture_compose_v1)
+fixture_compose_v1() {
+    printf 'compose-v1:%s\n' "$*" >> "$FAKE_DOCKER_LOG"
+    [[ "$1" == down ]] || return 97
+}
+rm() { return 1; }
+docker() {
+    printf '%s\n' "$*" >> "$FAKE_DOCKER_LOG"
+    if [[ "$1 $2" == 'container ls' ]]; then printf 'fixture-container'; return 0; fi
+    if [[ "$1 $2" == 'container inspect' ]]; then printf 'sha256:fixture'; return 0; fi
+    if [[ "$1" == run ]]; then find "$FIXTURE_DATA" -mindepth 1 -delete; return; fi
+    return 98
+}
+ci_docker_cleanup_stack
+'''
+        result = subprocess.run(["bash", "-c", command], cwd=self.root,
+            env=dict(self.env, FIXTURE_DATA=str(data)), capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(data.exists())
+        lines = self.log_lines()
+        inspect = next(i for i, line in enumerate(lines) if line.startswith("container inspect"))
+        down = next(i for i, line in enumerate(lines) if line.startswith("compose-v1:down"))
+        run = next(i for i, line in enumerate(lines) if line.startswith("run "))
+        self.assertLess(inspect, down)
+        self.assertLess(down, run)
+        self.assertNotIn("config --format", "\n".join(lines))
+        self.assertIn("--filter label=com.docker.compose.service=mysql", lines[0])
 
     def test_existing_bind_data_is_not_adopted_or_removed(self):
         data = self.root / "docker/.ci-mysql/retained-test"
