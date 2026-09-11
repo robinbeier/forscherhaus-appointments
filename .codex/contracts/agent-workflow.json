@@ -31,7 +31,24 @@
         "execution": "available_read_only_reviewer_or_human",
         "requires_sealed_runner": false,
         "requires_external_bootstrap_review": false,
-        "summary_binds_reviewed_head": true
+        "summary_binds_reviewed_head": true,
+        "runtime_preflight": {
+            "protocol": "docs/reviewer-runtime-preflight.md",
+            "capability_source": "current_runtime",
+            "before_diff_dispatch": true,
+            "startup_probe_is_review": false,
+            "requires_enforced_read_only_boundary": true,
+            "fallback_preserves": [
+                "independence",
+                "correctness_security",
+                "design_maintainability",
+                "tests_regressions",
+                "repository_base_head",
+                "tool_and_credential_boundaries"
+            ],
+            "runtime_failure_classification": "harness_failure",
+            "no_equivalent_reviewer": "block_merge"
+        }
     },
     "public_write": {
         "caller_supplied_values_create_authority": false,

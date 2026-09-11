@@ -63,6 +63,27 @@ class AgentWorkflowContractTest extends TestCase
         self::assertFalse($contract['review']['requires_sealed_runner'] ?? null);
         self::assertFalse($contract['review']['requires_external_bootstrap_review'] ?? null);
         self::assertTrue($contract['review']['summary_binds_reviewed_head'] ?? null);
+        self::assertSame(
+            [
+                'protocol' => 'docs/reviewer-runtime-preflight.md',
+                'capability_source' => 'current_runtime',
+                'before_diff_dispatch' => true,
+                'startup_probe_is_review' => false,
+                'requires_enforced_read_only_boundary' => true,
+                'fallback_preserves' => [
+                    'independence',
+                    'correctness_security',
+                    'design_maintainability',
+                    'tests_regressions',
+                    'repository_base_head',
+                    'tool_and_credential_boundaries',
+                ],
+                'runtime_failure_classification' => 'harness_failure',
+                'no_equivalent_reviewer' => 'block_merge',
+            ],
+            $contract['review']['runtime_preflight'] ?? null,
+        );
+        self::assertFileExists(__DIR__ . '/../../../' . $contract['review']['runtime_preflight']['protocol']);
         self::assertArrayNotHasKey('sensitive_changes_require_independent_final_reviews', $contract['review']);
         self::assertArrayNotHasKey('sensitive_change_lenses', $contract['review']);
         self::assertFalse($contract['public_write']['caller_supplied_values_create_authority'] ?? null);

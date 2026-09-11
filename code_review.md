@@ -119,9 +119,13 @@ if scope or risk changed. Group actionable findings into a correction pass;
 non-blocking suggestions must not restart a completed review cycle.
 
 No separate CLI login is required for standard
-review, including changes to review-tool code or policy. If a reviewer is
-unavailable, use another available independent reviewer or a human; keep the
-PR open if no independent review can be obtained.
+review, including changes to review-tool code or policy.
+Run the [runtime preflight](docs/reviewer-runtime-preflight.md) before the
+actual agent review. A configured role or model name is not availability
+evidence; an unsupported startup is a harness failure. Keep the same review
+scope, exact base/head, independence and enforced tool isolation for a fallback.
+If no equivalent reviewer is available, review remains pending and blocks merge;
+keep the PR open until an available independent reviewer or human can review it.
 Current blocking CI, resolved substantive findings, an updated independent
 review summary, and explicit merge authorization are still required by
 [WORKFLOW.md](WORKFLOW.md#pr-and-review-expectations).

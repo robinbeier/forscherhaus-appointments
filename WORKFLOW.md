@@ -342,6 +342,12 @@ watcher wrapper.
 
 The standard path requires one independent reviewer, either a read-only agent
 available in the current environment or a human who did not implement the diff.
+Before sending a diff to an agent, follow the
+[reviewer runtime preflight](docs/reviewer-runtime-preflight.md): inspect the
+live role/model capabilities and, when availability is unknown, perform a
+minimal no-diff startup check. Preserve the enforced read-only tool boundary
+and exact base/head binding when choosing an equivalent fallback. A readiness
+acknowledgement is not a review; runtime failures are not PR findings.
 That review covers correctness, security, test adequacy, and maintainability;
 these are topics, not a required number of agents. Give the reviewer the diff
 and enough surrounding code and tests to understand the execution path.
