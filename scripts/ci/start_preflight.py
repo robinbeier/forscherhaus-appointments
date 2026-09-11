@@ -86,10 +86,14 @@ def preflight(argv=None, runner=_run):
             ancestor = target
             while not ancestor.exists() and ancestor != ancestor.parent:
                 ancestor = ancestor.parent
-            if os.access(ancestor, os.W_OK):
+            if category == "bind-write" and target.is_file():
+                accessible = os.access(target, os.W_OK) and os.access(target.parent, os.X_OK)
+            else:
+                accessible = ancestor.is_dir() and os.access(ancestor, os.W_OK | os.X_OK)
+            if accessible:
                 add(category, "ready", "inside declared boundary; filesystem access observed, runtime approval unproven")
             else:
-                add(category, "blocked", "filesystem write access is unavailable", "Local/Git write permission")
+                add(category, "blocked", "filesystem write or directory search access is unavailable", "Local/Git write permission")
 
     repo_value = git("rev-parse", "--show-toplevel")
     git_dir = git("rev-parse", "--absolute-git-dir")

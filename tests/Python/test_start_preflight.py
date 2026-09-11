@@ -133,6 +133,28 @@ class StartPreflightTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(self.statuses(report, "git-common-write"), ["ready"])
 
+    def test_directory_write_readiness_requires_search_access(self):
+        real_access = os.access
+        def access(path, mode):
+            if Path(path) == self.runner.common and mode & os.X_OK:
+                return False
+            return real_access(path, mode)
+        with mock.patch.object(module.os, "access", side_effect=access):
+            code, report = self.run_preflight("--writable-root", str(self.root))
+        self.assertEqual(code, 1)
+        self.assertEqual(self.statuses(report, "git-common-write"), ["blocked"])
+
+    def test_bind_file_is_allowed_but_cannot_be_parent_of_missing_directory(self):
+        source = self.runner.repo / "bind-file"
+        source.write_text("fixture")
+        mount = {"type": "bind", "source": str(source), "target": "/fixture"}
+        self.runner.config["services"]["mysql"]["volumes"] = [mount]
+        report = self.run_preflight("--writable-root", str(self.root))[1]
+        self.assertEqual(self.statuses(report, "bind-write"), ["ready"])
+        mount["source"] = str(source / "missing")
+        report = self.run_preflight("--writable-root", str(self.root))[1]
+        self.assertEqual(self.statuses(report, "bind-write"), ["blocked"])
+
     def test_symlink_does_not_hide_outside_common_directory(self):
         link = self.runner.repo / "linked-git"
         link.symlink_to(self.runner.common, target_is_directory=True)
