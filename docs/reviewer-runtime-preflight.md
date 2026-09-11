@@ -15,6 +15,11 @@ it does not replace the review itself.
 3. If the requested role or capability is explicitly unsupported, reject the
    dispatch before launch. If support is unknown, perform one minimal,
    no-diff startup handshake in the candidate read-only role.
+   Use `fork_turns="none"` or an equivalent runtime-native fresh context for
+   every probe. Supply only the self-contained readiness request, never prior
+   turns, attachments, repository extracts, or diff output. If the runtime
+   cannot enforce that context boundary, do not send a probe; availability
+   remains unknown and an equivalent isolated reviewer or human is required.
 
 The handshake may confirm only that the candidate launches under the requested
 runtime. It must produce no review, finding, repository content, secret,
@@ -54,6 +59,7 @@ repeat a known-unsupported role or weaken a review gate to obtain output.
 
 ```text
 Start a no-diff compatibility handshake only.
+Context: fork_turns="none" or equivalent fresh runtime context; no inherited turns.
 Runtime: <runtime identifier>; resolved model/effort: <values>.
 Role: <registered read-only role>; repository: <path or identifier>.
 Confirm only that this role launches with the runtime's supplied read tools.

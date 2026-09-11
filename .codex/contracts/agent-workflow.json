@@ -47,7 +47,8 @@
                 "tool_and_credential_boundaries"
             ],
             "runtime_failure_classification": "harness_failure",
-            "no_equivalent_reviewer": "block_merge"
+            "no_equivalent_reviewer": "block_merge",
+            "requires_fresh_probe_context": true
         }
     },
     "public_write": {
