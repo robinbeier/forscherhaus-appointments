@@ -153,7 +153,7 @@ clean up another stack. Only `php-fpm` and `pdf-renderer` are supported, with
 the full gate for tests requiring a seeded database or multiple services.
 
 The pre-PR gates also refuse to adopt a project with existing containers
-(including stopped ones), networks or volumes for automatic teardown. Keep
+(including stopped ones), networks, volumes or retained MySQL bind data for automatic teardown. Keep
 such a retained environment intact and choose a fresh test project instead.
 Cleanup errors fail an otherwise successful run; an original test failure
 keeps its exit code. Database files are retained when stopping the stack fails.

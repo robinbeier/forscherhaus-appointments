@@ -4,6 +4,7 @@ CI_DOCKER_COMPOSE_CMD=()
 CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH=""
 CI_DOCKER_STACK_STARTED=0
 CI_DOCKER_PROJECT_OWNED=0
+CI_DOCKER_MYSQL_DATA_CREATED=0
 
 ci_docker_require_cmd() {
     if ! command -v "$1" >/dev/null 2>&1; then
@@ -75,6 +76,14 @@ ci_docker_claim_fresh_project() {
     [[ -z "$existing" ]] || return 1
     existing="$(docker volume ls -q --filter "name=^${CI_DOCKER_COMPOSE_PROJECT_NAME}_")" || return 1
     [[ -z "$existing" ]] || return 1
+    local expected_data_path
+    expected_data_path="$(ci_docker_repo_root)/docker/.ci-mysql/$(ci_docker_slugify "$CI_DOCKER_COMPOSE_PROJECT_NAME")"
+    if [[ -n "${EA_MYSQL_DATA_PATH:-}" && "$CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH" != "$expected_data_path" ]] ||
+        { [[ -e "$expected_data_path" || -L "$expected_data_path" ]] &&
+          [[ "$CI_DOCKER_MYSQL_DATA_CREATED" != "1" || "$CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH" != "$expected_data_path" ]]; }; then
+        echo "[${CI_DOCKER_LOG_PREFIX:-ci-docker}] Refusing to adopt existing or caller-supplied MySQL data." >&2
+        return 1
+    fi
     CI_DOCKER_PROJECT_OWNED=1
 }
 
@@ -96,7 +105,13 @@ ci_docker_configure_mysql_data_path() {
 
     project_data_dir="${repo_root}/docker/.ci-mysql/${project_data_dir_key}"
 
-    mkdir -p "${project_data_dir}"
+    mkdir -p "${repo_root}/docker/.ci-mysql" || return
+    if mkdir "${project_data_dir}" 2>/dev/null; then
+        CI_DOCKER_MYSQL_DATA_CREATED=1
+    elif [[ "$CI_DOCKER_PROJECT_OWNED" == "1" ]]; then
+        echo "[${CI_DOCKER_LOG_PREFIX:-ci-docker}] Refusing data directory that appeared after the fresh-project check." >&2
+        return 1
+    fi
 
     EA_MYSQL_DATA_PATH="./docker/.ci-mysql/${project_data_dir_key}"
     export EA_MYSQL_DATA_PATH
@@ -137,7 +152,7 @@ ci_docker_init_compose() {
     fi
 
     ci_docker_require_cmd docker "$log_prefix"
-    ci_docker_prepare_runtime
+    ci_docker_prepare_runtime || return
 
     if docker compose version >/dev/null 2>&1; then
         CI_DOCKER_COMPOSE_CMD=(docker compose)
@@ -339,6 +354,9 @@ ci_docker_cleanup_stack() {
 
     if ! "${CI_DOCKER_COMPOSE_CMD[@]}" down -v --remove-orphans >/dev/null 2>&1; then
         echo "[${CI_DOCKER_LOG_PREFIX:-ci-docker}] Compose stack cleanup failed." >&2
+        cleanup_status=1
+    elif [[ -n "${CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH:-}" && "$CI_DOCKER_MYSQL_DATA_CREATED" != "1" ]]; then
+        echo "[${CI_DOCKER_LOG_PREFIX:-ci-docker}] Retaining MySQL data not created by this run." >&2
         cleanup_status=1
     elif [[ -n "${CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH:-}" ]] && ! rm -rf "${CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH}" >/dev/null 2>&1; then
         echo "[${CI_DOCKER_LOG_PREFIX:-ci-docker}] Temporary MySQL data cleanup failed." >&2

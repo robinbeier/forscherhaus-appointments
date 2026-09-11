@@ -146,6 +146,35 @@ exit 0
         }
         self.assertEqual(len(projects), 2)
 
+    def test_existing_bind_data_is_not_adopted_or_removed(self):
+        data = self.root / "docker/.ci-mysql/retained-test"
+        data.mkdir(parents=True)
+        sentinel = data / "keep.txt"
+        sentinel.write_text("retained data")
+        command = (
+            "source scripts/ci/docker_compose_helpers.sh; "
+            "CI_DOCKER_COMPOSE_PROJECT_NAME=retained-test; "
+            "ci_docker_claim_fresh_project"
+        )
+        result = subprocess.run(["bash", "-c", command], cwd=self.root,
+                                env=self.env, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Refusing to adopt", result.stderr)
+        self.assertEqual(sentinel.read_text(), "retained data")
+        self.assertFalse(any(" down " in f" {line} " for line in self.log_lines()))
+
+    def test_data_created_during_own_build_can_be_claimed(self):
+        command = (
+            "set -e; source scripts/ci/docker_compose_helpers.sh; "
+            "CI_DOCKER_COMPOSE_PROJECT_NAME=own-build; "
+            "ci_docker_configure_mysql_data_path; ci_docker_claim_fresh_project; "
+            'test "$CI_DOCKER_MYSQL_DATA_CREATED" = 1; '
+            'test "$CI_DOCKER_PROJECT_OWNED" = 1'
+        )
+        result = subprocess.run(["bash", "-c", command], cwd=self.root,
+                                env=self.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_cleanup_before_start_does_not_initialize_or_call_docker(self):
         command = (
             "source scripts/ci/docker_compose_helpers.sh; "
