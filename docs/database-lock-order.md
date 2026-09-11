@@ -38,10 +38,12 @@ or locked. Buffer rows must not become a new parent level.
 The outer operation owns the business transaction and the commit/rollback
 boundary. Model methods may join an active CodeIgniter transaction; they must
 not commit work that an outer caller still owns. `Services_model::update()`
-explicitly records whether it started the transaction. The service controller,
-API service update, calendar save, and public booking controller establish an
-outer transaction around their multi-model writes. Appointment insert/update
+explicitly records whether it started the transaction. The calendar save and public booking controllers establish an outer
+transaction around their multi-model writes. Service controllers delegate the
+whole update, including buffers, to the model. Appointment insert/update
 and service/customer delete methods own a transaction when called directly.
+See [atomic write contracts](atomic-write-contracts.md) for error propagation
+and the distinction between standalone ownership and nested composition.
 
 Buffer resynchronization is part of the same transaction as the service or
 appointment mutation. Its parent helper requires an active transaction and
@@ -58,7 +60,7 @@ transaction; a nested call joins the caller's transaction depth.
 | Appointment insert/update | `Appointments_model::insert()` and `update()` start/join the appointment transaction, lock user parents, then service parents, mutate the ordinary appointment, and synchronize buffers before commit. |
 | Appointment delete | The method owns a transaction and locks the ordinary appointment row, deletes generated children, then deletes the parent appointment. The current implementation does not lock the user or service parents first; callers must not infer the full hierarchy for this path. |
 | Customer delete cascade | Own transaction; locks the customer user row, then ordinary customer appointments ordered by ID, deletes generated children, then deletes the customer. Provider/service parents are not locked by this path. |
-| Service update and buffer resync | Service controller/API owns the outer transaction. Buffer changes lock provider users, then the service, then ordinary appointments; generated children are deleted and regenerated before commit. The implementation checks that provider IDs did not change between the parent reads. The current provider-set assertion locks ordinary appointment rows ordered by ID. Resync reads those already-held parents ordered by ID before replacing their generated children. |
+| Service update and buffer resync | `Services_model::update()` owns the transaction for standalone controller/API calls, or joins an existing caller transaction. Buffer changes lock provider users, then the service, then ordinary appointments; generated children are deleted and regenerated before commit. The implementation checks that provider IDs did not change between the parent reads. The current provider-set assertion locks ordinary appointment rows ordered by ID. Resync reads those already-held parents ordered by ID before replacing their generated children. |
 | Service delete cascade | Own transaction; locks the service row, then ordinary service appointments ordered by ID, deletes generated children, then deletes the service. Provider/customer users are not locked by this path. |
 
 ## Review constraints and evidence gaps

@@ -56,6 +56,9 @@ class Users_model extends EA_Model
      *
      * @return int Returns the user ID.
      *
+     * The model owns the transaction when called without an active one. An
+     * existing outer transaction remains the caller's responsibility.
+     *
      * @throws InvalidArgumentException
      * @throws Exception
      */
@@ -63,10 +66,30 @@ class Users_model extends EA_Model
     {
         $this->validate($user);
 
-        if (empty($user['id'])) {
-            return $this->insert($user);
-        } else {
-            return $this->update($user);
+        $owns_transaction = false;
+
+        if (!$this->db->trans_active()) {
+            if (!$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start user save transaction.');
+            }
+
+            $owns_transaction = true;
+        }
+
+        try {
+            $user_id = empty($user['id']) ? $this->insert($user) : $this->update($user);
+
+            if ($owns_transaction && !$this->db->trans_commit()) {
+                throw new RuntimeException('Could not commit user save transaction.');
+            }
+
+            return $user_id;
+        } catch (Throwable $exception) {
+            if ($owns_transaction) {
+                $this->db->trans_rollback();
+            }
+
+            throw $exception;
         }
     }
 
@@ -146,7 +169,9 @@ class Users_model extends EA_Model
         $count = $this->db->get_where('user_settings', ['id_users' => $user_id])->num_rows();
 
         if (!$count) {
-            $this->db->insert('user_settings', ['id_users' => $user_id]);
+            if (!$this->db->insert('user_settings', ['id_users' => $user_id])) {
+                throw new RuntimeException('Could not create user settings.');
+            }
         }
 
         foreach ($settings as $name => $value) {

@@ -12,6 +12,30 @@ require_once APPPATH . 'models/Services_model.php';
 
 final class AppointmentsModelLockOrderTest extends TestCase
 {
+    public function testCommitFailuresPropagateAndRollBackForEveryAppointmentWrite(): void
+    {
+        foreach (['insert', 'update', 'delete'] as $operation) {
+            $database = new AppointmentsModelLockOrderFakeDatabase();
+            $database->commitSucceeds = false;
+            $CI = &get_instance();
+            $originalDb = $CI->db;
+            $CI->db = $database;
+
+            try {
+                $method = (new ReflectionClass(Appointments_model::class))->getMethod($operation);
+                try {
+                    $method->invoke($this->createModel(), $operation === 'delete' ? 99 : $database->appointment);
+                    $this->fail('Expected commit failure for ' . $operation);
+                } catch (RuntimeException $exception) {
+                    $this->assertSame('Could not commit appointment transaction.', $exception->getMessage());
+                }
+                $this->assertSame(['commit', 'rollback'], array_slice($database->events, -2), $operation);
+            } finally {
+                $CI->db = $originalDb;
+            }
+        }
+    }
+
     public function testUpdateParentsLocksDeduplicatedUsersThenServices(): void
     {
         $database = new AppointmentsModelLockOrderFakeDatabase();
@@ -259,6 +283,7 @@ final class AppointmentsModelLockOrderFakeDatabase
     /** @var array<int, array{sql:string,bindings:array<int, mixed>}> */
     public array $queries = [];
     public ?string $missingTable = null;
+    public bool $commitSucceeds = true;
     /** @var list<string> */
     public array $events = [];
     /** @var array<string, mixed> */
@@ -317,7 +342,7 @@ final class AppointmentsModelLockOrderFakeDatabase
     public function trans_commit(): bool
     {
         $this->events[] = 'commit';
-        return true;
+        return $this->commitSucceeds;
     }
 
     public function trans_rollback(): bool

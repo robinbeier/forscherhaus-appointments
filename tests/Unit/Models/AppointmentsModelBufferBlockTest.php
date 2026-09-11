@@ -86,6 +86,23 @@ class AppointmentsModelBufferBlockTest extends TestCase
                 $service = $this->servicesModel->find($service_id);
                 $expected_buffer_values = $service;
                 $service['buffer_after'] = EVENT_MINIMUM_DURATION;
+                $failing_model = new class extends Services_model {
+                    protected function sync_service_buffer_unavailabilities(int $service_id): void
+                    {
+                        parent::sync_service_buffer_unavailabilities($service_id);
+                        throw new \RuntimeException('Injected failure after buffer regeneration.');
+                    }
+                };
+                try {
+                    $failing_model->save($service, $expected_buffer_values);
+                    $this->fail('Expected the entire service update to roll back.');
+                } catch (\RuntimeException $exception) {
+                    $this->assertSame('Injected failure after buffer regeneration.', $exception->getMessage());
+                }
+                $this->assertFalse(get_instance()->db->trans_active());
+                $this->assertSame($expected_buffer_values, $this->servicesModel->find($service_id));
+                $this->assertCount(0, $this->getBufferBlocks($appointment_id));
+
                 $this->saveServiceAtomically($service, $expected_buffer_values);
 
                 $buffer_blocks = $this->getBufferBlocks($appointment_id);
@@ -500,20 +517,7 @@ class AppointmentsModelBufferBlockTest extends TestCase
      */
     private function saveServiceAtomically(array $service, array $expectedBufferValues): void
     {
-        $database = get_instance()->db;
-        if (!$database->trans_begin()) {
-            $this->fail('Could not start service test transaction.');
-        }
-
-        try {
-            $this->servicesModel->save($service, $expectedBufferValues);
-            if (!$database->trans_commit()) {
-                throw new \RuntimeException('Could not commit service test transaction.');
-            }
-        } catch (\Throwable $exception) {
-            $database->trans_rollback();
-            throw $exception;
-        }
+        $this->servicesModel->save($service, $expectedBufferValues);
     }
 
     private function findProviderId(): ?int

@@ -250,7 +250,9 @@ class Calendar extends EA_Controller
                 }
             }
 
-            $this->db->trans_begin();
+            if (!$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start appointment transaction.');
+            }
 
             try {
                 if ($manage_mode) {
@@ -344,7 +346,9 @@ class Calendar extends EA_Controller
                 $customer = $this->customers_model->find($appointment['id_users_customer']);
                 $service = $this->services_model->find($appointment['id_services']);
 
-                $this->db->trans_commit();
+                if (!$this->db->trans_commit()) {
+                    throw new RuntimeException('Could not commit appointment transaction.');
+                }
             } catch (Throwable $e) {
                 $this->db->trans_rollback();
 

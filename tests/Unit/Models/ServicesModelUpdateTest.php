@@ -80,6 +80,30 @@ class ServicesModelUpdateTest extends TestCase
         }
     }
 
+    public function test_stale_expected_buffers_abort_without_persisting_other_fields(): void
+    {
+        $service_id = $this->createService(['buffer_after' => 10]);
+        try {
+            $expected = $this->servicesModel->find($service_id);
+            $current = $expected;
+            $current['buffer_after'] = 20;
+            $this->servicesModel->save($current, $expected);
+            $persisted = $this->servicesModel->find($service_id);
+            $stale = $expected;
+            $stale['name'] = 'Must not persist';
+            try {
+                $this->servicesModel->save($stale, $expected);
+                $this->fail('Expected buffer drift to abort before any write.');
+            } catch (\RuntimeException $exception) {
+                $this->assertSame('Service buffer values changed concurrently.', $exception->getMessage());
+            }
+            $this->assertFalse(get_instance()->db->trans_active());
+            $this->assertSame($persisted, $this->servicesModel->find($service_id));
+        } finally {
+            $this->servicesModel->delete($service_id);
+        }
+    }
+
     public function test_create_without_buffer_fields_defaults_to_zero(): void
     {
         $service_id = $this->createService();
@@ -139,7 +163,7 @@ class ServicesModelUpdateTest extends TestCase
         ]);
     }
 
-    public function test_buffer_change_without_outer_transaction_is_rejected_atomically(): void
+    public function test_buffer_change_without_expected_values_is_rejected_atomically(): void
     {
         $service_id = $this->createService([
             'buffer_before' => 20,
@@ -155,7 +179,7 @@ class ServicesModelUpdateTest extends TestCase
                 $this->fail('Expected a standalone buffer change to be rejected.');
             } catch (\RuntimeException $exception) {
                 $this->assertSame(
-                    'Service buffer changes require expected values and an outer transaction for atomic synchronization.',
+                    'Service buffer changes require expected values for atomic synchronization.',
                     $exception->getMessage(),
                 );
             }
@@ -214,19 +238,6 @@ class ServicesModelUpdateTest extends TestCase
      */
     private function saveServiceAtomically(array $service, array $expectedBufferValues): void
     {
-        $database = get_instance()->db;
-        if (!$database->trans_begin()) {
-            $this->fail('Could not start service test transaction.');
-        }
-
-        try {
-            $this->servicesModel->save($service, $expectedBufferValues);
-            if (!$database->trans_commit()) {
-                throw new \RuntimeException('Could not commit service test transaction.');
-            }
-        } catch (\Throwable $exception) {
-            $database->trans_rollback();
-            throw $exception;
-        }
+        $this->servicesModel->save($service, $expectedBufferValues);
     }
 }

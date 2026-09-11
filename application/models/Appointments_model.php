@@ -242,7 +242,9 @@ class Appointments_model extends EA_Model
             $created_appointment = $this->find($appointment_id);
             $this->sync_buffer_unavailabilities($created_appointment);
 
-            $this->db->trans_commit();
+            if (!$this->db->trans_commit()) {
+                throw new RuntimeException('Could not commit appointment transaction.');
+            }
 
             return $appointment_id;
         } catch (Throwable $exception) {
@@ -282,7 +284,9 @@ class Appointments_model extends EA_Model
                 $this->sync_buffer_unavailabilities($updated_appointment);
             }
 
-            $this->db->trans_commit();
+            if (!$this->db->trans_commit()) {
+                throw new RuntimeException('Could not commit appointment transaction.');
+            }
 
             return $appointment['id'];
         } catch (Throwable $exception) {
@@ -459,7 +463,9 @@ class Appointments_model extends EA_Model
 
             $this->db->delete('appointments', ['id' => $appointment_id]);
 
-            $this->db->trans_commit();
+            if (!$this->db->trans_commit()) {
+                throw new RuntimeException('Could not commit appointment transaction.');
+            }
         } catch (Throwable $exception) {
             $this->db->trans_rollback();
 

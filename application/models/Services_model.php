@@ -56,6 +56,10 @@ class Services_model extends EA_Model
     /**
      * Save (insert or update) a service.
      *
+     * Updates own the transaction when called standalone, including all generated
+     * buffers. When composing inside an existing transaction, the caller owns
+     * the final commit and must roll back the whole operation on any exception.
+     *
      * @param array $service Associative array with the service data.
      * @param array|null $expected_buffer_values Buffer values read before the transaction, when updating them.
      *
@@ -315,9 +319,9 @@ class Services_model extends EA_Model
                 }
             }
 
-            if ($buffer_values_changed && (!$buffer_change_requested || $owns_transaction)) {
+            if ($buffer_values_changed && !$buffer_change_requested) {
                 throw new RuntimeException(
-                    'Service buffer changes require expected values and an outer transaction for atomic synchronization.',
+                    'Service buffer changes require expected values for atomic synchronization.',
                 );
             }
 
