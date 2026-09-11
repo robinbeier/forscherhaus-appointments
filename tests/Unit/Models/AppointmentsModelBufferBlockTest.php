@@ -84,10 +84,9 @@ class AppointmentsModelBufferBlockTest extends TestCase
                 $this->assertCount(0, $this->getBufferBlocks($appointment_id));
 
                 $service = $this->servicesModel->find($service_id);
+                $expected_buffer_values = $service;
                 $service['buffer_after'] = EVENT_MINIMUM_DURATION;
-                $this->servicesModel->save($service);
-
-                $this->appointmentsModel->sync_service_buffer_unavailabilities($service_id);
+                $this->saveServiceAtomically($service, $expected_buffer_values);
 
                 $buffer_blocks = $this->getBufferBlocks($appointment_id);
 
@@ -144,11 +143,10 @@ class AppointmentsModelBufferBlockTest extends TestCase
             }
 
             $service = $this->servicesModel->find($service_id);
+            $expected_buffer_values = $service;
             $service['buffer_before'] = 0;
             $service['buffer_after'] = EVENT_MINIMUM_DURATION;
-            $this->servicesModel->save($service);
-
-            $this->appointmentsModel->sync_service_buffer_unavailabilities($service_id);
+            $this->saveServiceAtomically($service, $expected_buffer_values);
 
             foreach ([0, 1] as $index) {
                 $appointment_id = $appointment_ids[$index];
@@ -234,10 +232,9 @@ class AppointmentsModelBufferBlockTest extends TestCase
                 );
 
                 $service = $this->servicesModel->find($service_id);
+                $expected_buffer_values = $service;
                 $service['buffer_after'] = 0;
-                $this->servicesModel->save($service);
-
-                $this->appointmentsModel->sync_service_buffer_unavailabilities($service_id);
+                $this->saveServiceAtomically($service, $expected_buffer_values);
 
                 $this->assertCount(0, $this->getBufferBlocks($appointment_id));
             } finally {
@@ -315,10 +312,9 @@ class AppointmentsModelBufferBlockTest extends TestCase
                     );
 
                     $service = $this->servicesModel->find($service_id);
+                    $expected_buffer_values = $service;
                     $service['buffer_after'] = EVENT_MINIMUM_DURATION;
-                    $this->servicesModel->save($service);
-
-                    $this->appointmentsModel->sync_service_buffer_unavailabilities($service_id);
+                    $this->saveServiceAtomically($service, $expected_buffer_values);
 
                     $buffer_blocks = $this->getBufferBlocks($appointment_id);
 
@@ -496,6 +492,28 @@ class AppointmentsModelBufferBlockTest extends TestCase
         );
 
         return $this->servicesModel->save($service);
+    }
+
+    /**
+     * @param array<string, mixed> $service
+     * @param array<string, mixed> $expectedBufferValues
+     */
+    private function saveServiceAtomically(array $service, array $expectedBufferValues): void
+    {
+        $database = get_instance()->db;
+        if (!$database->trans_begin()) {
+            $this->fail('Could not start service test transaction.');
+        }
+
+        try {
+            $this->servicesModel->save($service, $expectedBufferValues);
+            if (!$database->trans_commit()) {
+                throw new \RuntimeException('Could not commit service test transaction.');
+            }
+        } catch (\Throwable $exception) {
+            $database->trans_rollback();
+            throw $exception;
+        }
     }
 
     private function findProviderId(): ?int

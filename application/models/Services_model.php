@@ -57,12 +57,13 @@ class Services_model extends EA_Model
      * Save (insert or update) a service.
      *
      * @param array $service Associative array with the service data.
+     * @param array|null $expected_buffer_values Buffer values read before the transaction, when updating them.
      *
      * @return int Returns the service ID.
      *
      * @throws InvalidArgumentException
      */
-    public function save(array $service): int
+    public function save(array $service, ?array $expected_buffer_values = null): int
     {
         $this->validate($service);
         $service = $this->normalize_buffer_values($service);
@@ -70,7 +71,7 @@ class Services_model extends EA_Model
         if (empty($service['id'])) {
             return $this->insert($service);
         } else {
-            return $this->update($service);
+            return $this->update($service, $expected_buffer_values);
         }
     }
 
@@ -238,20 +239,217 @@ class Services_model extends EA_Model
      * Update an existing service.
      *
      * @param array $service Associative array with the service data.
+     * @param array|null $expected_buffer_values Buffer values read before the transaction, when updating them.
      *
      * @return int Returns the service ID.
      *
      * @throws RuntimeException
      */
-    protected function update(array $service): int
+    protected function update(array $service, ?array $expected_buffer_values = null): int
     {
-        $service['update_datetime'] = date('Y-m-d H:i:s');
+        $service_id = (int) $service['id'];
+        $owns_transaction = false;
 
-        if (!$this->db->update('services', $service, ['id' => $service['id']])) {
-            throw new RuntimeException('Could not update service.');
+        if (!$this->db->trans_active()) {
+            if (!$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start service update transaction.');
+            }
+            $owns_transaction = true;
         }
 
-        return $service['id'];
+        try {
+            $buffer_fields = ['buffer_before', 'buffer_after'];
+            $buffer_change_requested = $expected_buffer_values !== null;
+
+            if ($buffer_change_requested) {
+                $buffer_change_requested = false;
+                foreach ($buffer_fields as $field) {
+                    $requested_value = array_key_exists($field, $service)
+                        ? (int) $service[$field]
+                        : (int) ($expected_buffer_values[$field] ?? 0);
+                    if ($requested_value !== (int) ($expected_buffer_values[$field] ?? 0)) {
+                        $buffer_change_requested = true;
+                        break;
+                    }
+                }
+            }
+
+            if ($buffer_change_requested) {
+                $current_service = $this->lock_buffer_sync_parents($service_id);
+            } else {
+                $current_service = $this->db
+                    ->query(
+                        'SELECT `buffer_before`, `buffer_after` FROM `' .
+                            $this->db->dbprefix('services') .
+                            '` WHERE `id` = ? FOR UPDATE',
+                        [$service_id],
+                    )
+                    ->row_array();
+            }
+
+            if (!$current_service) {
+                throw new InvalidArgumentException(
+                    'The provided service ID does not exist in the database: ' . $service_id,
+                );
+            }
+
+            if ($expected_buffer_values !== null) {
+                foreach ($buffer_fields as $field) {
+                    if ((int) ($current_service[$field] ?? 0) !== (int) ($expected_buffer_values[$field] ?? 0)) {
+                        throw new RuntimeException('Service buffer values changed concurrently.');
+                    }
+                }
+            }
+
+            foreach ($buffer_fields as $field) {
+                if (!array_key_exists($field, $service)) {
+                    $service[$field] = $current_service[$field] ?? 0;
+                }
+            }
+
+            $buffer_values_changed = false;
+            foreach ($buffer_fields as $field) {
+                if ((int) ($current_service[$field] ?? 0) !== (int) ($service[$field] ?? 0)) {
+                    $buffer_values_changed = true;
+                    break;
+                }
+            }
+
+            if ($buffer_values_changed && (!$buffer_change_requested || $owns_transaction)) {
+                throw new RuntimeException(
+                    'Service buffer changes require expected values and an outer transaction for atomic synchronization.',
+                );
+            }
+
+            $service['update_datetime'] = date('Y-m-d H:i:s');
+
+            if (!$this->db->update('services', $service, ['id' => $service['id']])) {
+                throw new RuntimeException('Could not update service.');
+            }
+
+            if ($buffer_values_changed) {
+                $this->sync_service_buffer_unavailabilities($service_id);
+            }
+
+            if ($owns_transaction && !$this->db->trans_commit()) {
+                throw new RuntimeException('Could not commit service update transaction.');
+            }
+        } catch (Throwable $exception) {
+            if ($owns_transaction) {
+                $this->db->trans_rollback();
+            }
+            throw $exception;
+        }
+
+        return $service_id;
+    }
+
+    /**
+     * Regenerate appointment buffers inside the caller's service transaction.
+     */
+    protected function sync_service_buffer_unavailabilities(int $service_id): void
+    {
+        $this->load->model('appointments_model');
+        $this->appointments_model->sync_service_buffer_unavailabilities($service_id);
+    }
+
+    /**
+     * Lock provider users referenced by this service before the service row.
+     * Buffer regeneration inserts appointment rows with a provider FK.
+     */
+    /**
+     * @return list<int>
+     */
+    protected function lock_buffer_provider_parents(int $service_id): array
+    {
+        if ($service_id <= 0) {
+            return [];
+        }
+
+        $providers = $this->db
+            ->query(
+                'SELECT DISTINCT `id_users_provider` FROM `' .
+                    $this->db->dbprefix('appointments') .
+                    '` WHERE `id_services` = ? AND `is_unavailability` = 0',
+                [$service_id],
+            )
+            ->result_array();
+
+        $provider_ids = array_values(
+            array_unique(
+                array_filter(
+                    array_map(static fn(array $row): int => (int) ($row['id_users_provider'] ?? 0), $providers),
+                    static fn(int $id): bool => $id > 0,
+                ),
+            ),
+        );
+        sort($provider_ids, SORT_NUMERIC);
+
+        foreach ($provider_ids as $provider_id) {
+            $this->db->query('SELECT `id` FROM `' . $this->db->dbprefix('users') . '` WHERE `id` = ? FOR UPDATE', [
+                $provider_id,
+            ]);
+        }
+
+        return $provider_ids;
+    }
+
+    /**
+     * Lock every parent needed to regenerate a service's appointment buffers.
+     *
+     * @return array<string, mixed> Current locked service row.
+     */
+    public function lock_buffer_sync_parents(int $service_id): array
+    {
+        if (!$this->db->trans_active()) {
+            throw new RuntimeException('Service buffer synchronization requires an active transaction.');
+        }
+
+        $provider_ids = $this->lock_buffer_provider_parents($service_id);
+        $service = $this->db
+            ->query('SELECT * FROM `' . $this->db->dbprefix('services') . '` WHERE `id` = ? FOR UPDATE', [$service_id])
+            ->row_array();
+
+        if (!$service) {
+            throw new InvalidArgumentException(
+                'The provided service ID does not exist in the database: ' . $service_id,
+            );
+        }
+
+        $this->assert_buffer_provider_parents_unchanged($service_id, $provider_ids);
+
+        return $service;
+    }
+
+    /**
+     * Ensure no appointment provider changed while the service row was locked.
+     * This current read is intentionally after parent locks and service update.
+     *
+     * @param list<int> $expected_provider_ids
+     */
+    protected function assert_buffer_provider_parents_unchanged(int $service_id, array $expected_provider_ids): void
+    {
+        $rows = $this->db
+            ->query(
+                'SELECT DISTINCT `id_users_provider` FROM `' .
+                    $this->db->dbprefix('appointments') .
+                    '` WHERE `id_services` = ? AND `is_unavailability` = 0 FOR UPDATE',
+                [$service_id],
+            )
+            ->result_array();
+        $current_provider_ids = array_values(
+            array_unique(
+                array_filter(
+                    array_map(static fn(array $row): int => (int) ($row['id_users_provider'] ?? 0), $rows),
+                    static fn(int $id): bool => $id > 0,
+                ),
+            ),
+        );
+        sort($current_provider_ids, SORT_NUMERIC);
+
+        if ($current_provider_ids !== $expected_provider_ids) {
+            throw new RuntimeException('Service appointments changed during update.');
+        }
     }
 
     /**
@@ -268,6 +466,8 @@ class Services_model extends EA_Model
         }
 
         try {
+            $this->lock_service_parent($service_id);
+            $this->lock_service_appointment_parents($service_id);
             $this->delete_buffer_blocks_for_service($service_id);
 
             $this->db->delete('services', ['id' => $service_id]);
@@ -280,6 +480,33 @@ class Services_model extends EA_Model
 
             throw $exception;
         }
+    }
+
+    /**
+     * Lock service appointments before their generated buffer children.
+     */
+    protected function lock_service_appointment_parents(int $service_id): void
+    {
+        if ($service_id <= 0) {
+            return;
+        }
+
+        $this->db->query(
+            'SELECT `id` FROM `' .
+                $this->db->dbprefix('appointments') .
+                '` WHERE `id_services` = ? AND `is_unavailability` = 0 ORDER BY `id` FOR UPDATE',
+            [$service_id],
+        );
+    }
+
+    /**
+     * Lock the service parent before touching generated appointment buffers.
+     */
+    protected function lock_service_parent(int $service_id): void
+    {
+        $this->db->query('SELECT `id` FROM `' . $this->db->dbprefix('services') . '` WHERE `id` = ? FOR UPDATE', [
+            $service_id,
+        ]);
     }
 
     /**

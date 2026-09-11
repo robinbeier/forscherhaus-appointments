@@ -231,8 +231,10 @@ class Calendar extends EA_Controller
             $request_dto = $this->calendarRequestDtoFactory()->buildSaveAppointmentRequestDto();
             $customer_data = $request_dto->customerData;
             $appointment_data = $request_dto->appointmentData;
+            $manage_mode = !empty($appointment_data['id']);
+            $stored_appointment = null;
 
-            if (!empty($appointment_data['id'])) {
+            if ($manage_mode) {
                 $stored_appointment = $this->appointments_model->find((int) $appointment_data['id']);
                 $this->check_event_permissions((int) $stored_appointment['id_users_provider']);
             }
@@ -244,15 +246,47 @@ class Calendar extends EA_Controller
                     !empty($customer_id) &&
                     !$this->permissions->has_customer_access((int) session('user_id'), $customer_id)
                 ) {
-                    throw new RuntimeException('You do not have the required permissions for this task.');
+                    throw new RuntimeException('You do not have the required permissions for this task.', 403);
                 }
             }
-
-            $manage_mode = !empty($appointment_data['id']);
 
             $this->db->trans_begin();
 
             try {
+                if ($manage_mode) {
+                    if ($stored_appointment === null) {
+                        throw new RuntimeException('The appointment state could not be loaded.');
+                    }
+
+                    $this->lock_calendar_update_parents($stored_appointment, $appointment_data, [
+                        $customer_data['id'] ?? null,
+                    ]);
+                    $locked_appointment = $this->lock_appointment((int) $appointment_data['id']);
+
+                    if (
+                        !$this->has_event_permissions((int) $locked_appointment['id_users_provider']) ||
+                        !$this->has_event_permissions((int) $appointment_data['id_users_provider'])
+                    ) {
+                        throw new RuntimeException('You do not have the required permissions for this task.', 403);
+                    }
+
+                    if ($this->appointment_parent_ids_changed($stored_appointment, $locked_appointment)) {
+                        throw new RuntimeException(lang('requested_hour_is_unavailable'));
+                    }
+
+                    foreach (
+                        [$customer_data['id'] ?? null, $appointment_data['id_users_customer'] ?? null]
+                        as $customer_id
+                    ) {
+                        if (
+                            !empty($customer_id) &&
+                            !$this->permissions->has_customer_access((int) session('user_id'), $customer_id)
+                        ) {
+                            throw new RuntimeException('You do not have the required permissions for this task.', 403);
+                        }
+                    }
+                }
+
                 // Save customer changes to the database.
                 if ($customer_data) {
                     $customer = $customer_data;
@@ -262,7 +296,7 @@ class Calendar extends EA_Controller
                         : can('add', PRIV_CUSTOMERS);
 
                     if (!$required_permissions) {
-                        throw new RuntimeException('You do not have the required permissions for this task.');
+                        throw new RuntimeException('You do not have the required permissions for this task.', 403);
                     }
 
                     $this->customers_model->only($customer, $this->allowed_customer_fields);
@@ -281,7 +315,7 @@ class Calendar extends EA_Controller
                         : can('add', PRIV_APPOINTMENTS);
 
                     if (!$required_permissions) {
-                        throw new RuntimeException('You do not have the required permissions for this task.');
+                        throw new RuntimeException('You do not have the required permissions for this task.', 403);
                     }
 
                     // If the appointment does not contain the customer record id, then it means that is going to be inserted.
@@ -362,6 +396,10 @@ class Calendar extends EA_Controller
 
     protected function get_appointment_save_expected_error_status(Throwable $e): ?int
     {
+        if ($e->getCode() === 403 && $e->getMessage() === 'You do not have the required permissions for this task.') {
+            return 403;
+        }
+
         $expected_conflict_messages = [
             lang('buffer_conflict_error'),
             lang('buffer_outside_schedule_error'),
@@ -373,6 +411,13 @@ class Calendar extends EA_Controller
 
     private function check_event_permissions(int $provider_id): void
     {
+        if (!$this->has_event_permissions($provider_id)) {
+            abort(403);
+        }
+    }
+
+    private function has_event_permissions(int $provider_id): bool
+    {
         $user_id = (int) session('user_id');
         $role_slug = session('role_slug');
 
@@ -380,12 +425,50 @@ class Calendar extends EA_Controller
             $role_slug === DB_SLUG_SECRETARY &&
             !$this->secretaries_model->is_provider_supported($user_id, $provider_id)
         ) {
-            abort(403);
+            return false;
         }
 
-        if ($role_slug === DB_SLUG_PROVIDER && $user_id !== $provider_id) {
-            abort(403);
+        return $role_slug !== DB_SLUG_PROVIDER || $user_id === $provider_id;
+    }
+
+    protected function lock_calendar_update_parents(
+        array $current_appointment,
+        array $requested_appointment,
+        array $additional_user_ids = [],
+    ): void {
+        $this->appointments_model->lock_update_parents(
+            $current_appointment,
+            $requested_appointment,
+            $additional_user_ids,
+        );
+    }
+
+    protected function lock_appointment(int $appointment_id): array
+    {
+        $appointment = $this->db
+            ->query('SELECT * FROM `' . $this->db->dbprefix('appointments') . '` WHERE `id` = ? FOR UPDATE', [
+                $appointment_id,
+            ])
+            ->row_array();
+
+        if (!$appointment) {
+            throw new InvalidArgumentException(
+                'The provided appointment ID was not found in the database: ' . $appointment_id,
+            );
         }
+
+        return $appointment;
+    }
+
+    private function appointment_parent_ids_changed(array $stored_appointment, array $locked_appointment): bool
+    {
+        foreach (['id_users_customer', 'id_users_provider', 'id_services'] as $field) {
+            if ((int) ($stored_appointment[$field] ?? 0) !== (int) ($locked_appointment[$field] ?? 0)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

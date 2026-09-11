@@ -393,6 +393,161 @@ class BookingControllerFlowTest extends TestCase
         }
     }
 
+    public function testReschedulePostLockAvailabilityUsesCurrentProviderRows(): void
+    {
+        $scenario = $this->createRescheduleScenario(11);
+        $issuer = $this->createBookingControllerWithForcedAvailability($scenario['provider_id']);
+        $this->issueRescheduleAuthority($issuer, $scenario['hash']);
+
+        $startAt = new DateTimeImmutable(sprintf('+4 days %02d:00:00', ($scenario['hour'] + 2) % 24));
+        $endAt = $startAt->add(new DateInterval('PT' . EVENT_MINIMUM_DURATION . 'M'));
+        $secondary = get_instance()->load->database('', true);
+        $controller = new class (
+            $scenario['provider_id'],
+            $secondary,
+            $scenario['customer_id'],
+            $scenario['service_id'],
+            $startAt,
+            $endAt,
+        ) extends Booking {
+            private bool $injected = false;
+            public ?int $conflictAppointmentId = null;
+            public ?bool $rescheduleIsolationRequested = null;
+
+            public function __construct(
+                private readonly int $forcedProviderId,
+                private readonly object $secondary,
+                private readonly int $customerId,
+                private readonly int $serviceId,
+                private readonly DateTimeImmutable $startAt,
+                private readonly DateTimeImmutable $endAt,
+            ) {}
+
+            protected function begin_public_booking_transaction(bool $reschedule): bool
+            {
+                $this->rescheduleIsolationRequested = $reschedule;
+
+                return parent::begin_public_booking_transaction($reschedule);
+            }
+
+            protected function check_datetime_availability(array $appointment): ?int
+            {
+                if (!$this->injected) {
+                    $now = date('Y-m-d H:i:s');
+                    $conflictStartAt = $this->startAt->add(new DateInterval('PT10M'));
+                    $conflictEndAt = $this->endAt->add(new DateInterval('PT10M'));
+                    $this->secondary->insert('appointments', [
+                        'book_datetime' => $now,
+                        'start_datetime' => $conflictStartAt->format('Y-m-d H:i:s'),
+                        'end_datetime' => $conflictEndAt->format('Y-m-d H:i:s'),
+                        'notes' => 'Concurrent provider conflict',
+                        'hash' => 'concurrent-' . bin2hex(random_bytes(6)),
+                        'is_unavailability' => false,
+                        'id_users_provider' => $this->forcedProviderId,
+                        'id_users_customer' => $this->customerId,
+                        'id_services' => $this->serviceId,
+                        'create_datetime' => $now,
+                        'update_datetime' => $now,
+                    ]);
+                    $this->conflictAppointmentId = (int) $this->secondary->insert_id();
+                    $this->injected = true;
+                }
+
+                return $this->forcedProviderId;
+            }
+        };
+        $this->wireBookingDependencies($controller);
+        $controller->notifications = BookingFlowFixtures::createNoopNotifications();
+        $this->setReschedulePayload($scenario, true, $scenario['appointment_id'], $scenario['customer_id'], [], 2);
+        $_POST['post_data']['appointment']['end_datetime'] = $startAt
+            ->add(new DateInterval('PT5M'))
+            ->format('Y-m-d H:i:s');
+
+        try {
+            $controller->register();
+            $this->assertTrue($controller->rescheduleIsolationRequested);
+            $response = json_decode(get_instance()->output->get_output(), true);
+            $this->assertFalse($response['success'] ?? true);
+            $this->assertSame(lang('requested_hour_is_unavailable'), $response['message'] ?? null);
+            $this->assertSame(409, get_instance()->output->statusCode);
+            $this->assertSame(0, $controller->notifications->savedCalls);
+        } finally {
+            $secondary->close();
+            if ($controller->conflictAppointmentId !== null) {
+                get_instance()->db->delete('appointments', ['id' => $controller->conflictAppointmentId]);
+            }
+        }
+    }
+
+    public function testRescheduleTransactionSeesCommittedServiceChangeOnSecondRead(): void
+    {
+        $scenario = $this->createRescheduleScenario(13);
+        $CI = &get_instance();
+        $service = $CI->db->get_where('services', ['id' => $scenario['service_id']])->row_array();
+        $this->assertNotEmpty($service);
+        $originalDuration = (int) $service['duration'];
+        $secondary = $CI->load->database('', true);
+        $transactionOpen = false;
+        $controller = new class extends Booking {
+            public function __construct() {}
+
+            public function beginRescheduleTransaction(): bool
+            {
+                return $this->begin_public_booking_transaction(true);
+            }
+        };
+        $controller->db = $CI->db;
+
+        try {
+            $this->assertTrue($controller->beginRescheduleTransaction());
+            $transactionOpen = true;
+            $before = (int) $CI->db->get_where('services', ['id' => $scenario['service_id']])->row_array()['duration'];
+            $updatedDuration = $originalDuration + 5;
+            $this->assertTrue(
+                $secondary->update('services', ['duration' => $updatedDuration], ['id' => $scenario['service_id']]),
+            );
+            $after = (int) $CI->db->get_where('services', ['id' => $scenario['service_id']])->row_array()['duration'];
+
+            $this->assertSame($originalDuration, $before);
+            $this->assertSame($updatedDuration, $after);
+        } finally {
+            if ($transactionOpen) {
+                $CI->db->trans_rollback();
+            }
+            $secondary->close();
+            $CI->db->update('services', ['duration' => $originalDuration], ['id' => $scenario['service_id']]);
+        }
+    }
+
+    public function testProviderOverlapAllowsBackToBackRescheduleBoundary(): void
+    {
+        $scenario = $this->createRescheduleScenario(12);
+        $startAt = new DateTimeImmutable('2035-01-01 10:00:00');
+        $endAt = $startAt->add(new DateInterval('PT' . EVENT_MINIMUM_DURATION . 'M'));
+        $this->fixtures->createAppointment(
+            $scenario['provider_id'],
+            $scenario['customer_id'],
+            $scenario['service_id'],
+            $endAt,
+            $endAt->add(new DateInterval('PT25M')),
+            'Back-to-back boundary',
+        );
+
+        $this->assertTrue(get_instance()->db->trans_begin());
+        try {
+            $this->assertFalse(
+                get_instance()->reschedule_authority->providerHasOverlap(
+                    $scenario['provider_id'],
+                    $startAt->format('Y-m-d H:i:s'),
+                    $endAt->format('Y-m-d H:i:s'),
+                    null,
+                ),
+            );
+        } finally {
+            get_instance()->db->trans_rollback();
+        }
+    }
+
     public function testForgedManageModeWithoutAuthorityRejectsWithoutMutation(): void
     {
         $scenario = $this->createRescheduleScenario(9);

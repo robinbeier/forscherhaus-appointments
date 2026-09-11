@@ -326,6 +326,7 @@ class Customers_model extends EA_Model
         try {
             $customer_role_id = $this->get_customer_role_id();
             $this->assert_customer_exists_for_update($customer_id);
+            $this->lock_customer_appointment_parents($customer_id);
 
             $this->delete_buffer_blocks_for_customer($customer_id);
 
@@ -345,6 +346,23 @@ class Customers_model extends EA_Model
 
             throw $exception;
         }
+    }
+
+    /**
+     * Lock customer appointments before their generated buffer children.
+     */
+    protected function lock_customer_appointment_parents(int $customer_id): void
+    {
+        if ($customer_id <= 0) {
+            return;
+        }
+
+        $this->db->query(
+            'SELECT `id` FROM `' .
+                $this->db->dbprefix('appointments') .
+                '` WHERE `id_users_customer` = ? AND `is_unavailability` = 0 ORDER BY `id` FOR UPDATE',
+            [$customer_id],
+        );
     }
 
     /**

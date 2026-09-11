@@ -65,10 +65,11 @@ class ServicesModelUpdateTest extends TestCase
 
         try {
             $existing_service = $this->servicesModel->find($service_id);
+            $expected_buffer_values = $existing_service;
             $existing_service['buffer_before'] = 25;
             $existing_service['buffer_after'] = 35;
 
-            $this->servicesModel->save($existing_service);
+            $this->saveServiceAtomically($existing_service, $expected_buffer_values);
 
             $saved_service = $this->servicesModel->find($service_id);
 
@@ -113,10 +114,11 @@ class ServicesModelUpdateTest extends TestCase
 
         try {
             $existing_service = $this->servicesModel->find($service_id);
+            $expected_buffer_values = $existing_service;
             $existing_service['buffer_before'] = null;
             $existing_service['buffer_after'] = null;
 
-            $this->servicesModel->save($existing_service);
+            $this->saveServiceAtomically($existing_service, $expected_buffer_values);
 
             $saved_service = $this->servicesModel->find($service_id);
 
@@ -135,6 +137,34 @@ class ServicesModelUpdateTest extends TestCase
         $this->createService([
             'buffer_before' => EVENT_MINIMUM_DURATION - 1,
         ]);
+    }
+
+    public function test_buffer_change_without_outer_transaction_is_rejected_atomically(): void
+    {
+        $service_id = $this->createService([
+            'buffer_before' => 20,
+            'buffer_after' => 15,
+        ]);
+
+        try {
+            $existing_service = $this->servicesModel->find($service_id);
+            $existing_service['buffer_after'] = 30;
+
+            try {
+                $this->servicesModel->save($existing_service);
+                $this->fail('Expected a standalone buffer change to be rejected.');
+            } catch (\RuntimeException $exception) {
+                $this->assertSame(
+                    'Service buffer changes require expected values and an outer transaction for atomic synchronization.',
+                    $exception->getMessage(),
+                );
+            }
+
+            $saved_service = $this->servicesModel->find($service_id);
+            $this->assertSame(15, (int) $saved_service['buffer_after']);
+        } finally {
+            $this->servicesModel->delete($service_id);
+        }
     }
 
     public function test_create_with_non_numeric_buffer_is_rejected(): void
@@ -176,5 +206,27 @@ class ServicesModelUpdateTest extends TestCase
         );
 
         return $this->servicesModel->save($service);
+    }
+
+    /**
+     * @param array<string, mixed> $service
+     * @param array<string, mixed> $expectedBufferValues
+     */
+    private function saveServiceAtomically(array $service, array $expectedBufferValues): void
+    {
+        $database = get_instance()->db;
+        if (!$database->trans_begin()) {
+            $this->fail('Could not start service test transaction.');
+        }
+
+        try {
+            $this->servicesModel->save($service, $expectedBufferValues);
+            if (!$database->trans_commit()) {
+                throw new \RuntimeException('Could not commit service test transaction.');
+            }
+        } catch (\Throwable $exception) {
+            $database->trans_rollback();
+            throw $exception;
+        }
     }
 }

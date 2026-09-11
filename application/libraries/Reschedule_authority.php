@@ -314,7 +314,15 @@ class Reschedule_authority
         int $target_provider_id,
         int $target_service_id,
     ): RescheduleAuthorityState {
+        $appointment_snapshot = $this->selectOne('appointments', 'id', $claim->appointmentId);
+
+        if (empty($appointment_snapshot)) {
+            throw new RescheduleAuthorityException('canonical-identity-mismatch');
+        }
+
+        $this->lockAuthorityParents($appointment_snapshot, [$target_provider_id], [$target_service_id]);
         $appointment = $this->lockedAppointment($claim->appointmentId);
+        $this->assertAppointmentStructureUnchanged($appointment_snapshot, $appointment);
 
         if (
             (int) ($appointment['id_users_customer'] ?? 0) !== $claim->customerId ||
@@ -323,28 +331,11 @@ class Reschedule_authority
             throw new RescheduleAuthorityException('canonical-identity-mismatch');
         }
 
-        $provider_ids = array_values(array_unique([(int) $appointment['id_users_provider'], $target_provider_id]));
-        $service_ids = array_values(array_unique([(int) $appointment['id_services'], $target_service_id]));
-
-        sort($provider_ids, SORT_NUMERIC);
-        sort($service_ids, SORT_NUMERIC);
-
-        $user_ids = array_values(array_unique(array_merge([$claim->customerId], $provider_ids)));
-        sort($user_ids, SORT_NUMERIC);
-
-        $this->lockRowsByIds('users', 'id', $user_ids);
-        $this->lockRowsByIds('services', 'id', $service_ids);
-        $this->lockRowsByIds('user_settings', 'id_users', $provider_ids);
-
-        foreach ($provider_ids as $provider_id) {
-            $this->lockProviderServiceAssignments($provider_id);
-        }
-
-        if (!$this->providerOffersService($target_provider_id, $target_service_id)) {
+        if (!$this->providerOffersService($target_provider_id, $target_service_id, true)) {
             throw new RescheduleAuthorityException('target-assignment-mismatch');
         }
 
-        $state = $this->loadStateFromAppointment($appointment);
+        $state = $this->loadStateFromAppointment($appointment, true);
 
         if (!hash_equals($claim->snapshotDigest, $state->snapshotDigest)) {
             throw new RescheduleAuthorityException('canonical-state-drift');
@@ -449,48 +440,121 @@ class Reschedule_authority
         return $this->db->query($sql, $bindings)->num_rows() > 0;
     }
 
+    /**
+     * Re-check provider-side appointment and unavailability overlap with a
+     * current locking read after the reschedule authority has acquired its
+     * parent locks.
+     */
+    public function providerHasOverlap(
+        int $provider_id,
+        string $start_datetime,
+        string $end_datetime,
+        ?int $exclude_appointment_id,
+    ): bool {
+        $table = $this->table('appointments');
+        $sql =
+            'SELECT `id` FROM `' .
+            $table .
+            '` WHERE `id_users_provider` = ? AND `start_datetime` < ? AND `end_datetime` > ?';
+        $bindings = [$provider_id, $end_datetime, $start_datetime];
+
+        if ($exclude_appointment_id !== null) {
+            $sql .= ' AND `id` != ? AND (`id_parent_appointment` IS NULL OR `id_parent_appointment` != ?)';
+            $bindings[] = $exclude_appointment_id;
+            $bindings[] = $exclude_appointment_id;
+        }
+
+        $sql .= ' FOR UPDATE';
+
+        return $this->db->query($sql, $bindings)->num_rows() > 0;
+    }
+
     private function loadState(int $appointment_id, bool $lock): RescheduleAuthorityState
     {
-        $appointment = $lock
-            ? $this->lockedAppointment($appointment_id)
-            : $this->selectOne('appointments', 'id', $appointment_id);
+        $appointment = $this->selectOne('appointments', 'id', $appointment_id);
 
         if (empty($appointment) || !empty($appointment['is_unavailability'])) {
             throw new RescheduleAuthorityException('Public reschedule authority rejected.');
         }
 
         if ($lock) {
-            $customer_id = (int) $appointment['id_users_customer'];
-            $provider_id = (int) $appointment['id_users_provider'];
-            $service_id = (int) $appointment['id_services'];
-            $user_ids = array_values(array_unique([$customer_id, $provider_id]));
-            sort($user_ids, SORT_NUMERIC);
-
-            $this->lockRowsByIds('users', 'id', $user_ids);
-            $this->lockRowsByIds('services', 'id', [$service_id]);
-            $this->lockRowsByIds('user_settings', 'id_users', [$provider_id]);
-            $this->lockProviderServiceAssignments($provider_id);
+            $this->lockAuthorityParents($appointment);
+            $locked_appointment = $this->lockedAppointment($appointment_id);
+            $this->assertAppointmentStructureUnchanged($appointment, $locked_appointment);
+            $appointment = $locked_appointment;
         }
 
-        return $this->loadStateFromAppointment($appointment);
+        return $this->loadStateFromAppointment($appointment, $lock);
     }
 
-    private function loadStateFromAppointment(array $appointment): RescheduleAuthorityState
+    /**
+     * Lock all records referenced by an appointment before locking the child
+     * row. This order is shared with Calendar and avoids parent/child deadlocks.
+     *
+     * @param array<string, mixed> $appointment
+     * @param array<int, int> $additional_provider_ids
+     * @param array<int, int> $additional_service_ids
+     */
+    private function lockAuthorityParents(
+        array $appointment,
+        array $additional_provider_ids = [],
+        array $additional_service_ids = [],
+    ): void {
+        $provider_ids = array_values(
+            array_unique(array_merge([(int) ($appointment['id_users_provider'] ?? 0)], $additional_provider_ids)),
+        );
+        $service_ids = array_values(
+            array_unique(array_merge([(int) ($appointment['id_services'] ?? 0)], $additional_service_ids)),
+        );
+        $user_ids = array_values(
+            array_unique(array_merge([(int) ($appointment['id_users_customer'] ?? 0)], $provider_ids)),
+        );
+
+        sort($user_ids, SORT_NUMERIC);
+        sort($provider_ids, SORT_NUMERIC);
+        sort($service_ids, SORT_NUMERIC);
+
+        $this->lockRowsByIds('users', 'id', $user_ids);
+        $this->lockRowsByIds('services', 'id', $service_ids);
+        $this->lockRowsByIds('user_settings', 'id_users', $provider_ids);
+
+        foreach ($provider_ids as $provider_id) {
+            $this->lockProviderServiceAssignments($provider_id);
+        }
+    }
+
+    /**
+     * Reject a stale nonlocking snapshot instead of acquiring new parent locks
+     * after the appointment row has already been locked.
+     *
+     * @param array<string, mixed> $before
+     * @param array<string, mixed> $after
+     */
+    private function assertAppointmentStructureUnchanged(array $before, array $after): void
+    {
+        foreach (['id', 'id_users_customer', 'id_users_provider', 'id_services', 'is_unavailability'] as $field) {
+            if ((string) ($before[$field] ?? '') !== (string) ($after[$field] ?? '')) {
+                throw new RescheduleAuthorityException('canonical-identity-mismatch');
+            }
+        }
+    }
+
+    private function loadStateFromAppointment(array $appointment, bool $lock = false): RescheduleAuthorityState
     {
         $customer_id = (int) ($appointment['id_users_customer'] ?? 0);
         $provider_id = (int) ($appointment['id_users_provider'] ?? 0);
         $service_id = (int) ($appointment['id_services'] ?? 0);
-        $customer = $this->selectOne('users', 'id', $customer_id);
-        $provider = $this->selectOne('users', 'id', $provider_id);
-        $service = $this->selectOne('services', 'id', $service_id);
-        $provider_settings = $this->selectOne('user_settings', 'id_users', $provider_id);
+        $customer = $this->selectOne('users', 'id', $customer_id, $lock);
+        $provider = $this->selectOne('users', 'id', $provider_id, $lock);
+        $service = $this->selectOne('services', 'id', $service_id, $lock);
+        $provider_settings = $this->selectOne('user_settings', 'id_users', $provider_id, $lock);
 
         if (
             empty($customer) ||
             empty($provider) ||
             empty($service) ||
             empty($provider_settings) ||
-            !$this->providerOffersService($provider_id, $service_id)
+            !$this->providerOffersService($provider_id, $service_id, $lock)
         ) {
             throw new RescheduleAuthorityException('Public reschedule authority rejected.');
         }
@@ -505,7 +569,7 @@ class Reschedule_authority
                 'working_plan_exceptions' => $this->decodeJsonValue(
                     $provider_settings['working_plan_exceptions'] ?? null,
                 ),
-                'service_ids' => $this->providerServiceIds($provider_id),
+                'service_ids' => $this->providerServiceIds($provider_id, $lock),
             ],
             'service' => $this->only($service, self::SERVICE_SNAPSHOT_FIELDS),
         ];
@@ -575,8 +639,19 @@ class Reschedule_authority
         );
     }
 
-    private function providerOffersService(int $provider_id, int $service_id): bool
+    private function providerOffersService(int $provider_id, int $service_id, bool $lock = false): bool
     {
+        if ($lock) {
+            return $this->db
+                ->query(
+                    'SELECT `id_services` FROM `' .
+                        $this->table('services_providers') .
+                        '` WHERE `id_users` = ? AND `id_services` = ? FOR UPDATE',
+                    [$provider_id, $service_id],
+                )
+                ->num_rows() === 1;
+        }
+
         return $this->db
             ->get_where('services_providers', [
                 'id_users' => $provider_id,
@@ -588,8 +663,21 @@ class Reschedule_authority
     /**
      * @return array<int, int>
      */
-    private function providerServiceIds(int $provider_id): array
+    private function providerServiceIds(int $provider_id, bool $lock = false): array
     {
+        if ($lock) {
+            $rows = $this->db
+                ->query(
+                    'SELECT `id_services` FROM `' .
+                        $this->table('services_providers') .
+                        '` WHERE `id_users` = ? ORDER BY `id_services` ASC FOR UPDATE',
+                    [$provider_id],
+                )
+                ->result_array();
+
+            return array_map(static fn(array $row): int => (int) $row['id_services'], $rows);
+        }
+
         $rows = $this->db
             ->select('id_services')
             ->from('services_providers')
@@ -601,8 +689,14 @@ class Reschedule_authority
         return array_map(static fn(array $row): int => (int) $row['id_services'], $rows);
     }
 
-    private function selectOne(string $table, string $field, int $value): array
+    private function selectOne(string $table, string $field, int $value, bool $lock = false): array
     {
+        if ($lock) {
+            return $this->db
+                ->query('SELECT * FROM `' . $this->table($table) . '` WHERE `' . $field . '` = ? FOR UPDATE', [$value])
+                ->row_array();
+        }
+
         return $this->db->get_where($table, [$field => $value])->row_array();
     }
 

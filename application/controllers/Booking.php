@@ -406,7 +406,7 @@ class Booking extends EA_Controller
                 return;
             }
 
-            if (!$this->db->trans_begin()) {
+            if (!$this->begin_public_booking_transaction($authority_claim instanceof RescheduleAuthorityClaim)) {
                 throw new RuntimeException('Could not start public booking transaction.');
             }
 
@@ -429,11 +429,38 @@ class Booking extends EA_Controller
                 );
             }
 
+            // Recompute the requested end from the server-side service duration
+            // before any post-lock overlap decision can use the range.
+            $appointment['end_datetime'] = $this->appointments_model->calculate_end_datetime($appointment);
+
             // The provider row lock serializes public writes for this target;
             // rerun the existing availability boundary after acquiring it.
             $locked_provider_id = $this->check_datetime_availability($appointment);
 
             if ($locked_provider_id !== $target_provider_id) {
+                $this->db->trans_rollback();
+                $transaction_open = false;
+
+                json_response(
+                    [
+                        'success' => false,
+                        'message' => lang('requested_hour_is_unavailable'),
+                    ],
+                    409,
+                );
+
+                return;
+            }
+
+            if (
+                $authority_claim instanceof RescheduleAuthorityClaim &&
+                $this->rescheduleAuthority()->providerHasOverlap(
+                    $target_provider_id,
+                    (string) $appointment['start_datetime'],
+                    (string) $appointment['end_datetime'],
+                    (int) $appointment['id'],
+                )
+            ) {
                 $this->db->trans_rollback();
                 $transaction_open = false;
 
@@ -457,8 +484,6 @@ class Booking extends EA_Controller
             } elseif ($existing_customer_id !== null) {
                 $customer['id'] = $existing_customer_id;
             }
-
-            $appointment['end_datetime'] = $this->appointments_model->calculate_end_datetime($appointment);
 
             if (!empty($customer['id'])) {
                 $exclude_appointment_id =
@@ -716,6 +741,17 @@ class Booking extends EA_Controller
         }
 
         return $is_still_available ? $appointment['id_users_provider'] : null;
+    }
+
+    protected function begin_public_booking_transaction(bool $reschedule): bool
+    {
+        if ($reschedule) {
+            if ($this->db->query('SET TRANSACTION ISOLATION LEVEL READ COMMITTED') === false) {
+                return false;
+            }
+        }
+
+        return $this->db->trans_begin();
     }
 
     /**
