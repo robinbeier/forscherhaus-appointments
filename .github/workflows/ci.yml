@@ -338,7 +338,10 @@ jobs:
       - name: Git clone
         uses: actions/checkout@v6
       - name: Start build-test database
-        run: docker compose up -d mysql
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label build-test-1 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          docker compose up -d mysql
+          ROB557_GATE_COMMAND
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
@@ -347,7 +350,10 @@ jobs:
       - name: Install frontend test dependencies
         # The WebMCP runtime test needs moment-timezone; this job neither
         # builds assets nor runs frontend development tools.
-        run: npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label build-test-2 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+          ROB557_GATE_COMMAND
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
@@ -357,20 +363,28 @@ jobs:
           tools: composer:v2
       - name: Install dependencies
         run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label build-test-3 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           set -euo pipefail
           php --version
           composer --version
           composer install --no-interaction --no-progress
+          ROB557_GATE_COMMAND
       - name: Prepare root test configuration
         run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label build-test-4 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           test ! -e config.php
           install -m 0600 config-sample.php config.php
           sed -i "s/const DB_HOST = 'mysql';/const DB_HOST = '127.0.0.1';/" config.php
           grep -Fq "const DB_HOST = '127.0.0.1';" config.php
+          ROB557_GATE_COMMAND
       - name: Wait for build-test MySQL readiness
-        run: bash scripts/ci/wait_for_mysql_readiness.sh
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label build-test-5 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          bash scripts/ci/wait_for_mysql_readiness.sh
+          ROB557_GATE_COMMAND
       - name: Install deterministic build-test instance
         run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label build-test-6 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           for attempt in 1 2 3; do
             if php index.php console install; then
               exit 0
@@ -380,8 +394,10 @@ jobs:
           done
           echo "::error::console install failed after 3 attempts." >&2
           exit 1
+          ROB557_GATE_COMMAND
       - name: PHPUnit Tests
         run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label build-test-7 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           set -o pipefail
           mkdir -p storage/logs/ci
           if ! APP_ENV=testing php -d memory_limit=512M vendor/bin/phpunit \
@@ -393,14 +409,30 @@ jobs:
             exit 1
           fi
           grep -Eq '^(OK \([1-9][0-9]* tests?,|Tests: [1-9][0-9]*,)' storage/logs/ci/phpunit-general.log
+          ROB557_GATE_COMMAND
       - name: Diagnostics (build-test database)
         if: failure()
         run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label build-test-8 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           docker compose ps || true
           docker compose logs --no-color --timestamps mysql || true
+          ROB557_GATE_COMMAND
       - name: Cleanup build-test database
         if: always()
-        run: docker compose down -v --remove-orphans
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label build-test-9 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          docker compose down -v --remove-orphans
+          ROB557_GATE_COMMAND
+      - name: Gate diagnostic summary
+        if: always()
+        run: python3 -B scripts/ci/run_gate_with_summary.py --summarize --job-status '${{ job.status }}'
+      - name: Upload gate diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gate-summary-${{ github.job }}
+          path: storage/logs/ci/gate-summary/
+          retention-days: 7
 
   root-deployment-tests:
     needs:
@@ -419,9 +451,25 @@ jobs:
           extensions: gd
           tools: composer:v2
       - name: Install dependencies
-        run: composer install --no-interaction --no-progress
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label root-deployment-tests-1 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          composer install --no-interaction --no-progress
+          ROB557_GATE_COMMAND
       - name: Root deployment regression tests
-        run: bash scripts/ci/run_root_deployment_regressions.sh
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label root-deployment-tests-2 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          bash scripts/ci/run_root_deployment_regressions.sh
+          ROB557_GATE_COMMAND
+      - name: Gate diagnostic summary
+        if: always()
+        run: python3 -B scripts/ci/run_gate_with_summary.py --summarize --job-status '${{ job.status }}'
+      - name: Upload gate diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gate-summary-${{ github.job }}
+          path: storage/logs/ci/gate-summary/
+          retention-days: 7
 
   js-lint-changed:
     runs-on: ubuntu-latest
@@ -436,7 +484,10 @@ jobs:
         id: js_changes
         env:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
-        run: ./scripts/ci/js-lint-changed.sh --check-only
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label js-lint-changed-1 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          ./scripts/ci/js-lint-changed.sh --check-only
+          ROB557_GATE_COMMAND
       - name: Setup Node.js
         if: steps.js_changes.outputs.needs_node == 'true'
         uses: actions/setup-node@v6
@@ -445,15 +496,34 @@ jobs:
           cache: npm
       - name: Install npm dependencies
         if: steps.js_changes.outputs.needs_node == 'true'
-        run: npm ci --ignore-scripts --no-audit --no-fund
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label js-lint-changed-2 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          npm ci --ignore-scripts --no-audit --no-fund
+          ROB557_GATE_COMMAND
       - name: ESLint changed JS files
         if: steps.js_changes.outputs.has_changes == 'true'
         env:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
-        run: ./scripts/ci/js-lint-changed.sh
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label js-lint-changed-3 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          ./scripts/ci/js-lint-changed.sh
+          ROB557_GATE_COMMAND
       - name: Frontend compiler regression tests
         if: steps.js_changes.outputs.needs_node == 'true'
-        run: node --test tests/JavaScript/gulp_build.test.js tests/JavaScript/dashboard_date_range.test.js tests/JavaScript/dashboard_zero_target.test.js tests/JavaScript/blocked_periods.test.js
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label js-lint-changed-4 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          node --test tests/JavaScript/gulp_build.test.js tests/JavaScript/dashboard_date_range.test.js tests/JavaScript/dashboard_zero_target.test.js tests/JavaScript/blocked_periods.test.js
+          ROB557_GATE_COMMAND
+      - name: Gate diagnostic summary
+        if: always()
+        run: python3 -B scripts/ci/run_gate_with_summary.py --summarize --job-status '${{ job.status }}'
+      - name: Upload gate diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gate-summary-${{ github.job }}
+          path: storage/logs/ci/gate-summary/
+          retention-days: 7
 
   phpstan-application:
     needs:
@@ -474,12 +544,27 @@ jobs:
           tools: composer:v2
       - name: Install dependencies
         run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label phpstan-application-1 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           set -euo pipefail
           php --version
           composer --version
           composer install --no-interaction --no-progress
+          ROB557_GATE_COMMAND
       - name: PHPStan Application
-        run: composer phpstan:application
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label phpstan-application-2 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          composer phpstan:application
+          ROB557_GATE_COMMAND
+      - name: Gate diagnostic summary
+        if: always()
+        run: python3 -B scripts/ci/run_gate_with_summary.py --summarize --job-status '${{ job.status }}'
+      - name: Upload gate diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gate-summary-${{ github.job }}
+          path: storage/logs/ci/gate-summary/
+          retention-days: 7
 
   typed-request-dto:
     needs:
@@ -500,16 +585,37 @@ jobs:
           tools: composer:v2
       - name: Install dependencies
         run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label typed-request-dto-1 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           set -euo pipefail
           php --version
           composer --version
           composer install --no-interaction --no-progress
+          ROB557_GATE_COMMAND
       - name: PHPStan Request DTO
-        run: composer phpstan:request-dto
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label typed-request-dto-2 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          composer phpstan:request-dto
+          ROB557_GATE_COMMAND
       - name: Request DTO Unit Tests
-        run: composer test:request-dto
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label typed-request-dto-3 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          composer test:request-dto
+          ROB557_GATE_COMMAND
       - name: Request DTO Adoption Check
-        run: php scripts/ci/check_request_dto_adoption.php
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label typed-request-dto-4 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          php scripts/ci/check_request_dto_adoption.php
+          ROB557_GATE_COMMAND
+      - name: Gate diagnostic summary
+        if: always()
+        run: python3 -B scripts/ci/run_gate_with_summary.py --summarize --job-status '${{ job.status }}'
+      - name: Upload gate diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gate-summary-${{ github.job }}
+          path: storage/logs/ci/gate-summary/
+          retention-days: 7
 
   typed-request-contracts:
     needs:
@@ -535,19 +641,33 @@ jobs:
           tools: composer:v2
       - name: Install dependencies
         run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label typed-request-contracts-1 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           set -euo pipefail
           php --version
           composer --version
           composer install --no-interaction --no-progress
+          ROB557_GATE_COMMAND
       - name: PHPStan Request Contracts L1
-        run: composer phpstan:request-contracts:l1
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label typed-request-contracts-2 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          composer phpstan:request-contracts:l1
+          ROB557_GATE_COMMAND
       - name: Request Contracts Unit Tests
-        run: composer test:request-contracts
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label typed-request-contracts-3 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          composer test:request-contracts
+          ROB557_GATE_COMMAND
       - name: Request Contract Adoption Check
-        run: php scripts/ci/check_request_contract_adoption.php
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label typed-request-contracts-4 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          php scripts/ci/check_request_contract_adoption.php
+          ROB557_GATE_COMMAND
       - name: PHPStan Request Contracts L2
         if: always()
-        run: composer phpstan:request-contracts:l2
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label typed-request-contracts-5 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          composer phpstan:request-contracts:l2
+          ROB557_GATE_COMMAND
       - name: Upload request-contract artifacts
         if: always()
         uses: actions/upload-artifact@v7
@@ -560,8 +680,20 @@ jobs:
       - name: Diagnostics (request-contract reports)
         if: failure()
         run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label typed-request-contracts-6 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           cat storage/logs/ci/request-contract-adoption-latest.json || true
           cat storage/logs/ci/phpstan-request-contracts-l2.raw || true
+          ROB557_GATE_COMMAND
+      - name: Gate diagnostic summary
+        if: always()
+        run: python3 -B scripts/ci/run_gate_with_summary.py --summarize --job-status '${{ job.status }}'
+      - name: Upload gate diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gate-summary-${{ github.job }}
+          path: storage/logs/ci/gate-summary/
+          retention-days: 7
 
   deep-runtime-suite:
     needs:
@@ -590,6 +722,7 @@ jobs:
       - name: Resolve LDAP guardrail scope
         id: ldap_guardrail
         run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label deep-runtime-suite-1 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           include_ldap="false"
 
           if [[ "${{ needs.changes.outputs.integration_smoke }}" == "true" ]]; then
@@ -601,8 +734,10 @@ jobs:
           {
             echo "include_ldap=${include_ldap}"
           } >> "$GITHUB_OUTPUT"
+          ROB557_GATE_COMMAND
       - name: Start deep runtime services
         run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label deep-runtime-suite-2 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           services=(mysql)
 
           if [[ "${{ steps.ldap_guardrail.outputs.include_ldap }}" == "true" ]]; then
@@ -611,6 +746,7 @@ jobs:
           fi
 
           docker compose up -d "${services[@]}"
+          ROB557_GATE_COMMAND
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
@@ -619,7 +755,10 @@ jobs:
           extensions: curl,gd,intl,ldap,mbstring,mysqli,pdo,pdo_mysql,sockets,xml,zip,exif,sqlite3,gettext,bcmath
           tools: composer:v2
       - name: Install Composer dependencies
-        run: composer install --no-interaction --no-progress
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label deep-runtime-suite-3 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          composer install --no-interaction --no-progress
+          ROB557_GATE_COMMAND
       - name: Setup Node.js
         if: needs.changes.outputs.integration_smoke == 'true'
         uses: actions/setup-node@v6
@@ -628,18 +767,27 @@ jobs:
           cache: npm
       - name: Install Node.js dependencies
         if: needs.changes.outputs.integration_smoke == 'true'
-        run: npm ci --ignore-scripts --no-audit --no-fund
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label deep-runtime-suite-4 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          npm ci --ignore-scripts --no-audit --no-fund
+          ROB557_GATE_COMMAND
       - name: Build runtime assets
         if: needs.changes.outputs.integration_smoke == 'true'
-        run: npm run build
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label deep-runtime-suite-5 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          npm run build
+          ROB557_GATE_COMMAND
       - name: Prepare deep runtime suite artifact directory
         run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label deep-runtime-suite-6 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           rm -rf storage/logs/ci/deep-runtime-suite
           mkdir -p storage/logs/ci/deep-runtime-suite
           touch storage/logs/ci/deep-runtime-suite/.placeholder
+          ROB557_GATE_COMMAND
       - name: Resolve requested deep runtime suites
         id: suites
         run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label deep-runtime-suite-7 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           suites=()
 
           if [[ "${{ needs.changes.outputs.api_contract }}" == "true" ]]; then
@@ -670,10 +818,15 @@ jobs:
           {
             echo "requested=$(IFS=,; echo "${suites[*]}")"
           } >> "$GITHUB_OUTPUT"
+          ROB557_GATE_COMMAND
       - name: Wait for MySQL readiness
-        run: bash scripts/ci/wait_for_mysql_readiness.sh
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label deep-runtime-suite-8 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          bash scripts/ci/wait_for_mysql_readiness.sh
+          ROB557_GATE_COMMAND
       - name: Install deterministic seed instance
         run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label deep-runtime-suite-9 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           test ! -e config.php
           install -m 0600 config-sample.php config.php
           sed -i "s/const BASE_URL = 'http:\/\/localhost';/const BASE_URL = 'http:\/\/127.0.0.1:8080';/" config.php
@@ -689,9 +842,11 @@ jobs:
           done
           echo "::error::console install failed after 3 attempts." >&2
           exit 1
+          ROB557_GATE_COMMAND
       - name: Start deep runtime HTTP server
         if: needs.changes.outputs.api_contract == 'true' || needs.changes.outputs.write_contract_booking == 'true' || needs.changes.outputs.write_contract_api == 'true' || needs.changes.outputs.integration_smoke == 'true'
         run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label deep-runtime-suite-10 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           mkdir -p storage/logs/ci/deep-runtime-suite
           export PHP_CLI_SERVER_WORKERS=4
           setsid php -S 127.0.0.1:8080 -t . > storage/logs/ci/deep-runtime-suite/php-server.log 2>&1 &
@@ -704,13 +859,16 @@ jobs:
           done
           cat storage/logs/ci/deep-runtime-suite/php-server.log
           exit 1
+          ROB557_GATE_COMMAND
       - name: Resolve system Chrome executable
         if: needs.changes.outputs.integration_smoke == 'true'
         run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label deep-runtime-suite-11 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           chrome_path="$(command -v google-chrome)"
           test -n "$chrome_path"
           test -x "$chrome_path"
           echo "PLAYWRIGHT_MCP_EXECUTABLE_PATH=$chrome_path" >> "$GITHUB_ENV"
+          ROB557_GATE_COMMAND
       - name: Install Playwright smoke browser
         if: needs.changes.outputs.integration_smoke == 'true'
         env:
@@ -719,7 +877,10 @@ jobs:
           PLAYWRIGHT_MCP_READY_DIR: storage/logs/ci/deep-runtime-suite/playwright-ready
           PLAYWRIGHT_RUNTIME_PACKAGE: playwright@1.59.0-alpha-1771104257000
           PLAYWRIGHT_USE_LOCAL_BINS: "1"
-        run: bash scripts/release-gate/playwright/playwright_cli.sh install-browser
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label deep-runtime-suite-12 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          bash scripts/release-gate/playwright/playwright_cli.sh install-browser
+          ROB557_GATE_COMMAND
       - name: Run deep runtime suite
         env:
           PLAYWRIGHT_MCP_BROWSER: chromium
@@ -727,19 +888,10 @@ jobs:
           PLAYWRIGHT_MCP_READY_DIR: storage/logs/ci/deep-runtime-suite/playwright-ready
           PLAYWRIGHT_RUNTIME_PACKAGE: playwright@1.59.0-alpha-1771104257000
           PLAYWRIGHT_USE_LOCAL_BINS: "1"
-        run: >
-          php scripts/ci/run_deep_runtime_suite.php
-          --suites=${{ steps.suites.outputs.requested }}
-          --base-url=http://127.0.0.1:8080 --index-page=index.php
-          --openapi-spec=openapi.yml
-          --username=administrator --password=administrator
-          --booking-search-days=14 --retry-count=1
-          --start-date=2026-01-12 --end-date=2026-01-16
-          --integration-smoke-include-ldap=${{ steps.ldap_guardrail.outputs.include_ldap }}
-          --integration-smoke-browser-bootstrap-timeout=900
-          --integration-smoke-browser-open-timeout=60
-          --integration-smoke-browser-evidence=${{ github.event_name == 'push' && 'always' || 'on-failure' }}
-          --report-dir=storage/logs/ci/deep-runtime-suite
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label deep-runtime-suite-13 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          php scripts/ci/run_deep_runtime_suite.php --suites=${{ steps.suites.outputs.requested }} --base-url=http://127.0.0.1:8080 --index-page=index.php --openapi-spec=openapi.yml --username=administrator --password=administrator --booking-search-days=14 --retry-count=1 --start-date=2026-01-12 --end-date=2026-01-16 --integration-smoke-include-ldap=${{ steps.ldap_guardrail.outputs.include_ldap }} --integration-smoke-browser-bootstrap-timeout=900 --integration-smoke-browser-open-timeout=60 --integration-smoke-browser-evidence=${{ github.event_name == 'push' && 'always' || 'on-failure' }} --report-dir=storage/logs/ci/deep-runtime-suite
+          ROB557_GATE_COMMAND
       - name: Upload deep runtime suite artifacts
         if: always()
         uses: actions/upload-artifact@v7
@@ -750,17 +902,31 @@ jobs:
       - name: Diagnostics (failure logs)
         if: failure()
         run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label deep-runtime-suite-14 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           docker compose ps || true
           docker compose logs --no-color --timestamps mysql openldap || true
           cat storage/logs/ci/deep-runtime-suite/php-server.log || true
           cat storage/logs/ci/deep-runtime-suite/manifest.json || true
+          ROB557_GATE_COMMAND
       - name: Cleanup deep runtime services
         if: always()
         run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label deep-runtime-suite-15 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           if [[ -f storage/logs/ci/deep-runtime-suite/php-server.pid ]]; then
             kill -- "-$(cat storage/logs/ci/deep-runtime-suite/php-server.pid)" 2>/dev/null || true
           fi
           docker compose down -v --remove-orphans
+          ROB557_GATE_COMMAND
+      - name: Gate diagnostic summary
+        if: always()
+        run: python3 -B scripts/ci/run_gate_with_summary.py --summarize --job-status '${{ job.status }}'
+      - name: Upload gate diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gate-summary-${{ github.job }}
+          path: storage/logs/ci/gate-summary/
+          retention-days: 7
 
   coverage-shard-unit:
     needs:
@@ -785,9 +951,15 @@ jobs:
           extensions: gd
           tools: composer:v2
       - name: Install Composer dependencies
-        run: composer install --no-interaction --no-progress
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label coverage-shard-unit-1 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          composer install --no-interaction --no-progress
+          ROB557_GATE_COMMAND
       - name: Run coverage shard (unit)
-        run: composer test:coverage:unit-shard
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label coverage-shard-unit-2 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          composer test:coverage:unit-shard
+          ROB557_GATE_COMMAND
       - name: Upload coverage shard unit artifacts
         if: always()
         uses: actions/upload-artifact@v7
@@ -800,8 +972,20 @@ jobs:
       - name: Diagnostics (failure logs)
         if: failure()
         run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label coverage-shard-unit-3 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           php -v || true
           ls -la storage/logs/ci || true
+          ROB557_GATE_COMMAND
+      - name: Gate diagnostic summary
+        if: always()
+        run: python3 -B scripts/ci/run_gate_with_summary.py --summarize --job-status '${{ job.status }}'
+      - name: Upload gate diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gate-summary-${{ github.job }}
+          path: storage/logs/ci/gate-summary/
+          retention-days: 7
 
   coverage-shard-integration:
     needs:
@@ -819,7 +1003,10 @@ jobs:
       - name: Git clone
         uses: actions/checkout@v6
       - name: Start coverage shard services
-        run: docker compose up -d mysql
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label coverage-shard-integration-1 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          docker compose up -d mysql
+          ROB557_GATE_COMMAND
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
@@ -828,17 +1015,26 @@ jobs:
           extensions: gd
           tools: composer:v2
       - name: Install Composer dependencies
-        run: composer install --no-interaction --no-progress
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label coverage-shard-integration-2 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          composer install --no-interaction --no-progress
+          ROB557_GATE_COMMAND
       - name: Prepare root test configuration
         run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label coverage-shard-integration-3 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           test ! -e config.php
           install -m 0600 config-sample.php config.php
           sed -i "s/const DB_HOST = 'mysql';/const DB_HOST = '127.0.0.1';/" config.php
           grep -Fq "const DB_HOST = '127.0.0.1';" config.php
+          ROB557_GATE_COMMAND
       - name: Wait for MySQL readiness
-        run: bash scripts/ci/wait_for_mysql_readiness.sh
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label coverage-shard-integration-4 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          bash scripts/ci/wait_for_mysql_readiness.sh
+          ROB557_GATE_COMMAND
       - name: Install deterministic seed instance
         run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label coverage-shard-integration-5 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           for attempt in 1 2 3; do
             if php index.php console install; then
               exit 0
@@ -848,8 +1044,12 @@ jobs:
           done
           echo "::error::console install failed after 3 attempts." >&2
           exit 1
+          ROB557_GATE_COMMAND
       - name: Run coverage shard (integration)
-        run: composer test:coverage:integration-shard
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label coverage-shard-integration-6 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          composer test:coverage:integration-shard
+          ROB557_GATE_COMMAND
       - name: Upload coverage shard integration artifacts
         if: always()
         uses: actions/upload-artifact@v7
@@ -862,12 +1062,27 @@ jobs:
       - name: Diagnostics (failure logs)
         if: failure()
         run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label coverage-shard-integration-7 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           php -v || true
           docker compose ps || true
           docker compose logs --no-color --timestamps mysql || true
+          ROB557_GATE_COMMAND
       - name: Cleanup coverage shard services
         if: always()
-        run: docker compose down -v --remove-orphans
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label coverage-shard-integration-8 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          docker compose down -v --remove-orphans
+          ROB557_GATE_COMMAND
+      - name: Gate diagnostic summary
+        if: always()
+        run: python3 -B scripts/ci/run_gate_with_summary.py --summarize --job-status '${{ job.status }}'
+      - name: Upload gate diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gate-summary-${{ github.job }}
+          path: storage/logs/ci/gate-summary/
+          retention-days: 7
 
   coverage-delta:
     needs:
@@ -907,6 +1122,7 @@ jobs:
           path: storage/logs/ci
       - name: Merge shard coverage reports
         run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label coverage-delta-1 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           test -f storage/logs/ci/coverage-shard-unit-clover.xml
           test -f storage/logs/ci/coverage-shard-integration-clover.xml
           php scripts/ci/merge_coverage_shards.php \
@@ -914,12 +1130,12 @@ jobs:
             --input=storage/logs/ci/coverage-shard-integration-clover.xml \
             --output-clover=storage/logs/ci/coverage-unit-clover.xml \
             --output-json=storage/logs/ci/coverage-merge-latest.json
+          ROB557_GATE_COMMAND
       - name: Evaluate coverage delta policy
-        run: >
-          php scripts/ci/check_coverage_delta.php
-          --clover=storage/logs/ci/coverage-unit-clover.xml
-          --policy=scripts/ci/config/coverage_delta_policy.php
-          --output-json=storage/logs/ci/coverage-delta-latest.json
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label coverage-delta-2 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          php scripts/ci/check_coverage_delta.php --clover=storage/logs/ci/coverage-unit-clover.xml --policy=scripts/ci/config/coverage_delta_policy.php --output-json=storage/logs/ci/coverage-delta-latest.json
+          ROB557_GATE_COMMAND
       - name: Upload coverage delta artifacts
         if: always()
         uses: actions/upload-artifact@v7
@@ -935,8 +1151,20 @@ jobs:
       - name: Diagnostics (coverage delta report)
         if: failure()
         run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label coverage-delta-3 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           cat storage/logs/ci/coverage-merge-latest.json || true
           cat storage/logs/ci/coverage-delta-latest.json || true
+          ROB557_GATE_COMMAND
+      - name: Gate diagnostic summary
+        if: always()
+        run: python3 -B scripts/ci/run_gate_with_summary.py --summarize --job-status '${{ job.status }}'
+      - name: Upload gate diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gate-summary-${{ github.job }}
+          path: storage/logs/ci/gate-summary/
+          retention-days: 7
 
   pdf-renderer-tests:
     needs:
@@ -956,6 +1184,7 @@ jobs:
         uses: actions/checkout@v6
       - name: Verify PDF renderer host isolation
         run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label pdf-renderer-tests-1 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           python3 - <<'PYTHON'
           import json
           import subprocess
@@ -973,10 +1202,15 @@ jobs:
           assert str(published[0]["published"]) == "3003" and published[0]["target"] == 3000, published
           assert ports("docker-compose.yml", "docker/compose.zero-surprise.yml") == []
           PYTHON
+          ROB557_GATE_COMMAND
       - name: Start PDF renderer service
-        run: docker compose up -d pdf-renderer
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label pdf-renderer-tests-2 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          docker compose up -d pdf-renderer
+          ROB557_GATE_COMMAND
       - name: Wait for PDF renderer health
         run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label pdf-renderer-tests-3 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           for attempt in $(seq 1 30); do
             if curl -fsS http://localhost:3003/healthz >/dev/null; then
               exit 0
@@ -987,11 +1221,28 @@ jobs:
           echo "pdf-renderer health check timed out" >&2
           docker compose logs pdf-renderer || true
           exit 1
+          ROB557_GATE_COMMAND
       - name: Run PDF renderer regression tests
-        run: docker compose exec -T pdf-renderer npm test
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label pdf-renderer-tests-4 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          docker compose exec -T pdf-renderer npm test
+          ROB557_GATE_COMMAND
       - name: Tear down PDF renderer service
         if: always()
-        run: docker compose down --remove-orphans
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label pdf-renderer-tests-5 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          docker compose down --remove-orphans
+          ROB557_GATE_COMMAND
+      - name: Gate diagnostic summary
+        if: always()
+        run: python3 -B scripts/ci/run_gate_with_summary.py --summarize --job-status '${{ job.status }}'
+      - name: Upload gate diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gate-summary-${{ github.job }}
+          path: storage/logs/ci/gate-summary/
+          retention-days: 7
 
   architecture-ownership-map:
     runs-on: ubuntu-latest
@@ -1007,11 +1258,27 @@ jobs:
         with:
           python-version: "3.12"
       - name: Check generated architecture/ownership docs
-        run: python3 scripts/docs/generate_architecture_ownership_docs.py --check
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label architecture-ownership-map-1 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          python3 scripts/docs/generate_architecture_ownership_docs.py --check
+          ROB557_GATE_COMMAND
       - name: Validate architecture/ownership map
         env:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
-        run: python3 scripts/ci/check_architecture_ownership_map.py
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label architecture-ownership-map-2 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          python3 scripts/ci/check_architecture_ownership_map.py
+          ROB557_GATE_COMMAND
+      - name: Gate diagnostic summary
+        if: always()
+        run: python3 -B scripts/ci/run_gate_with_summary.py --summarize --job-status '${{ job.status }}'
+      - name: Upload gate diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gate-summary-${{ github.job }}
+          path: storage/logs/ci/gate-summary/
+          retention-days: 7
 
   architecture-boundaries:
     needs:
@@ -1039,20 +1306,31 @@ jobs:
       - name: Install dependencies
         if: needs.changes.outputs.runtime_checks_required == 'true'
         run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label architecture-boundaries-1 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           set -euo pipefail
           php --version
           composer --version
           composer install --no-interaction --no-progress
+          ROB557_GATE_COMMAND
       - name: Check generated CODEOWNERS
-        run: python3 scripts/docs/generate_codeowners_from_map.py --check
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label architecture-boundaries-2 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          python3 scripts/docs/generate_codeowners_from_map.py --check
+          ROB557_GATE_COMMAND
       - name: Run Deptrac changed-file gate
         env:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
-        run: bash scripts/ci/run_deptrac_changed_gate.sh
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label architecture-boundaries-3 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          bash scripts/ci/run_deptrac_changed_gate.sh
+          ROB557_GATE_COMMAND
       - name: Run component boundary check
         env:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
-        run: python3 scripts/ci/check_component_boundaries.py
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label architecture-boundaries-4 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          python3 scripts/ci/check_component_boundaries.py
+          ROB557_GATE_COMMAND
       - name: Upload architecture boundary artifacts
         if: always()
         uses: actions/upload-artifact@v7
@@ -1065,8 +1343,20 @@ jobs:
       - name: Diagnostics (failure reports)
         if: failure()
         run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label architecture-boundaries-5 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           cat storage/logs/ci/deptrac-changed-gate.json || true
           cat storage/logs/ci/component-boundary-latest.json || true
+          ROB557_GATE_COMMAND
+      - name: Gate diagnostic summary
+        if: always()
+        run: python3 -B scripts/ci/run_gate_with_summary.py --summarize --job-status '${{ job.status }}'
+      - name: Upload gate diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gate-summary-${{ github.job }}
+          path: storage/logs/ci/gate-summary/
+          retention-days: 7
 
   api-contract-openapi:
     needs:
@@ -1091,13 +1381,28 @@ jobs:
           name: ${{ needs.deep-runtime-suite.outputs.artifact-name || 'missing-deep-runtime-artifact' }}
           path: storage/logs/ci/deep-runtime-suite
       - name: Assert API OpenAPI contract suite result
-        run: php scripts/ci/assert_deep_runtime_suite.php --manifest=storage/logs/ci/deep-runtime-suite/manifest.json --suite=api-contract-openapi
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label api-contract-openapi-1 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          php scripts/ci/assert_deep_runtime_suite.php --manifest=storage/logs/ci/deep-runtime-suite/manifest.json --suite=api-contract-openapi
+          ROB557_GATE_COMMAND
       - name: Diagnostics (suite reports)
         if: failure()
         run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label api-contract-openapi-2 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           cat storage/logs/ci/deep-runtime-suite/manifest.json || true
           cat storage/logs/ci/deep-runtime-suite/api-contract-openapi.log || true
           cat storage/logs/ci/deep-runtime-suite/api-contract-openapi.json || true
+          ROB557_GATE_COMMAND
+      - name: Gate diagnostic summary
+        if: always()
+        run: python3 -B scripts/ci/run_gate_with_summary.py --summarize --job-status '${{ job.status }}'
+      - name: Upload gate diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gate-summary-${{ github.job }}
+          path: storage/logs/ci/gate-summary/
+          retention-days: 7
 
   write-contract-booking:
     needs:
@@ -1186,12 +1491,27 @@ jobs:
           name: ${{ needs.deep-runtime-suite.outputs.artifact-name || 'missing-deep-runtime-artifact' }}
           path: storage/logs/ci/deep-runtime-suite
       - name: Assert booking controller flow suite result
-        run: php scripts/ci/assert_deep_runtime_suite.php --manifest=storage/logs/ci/deep-runtime-suite/manifest.json --suite=booking-controller-flows
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label booking-controller-flows-1 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          php scripts/ci/assert_deep_runtime_suite.php --manifest=storage/logs/ci/deep-runtime-suite/manifest.json --suite=booking-controller-flows
+          ROB557_GATE_COMMAND
       - name: Diagnostics (suite reports)
         if: failure()
         run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label booking-controller-flows-2 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           cat storage/logs/ci/deep-runtime-suite/manifest.json || true
           cat storage/logs/ci/deep-runtime-suite/booking-controller-flows.log || true
+          ROB557_GATE_COMMAND
+      - name: Gate diagnostic summary
+        if: always()
+        run: python3 -B scripts/ci/run_gate_with_summary.py --summarize --job-status '${{ job.status }}'
+      - name: Upload gate diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gate-summary-${{ github.job }}
+          path: storage/logs/ci/gate-summary/
+          retention-days: 7
 
   integration-smoke:
     needs:
@@ -1216,11 +1536,26 @@ jobs:
           name: ${{ needs.deep-runtime-suite.outputs.artifact-name || 'missing-deep-runtime-artifact' }}
           path: storage/logs/ci/deep-runtime-suite
       - name: Assert integration smoke suite result
-        run: php scripts/ci/assert_deep_runtime_suite.php --manifest=storage/logs/ci/deep-runtime-suite/manifest.json --suite=integration-smoke
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label integration-smoke-1 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          php scripts/ci/assert_deep_runtime_suite.php --manifest=storage/logs/ci/deep-runtime-suite/manifest.json --suite=integration-smoke
+          ROB557_GATE_COMMAND
       - name: Diagnostics (suite reports)
         if: failure()
         run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label integration-smoke-2 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           cat storage/logs/ci/deep-runtime-suite/manifest.json || true
           cat storage/logs/ci/deep-runtime-suite/integration-smoke.log || true
           cat storage/logs/ci/deep-runtime-suite/integration-smoke.json || true
           cat storage/logs/ci/deep-runtime-suite/integration-smoke-browser/summary.json || true
+          ROB557_GATE_COMMAND
+      - name: Gate diagnostic summary
+        if: always()
+        run: python3 -B scripts/ci/run_gate_with_summary.py --summarize --job-status '${{ job.status }}'
+      - name: Upload gate diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gate-summary-${{ github.job }}
+          path: storage/logs/ci/gate-summary/
+          retention-days: 7

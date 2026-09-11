@@ -70,6 +70,9 @@ npm run lint:js
 PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh
 ```
 
+The full gate ends with a [diagnostic summary](docs/gate-diagnostic-summary.md);
+complete raw logs and exact known-warning evidence remain available.
+
 For optional smoke tests, write-path contracts, deep runtime suites, release
 gates, and CI-only signals, use [Agent Harness Index](docs/agent-harness-index.md)
 as the routing map and [AGENTS.md](AGENTS.md) as the compact guardrail and entry-point hub.
