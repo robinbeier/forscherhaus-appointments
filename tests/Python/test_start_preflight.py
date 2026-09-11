@@ -186,6 +186,17 @@ class StartPreflightTest(unittest.TestCase):
         self.assertEqual(self.statuses(report, "ports"), ["blocked"])
         self.assertNotIn("PRIVATE", json.dumps(report))
 
+    def test_unresolved_port_requirements_never_report_ready(self):
+        for port in ({"published": "8000-8010"}, {"published": "0"}, {"target": 80}, "8080:80"):
+            for known_ports in ([], [{"published": "8080", "protocol": "tcp"}]):
+                with self.subTest(port=port, known_ports=known_ports):
+                    self.runner.config["services"]["nginx"]["ports"] = [port] + known_ports
+                    report = self.run_preflight()[1]
+                    self.assertIn("unknown", self.statuses(report, "ports"))
+                    self.assertNotIn("ready", self.statuses(report, "ports"))
+        self.runner.config["services"]["nginx"]["ports"] = []
+        self.assertEqual(self.statuses(self.run_preflight()[1], "ports"), ["ready"])
+
     def test_invalid_service_and_malformed_config_fail_closed(self):
         code, report = self.run_preflight("--service", "missing")
         self.assertEqual(code, 1)

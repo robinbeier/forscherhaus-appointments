@@ -190,6 +190,7 @@ def preflight(argv=None, runner=_run):
     missing_pull = missing_build = 0
     resources = set()
     ports = set()
+    port_requirements_resolved = True
     shared_php_image = None
     if "php-fpm" in planned and ci_override and daemon:
         platform = os.environ.get("DOCKER_DEFAULT_PLATFORM") or "/".join(str(info.get(key, "")) for key in ["OSType", "Architecture"])
@@ -231,8 +232,10 @@ def preflight(argv=None, runner=_run):
                 if value.isdecimal() and 0 < int(value) < 65536:
                     ports.add((port.get("protocol", "tcp"), int(value)))
                 else:
+                    port_requirements_resolved = False
                     add("ports", "unknown", "port ranges or dynamic ports need separate inspection")
             else:
+                port_requirements_resolved = False
                 add("ports", "unknown", "unresolved published-port configuration")
     if missing_pull:
         add("images", "unknown", f"{missing_pull} pull image(s) unavailable", "Docker image pull/network access")
@@ -256,7 +259,7 @@ def preflight(argv=None, runner=_run):
             None if not code else ("External Docker resource preparation" if external else "Local Docker resource creation"))
     if not selected_services_resolved:
         add("ports", "unknown", "planned host-port requirements could not be resolved")
-    elif not ports:
+    elif not ports and port_requirements_resolved:
         add("ports", "ready", "selected services have no observed published host ports")
     for protocol in sorted({protocol for protocol, _ in ports}):
         command = ["lsof", "-nP", "-iTCP", "-sTCP:LISTEN", "-F", "n"] if protocol == "tcp" else ["lsof", "-nP", "-iUDP", "-F", "n"]
