@@ -8,6 +8,7 @@ use ReflectionClass;
 use RuntimeException;
 
 require_once APPPATH . 'models/Appointments_model.php';
+require_once APPPATH . 'models/Services_model.php';
 
 final class AppointmentsModelLockOrderTest extends TestCase
 {
@@ -32,9 +33,11 @@ final class AppointmentsModelLockOrderTest extends TestCase
         $this->assertCount(2, $database->queries);
         $this->assertSame([10, 20, 30, 40], $database->queries[0]['bindings']);
         $this->assertStringContainsString('FROM `ea_users`', $database->queries[0]['sql']);
+        $this->assertStringContainsString('ORDER BY `id` ASC FOR UPDATE', $database->queries[0]['sql']);
         $this->assertStringContainsString('FOR UPDATE', $database->queries[0]['sql']);
         $this->assertSame([30, 50], $database->queries[1]['bindings']);
         $this->assertStringContainsString('FROM `ea_services`', $database->queries[1]['sql']);
+        $this->assertStringContainsString('ORDER BY `id` ASC FOR UPDATE', $database->queries[1]['sql']);
         $this->assertStringContainsString('FOR UPDATE', $database->queries[1]['sql']);
     }
 
@@ -70,6 +73,56 @@ final class AppointmentsModelLockOrderTest extends TestCase
         }
 
         $this->assertSame(['begin', 'users_lock', 'services_lock', 'appointment_update', 'commit'], $database->events);
+    }
+
+    public function testInsertLocksParentsBeforeAppointmentAndBufferWrites(): void
+    {
+        $database = new AppointmentsModelLockOrderFakeDatabase();
+        $CI = &get_instance();
+        $originalDb = $CI->db;
+        $CI->db = $database;
+
+        try {
+            $method = (new ReflectionClass(Appointments_model::class))->getMethod('insert');
+            $this->assertSame(99, $method->invoke($this->createModel(), $database->appointment));
+        } finally {
+            $CI->db = $originalDb;
+        }
+
+        $this->assertSame(
+            ['begin', 'users_lock', 'services_lock', 'appointment_insert', 'services_lock', 'buffer_delete', 'commit'],
+            $database->events,
+        );
+        // The later service read reuses the row locked before the insert.
+        $this->assertSame($database->queries[1]['bindings'], $database->queries[2]['bindings']);
+    }
+
+    public function testRescheduleKeepsBufferCleanupAfterParentLocksAndAppointmentWrite(): void
+    {
+        $database = new AppointmentsModelLockOrderFakeDatabase();
+        $CI = &get_instance();
+        $originalDb = $CI->db;
+        $CI->db = $database;
+
+        try {
+            $method = (new ReflectionClass(Appointments_model::class))->getMethod('update');
+            $this->assertSame(
+                99,
+                $method->invoke($this->createModel(), [
+                    'id' => 99,
+                    'start_datetime' => '2035-02-17 10:00:00',
+                    'end_datetime' => '2035-02-17 10:30:00',
+                ]),
+            );
+        } finally {
+            $CI->db = $originalDb;
+        }
+
+        $this->assertSame(
+            ['begin', 'users_lock', 'services_lock', 'appointment_update', 'services_lock', 'buffer_delete', 'commit'],
+            $database->events,
+        );
+        $this->assertSame($database->queries[1]['bindings'], $database->queries[2]['bindings']);
     }
 
     public function testUpdateParentsFailsClosedWhenAParentIsMissing(): void
@@ -165,7 +218,7 @@ final class AppointmentsModelLockOrderTest extends TestCase
         $originalDb = $CI->db;
         $originalServicesModel = $CI->services_model ?? null;
         $CI->db = $database;
-        $CI->services_model = new AppointmentsModelLockOrderFakeServicesModel($database);
+        $CI->services_model = (new ReflectionClass(\Services_model::class))->newInstanceWithoutConstructor();
 
         try {
             $this->createModel()->sync_service_buffer_unavailabilities(50);
@@ -177,7 +230,10 @@ final class AppointmentsModelLockOrderTest extends TestCase
         $this->assertSame(
             [
                 'begin',
-                'buffer_parent_locks',
+                'provider_snapshot',
+                'users_lock',
+                'services_lock',
+                'appointment_lock',
                 'appointment_lock',
                 'buffer_batch_delete',
                 'services_lock',
@@ -186,7 +242,9 @@ final class AppointmentsModelLockOrderTest extends TestCase
             ],
             $database->events,
         );
-        $this->assertStringContainsString('FOR UPDATE', $database->queries[0]['sql']);
+        $this->assertStringNotContainsString('FOR UPDATE', $database->queries[0]['sql']);
+        $this->assertStringContainsString('ORDER BY `id` ASC FOR UPDATE', $database->queries[3]['sql']);
+        $this->assertSame([['appointments.id', 'ASC']], $database->orderBy);
     }
 
     private function createModel(): Appointments_model
@@ -204,10 +262,20 @@ final class AppointmentsModelLockOrderFakeDatabase
     /** @var list<string> */
     public array $events = [];
     /** @var array<string, mixed> */
-    public array $appointment = ['id' => 99, 'id_users_customer' => 30, 'id_users_provider' => 20, 'id_services' => 50];
+    public array $appointment = [
+        'id' => 99,
+        'id_users_customer' => 30,
+        'id_users_provider' => 20,
+        'id_services' => 50,
+        'is_unavailability' => false,
+        'start_datetime' => '2035-02-17 09:00:00',
+        'end_datetime' => '2035-02-17 09:30:00',
+    ];
     /** @var array<string, mixed> */
     public array $service = ['id' => 50, 'buffer_before' => 0, 'buffer_after' => 0, 'attendants_number' => 1];
     private bool $usedWhereIn = false;
+    /** @var list<array{string, string}> */
+    public array $orderBy = [];
 
     public function dbprefix(string $table): string
     {
@@ -220,6 +288,10 @@ final class AppointmentsModelLockOrderFakeDatabase
     public function query(string $sql, array $bindings = []): AppointmentsModelLockOrderFakeQuery
     {
         $this->queries[] = ['sql' => $sql, 'bindings' => $bindings];
+        if (str_contains($sql, 'DISTINCT `id_users_provider`')) {
+            $this->events[] = 'provider_snapshot';
+            return new AppointmentsModelLockOrderFakeQuery(1, $this->appointment);
+        }
         if (str_contains($sql, 'ea_appointments')) {
             $this->events[] = 'appointment_lock';
             return new AppointmentsModelLockOrderFakeQuery(1, $this->appointment);
@@ -229,6 +301,11 @@ final class AppointmentsModelLockOrderFakeDatabase
         $rowCount = $table === $this->missingTable ? count($bindings) - 1 : count($bindings);
 
         return new AppointmentsModelLockOrderFakeQuery($rowCount, $table === 'services' ? $this->service : []);
+    }
+
+    public function trans_active(): bool
+    {
+        return true;
     }
 
     public function trans_begin(): bool
@@ -252,7 +329,20 @@ final class AppointmentsModelLockOrderFakeDatabase
     public function update(string $table, array $data, array $where = []): bool
     {
         $this->events[] = 'appointment_update';
+        $this->appointment = array_replace($this->appointment, $data);
         return true;
+    }
+
+    public function insert(string $table, array $data): bool
+    {
+        $this->events[] = 'appointment_insert';
+        $this->appointment = array_replace($this->appointment, $data);
+        return true;
+    }
+
+    public function insert_id(): int
+    {
+        return 99;
     }
 
     public function where(string $field, mixed $value): self
@@ -308,6 +398,7 @@ final class AppointmentsModelLockOrderFakeDatabase
 
     public function order_by(string $field, string $direction = ''): self
     {
+        $this->orderBy[] = [$field, $direction];
         return $this;
     }
 
@@ -334,18 +425,6 @@ final class AppointmentsModelLockOrderFakeDatabase
     public function get_where(string $table, array $where): AppointmentsModelLockOrderFakeQuery
     {
         return new AppointmentsModelLockOrderFakeQuery(1, $this->appointment);
-    }
-}
-
-final class AppointmentsModelLockOrderFakeServicesModel
-{
-    public function __construct(private readonly AppointmentsModelLockOrderFakeDatabase $database) {}
-
-    /** @return array<string, mixed> */
-    public function lock_buffer_sync_parents(int $serviceId): array
-    {
-        $this->database->events[] = 'buffer_parent_locks';
-        return $this->database->service;
     }
 }
 

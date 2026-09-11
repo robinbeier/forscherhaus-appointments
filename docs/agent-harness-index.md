@@ -41,6 +41,7 @@ This file stays intentionally short. It is a map, not a second runbook.
 | Architecture boundaries | `docs/architecture-map.md` | Generated view of component boundaries. |
 | Ownership scope | `docs/ownership-map.md` | Generated view of ownership and key paths. |
 | Canonical architecture/ownership map source | `docs/maps/component_ownership_map.json` | Machine-readable source of truth. |
+| Database lock hierarchy | `docs/database-lock-order.md` | Source-grounded parent-first lock order, transaction ownership, productive paths, and known narrower delete subsets. |
 | Write-path contract harness | `docs/ci-write-contracts.md` | Focused contract-smoke reference. |
 | Release gates | `docs/release-gate-zero-surprise.md`, `docs/release-gate-dashboard.md`, `docs/release-gate-booking-confirmation-pdf.md`, `docs/release-gate-provider-ui-smoke.md`, `docs/release-gate-customers-ui-smoke.md` | Dedicated gate behavior and usage. |
 

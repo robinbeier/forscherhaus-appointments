@@ -15,6 +15,9 @@ conflict, follow `AGENTS.md`.
   discipline, and the ticket-to-merge loop.
 - Use [`.codex/contracts/agent-workflow.json`](.codex/contracts/agent-workflow.json)
   as the machine-readable source for workflow and CI invariants.
+- Use [the database lock hierarchy](docs/database-lock-order.md) when changing
+  appointment, service, customer, calendar, booking, or generated-buffer
+  writes.
 
 ## Non-Negotiables
 
