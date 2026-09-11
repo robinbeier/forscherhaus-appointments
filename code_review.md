@@ -4,6 +4,9 @@ Purpose: durable review guidance for `/review` and normal Codex turns in this re
 Keep this file focused on review behavior, not on general setup or CI command matrices.
 Machine-checked review invariants live in
 [`.codex/contracts/agent-workflow.json`](.codex/contracts/agent-workflow.json).
+For concurrency-sensitive appointment and service changes, use the
+[database lock hierarchy](docs/database-lock-order.md) as the source-grounded
+review reference.
 
 ## Review Priorities
 

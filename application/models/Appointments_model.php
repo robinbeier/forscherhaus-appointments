@@ -508,7 +508,7 @@ class Appointments_model extends EA_Model
                 ->or_where('buffer_blocks.id IS NOT NULL', null, false)
                 ->group_end()
                 ->group_by('appointments.id')
-                ->order_by('appointments.start_datetime', 'ASC')
+                ->order_by('appointments.id', 'ASC')
                 ->get_compiled_select();
             $appointments = $this->db->query($appointments_query . ' FOR UPDATE')->result_array();
 

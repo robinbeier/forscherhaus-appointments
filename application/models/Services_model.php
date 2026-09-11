@@ -431,9 +431,9 @@ class Services_model extends EA_Model
     {
         $rows = $this->db
             ->query(
-                'SELECT DISTINCT `id_users_provider` FROM `' .
+                'SELECT `id`, `id_users_provider` FROM `' .
                     $this->db->dbprefix('appointments') .
-                    '` WHERE `id_services` = ? AND `is_unavailability` = 0 FOR UPDATE',
+                    '` WHERE `id_services` = ? AND `is_unavailability` = 0 ORDER BY `id` ASC FOR UPDATE',
                 [$service_id],
             )
             ->result_array();

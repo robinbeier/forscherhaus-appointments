@@ -54,6 +54,9 @@ final class ServicesModelLockOrderTest extends TestCase
         $this->assertSame([30], $database->queries[2]['bindings']);
         $this->assertStringContainsString('FOR UPDATE', $database->queries[3]['sql']);
         $this->assertSame([42], $database->queries[3]['bindings']);
+        $this->assertStringContainsString('SELECT `id`, `id_users_provider`', $database->queries[4]['sql']);
+        $this->assertStringContainsString('ORDER BY `id` ASC FOR UPDATE', $database->queries[4]['sql']);
+        $this->assertSame([42], $database->queries[4]['bindings']);
     }
 
     public function testUpdateAbortsAfterProviderDriftWithoutFurtherWrites(): void
@@ -371,7 +374,7 @@ final class ServicesModelLockOrderFakeDatabase
     {
         $this->queries[] = ['sql' => $sql, 'bindings' => $bindings];
 
-        if (str_contains($sql, 'DISTINCT `id_users_provider`')) {
+        if (str_contains($sql, '`id_users_provider` FROM')) {
             $is_current = str_contains($sql, 'FOR UPDATE');
             $this->events[] = $is_current ? 'provider_current' : 'provider_snapshot';
             $rows = $is_current && $this->currentProviderRows !== [] ? $this->currentProviderRows : $this->providerRows;
