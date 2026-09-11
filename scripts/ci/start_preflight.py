@@ -253,10 +253,24 @@ def preflight(argv=None, runner=_run):
         if not daemon:
             add("docker-" + kind, "unknown", "resource inspection requires daemon access")
             continue
-        code, _, _ = probe(["docker", kind, "inspect", name])
-        add("docker-" + kind, "ready" if not code else ("blocked" if external else "unknown"),
-            "resource exists" if not code else ("required external resource unavailable" if external else "internal resource must be created by the normal workflow"),
-            None if not code else ("External Docker resource preparation" if external else "Local Docker resource creation"))
+        code, raw, _ = probe(["docker", kind, "inspect", name])
+        if code:
+            add("docker-" + kind, "blocked" if external else "unknown",
+                "required external resource unavailable" if external else "internal resource must be created by the normal workflow",
+                "External Docker resource preparation" if external else "Local Docker resource creation")
+            continue
+        inspected = _json(raw)
+        resource = inspected[0] if isinstance(inspected, list) and len(inspected) == 1 and isinstance(inspected[0], dict) else None
+        if resource is None:
+            add("docker-" + kind, "unknown", "resource inspection response could not be resolved")
+        elif external:
+            add("docker-" + kind, "ready", "declared external resource exists")
+        else:
+            labels = resource.get("Labels")
+            owned = isinstance(labels, dict) and labels.get("com.docker.compose.project") == project and labels.get("com.docker.compose." + kind) == key
+            add("docker-" + kind, "ready" if owned else "blocked",
+                "resource exists with expected Compose ownership labels" if owned else "existing internal resource has missing or conflicting Compose ownership labels",
+                None if owned else "Existing Compose resource ownership")
     if not selected_services_resolved:
         add("ports", "unknown", "planned host-port requirements could not be resolved")
     elif not ports and port_requirements_resolved:

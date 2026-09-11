@@ -68,7 +68,10 @@ contain passwords or other sensitive environment values. Image/resource names,
 connection errors and command output must not become raw logs in the report.
 A missing build image, pull image, internal network or internal volume is an
 environment prerequisite; a missing declared external resource requires separate
-preparation. None is evidence of an application regression.
+preparation. Existing internal networks and volumes must carry the expected
+Compose project and resource labels; missing or conflicting labels block reuse.
+Declared external resources do not require Compose ownership labels. An invalid
+inspection response remains unknown. None is evidence of an application regression.
 
 The preflight does not reserve ports, allocate a subnet or create a trial
 container. Visible conflicts can be reported, but resource creation capacity

@@ -32,6 +32,7 @@ class FixtureRunner:
         self.branch = b"codex/example"
         self.containers = b""
         self.listeners = b""
+        self.resources = {}
         self.shared_image = "forscherhaus-local/php-fpm:" + "a" * 64
         self.config = {
             "services": {
@@ -80,7 +81,7 @@ class FixtureRunner:
         if len(command) > 2 and command[0] == sys.executable and command[1] == "-B":
             return 0, self.shared_image.encode(), b""
         if command[:3] in [("docker", "image", "inspect"), ("docker", "network", "inspect"), ("docker", "volume", "inspect")]:
-            return 0, b"[]", b""
+            return 0, json.dumps(self.resources.get(command[-1], [])).encode(), b""
         if command == ("gh", "api", "rate_limit"):
             return 0, b'{"PRIVATE":"account data"}', b""
         raise AssertionError("Unexpected command: " + repr(command))
@@ -171,6 +172,21 @@ class StartPreflightTest(unittest.TestCase):
         for command in [("docker", "volume", "inspect", "resolved-data"), ("docker", "network", "inspect", "resolved-network"), ("docker", "image", "inspect", self.runner.shared_image)]:
             self.assertIn(command, self.runner.commands)
         self.assertNotIn(("docker", "image", "inspect", "optional:fixture"), self.runner.commands)
+
+    def test_internal_resource_ownership_is_required_but_external_labels_are_not(self):
+        project = self.run_preflight()[1]["project"]
+        for kind, name, key in (("network", "resolved-network", "default"), ("volume", "resolved-data", "db")):
+            for labels in (None, {}, {"com.docker.compose.project": "other", "com.docker.compose." + kind: key}):
+                with self.subTest(kind=kind, labels=labels):
+                    self.runner.resources[name] = [{"Labels": labels}]
+                    self.assertEqual(self.statuses(self.run_preflight()[1], "docker-" + kind), ["blocked"])
+            self.runner.resources[name] = [{"Labels": {"com.docker.compose.project": project, "com.docker.compose." + kind: key}}]
+            self.assertEqual(self.statuses(self.run_preflight()[1], "docker-" + kind), ["ready"])
+            self.runner.config[kind + "s"][key]["external"] = True
+            self.runner.resources[name] = [{"Labels": None}]
+            self.assertEqual(self.statuses(self.run_preflight()[1], "docker-" + kind), ["ready"])
+            self.runner.resources[name] = []
+            self.assertEqual(self.statuses(self.run_preflight()[1], "docker-" + kind), ["unknown"])
 
     def test_missing_external_resource_blocks_but_internal_requires_creation(self):
         self.runner.failures.add(("docker", "volume", "inspect"))
