@@ -81,6 +81,7 @@ class AgentWorkflowContractTest extends TestCase
                 'runtime_failure_classification' => 'harness_failure',
                 'no_equivalent_reviewer' => 'block_merge',
                 'requires_fresh_probe_context' => true,
+                'startup_probe_input' => 'self_contained_readiness_request_only',
             ],
             $contract['review']['runtime_preflight'] ?? null,
         );
