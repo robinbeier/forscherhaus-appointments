@@ -31,6 +31,7 @@ class FixtureRunner:
         self.failures = set()
         self.branch = b"codex/example"
         self.containers = b""
+        self.container_names = b""
         self.listeners = b""
         self.resources = {}
         self.shared_image = "forscherhaus-local/php-fpm:" + "a" * 64
@@ -74,6 +75,8 @@ class FixtureRunner:
             return 0, b'"unix:///fixture/docker.sock"', b""
         if command[:2] == ("docker", "info"):
             return 0, b'{"OSType":"linux","Architecture":"aarch64"}', b""
+        if command == ("docker", "ps", "-a", "--format", "{{.Names}}"):
+            return 0, self.container_names, b""
         if command[:3] == ("docker", "ps", "-a"):
             return 0, self.containers, b""
         if command[0] == "lsof":
@@ -214,6 +217,19 @@ class StartPreflightTest(unittest.TestCase):
         self.assertEqual(self.statuses(report, "project-collision"), ["blocked"])
         self.assertEqual(self.statuses(report, "ports"), ["blocked"])
         self.assertNotIn("PRIVATE", json.dumps(report))
+
+    def test_unlabeled_selected_container_names_block_reuse(self):
+        project = self.run_preflight()[1]["project"]
+        for name in (project + "-nginx-1", project + "_nginx_2"):
+            self.runner.container_names = name.encode()
+            self.assertEqual(self.statuses(self.run_preflight()[1], "project-collision"), ["blocked"])
+        self.runner.config["services"]["nginx"]["container_name"] = "custom-web"
+        self.runner.container_names = b"custom-web"
+        self.assertEqual(self.statuses(self.run_preflight()[1], "project-collision"), ["blocked"])
+        self.runner.container_names = b"another-project-nginx-1"
+        self.assertEqual(self.statuses(self.run_preflight()[1], "project-collision"), ["ready"])
+        self.runner.failures.add(("docker", "ps", "-a", "--format", "{{.Names}}"))
+        self.assertEqual(self.statuses(self.run_preflight()[1], "project-collision"), ["unknown"])
 
     def test_unresolved_port_requirements_never_report_ready(self):
         for port in ({"published": "8000-8010"}, {"published": "0"}, {"target": 80}, "8080:80"):

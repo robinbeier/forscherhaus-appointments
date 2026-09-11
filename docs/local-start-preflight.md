@@ -70,6 +70,8 @@ A missing build image, pull image, internal network or internal volume is an
 environment prerequisite; a missing declared external resource requires separate
 preparation. Existing internal networks and volumes must carry the expected
 Compose project and resource labels; missing or conflicting labels block reuse.
+Container inspection includes all existing names, so explicit or generated selected-service
+names occupied by containers without the project label also block reuse.
 Declared external resources do not require Compose ownership labels. An invalid
 inspection response remains unknown. None is evidence of an application regression.
 

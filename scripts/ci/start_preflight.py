@@ -183,9 +183,24 @@ def preflight(argv=None, runner=_run):
 
     if daemon and project:
         code, raw, _ = probe(["docker", "ps", "-a", "--filter", f"label=com.docker.compose.project={project}", "--format", "{{.ID}}"])
-        add("project-collision", "unknown" if code else ("blocked" if raw.strip() else "ready"),
-            "project inspection unavailable" if code else ("project already has containers; ownership must be checked before reuse" if raw.strip() else "no existing project containers observed"),
-            "Existing Compose project ownership" if code or raw.strip() else None)
+        names_code, names_raw, _ = probe(["docker", "ps", "-a", "--format", "{{.Names}}"])
+        names = names_raw.decode(errors="replace").splitlines() if names_code == 0 else []
+        collision = bool(raw.strip()) if code == 0 else False
+        for name in planned:
+            service = services.get(name)
+            if not isinstance(service, dict):
+                continue
+            explicit = service.get("container_name")
+            if explicit:
+                collision = collision or explicit in names
+            else:
+                # Include both Compose v2 and compatibility separators and any replica.
+                pattern = re.compile(re.escape(project) + r"[-_]" + re.escape(name) + r"[-_][1-9][0-9]*$")
+                collision = collision or any(pattern.fullmatch(item) for item in names)
+        unresolved = code != 0 or names_code != 0 or not selected_services_resolved
+        add("project-collision", "blocked" if collision else ("unknown" if unresolved else "ready"),
+            "existing project containers or selected container names require ownership checks" if collision else ("project or container-name inspection unavailable" if unresolved else "no existing project containers or selected-name collisions observed"),
+            "Existing Compose project ownership" if collision else None)
 
     missing_pull = missing_build = 0
     resources = set()
