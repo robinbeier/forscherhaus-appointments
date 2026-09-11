@@ -145,6 +145,7 @@ final class RescheduleAuthorityLockOrderTest extends TestCase
         $this->assertIsArray($query);
         $this->assertStringContainsString('`start_datetime` < ?', $query['sql']);
         $this->assertStringContainsString('`end_datetime` > ?', $query['sql']);
+        $this->assertStringContainsString('FOR UPDATE', $query['sql']);
     }
 
     private function createAuthority(object $database): Reschedule_authority

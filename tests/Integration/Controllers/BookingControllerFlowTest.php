@@ -470,6 +470,46 @@ class BookingControllerFlowTest extends TestCase
         }
     }
 
+    public function testRescheduleTransactionSeesCommittedServiceChangeOnSecondRead(): void
+    {
+        $scenario = $this->createRescheduleScenario(13);
+        $CI = &get_instance();
+        $service = $CI->db->get_where('services', ['id' => $scenario['service_id']])->row_array();
+        $this->assertNotEmpty($service);
+        $originalDuration = (int) $service['duration'];
+        $secondary = $CI->load->database('', true);
+        $transactionOpen = false;
+        $controller = new class extends Booking {
+            public function __construct() {}
+
+            public function beginRescheduleTransaction(): bool
+            {
+                return $this->begin_public_booking_transaction(true);
+            }
+        };
+        $controller->db = $CI->db;
+
+        try {
+            $this->assertTrue($controller->beginRescheduleTransaction());
+            $transactionOpen = true;
+            $before = (int) $CI->db->get_where('services', ['id' => $scenario['service_id']])->row_array()['duration'];
+            $updatedDuration = $originalDuration + 5;
+            $this->assertTrue(
+                $secondary->update('services', ['duration' => $updatedDuration], ['id' => $scenario['service_id']]),
+            );
+            $after = (int) $CI->db->get_where('services', ['id' => $scenario['service_id']])->row_array()['duration'];
+
+            $this->assertSame($originalDuration, $before);
+            $this->assertSame($updatedDuration, $after);
+        } finally {
+            if ($transactionOpen) {
+                $CI->db->trans_rollback();
+            }
+            $secondary->close();
+            $CI->db->update('services', ['duration' => $originalDuration], ['id' => $scenario['service_id']]);
+        }
+    }
+
     public function testProviderOverlapAllowsBackToBackRescheduleBoundary(): void
     {
         $scenario = $this->createRescheduleScenario(12);

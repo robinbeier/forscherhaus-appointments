@@ -406,7 +406,7 @@ class Booking extends EA_Controller
                 return;
             }
 
-            if (!$this->db->trans_begin()) {
+            if (!$this->begin_public_booking_transaction($authority_claim instanceof RescheduleAuthorityClaim)) {
                 throw new RuntimeException('Could not start public booking transaction.');
             }
 
@@ -741,6 +741,15 @@ class Booking extends EA_Controller
         }
 
         return $is_still_available ? $appointment['id_users_provider'] : null;
+    }
+
+    protected function begin_public_booking_transaction(bool $reschedule): bool
+    {
+        if ($reschedule) {
+            $this->db->query('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
+        }
+
+        return $this->db->trans_begin();
     }
 
     /**
