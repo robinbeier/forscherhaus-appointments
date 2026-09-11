@@ -110,6 +110,36 @@ final class AppointmentsModelLockOrderTest extends TestCase
         );
     }
 
+    public function testBufferSyncReadsCurrentServiceUnderLock(): void
+    {
+        $database = new AppointmentsModelLockOrderFakeDatabase();
+        $database->appointment = [
+            'id' => 99,
+            'id_users_customer' => 30,
+            'id_users_provider' => 20,
+            'id_services' => 50,
+            'is_unavailability' => false,
+            'start_datetime' => '2035-02-17 09:00:00',
+            'end_datetime' => '2035-02-17 09:30:00',
+        ];
+        $CI = &get_instance();
+        $originalDb = $CI->db;
+        $CI->db = $database;
+        $model = $this->createModel();
+        $sync = (new ReflectionClass(Appointments_model::class))->getMethod('sync_buffer_unavailabilities');
+
+        try {
+            $sync->invoke($model, $database->appointment);
+        } finally {
+            $CI->db = $originalDb;
+        }
+
+        $this->assertSame(['services_lock', 'buffer_delete'], $database->events);
+        $this->assertStringContainsString('SELECT * FROM `ea_services`', $database->queries[0]['sql']);
+        $this->assertStringContainsString('FOR UPDATE', $database->queries[0]['sql']);
+        $this->assertSame([50], $database->queries[0]['bindings']);
+    }
+
     private function createModel(): Appointments_model
     {
         $reflection = new ReflectionClass(Appointments_model::class);

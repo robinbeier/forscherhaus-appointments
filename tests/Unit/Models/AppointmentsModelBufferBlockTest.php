@@ -85,7 +85,9 @@ class AppointmentsModelBufferBlockTest extends TestCase
 
                 $service = $this->servicesModel->find($service_id);
                 $service['buffer_after'] = EVENT_MINIMUM_DURATION;
-                $this->servicesModel->save($service);
+                get_instance()->db->trans_begin();
+                $this->servicesModel->save($service, true);
+                get_instance()->db->trans_commit();
 
                 $this->appointmentsModel->sync_service_buffer_unavailabilities($service_id);
 
@@ -146,7 +148,9 @@ class AppointmentsModelBufferBlockTest extends TestCase
             $service = $this->servicesModel->find($service_id);
             $service['buffer_before'] = 0;
             $service['buffer_after'] = EVENT_MINIMUM_DURATION;
-            $this->servicesModel->save($service);
+            get_instance()->db->trans_begin();
+            $this->servicesModel->save($service, true);
+            get_instance()->db->trans_commit();
 
             $this->appointmentsModel->sync_service_buffer_unavailabilities($service_id);
 
@@ -235,7 +239,9 @@ class AppointmentsModelBufferBlockTest extends TestCase
 
                 $service = $this->servicesModel->find($service_id);
                 $service['buffer_after'] = 0;
-                $this->servicesModel->save($service);
+                get_instance()->db->trans_begin();
+                $this->servicesModel->save($service, true);
+                get_instance()->db->trans_commit();
 
                 $this->appointmentsModel->sync_service_buffer_unavailabilities($service_id);
 
@@ -316,7 +322,9 @@ class AppointmentsModelBufferBlockTest extends TestCase
 
                     $service = $this->servicesModel->find($service_id);
                     $service['buffer_after'] = EVENT_MINIMUM_DURATION;
-                    $this->servicesModel->save($service);
+                    get_instance()->db->trans_begin();
+                    $this->servicesModel->save($service, true);
+                    get_instance()->db->trans_commit();
 
                     $this->appointmentsModel->sync_service_buffer_unavailabilities($service_id);
 

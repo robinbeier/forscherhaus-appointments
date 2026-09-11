@@ -31,7 +31,7 @@ final class ServicesModelLockOrderTest extends TestCase
         }
 
         $this->assertSame(
-            ['provider_snapshot', 'user_lock', 'user_lock', 'update_services', 'provider_current'],
+            ['provider_snapshot', 'user_lock', 'user_lock', 'service_current', 'provider_current', 'update_services'],
             $database->events,
         );
         $this->assertSame([10, 30], $database->userLockIds);
@@ -68,8 +68,66 @@ final class ServicesModelLockOrderTest extends TestCase
             $CI->db = $originalDb;
         }
 
+        $this->assertSame([], $database->updates);
+        $this->assertSame(['provider_snapshot', 'user_lock', 'service_current', 'provider_current'], $database->events);
+    }
+
+    public function testBufferUpdateRequiresActiveTransactionBeforeAnyWrite(): void
+    {
+        $database = new ServicesModelLockOrderFakeDatabase();
+        $database->transactionActive = false;
+        $CI = &get_instance();
+        $originalDb = $CI->db;
+        $CI->db = $database;
+        $model = (new ReflectionClass(Services_model::class))->newInstanceWithoutConstructor();
+        $update = (new ReflectionClass(Services_model::class))->getMethod('update');
+
+        try {
+            $update->invoke($model, ['id' => 42, 'name' => 'Updated'], true);
+            $this->fail('Expected a buffer update without a transaction to abort.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame(
+                'Service buffer synchronization requires an active transaction.',
+                $exception->getMessage(),
+            );
+        } finally {
+            $CI->db = $originalDb;
+        }
+
+        $this->assertSame([], $database->events);
+        $this->assertSame([], $database->queries);
+        $this->assertSame([], $database->updates);
+    }
+
+    public function testNonBufferUpdateDoesNotAcquireProviderLocks(): void
+    {
+        $database = new ServicesModelLockOrderFakeDatabase();
+        $database->serviceRow = ['buffer_before' => 25, 'buffer_after' => 35];
+        $CI = &get_instance();
+        $originalDb = $CI->db;
+        $CI->db = $database;
+        $model = (new ReflectionClass(Services_model::class))->newInstanceWithoutConstructor();
+        $update = (new ReflectionClass(Services_model::class))->getMethod('update');
+
+        try {
+            $this->assertSame(
+                42,
+                $update->invoke(
+                    $model,
+                    ['id' => 42, 'name' => 'Updated', 'buffer_before' => 1, 'buffer_after' => 2],
+                    false,
+                ),
+            );
+        } finally {
+            $CI->db = $originalDb;
+        }
+
+        $this->assertSame(['service_current', 'update_services'], $database->events);
+        $this->assertSame([42], $database->queries[0]['bindings']);
+        $this->assertStringContainsString('FOR UPDATE', $database->queries[0]['sql']);
+        $this->assertSame(25, $database->updatedData['buffer_before']);
+        $this->assertSame(35, $database->updatedData['buffer_after']);
         $this->assertSame(['services'], $database->updates);
-        $this->assertSame(['provider_snapshot', 'user_lock', 'update_services', 'provider_current'], $database->events);
     }
 
     public function testDeleteLocksServiceBeforeBufferCleanupAndServiceDelete(): void
@@ -86,12 +144,18 @@ final class ServicesModelLockOrderTest extends TestCase
             $CI->db = $originalDb;
         }
 
-        $this->assertSame(['begin', 'service_lock', 'buffer_cleanup', 'delete_services', 'commit'], $database->events);
+        $this->assertSame(
+            ['begin', 'service_lock', 'appointment_lock', 'buffer_cleanup', 'delete_services', 'commit'],
+            $database->events,
+        );
         $this->assertStringContainsString('FROM `ea_services`', $database->queries[0]['sql']);
         $this->assertStringContainsString('FOR UPDATE', $database->queries[0]['sql']);
         $this->assertSame([42], $database->queries[0]['bindings']);
-        $this->assertStringContainsString('DELETE `buffer_blocks`', $database->queries[1]['sql']);
+        $this->assertStringContainsString('FROM `ea_appointments`', $database->queries[1]['sql']);
+        $this->assertStringContainsString('ORDER BY `id` FOR UPDATE', $database->queries[1]['sql']);
         $this->assertSame([42], $database->queries[1]['bindings']);
+        $this->assertStringContainsString('DELETE `buffer_blocks`', $database->queries[2]['sql']);
+        $this->assertSame([42], $database->queries[2]['bindings']);
         $this->assertSame(['services'], $database->deletes);
     }
 
@@ -110,10 +174,15 @@ final class ServicesModelLockOrderTest extends TestCase
             $CI->db = $originalDb;
         }
 
-        $this->assertSame(['begin', 'service_lock', 'buffer_cleanup', 'delete_services', 'commit'], $database->events);
+        $this->assertSame(
+            ['begin', 'service_lock', 'appointment_lock', 'buffer_cleanup', 'delete_services', 'commit'],
+            $database->events,
+        );
         $this->assertStringContainsString('FROM `ea_services`', $database->queries[0]['sql']);
         $this->assertStringContainsString('FOR UPDATE', $database->queries[0]['sql']);
-        $this->assertStringContainsString('DELETE `buffer_blocks`', $database->queries[1]['sql']);
+        $this->assertStringContainsString('FROM `ea_appointments`', $database->queries[1]['sql']);
+        $this->assertStringContainsString('FOR UPDATE', $database->queries[1]['sql']);
+        $this->assertStringContainsString('DELETE `buffer_blocks`', $database->queries[2]['sql']);
         $this->assertSame(['services'], $database->deletes);
     }
 }
@@ -135,7 +204,12 @@ final class ServicesModelLockOrderFakeDatabase
     public array $userLockIds = [];
     /** @var list<string> */
     public array $updates = [];
+    /** @var array<string, mixed> */
+    public array $updatedData = [];
+    /** @var array<string, mixed> */
+    public array $serviceRow = ['buffer_before' => 0, 'buffer_after' => 0];
     public bool $transactionActive = true;
+    /** @var array<string, mixed> */
 
     public function dbprefix(string $table): string
     {
@@ -185,7 +259,20 @@ final class ServicesModelLockOrderFakeDatabase
             return new ServicesModelLockOrderFakeQuery(1);
         }
 
+        if (str_starts_with(trim($sql), 'SELECT') && str_contains($sql, 'FROM `ea_appointments`')) {
+            $this->events[] = 'appointment_lock';
+            return new ServicesModelLockOrderFakeQuery(1);
+        }
+
         if (str_contains($sql, 'FROM `ea_services`')) {
+            if (str_contains($sql, 'SELECT *')) {
+                $this->events[] = 'service_current';
+                return new ServicesModelLockOrderFakeQuery(1, [$this->serviceRow]);
+            }
+            if (str_contains($sql, 'buffer_before')) {
+                $this->events[] = 'service_current';
+                return new ServicesModelLockOrderFakeQuery(1, [$this->serviceRow]);
+            }
             $this->events[] = 'service_lock';
             return new ServicesModelLockOrderFakeQuery($this->serviceExists ? 1 : 0);
         }
@@ -212,6 +299,7 @@ final class ServicesModelLockOrderFakeDatabase
     {
         $this->updates[] = $table;
         $this->events[] = 'update_' . $table;
+        $this->updatedData = $data;
         return true;
     }
 }
@@ -230,5 +318,11 @@ final class ServicesModelLockOrderFakeQuery
     public function result_array(): array
     {
         return $this->rows;
+    }
+
+    /** @return array<string, mixed> */
+    public function row_array(): array
+    {
+        return $this->rows[0] ?? [];
     }
 }

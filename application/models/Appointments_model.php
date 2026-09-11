@@ -232,6 +232,7 @@ class Appointments_model extends EA_Model
             $appointment['create_datetime'] = date('Y-m-d H:i:s');
             $appointment['update_datetime'] = date('Y-m-d H:i:s');
             $appointment['hash'] = bin2hex(random_bytes(32));
+            $this->lock_update_parents([], $appointment);
 
             if (!$this->db->insert('appointments', $appointment)) {
                 throw new RuntimeException('Could not insert appointment.');
@@ -483,7 +484,7 @@ class Appointments_model extends EA_Model
 
         try {
             $now = date('Y-m-d H:i:s');
-            $service = $this->services_model->find($service_id);
+            $service = $this->services_model->lock_buffer_sync_parents($service_id);
             $buffer_after = max(0, (int) ($service['buffer_after'] ?? 0));
             $resync_cutoff = (new DateTimeImmutable($now))
                 ->sub(new DateInterval('PT' . $buffer_after . 'M'))
