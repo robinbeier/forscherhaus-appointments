@@ -24,6 +24,11 @@ Prerequisites on host (required by `./scripts/setup-worktree.sh`):
 - Node.js `>=24.0.0` plus `npm`/`npx`
 - Docker + Docker Compose
 
+Before setup, use the [read-only start preflight](docs/local-start-preflight.md)
+to inspect worktree, Git, Docker and declared permission prerequisites:
+`python3 scripts/ci/start_preflight.py`. It requires Python 3 and does not grant
+permissions or start services.
+
 ```bash
 ./scripts/setup-worktree.sh
 docker compose up -d

@@ -24,6 +24,7 @@ This file stays intentionally short. It is a map, not a second runbook.
 | Model-aware implementation delegation | `WORKFLOW.md`, `.codex/agents/implementation-worker.toml` | Primary-agent authority plus the pinned Luna worker boundary. |
 | Controlled parallel implementation | `WORKFLOW.md` | Explicit disjoint local ownership with primary-owned integration and publication. |
 | Compact guardrails and command entry points | `AGENTS.md` | Cross-topic entry point without duplicating specialist docs. |
+| Read-only local start preflight | `docs/local-start-preflight.md`, `scripts/ci/start_preflight.py` | Worktree/Git, declared boundaries, Docker resources and approval prerequisites before mutation. |
 | Core pre-PR path | `scripts/ci/pre_pr_quick.sh`, `scripts/ci/pre_pr_full.sh`, `scripts/ci/select_local_full_gate.php` | Actual executable gate logic; the full gate reuses the GitHub `integration_smoke` filter for local smoke and frontend-build selection. |
 | CI gate semantics and job wiring | `.github/workflows/ci.yml` | Ground truth for job triggers, blocking status, and artifacts. |
 | Standard review and landing | `WORKFLOW.md`, `code_review.md` | One independent reviewer, risk-based specialists, current blocking CI, and authorized merge of the reviewed head. |

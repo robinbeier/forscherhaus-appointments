@@ -187,6 +187,10 @@ Rules:
 ### 1. Resume and orient
 
 - Read the issue, current state, branch, PR context, and existing workpad.
+- Before the first mutation, run the [read-only start preflight](docs/local-start-preflight.md)
+  with the writable roots and network policy actually supplied by the runtime.
+  Keep unobservable permissions unknown; resolve the concrete prerequisites
+  before setup, sync, tests or publication. The report is not authorization.
 - If the current branch already exists, sync it before editing.
 - Reproduce the problem or gather concrete evidence before changing code.
 - For authority-, secret-, identity-, transaction-, or concurrency-sensitive
