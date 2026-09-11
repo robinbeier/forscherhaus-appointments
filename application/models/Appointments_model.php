@@ -447,6 +447,10 @@ class Appointments_model extends EA_Model
         }
 
         try {
+            $this->db->query(
+                'SELECT `id` FROM `' . $this->db->dbprefix('appointments') . '` WHERE `id` = ? FOR UPDATE',
+                [$appointment_id],
+            );
             $this->db
                 ->where('id_parent_appointment', $appointment_id)
                 ->where('is_unavailability', true)
@@ -485,7 +489,7 @@ class Appointments_model extends EA_Model
                 ->sub(new DateInterval('PT' . $buffer_after . 'M'))
                 ->format('Y-m-d H:i:s');
 
-            $appointments = $this->db
+            $appointments_query = $this->db
                 ->select('appointments.*')
                 ->from('appointments')
                 ->join(
@@ -504,8 +508,8 @@ class Appointments_model extends EA_Model
                 ->group_end()
                 ->group_by('appointments.id')
                 ->order_by('appointments.start_datetime', 'ASC')
-                ->get()
-                ->result_array();
+                ->get_compiled_select();
+            $appointments = $this->db->query($appointments_query . ' FOR UPDATE')->result_array();
 
             $appointment_ids = array_map(static fn(array $appointment): int => (int) $appointment['id'], $appointments);
 
@@ -566,7 +570,11 @@ class Appointments_model extends EA_Model
             return;
         }
 
-        $service = $this->services_model->find((int) $appointment['id_services']);
+        $service = $this->db
+            ->query('SELECT * FROM `' . $this->db->dbprefix('services') . '` WHERE `id` = ? FOR UPDATE', [
+                (int) $appointment['id_services'],
+            ])
+            ->row_array();
 
         $buffer_before = max(0, (int) ($service['buffer_before'] ?? 0));
         $buffer_after = max(0, (int) ($service['buffer_after'] ?? 0));

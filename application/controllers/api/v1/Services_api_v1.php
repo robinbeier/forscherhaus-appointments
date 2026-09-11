@@ -159,7 +159,7 @@ class Services_api_v1 extends EA_Controller
             }
 
             try {
-                $service_id = $this->services_model->save($service);
+                $service_id = $this->services_model->save($service, $buffer_values_changed);
 
                 if ($buffer_values_changed) {
                     $this->appointments_model->sync_service_buffer_unavailabilities($service_id);

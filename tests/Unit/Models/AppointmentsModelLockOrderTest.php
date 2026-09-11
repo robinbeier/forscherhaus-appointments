@@ -91,6 +91,25 @@ final class AppointmentsModelLockOrderTest extends TestCase
         }
     }
 
+    public function testDeleteLocksAppointmentBeforeBufferCleanup(): void
+    {
+        $database = new AppointmentsModelLockOrderFakeDatabase();
+        $CI = &get_instance();
+        $originalDb = $CI->db;
+        $CI->db = $database;
+
+        try {
+            $this->createModel()->delete(99);
+        } finally {
+            $CI->db = $originalDb;
+        }
+
+        $this->assertSame(
+            ['begin', 'appointment_lock', 'buffer_delete', 'appointment_delete', 'commit'],
+            $database->events,
+        );
+    }
+
     private function createModel(): Appointments_model
     {
         $reflection = new ReflectionClass(Appointments_model::class);
@@ -119,6 +138,10 @@ final class AppointmentsModelLockOrderFakeDatabase
     public function query(string $sql, array $bindings = []): AppointmentsModelLockOrderFakeQuery
     {
         $this->queries[] = ['sql' => $sql, 'bindings' => $bindings];
+        if (str_contains($sql, 'ea_appointments')) {
+            $this->events[] = 'appointment_lock';
+            return new AppointmentsModelLockOrderFakeQuery(1, $this->appointment);
+        }
         $table = str_contains($sql, 'ea_users') ? 'users' : 'services';
         $this->events[] = $table . '_lock';
         $rowCount = $table === $this->missingTable ? count($bindings) - 1 : count($bindings);
@@ -147,6 +170,17 @@ final class AppointmentsModelLockOrderFakeDatabase
     public function update(string $table, array $data, array $where = []): bool
     {
         $this->events[] = 'appointment_update';
+        return true;
+    }
+
+    public function where(string $field, mixed $value): self
+    {
+        return $this;
+    }
+
+    public function delete(?string $table = null, array $where = []): bool
+    {
+        $this->events[] = $table === 'appointments' && $where === [] ? 'buffer_delete' : 'appointment_delete';
         return true;
     }
 

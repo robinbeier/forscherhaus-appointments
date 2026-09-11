@@ -62,7 +62,7 @@ class Services_model extends EA_Model
      *
      * @throws InvalidArgumentException
      */
-    public function save(array $service): int
+    public function save(array $service, bool $lock_buffer_parents = false): int
     {
         $this->validate($service);
         $service = $this->normalize_buffer_values($service);
@@ -70,7 +70,7 @@ class Services_model extends EA_Model
         if (empty($service['id'])) {
             return $this->insert($service);
         } else {
-            return $this->update($service);
+            return $this->update($service, $lock_buffer_parents);
         }
     }
 
@@ -243,15 +243,99 @@ class Services_model extends EA_Model
      *
      * @throws RuntimeException
      */
-    protected function update(array $service): int
+    protected function update(array $service, bool $lock_buffer_parents = false): int
     {
+        $service_id = (int) $service['id'];
+        $provider_ids = [];
+        if ($lock_buffer_parents) {
+            if (!$this->db->trans_active()) {
+                throw new RuntimeException('Buffer service update requires an active transaction.');
+            }
+            $provider_ids = $this->lock_buffer_provider_parents($service_id);
+        }
         $service['update_datetime'] = date('Y-m-d H:i:s');
 
         if (!$this->db->update('services', $service, ['id' => $service['id']])) {
             throw new RuntimeException('Could not update service.');
         }
 
-        return $service['id'];
+        if ($lock_buffer_parents) {
+            $this->assert_buffer_provider_parents_unchanged($service_id, $provider_ids);
+        }
+
+        return $service_id;
+    }
+
+    /**
+     * Lock provider users referenced by this service before the service row.
+     * Buffer regeneration inserts appointment rows with a provider FK.
+     */
+    /**
+     * @return list<int>
+     */
+    protected function lock_buffer_provider_parents(int $service_id): array
+    {
+        if ($service_id <= 0) {
+            return [];
+        }
+
+        $providers = $this->db
+            ->query(
+                'SELECT DISTINCT `id_users_provider` FROM `' .
+                    $this->db->dbprefix('appointments') .
+                    '` WHERE `id_services` = ? AND `is_unavailability` = 0',
+                [$service_id],
+            )
+            ->result_array();
+
+        $provider_ids = array_values(
+            array_unique(
+                array_filter(
+                    array_map(static fn(array $row): int => (int) ($row['id_users_provider'] ?? 0), $providers),
+                    static fn(int $id): bool => $id > 0,
+                ),
+            ),
+        );
+        sort($provider_ids, SORT_NUMERIC);
+
+        foreach ($provider_ids as $provider_id) {
+            $this->db->query('SELECT `id` FROM `' . $this->db->dbprefix('users') . '` WHERE `id` = ? FOR UPDATE', [
+                $provider_id,
+            ]);
+        }
+
+        return $provider_ids;
+    }
+
+    /**
+     * Ensure no appointment provider changed while the service row was locked.
+     * This current read is intentionally after parent locks and service update.
+     *
+     * @param list<int> $expected_provider_ids
+     */
+    protected function assert_buffer_provider_parents_unchanged(int $service_id, array $expected_provider_ids): void
+    {
+        $rows = $this->db
+            ->query(
+                'SELECT DISTINCT `id_users_provider` FROM `' .
+                    $this->db->dbprefix('appointments') .
+                    '` WHERE `id_services` = ? AND `is_unavailability` = 0 FOR UPDATE',
+                [$service_id],
+            )
+            ->result_array();
+        $current_provider_ids = array_values(
+            array_unique(
+                array_filter(
+                    array_map(static fn(array $row): int => (int) ($row['id_users_provider'] ?? 0), $rows),
+                    static fn(int $id): bool => $id > 0,
+                ),
+            ),
+        );
+        sort($current_provider_ids, SORT_NUMERIC);
+
+        if ($current_provider_ids !== $expected_provider_ids) {
+            throw new RuntimeException('Service appointments changed during update.');
+        }
     }
 
     /**
