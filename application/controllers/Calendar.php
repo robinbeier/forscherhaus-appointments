@@ -231,8 +231,10 @@ class Calendar extends EA_Controller
             $request_dto = $this->calendarRequestDtoFactory()->buildSaveAppointmentRequestDto();
             $customer_data = $request_dto->customerData;
             $appointment_data = $request_dto->appointmentData;
+            $manage_mode = !empty($appointment_data['id']);
+            $stored_appointment = null;
 
-            if (!empty($appointment_data['id'])) {
+            if ($manage_mode) {
                 $stored_appointment = $this->appointments_model->find((int) $appointment_data['id']);
                 $this->check_event_permissions((int) $stored_appointment['id_users_provider']);
             }
@@ -248,12 +250,14 @@ class Calendar extends EA_Controller
                 }
             }
 
-            $manage_mode = !empty($appointment_data['id']);
-
             $this->db->trans_begin();
 
             try {
                 if ($manage_mode) {
+                    if ($stored_appointment === null) {
+                        throw new RuntimeException('The appointment state could not be loaded.');
+                    }
+
                     $this->lock_calendar_update_parents($stored_appointment, $appointment_data, [
                         $customer_data['id'] ?? null,
                     ]);
