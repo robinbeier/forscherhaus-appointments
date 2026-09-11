@@ -150,21 +150,7 @@ class Services_api_v1 extends EA_Controller
 
             $this->services_model->api_decode($service, $original_service);
 
-            if (!$this->db->trans_begin()) {
-                throw new RuntimeException('Could not start service transaction.');
-            }
-
-            try {
-                $service_id = $this->services_model->save($service, $original_service);
-
-                if (!$this->db->trans_commit()) {
-                    throw new RuntimeException('Could not commit service transaction.');
-                }
-            } catch (Throwable $exception) {
-                $this->db->trans_rollback();
-
-                throw $exception;
-            }
+            $service_id = $this->services_model->save($service, $original_service);
 
             $updated_service = $this->services_model->find($service_id);
 

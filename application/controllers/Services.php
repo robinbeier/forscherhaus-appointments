@@ -211,21 +211,7 @@ class Services extends EA_Controller
 
             $this->services_model->optional($service, $this->optional_service_update_fields);
 
-            if (!$this->db->trans_begin()) {
-                throw new RuntimeException('Could not start service transaction.');
-            }
-
-            try {
-                $service_id = $this->services_model->save($service, $existing_service ?? null);
-
-                if (!$this->db->trans_commit()) {
-                    throw new RuntimeException('Could not commit service transaction.');
-                }
-            } catch (Throwable $exception) {
-                $this->db->trans_rollback();
-
-                throw $exception;
-            }
+            $service_id = $this->services_model->save($service, $existing_service ?? null);
 
             $service = $this->services_model->find($service_id);
 

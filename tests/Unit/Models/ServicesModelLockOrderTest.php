@@ -213,6 +213,37 @@ final class ServicesModelLockOrderTest extends TestCase
         $this->assertSame(['begin', 'service_current', 'update_services', 'commit'], $database->events);
     }
 
+    public function testStandaloneBufferChangeOwnsCommitAfterSynchronization(): void
+    {
+        $database = new ServicesModelLockOrderFakeDatabase();
+        $database->transactionActive = false;
+        $CI = &get_instance();
+        $originalDb = $CI->db;
+        $CI->db = $database;
+        try {
+            $model = new ServicesModelLockOrderTestModel();
+            $model->callUpdate(
+                ['id' => 42, 'name' => 'Updated', 'buffer_after' => 20],
+                ['buffer_before' => 0, 'buffer_after' => 0],
+            );
+        } finally {
+            $CI->db = $originalDb;
+        }
+        $this->assertSame(
+            [
+                'begin',
+                'provider_snapshot',
+                'service_current',
+                'provider_current',
+                'update_services',
+                'buffer_sync',
+                'commit',
+            ],
+            $database->events,
+        );
+        $this->assertFalse($database->transactionActive);
+    }
+
     public function testStandaloneBufferChangeRollsBackBeforeWrite(): void
     {
         $database = new ServicesModelLockOrderFakeDatabase();
@@ -228,7 +259,7 @@ final class ServicesModelLockOrderTest extends TestCase
             $this->fail('Expected the standalone buffer change to abort.');
         } catch (\RuntimeException $exception) {
             $this->assertSame(
-                'Service buffer changes require expected values and an outer transaction for atomic synchronization.',
+                'Service buffer changes require expected values for atomic synchronization.',
                 $exception->getMessage(),
             );
         } finally {

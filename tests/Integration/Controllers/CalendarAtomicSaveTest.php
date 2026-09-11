@@ -112,6 +112,71 @@ class CalendarAtomicSaveTest extends TestCase
         $this->assertSame($customerEmail, $customer['email']);
     }
 
+    public function testTransactionFailuresDoNotPersistCustomerOrSendNotifications(): void
+    {
+        $pair = $this->fixtures->resolveProviderServicePair();
+        foreach (['trans_begin', 'trans_commit'] as $failure) {
+            $this->resetRuntimeState();
+            $email = 'calendar-transaction-' . bin2hex(random_bytes(4)) . '@example.org';
+            $this->cleanupEmails[] = $email;
+            $this->postCalendarSavePayload($pair['provider_id'], $pair['service_id'], [
+                'first_name' => 'Transaction',
+                'last_name' => 'Rollback',
+                'phone_number' => '+49123456789',
+                'email' => $email,
+            ]);
+            $controller = $this->createCalendarControllerWithFailingAppointmentSave();
+            $controller->db = new class (get_instance()->db, $failure) {
+                public array $events = [];
+                public function __construct(private object $database, private string $failure) {}
+                public function __call(string $name, array $arguments): mixed
+                {
+                    $this->events[] = $name;
+                    return $name === $this->failure ? false : $this->database->$name(...$arguments);
+                }
+            };
+            $controller->appointments_model = new class {
+                private array $appointment;
+                public function only(array &$record, array $fields): void {}
+                public function optional(array &$record, array $fields): void {}
+                public function save(array $appointment): int
+                {
+                    $this->appointment = $appointment + ['id' => 999];
+                    return 999;
+                }
+                public function find(int $id): array
+                {
+                    return $this->appointment;
+                }
+            };
+            $controller->notifications = new class {
+                public int $calls = 0;
+                public function notify_appointment_saved(...$arguments): void
+                {
+                    $this->calls++;
+                }
+            };
+            $controller->save_appointment();
+            $response = json_decode(get_instance()->output->get_output(), true);
+            $this->assertFalse($response['success'] ?? true);
+            $this->assertSame(
+                $failure === 'trans_begin'
+                    ? 'Could not start appointment transaction.'
+                    : 'Could not commit appointment transaction.',
+                $response['message'] ?? null,
+            );
+            $this->assertFalse($this->fixtures->customerExistsByEmail($email));
+            $this->assertSame(0, $controller->notifications->calls);
+            $this->assertFalse(get_instance()->db->trans_active());
+            $this->assertSame(
+                $failure === 'trans_begin'
+                    ? ['trans_begin']
+                    : ['trans_begin', 'trans_status', 'trans_commit', 'trans_rollback'],
+                $controller->db->events,
+            );
+        }
+    }
+
     /**
      * @param array<string, mixed> $customerData
      */
