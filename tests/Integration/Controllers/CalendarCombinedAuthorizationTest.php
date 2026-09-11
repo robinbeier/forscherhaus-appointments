@@ -136,6 +136,7 @@ final class CalendarCombinedAuthorizationTest extends TestCase
             $this->appointmentPayload($appointment, $pair['provider_id'], $pair['service_id'], $customer),
         );
         $this->controller()->save_appointment();
+        $this->assertSame(403, get_instance()->output->statusCode);
         $this->assertDenied();
         $this->assertSame('Foreign', $this->customerLastName($foreign));
         $this->assertSame($customer, (int) $this->storedAppointment($appointment)['id_users_customer']);
@@ -328,6 +329,7 @@ final class CalendarCombinedAuthorizationTest extends TestCase
             ),
         );
         $controller->save_appointment();
+        $this->assertSame(403, get_instance()->output->statusCode);
         $secondary->close();
 
         $response = $this->decode();
@@ -473,6 +475,8 @@ final class CalendarCombinedAuthorizationTest extends TestCase
         );
 
         $controller->save_appointment();
+        $this->assertSame(['parents', 'appointment'], $controller->lockOrder);
+        $this->assertTrue($controller->parentLockTransactionActive);
         $secondary->close();
 
         $this->assertTrue($permissions->reassigned);
