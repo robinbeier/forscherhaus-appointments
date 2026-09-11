@@ -448,6 +448,29 @@ class Booking extends EA_Controller
                 return;
             }
 
+            if (
+                $authority_claim instanceof RescheduleAuthorityClaim &&
+                $this->rescheduleAuthority()->providerHasOverlap(
+                    $target_provider_id,
+                    (string) $appointment['start_datetime'],
+                    (string) $appointment['end_datetime'],
+                    (int) $appointment['id'],
+                )
+            ) {
+                $this->db->trans_rollback();
+                $transaction_open = false;
+
+                json_response(
+                    [
+                        'success' => false,
+                        'message' => lang('requested_hour_is_unavailable'),
+                    ],
+                    409,
+                );
+
+                return;
+            }
+
             $provider = $this->providers_model->find($target_provider_id);
 
             $service = $this->services_model->find($target_service_id);

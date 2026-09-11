@@ -440,6 +440,35 @@ class Reschedule_authority
         return $this->db->query($sql, $bindings)->num_rows() > 0;
     }
 
+    /**
+     * Re-check provider-side appointment and unavailability overlap with a
+     * current locking read after the reschedule authority has acquired its
+     * parent locks.
+     */
+    public function providerHasOverlap(
+        int $provider_id,
+        string $start_datetime,
+        string $end_datetime,
+        ?int $exclude_appointment_id,
+    ): bool {
+        $table = $this->table('appointments');
+        $sql =
+            'SELECT `id` FROM `' .
+            $table .
+            '` WHERE `id_users_provider` = ? AND `start_datetime` <= ? AND `end_datetime` >= ?';
+        $bindings = [$provider_id, $end_datetime, $start_datetime];
+
+        if ($exclude_appointment_id !== null) {
+            $sql .= ' AND `id` != ? AND (`id_parent_appointment` IS NULL OR `id_parent_appointment` != ?)';
+            $bindings[] = $exclude_appointment_id;
+            $bindings[] = $exclude_appointment_id;
+        }
+
+        $sql .= ' FOR UPDATE';
+
+        return $this->db->query($sql, $bindings)->num_rows() > 0;
+    }
+
     private function loadState(int $appointment_id, bool $lock): RescheduleAuthorityState
     {
         $appointment = $this->selectOne('appointments', 'id', $appointment_id);

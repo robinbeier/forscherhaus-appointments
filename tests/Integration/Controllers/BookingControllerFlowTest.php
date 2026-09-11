@@ -393,6 +393,79 @@ class BookingControllerFlowTest extends TestCase
         }
     }
 
+    public function testReschedulePostLockAvailabilityUsesCurrentProviderRows(): void
+    {
+        $scenario = $this->createRescheduleScenario(11);
+        $issuer = $this->createBookingControllerWithForcedAvailability($scenario['provider_id']);
+        $this->issueRescheduleAuthority($issuer, $scenario['hash']);
+
+        $startAt = new DateTimeImmutable(sprintf('+4 days %02d:00:00', ($scenario['hour'] + 2) % 24));
+        $endAt = $startAt->add(new DateInterval('PT' . EVENT_MINIMUM_DURATION . 'M'));
+        $secondary = get_instance()->load->database('', true);
+        $conflictAppointmentId = null;
+        $controller = new class (
+            $scenario['provider_id'],
+            $secondary,
+            $scenario['customer_id'],
+            $scenario['service_id'],
+            $startAt,
+            $endAt,
+        ) extends Booking {
+            private bool $injected = false;
+            public ?int $conflictAppointmentId = null;
+
+            public function __construct(
+                private readonly int $forcedProviderId,
+                private readonly object $secondary,
+                private readonly int $customerId,
+                private readonly int $serviceId,
+                private readonly DateTimeImmutable $startAt,
+                private readonly DateTimeImmutable $endAt,
+            ) {}
+
+            protected function check_datetime_availability(array $appointment): ?int
+            {
+                if (!$this->injected) {
+                    $now = date('Y-m-d H:i:s');
+                    $this->secondary->insert('appointments', [
+                        'book_datetime' => $now,
+                        'start_datetime' => $this->startAt->format('Y-m-d H:i:s'),
+                        'end_datetime' => $this->endAt->format('Y-m-d H:i:s'),
+                        'notes' => 'Concurrent provider conflict',
+                        'hash' => 'concurrent-' . bin2hex(random_bytes(6)),
+                        'is_unavailability' => false,
+                        'id_users_provider' => $this->forcedProviderId,
+                        'id_users_customer' => $this->customerId,
+                        'id_services' => $this->serviceId,
+                        'create_datetime' => $now,
+                        'update_datetime' => $now,
+                    ]);
+                    $this->conflictAppointmentId = (int) $this->secondary->insert_id();
+                    $this->injected = true;
+                }
+
+                return $this->forcedProviderId;
+            }
+        };
+        $this->wireBookingDependencies($controller);
+        $controller->notifications = BookingFlowFixtures::createNoopNotifications();
+        $this->setReschedulePayload($scenario, true, $scenario['appointment_id'], $scenario['customer_id'], [], 2);
+
+        try {
+            $controller->register();
+            $response = json_decode(get_instance()->output->get_output(), true);
+            $this->assertFalse($response['success'] ?? true);
+            $this->assertSame(lang('requested_hour_is_unavailable'), $response['message'] ?? null);
+            $this->assertSame(409, get_instance()->output->statusCode);
+            $this->assertSame(0, $controller->notifications->savedCalls);
+        } finally {
+            $secondary->close();
+            if ($controller->conflictAppointmentId !== null) {
+                get_instance()->db->delete('appointments', ['id' => $controller->conflictAppointmentId]);
+            }
+        }
+    }
+
     public function testForgedManageModeWithoutAuthorityRejectsWithoutMutation(): void
     {
         $scenario = $this->createRescheduleScenario(9);
