@@ -337,6 +337,15 @@ ci_docker_install_seed_instance() {
 
 ci_docker_cleanup_stack() {
     if [[ "${CI_DOCKER_STACK_STARTED:-0}" != "1" ]]; then
+        # Image/config preparation can create our empty data directory before
+        # any container command runs. Remove only that empty, owned directory.
+        if [[ "$CI_DOCKER_PROJECT_OWNED" == "1" && "$CI_DOCKER_MYSQL_DATA_CREATED" == "1" && -n "$CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH" ]]; then
+            if ! rmdir "$CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH" 2>/dev/null; then
+                echo "[${CI_DOCKER_LOG_PREFIX:-ci-docker}] Could not remove empty runtime preparation directory; retaining it." >&2
+                return 1
+            fi
+            CI_DOCKER_MYSQL_DATA_CREATED=0
+        fi
         return 0
     fi
 

@@ -46,6 +46,19 @@ class PrePrCiComposeReadinessTest extends TestCase
         self::assertStringContainsString('local max_attempts="${CI_DOCKER_INSTALL_SEED_MAX_ATTEMPTS:-3}"', $helper);
     }
 
+    public function testQuickGatePreparesRuntimeOnlyAfterPrechecksAndCleanupTrap(): void
+    {
+        $script = $this->readScript('scripts/ci/pre_pr_quick.sh');
+        $build = strpos($script, 'ci_docker_build_php_fpm_if_inputs_changed');
+        $trap = strpos($script, 'trap cleanup_on_exit EXIT');
+        $lockCheck = strpos($script, 'npm install --package-lock-only');
+        self::assertNotFalse($build);
+        self::assertNotFalse($trap);
+        self::assertNotFalse($lockCheck);
+        self::assertLessThan($build, $trap);
+        self::assertLessThan($trap, $lockCheck);
+    }
+
     public function testGateCleanupPreservesFailureStatusAndHandlesSignals(): void
     {
         foreach (['scripts/ci/pre_pr_quick.sh', 'scripts/ci/pre_pr_full.sh'] as $path) {

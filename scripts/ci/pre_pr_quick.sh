@@ -70,7 +70,6 @@ ensure_local_config
 
 # Keep changed-file checks deterministic against current base branch state.
 git_ci_refresh_base_ref_if_safe "$BASE_REF" "pre-pr-quick"
-ci_docker_build_php_fpm_if_inputs_changed "$BASE_REF" "pre-pr-quick"
 
 echo_section "Changed-file JS lint"
 GITHUB_EVENT_NAME=pull_request GITHUB_BASE_REF="$BASE_REF" ./scripts/ci/js-lint-changed.sh
@@ -98,6 +97,7 @@ git diff --quiet --exit-code -- package.json package-lock.json || {
 echo_section "Start quick gate database service"
 ci_docker_claim_fresh_project
 trap cleanup_on_exit EXIT
+ci_docker_build_php_fpm_if_inputs_changed "$BASE_REF" "pre-pr-quick"
 ci_docker_compose up -d mysql php-fpm
 ci_docker_wait_for_mysql_readiness "pre-pr-quick"
 ci_docker_wait_for_service_exec php-fpm "pre-pr-quick" php -v

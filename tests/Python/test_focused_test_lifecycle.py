@@ -146,6 +146,19 @@ exit 0
         }
         self.assertEqual(len(projects), 2)
 
+    def test_failed_preparation_cleans_only_its_own_empty_directory(self):
+        command = (
+            "set -e; source scripts/ci/docker_compose_helpers.sh; "
+            "CI_DOCKER_COMPOSE_PROJECT_NAME=failed-build; "
+            "ci_docker_claim_fresh_project; ci_docker_configure_mysql_data_path; "
+            "ci_docker_cleanup_stack; "
+            'test ! -e "$CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH"'
+        )
+        result = subprocess.run(["bash", "-c", command], cwd=self.root,
+                                env=self.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(any(" down " in f" {line} " for line in self.log_lines()))
+
     def test_existing_bind_data_is_not_adopted_or_removed(self):
         data = self.root / "docker/.ci-mysql/retained-test"
         data.mkdir(parents=True)
