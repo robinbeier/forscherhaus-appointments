@@ -232,6 +232,7 @@ final class CalendarCombinedAuthorizationTest extends TestCase
         );
         $this->controller()->save_appointment();
 
+        $this->assertSame(403, get_instance()->output->statusCode);
         $this->assertDenied();
         $this->assertSame('Before', $this->customerLastName($customer));
         $this->assertSame(0, $this->notifications->savedCalls);
@@ -329,7 +330,6 @@ final class CalendarCombinedAuthorizationTest extends TestCase
         $controller->save_appointment();
         $secondary->close();
 
-        $this->assertSame(403, get_instance()->output->statusCode);
         $response = $this->decode();
         $stored = $this->storedAppointment($appointment);
         $this->assertSame(
@@ -415,6 +415,71 @@ final class CalendarCombinedAuthorizationTest extends TestCase
         $stored = $this->storedAppointment($appointment);
         $this->assertSame($foreignProvider, (int) $stored['id_users_provider']);
         $this->assertSame('2035-05-08 09:00:00', $stored['start_datetime']);
+        $this->assertSame(0, $this->notifications->savedCalls);
+    }
+
+    public function testCustomerAccessIsRevalidatedAfterGrantAppointmentDrift(): void
+    {
+        $pair = $this->fixtures->resolveProviderServicePair();
+        $customerA = $this->fixtures->createCustomer(['last_name' => 'Stored']);
+        $customerB = $this->fixtures->createCustomer(['last_name' => 'Requested']);
+        $foreignCustomer = $this->fixtures->createCustomer(['last_name' => 'Foreign']);
+        $appointment = $this->fixtures->createAppointment(
+            $pair['provider_id'],
+            $customerA,
+            $pair['service_id'],
+            new DateTimeImmutable('2035-05-09 09:00:00'),
+        );
+        $grantAppointment = $this->fixtures->createAppointment(
+            $pair['provider_id'],
+            $customerB,
+            $pair['service_id'],
+            new DateTimeImmutable('2035-05-09 11:00:00'),
+        );
+        $secondary = get_instance()->load->database('', true);
+        $this->setRolePrivileges(DB_SLUG_PROVIDER, 'customers', PRIV_VIEW | PRIV_EDIT);
+        $this->setRolePrivileges(DB_SLUG_PROVIDER, 'appointments', PRIV_VIEW | PRIV_EDIT);
+        $this->authenticate($pair['provider_id'], DB_SLUG_PROVIDER);
+        $permissions = new class (get_instance()->permissions, $secondary, $grantAppointment, $foreignCustomer) {
+            public bool $reassigned = false;
+
+            public function __construct(
+                private object $permissions,
+                private object $secondary,
+                private int $grantAppointment,
+                private int $foreignCustomer,
+            ) {}
+
+            public function has_customer_access(int $userId, int $customerId): bool
+            {
+                $allowed = $this->permissions->has_customer_access($userId, $customerId);
+
+                if (!$this->reassigned && $allowed) {
+                    $this->reassigned = $this->secondary->update(
+                        'appointments',
+                        ['id_users_customer' => $this->foreignCustomer],
+                        ['id' => $this->grantAppointment],
+                    );
+                }
+
+                return $allowed;
+            }
+        };
+        $controller = $this->controller();
+        $controller->permissions = $permissions;
+        $this->post(
+            $this->customerPayload($customerB, 'Should Roll Back'),
+            $this->appointmentPayload($appointment, $pair['provider_id'], $pair['service_id'], $customerA),
+        );
+
+        $controller->save_appointment();
+        $secondary->close();
+
+        $this->assertTrue($permissions->reassigned);
+        $this->assertSame(403, get_instance()->output->statusCode);
+        $this->assertDenied();
+        $this->assertSame($customerA, (int) $this->storedAppointment($appointment)['id_users_customer']);
+        $this->assertSame('Requested', $this->customerLastName($customerB));
         $this->assertSame(0, $this->notifications->savedCalls);
     }
 

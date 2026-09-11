@@ -246,7 +246,7 @@ class Calendar extends EA_Controller
                     !empty($customer_id) &&
                     !$this->permissions->has_customer_access((int) session('user_id'), $customer_id)
                 ) {
-                    throw new RuntimeException('You do not have the required permissions for this task.');
+                    throw new RuntimeException('You do not have the required permissions for this task.', 403);
                 }
             }
 
@@ -273,6 +273,18 @@ class Calendar extends EA_Controller
                     if ($this->appointment_parent_ids_changed($stored_appointment, $locked_appointment)) {
                         throw new RuntimeException(lang('requested_hour_is_unavailable'));
                     }
+
+                    foreach (
+                        [$customer_data['id'] ?? null, $appointment_data['id_users_customer'] ?? null]
+                        as $customer_id
+                    ) {
+                        if (
+                            !empty($customer_id) &&
+                            !$this->permissions->has_customer_access((int) session('user_id'), $customer_id)
+                        ) {
+                            throw new RuntimeException('You do not have the required permissions for this task.', 403);
+                        }
+                    }
                 }
 
                 // Save customer changes to the database.
@@ -284,7 +296,7 @@ class Calendar extends EA_Controller
                         : can('add', PRIV_CUSTOMERS);
 
                     if (!$required_permissions) {
-                        throw new RuntimeException('You do not have the required permissions for this task.');
+                        throw new RuntimeException('You do not have the required permissions for this task.', 403);
                     }
 
                     $this->customers_model->only($customer, $this->allowed_customer_fields);
@@ -303,7 +315,7 @@ class Calendar extends EA_Controller
                         : can('add', PRIV_APPOINTMENTS);
 
                     if (!$required_permissions) {
-                        throw new RuntimeException('You do not have the required permissions for this task.');
+                        throw new RuntimeException('You do not have the required permissions for this task.', 403);
                     }
 
                     // If the appointment does not contain the customer record id, then it means that is going to be inserted.
