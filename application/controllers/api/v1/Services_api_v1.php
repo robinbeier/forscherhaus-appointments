@@ -150,15 +150,12 @@ class Services_api_v1 extends EA_Controller
 
             $this->services_model->api_decode($service, $original_service);
 
-            $buffer_values_changed =
-                (int) ($original_service['buffer_before'] ?? 0) !== (int) ($service['buffer_before'] ?? 0) ||
-                (int) ($original_service['buffer_after'] ?? 0) !== (int) ($service['buffer_after'] ?? 0);
-
             if (!$this->db->trans_begin()) {
                 throw new RuntimeException('Could not start service transaction.');
             }
 
             try {
+                $buffer_values_changed = false;
                 $service_id = $this->services_model->save($service, $buffer_values_changed);
 
                 if ($buffer_values_changed) {

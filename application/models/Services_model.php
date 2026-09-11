@@ -57,20 +57,22 @@ class Services_model extends EA_Model
      * Save (insert or update) a service.
      *
      * @param array $service Associative array with the service data.
+     * @param bool|null $buffer_values_changed Set to whether the locked current buffer values changed.
      *
      * @return int Returns the service ID.
      *
      * @throws InvalidArgumentException
      */
-    public function save(array $service, bool $lock_buffer_parents = false): int
+    public function save(array $service, ?bool &$buffer_values_changed = null): int
     {
+        $buffer_values_changed = false;
         $this->validate($service);
         $service = $this->normalize_buffer_values($service);
 
         if (empty($service['id'])) {
             return $this->insert($service);
         } else {
-            return $this->update($service, $lock_buffer_parents);
+            return $this->update($service, $buffer_values_changed);
         }
     }
 
@@ -238,42 +240,38 @@ class Services_model extends EA_Model
      * Update an existing service.
      *
      * @param array $service Associative array with the service data.
+     * @param bool|null $buffer_values_changed Set to whether the locked current buffer values changed.
      *
      * @return int Returns the service ID.
      *
      * @throws RuntimeException
      */
-    protected function update(array $service, bool $lock_buffer_parents = false): int
+    protected function update(array $service, ?bool &$buffer_values_changed = null): int
     {
         $service_id = (int) $service['id'];
         $owns_transaction = false;
-        if ($lock_buffer_parents) {
-            $this->lock_buffer_sync_parents($service_id);
-        } else {
-            if (!$this->db->trans_active()) {
-                if (!$this->db->trans_begin()) {
-                    throw new RuntimeException('Could not start service update transaction.');
-                }
-                $owns_transaction = true;
+
+        if (!$this->db->trans_active()) {
+            if (!$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start service update transaction.');
             }
+            $owns_transaction = true;
         }
 
         try {
-            if (!$lock_buffer_parents) {
-                $current_service = $this->db
-                    ->query(
-                        'SELECT `buffer_before`, `buffer_after` FROM `' .
-                            $this->db->dbprefix('services') .
-                            '` WHERE `id` = ? FOR UPDATE',
-                        [$service_id],
-                    )
-                    ->row_array();
-                foreach (['buffer_before', 'buffer_after'] as $field) {
-                    if (array_key_exists($field, $service) && array_key_exists($field, $current_service)) {
-                        $service[$field] = $current_service[$field];
-                    }
+            // Full service payloads can be stale by the time the transaction starts.
+            // Always establish the global parent order before comparing buffers.
+            $current_service = $this->lock_buffer_sync_parents($service_id);
+
+            foreach (['buffer_before', 'buffer_after'] as $field) {
+                if (!array_key_exists($field, $service)) {
+                    $service[$field] = $current_service[$field] ?? 0;
                 }
             }
+
+            $buffer_values_changed =
+                (int) ($current_service['buffer_before'] ?? 0) !== (int) ($service['buffer_before'] ?? 0) ||
+                (int) ($current_service['buffer_after'] ?? 0) !== (int) ($service['buffer_after'] ?? 0);
 
             $service['update_datetime'] = date('Y-m-d H:i:s');
 

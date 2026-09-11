@@ -200,15 +200,9 @@ class Services extends EA_Controller
 
             $this->services_model->only($service, $this->allowed_service_fields);
             $has_category_id = array_key_exists('id_service_categories', $service);
-            $buffer_values_changed = false;
-
             if (!empty($service['id'])) {
                 $existing_service = $this->services_model->find((int) $service['id']);
                 $service = array_merge($existing_service, $service);
-
-                $buffer_values_changed =
-                    (int) ($existing_service['buffer_before'] ?? 0) !== (int) ($service['buffer_before'] ?? 0) ||
-                    (int) ($existing_service['buffer_after'] ?? 0) !== (int) ($service['buffer_after'] ?? 0);
             }
 
             if (!$has_category_id) {
@@ -222,6 +216,7 @@ class Services extends EA_Controller
             }
 
             try {
+                $buffer_values_changed = false;
                 $service_id = $this->services_model->save($service, $buffer_values_changed);
 
                 if ($buffer_values_changed) {

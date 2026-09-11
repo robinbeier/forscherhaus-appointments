@@ -86,7 +86,9 @@ class AppointmentsModelBufferBlockTest extends TestCase
                 $service = $this->servicesModel->find($service_id);
                 $service['buffer_after'] = EVENT_MINIMUM_DURATION;
                 get_instance()->db->trans_begin();
-                $this->servicesModel->save($service, true);
+                $buffer_values_changed = false;
+                $this->servicesModel->save($service, $buffer_values_changed);
+                $this->assertTrue($buffer_values_changed);
                 get_instance()->db->trans_commit();
 
                 $this->appointmentsModel->sync_service_buffer_unavailabilities($service_id);
@@ -149,7 +151,9 @@ class AppointmentsModelBufferBlockTest extends TestCase
             $service['buffer_before'] = 0;
             $service['buffer_after'] = EVENT_MINIMUM_DURATION;
             get_instance()->db->trans_begin();
-            $this->servicesModel->save($service, true);
+            $buffer_values_changed = false;
+            $this->servicesModel->save($service, $buffer_values_changed);
+            $this->assertTrue($buffer_values_changed);
             get_instance()->db->trans_commit();
 
             $this->appointmentsModel->sync_service_buffer_unavailabilities($service_id);
@@ -240,7 +244,9 @@ class AppointmentsModelBufferBlockTest extends TestCase
                 $service = $this->servicesModel->find($service_id);
                 $service['buffer_after'] = 0;
                 get_instance()->db->trans_begin();
-                $this->servicesModel->save($service, true);
+                $buffer_values_changed = false;
+                $this->servicesModel->save($service, $buffer_values_changed);
+                $this->assertTrue($buffer_values_changed);
                 get_instance()->db->trans_commit();
 
                 $this->appointmentsModel->sync_service_buffer_unavailabilities($service_id);
@@ -323,7 +329,9 @@ class AppointmentsModelBufferBlockTest extends TestCase
                     $service = $this->servicesModel->find($service_id);
                     $service['buffer_after'] = EVENT_MINIMUM_DURATION;
                     get_instance()->db->trans_begin();
-                    $this->servicesModel->save($service, true);
+                    $buffer_values_changed = false;
+                    $this->servicesModel->save($service, $buffer_values_changed);
+                    $this->assertTrue($buffer_values_changed);
                     get_instance()->db->trans_commit();
 
                     $this->appointmentsModel->sync_service_buffer_unavailabilities($service_id);
