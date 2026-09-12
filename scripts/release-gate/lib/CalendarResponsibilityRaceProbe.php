@@ -668,31 +668,96 @@ final class CalendarResponsibilityRaceProbe
     /** @param array<string,mixed> $before @param array<string,mixed> $fixture */
     private function restoreOwnedAppointment(array $before, array $fixture): void
     {
-        $current = $this->appointmentSnapshot($fixture);
-        if (
-            !in_array(
-                (int) $current['id_users_provider'],
-                [(int) $before['id_users_provider'], (int) $fixture['foreign_provider_id']],
-                true,
-            )
-        ) {
-            throw new RuntimeException(
-                'Calendar race appointment ownership changed ambiguously; refusing restoration.',
+        if (!$this->db->trans_begin()) {
+            throw new RuntimeException('Owned calendar race appointment restoration transaction could not start.');
+        }
+        try {
+            $userIds = array_values(
+                array_unique(
+                    array_filter(
+                        array_map('intval', [
+                            $before['id_users_customer'],
+                            $before['id_users_provider'],
+                            $fixture['foreign_provider_id'],
+                        ]),
+                        static fn(int $id): bool => $id > 0,
+                    ),
+                ),
             );
+            sort($userIds, SORT_NUMERIC);
+            $usersTable = $this->db->escape_identifiers($this->db->dbprefix('users'));
+            $placeholders = implode(', ', array_fill(0, count($userIds), '?'));
+            $lockedUsers = $this->db
+                ->query(
+                    'SELECT id FROM ' . $usersTable . ' WHERE id IN (' . $placeholders . ') ORDER BY id ASC FOR UPDATE',
+                    $userIds,
+                )
+                ->result_array();
+            if (count($lockedUsers) !== count($userIds)) {
+                throw new RuntimeException('Owned calendar race appointment parent lock set is incomplete.');
+            }
+
+            $appointmentsTable = $this->db->escape_identifiers($this->db->dbprefix('appointments'));
+            $current = $this->db
+                ->query('SELECT * FROM ' . $appointmentsTable . ' WHERE id = ? FOR UPDATE', [
+                    $fixture['appointment_id'],
+                ])
+                ->row_array();
+            if (!is_array($current) || $current === []) {
+                throw new RuntimeException('Owned calendar race appointment restoration row is unavailable.');
+            }
+            $current = $this->normalizeAppointment($current);
+            $before = $this->normalizeAppointment($before);
+            $foreignState = $before;
+            $foreignState['id_users_provider'] = (int) $fixture['foreign_provider_id'];
+            if ($current !== $before && $current !== $foreignState) {
+                throw new RuntimeException(
+                    'Owned calendar race appointment drifted beyond the permitted provider reassignment; refusing restoration.',
+                );
+            }
+            if ($current === $foreignState) {
+                if (
+                    !$this->db->update(
+                        'appointments',
+                        ['id_users_provider' => (int) $before['id_users_provider']],
+                        [
+                            'id' => $fixture['appointment_id'],
+                            'notes' => $fixture['marker'],
+                            'id_users_provider' => $fixture['foreign_provider_id'],
+                        ],
+                    ) ||
+                    $this->db->affected_rows() !== 1
+                ) {
+                    throw new RuntimeException('Owned calendar race appointment restoration failed.');
+                }
+            }
+            $verified = $this->db
+                ->query('SELECT * FROM ' . $appointmentsTable . ' WHERE id = ? FOR UPDATE', [
+                    $fixture['appointment_id'],
+                ])
+                ->row_array();
+            if (!is_array($verified) || $this->normalizeAppointment($verified) !== $before) {
+                throw new RuntimeException('Owned calendar race appointment restoration was not verified.');
+            }
+            if (!$this->db->trans_commit()) {
+                throw new RuntimeException('Owned calendar race appointment restoration transaction could not commit.');
+            }
+        } catch (Throwable $error) {
+            $this->db->trans_rollback();
+            throw $error;
         }
-        $restore = $before;
-        unset($restore['id']);
-        if (
-            !$this->db->update('appointments', $restore, [
-                'id' => $fixture['appointment_id'],
-                'notes' => $fixture['marker'],
-            ])
-        ) {
-            throw new RuntimeException('Owned calendar race appointment restoration failed.');
+    }
+
+    /** @param array<string,mixed> $row @return array<string,mixed> */
+    private function normalizeAppointment(array $row): array
+    {
+        foreach (['id', 'id_users_provider', 'id_users_customer', 'id_services', 'id_parent_appointment'] as $field) {
+            if (array_key_exists($field, $row) && $row[$field] !== null) {
+                $row[$field] = (int) $row[$field];
+            }
         }
-        if ($this->appointmentSnapshot($fixture) !== $before) {
-            throw new RuntimeException('Owned calendar race appointment restoration was not verified.');
-        }
+
+        return $row;
     }
 
     private function newConnection(): object

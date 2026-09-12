@@ -210,7 +210,10 @@ a different customer or multiple candidates fail closed. A separate database
 transaction then commits the appointment's provider reassignment; after the lock
 is released, the request must return `403` and must not produce any appointment
 change beyond that administrative reassignment. The appointment is restored to
-its exact prior snapshot before wrapper cleanup. This is direct evidence for one
+its exact prior snapshot before wrapper cleanup only after a transaction locks
+its parents and full row and confirms that no field other than the expected
+provider reassignment changed; restoration updates only the provider field. Any
+other drift remains untouched and fails closed. This is direct evidence for one
 specified responsibility-change schedule, not proof of all possible interleavings.
 If an error occurs while the HTTP request is still active, the harness identifies
 its exact synthetic parent-lock query when possible and attempts to terminate that

@@ -119,27 +119,26 @@ final class CalendarResponsibilityRaceProbeTest extends TestCase
             $appointment = $fixture->appointment();
             $server = new DefenseCycleHttpServer();
             $actor = $fixture->row('users', $fixture->providerId);
+            $actorContext = [
+                'user_id' => $fixture->providerId,
+                'username' => $fixture->run . '_provider',
+                'password' => $fixture->password,
+                'email' => (string) $actor['email'],
+                'marker' => (string) $actor['notes'],
+            ];
+            $raceFixture = [
+                'profile' => 'calendar_race',
+                'marker' => $fixture->run,
+                'appointment_id' => (int) $appointment['id'],
+                'foreign_provider_id' => $foreignProviderId,
+                'customer_id' => $fixture->customerId,
+                'service_id' => $fixture->serviceId,
+            ];
             $result = (new CalendarResponsibilityRaceProbe(
                 new \ReleaseGate\GateHttpClient($server->baseUrl, additionalHeaders: ['X-FH-Ordinary-Probe' => '1']),
                 $db,
                 $server->baseUrl,
-            ))->run(
-                [
-                    'user_id' => $fixture->providerId,
-                    'username' => $fixture->run . '_provider',
-                    'password' => $fixture->password,
-                    'email' => (string) $actor['email'],
-                    'marker' => (string) $actor['notes'],
-                ],
-                [
-                    'profile' => 'calendar_race',
-                    'marker' => $fixture->run,
-                    'appointment_id' => (int) $appointment['id'],
-                    'foreign_provider_id' => $foreignProviderId,
-                    'customer_id' => $fixture->customerId,
-                    'service_id' => $fixture->serviceId,
-                ],
-            );
+            ))->run($actorContext, $raceFixture);
 
             self::assertSame('verified', $result['status']);
             self::assertSame('targeted_concurrent_schedule', $result['coverage']);
@@ -150,6 +149,45 @@ final class CalendarResponsibilityRaceProbeTest extends TestCase
             self::assertSame(
                 $fixture->providerId,
                 (int) $fixture->row('appointments', (int) $appointment['id'])['id_users_provider'],
+            );
+
+            $driftAppointment = $fixture->appointment();
+            $originalStart = (string) $driftAppointment['start_datetime'];
+            $driftedStart = date('Y-m-d H:i:s', strtotime($originalStart . ' +2 hours'));
+            $driftError = null;
+            try {
+                (new CalendarResponsibilityRaceProbe(
+                    new \ReleaseGate\GateHttpClient(
+                        $server->baseUrl,
+                        additionalHeaders: ['X-FH-Ordinary-Probe' => '1'],
+                    ),
+                    $db,
+                    $server->baseUrl,
+                ))->run(
+                    [...$actorContext],
+                    [...$raceFixture, 'appointment_id' => (int) $driftAppointment['id']],
+                    static function (string $phase, string $outcome) use ($db, $driftAppointment, $driftedStart): void {
+                        if ($phase === 'race_response' && $outcome === 'passed') {
+                            $db->update(
+                                'appointments',
+                                ['start_datetime' => $driftedStart],
+                                ['id' => $driftAppointment['id']],
+                            );
+                        }
+                    },
+                );
+            } catch (\Throwable $error) {
+                $driftError = $error;
+            }
+            self::assertInstanceOf(\Throwable::class, $driftError);
+            self::assertSame(
+                $driftedStart,
+                (string) $fixture->row('appointments', (int) $driftAppointment['id'])['start_datetime'],
+            );
+            $db->update(
+                'appointments',
+                ['start_datetime' => $originalStart, 'id_users_provider' => $fixture->providerId],
+                ['id' => $driftAppointment['id']],
             );
         } finally {
             try {
