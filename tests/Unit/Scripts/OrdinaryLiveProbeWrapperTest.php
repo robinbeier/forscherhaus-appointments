@@ -23,8 +23,8 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
         file_put_contents(
             $this->wrapper,
             str_replace(
-                '/root/deploy_ea.sh',
-                $this->sandbox . '/installed-deploy.sh',
+                ['/root/deploy_ea.sh', '/var/lib/fh-defense-ordinary'],
+                [$this->sandbox . '/installed-deploy.sh', $this->sandbox . '/ordinary-state'],
                 file_get_contents(__DIR__ . '/../../../scripts/ops/run_ordinary_live_probe.sh'),
             ),
         );
@@ -40,6 +40,7 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
         }
         ordinary_probe_begin() { echo pending-begin >> "$MOCK_LOG"; }
         ordinary_probe_finish() { echo pending-finish >> "$MOCK_LOG"; }
+        ordinary_trusted_path() { return 0; }
         SH;
         file_put_contents($this->sandbox . '/deploy_ea.sh', $coordination);
         file_put_contents($this->sandbox . '/installed-deploy.sh', $coordination);
@@ -53,6 +54,10 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
                 'OrdinaryProbeEvidence.php',
                 'OrdinarySessionProbe.php',
                 'OrdinaryAccountProbe.php',
+                'AccountSecurityMatrixProbe.php',
+                'CustomerRoleBoundaryProbe.php',
+                'CalendarResponsibilityRaceProbe.php',
+                'DefenseVerificationFixture.php',
             ]
             as $file
         ) {
@@ -68,6 +73,7 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
             );
         }
         mkdir($this->sandbox . '/app', 0700);
+        mkdir($this->sandbox . '/ordinary-state', 0700);
         file_put_contents($this->sandbox . '/app/original-marker', 'owned');
         file_put_contents($this->log, '');
         $this->writeMock('id', "#!/bin/sh\necho 0\n");
@@ -95,7 +101,7 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
         );
         $this->writeMock(
             'php',
-            "#!/bin/sh\necho \"php \$*\" >> \"\$MOCK_LOG\"\nfor arg in \"\$@\"; do case \"\$arg\" in --action=*) action=\"\${arg#--action=}\";; esac; done\ncase \",\${MOCK_PHP_FAIL_ACTIONS:-},\" in *\",\$action,\"*) exit 42;; esac\nexit 0\n",
+            "#!/bin/sh\necho \"php \$*\" >> \"\$MOCK_LOG\"\nfor arg in \"\$@\"; do case \"\$arg\" in --action=*) action=\"\${arg#--action=}\";; esac; done\n[ \"\${MOCK_PHP_UNCONFIRMED_ACTION:-}\" != \"\$action\" ] || exit 86\ncase \",\${MOCK_PHP_FAIL_ACTIONS:-},\" in *\",\$action,\"*) exit 42;; esac\nexit 0\n",
         );
         $this->writeMock(
             'systemctl',
@@ -190,6 +196,39 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
         );
     }
 
+    public function testSecurityActionsUseOneExpectedProbeAndSyntheticActorRole(): void
+    {
+        foreach (
+            [
+                'methods' => 'provider',
+                'customer-boundary' => 'admin',
+                'calendar-race' => 'provider',
+            ]
+            as $action => $role
+        ) {
+            file_put_contents($this->log, '');
+            if (is_file($this->log . '.armed')) {
+                unlink($this->log . '.armed');
+            }
+            $result = $this->executeWrapper($action);
+            self::assertSame(0, $result['status'], $action . ': ' . $result['error']);
+            self::assertSame(
+                ['preflight', 'activate', $action, 'deactivate', 'verify'],
+                $this->actions($result['lines']),
+            );
+            $activation = array_values(
+                array_filter(
+                    $result['lines'],
+                    static fn(string $line): bool => str_starts_with($line, 'php ') &&
+                        str_contains($line, '--action=activate'),
+                ),
+            );
+            self::assertCount(1, $activation);
+            self::assertStringContainsString('--fixture-role=' . $role, $activation[0]);
+            self::assertContains('pending-finish', $result['lines']);
+        }
+    }
+
     public function testCleanupCallbackCanRetryAfterLockOwnerReleases(): void
     {
         $result = $this->executeWrapper('account', ['MOCK_CALLBACK_RETRY' => '1']);
@@ -243,6 +282,42 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
         self::assertContains('pending-begin', $result['lines']);
         self::assertContains('deactivate', $this->actions($result['lines']));
         self::assertNotContains('pending-finish', $result['lines']);
+    }
+
+    public function testUnconfirmedCalendarRequestCreatesIndependentBlockAndSkipsAutomaticCleanup(): void
+    {
+        $result = $this->executeWrapper('calendar-race', [
+            'MOCK_PHP_UNCONFIRMED_ACTION' => 'calendar-race',
+        ]);
+
+        self::assertSame(86, $result['status']);
+        self::assertSame(['preflight', 'activate', 'calendar-race'], $this->actions($result['lines']));
+        self::assertDirectoryExists($this->sandbox . '/ordinary-state/request-unconfirmed');
+        self::assertNotContains('deactivate', $this->actions($result['lines']));
+        self::assertNotContains('pending-finish', $result['lines']);
+        self::assertFalse(
+            (bool) array_filter(
+                $result['lines'],
+                static fn(string $line): bool => str_starts_with($line, 'systemctl stop'),
+            ),
+        );
+    }
+
+    public function testUnconfirmedRequestStopsTimerWhenIndependentMarkerCannotBeEstablished(): void
+    {
+        file_put_contents(
+            $this->sandbox . '/ordinary-state/request-unconfirmed',
+            'synthetic invalid recovery artifact',
+        );
+        $result = $this->executeWrapper('calendar-race', [
+            'MOCK_PHP_UNCONFIRMED_ACTION' => 'calendar-race',
+        ]);
+
+        self::assertSame(1, $result['status']);
+        self::assertSame(['preflight', 'activate', 'calendar-race'], $this->actions($result['lines']));
+        self::assertContains('systemctl stop fh-defense-ordinary-cleanup.timer', $result['lines']);
+        self::assertContains('systemctl stop fh-defense-ordinary-cleanup.service', $result['lines']);
+        self::assertNotContains('deactivate', $this->actions($result['lines']));
     }
 
     public function testFailedPreflightDoesNotArmTimerOrActivateIdentity(): void

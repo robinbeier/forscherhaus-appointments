@@ -10,6 +10,12 @@
             <file>./tests/Integration/OrdinaryAccountProbeTest.php</file>
             <file>./tests/Integration/OrdinarySessionProbeTest.php</file>
             <file>./tests/Integration/OrdinaryProbeEvidenceTest.php</file>
+            <file>./tests/Integration/AccountSecurityMatrixProbeTest.php</file>
+            <file>./tests/Integration/CustomerRoleBoundaryProbeTest.php</file>
+            <file>./tests/Integration/CalendarResponsibilityRaceProbeTest.php</file>
+            <file>./tests/Integration/DefenseVerificationFixtureTest.php</file>
+            <file>./tests/Unit/Scripts/GateHttpClientTest.php</file>
+            <file>./tests/Unit/Scripts/OrdinaryLiveProbeWrapperTest.php</file>
             <file>./tests/Unit/Scripts/OrdinaryDeploymentCoordinationTest.php</file>
         </testsuite>
     </testsuites>

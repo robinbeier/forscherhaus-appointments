@@ -73,21 +73,37 @@ final class GateHttpClient
         ?int $timeoutSeconds = null,
         bool $withCsrfToken = true,
     ): GateHttpResponse {
-        if ($withCsrfToken && !array_key_exists($this->csrfTokenName, $form)) {
-            $csrfToken = $this->getCookie($this->csrfCookieName);
-
-            if ($csrfToken === null || $csrfToken === '') {
-                throw new RuntimeException(
-                    'Missing ' . $this->csrfCookieName . ' before POST request to "' . $path . '".',
-                );
-            }
-
-            $form[$this->csrfTokenName] = $csrfToken;
-        }
+        $form = $this->prepareAppRequestForm('POST', $form, $withCsrfToken, $path);
 
         $url = $this->buildAppUrl($path);
 
         return $this->request('POST', $url, $form, $timeoutSeconds ?? $this->defaultTimeoutSeconds);
+    }
+
+    /**
+     * Send an HTTP request to an app-relative path.
+     *
+     * @param array<string, mixed> $form
+     */
+    public function requestApp(
+        string $method,
+        string $path,
+        array $form = [],
+        ?int $timeoutSeconds = null,
+        bool $withCsrfToken = false,
+    ): GateHttpResponse {
+        $normalizedMethod = $this->normalizeAppRequestMethod($method);
+        $form = $this->prepareAppRequestForm($normalizedMethod, $form, $withCsrfToken, $path);
+
+        return $this->request(
+            $normalizedMethod,
+            $this->buildAppUrl($path),
+            $form === [] ? null : $form,
+            $timeoutSeconds ?? $this->defaultTimeoutSeconds,
+            true,
+            true,
+            $this->shouldSuppressResponseBody($normalizedMethod),
+        );
     }
 
     public function getAbsolute(string $url, ?int $timeoutSeconds = null): GateHttpResponse
@@ -138,6 +154,7 @@ final class GateHttpClient
         int $timeoutSeconds,
         bool $useCookieJar = true,
         bool $consumeResponseCookies = true,
+        bool $noBody = false,
     ): GateHttpResponse {
         if (!function_exists('curl_init')) {
             throw new RuntimeException('ext-curl is required for the release gate.');
@@ -226,6 +243,7 @@ final class GateHttpClient
             CURLOPT_URL => $url,
             CURLOPT_CUSTOMREQUEST => strtoupper($method),
             CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_NOBODY => $noBody,
             CURLOPT_FOLLOWLOCATION => $this->additionalHeaders === [],
             CURLOPT_MAXREDIRS => 5,
             CURLOPT_TIMEOUT => $timeoutSeconds,
@@ -277,6 +295,51 @@ final class GateHttpClient
         }
 
         return $response;
+    }
+
+    private function normalizeAppRequestMethod(string $method): string
+    {
+        $normalized = strtoupper(trim($method));
+        $allowed = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'];
+
+        if (!in_array($normalized, $allowed, true)) {
+            throw new RuntimeException('Unsupported app request method: "' . $method . '".');
+        }
+
+        return $normalized;
+    }
+
+    private function shouldSuppressResponseBody(string $method): bool
+    {
+        return $method === 'HEAD';
+    }
+
+    /**
+     * @param array<string, mixed> $form
+     * @return array<string, mixed>
+     */
+    private function prepareAppRequestForm(string $method, array $form, bool $withCsrfToken, string $path): array
+    {
+        if (!$withCsrfToken) {
+            return $form;
+        }
+
+        if ($method !== 'POST') {
+            throw new RuntimeException('CSRF token injection is only supported for POST app requests.');
+        }
+
+        if (array_key_exists($this->csrfTokenName, $form)) {
+            return $form;
+        }
+
+        $csrfToken = $this->getCookie($this->csrfCookieName);
+        if ($csrfToken === null || $csrfToken === '') {
+            throw new RuntimeException('Missing ' . $this->csrfCookieName . ' before POST request to "' . $path . '".');
+        }
+
+        $form[$this->csrfTokenName] = $csrfToken;
+
+        return $form;
     }
 
     private function isSameOrigin(string $left, string $right): bool
