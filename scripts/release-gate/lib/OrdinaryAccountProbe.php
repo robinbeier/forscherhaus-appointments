@@ -1,0 +1,166 @@
+<?php
+
+declare(strict_types=1);
+
+namespace ReleaseGate;
+
+use RuntimeException;
+
+/**
+ * Exercises the ordinary authenticated account flow for one owned synthetic user.
+ *
+ * The probe deliberately covers the positive own-account path and the method
+ * guard. It does not claim to be a complete authorization or CSRF matrix.
+ */
+final class OrdinaryAccountProbe
+{
+    public function __construct(
+        private readonly GateHttpClient $client,
+        private readonly object $db,
+        ?callable $rememberSession = null,
+    ) {
+        $this->rememberSession = $rememberSession ?? static function (?string $session): void {};
+    }
+
+    /** @var callable(?string):void */
+    private readonly mixed $rememberSession;
+
+    /**
+     * @param array{user_id:int,username:string,password:string,run_id:string} $context
+     * @return array{status:string,coverage:string,login_status:int,account_status:int,save_status:int,get_save_status:int,logout_status:int,post_logout_account_status:int,observed:string}
+     */
+    public function run(array $context): array
+    {
+        $userId = (int) ($context['user_id'] ?? 0);
+        $username = (string) ($context['username'] ?? '');
+        $password = (string) ($context['password'] ?? '');
+        if ($userId < 1 || $username === '' || $password === '') {
+            throw new RuntimeException('Ordinary account probe requires one complete synthetic user context.');
+        }
+
+        $before = $this->snapshot($userId);
+        $loggedIn = false;
+        $logoutStatus = 0;
+        try {
+            $loginPage = $this->client->get('login');
+            $this->remember();
+            $this->expectStatus($loginPage, 200, 'login page');
+            $login = $this->client->post('login/validate', [
+                'username' => $username,
+                'password' => $password,
+            ]);
+            $this->remember();
+            $this->expectStatus($login, 200, 'login validation');
+            $loginData = json_decode($login->body, true, 512, JSON_THROW_ON_ERROR);
+            if (!is_array($loginData) || ($loginData['success'] ?? false) !== true) {
+                throw new RuntimeException('Synthetic account login did not succeed.');
+            }
+            $loggedIn = true;
+
+            $account = $this->client->get('account');
+            $this->remember();
+            $this->expectStatus($account, 200, 'authenticated account page');
+
+            $getSave = $this->client->get('account/save');
+            $this->remember();
+            $this->expectStatus($getSave, 405, 'account/save GET guard');
+            if (strtoupper((string) $getSave->header('allow')) !== 'POST') {
+                throw new RuntimeException('account/save GET did not advertise Allow: POST.');
+            }
+            $afterGet = $this->snapshot($userId);
+            $this->assertSnapshotEqual($before, $afterGet, 'account/save GET changed the synthetic account.');
+
+            $payload = $before['user'];
+            $payload['first_name'] = 'Synthetic Updated';
+            $payload['settings'] = [
+                'username' => $before['settings']['username'],
+                'password' => '',
+                'notifications' => $before['settings']['notifications'],
+                'calendar_view' => $before['settings']['calendar_view'],
+            ];
+            $save = $this->client->post('account/save', ['account' => $payload]);
+            $this->remember();
+            $this->expectStatus($save, 200, 'account/save POST');
+            $after = $this->snapshot($userId);
+            if (($after['user']['first_name'] ?? null) !== 'Synthetic Updated') {
+                throw new RuntimeException('account/save did not persist the synthetic first name.');
+            }
+            $this->assertSnapshotEqualExceptFirstName($before, $after);
+
+            $result = [
+                'status' => 'verified',
+                'coverage' => 'partial',
+                'login_status' => $login->statusCode,
+                'account_status' => $account->statusCode,
+                'save_status' => $save->statusCode,
+                'get_save_status' => $getSave->statusCode,
+                'logout_status' => $logoutStatus,
+                'post_logout_account_status' => 0,
+                'observed' =>
+                    'Ordinary synthetic own-account login, GET guard, and protected POST persistence succeeded; other methods and CSRF matrix remain outside this probe.',
+            ];
+        } finally {
+            if ($loggedIn) {
+                try {
+                    $logout = $this->client->get('logout');
+                    $this->remember();
+                    $logoutStatus = $logout->statusCode;
+                    $result['logout_status'] = $logoutStatus;
+                } catch (\Throwable) {
+                    // The owning fixture teardown removes the synthetic account even if logout fails.
+                }
+                $afterLogout = $this->client->get('account');
+                $this->remember();
+                $result['post_logout_account_status'] = $afterLogout->statusCode;
+                if ($afterLogout->statusCode !== 307) {
+                    throw new RuntimeException('Authenticated account remained accessible after synthetic logout.');
+                }
+            }
+        }
+        return $result;
+    }
+
+    private function remember(): void
+    {
+        ($this->rememberSession)($this->client->getCookie('ea_session'));
+    }
+
+    /** @return array{user:array<string,mixed>,settings:array<string,mixed>} */
+    private function snapshot(int $userId): array
+    {
+        $user = $this->db->get_where('users', ['id' => $userId])->row_array();
+        $settings = $this->db->get_where('user_settings', ['id_users' => $userId])->row_array();
+        if (!is_array($user) || $user === [] || !is_array($settings) || $settings === []) {
+            throw new RuntimeException('Synthetic account snapshot is incomplete.');
+        }
+        return ['user' => $user, 'settings' => $settings];
+    }
+
+    private function expectStatus(GateHttpResponse $response, int $expected, string $operation): void
+    {
+        if ($response->statusCode !== $expected) {
+            throw new RuntimeException(
+                $operation . ' returned HTTP ' . $response->statusCode . ', expected ' . $expected . '.',
+            );
+        }
+    }
+
+    /** @param array{user:array<string,mixed>,settings:array<string,mixed>} $before */
+    private function assertSnapshotEqual(array $before, array $after, string $message): void
+    {
+        $before['user']['update_datetime'] = $after['user']['update_datetime'] ?? null;
+        if ($before !== $after) {
+            throw new RuntimeException($message);
+        }
+    }
+
+    /** @param array{user:array<string,mixed>,settings:array<string,mixed>} $before */
+    private function assertSnapshotEqualExceptFirstName(array $before, array $after): void
+    {
+        $before['user']['first_name'] = $after['user']['first_name'];
+        $before['user']['update_datetime'] = $after['user']['update_datetime'] ?? null;
+        if ($before !== $after) {
+            throw new RuntimeException('account/save changed fields beyond the synthetic first name.');
+        }
+    }
+}
