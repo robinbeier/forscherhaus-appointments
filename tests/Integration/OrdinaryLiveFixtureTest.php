@@ -116,6 +116,71 @@ final class OrdinaryLiveFixtureTest extends TestCase
         $this->fixture->activate();
     }
 
+    public function testCleanGuardAllowsCleanStateAndRefusesActiveState(): void
+    {
+        $this->fixture->assertCleanBeforeActivation();
+        $this->fixture->activate();
+        self::expectException(RuntimeException::class);
+        $this->fixture->assertCleanBeforeActivation();
+    }
+
+    public function testOrphanSelectorsEachBlockPreflightAndActivationWithoutNewMutation(): void
+    {
+        $db = &get_instance()->db;
+        $role = $db->get_where('roles', ['slug' => 'provider'])->row_array();
+        foreach (['user', 'settings', 'both'] as $selector) {
+            $marker = ($selector === 'settings' ? 'unrelated-synthetic:' : 'ordinary-live:') . bin2hex(random_bytes(8));
+            $username = ($selector === 'user' ? 'unrelated_synthetic_' : 'defense_live_') . bin2hex(random_bytes(16));
+            $email = bin2hex(random_bytes(16)) . '@synthetic.invalid';
+            $db->insert('users', [
+                'first_name' => 'Orphan',
+                'last_name' => 'Synthetic',
+                'email' => $email,
+                'phone_number' => '000000000',
+                'notes' => $marker,
+                'timezone' => 'UTC',
+                'language' => 'english',
+                'id_roles' => (int) $role['id'],
+                'is_private' => 1,
+            ]);
+            $userId = (int) $db->insert_id();
+            try {
+                $salt = generate_salt();
+                $db->insert('user_settings', [
+                    'id_users' => $userId,
+                    'username' => $username,
+                    'password' => hash_password($salt, bin2hex(random_bytes(16))),
+                    'salt' => $salt,
+                    'working_plan' => '{}',
+                    'working_plan_exceptions' => '{}',
+                    'notifications' => 0,
+                    'google_sync' => 0,
+                    'caldav_sync' => 0,
+                ]);
+                $userCount = $db->count_all('users');
+                $settingsCount = $db->count_all('user_settings');
+                self::assertSame('cleanup_pending', $this->fixture->verify());
+                foreach (['assertCleanBeforeActivation', 'activate'] as $operation) {
+                    $error = null;
+                    try {
+                        $this->fixture->{$operation}();
+                    } catch (RuntimeException $caught) {
+                        $error = $caught;
+                    }
+                    self::assertNotNull($error, $selector . ' must block ' . $operation);
+                    self::assertStringContainsString('Orphaned ordinary fixture rows', $error->getMessage());
+                    self::assertFileDoesNotExist($this->stateDirectory . '/state.json');
+                    self::assertSame($userCount, $db->count_all('users'));
+                    self::assertSame($settingsCount, $db->count_all('user_settings'));
+                }
+            } finally {
+                $db->delete('user_settings', ['id_users' => $userId, 'username' => $username]);
+                $db->delete('users', ['id' => $userId, 'notes' => $marker, 'email' => $email]);
+            }
+            self::assertSame('clean', $this->fixture->verify());
+        }
+    }
+
     public function testPreparedJournalRecoversRowsCommittedBeforeFinalStateWrite(): void
     {
         $state = $this->fixture->activate();

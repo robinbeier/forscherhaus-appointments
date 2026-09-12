@@ -157,7 +157,13 @@ The active application path must retain its pinned directory identity and releas
 marker throughout evidence collection, including the inactivity wait. A deployment
 aborts evidence collection; cleanup still resolves the original directory by inode.
 Account/session runs arm an independent three-hour cleanup timer before inserting
-one identity. They retain that timer if compensation fails. The fixture lifetime
+one identity. They retain that timer if compensation fails. A callback that cannot
+acquire the shared lock within five minutes exits unsuccessfully; its service
+retries after 60 seconds without a start limit, including after the foreground
+owner eventually releases the lock. Successful foreground compensation stops both
+the timer and any pending cleanup service. A permanently stuck owner still needs
+operator intervention; the persistent marker continues blocking deployments.
+The fixture lifetime
 is three hours; there is no new authorization exemption or increased global TTL.
 
 `account` checks normal login, exact own-account identity, a GET receiving

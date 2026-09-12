@@ -104,6 +104,7 @@ try {
     $result = ['action' => $action, 'release' => $expectedRelease];
     if ($action === 'preflight') {
         $sessions->assertCleanBeforeActivation();
+        $fixture->assertCleanBeforeActivation();
         $result += [
             'fixture' => $fixture->verify(),
             'session_expiration_seconds' => $expiration,

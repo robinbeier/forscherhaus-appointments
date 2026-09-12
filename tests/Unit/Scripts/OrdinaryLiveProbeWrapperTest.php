@@ -31,6 +31,7 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
         $coordination = <<<'SH'
         ordinary_production_change_lock() {
             echo coordination-lock >> "$MOCK_LOG"
+            [ "${MOCK_CALLBACK_BUSY:-0}" != 1 ] || return 75
             [ "${MOCK_LOCK_BUSY:-0}" != 1 ] || return 75
         }
         ordinary_assert_no_pending_probe() {
@@ -97,19 +98,44 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
         );
         $this->writeMock(
             'systemctl',
-            "#!/bin/sh\necho \"systemctl \$*\" >> \"\$MOCK_LOG\"\ncase \"\$1\" in show) [ \"\${MOCK_TIMER_EXISTS:-0}\" = 1 ] && echo active || echo not-found;; esac\n",
+            <<<'SH'
+            #!/bin/sh
+            echo "systemctl $*" >> "$MOCK_LOG"
+            if [ "$1" = show ]; then
+                if [ "${MOCK_TIMER_EXISTS:-0}" = 1 ] || [ -f "$MOCK_LOG.armed" ]; then
+                    echo loaded
+                else
+                    echo not-found
+                fi
+            fi
+            SH
+            ,
         );
         $this->writeMock(
             'systemd-run',
             <<<'SH'
             #!/bin/sh
-            printf 'systemd-run armed\n' >> "$MOCK_LOG"
+            : > "$MOCK_LOG.armed"
+            printf 'systemd-run' >> "$MOCK_LOG"
+            for arg do
+                [ "$arg" = /bin/bash ] && break
+                printf ' %s' "$arg" >> "$MOCK_LOG"
+            done
+            printf '\n' >> "$MOCK_LOG"
+            if [ "${MOCK_CALLBACK_RETRY:-0}" = 1 ]; then
+                while [ "$1" != /bin/bash ]; do shift; done
+                MOCK_CALLBACK_BUSY=1 "$@"
+                printf 'callback-blocked:%s\n' "$?" >> "$MOCK_LOG"
+                "$@"
+                printf 'callback-retry:%s\n' "$?" >> "$MOCK_LOG"
+                exit 0
+            fi
             if [ "${MOCK_CALLBACK_RENAME:-0}" = 1 ]; then
                 mv "$APP_ROOT" "$APP_ROOT-renamed"
                 mkdir "$APP_ROOT"
                 if [ "${MOCK_CHANGE_PROBE:-0}" = 1 ]; then : > "$MOCK_LOG.changed-probe"; fi
                 printf 'callback-start\n' >> "$MOCK_LOG"
-                shift 4
+                while [ "$1" != /bin/bash ]; do shift; done
                 "$@"
                 status=$?
                 printf 'callback-exit:%s\n' "$status" >> "$MOCK_LOG"
@@ -145,6 +171,12 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
         self::assertIsInt($activateLine);
         self::assertLessThan($activateLine, $timerIndex);
         self::assertNotContains('session', $this->actions($result['lines']));
+        $timer = $result['lines'][$timerIndex];
+        self::assertStringContainsString('--property=Restart=on-failure', $timer);
+        self::assertStringContainsString('--property=RestartSec=60s', $timer);
+        self::assertStringContainsString('--property=StartLimitIntervalSec=0', $timer);
+        self::assertContains('systemctl stop fh-defense-ordinary-cleanup.timer', $result['lines']);
+        self::assertContains('systemctl stop fh-defense-ordinary-cleanup.service', $result['lines']);
     }
 
     public function testSessionActionRunsOnlyAfterAccount(): void
@@ -157,13 +189,30 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
         );
     }
 
+    public function testCleanupCallbackCanRetryAfterLockOwnerReleases(): void
+    {
+        $result = $this->executeWrapper('account', ['MOCK_CALLBACK_RETRY' => '1']);
+        self::assertSame(0, $result['status'], $result['error']);
+        self::assertContains('callback-blocked:75', $result['lines']);
+        self::assertContains('callback-retry:0', $result['lines']);
+        self::assertSame(
+            ['preflight', 'deactivate', 'activate', 'account', 'deactivate', 'verify'],
+            $this->actions($result['lines']),
+        );
+    }
+
     public function testActivationFailureCompensatesAndRetainsTimerOnCompensationFailure(): void
     {
         $result = $this->executeWrapper('account', ['MOCK_PHP_FAIL_ACTIONS' => 'activate,deactivate']);
         self::assertSame(1, $result['status']);
         self::assertSame(['preflight', 'activate', 'deactivate'], $this->actions($result['lines']));
         self::assertContains('systemd-run', $this->prefixes($result['lines']));
-        self::assertNotContains('systemctl stop', $result['lines']);
+        self::assertFalse(
+            (bool) array_filter(
+                $result['lines'],
+                static fn(string $line): bool => str_starts_with($line, 'systemctl stop'),
+            ),
+        );
     }
 
     public function testExistingTimerRefusesMutation(): void

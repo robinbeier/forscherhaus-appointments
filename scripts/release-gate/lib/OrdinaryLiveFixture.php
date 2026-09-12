@@ -40,6 +40,7 @@ final class OrdinaryLiveFixture
             if (is_link($this->stateFile) || is_file($this->stateFile)) {
                 throw new RuntimeException('An ordinary live fixture already exists; deactivate it first.');
             }
+            $this->assertCleanDatabaseBeforeActivation();
             $role = $this->db->get_where('roles', ['slug' => 'provider'])->row_array();
             if (empty($role['id'])) {
                 throw new RuntimeException('Provider role is missing.');
@@ -116,6 +117,16 @@ final class OrdinaryLiveFixture
                 // exact matching row if the process failed after an insert.
                 throw $e;
             }
+        });
+    }
+
+    public function assertCleanBeforeActivation(): void
+    {
+        $this->withLock(function (): void {
+            if (is_link($this->stateFile) || is_file($this->stateFile)) {
+                throw new RuntimeException('An ordinary live fixture already exists; deactivate it first.');
+            }
+            $this->assertCleanDatabaseBeforeActivation();
         });
     }
 
@@ -276,6 +287,15 @@ final class OrdinaryLiveFixture
         $settings = $this->db->get_where('user_settings', ['username' => $username])->num_rows();
         if ($users !== 0 || $settings !== 0) {
             throw new RuntimeException('Fixture identity collision detected.');
+        }
+    }
+
+    private function assertCleanDatabaseBeforeActivation(): void
+    {
+        $users = $this->db->like('notes', 'ordinary-live:', 'after')->get('users')->num_rows();
+        $settings = $this->db->like('username', 'defense_live_', 'after')->get('user_settings')->num_rows();
+        if ($users !== 0 || $settings !== 0) {
+            throw new RuntimeException('Orphaned ordinary fixture rows require explicit recovery.');
         }
     }
 

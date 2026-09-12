@@ -66,6 +66,14 @@ invoke() {
     return 1
 }
 unit=fh-defense-ordinary-cleanup
+stop_cleanup_units() {
+    local load_state
+    systemctl stop "$unit.timer" || return $?
+    load_state=$(systemctl show "$unit.service" --property=LoadState --value) || return $?
+    if [[ "$load_state" != not-found ]]; then
+        systemctl stop "$unit.service" || return $?
+    fi
+}
 if [[ "$action" == preflight || "$action" == verify ]]; then
     ordinary_assert_no_pending_probe || exit $?
     invoke "$action"
@@ -74,7 +82,7 @@ fi
 if [[ "$action" == cleanup ]]; then
     invoke deactivate
     invoke verify
-    systemctl stop "$unit.timer"
+    stop_cleanup_units
     # Recovery can revoke known identity/session state, but must not erase an
     # interruption marker whose unjournaled response window is not accounted for.
     ordinary_assert_no_pending_probe || exit $?
@@ -102,14 +110,15 @@ for candidate in "$1"/*; do
 done
 echo "original ordinary probe application directory unavailable" >&2
 exit 1'
-# Timer is armed before any account insertion and remains armed if compensation fails.
+# Failed callbacks retry after lock release; foreground cleanup cancels retries.
 systemd-run --quiet --unit="$unit" --on-active=3h --collect \
+    --property=Restart=on-failure --property=RestartSec=60s --property=StartLimitIntervalSec=0 \
     /bin/bash -c "$callback" ordinary-cleanup "$parent" "$identity" "$probe" "$release" "$probe_identity" "$coordination" "$coordination_identity"
 cleanup() {
     local status=$?
     trap - EXIT
     if invoke deactivate && invoke verify; then
-        systemctl stop "$unit.timer" || status=1
+        stop_cleanup_units || status=1
         if [[ "$status" == 0 ]]; then
             ordinary_probe_finish || status=1
         else
