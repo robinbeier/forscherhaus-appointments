@@ -99,6 +99,93 @@ final class DefenseVerificationFixtureTest extends TestCase
         self::assertSame(0, $db->get_where('services_providers', ['id_services' => $state['service_id']])->num_rows());
     }
 
+    public function testCleanupRefusesForeignProviderLinkWithoutDeletingService(): void
+    {
+        $actor = $this->ordinary->activate();
+        $state = $this->fixture->activate('calendar_race', $actor);
+        $db = &get_instance()->db;
+        $providerRole = $db->get_where('roles', ['slug' => 'provider'])->row_array();
+        self::assertIsArray($providerRole);
+        $db->insert('users', [
+            'first_name' => 'Synthetic foreign child',
+            'last_name' => 'cleanup regression',
+            'email' => bin2hex(random_bytes(8)) . '@synthetic.invalid',
+            'phone_number' => '000000000',
+            'notes' => 'foreign-defense-verification-provider-child',
+            'timezone' => 'UTC',
+            'language' => 'english',
+            'id_roles' => (int) $providerRole['id'],
+            'is_private' => 1,
+        ]);
+        $extraProviderId = (int) $db->insert_id();
+        $db->insert('services_providers', [
+            'id_users' => $extraProviderId,
+            'id_services' => (int) $state['service_id'],
+        ]);
+        try {
+            $this->fixture->deactivate();
+            self::fail('Cleanup must refuse a foreign provider relationship.');
+        } catch (RuntimeException $error) {
+            self::assertStringContainsString('Unexpected service provider relationship', $error->getMessage());
+        }
+        self::assertSame(1, $db->get_where('services', ['id' => $state['service_id']])->num_rows());
+        self::assertSame(
+            1,
+            $db
+                ->get_where('services_providers', [
+                    'id_users' => $extraProviderId,
+                    'id_services' => (int) $state['service_id'],
+                ])
+                ->num_rows(),
+        );
+        $db->delete('services_providers', [
+            'id_users' => $extraProviderId,
+            'id_services' => (int) $state['service_id'],
+        ]);
+        $db->delete('users', ['id' => $extraProviderId]);
+        $this->fixture->deactivate();
+        self::assertSame('clean', $this->fixture->verify());
+    }
+
+    public function testCleanupRefusesForeignAppointmentWithoutDeletingItOrService(): void
+    {
+        $actor = $this->ordinary->activate();
+        $state = $this->fixture->activate('calendar_race', $actor);
+        $db = &get_instance()->db;
+        $foreignAppointment = [
+            'create_datetime' => date('Y-m-d H:i:s'),
+            'update_datetime' => date('Y-m-d H:i:s'),
+            'book_datetime' => date('Y-m-d H:i:s'),
+            'start_datetime' => '2099-12-01 10:00:00',
+            'end_datetime' => '2099-12-01 10:30:00',
+            'location' => null,
+            'color' => '#6c757d',
+            'status' => 'Booked',
+            'notes' => 'foreign-defense-verification-child',
+            'hash' => bin2hex(random_bytes(32)),
+            'is_unavailability' => 0,
+            'id_users_provider' => (int) $state['foreign_provider_id'],
+            'id_users_customer' => (int) $state['customer_id'],
+            'id_services' => (int) $state['service_id'],
+            'id_parent_appointment' => null,
+            'id_google_calendar' => null,
+            'id_caldav_calendar' => null,
+        ];
+        $db->insert('appointments', $foreignAppointment);
+        $foreignAppointmentId = (int) $db->insert_id();
+        try {
+            $this->fixture->deactivate();
+            self::fail('Cleanup must refuse foreign service children.');
+        } catch (RuntimeException $error) {
+            self::assertStringContainsString('service appointment relationship drifted', $error->getMessage());
+        }
+        self::assertSame(1, $db->get_where('appointments', ['id' => $foreignAppointmentId])->num_rows());
+        self::assertSame(1, $db->get_where('services', ['id' => $state['service_id']])->num_rows());
+        $db->delete('appointments', ['id' => $foreignAppointmentId]);
+        $this->fixture->deactivate();
+        self::assertSame('clean', $this->fixture->verify());
+    }
+
     public function testPreparedJournalRecoversExactRowsWhenPublishedIdsAreMissing(): void
     {
         $actor = $this->ordinary->activate();

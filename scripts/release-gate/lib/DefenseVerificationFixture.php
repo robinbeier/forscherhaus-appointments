@@ -562,6 +562,7 @@ final class DefenseVerificationFixture
     private function deleteOwned(array $state, bool $alreadyCleaning): void
     {
         $ids = $state['ids'];
+        $this->assertServiceDependencies($state, $alreadyCleaning);
         if (isset($ids['appointment'])) {
             $exists = $this->db->get_where('appointments', ['id' => (int) $ids['appointment']])->num_rows() !== 0;
             if ($exists || !$alreadyCleaning) {
@@ -632,6 +633,69 @@ final class DefenseVerificationFixture
             }
             $this->db->delete('user_settings', ['id_users' => $id, 'username' => $state['usernames'][$key] ?? '']);
             $this->db->delete('users', ['id' => $id, 'notes' => $state['marker']]);
+        }
+    }
+
+    /** Lock and compare every child before deleting the synthetic service. */
+    private function assertServiceDependencies(array $state, bool $alreadyCleaning): void
+    {
+        if (!isset($state['ids']['service'])) {
+            return;
+        }
+        $serviceId = (int) $state['ids']['service'];
+        $serviceRows = $this->db
+            ->query('SELECT id FROM `' . $this->db->dbprefix('services') . '` WHERE id = ? FOR UPDATE', [$serviceId])
+            ->result_array();
+        $actualLinks = $this->db
+            ->query(
+                'SELECT id_users, id_services FROM `' .
+                    $this->db->dbprefix('services_providers') .
+                    '` WHERE id_services = ? ORDER BY id_users FOR UPDATE',
+                [$serviceId],
+            )
+            ->result_array();
+        $expectedLinks = [];
+        foreach ($state['links'] ?? [] as $link) {
+            if (!is_array($link)) {
+                throw new RuntimeException('Fixture service relationship journal is invalid.');
+            }
+            $expectedLinks[] = [
+                'id_users' => (int) ($link['id_users'] ?? 0),
+                'id_services' => $serviceId,
+            ];
+        }
+        usort($expectedLinks, static fn(array $a, array $b): int => $a['id_users'] <=> $b['id_users']);
+        $actualLinks = array_map(
+            static fn(array $row): array => [
+                'id_users' => (int) $row['id_users'],
+                'id_services' => (int) $row['id_services'],
+            ],
+            $actualLinks,
+        );
+        if ($serviceRows === []) {
+            if (!$alreadyCleaning || $actualLinks !== []) {
+                throw new RuntimeException('Synthetic service disappeared with dependent rows; refusing cleanup.');
+            }
+        } elseif (count($serviceRows) !== 1 || $actualLinks !== $expectedLinks) {
+            throw new RuntimeException('Unexpected service provider relationship; refusing cleanup.');
+        }
+
+        if (!isset($state['ids']['appointment'])) {
+            return;
+        }
+        $appointmentRows = $this->db
+            ->query(
+                'SELECT id FROM `' .
+                    $this->db->dbprefix('appointments') .
+                    '` WHERE id_services = ? ORDER BY id FOR UPDATE',
+                [$serviceId],
+            )
+            ->result_array();
+        $expectedAppointment = (int) $state['ids']['appointment'];
+        $actualAppointmentIds = array_map(static fn(array $row): int => (int) $row['id'], $appointmentRows);
+        $expectedAppointmentIds = $serviceRows === [] && $alreadyCleaning ? [] : [$expectedAppointment];
+        if ($actualAppointmentIds !== $expectedAppointmentIds) {
+            throw new RuntimeException('Synthetic service appointment relationship drifted; refusing cleanup.');
         }
     }
 
