@@ -142,7 +142,7 @@ final class OrdinaryProbeEvidenceTest extends TestCase
 
     public static function recordedPhases(): array
     {
-        return [['session'], ['activate'], ['deactivate']];
+        return [['session'], ['activate'], ['deactivate'], ['verify']];
     }
 
     #[DataProvider('recordedPhases')]
@@ -246,6 +246,25 @@ final class OrdinaryProbeEvidenceTest extends TestCase
         self::assertSame($receipt, $evidence->read());
         self::expectException(RuntimeException::class);
         $evidence->step('session', 'started');
+    }
+
+    public function testFailedPostconditionRemainsVisibleAfterSuccessfulProbe(): void
+    {
+        $evidence = new OrdinaryProbeEvidence($this->directory);
+        $evidence->begin('ea_synthetic');
+        $evidence->step('post_save', 'passed');
+        $failure = new RuntimeException('synthetic postcondition mismatch');
+        try {
+            $evidence->run('verify', static function () use ($failure): void {
+                throw $failure;
+            });
+            self::fail('A failed postcondition must prevent success.');
+        } catch (RuntimeException $error) {
+            self::assertSame($failure, $error);
+        }
+        $events = $evidence->read()['events'];
+        self::assertSame(['post_save', 'verify', 'verify'], array_column($events, 'phase'));
+        self::assertSame(['passed', 'started', 'failed'], array_column($events, 'outcome'));
     }
 
     public function testOnlyFixedDiagnosticCodesAreAccepted(): void

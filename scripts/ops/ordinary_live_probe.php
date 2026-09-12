@@ -117,7 +117,13 @@ try {
         $sessions->assertCleanBeforeActivation();
         $evidence->begin($expectedRelease);
         $evidence->run('activate', $fixture->activate(...));
-        $result['fixture'] = $fixture->verify();
+        $result['fixture'] = $evidence->run('verify', static function () use ($fixture): string {
+            $status = $fixture->verify();
+            if ($status !== 'active') {
+                throw new RuntimeException('Activated ordinary fixture is not active.');
+            }
+            return $status;
+        });
     } elseif ($action === 'verify') {
         $result['fixture'] = $fixture->verify();
     } elseif ($action === 'deactivate') {
@@ -137,10 +143,13 @@ try {
             alwaysAttempt: true,
         );
     } else {
-        $context = $fixture->read();
-        if ($context['expires_at'] <= time() + 60) {
-            throw new RuntimeException('Ordinary fixture deadline is too close.');
-        }
+        $context = $evidence->run('verify', static function () use ($fixture): array {
+            $context = $fixture->read();
+            if ($context['expires_at'] <= time() + 60) {
+                throw new RuntimeException('Ordinary fixture deadline is too close.');
+            }
+            return $context;
+        });
         $client = new GateHttpClient('http://localhost', additionalHeaders: ['X-FH-Ordinary-Probe' => '1']);
         if ($action === 'account') {
             $result['evidence'] = (new OrdinaryAccountProbe($client, $ci->db, $sessions->remember(...)))->run(
@@ -161,12 +170,12 @@ try {
                 ),
             );
         }
-        if (!in_array($action, ['deactivate', 'verify'], true)) {
+        $evidence->run('verify', static function () use ($assertActive, $markerPath, $marker): void {
             $assertActive();
-        }
-        if (trim((string) file_get_contents($markerPath)) !== $marker) {
-            throw new RuntimeException('Release changed during the probe; evidence is not valid.');
-        }
+            if (trim((string) file_get_contents($markerPath)) !== $marker) {
+                throw new RuntimeException('Release changed during the probe; evidence is not valid.');
+            }
+        });
         $result['cleanup'] = 'pending_wrapper';
     }
     echo json_encode($result, JSON_THROW_ON_ERROR) . PHP_EOL;

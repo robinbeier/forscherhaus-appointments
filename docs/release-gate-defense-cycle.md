@@ -212,7 +212,10 @@ operator bundle. Each activation starts a root-only `last-evidence.json` contain
 the release, fixed step/outcome codes, timestamps and aggregate cleanup counters.
 The receipt contains no account fields, cookies, credentials or raw exceptions.
 The own-account probe records the failing step before attempting logout, so a
-cleanup step cannot hide an earlier persistence assertion failure.
+cleanup step cannot hide an earlier persistence assertion failure. Activation
+postconditions, probe context/deadline checks and final active-release checks are
+recorded as verify events. Standalone preflight/verify commands keep the receipt
+read-only.
 
 The owned fixture is revoked first. Session cleanup checks every journaled path
 is absent, synchronizes deletions, and durably publishes the aggregate receipt
