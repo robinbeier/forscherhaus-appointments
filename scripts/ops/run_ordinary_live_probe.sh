@@ -18,7 +18,8 @@ for path in "$probe" "$script_dir/../release-gate/lib/OrdinaryLiveFixture.php" \
     "$script_dir/../release-gate/lib/OrdinaryProbeSessions.php" \
     "$script_dir/../release-gate/lib/OrdinarySessionProbe.php" \
     "$script_dir/../release-gate/lib/OrdinaryAccountProbe.php" \
-    "$script_dir/../release-gate/lib/GateHttpClient.php"; do
+    "$script_dir/../release-gate/lib/GateHttpClient.php" \
+    "$script_dir/../../deploy_ea.sh" /root/deploy_ea.sh; do
     path=$(realpath -e -- "$path")
     [[ -f "$path" && ! -L "$path" && $(stat -c %u -- "$path") == 0 ]] || exit 77
     while [[ "$path" != / ]]; do
@@ -33,6 +34,15 @@ tool_root=$(cd "$script_dir/../.." && pwd -P)
 [[ "$tool_root" != "$app_root" && "$tool_root" != "$app_root/"* ]] || {
     echo 'use an immutable root-controlled operator bundle outside the application release' >&2; exit 77;
 }
+coordination="$tool_root/deploy_ea.sh"
+cmp -s -- "$coordination" /root/deploy_ea.sh || {
+    echo 'installed deploy script must match the reviewed coordinated version' >&2; exit 77;
+}
+# The root-controlled deploy script exposes the same lock contract when sourced.
+source "$coordination"
+umask 077
+ordinary_production_change_lock || exit $?
+coordination_identity=$(stat -c '%d:%i' -- "$coordination")
 parent=$(dirname -- "$app_root")
 identity=$(stat -c '%d:%i' -- "$app_root")
 probe_identity=$(stat -c '%d:%i' -- "$probe")
@@ -57,6 +67,7 @@ invoke() {
 }
 unit=fh-defense-ordinary-cleanup
 if [[ "$action" == preflight || "$action" == verify ]]; then
+    ordinary_assert_no_pending_probe || exit $?
     invoke "$action"
     exit
 fi
@@ -64,6 +75,9 @@ if [[ "$action" == cleanup ]]; then
     invoke deactivate
     invoke verify
     systemctl stop "$unit.timer"
+    # Recovery can revoke known identity/session state, but must not erase an
+    # interruption marker whose unjournaled response window is not accounted for.
+    ordinary_assert_no_pending_probe || exit $?
     exit
 fi
 for suffix in timer service; do
@@ -71,9 +85,15 @@ for suffix in timer service; do
         echo 'ordinary cleanup unit already exists; inspect prior run' >&2; exit 75;
     }
 done
+ordinary_assert_no_pending_probe || exit $?
 invoke preflight
+ordinary_probe_begin || exit $?
 callback='set -euo pipefail
 [[ -f "$3" && ! -L "$3" && $(stat -c "%d:%i" -- "$3") == "$5" ]] || exit 1
+[[ -f "$6" && ! -L "$6" && $(stat -c "%d:%i" -- "$6") == "$7" ]] || exit 1
+source "$6"
+umask 077
+ordinary_production_change_lock /var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock 300 || exit $?
 for candidate in "$1"/*; do
     [[ -d "$candidate" && ! -L "$candidate" ]] || continue
     [[ $(stat -c "%d:%i" -- "$candidate") == "$2" ]] || continue
@@ -84,12 +104,17 @@ echo "original ordinary probe application directory unavailable" >&2
 exit 1'
 # Timer is armed before any account insertion and remains armed if compensation fails.
 systemd-run --quiet --unit="$unit" --on-active=3h --collect \
-    /bin/bash -c "$callback" ordinary-cleanup "$parent" "$identity" "$probe" "$release" "$probe_identity"
+    /bin/bash -c "$callback" ordinary-cleanup "$parent" "$identity" "$probe" "$release" "$probe_identity" "$coordination" "$coordination_identity"
 cleanup() {
     local status=$?
     trap - EXIT
     if invoke deactivate && invoke verify; then
         systemctl stop "$unit.timer" || status=1
+        if [[ "$status" == 0 ]]; then
+            ordinary_probe_finish || status=1
+        else
+            echo 'interrupted or failed probe; persistent recovery marker retained' >&2
+        fi
     else
         echo 'ordinary cleanup incomplete; independent timer retained' >&2
         status=1

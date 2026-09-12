@@ -9,6 +9,7 @@
             <file>./tests/Integration/OrdinaryLiveFixtureTest.php</file>
             <file>./tests/Integration/OrdinaryAccountProbeTest.php</file>
             <file>./tests/Integration/OrdinarySessionProbeTest.php</file>
+            <file>./tests/Unit/Scripts/OrdinaryDeploymentCoordinationTest.php</file>
         </testsuite>
     </testsuites>
     <php><server name="APP_ENV" value="testing"/></php>

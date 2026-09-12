@@ -16,11 +16,32 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
         $this->sandbox = sys_get_temp_dir() . '/ordinary-wrapper-test-' . bin2hex(random_bytes(8));
         $this->bin = $this->sandbox . '/bin';
         $this->log = $this->sandbox . '/commands.log';
-        $this->wrapper = $this->sandbox . '/ops/run_ordinary_live_probe.sh';
+        $this->wrapper = $this->sandbox . '/scripts/ops/run_ordinary_live_probe.sh';
         mkdir($this->bin, 0700, true);
         mkdir(dirname($this->wrapper), 0700, true);
-        mkdir($this->sandbox . '/release-gate/lib', 0700, true);
-        copy(__DIR__ . '/../../../scripts/ops/run_ordinary_live_probe.sh', $this->wrapper);
+        mkdir($this->sandbox . '/scripts/release-gate/lib', 0700, true);
+        file_put_contents(
+            $this->wrapper,
+            str_replace(
+                '/root/deploy_ea.sh',
+                $this->sandbox . '/installed-deploy.sh',
+                file_get_contents(__DIR__ . '/../../../scripts/ops/run_ordinary_live_probe.sh'),
+            ),
+        );
+        $coordination = <<<'SH'
+        ordinary_production_change_lock() {
+            echo coordination-lock >> "$MOCK_LOG"
+            [ "${MOCK_LOCK_BUSY:-0}" != 1 ] || return 75
+        }
+        ordinary_assert_no_pending_probe() {
+            echo pending-check >> "$MOCK_LOG"
+            [ "${MOCK_PENDING:-0}" != 1 ] || return 75
+        }
+        ordinary_probe_begin() { echo pending-begin >> "$MOCK_LOG"; }
+        ordinary_probe_finish() { echo pending-finish >> "$MOCK_LOG"; }
+        SH;
+        file_put_contents($this->sandbox . '/deploy_ea.sh', $coordination);
+        file_put_contents($this->sandbox . '/installed-deploy.sh', $coordination);
         chmod($this->wrapper, 0700);
         foreach (
             [
@@ -39,7 +60,9 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
                     : __DIR__ . '/../../../scripts/release-gate/lib/' . $file;
             copy(
                 $source,
-                $this->sandbox . ($file === 'ordinary_live_probe.php' ? '/ops/' : '/release-gate/lib/') . $file,
+                $this->sandbox .
+                    ($file === 'ordinary_live_probe.php' ? '/scripts/ops/' : '/scripts/release-gate/lib/') .
+                    $file,
             );
         }
         mkdir($this->sandbox . '/app', 0700);
@@ -150,6 +173,26 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
         self::assertNotEmpty($result['lines']);
         self::assertNotContains('php', $this->prefixes($result['lines']));
         self::assertNotContains('systemd-run', $this->prefixes($result['lines']));
+    }
+
+    public function testBusySharedLockAndPendingRecoveryPreventAnyProbe(): void
+    {
+        foreach ([['MOCK_LOCK_BUSY' => '1'], ['MOCK_PENDING' => '1']] as $environment) {
+            file_put_contents($this->log, '');
+            $result = $this->executeWrapper('account', $environment);
+            self::assertSame(75, $result['status']);
+            self::assertSame([], $this->actions($result['lines']));
+            self::assertNotContains('systemd-run', $this->prefixes($result['lines']));
+        }
+    }
+
+    public function testFailedProbeRetainsPersistentMarkerDespiteKnownObjectCleanup(): void
+    {
+        $result = $this->executeWrapper('account', ['MOCK_PHP_FAIL_ACTIONS' => 'account']);
+        self::assertSame(42, $result['status']);
+        self::assertContains('pending-begin', $result['lines']);
+        self::assertContains('deactivate', $this->actions($result['lines']));
+        self::assertNotContains('pending-finish', $result['lines']);
     }
 
     public function testFailedPreflightDoesNotArmTimerOrActivateIdentity(): void

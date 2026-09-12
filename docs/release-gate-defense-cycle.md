@@ -108,14 +108,36 @@ exception, global setting or application behavior change. Its root-only lifecycl
 journal binds the exact username, email, marker and user ID before any request;
 credential drift is rejected before a login could fall back to LDAP.
 
-The reviewed operator tools are `scripts/ops/run_ordinary_live_probe.sh` and
-`scripts/ops/ordinary_live_probe.php`. Run them only from a root-controlled copy
+The reviewed operator bundle includes `deploy_ea.sh`, `scripts/ops/run_ordinary_live_probe.sh`,
+`scripts/ops/ordinary_live_probe.php` and their five release-gate libraries. Run them only from a root-controlled copy
 of the reviewed tools outside the replaceable application release, against the
 verified installed release. The wrapper pins the tool inode and resolves the
 original application directory by inode before each call and independent cleanup.
 Do not rename, replace or delete this private operator bundle during a run. These are operator
 probes, not an alternative application release mechanism. If an application
 release is required, use the existing controlled deployment procedure.
+Before running a probe, install the reviewed `deploy_ea.sh` at the existing
+root-controlled `/root/deploy_ea.sh` path using the authorized operator update;
+retain the previous file and its hash for rollback. The wrapper requires exact
+byte equality with its bundled deploy script and refuses an older uncoordinated
+deployment entry point.
+
+Both callers acquire the existing
+`/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock`, validating its
+root ownership, private mode, canonical ancestors and unchanged inode. Normal
+deployment holds it before staging/storage copying through completion or rollback;
+the probe holds it before activation through verified cleanup. Conflicting
+deployment, backup and retention work must wait or retry; the ordinary two-hour
+session test therefore occupies this operations window. No runtime TTL changes.
+
+Before activation the probe durably creates `/var/lib/fh-defense-ordinary/run.pending`.
+Only a fully successful foreground run with verified data/session cleanup removes
+it. Failure, signal or independent timer cleanup retains it, even when known
+database/session objects were removed. New deployments and probes reject this
+marker and remaining fixture/journal artifacts. Explicit recovery must account for
+the interrupted run and any response not durably journaled; an empty database or
+successful timer alone does not authorize deleting the marker. Never restore an
+older uncoordinated deploy script while a run or its recovery marker is pending.
 
 ```bash
 bash scripts/ops/run_ordinary_live_probe.sh preflight EXPECTED_RELEASE
