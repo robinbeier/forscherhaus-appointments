@@ -201,19 +201,24 @@ that unjournaled row. Fixture cleanup instead locks and verifies complete
 dependency sets before removing its owned customer rows.
 
 `calendar-race` creates only an owned synthetic service, customer, foreign
-provider and appointment. One transaction holds the deterministic first
-user-parent row while the real authenticated calendar request begins. The harness
-must observe that exact request query waiting on the held row. A separate database
+provider and appointment. One transaction holds the request-specific synthetic
+customer parent while the real authenticated calendar request begins. Before the
+request starts, the harness records the existing database process IDs. It then
+accepts only one newly created process whose complete normalized user-parent lock
+query contains exactly the synthetic provider/customer pair; an actor-only query,
+a different customer or multiple candidates fail closed. A separate database
 transaction then commits the appointment's provider reassignment; after the lock
 is released, the request must return `403` and must not produce any appointment
 change beyond that administrative reassignment. The appointment is restored to
 its exact prior snapshot before wrapper cleanup. This is direct evidence for one
 specified responsibility-change schedule, not proof of all possible interleavings.
 If an error occurs while the HTTP request is still active, the harness identifies
-its exact synthetic parent-lock query, terminates that database connection, and
-confirms both connection disappearance and HTTP completion before releasing the
-held parent lock. If either attribution or termination cannot be confirmed, it
-does not restore the appointment or log out. Instead it first creates the separate
+its exact synthetic parent-lock query when possible and attempts to terminate that
+database connection before releasing the held parent lock. Restoration is allowed
+only after either a normal HTTP completion with a valid response status or both
+connection disappearance and HTTP termination have been confirmed. If attribution
+or termination cannot be confirmed, it does not restore the appointment or log
+out. Instead it first creates the separate
 root-only `request-unconfirmed` recovery marker and also marks the fixture
 `recovery_required`. Exit code `86` independently forces the wrapper to establish
 that marker and skip cleanup; if the marker cannot be established, the wrapper

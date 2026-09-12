@@ -80,23 +80,22 @@ final class CalendarResponsibilityRaceProbe
             $lockerActive = true;
             $usersTable = $locker->escape_identifiers($locker->dbprefix('users'));
             $locked = $locker
-                ->query('SELECT id FROM ' . $usersTable . ' WHERE id = ? FOR UPDATE', [$actor['user_id']])
+                ->query('SELECT id FROM ' . $usersTable . ' WHERE id = ? FOR UPDATE', [$before['id_users_customer']])
                 ->row_array();
-            if ((int) ($locked['id'] ?? 0) !== (int) $actor['user_id']) {
-                throw new RuntimeException('Calendar race did not lock the owned actor parent.');
+            if ((int) ($locked['id'] ?? 0) !== (int) $before['id_users_customer']) {
+                throw new RuntimeException('Calendar race did not lock its request-specific customer parent.');
             }
             $observe('race_parent_lock', 'passed');
 
             $observe('race_request_wait', 'started');
+            $preRequestProcessIds = $this->processIds($changer);
             [$multi, $curl] = $this->startAppointmentRequest($before);
             $requestRunning = true;
             $controlIds = [$this->connectionId($this->db), $this->connectionId($locker), $this->connectionId($changer)];
-            $requestConnectionId = $this->waitForOwnedParentLock(
-                $multi,
-                $changer,
-                $controlIds,
-                (int) $actor['user_id'],
-            );
+            $requestConnectionId = $this->waitForOwnedParentLock($multi, $changer, $controlIds, $preRequestProcessIds, [
+                (int) $before['id_users_customer'],
+                (int) $before['id_users_provider'],
+            ]);
             $waitObserved = $requestConnectionId > 0;
             $observe('race_request_wait', 'passed');
 
@@ -173,7 +172,8 @@ final class CalendarResponsibilityRaceProbe
                         $curl,
                         $changer,
                         $controlIds,
-                        (int) $actor['user_id'],
+                        $preRequestProcessIds,
+                        [(int) $before['id_users_customer'], (int) $before['id_users_provider']],
                         $requestConnectionId,
                     );
                 } catch (Throwable $error) {
@@ -255,7 +255,7 @@ final class CalendarResponsibilityRaceProbe
             'reassignment_committed' => $reassignmentCommitted,
             'appointment_unchanged_except_provider' => true,
             'observed' =>
-                'The real owned synthetic calendar request was observed waiting on its first user-parent lock; a separate connection committed the provider reassignment, after which the request was rejected without a partial appointment write.',
+                'The real owned synthetic calendar request was observed waiting on its request-specific customer-parent lock; a separate connection committed the provider reassignment, after which the request was rejected without a partial appointment write.',
         ];
     }
 
@@ -400,9 +400,14 @@ final class CalendarResponsibilityRaceProbe
         return [$multi, $curl];
     }
 
-    /** @param list<int> $controlIds */
-    private function waitForOwnedParentLock(object $multi, object $observer, array $controlIds, int $actorId): int
-    {
+    /** @param list<int> $controlIds @param list<int> $baselineIds @param list<int> $parentIds */
+    private function waitForOwnedParentLock(
+        object $multi,
+        object $observer,
+        array $controlIds,
+        array $baselineIds,
+        array $parentIds,
+    ): int {
         $table = strtolower($observer->dbprefix('users'));
         $deadline = microtime(true) + 8;
         $candidateId = 0;
@@ -416,17 +421,20 @@ final class CalendarResponsibilityRaceProbe
                     'Calendar race request completed before the owned parent-lock wait was observed.',
                 );
             }
-            $id = $this->findOwnedParentLockProcess($observer, $controlIds, $table, $actorId);
+            $id = $this->findOwnedParentLockProcess($observer, $controlIds, $baselineIds, $table, $parentIds);
             if ($id > 0) {
                 if ($candidateId !== $id) {
                     $candidateId = $id;
                     $candidateFirstSeen = microtime(true);
                 } elseif (microtime(true) - $candidateFirstSeen >= 0.15) {
                     // MariaDB may report an InnoDB row-lock wait as "Executing".
-                    // The same owned query persisting while our transaction
-                    // holds its first requested row is the deterministic wait signal.
+                    // The same exact owned query persisting while our transaction
+                    // holds its request-specific customer is the wait signal.
                     return $id;
                 }
+            } else {
+                $candidateId = 0;
+                $candidateFirstSeen = 0.0;
             }
             usleep(50_000);
         } while (microtime(true) < $deadline);
@@ -440,7 +448,8 @@ final class CalendarResponsibilityRaceProbe
         object $curl,
         object $observer,
         array $controlIds,
-        int $actorId,
+        array $baselineIds,
+        array $parentIds,
         int $knownConnectionId,
     ): void {
         $table = strtolower($observer->dbprefix('users'));
@@ -456,7 +465,13 @@ final class CalendarResponsibilityRaceProbe
                 );
             }
             if ($connectionId < 1) {
-                $connectionId = $this->findOwnedParentLockProcess($observer, $controlIds, $table, $actorId);
+                $connectionId = $this->findOwnedParentLockProcess(
+                    $observer,
+                    $controlIds,
+                    $baselineIds,
+                    $table,
+                    $parentIds,
+                );
             }
             if ($running === 0) {
                 $transportError = curl_error($curl);
@@ -501,23 +516,83 @@ final class CalendarResponsibilityRaceProbe
         );
     }
 
-    /** @param list<int> $controlIds */
-    private function findOwnedParentLockProcess(object $observer, array $controlIds, string $table, int $actorId): int
-    {
-        foreach ($observer->query('SHOW FULL PROCESSLIST')->result_array() as $process) {
+    /** @param list<int> $controlIds @param list<int> $baselineIds @param list<int> $parentIds */
+    private function findOwnedParentLockProcess(
+        object $observer,
+        array $controlIds,
+        array $baselineIds,
+        string $table,
+        array $parentIds,
+    ): int {
+        return self::attributeConnectionId(
+            $observer->query('SHOW FULL PROCESSLIST')->result_array(),
+            $controlIds,
+            $baselineIds,
+            $table,
+            $parentIds,
+        );
+    }
+
+    /**
+     * Attribute one request-created DB process to this probe's HTTP request.
+     *
+     * Processlist text has no HTTP request identity. Therefore a process is
+     * eligible only when it is new since the request started and its query
+     * contains the complete user-parent lock query fingerprint. Multiple eligible processes are
+     * deliberately ambiguous and fail closed.
+     *
+     * @param list<array<string,mixed>> $processes
+     * @param list<int> $controlIds
+     * @param list<int> $baselineIds
+     * @param list<int> $parentIds
+     */
+    public static function attributeConnectionId(
+        array $processes,
+        array $controlIds,
+        array $baselineIds,
+        string $table,
+        array $parentIds,
+    ): int {
+        $expectedIds = array_values(
+            array_unique(array_filter(array_map('intval', $parentIds), static fn(int $id): bool => $id > 0)),
+        );
+        sort($expectedIds, SORT_NUMERIC);
+        if ($expectedIds === []) {
+            return 0;
+        }
+        $candidates = [];
+        foreach ($processes as $process) {
             $id = (int) ($process['Id'] ?? ($process['ID'] ?? 0));
+            if ($id < 1 || in_array($id, $controlIds, true) || in_array($id, $baselineIds, true)) {
+                continue;
+            }
             $info = strtolower((string) ($process['Info'] ?? ''));
-            if (
-                $id > 0 &&
-                !in_array($id, $controlIds, true) &&
-                str_contains($info, $table) &&
-                str_contains($info, 'for update') &&
-                preg_match('/\b' . preg_quote((string) $actorId, '/') . '\b/', $info) === 1
-            ) {
-                return $id;
+            $info = trim((string) preg_replace('/\s+/', ' ', str_replace('`', '', $info)));
+            $expectedQuery = sprintf(
+                'select id from %s where id in (%s) order by id asc for update',
+                strtolower($table),
+                implode(', ', $expectedIds),
+            );
+            if ($info === $expectedQuery) {
+                $candidates[] = $id;
             }
         }
-        return 0;
+
+        return count($candidates) === 1 ? $candidates[0] : 0;
+    }
+
+    /** @return list<int> */
+    private function processIds(object $observer): array
+    {
+        $ids = [];
+        foreach ($observer->query('SHOW FULL PROCESSLIST')->result_array() as $process) {
+            $id = (int) ($process['Id'] ?? ($process['ID'] ?? 0));
+            if ($id > 0) {
+                $ids[] = $id;
+            }
+        }
+
+        return array_values(array_unique($ids));
     }
 
     private function processExists(object $observer, int $connectionId): bool

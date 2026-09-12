@@ -14,6 +14,65 @@ require_once __DIR__ . '/Support/DefenseCycleHttpServer.php';
 
 final class CalendarResponsibilityRaceProbeTest extends TestCase
 {
+    public function testRequestAttributionFailsClosedWhenTwoNewMatchingProcessesExist(): void
+    {
+        $processes = [
+            ['Id' => 901, 'Info' => 'SELECT `id` FROM `ea_users` WHERE `id` IN (11, 22) ORDER BY `id` ASC FOR UPDATE'],
+            ['Id' => 902, 'Info' => 'SELECT `id` FROM `ea_users` WHERE `id` IN (11, 22) ORDER BY `id` ASC FOR UPDATE'],
+        ];
+
+        self::assertSame(
+            0,
+            CalendarResponsibilityRaceProbe::attributeConnectionId($processes, [100], [200], 'ea_users', [11, 22]),
+        );
+    }
+
+    public function testRequestAttributionAcceptsTheOnlyNewExactParentLockProcess(): void
+    {
+        $processes = [
+            ['Id' => 700, 'Info' => 'SELECT `id` FROM `ea_users` WHERE `id` IN (11, 22) ORDER BY `id` ASC FOR UPDATE'],
+            ['Id' => 901, 'Info' => 'SELECT `id` FROM `ea_users` WHERE `id` IN (11, 22) ORDER BY `id` ASC FOR UPDATE'],
+        ];
+
+        self::assertSame(
+            901,
+            CalendarResponsibilityRaceProbe::attributeConnectionId($processes, [100], [700], 'ea_users', [11, 22]),
+        );
+    }
+
+    public function testRequestAttributionDoesNotAcceptGenericActorOnlyQuery(): void
+    {
+        self::assertSame(
+            0,
+            CalendarResponsibilityRaceProbe::attributeConnectionId(
+                [['Id' => 901, 'Info' => 'SELECT id FROM ea_users WHERE id = 22 FOR UPDATE']],
+                [],
+                [],
+                'ea_users',
+                [11, 22],
+            ),
+        );
+    }
+
+    public function testRequestAttributionDoesNotAcceptSameActorWithDifferentCustomer(): void
+    {
+        self::assertSame(
+            0,
+            CalendarResponsibilityRaceProbe::attributeConnectionId(
+                [
+                    [
+                        'Id' => 901,
+                        'Info' => 'SELECT `id` FROM `ea_users` WHERE `id` IN (22, 99) ORDER BY `id` ASC FOR UPDATE',
+                    ],
+                ],
+                [],
+                [],
+                'ea_users',
+                [11, 22],
+            ),
+        );
+    }
+
     public function testObservedParentLockWaitThenConcurrentResponsibilityChangeIsRejected(): void
     {
         if (getenv('FH_DEFENSE_ISOLATED') !== '1') {
