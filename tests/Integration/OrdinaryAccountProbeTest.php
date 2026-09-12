@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use PHPUnit\Framework\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 use ReleaseGate\OrdinaryAccountProbe;
 use ReleaseGate\GateHttpClient;
 use ReleaseGate\OrdinaryLiveFixture;
@@ -15,7 +16,13 @@ require_once dirname(__DIR__, 2) . '/scripts/release-gate/lib/OrdinaryLiveFixtur
 
 final class OrdinaryAccountProbeTest extends TestCase
 {
-    public function testOrdinarySyntheticAccountProbe(): void
+    public static function scenarios(): array
+    {
+        return ['normal' => [false], 'failure-before-logout' => [true]];
+    }
+
+    #[DataProvider('scenarios')]
+    public function testOrdinarySyntheticAccountProbe(bool $failPostSave): void
     {
         if (getenv('FH_DEFENSE_ISOLATED') !== '1') {
             self::markTestSkipped('Run scripts/ci/run_defense_cycle.sh with its fresh synthetic stack.');
@@ -39,27 +46,58 @@ final class OrdinaryAccountProbeTest extends TestCase
                 ],
             );
             $sessions = [];
-            $result = (new OrdinaryAccountProbe($client, \get_instance()->db, static function (?string $session) use (
-                &$sessions,
-            ): void {
-                if ($session !== null && $session !== '') {
-                    $sessions[] = $session;
-                }
-            }))->run([
-                'user_id' => (int) $state['user_id'],
-                'username' => (string) $state['username'],
-                'password' => (string) $state['password'],
-                'run_id' => (string) $state['run_id'],
-                'email' => (string) $state['email'],
-                'marker' => (string) $state['marker'],
-            ]);
-            self::assertSame('verified', $result['status']);
-            self::assertSame('partial', $result['coverage']);
-            self::assertSame(405, $result['get_save_status']);
-            self::assertSame(200, $result['save_status']);
-            self::assertSame(200, $result['logout_status']);
-            self::assertSame(307, $result['post_logout_account_status']);
-            self::assertNotEmpty($sessions);
+            $events = [];
+            $rememberCount = 0;
+            $failure = null;
+            $result = null;
+            try {
+                $result = (new OrdinaryAccountProbe($client, \get_instance()->db, static function (
+                    ?string $session,
+                ) use (&$sessions, &$rememberCount, $failPostSave): void {
+                    $rememberCount++;
+                    if ($failPostSave && $rememberCount === 5) {
+                        throw new RuntimeException('synthetic diagnostic failure');
+                    }
+                    if ($session !== null && $session !== '') {
+                        $sessions[] = $session;
+                    }
+                }))->run(
+                    [
+                        'user_id' => (int) $state['user_id'],
+                        'username' => (string) $state['username'],
+                        'password' => (string) $state['password'],
+                        'run_id' => (string) $state['run_id'],
+                        'email' => (string) $state['email'],
+                        'marker' => (string) $state['marker'],
+                    ],
+                    static function (string $phase, string $outcome) use (&$events): void {
+                        $events[] = [$phase, $outcome];
+                    },
+                );
+            } catch (RuntimeException $error) {
+                $failure = $error;
+            }
+            if ($failPostSave) {
+                self::assertNotNull($failure);
+                self::assertSame('synthetic diagnostic failure', $failure->getMessage());
+                self::assertNull($result);
+                self::assertContains(['post_save', 'failed'], $events);
+                self::assertContains(['logout', 'passed'], $events);
+                self::assertContains(['post_logout', 'passed'], $events);
+                self::assertStringNotContainsString('synthetic diagnostic failure', json_encode($events));
+            } else {
+                self::assertNull($failure);
+                self::assertSame('verified', $result['status']);
+                self::assertSame('partial', $result['coverage']);
+                self::assertSame(405, $result['get_save_status']);
+                self::assertSame(200, $result['save_status']);
+                self::assertSame(200, $result['logout_status']);
+                self::assertSame(307, $result['post_logout_account_status']);
+                self::assertNotEmpty($sessions);
+                self::assertContains(['post_save', 'passed'], $events);
+                self::assertContains(['logout', 'passed'], $events);
+                self::assertContains(['post_logout', 'passed'], $events);
+            }
         } finally {
             try {
                 $server?->close();

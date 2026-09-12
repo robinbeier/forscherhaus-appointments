@@ -16,6 +16,7 @@ app_root=$(realpath -e -- "$app_root")
 # Do not execute a root cleanup callback from a caller-writable tool checkout.
 for path in "$probe" "$script_dir/../release-gate/lib/OrdinaryLiveFixture.php" \
     "$script_dir/../release-gate/lib/OrdinaryProbeSessions.php" \
+    "$script_dir/../release-gate/lib/OrdinaryProbeEvidence.php" \
     "$script_dir/../release-gate/lib/OrdinarySessionProbe.php" \
     "$script_dir/../release-gate/lib/OrdinaryAccountProbe.php" \
     "$script_dir/../release-gate/lib/GateHttpClient.php" \

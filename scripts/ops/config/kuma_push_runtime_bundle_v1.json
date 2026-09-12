@@ -70,7 +70,7 @@
             "source": "scripts/release-gate/lib/GateHttpClient.php",
             "install": "scripts/release-gate/lib/GateHttpClient.php",
             "role": "pdf_gate_library",
-            "sha256": "2eb4b3925f174f4e26b984f150fb1bcade250d183a57d622bcba2ac55aab5cb9"
+            "sha256": "8c8009305c091bef83d5493596be0939f0dac60a33fda5d14651f9c7d32c7a87"
         },
         {
             "source": "scripts/release-gate/lib/ZeroSurpriseCanaryContext.php",

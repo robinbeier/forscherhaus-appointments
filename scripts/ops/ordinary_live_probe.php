@@ -7,6 +7,7 @@ use ReleaseGate\OrdinaryAccountProbe;
 use ReleaseGate\OrdinaryLiveFixture;
 use ReleaseGate\OrdinaryProbeSessions;
 use ReleaseGate\OrdinarySessionProbe;
+use ReleaseGate\OrdinaryProbeEvidence;
 
 // Reviewed operator tool only. Never a web route, configurable HTTP target, or auth exception.
 if (PHP_SAPI !== 'cli' || !function_exists('posix_geteuid') || posix_geteuid() !== 0) {
@@ -86,6 +87,7 @@ try {
     require_once dirname(__DIR__) . '/release-gate/lib/OrdinaryAccountProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/OrdinaryProbeSessions.php';
     require_once dirname(__DIR__) . '/release-gate/lib/OrdinarySessionProbe.php';
+    require_once dirname(__DIR__) . '/release-gate/lib/OrdinaryProbeEvidence.php';
     if (
         !in_array($action, ['deactivate', 'verify'], true) &&
         (config_item('sess_driver') !== 'files' ||
@@ -101,6 +103,7 @@ try {
     }
     $fixture = new OrdinaryLiveFixture($stateDirectory);
     $sessions = new OrdinaryProbeSessions($stateDirectory, $appRoot . '/storage/sessions');
+    $evidence = new OrdinaryProbeEvidence($stateDirectory);
     $result = ['action' => $action, 'release' => $expectedRelease];
     if ($action === 'preflight') {
         $sessions->assertCleanBeforeActivation();
@@ -112,14 +115,18 @@ try {
         ];
     } elseif ($action === 'activate') {
         $sessions->assertCleanBeforeActivation();
+        $evidence->begin($expectedRelease);
+        $evidence->step('activate', 'started');
         $fixture->activate();
+        $evidence->step('activate', 'passed');
         $result['fixture'] = $fixture->verify();
     } elseif ($action === 'verify') {
         $result['fixture'] = $fixture->verify();
     } elseif ($action === 'deactivate') {
         // Revoke the identity first, then remove only journaled own session inodes.
         $fixture->deactivate();
-        $sessions->cleanup();
+        // Persist a non-secret known-object receipt before retiring private session provenance.
+        $sessions->cleanup($evidence->cleaned(...));
         $result['fixture'] = $fixture->verify();
         if ($result['fixture'] !== 'clean') {
             throw new RuntimeException('Ordinary fixture cleanup is incomplete.');
@@ -131,16 +138,22 @@ try {
         }
         $client = new GateHttpClient('http://localhost', additionalHeaders: ['X-FH-Ordinary-Probe' => '1']);
         if ($action === 'account') {
-            $result['evidence'] = (new OrdinaryAccountProbe($client, $ci->db, $sessions->remember(...)))->run($context);
+            $result['evidence'] = (new OrdinaryAccountProbe($client, $ci->db, $sessions->remember(...)))->run(
+                $context,
+                $evidence->step(...),
+            );
         } else {
+            $evidence->step('session', 'started');
             $result['evidence'] = (new OrdinarySessionProbe($client, $sessions, 'http://localhost', $expiration))->run(
                 $context,
-                static function (array $progress): void {
+                static function (array $progress) use ($evidence): void {
+                    $evidence->step('waiting', 'started');
                     echo json_encode($progress, JSON_THROW_ON_ERROR) . PHP_EOL;
                     flush();
                 },
                 $assertActive,
             );
+            $evidence->step('session', 'passed');
         }
         if (!in_array($action, ['deactivate', 'verify'], true)) {
             $assertActive();
@@ -156,6 +169,8 @@ try {
     while (ob_get_level() > 0) {
         ob_end_clean();
     }
+    // Fixed action code only: no dynamic exception messages or traces.
+    fwrite(STDERR, json_encode(['status' => 'failed', 'action' => $action], JSON_THROW_ON_ERROR) . PHP_EOL);
     fwrite(STDERR, "Ordinary live probe failed; retain private state and run controlled cleanup.\n");
     $exitCode = 1;
 }
