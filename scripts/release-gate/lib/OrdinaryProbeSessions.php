@@ -122,15 +122,19 @@ final class OrdinaryProbeSessions
         return (int) $match[1];
     }
 
-    public function cleanup(): void
+    public function cleanup(?callable $beforeJournalRetirement = null): void
     {
         if (file_exists($this->journal . '.tmp') || is_link($this->journal . '.tmp')) {
             throw new RuntimeException('Incomplete session journal requires explicit recovery.');
         }
-        foreach ($this->read() as $cookie => $identity) {
+        $records = $this->read();
+        $removed = 0;
+        $alreadyAbsent = 0;
+        foreach ($records as $cookie => $identity) {
             $path = $this->path($cookie);
             clearstatcache(true, $path);
             if (!file_exists($path) && !is_link($path)) {
+                $alreadyAbsent++;
                 continue;
             }
             $stat = @lstat($path);
@@ -140,9 +144,20 @@ final class OrdinaryProbeSessions
             if (!unlink($path)) {
                 throw new RuntimeException('Owned session cleanup failed.');
             }
+            $removed++;
         }
         // Persist owned file removals before retiring their recovery journal.
         $this->syncDirectory($this->sessionDirectory);
+        foreach ($records as $cookie => $identity) {
+            $path = $this->path((string) $cookie);
+            clearstatcache(true, $path);
+            if (file_exists($path) || is_link($path)) {
+                throw new RuntimeException('Owned session removal could not be verified.');
+            }
+        }
+        if ($beforeJournalRetirement !== null) {
+            $beforeJournalRetirement(count($records), $removed, $alreadyAbsent);
+        }
         if (is_file($this->journal) && !unlink($this->journal)) {
             throw new RuntimeException('Session journal cleanup failed.');
         }

@@ -109,7 +109,7 @@ journal binds the exact username, email, marker and user ID before any request;
 credential drift is rejected before a login could fall back to LDAP.
 
 The reviewed operator bundle includes `deploy_ea.sh`, `scripts/ops/run_ordinary_live_probe.sh`,
-`scripts/ops/ordinary_live_probe.php` and their five release-gate libraries. Run them only from a root-controlled copy
+`scripts/ops/ordinary_live_probe.php` and their six release-gate libraries. Run them only from a root-controlled copy
 of the reviewed tools outside the replaceable application release, against the
 verified installed release. The wrapper pins the tool inode and resolves the
 original application directory by inode before each call and independent cleanup.
@@ -204,3 +204,36 @@ This addition does not verify the full staff/customer read-write-delete boundary
 or calendar authorization during a concurrent responsibility change. Those
 production evidence gaps remain explicit in ROB-551 and ROB-550. No new discovery
 or product repair is part of the operator probe.
+
+### Ordinary probe diagnostics and cleanup receipts
+
+Include `scripts/release-gate/lib/OrdinaryProbeEvidence.php` in the immutable
+operator bundle. Each activation starts a root-only `last-evidence.json` containing
+the release, fixed step/outcome codes, timestamps and aggregate cleanup counters.
+The receipt contains no account fields, cookies, credentials or raw exceptions.
+The own-account probe records the failing step before attempting logout, so a
+cleanup step cannot hide an earlier persistence assertion failure. Activation
+postconditions, probe context/deadline checks and final active-release checks are
+recorded as verify events. Standalone preflight/verify commands keep the receipt
+read-only.
+
+The owned fixture is revoked first. Session cleanup checks every journaled path
+is absent, synchronizes deletions, and durably publishes the aggregate receipt
+before retiring the private session journal. Publication failure retains the
+journal for retry. A handled publication failure removes only its own unpublished
+temporary inode, preserving the prior receipt; pre-existing or replaced temporary
+files remain blocked for explicit recovery. Repeated compensation preserves the
+first completed cleanup receipt, including retries before journal retirement.
+Diagnostic I/O failure cannot prevent the cleanup path from attempting identity
+revocation; a failed revocation retains the private journal and recovery marker.
+After 64 diagnostic events, prior events remain unchanged and further cleanup
+events are marked as omitted. Successful cleanup can still publish its receipt
+and finish; saturated history continues to block new verification events.
+Archive the non-secret receipt with the run evidence before another activation.
+A receipt covers known journaled objects only: it never authorizes clearing a
+hard-interruption marker or silently treating unobserved requests as passed.
+
+The HTTP client honors scoped cookie deletion, Max-Age precedence and expiry.
+Logout deletion cookies must not be sent onward or interpreted as session IDs.
+Local cookie tests are synthetic; production logout and actual elapsed inactivity
+remain distinct evidence requirements.

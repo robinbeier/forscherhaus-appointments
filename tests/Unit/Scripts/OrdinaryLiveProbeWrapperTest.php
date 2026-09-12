@@ -50,6 +50,7 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
                 'GateHttpClient.php',
                 'OrdinaryLiveFixture.php',
                 'OrdinaryProbeSessions.php',
+                'OrdinaryProbeEvidence.php',
                 'OrdinarySessionProbe.php',
                 'OrdinaryAccountProbe.php',
             ]

@@ -29,7 +29,7 @@ final class OrdinaryAccountProbe
      * @param array{user_id:int,username:string,password:string,run_id:string,email:string,marker:string} $context
      * @return array{status:string,coverage:string,login_status:int,account_status:int,save_status:int,get_save_status:int,logout_status:int,post_logout_account_status:int,observed:string}
      */
-    public function run(array $context): array
+    public function run(array $context, ?callable $observe = null): array
     {
         $userId = (int) ($context['user_id'] ?? 0);
         $username = (string) ($context['username'] ?? '');
@@ -40,15 +40,24 @@ final class OrdinaryAccountProbe
             throw new RuntimeException('Ordinary account probe requires one complete synthetic user context.');
         }
 
-        $before = $this->snapshot($userId, $username, $email, $marker);
+        $observe ??= static function (string $phase, string $outcome): void {};
+        $phase = 'account_snapshot';
         $loggedIn = false;
         $logoutStatus = 0;
         $result = null;
         $cleanupError = null;
         try {
+            $observe($phase, 'started');
+            $before = $this->snapshot($userId, $username, $email, $marker);
+            $observe($phase, 'passed');
+            $phase = 'login_page';
+            $observe($phase, 'started');
             $loginPage = $this->client->get('login');
             $this->remember();
             $this->expectStatus($loginPage, 200, 'login page');
+            $observe($phase, 'passed');
+            $phase = 'login_validate';
+            $observe($phase, 'started');
             $login = $this->client->post('login/validate', [
                 'username' => $username,
                 'password' => $password,
@@ -61,11 +70,17 @@ final class OrdinaryAccountProbe
             }
             $loggedIn = true;
 
+            $observe($phase, 'passed');
+            $phase = 'account_page';
+            $observe($phase, 'started');
             $account = $this->client->get('account');
             $this->remember();
             $this->expectStatus($account, 200, 'authenticated account page');
             $this->assertAccountIdentity($account->body, $userId);
 
+            $observe($phase, 'passed');
+            $phase = 'get_save';
+            $observe($phase, 'started');
             $getSave = $this->client->get('account/save');
             $this->remember();
             $this->expectStatus($getSave, 405, 'account/save GET guard');
@@ -75,6 +90,9 @@ final class OrdinaryAccountProbe
             $afterGet = $this->snapshot($userId, $username, $email, $marker);
             $this->assertSnapshotEqual($before, $afterGet, 'account/save GET changed the synthetic account.');
 
+            $observe($phase, 'passed');
+            $phase = 'post_save';
+            $observe($phase, 'started');
             $payload = $before['user'];
             $payload['first_name'] = 'Synthetic Updated';
             $payload['settings'] = [
@@ -91,6 +109,7 @@ final class OrdinaryAccountProbe
             }
             $this->assertSnapshotEqualExceptFirstName($before, $after);
 
+            $observe($phase, 'passed');
             $result = [
                 'status' => 'verified',
                 'coverage' => 'partial',
@@ -103,9 +122,14 @@ final class OrdinaryAccountProbe
                 'observed' =>
                     'Ordinary synthetic own-account login, GET guard, and protected POST persistence succeeded; other methods and CSRF matrix remain outside this probe.',
             ];
+        } catch (\Throwable $error) {
+            $observe($phase, 'failed');
+            throw $error;
         } finally {
             if ($loggedIn) {
                 try {
+                    $phase = 'logout';
+                    $observe($phase, 'started');
                     $logout = $this->client->get('logout');
                     $this->remember();
                     $logoutStatus = $logout->statusCode;
@@ -113,6 +137,9 @@ final class OrdinaryAccountProbe
                     if (is_array($result)) {
                         $result['logout_status'] = $logoutStatus;
                     }
+                    $observe($phase, 'passed');
+                    $phase = 'post_logout';
+                    $observe($phase, 'started');
                     $afterLogout = $this->client->get('account');
                     $this->remember();
                     if (is_array($result)) {
@@ -121,7 +148,9 @@ final class OrdinaryAccountProbe
                     if ($afterLogout->statusCode !== 307) {
                         throw new RuntimeException('Authenticated account remained accessible after synthetic logout.');
                     }
+                    $observe($phase, 'passed');
                 } catch (\Throwable $error) {
+                    $observe($phase, 'failed');
                     $cleanupError = $error;
                 }
             }

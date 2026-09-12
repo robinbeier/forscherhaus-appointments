@@ -185,6 +185,134 @@ class GateHttpClientTest extends TestCase
         self::assertNull($buildMethod->invoke($client, 'https://example.test/application/dashboard'));
     }
 
+    public function testMaxAgeTakesPrecedenceAndExpiredCookiesArePurgedFromAllViews(): void
+    {
+        $now = 1_700_000_000;
+        $client = new GateHttpClient(
+            'https://example.test/app',
+            'index.php',
+            clock: function () use (&$now): int {
+                return $now;
+            },
+        );
+
+        $consumeMethod = new ReflectionMethod(GateHttpClient::class, 'consumeSetCookies');
+        $consumeMethod->setAccessible(true);
+        $consumeMethod->invoke(
+            $client,
+            ['ea_session=abc123; Path=/app/; Expires=Wed, 01 Jan 2030 00:00:00 GMT; Max-Age=10'],
+            'https://example.test/app/index.php/login/validate',
+        );
+
+        self::assertSame('abc123', $client->getCookie('ea_session'));
+        self::assertCount(1, $client->cookieRecords());
+        self::assertArrayNotHasKey('expiresAt', $client->cookieRecords()[0]);
+
+        $now += 11;
+        self::assertNull($client->getCookie('ea_session'));
+        self::assertSame([], $client->cookieRecords());
+
+        $buildMethod = new ReflectionMethod(GateHttpClient::class, 'buildCookieHeader');
+        $buildMethod->setAccessible(true);
+        self::assertNull($buildMethod->invoke($client, 'https://example.test/app/index.php/dashboard'));
+    }
+
+    public function testEmptyValueWithoutExpiryRemainsAValidCookie(): void
+    {
+        $client = new GateHttpClient('https://example.test', '');
+
+        $consumeMethod = new ReflectionMethod(GateHttpClient::class, 'consumeSetCookies');
+        $consumeMethod->setAccessible(true);
+        $consumeMethod->invoke($client, ['feature_flag=; Path=/app/'], 'https://example.test/app/login');
+
+        self::assertSame('', $client->getCookie('feature_flag'));
+        self::assertCount(1, $client->cookieRecords());
+    }
+
+    public function testVeryLargePositiveMaxAgeDoesNotOverflowIntoImmediateExpiry(): void
+    {
+        $client = new GateHttpClient('https://example.test', '', clock: static fn(): int => 1_700_000_000);
+
+        $consumeMethod = new ReflectionMethod(GateHttpClient::class, 'consumeSetCookies');
+        $consumeMethod->setAccessible(true);
+        $consumeMethod->invoke(
+            $client,
+            ['long_lived=value; Path=/; Max-Age=999999999999999999999999'],
+            'https://example.test/login',
+        );
+
+        self::assertSame('value', $client->getCookie('long_lived'));
+        self::assertCount(1, $client->cookieRecords());
+    }
+
+    public function testDeletionRemovesOnlyTheExactCookieScope(): void
+    {
+        $client = new GateHttpClient('https://example.test/app', 'index.php');
+
+        $consumeMethod = new ReflectionMethod(GateHttpClient::class, 'consumeSetCookies');
+        $consumeMethod->setAccessible(true);
+        $consumeMethod->invoke(
+            $client,
+            [
+                'ea_session=app; Path=/app/; Domain=example.test',
+                'ea_session=admin; Path=/app/admin/; Domain=example.test',
+            ],
+            'https://example.test/app/index.php/login/validate',
+        );
+        $consumeMethod->invoke(
+            $client,
+            ['ea_session=; Path=/app/admin/; Domain=example.test; Max-Age=0'],
+            'https://example.test/app/admin/logout',
+        );
+
+        self::assertSame('app', $client->getCookie('ea_session'));
+        self::assertCount(1, $client->cookieRecords());
+        self::assertSame('/app/', $client->cookieRecords()[0]['path']);
+
+        $buildMethod = new ReflectionMethod(GateHttpClient::class, 'buildCookieHeader');
+        $buildMethod->setAccessible(true);
+        self::assertSame('ea_session=app', $buildMethod->invoke($client, 'https://example.test/app/admin/dashboard'));
+    }
+
+    public function testHostOnlyDeletionUsesTheSameRedirectResolvedScope(): void
+    {
+        $client = new GateHttpClient('https://example.test', '');
+
+        $consumeMethod = new ReflectionMethod(GateHttpClient::class, 'consumeSetCookies');
+        $consumeMethod->setAccessible(true);
+        $consumeMethod->invoke($client, ['login_step=one; HttpOnly'], 'https://example.test/login/start');
+        $consumeMethod->invoke(
+            $client,
+            ['login_step=; HttpOnly; Expires=Thu, 01 Jan 1970 00:00:00 GMT'],
+            'https://example.test/login/final',
+        );
+
+        self::assertNull($client->getCookie('login_step'));
+        self::assertSame([], $client->cookieRecords());
+    }
+
+    public function testHostOnlyDeletionIgnoresSchemeAndPortButPreservesHostAndPathScopes(): void
+    {
+        $client = new GateHttpClient('https://example.test/app', '');
+
+        $consumeMethod = new ReflectionMethod(GateHttpClient::class, 'consumeSetCookies');
+        $consumeMethod->setAccessible(true);
+        $consumeMethod->invoke(
+            $client,
+            ['session=secure-port; Path=/app/', 'session=other-path; Path=/app/admin/'],
+            'https://example.test:8443/app/login',
+        );
+        $consumeMethod->invoke($client, ['session=other-host; Path=/app/'], 'https://other.test/app/login');
+        $consumeMethod->invoke($client, ['session=; Path=/app/; Max-Age=0'], 'http://example.test/app/logout');
+
+        $records = $client->cookieRecords();
+        self::assertCount(2, $records);
+        self::assertSame('other-path', $records[0]['value']);
+        self::assertSame('/app/admin/', $records[0]['path']);
+        self::assertSame('other-host', $records[1]['value']);
+        self::assertSame('/app/', $records[1]['path']);
+    }
+
     public function testConsumeResponseCookieBlocksScopesHostOnlyCookiesPerRedirectHop(): void
     {
         $client = new GateHttpClient('https://example.test', '');

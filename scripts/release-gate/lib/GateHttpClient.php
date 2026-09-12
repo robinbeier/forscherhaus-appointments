@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ReleaseGate;
 
+use Closure;
 use RuntimeException;
 
 final class GateHttpResponse
@@ -43,6 +44,8 @@ final class GateHttpClient
      */
     private array $cookieRecords = [];
 
+    private readonly Closure $clock;
+
     public function __construct(
         private readonly string $baseUrl,
         private readonly string $indexPage = 'index.php',
@@ -52,7 +55,10 @@ final class GateHttpClient
         private readonly string $csrfTokenName = 'csrf_token',
         /** @var array<string, string> */
         private readonly array $additionalHeaders = [],
-    ) {}
+        ?callable $clock = null,
+    ) {
+        $this->clock = $clock !== null ? Closure::fromCallable($clock) : static fn(): int => time();
+    }
 
     public function get(string $path, array $query = [], ?int $timeoutSeconds = null): GateHttpResponse
     {
@@ -91,6 +97,8 @@ final class GateHttpClient
 
     public function getCookie(string $name): ?string
     {
+        $this->purgeExpiredCookies();
+
         return $this->cookies[$name] ?? null;
     }
 
@@ -99,6 +107,8 @@ final class GateHttpClient
      */
     public function cookies(): array
     {
+        $this->purgeExpiredCookies();
+
         return $this->cookies;
     }
 
@@ -107,7 +117,15 @@ final class GateHttpClient
      */
     public function cookieRecords(): array
     {
-        return array_values($this->cookieRecords);
+        $this->purgeExpiredCookies();
+
+        return array_values(
+            array_map(static function (array $record): array {
+                unset($record['expiresAt']);
+
+                return $record;
+            }, $this->cookieRecords),
+        );
     }
 
     /**
@@ -278,6 +296,8 @@ final class GateHttpClient
      */
     private function buildCookieHeader(string $requestUrl): ?string
     {
+        $this->purgeExpiredCookies();
+
         if ($this->cookieRecords !== []) {
             $requestParts = parse_url($requestUrl);
 
@@ -453,6 +473,8 @@ final class GateHttpClient
             ];
             $domainExplicitlySet = false;
             $pathExplicitlySet = false;
+            $maxAge = null;
+            $expires = null;
 
             foreach ($segments as $segment) {
                 if ($segment === '') {
@@ -487,7 +509,22 @@ final class GateHttpClient
                             $record['sameSite'] = ucfirst(strtolower($attributeValue));
                         }
                         break;
+                    case 'max-age':
+                        if (preg_match('/^-?\d+$/', $attributeValue) === 1) {
+                            $maxAge = (int) $attributeValue;
+                        }
+                        break;
+                    case 'expires':
+                        $expires = strtotime($attributeValue);
+                        break;
                 }
+            }
+
+            if ($maxAge !== null) {
+                $now = (int) ($this->clock)();
+                $record['expiresAt'] = $maxAge > 0 && $now > PHP_INT_MAX - $maxAge ? PHP_INT_MAX : $now + $maxAge;
+            } elseif ($expires !== false && $expires !== null) {
+                $record['expiresAt'] = (int) $expires;
             }
 
             if (!$pathExplicitlySet && $defaultPath !== '') {
@@ -503,8 +540,43 @@ final class GateHttpClient
                 unset($record['domain']);
             }
 
-            $this->cookies[$name] = (string) $record['value'];
-            $this->cookieRecords[$this->buildCookieRecordScopeKey($record)] = $record;
+            $scopeKey = $this->buildCookieRecordScopeKey($record);
+            $isDeletion = isset($record['expiresAt']) && (int) $record['expiresAt'] <= (int) ($this->clock)();
+
+            if ($isDeletion) {
+                unset($this->cookieRecords[$scopeKey]);
+            } else {
+                unset($this->cookieRecords[$scopeKey]);
+                $this->cookieRecords[$scopeKey] = $record;
+            }
+
+            $this->rebuildCookieValues();
+        }
+    }
+
+    private function purgeExpiredCookies(): void
+    {
+        $now = (int) ($this->clock)();
+        $changed = false;
+
+        foreach ($this->cookieRecords as $scopeKey => $record) {
+            if (isset($record['expiresAt']) && (int) $record['expiresAt'] <= $now) {
+                unset($this->cookieRecords[$scopeKey]);
+                $changed = true;
+            }
+        }
+
+        if ($changed) {
+            $this->rebuildCookieValues();
+        }
+    }
+
+    private function rebuildCookieValues(): void
+    {
+        $this->cookies = [];
+
+        foreach ($this->cookieRecords as $record) {
+            $this->cookies[(string) $record['name']] = (string) $record['value'];
         }
     }
 
@@ -556,13 +628,21 @@ final class GateHttpClient
     private function buildCookieRecordScopeKey(array $record): string
     {
         if (isset($record['url'])) {
+            $url = parse_url((string) $record['url']);
+            if (is_array($url) && isset($url['host'])) {
+                $host = strtolower((string) $url['host']);
+                $path = $this->extractCookieRecordPath($record);
+
+                return (string) $record['name'] . '|host|' . $host . '|path|' . $path;
+            }
+
             return (string) $record['name'] . '|url|' . (string) $record['url'];
         }
 
         return sprintf(
             '%s|domain|%s|path|%s',
             (string) $record['name'],
-            (string) ($record['domain'] ?? ''),
+            ltrim(strtolower((string) ($record['domain'] ?? '')), '.'),
             (string) ($record['path'] ?? '/'),
         );
     }
