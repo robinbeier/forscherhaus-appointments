@@ -61,6 +61,12 @@ class Notifications
         array $settings,
         bool $manage_mode = false,
     ): void {
+        if (
+            isset($this->CI->zero_surprise_canary) &&
+            $this->CI->zero_surprise_canary->suppressNotifications($appointment)
+        ) {
+            return;
+        }
         try {
             $current_language = config('language');
 
@@ -222,6 +228,12 @@ class Notifications
         array $settings,
         string $cancellation_reason = '',
     ): void {
+        if (
+            isset($this->CI->zero_surprise_canary) &&
+            $this->CI->zero_surprise_canary->suppressNotifications($appointment)
+        ) {
+            return;
+        }
         try {
             $current_language = config('language');
 

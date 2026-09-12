@@ -5,10 +5,12 @@ declare(strict_types=1);
 require_once __DIR__ . '/lib/GateProcessRunner.php';
 require_once __DIR__ . '/lib/ZeroSurpriseReport.php';
 require_once __DIR__ . '/lib/ZeroSurpriseCredentials.php';
+require_once __DIR__ . '/lib/ZeroSurpriseCanaryContext.php';
 
 use ReleaseGate\GateProcessRunner;
 use ReleaseGate\ZeroSurpriseCredentials;
 use ReleaseGate\ZeroSurpriseReport;
+use ReleaseGate\ZeroSurpriseCanaryContext;
 
 const ZERO_SURPRISE_CANARY_EXIT_SUCCESS = 0;
 const ZERO_SURPRISE_CANARY_EXIT_ASSERTION_FAILURE = 1;
@@ -24,7 +26,7 @@ $exitCode = ZERO_SURPRISE_CANARY_EXIT_RUNTIME_ERROR;
 $config = [];
 
 try {
-    $config = parseCliOptions($defaultOutputPath, $defaultProfile);
+    $config = parseCliOptions($defaultOutputPath, $defaultProfile, $repoRoot);
 
     if (($config['help'] ?? false) === true) {
         printUsage();
@@ -59,8 +61,45 @@ try {
         'postdeploy_canary',
     );
 
-    $runId = buildCanaryRunId($config['release_id']);
     $deadlineAt = microtime(true) + $config['timeout_seconds'];
+    $fixtureWrapper = $repoRoot . '/scripts/ops/zero_surprise_canary_fixture.sh';
+    $fixtureStatePath = ZeroSurpriseCanaryContext::DEFAULT_PATH;
+    $fixtureActivated = false;
+    $activation = GateProcessRunner::run(
+        [
+            'env',
+            'APP_ROOT=' . $repoRoot,
+            'ZERO_SURPRISE_CANARY_STATE_FILE=' . $fixtureStatePath,
+            'bash',
+            $fixtureWrapper,
+            'activate',
+        ],
+        $repoRoot,
+        null,
+        max(1, (int) ceil($deadlineAt - microtime(true))),
+    );
+    if (($activation['exit_code'] ?? 1) !== 0) {
+        throw new RuntimeException('Canary fixture activation failed.');
+    }
+    $fixtureActivated = true;
+    $verification = GateProcessRunner::run(
+        [
+            'env',
+            'APP_ROOT=' . $repoRoot,
+            'ZERO_SURPRISE_CANARY_STATE_FILE=' . $fixtureStatePath,
+            'bash',
+            $fixtureWrapper,
+            'verify',
+        ],
+        $repoRoot,
+        null,
+        max(1, (int) ceil($deadlineAt - microtime(true))),
+    );
+    if (($verification['exit_code'] ?? 1) !== 0) {
+        throw new RuntimeException('Canary fixture verification failed.');
+    }
+    $canaryContext = ZeroSurpriseCanaryContext::loadVerified($fixtureStatePath);
+    $runId = $canaryContext['run_id'];
 
     $bookingReport = null;
     $dashboardReport = null;
@@ -72,17 +111,15 @@ try {
             'scripts/ci/booking_write_contract_smoke.php',
             '--base-url=' . $credentials['base_url'],
             '--index-page=' . $credentials['index_page'],
-            '--username=' . $credentials['username'],
-            '--password-stdin',
             '--booking-search-days=' . $credentials['booking_search_days'],
             '--retry-count=' . $credentials['retry_count'],
             '--timezone=' . $credentials['timezone'],
             '--run-id=' . $runId,
+            '--canary-context-file=' . $fixtureStatePath,
             '--output-json=' . $bookingReportPath,
         ],
         $repoRoot,
         $deadlineAt,
-        $credentials['password'],
     );
 
     $report->addStep(
@@ -107,25 +144,20 @@ try {
             'scripts/release-gate/dashboard_release_gate.php',
             '--base-url=' . $credentials['base_url'],
             '--index-page=' . $credentials['index_page'],
-            '--username=' . $credentials['username'],
-            '--password-stdin',
             '--start-date=' . $credentials['start_date'],
             '--end-date=' . $credentials['end_date'],
             '--max-pdf-duration-ms=' . $credentials['max_pdf_duration_ms'],
             '--output-json=' . $dashboardReportPath,
+            '--canary-context-file=' . $fixtureStatePath,
+            '--service-id=' . $canaryContext['service_id'],
+            '--provider-ids=' . $canaryContext['provider_id'],
         ];
 
         if ($credentials['pdf_health_url'] !== null) {
             $dashboardCommand[] = '--pdf-health-url=' . $credentials['pdf_health_url'];
         }
 
-        $dashboardStep = runCanaryStep(
-            'dashboard_replay',
-            $dashboardCommand,
-            $repoRoot,
-            $deadlineAt,
-            $credentials['password'],
-        );
+        $dashboardStep = runCanaryStep('dashboard_replay', $dashboardCommand, $repoRoot, $deadlineAt);
 
         $report->addStep(
             'dashboard_replay',
@@ -181,6 +213,53 @@ try {
     $exitCode = ZERO_SURPRISE_CANARY_EXIT_RUNTIME_ERROR;
 }
 
+if (($fixtureActivated ?? false) === true) {
+    try {
+        $deactivation = GateProcessRunner::run(
+            [
+                'env',
+                'APP_ROOT=' . $repoRoot,
+                'ZERO_SURPRISE_CANARY_STATE_FILE=' . ZeroSurpriseCanaryContext::DEFAULT_PATH,
+                'bash',
+                $repoRoot . '/scripts/ops/zero_surprise_canary_fixture.sh',
+                'deactivate',
+            ],
+            $repoRoot,
+            null,
+            30,
+        );
+        if (($deactivation['exit_code'] ?? 1) !== 0) {
+            $report?->setFailure('Canary fixture cleanup failed.', RuntimeException::class, 'runtime_error');
+            $exitCode = ZERO_SURPRISE_CANARY_EXIT_RUNTIME_ERROR;
+        } else {
+            $verification = GateProcessRunner::run(
+                [
+                    'env',
+                    'APP_ROOT=' . $repoRoot,
+                    'ZERO_SURPRISE_CANARY_STATE_FILE=' . ZeroSurpriseCanaryContext::DEFAULT_PATH,
+                    'bash',
+                    $repoRoot . '/scripts/ops/zero_surprise_canary_fixture.sh',
+                    'verify',
+                ],
+                $repoRoot,
+                null,
+                30,
+            );
+            if (($verification['exit_code'] ?? 1) !== 0) {
+                $report?->setFailure(
+                    'Canary fixture cleanup verification failed.',
+                    RuntimeException::class,
+                    'runtime_error',
+                );
+                $exitCode = ZERO_SURPRISE_CANARY_EXIT_RUNTIME_ERROR;
+            }
+        }
+    } catch (Throwable $cleanupException) {
+        $report?->setFailure('Canary fixture cleanup failed.', get_class($cleanupException), 'runtime_error');
+        $exitCode = ZERO_SURPRISE_CANARY_EXIT_RUNTIME_ERROR;
+    }
+}
+
 if ($report === null) {
     fwrite(STDERR, '[FAIL] Zero-surprise live canary failed before report initialization.' . PHP_EOL);
     exit(ZERO_SURPRISE_CANARY_EXIT_RUNTIME_ERROR);
@@ -206,7 +285,7 @@ exit($exitCode);
 /**
  * @return array<string, mixed>
  */
-function parseCliOptions(string $defaultOutputPath, string $defaultProfile): array
+function parseCliOptions(string $defaultOutputPath, string $defaultProfile, string $repoRoot): array
 {
     $options = getopt('', [
         'help',
@@ -340,13 +419,8 @@ function validateDate(string $value, string $name): void
  * @param array<int, string> $command
  * @return array<string, mixed>
  */
-function runCanaryStep(
-    string $stepName,
-    array $command,
-    string $repoRoot,
-    float $deadlineAt,
-    ?string $stdinPayload = null,
-): array {
+function runCanaryStep(string $stepName, array $command, string $repoRoot, float $deadlineAt): array
+{
     $remainingSeconds = (int) ceil($deadlineAt - microtime(true));
 
     if ($remainingSeconds <= 0) {
@@ -361,7 +435,7 @@ function runCanaryStep(
         ];
     }
 
-    $result = GateProcessRunner::run($command, $repoRoot, null, $remainingSeconds, $stdinPayload);
+    $result = GateProcessRunner::run($command, $repoRoot, null, $remainingSeconds);
 
     $exitCode = (int) ($result['exit_code'] ?? 1);
     $timedOut = (bool) ($result['timed_out'] ?? false);
@@ -388,13 +462,6 @@ function runCanaryStep(
 function classifyFailureFromExitCode(int $exitCode): string
 {
     return $exitCode === ZERO_SURPRISE_CANARY_EXIT_ASSERTION_FAILURE ? 'assertion_failure' : 'runtime_error';
-}
-
-function buildCanaryRunId(string $releaseId): string
-{
-    $hash = substr(hash('sha256', $releaseId . '|' . microtime(true) . '|' . random_int(1000, 9999)), 0, 8);
-
-    return 'zslc-' . gmdate('YmdHis') . '-' . $hash;
 }
 
 function readJsonFile(string $path): ?array

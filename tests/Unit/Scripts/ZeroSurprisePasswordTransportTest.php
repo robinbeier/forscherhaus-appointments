@@ -8,7 +8,7 @@ use PHPUnit\Framework\TestCase;
 
 final class ZeroSurprisePasswordTransportTest extends TestCase
 {
-    public function testLiveCanaryPassesPasswordThroughStdinToBothChildChecks(): void
+    public function testLiveCanaryUsesContextFileAndNeverForwardsRealPassword(): void
     {
         $fixture = sys_get_temp_dir() . '/zero-surprise-transport-' . bin2hex(random_bytes(6));
         $bin = $fixture . '/bin';
@@ -17,6 +17,7 @@ final class ZeroSurprisePasswordTransportTest extends TestCase
         $record = $fixture . '/stub-record.log';
         $report = $fixture . '/canary-report.json';
         $credentials = $fixture . '/canary.ini';
+        $wrapperRecord = $fixture . '/wrapper-record.log';
         $originalPath = getenv('PATH');
 
         mkdir($bin, 0700, true);
@@ -29,6 +30,7 @@ final class ZeroSurprisePasswordTransportTest extends TestCase
                 'scripts/release-gate/lib/ZeroSurpriseCredentials.php',
                 'scripts/release-gate/lib/ZeroSurpriseProfile.php',
                 'scripts/release-gate/config/zero_surprise_profiles.php',
+                'scripts/release-gate/lib/ZeroSurpriseCanaryContext.php',
             ]
             as $relativePath
         ) {
@@ -38,6 +40,31 @@ final class ZeroSurprisePasswordTransportTest extends TestCase
             }
             self::assertTrue(copy($repoRoot . '/' . $relativePath, $target), $relativePath);
         }
+
+        mkdir($fixture . '/scripts/ops', 0700, true);
+        file_put_contents(
+            $fixture . '/scripts/ops/zero_surprise_canary_fixture.sh',
+            <<<'SH'
+            #!/bin/sh
+            printf '%s\n' "${1:-}" >> "${ZERO_SURPRISE_WRAPPER_RECORD:?}"
+            [ "${1:-}" = activate ] && [ "${ZERO_SURPRISE_ACTIVATE_FAIL:-0}" = 1 ] && exit 1
+            exit 0
+            SH
+            ,
+        );
+        chmod($fixture . '/scripts/ops/zero_surprise_canary_fixture.sh', 0700);
+        file_put_contents(
+            $fixture . '/scripts/release-gate/lib/ZeroSurpriseCanaryContext.php',
+            <<<'PHP'
+            <?php
+            namespace ReleaseGate;
+            final class ZeroSurpriseCanaryContext {
+             public const DEFAULT_PATH='/var/lib/fh-zero-surprise-canary/active.json';
+             public static function loadVerified(string $path=self::DEFAULT_PATH, ?int $now=null): array { return ['run_id'=>'zs-canary-'.str_repeat('a',32),'actor_id'=>1,'actor_username'=>'__ea_zero_surprise_canary_v1','actor_password'=>str_repeat('a',64),'provider_id'=>2,'service_id'=>3,'token'=>str_repeat('b',64)]; }
+            }
+            PHP
+            ,
+        );
 
         file_put_contents(
             $credentials,
@@ -71,15 +98,7 @@ final class ZeroSurprisePasswordTransportTest extends TestCase
             esac
         done
 
-        stdin_file="$record.stdin.$$"
-        cat > "$stdin_file"
-        if command -v sha256sum >/dev/null 2>&1; then
-            hash=$(sha256sum "$stdin_file" | awk '{print $1}')
-        else
-            hash=$(shasum -a 256 "$stdin_file" | awk '{print $1}')
-        fi
-        printf 'stdin_sha256=%s\n' "$hash" >> "$record"
-        rm -f "$stdin_file"
+        cat >/dev/null
 
         mkdir -p "$(dirname "$output")"
         case "$script" in
@@ -104,6 +123,7 @@ final class ZeroSurprisePasswordTransportTest extends TestCase
 
         putenv('PATH=' . $bin . ':' . (is_string($originalPath) ? $originalPath : ''));
         putenv('ZERO_SURPRISE_STUB_RECORD=' . $record);
+        putenv('ZERO_SURPRISE_WRAPPER_RECORD=' . $wrapperRecord);
 
         try {
             $result = $this->runCanary($fixture, $credentials, $report);
@@ -114,19 +134,38 @@ final class ZeroSurprisePasswordTransportTest extends TestCase
 
             $records = (string) file_get_contents($record);
             self::assertSame(2, substr_count($records, 'call='));
-            self::assertSame(2, substr_count($records, 'arg=--password-stdin'));
+            self::assertSame(
+                2,
+                substr_count($records, 'arg=--canary-context-file=/var/lib/fh-zero-surprise-canary/active.json'),
+            );
             self::assertStringNotContainsString($password, $records);
-            self::assertSame(2, substr_count($records, 'stdin_sha256=' . hash('sha256', $password)));
             self::assertStringNotContainsString($password, $result['stdout'] . $result['stderr']);
+            self::assertSame("activate\nverify\ndeactivate\nverify\n", (string) file_get_contents($wrapperRecord));
 
             $canary = json_decode((string) file_get_contents($report), true, 512, JSON_THROW_ON_ERROR);
             self::assertSame(0, $canary['summary']['exit_code'] ?? null);
             self::assertSame('pass', $canary['invariants']['overbooking']['status'] ?? null);
             self::assertSame('pass', $canary['invariants']['fill_rate_math']['status'] ?? null);
             self::assertSame('pass', $canary['invariants']['pdf_exports']['status'] ?? null);
+
+            file_put_contents($record, '');
+            file_put_contents($wrapperRecord, '');
+            putenv('ZERO_SURPRISE_ACTIVATE_FAIL=1');
+            $failed = $this->runCanary($fixture, $credentials, $fixture . '/activation-failure.json');
+            self::assertNotSame(0, $failed['exit_code']);
+            self::assertStringNotContainsString(
+                'scripts/ci/booking_write_contract_smoke.php',
+                (string) file_get_contents($record),
+            );
+            self::assertStringNotContainsString(
+                'scripts/release-gate/dashboard_release_gate.php',
+                (string) file_get_contents($record),
+            );
+            putenv('ZERO_SURPRISE_ACTIVATE_FAIL');
         } finally {
             putenv('PATH=' . (is_string($originalPath) ? $originalPath : ''));
             putenv('ZERO_SURPRISE_STUB_RECORD');
+            putenv('ZERO_SURPRISE_WRAPPER_RECORD');
             self::removeTree($fixture);
         }
     }

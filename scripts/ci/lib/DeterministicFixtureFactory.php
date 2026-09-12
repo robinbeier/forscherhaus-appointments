@@ -19,6 +19,7 @@ final class DeterministicFixtureFactory
         private readonly string $runId,
         private readonly int $bookingSearchDays = 14,
         private readonly string $timezone = 'UTC',
+        private readonly bool $syntheticCanary = false,
     ) {}
 
     public static function create(int $bookingSearchDays = 14): self
@@ -298,6 +299,18 @@ final class DeterministicFixtureFactory
         return $pairs;
     }
 
+    /** @param array<int, array{provider_id:int,service_id:int}> $pairs @return array{provider_id:int,service_id:int} */
+    public function resolveCanaryPair(array $pairs, int $providerId, int $serviceId): array
+    {
+        $wanted = ['provider_id' => $providerId, 'service_id' => $serviceId];
+        foreach ($pairs as $pair) {
+            if ($pair === $wanted) {
+                return $wanted;
+            }
+        }
+        throw new GateAssertionException('Canary context provider/service pair is not present in booking bootstrap.');
+    }
+
     /**
      * @param array<int, array{provider_id:int,service_id:int}> $providerServicePairs
      * @return array{
@@ -370,7 +383,7 @@ final class DeterministicFixtureFactory
         $normalized = preg_replace('/[^a-z0-9]+/', '-', strtolower($marker)) ?: 'ci-write';
         $local = 'ci-' . substr(hash('sha256', $normalized), 0, 20);
 
-        return $local . '@example.org';
+        return $local . ($this->syntheticCanary ? '@synthetic.invalid' : '@example.org');
     }
 
     private function nextMarker(string $prefix): string

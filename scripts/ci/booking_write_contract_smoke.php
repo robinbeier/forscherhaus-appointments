@@ -32,6 +32,9 @@ use ReleaseGate\GateAssertionException;
 use ReleaseGate\GateAssertions;
 use ReleaseGate\GateHttpClient;
 use ReleaseGate\GateCliSupport;
+use ReleaseGate\ZeroSurpriseCanaryContext;
+
+require_once __DIR__ . '/../release-gate/lib/ZeroSurpriseCanaryContext.php';
 
 const BOOKING_WRITE_CONTRACT_EXIT_SUCCESS = 0;
 const BOOKING_WRITE_CONTRACT_EXIT_ASSERTION_FAILURE = 1;
@@ -167,7 +170,12 @@ function runBookingContractsAttempt(
     array &$state,
     array &$cleanupSummary,
 ): void {
-    $factory = new DeterministicFixtureFactory($config['run_id'], $config['booking_search_days'], $config['timezone']);
+    $factory = new DeterministicFixtureFactory(
+        $config['run_id'],
+        $config['booking_search_days'],
+        $config['timezone'],
+        $config['canary_context'] !== null,
+    );
 
     $state = [
         'run_id' => $factory->runId(),
@@ -181,6 +189,7 @@ function runBookingContractsAttempt(
         'booking-write-contract-smoke/1.0',
         $config['csrf_cookie_name'],
         $config['csrf_token_name'],
+        $config['canary_context'] === null ? [] : ['X-EA-Canary' => $config['canary_context']['token']],
     );
 
     $cleanup = new WriteContractCleanupRegistry();
@@ -191,6 +200,15 @@ function runBookingContractsAttempt(
         GateAssertions::assertStatus($bookingPage->statusCode, 200, 'GET /booking');
         $bootstrap = $factory->extractBookingBootstrap($bookingPage->body);
         $pairs = $factory->resolveProviderServicePairs($bootstrap);
+        if ($config['canary_context'] !== null) {
+            $pairs = [
+                $factory->resolveCanaryPair(
+                    $pairs,
+                    $config['canary_context']['provider_id'],
+                    $config['canary_context']['service_id'],
+                ),
+            ];
+        }
         $slot = $factory->resolveBookableSlot($client, $config['http_timeout'], $pairs);
 
         $state['provider_id'] = $slot['provider_id'];
@@ -893,6 +911,9 @@ function apiJsonRequest(
         throw new RuntimeException('ext-curl is required for booking write contract smoke.');
     }
 
+    if (($config['canary_context'] ?? null) !== null) {
+        ZeroSurpriseCanaryContext::assertUnchanged($config['canary_context'], $config['canary_context_file']);
+    }
     $url = buildAppUrl($config['base_url'], $config['index_page'], $path, $query);
     $curl = curl_init();
 
@@ -931,6 +952,9 @@ function apiJsonRequest(
     $connectTimeout = min(5, $timeout);
 
     $requestHeaders = ['Accept: application/json'];
+    if (($config['canary_context'] ?? null) !== null) {
+        $requestHeaders[] = 'X-EA-Canary: ' . $config['canary_context']['token'];
+    }
     if ($payload !== null) {
         $requestHeaders[] = 'Content-Type: application/json';
     }
@@ -939,7 +963,7 @@ function apiJsonRequest(
         CURLOPT_URL => $url,
         CURLOPT_CUSTOMREQUEST => strtoupper($method),
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_FOLLOWLOCATION => ($config['canary_context'] ?? null) === null,
         CURLOPT_MAXREDIRS => 5,
         CURLOPT_TIMEOUT => $timeout,
         CURLOPT_CONNECTTIMEOUT => $connectTimeout,
@@ -1077,6 +1101,7 @@ function parseCliOptions(): array
         'username:',
         'password:',
         'password-stdin',
+        'canary-context-file:',
         'http-timeout::',
         'booking-search-days::',
         'retry-count::',
@@ -1094,8 +1119,10 @@ function parseCliOptions(): array
     }
 
     $baseUrl = trim((string) ($options['base-url'] ?? ''));
-    $username = trim((string) ($options['username'] ?? ''));
-    $password = GateCliSupport::readPassword($options);
+    $contextFile = (string) ($options['canary-context-file'] ?? '');
+    $canaryContext = $contextFile === '' ? null : ZeroSurpriseCanaryContext::loadVerified($contextFile);
+    $username = $canaryContext['actor_username'] ?? trim((string) ($options['username'] ?? ''));
+    $password = $canaryContext['actor_password'] ?? GateCliSupport::readPassword($options);
 
     if ($baseUrl === '' || $username === '' || $password === '') {
         throw new ContractAssertionException('Missing required arguments. Use --help for usage.');
@@ -1105,7 +1132,7 @@ function parseCliOptions(): array
     $retryCount = (int) ($options['retry-count'] ?? 1);
     $timeout = (int) ($options['http-timeout'] ?? 15);
 
-    $runId = trim((string) ($options['run-id'] ?? ''));
+    $runId = $canaryContext['run_id'] ?? trim((string) ($options['run-id'] ?? ''));
     if ($runId === '') {
         $runId = DeterministicFixtureFactory::generateRunId();
     }
@@ -1126,6 +1153,8 @@ function parseCliOptions(): array
         'retry_count' => max(0, $retryCount),
         'output_json' => (string) ($options['output-json'] ?? ''),
         'run_id' => $runId,
+        'canary_context_file' => $contextFile,
+        'canary_context' => $canaryContext,
         'timezone' => (string) ($options['timezone'] ?? (date_default_timezone_get() ?: 'UTC')),
         'csrf_cookie_name' => (string) ($options['csrf-cookie-name'] ?? 'csrf_cookie'),
         'csrf_token_name' => (string) ($options['csrf-token-name'] ?? 'csrf_token'),

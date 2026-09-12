@@ -14,6 +14,9 @@ use ReleaseGate\GateAssertionException;
 use ReleaseGate\GateAssertions;
 use ReleaseGate\GateCliSupport;
 use ReleaseGate\GateHttpClient;
+use ReleaseGate\ZeroSurpriseCanaryContext;
+
+require_once __DIR__ . '/lib/ZeroSurpriseCanaryContext.php';
 
 const RELEASE_GATE_EXIT_SUCCESS = 0;
 const RELEASE_GATE_EXIT_ASSERTION_FAILURE = 1;
@@ -44,6 +47,7 @@ try {
         'dashboard-release-gate/1.0',
         $config['csrf_cookie_name'],
         $config['csrf_token_name'],
+        $config['canary_context'] === null ? [] : ['X-EA-Canary' => $config['canary_context']['token']],
     );
 
     $runCheck = static function (string $name, callable $callback) use (&$checks): void {
@@ -232,6 +236,13 @@ try {
             'duration_ms' => $response->durationMs,
         ];
     });
+    if ($config['canary_context'] !== null) {
+        $runCheck('auth_logout', static function () use ($client, $config): array {
+            $response = $client->get('logout', [], $config['http_timeout']);
+            GateAssertions::assertStatus($response->statusCode, 200, 'GET /logout');
+            return ['http_status' => $response->statusCode];
+        });
+    }
 } catch (GateAssertionException $e) {
     $exitCode = GateCliSupport::classifyAssertionExitCode($checks);
     $failure = [
@@ -361,6 +372,7 @@ function parseCliOptions(string $defaultOutputPath, array $csrfDefaults): array
         'username:',
         'password:',
         'password-stdin',
+        'canary-context-file:',
         'start-date:',
         'end-date:',
         'statuses::',
@@ -404,8 +416,10 @@ function parseCliOptions(string $defaultOutputPath, array $csrfDefaults): array
     }
 
     $baseUrl = trim(getRequiredOption($options, 'base-url'));
-    $username = trim(getRequiredOption($options, 'username'));
-    $password = GateCliSupport::readPassword($options);
+    $contextFile = (string) ($options['canary-context-file'] ?? '');
+    $canaryContext = $contextFile === '' ? null : ZeroSurpriseCanaryContext::loadVerified($contextFile);
+    $username = $canaryContext['actor_username'] ?? trim(getRequiredOption($options, 'username'));
+    $password = $canaryContext['actor_password'] ?? GateCliSupport::readPassword($options);
     $startDate = trim(getRequiredOption($options, 'start-date'));
     $endDate = trim(getRequiredOption($options, 'end-date'));
 
@@ -425,6 +439,10 @@ function parseCliOptions(string $defaultOutputPath, array $csrfDefaults): array
     $statuses = parseStringList(getOptionalOption($options, 'statuses', null), ['Booked']);
     $serviceId = parseOptionalPositiveInt(getOptionalOption($options, 'service-id', null), 'service-id');
     $providerIds = parseIntList(getOptionalOption($options, 'provider-ids', null));
+    if ($canaryContext !== null) {
+        $serviceId = $canaryContext['service_id'];
+        $providerIds = [$canaryContext['provider_id']];
+    }
 
     $httpTimeout = parsePositiveInt(getOptionalOption($options, 'http-timeout', 15), 'http-timeout');
     $exportTimeout = parsePositiveInt(getOptionalOption($options, 'export-timeout', 60), 'export-timeout');
@@ -473,6 +491,7 @@ function parseCliOptions(string $defaultOutputPath, array $csrfDefaults): array
         'csrf_token_name' => $csrfTokenName,
         'csrf_cookie_name' => $csrfCookieName,
         'output_json' => $outputJson,
+        'canary_context' => $canaryContext,
     ];
 }
 

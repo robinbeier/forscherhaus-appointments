@@ -34,6 +34,7 @@ class Console extends EA_Controller
         $this->load->library('instance');
         $this->load->library('customers_ui_smoke_fixture');
         $this->load->library('provider_ui_smoke_fixture');
+        $this->load->library('zero_surprise_canary_fixture');
 
         $this->load->model('admins_model');
         $this->load->model('customers_model');
@@ -184,6 +185,24 @@ class Console extends EA_Controller
         }
     }
 
+    public function zero_surprise_canary(string $action = ''): void
+    {
+        if (!in_array($action, ['activate', 'verify', 'deactivate'], true) || isset($GLOBALS['argv'][5])) {
+            fwrite(STDOUT, 'zero_surprise_canary action=invalid state=error result=error' . PHP_EOL);
+            exit(64);
+        }
+        try {
+            $state = $this->zero_surprise_canary_fixture->run(
+                $action,
+                $GLOBALS['argv'][4] ?? Zero_surprise_canary_fixture::DEFAULT_STATE_FILE,
+            );
+            response('zero_surprise_canary action=' . $action . ' state=' . $state . ' result=ok' . PHP_EOL);
+        } catch (Throwable) {
+            fwrite(STDOUT, 'zero_surprise_canary action=' . $action . ' state=error result=error' . PHP_EOL);
+            exit(1);
+        }
+    }
+
     private function exit_customers_ui_smoke_error(string $action, int $exitCode): never
     {
         fwrite(STDOUT, 'customers_ui_smoke action=' . $action . ' state=error result=error' . PHP_EOL);
@@ -220,6 +239,7 @@ class Console extends EA_Controller
             '⇾ php index.php console backup',
             '⇾ php index.php console customers_ui_smoke <install|verify|activate|deactivate|remove>',
             '⇾ php index.php console provider_ui_smoke <install|verify|activate|deactivate|remove>',
+            '⇾ php index.php console zero_surprise_canary <activate|verify|deactivate>',
             '',
             '',
         ];

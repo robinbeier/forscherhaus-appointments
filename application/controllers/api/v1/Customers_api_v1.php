@@ -51,9 +51,15 @@ class Customers_api_v1 extends EA_Controller
 
             $with = $this->api->request_with();
 
-            $customers = empty($keyword)
-                ? $this->customers_model->get(null, $limit, $offset, $order_by)
-                : $this->customers_model->search($keyword, $limit, $offset, $order_by);
+            if ($this->zero_surprise_canary->active()) {
+                $customers = $this->customers_model->get([
+                    'notes' => 'run:' . $this->zero_surprise_canary->context()['run_id'],
+                ]);
+            } else {
+                $customers = empty($keyword)
+                    ? $this->customers_model->get(null, $limit, $offset, $order_by)
+                    : $this->customers_model->search($keyword, $limit, $offset, $order_by);
+            }
 
             foreach ($customers as &$customer) {
                 $this->customers_model->api_encode($customer);
