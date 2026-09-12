@@ -671,6 +671,48 @@ final class DefenseVerificationFixture
         $serviceRows = $this->db
             ->query('SELECT id FROM `' . $this->db->dbprefix('services') . '` WHERE id = ? FOR UPDATE', [$serviceId])
             ->result_array();
+        $parentId = isset($state['ids']['appointment']) ? (int) $state['ids']['appointment'] : 0;
+        if ($parentId > 0) {
+            $parentRows = $this->db
+                ->query(
+                    'SELECT id, id_services FROM ' . $this->db->dbprefix('appointments') . ' WHERE id = ? FOR UPDATE',
+                    [$parentId],
+                )
+                ->result_array();
+            if ($parentRows === []) {
+                if (!$alreadyCleaning) {
+                    throw new RuntimeException('Synthetic appointment parent disappeared; refusing cleanup.');
+                }
+            } elseif (count($parentRows) !== 1 || (int) $parentRows[0]['id_services'] !== $serviceId) {
+                throw new RuntimeException('Synthetic appointment parent drifted; refusing cleanup.');
+            }
+            $generatedChildren = $this->db
+                ->query(
+                    'SELECT id, id_parent_appointment, id_services FROM ' .
+                        $this->db->dbprefix('appointments') .
+                        ' WHERE id_parent_appointment = ? ORDER BY id FOR UPDATE',
+                    [$parentId],
+                )
+                ->result_array();
+            if ($generatedChildren !== []) {
+                throw new RuntimeException('Unexpected generated appointment child; refusing cleanup.');
+            }
+        } elseif (isset($state['actor_id'], $state['ids']['calendar_customer'])) {
+            // A prepared journal may not yet contain the parent ID. Still
+            // lock the only attributable synthetic actor/customer children.
+            $generatedChildren = $this->db
+                ->query(
+                    'SELECT id, id_parent_appointment, id_services FROM ' .
+                        $this->db->dbprefix('appointments') .
+                        ' WHERE id_parent_appointment IS NOT NULL AND id_users_provider = ?' .
+                        ' AND id_users_customer = ? ORDER BY id FOR UPDATE',
+                    [(int) $state['actor_id'], (int) $state['ids']['calendar_customer']],
+                )
+                ->result_array();
+            if ($generatedChildren !== []) {
+                throw new RuntimeException('Unexpected generated appointment child; refusing cleanup.');
+            }
+        }
         $actualLinks = $this->db
             ->query(
                 'SELECT id_users, id_services FROM `' .

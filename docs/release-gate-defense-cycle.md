@@ -200,6 +200,13 @@ HTTP request, and the ordinary customer delete path would legitimately cascade
 that unjournaled row. Fixture cleanup instead locks and verifies complete
 dependency sets before removing its owned customer rows.
 
+Fixture service cleanup follows the application lock order: synthetic user
+parents, then the service, its appointment parent and generated buffer children.
+Every child whose `id_parent_appointment` references the owned appointment is
+locked and must be absent. An unexpected generated child is left untouched and
+blocks parent and service removal until a separately controlled recovery proves
+it safe to continue.
+
 `calendar-race` creates only an owned synthetic service, customer, foreign
 provider and appointment. One transaction holds the request-specific synthetic
 customer parent while the real authenticated calendar request begins. Before the

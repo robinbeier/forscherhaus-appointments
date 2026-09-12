@@ -352,6 +352,45 @@ final class DefenseVerificationFixtureTest extends TestCase
         self::assertSame('clean', $this->fixture->verify());
     }
 
+    public function testCleanupRefusesGeneratedBufferChildAndResumesAfterRemoval(): void
+    {
+        $actor = $this->ordinary->activate();
+        $state = $this->fixture->activate('calendar_race', $actor);
+        $db = &get_instance()->db;
+        $db->insert('appointments', [
+            'create_datetime' => date('Y-m-d H:i:s'),
+            'update_datetime' => date('Y-m-d H:i:s'),
+            'book_datetime' => date('Y-m-d H:i:s'),
+            'start_datetime' => '2099-12-03 10:00:00',
+            'end_datetime' => '2099-12-03 10:30:00',
+            'location' => null,
+            'color' => '#6c757d',
+            'status' => 'Booked',
+            'notes' => 'foreign-generated-buffer-child',
+            'hash' => bin2hex(random_bytes(32)),
+            'is_unavailability' => 1,
+            'id_users_provider' => (int) $state['actor_id'],
+            'id_users_customer' => (int) $state['customer_id'],
+            'id_services' => null,
+            'id_parent_appointment' => (int) $state['appointment_id'],
+            'id_google_calendar' => null,
+            'id_caldav_calendar' => null,
+        ]);
+        $childId = (int) $db->insert_id();
+        try {
+            $this->fixture->deactivate();
+            self::fail('Cleanup must refuse a generated appointment child.');
+        } catch (RuntimeException $error) {
+            self::assertStringContainsString('generated appointment child', $error->getMessage());
+        }
+        self::assertSame(1, $db->get_where('appointments', ['id' => $childId])->num_rows());
+        self::assertSame(1, $db->get_where('appointments', ['id' => $state['appointment_id']])->num_rows());
+        self::assertSame(1, $db->get_where('services', ['id' => $state['service_id']])->num_rows());
+        $db->delete('appointments', ['id' => $childId]);
+        $this->fixture->deactivate();
+        self::assertSame('clean', $this->fixture->verify());
+    }
+
     public function testOwnershipDriftRefusesCleanupUntilExactStateIsRestored(): void
     {
         $actor = $this->ordinary->activate();
