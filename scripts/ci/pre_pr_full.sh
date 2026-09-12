@@ -123,6 +123,9 @@ echo_section "Resolve local full-gate scope"
 RUN_INTEGRATION_SMOKE="$(pre_pr_full_should_run_integration_smoke "$BASE_REF")"
 echo "[pre-pr-full] Integration smoke required by changed paths: ${RUN_INTEGRATION_SMOKE}"
 
+echo_section "Ordinary defense-cycle HTTP and session tests"
+bash scripts/ci/run_defense_cycle.sh
+
 echo_section "Run quick pre-PR gate"
 SKIP_LOCAL_DEPS_BOOTSTRAP=1 PRE_PR_BASE_REF="$BASE_REF" bash ./scripts/ci/pre_pr_quick.sh
 

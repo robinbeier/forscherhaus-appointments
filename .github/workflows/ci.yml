@@ -1559,3 +1559,35 @@ jobs:
           name: gate-summary-${{ github.job }}
           path: storage/logs/ci/gate-summary/
           retention-days: 7
+
+  defense-cycle-ordinary-flows:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Git clone
+        uses: actions/checkout@v6
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          coverage: none
+          extensions: gd
+          tools: composer:v2
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress
+      - name: Prepare synthetic Docker configuration
+        run: |
+          if [[ -e config.php ]]; then
+            cmp -s config.php config-sample.php
+          fi
+          install -m 0600 config-sample.php config.php
+      - name: Run isolated ordinary application and session lifecycle checks
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label defense-cycle -- bash scripts/ci/run_defense_cycle.sh
+      - name: Upload gate diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gate-summary-${{ github.job }}
+          path: storage/logs/ci/gate-summary/
+          retention-days: 7
