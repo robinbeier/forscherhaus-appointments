@@ -71,7 +71,15 @@ final class OrdinaryProbeEvidence
         }
         $data = $this->read();
         if (count($data['events']) >= 64) {
-            throw new RuntimeException('Evidence event limit exceeded.');
+            if ($phase !== 'deactivate') {
+                throw new RuntimeException('Evidence event limit exceeded.');
+            }
+            // Keep prior evidence bounded without preventing eventual revocation/cleanup.
+            if (($data['cleanup_events_omitted'] ?? false) !== true) {
+                $data['cleanup_events_omitted'] = true;
+                $this->write($data);
+            }
+            return;
         }
         $data['events'][] = ['phase' => $phase, 'outcome' => $outcome, 'at' => time()];
         $this->write($data);

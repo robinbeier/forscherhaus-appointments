@@ -220,6 +220,34 @@ final class OrdinaryProbeEvidenceTest extends TestCase
         self::assertFileDoesNotExist($this->directory . '/sessions.json');
     }
 
+    public function testSaturatedHistoryDoesNotPreventSuccessfulCleanup(): void
+    {
+        $evidence = new OrdinaryProbeEvidence($this->directory);
+        $evidence->begin('ea_synthetic');
+        for ($i = 0; $i < 32; $i++) {
+            $evidence->step('deactivate', 'started');
+            $evidence->step('deactivate', 'failed');
+        }
+        $history = $evidence->read()['events'];
+        $result = $evidence->run(
+            'deactivate',
+            static function () use ($evidence): string {
+                $evidence->cleaned(0, 0, 0);
+                return 'clean';
+            },
+            alwaysAttempt: true,
+        );
+        self::assertSame('clean', $result);
+        $receipt = $evidence->read();
+        self::assertSame($history, $receipt['events']);
+        self::assertTrue($receipt['cleanup_events_omitted']);
+        self::assertSame(0, $receipt['cleanup']['remaining']);
+        self::assertSame('clean', $evidence->run('deactivate', static fn() => 'clean', alwaysAttempt: true));
+        self::assertSame($receipt, $evidence->read());
+        self::expectException(RuntimeException::class);
+        $evidence->step('session', 'started');
+    }
+
     public function testOnlyFixedDiagnosticCodesAreAccepted(): void
     {
         $evidence = new OrdinaryProbeEvidence($this->directory);
