@@ -124,7 +124,11 @@ RUN_INTEGRATION_SMOKE="$(pre_pr_full_should_run_integration_smoke "$BASE_REF")"
 echo "[pre-pr-full] Integration smoke required by changed paths: ${RUN_INTEGRATION_SMOKE}"
 
 echo_section "Ordinary defense-cycle HTTP and session tests"
-(unset CI_DOCKER_COMPOSE_PROJECT_NAME COMPOSE_PROJECT_NAME; bash scripts/ci/run_defense_cycle.sh)
+(
+    unset CI_DOCKER_COMPOSE_PROJECT_NAME COMPOSE_PROJECT_NAME COMPOSE_FILE \
+        EA_MYSQL_DATA_PATH EA_LOCAL_CI_COMPOSE_OVERRIDE_PATH EA_LOCAL_CI_PORTLESS_COMPOSE
+    bash scripts/ci/run_defense_cycle.sh
+)
 
 echo_section "Run quick pre-PR gate"
 SKIP_LOCAL_DEPS_BOOTSTRAP=1 PRE_PR_BASE_REF="$BASE_REF" bash ./scripts/ci/pre_pr_quick.sh

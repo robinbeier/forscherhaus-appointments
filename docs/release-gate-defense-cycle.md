@@ -14,7 +14,10 @@ bash scripts/ci/run_defense_cycle.sh
 The runner claims a fresh Docker project and a fresh MySQL data directory using
 the existing CI lifecycle helpers. It accepts no caller-owned Compose project,
 data directory, external target or database dump. Before installing the demo seed,
-it requires the exact Docker sample database connection. It removes its containers,
+it requires the exact Docker sample database connection. Caller Docker endpoint
+selectors are rejected; the current context must resolve to a local Unix/npipe
+socket, which is pinned for the whole owned lifecycle. Unavailable or malformed
+context evidence fails before resource mutation. It removes its containers,
 network and MySQL data on normal exit, failure and handled interruption; a cleanup
 failure makes the run fail. A hard host/process termination still requires the
 operator to inspect and remove that exact owned project using the existing CI
@@ -31,7 +34,10 @@ Fixture records are removed by exact identity, with relationship checks and
 baseline table-count checks. The entire owned database is disposed even if row
 cleanup fails. Temporary server/session files are removed as well.
 
-`pre_pr_full.sh` runs this gate. The dedicated required workflow job in
+`pre_pr_full.sh` runs this gate in a subshell that clears its six inherited
+Compose/project/data overrides while retaining them for the parent. Explicit
+Docker endpoint selectors remain visible and are rejected, never silently
+redirected to another daemon. The dedicated required workflow job in
 [ci.yml](../.github/workflows/ci.yml) runs the same command. Ordinary PHPUnit
 coverage runs skip these tests unless the isolated flag is present; those skips
 are not evidence that the gate passed.
