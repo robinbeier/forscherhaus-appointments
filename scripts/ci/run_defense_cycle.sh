@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 source scripts/ci/docker_compose_helpers.sh
 # No existing database, external target, dump, project or data path can be adopted.
-if [[ -n "${CI_DOCKER_COMPOSE_PROJECT_NAME:-}${COMPOSE_PROJECT_NAME:-}${COMPOSE_FILE:-}${EA_MYSQL_DATA_PATH:-}" ]]; then
+if [[ -n "${CI_DOCKER_COMPOSE_PROJECT_NAME:-}${COMPOSE_PROJECT_NAME:-}${COMPOSE_FILE:-}${EA_MYSQL_DATA_PATH:-}${EA_LOCAL_CI_COMPOSE_OVERRIDE_PATH:-}" || "${EA_LOCAL_CI_PORTLESS_COMPOSE:-1}" != "1" ]]; then
     echo 'Refusing caller-owned Docker runtime configuration.' >&2
     exit 1
 fi

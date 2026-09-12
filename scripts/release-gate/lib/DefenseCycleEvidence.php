@@ -86,7 +86,12 @@ final class DefenseCycleEvidence
         }
 
         $missing = array_values(array_diff(self::INVARIANTS, array_keys($completeByInvariant)));
-        $verified = $this->observations !== [] && $invalid === [] && !$hasHistoricalFailure && $missing === [];
+        $verified =
+            $this->targetEnvironment === 'production' &&
+            $this->observations !== [] &&
+            $invalid === [] &&
+            !$hasHistoricalFailure &&
+            $missing === [];
 
         return [
             'expected_commit' => $this->expectedCommit,

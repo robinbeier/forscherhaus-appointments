@@ -103,6 +103,20 @@ final class DefenseCycleEvidenceTest extends TestCase
         self::assertContains('ROB-548', $report->toArray()['missing_invariants']);
     }
 
+    public function testNonProductionTargetsNeverVerifyTheCycle(): void
+    {
+        foreach (['source', 'isolated'] as $environment) {
+            $report = new DefenseCycleEvidence(self::COMMIT, $environment);
+            foreach (DefenseCycleEvidence::INVARIANTS as $invariant) {
+                $observation = $this->observation($invariant);
+                $observation['environment'] = $environment;
+                $report->append($observation);
+            }
+            self::assertFalse($report->isVerified());
+            self::assertSame('not_safely_testable', $report->toArray()['overall_status']);
+        }
+    }
+
     public function testMissingCoverageFieldDefaultsToPartial(): void
     {
         $report = new DefenseCycleEvidence(self::COMMIT);
