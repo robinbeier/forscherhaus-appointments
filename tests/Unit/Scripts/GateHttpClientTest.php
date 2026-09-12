@@ -291,6 +291,28 @@ class GateHttpClientTest extends TestCase
         self::assertSame([], $client->cookieRecords());
     }
 
+    public function testHostOnlyDeletionIgnoresSchemeAndPortButPreservesHostAndPathScopes(): void
+    {
+        $client = new GateHttpClient('https://example.test/app', '');
+
+        $consumeMethod = new ReflectionMethod(GateHttpClient::class, 'consumeSetCookies');
+        $consumeMethod->setAccessible(true);
+        $consumeMethod->invoke(
+            $client,
+            ['session=secure-port; Path=/app/', 'session=other-path; Path=/app/admin/'],
+            'https://example.test:8443/app/login',
+        );
+        $consumeMethod->invoke($client, ['session=other-host; Path=/app/'], 'https://other.test/app/login');
+        $consumeMethod->invoke($client, ['session=; Path=/app/; Max-Age=0'], 'http://example.test/app/logout');
+
+        $records = $client->cookieRecords();
+        self::assertCount(2, $records);
+        self::assertSame('other-path', $records[0]['value']);
+        self::assertSame('/app/admin/', $records[0]['path']);
+        self::assertSame('other-host', $records[1]['value']);
+        self::assertSame('/app/', $records[1]['path']);
+    }
+
     public function testConsumeResponseCookieBlocksScopesHostOnlyCookiesPerRedirectHop(): void
     {
         $client = new GateHttpClient('https://example.test', '');

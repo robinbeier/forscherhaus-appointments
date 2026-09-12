@@ -143,17 +143,18 @@ try {
                 $evidence->step(...),
             );
         } else {
-            $evidence->step('session', 'started');
-            $result['evidence'] = (new OrdinarySessionProbe($client, $sessions, 'http://localhost', $expiration))->run(
-                $context,
-                static function (array $progress) use ($evidence): void {
-                    $evidence->step('waiting', 'started');
-                    echo json_encode($progress, JSON_THROW_ON_ERROR) . PHP_EOL;
-                    flush();
-                },
-                $assertActive,
+            $result['evidence'] = $evidence->run(
+                'session',
+                fn() => (new OrdinarySessionProbe($client, $sessions, 'http://localhost', $expiration))->run(
+                    $context,
+                    static function (array $progress) use ($evidence): void {
+                        $evidence->step('waiting', 'started');
+                        echo json_encode($progress, JSON_THROW_ON_ERROR) . PHP_EOL;
+                        flush();
+                    },
+                    $assertActive,
+                ),
             );
-            $evidence->step('session', 'passed');
         }
         if (!in_array($action, ['deactivate', 'verify'], true)) {
             $assertActive();

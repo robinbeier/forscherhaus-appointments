@@ -77,6 +77,19 @@ final class OrdinaryProbeEvidence
         $this->write($data);
     }
 
+    public function run(string $phase, callable $operation): mixed
+    {
+        $this->step($phase, 'started');
+        try {
+            $result = $operation();
+            $this->step($phase, 'passed');
+            return $result;
+        } catch (\Throwable $error) {
+            $this->step($phase, 'failed');
+            throw $error;
+        }
+    }
+
     /** Called only after exact journaled paths were removed and checked absent. */
     public function cleaned(int $tracked, int $removed, int $alreadyAbsent): void
     {

@@ -42,14 +42,14 @@ final class OrdinaryAccountProbe
 
         $observe ??= static function (string $phase, string $outcome): void {};
         $phase = 'account_snapshot';
-        $observe($phase, 'started');
-        $before = $this->snapshot($userId, $username, $email, $marker);
-        $observe($phase, 'passed');
         $loggedIn = false;
         $logoutStatus = 0;
         $result = null;
         $cleanupError = null;
         try {
+            $observe($phase, 'started');
+            $before = $this->snapshot($userId, $username, $email, $marker);
+            $observe($phase, 'passed');
             $phase = 'login_page';
             $observe($phase, 'started');
             $loginPage = $this->client->get('login');

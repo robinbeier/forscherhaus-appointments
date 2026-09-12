@@ -109,6 +109,28 @@ final class OrdinaryProbeEvidenceTest extends TestCase
         }
     }
 
+    public function testHandledSessionFailureIsDistinctFromAnInterruptedOperation(): void
+    {
+        $evidence = new OrdinaryProbeEvidence($this->directory);
+        $evidence->begin('ea_synthetic');
+        $error = new RuntimeException('private synthetic failure detail');
+        try {
+            $evidence->run('session', static function () use ($evidence, $error): void {
+                $evidence->step('waiting', 'started');
+                throw $error;
+            });
+            self::fail('Original operation failure must propagate.');
+        } catch (RuntimeException $caught) {
+            self::assertSame($error, $caught);
+        }
+        $receipt = $evidence->read();
+        self::assertSame(['started', 'started', 'failed'], array_column($receipt['events'], 'outcome'));
+        self::assertSame(['session', 'waiting', 'session'], array_column($receipt['events'], 'phase'));
+        self::assertStringNotContainsString($error->getMessage(), json_encode($receipt));
+        self::assertSame('synthetic result', $evidence->run('session', static fn() => 'synthetic result'));
+        self::assertSame('passed', $evidence->read()['events'][4]['outcome']);
+    }
+
     public function testOnlyFixedDiagnosticCodesAreAccepted(): void
     {
         $evidence = new OrdinaryProbeEvidence($this->directory);

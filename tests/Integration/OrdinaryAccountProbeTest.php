@@ -18,11 +18,15 @@ final class OrdinaryAccountProbeTest extends TestCase
 {
     public static function scenarios(): array
     {
-        return ['normal' => [false], 'failure-before-logout' => [true]];
+        return [
+            'normal' => [false, false],
+            'failure-before-logout' => [true, false],
+            'missing-snapshot' => [false, true],
+        ];
     }
 
     #[DataProvider('scenarios')]
-    public function testOrdinarySyntheticAccountProbe(bool $failPostSave): void
+    public function testOrdinarySyntheticAccountProbe(bool $failPostSave, bool $failSnapshot): void
     {
         if (getenv('FH_DEFENSE_ISOLATED') !== '1') {
             self::markTestSkipped('Run scripts/ci/run_defense_cycle.sh with its fresh synthetic stack.');
@@ -68,7 +72,7 @@ final class OrdinaryAccountProbeTest extends TestCase
                         'password' => (string) $state['password'],
                         'run_id' => (string) $state['run_id'],
                         'email' => (string) $state['email'],
-                        'marker' => (string) $state['marker'],
+                        'marker' => (string) $state['marker'] . ($failSnapshot ? '-missing' : ''),
                     ],
                     static function (string $phase, string $outcome) use (&$events): void {
                         $events[] = [$phase, $outcome];
@@ -77,7 +81,13 @@ final class OrdinaryAccountProbeTest extends TestCase
             } catch (RuntimeException $error) {
                 $failure = $error;
             }
-            if ($failPostSave) {
+            if ($failSnapshot) {
+                self::assertNotNull($failure);
+                self::assertSame('Synthetic account snapshot is incomplete.', $failure->getMessage());
+                self::assertSame([['account_snapshot', 'started'], ['account_snapshot', 'failed']], $events);
+                self::assertNull($result);
+                self::assertSame(0, $rememberCount);
+            } elseif ($failPostSave) {
                 self::assertNotNull($failure);
                 self::assertSame('synthetic diagnostic failure', $failure->getMessage());
                 self::assertNull($result);

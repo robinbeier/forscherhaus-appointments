@@ -630,12 +630,10 @@ final class GateHttpClient
         if (isset($record['url'])) {
             $url = parse_url((string) $record['url']);
             if (is_array($url) && isset($url['host'])) {
-                $scheme = strtolower((string) ($url['scheme'] ?? ''));
                 $host = strtolower((string) $url['host']);
-                $port = isset($url['port']) ? ':' . (string) $url['port'] : '';
                 $path = $this->extractCookieRecordPath($record);
 
-                return (string) $record['name'] . '|url|' . $scheme . '://' . $host . $port . $path;
+                return (string) $record['name'] . '|host|' . $host . '|path|' . $path;
             }
 
             return (string) $record['name'] . '|url|' . (string) $record['url'];
