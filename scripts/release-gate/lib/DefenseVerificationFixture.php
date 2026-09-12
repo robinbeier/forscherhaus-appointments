@@ -697,16 +697,18 @@ final class DefenseVerificationFixture
             if ($generatedChildren !== []) {
                 throw new RuntimeException('Unexpected generated appointment child; refusing cleanup.');
             }
-        } elseif (isset($state['actor_id'], $state['ids']['calendar_customer'])) {
-            // A prepared journal may not yet contain the parent ID. Still
-            // lock the only attributable synthetic actor/customer children.
+        } elseif (isset($state['actor_id'])) {
+            // Production buffer blocks have NULL customer/service references.
+            // Their parent link, provider and unavailability flag are the
+            // persisted attribution available during an interrupted journal.
             $generatedChildren = $this->db
                 ->query(
                     'SELECT id, id_parent_appointment, id_services FROM ' .
                         $this->db->dbprefix('appointments') .
-                        ' WHERE id_parent_appointment IS NOT NULL AND id_users_provider = ?' .
-                        ' AND id_users_customer = ? ORDER BY id FOR UPDATE',
-                    [(int) $state['actor_id'], (int) $state['ids']['calendar_customer']],
+                        ' WHERE id_parent_appointment IS NOT NULL AND is_unavailability = 1' .
+                        ' AND id_users_provider = ? AND id_users_customer IS NULL AND id_services IS NULL' .
+                        ' ORDER BY id FOR UPDATE',
+                    [(int) $state['actor_id']],
                 )
                 ->result_array();
             if ($generatedChildren !== []) {

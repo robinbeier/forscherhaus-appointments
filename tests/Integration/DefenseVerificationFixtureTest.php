@@ -370,13 +370,19 @@ final class DefenseVerificationFixtureTest extends TestCase
             'hash' => bin2hex(random_bytes(32)),
             'is_unavailability' => 1,
             'id_users_provider' => (int) $state['actor_id'],
-            'id_users_customer' => (int) $state['customer_id'],
+            'id_users_customer' => null,
             'id_services' => null,
             'id_parent_appointment' => (int) $state['appointment_id'],
             'id_google_calendar' => null,
             'id_caldav_calendar' => null,
         ]);
         $childId = (int) $db->insert_id();
+        $db->delete('appointments', ['id' => (int) $state['appointment_id']]);
+        $journalPath = $this->stateDirectory . '/defense-verification.json';
+        $state['phase'] = 'prepared';
+        unset($state['ids']['appointment'], $state['intents']['appointment']);
+        file_put_contents($journalPath, json_encode($state, JSON_THROW_ON_ERROR));
+        chmod($journalPath, 0600);
         try {
             $this->fixture->deactivate();
             self::fail('Cleanup must refuse a generated appointment child.');
@@ -384,7 +390,7 @@ final class DefenseVerificationFixtureTest extends TestCase
             self::assertStringContainsString('generated appointment child', $error->getMessage());
         }
         self::assertSame(1, $db->get_where('appointments', ['id' => $childId])->num_rows());
-        self::assertSame(1, $db->get_where('appointments', ['id' => $state['appointment_id']])->num_rows());
+        self::assertSame(0, $db->get_where('appointments', ['id' => $state['appointment_id']])->num_rows());
         self::assertSame(1, $db->get_where('services', ['id' => $state['service_id']])->num_rows());
         $db->delete('appointments', ['id' => $childId]);
         $this->fixture->deactivate();

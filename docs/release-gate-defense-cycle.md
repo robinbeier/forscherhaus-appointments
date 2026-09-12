@@ -205,7 +205,9 @@ parents, then the service, its appointment parent and generated buffer children.
 Every child whose `id_parent_appointment` references the owned appointment is
 locked and must be absent. An unexpected generated child is left untouched and
 blocks parent and service removal until a separately controlled recovery proves
-it safe to continue.
+it safe to continue. If a prepared journal has no parent ID, cleanup also locks
+the production buffer shape attributable to the synthetic provider: an
+unavailability with a non-null parent link and null customer/service references.
 
 `calendar-race` creates only an owned synthetic service, customer, foreign
 provider and appointment. One transaction holds the request-specific synthetic
