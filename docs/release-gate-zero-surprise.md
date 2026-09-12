@@ -45,8 +45,9 @@ Resolution order is fixed:
 ## Credentials INI
 
 The same INI shape is used by the automated predeploy replay and the postdeploy canary.
-Both pass passwords to their booking and dashboard child checks through standard
-input; password values are not included in child process arguments.
+The isolated replay passes passwords to child checks through standard input.
+The live canary instead passes the fixed root-only context-file path and uses
+its generated fixture identity. Password values are never child process arguments.
 
 Required keys:
 
@@ -294,3 +295,42 @@ Deploy:
 - `0`: deploy completed
 - `30`: deploy failed, automatic rollback succeeded
 - `31`: deploy failed, rollback failed or was not fully verifiable
+
+
+## Synthetic live-canary fixture
+
+The live canary creates a ten-minute fixture through the root-only
+`scripts/ops/zero_surprise_canary_fixture.sh` lifecycle (`activate`, `verify`,
+`deactivate`). It creates its own private provider and service, an ephemeral
+admin identity, and synthetic customers/appointments. The capacity remains one.
+The ordinary isolated replay retains its existing password-stdin contract.
+The live canary uses its generated identity instead of the configured account.
+
+The fixture journal is `/var/lib/fh-zero-surprise-canary/active.json`, root-owned
+with mode 0600 in a 0700 directory. Its credentials must never be logged or
+attached to an issue. The child gates receive only this fixed file path.
+The server checks the current lease and ownership, restricts requests to the
+fixture resources and suppresses its notification side effects. A missing or
+expired context never falls back to public providers. Custom request headers
+are not followed through redirects or sent to foreign origins.
+
+An independent one-shot systemd timer is armed before activation. Its callback
+tracks the release directory by filesystem identity so that the existing
+rollback rename does not redirect cleanup into another release. Normal cleanup
+stops the pending timer after fixture verification. Cleanup errors fail the
+canary and retain the independent timer. No persistent monitor or cron job is
+installed by this lifecycle.
+
+The state file acts as a pre-commit journal. If activation rolls back after the
+journal is published, verification reports `cleanup_pending`; deactivation can
+remove that journal only after confirming complete absence of the fixture
+parents and marked children. Partial ownership or unexpected relationships
+cause an explicit failure rather than deletion of ambiguous data.
+
+Targeted validation includes pure context/selection/transport tests, a wrapper
+lifecycle test using command doubles, and
+`tests/Integration/ZeroSurpriseCanaryFixtureTest.php` for an explicitly isolated
+root Docker run (`FH_CANARY_INTEGRATION=1`, `APP_ENV=testing`). The integration
+fixture test must never be pointed at the production database. A passing
+fixture test is not evidence that a release has been deployed or that its
+production business functions have been verified.

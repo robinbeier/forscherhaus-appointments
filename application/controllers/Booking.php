@@ -135,6 +135,12 @@ class Booking extends EA_Controller
         $available_services = $this->services_model->get_available_services(true);
         $available_providers = $this->providers_model->get_available_providers(true);
 
+        if ($this->zero_surprise_canary->active()) {
+            $scope = $this->zero_surprise_canary->context();
+            $available_services = [$this->services_model->find($scope['service_id'])];
+            $available_providers = [$this->providers_model->find($scope['provider_id'])];
+        }
+
         foreach ($available_providers as &$available_provider) {
             // Only expose the required provider data.
 
@@ -387,6 +393,9 @@ class Booking extends EA_Controller
 
                 if ($this->customers_model->exists($customer)) {
                     $existing_customer_id = $this->customers_model->find_record_id($customer);
+                    if ($this->zero_surprise_canary->active()) {
+                        $this->zero_surprise_canary->assertCustomer($existing_customer_id);
+                    }
                 }
             }
 
@@ -546,6 +555,10 @@ class Booking extends EA_Controller
             $customer['language'] = session('language') ?? config('language');
 
             $this->customers_model->only($customer, $this->allowed_customer_fields);
+
+            if ($this->zero_surprise_canary->active()) {
+                $customer['notes'] = 'run:' . $this->zero_surprise_canary->context()['run_id'];
+            }
 
             $customer_id = $this->customers_model->save($customer);
             $customer = $this->customers_model->find($customer_id);
@@ -997,6 +1010,7 @@ class Booking extends EA_Controller
      */
     private function assertNotProviderUiSmokeBookingTarget(string|int|null $provider_id, ?int $service_id): void
     {
+        $this->zero_surprise_canary->assertPublicTarget($provider_id, $service_id);
         if ($this->isProviderUiSmokeBookingTarget($provider_id, $service_id)) {
             abort(404, 'Not Found');
         }

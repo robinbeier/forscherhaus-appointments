@@ -21,7 +21,7 @@ This map defines component boundaries, path ownership scope, and dependency edge
 | `integrations-sync` | Integrations & Sync | auth-session, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 6 | 1 |
 | `api-v1` | REST API v1 | auth-session, integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 5 | 3 |
 | `shared-core` | Shared Core | None | 10 | 2 |
-| `platform-quality-tooling` | Platform, CI, Release Gates | api-v1, booking-public, dashboard-exports, installation-bootstrap, people-services-admin, settings-compliance, shared-core | 19 | 11 |
+| `platform-quality-tooling` | Platform, CI, Release Gates | api-v1, booking-public, dashboard-exports, installation-bootstrap, people-services-admin, settings-compliance, shared-core | 22 | 11 |
 
 ## Component Details
 
@@ -380,6 +380,9 @@ Path rules:
 - `docs/release-gate-booking-confirmation-pdf.md` (exact_file)
 - `docs/release-gate-customers-ui-smoke.md` (exact_file)
 - `docs/release-gate-provider-ui-smoke.md` (exact_file)
+- `application/core/Zero_surprise_canary.php` (exact_file)
+- `application/libraries/Zero_surprise_canary_fixture.php` (exact_file)
+- `scripts/ops/zero_surprise_canary_fixture.sh` (exact_file)
 
 Key files:
 - `application/controllers/Console.php`

@@ -896,6 +896,18 @@
         {
           "path": "docs/release-gate-provider-ui-smoke.md",
           "match": "exact_file"
+        },
+        {
+          "path": "application/core/Zero_surprise_canary.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/libraries/Zero_surprise_canary_fixture.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "scripts/ops/zero_surprise_canary_fixture.sh",
+          "match": "exact_file"
         }
       ],
       "key_files": [

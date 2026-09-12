@@ -100,12 +100,27 @@ class Appointments_api_v1 extends EA_Controller
                 $where['id_users_customer'] = $customer_id;
             }
 
-            $appointments = empty($query->keyword)
-                ? $this->appointments_model->get($where, $query->limit, $query->offset, $query->orderBy)
-                : $this->appointments_model->search($query->keyword, $query->limit, $query->offset, $query->orderBy);
+            if ($this->zero_surprise_canary->active()) {
+                $scope = $this->zero_surprise_canary->context();
+                $where['id_users_provider'] = $scope['provider_id'];
+                $where['id_services'] = $scope['service_id'];
+            }
+
+            $appointments =
+                $this->zero_surprise_canary->active() || empty($query->keyword)
+                    ? $this->appointments_model->get($where, $query->limit, $query->offset, $query->orderBy)
+                    : $this->appointments_model->search(
+                        $query->keyword,
+                        $query->limit,
+                        $query->offset,
+                        $query->orderBy,
+                    );
 
             foreach ($appointments as &$appointment) {
                 $appointment_id = (int) $appointment['id'];
+                if ($this->zero_surprise_canary->active()) {
+                    $this->zero_surprise_canary->assertAppointment($appointment_id);
+                }
 
                 $this->appointments_model->api_encode($appointment);
 

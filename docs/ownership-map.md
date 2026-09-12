@@ -378,3 +378,6 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
   - `docs/release-gate-booking-confirmation-pdf.md` (exact_file)
   - `docs/release-gate-customers-ui-smoke.md` (exact_file)
   - `docs/release-gate-provider-ui-smoke.md` (exact_file)
+  - `application/core/Zero_surprise_canary.php` (exact_file)
+  - `application/libraries/Zero_surprise_canary_fixture.php` (exact_file)
+  - `scripts/ops/zero_surprise_canary_fixture.sh` (exact_file)

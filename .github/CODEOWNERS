@@ -41,6 +41,7 @@
 /application/core/Customers_ui_smoke_access_policy.php @robinbeier
 /application/core/EA_Session.php @robinbeier
 /application/core/Provider_ui_smoke_access_policy.php @robinbeier
+/application/core/Zero_surprise_canary.php @robinbeier
 /application/libraries/Accounts.php @robinbeier
 /application/libraries/Api.php @robinbeier
 /application/libraries/Api_request_dto_factory.php @robinbeier
@@ -69,6 +70,7 @@
 /application/libraries/Reschedule_authority.php @robinbeier
 /application/libraries/Session/EA_Session.php @robinbeier
 /application/libraries/Timezones.php @robinbeier
+/application/libraries/Zero_surprise_canary_fixture.php @robinbeier
 /application/models/Admins_model.php @robinbeier
 /application/models/Appointments_model.php @robinbeier
 /application/models/Blocked_periods_model.php @robinbeier
@@ -152,4 +154,5 @@
 /scripts/ops/prod_customers_ui_smoke.sh @robinbeier
 /scripts/ops/prod_provider_ui_smoke.sh @robinbeier
 /scripts/ops/provider_ui_smoke_principal.sh @robinbeier
+/scripts/ops/zero_surprise_canary_fixture.sh @robinbeier
 /scripts/release-gate/** @robinbeier

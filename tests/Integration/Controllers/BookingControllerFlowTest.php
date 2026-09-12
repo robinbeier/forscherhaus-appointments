@@ -1275,6 +1275,9 @@ class BookingControllerFlowTest extends TestCase
         $CI->load->library('availability');
         $CI->load->library('reschedule_authority');
 
+        require_once APPPATH . 'core/Zero_surprise_canary.php';
+        $controller->zero_surprise_canary = new \Zero_surprise_canary();
+
         $controller->load = $CI->load;
         $controller->db = $CI->db;
         $controller->input = $CI->input;

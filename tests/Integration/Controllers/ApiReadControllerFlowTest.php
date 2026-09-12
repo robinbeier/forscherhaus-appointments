@@ -169,9 +169,7 @@ class ApiReadControllerFlowTest extends TestCase
     private function createAppointmentsController(): Appointments_api_v1
     {
         $controller = new class extends Appointments_api_v1 {
-            public function __construct()
-            {
-            }
+            public function __construct() {}
         };
 
         $CI = &get_instance();
@@ -182,6 +180,9 @@ class ApiReadControllerFlowTest extends TestCase
         $CI->load->model('settings_model');
         $CI->load->model('unavailabilities_model');
         $CI->load->library('api_request_dto_factory');
+
+        require_once APPPATH . 'core/Zero_surprise_canary.php';
+        $controller->zero_surprise_canary = new \Zero_surprise_canary();
 
         $controller->load = $CI->load;
         $controller->input = $CI->input;
@@ -201,9 +202,7 @@ class ApiReadControllerFlowTest extends TestCase
     private function createProvidersController(): Providers_api_v1
     {
         $controller = new class extends Providers_api_v1 {
-            public function __construct()
-            {
-            }
+            public function __construct() {}
         };
 
         $CI = &get_instance();
@@ -223,9 +222,7 @@ class ApiReadControllerFlowTest extends TestCase
     private function createServicesController(): Services_api_v1
     {
         $controller = new class extends Services_api_v1 {
-            public function __construct()
-            {
-            }
+            public function __construct() {}
         };
 
         $CI = &get_instance();
@@ -245,9 +242,7 @@ class ApiReadControllerFlowTest extends TestCase
     private function createAvailabilitiesController(): Availabilities_api_v1
     {
         $controller = new class extends Availabilities_api_v1 {
-            public function __construct()
-            {
-            }
+            public function __construct() {}
         };
 
         $CI = &get_instance();

@@ -50,6 +50,8 @@ final class GateHttpClient
         private readonly string $userAgent = 'dashboard-release-gate/1.0',
         private readonly string $csrfCookieName = 'csrf_cookie',
         private readonly string $csrfTokenName = 'csrf_token',
+        /** @var array<string, string> */
+        private readonly array $additionalHeaders = [],
     ) {}
 
     public function get(string $path, array $query = [], ?int $timeoutSeconds = null): GateHttpResponse
@@ -184,6 +186,13 @@ final class GateHttpClient
         };
 
         $requestHeaders = ['Accept: */*'];
+        if ($this->isSameOrigin($url, $this->baseUrl)) {
+            foreach ($this->additionalHeaders as $name => $value) {
+                if (trim($name) !== '' && trim($value) !== '') {
+                    $requestHeaders[] = trim($name) . ': ' . trim($value);
+                }
+            }
+        }
 
         if ($useCookieJar) {
             $cookieHeader = $this->buildCookieHeader($url);
@@ -199,7 +208,7 @@ final class GateHttpClient
             CURLOPT_URL => $url,
             CURLOPT_CUSTOMREQUEST => strtoupper($method),
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_FOLLOWLOCATION => $this->additionalHeaders === [],
             CURLOPT_MAXREDIRS => 5,
             CURLOPT_TIMEOUT => $timeoutSeconds,
             CURLOPT_CONNECTTIMEOUT => $connectTimeout,
@@ -250,6 +259,18 @@ final class GateHttpClient
         }
 
         return $response;
+    }
+
+    private function isSameOrigin(string $left, string $right): bool
+    {
+        $a = parse_url($left);
+        $b = parse_url($right);
+        if (!is_array($a) || !is_array($b)) {
+            return false;
+        }
+        return strtolower((string) ($a['scheme'] ?? '')) === strtolower((string) ($b['scheme'] ?? '')) &&
+            strtolower((string) ($a['host'] ?? '')) === strtolower((string) ($b['host'] ?? '')) &&
+            (int) ($a['port'] ?? 0) === (int) ($b['port'] ?? 0);
     }
 
     /**

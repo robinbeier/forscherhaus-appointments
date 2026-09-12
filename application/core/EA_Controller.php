@@ -64,6 +64,7 @@ require_once __DIR__ . '/Customers_ui_smoke_access_policy.php';
  * @property Ics_file $ics_file
  * @property Instance $instance
  * @property Ldap_client $ldap_client
+ * @property Zero_surprise_canary $zero_surprise_canary
  * @property Notifications $notifications
  * @property Permissions $permissions
  * @property Timezones $timezones
@@ -79,6 +80,9 @@ class EA_Controller extends CI_Controller
 
         $this->load->library('accounts');
 
+        require_once APPPATH . 'core/Zero_surprise_canary.php';
+        $this->zero_surprise_canary = new Zero_surprise_canary();
+        $this->zero_surprise_canary->enforce();
         $this->ensure_user_exists();
         $this->enforce_provider_ui_smoke_boundary();
         $this->enforce_customers_ui_smoke_boundary();
