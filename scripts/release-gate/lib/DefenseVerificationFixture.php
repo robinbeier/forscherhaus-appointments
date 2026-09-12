@@ -177,6 +177,9 @@ final class DefenseVerificationFixture
             $wasCleaning = $state['phase'] === 'cleaning';
             $wasPrepared = $state['phase'] === 'prepared' || ($state['cleanup_origin_phase'] ?? null) === 'prepared';
             $state = $this->recoverExactIds($state);
+            if (isset($state['intents']['appointment']) && !isset($state['ids']['appointment'])) {
+                throw new RuntimeException('Appointment intent could not be reconstructed; refusing cleanup.');
+            }
             if (!$wasCleaning) {
                 if ($state['phase'] === 'active') {
                     $this->assertOwnership($state);

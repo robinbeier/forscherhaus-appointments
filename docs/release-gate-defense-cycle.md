@@ -208,6 +208,11 @@ blocks parent and service removal until a separately controlled recovery proves
 it safe to continue. If a prepared journal has no parent ID, cleanup also locks
 the production buffer shape attributable to the synthetic provider: an
 unavailability with a non-null parent link and null customer/service references.
+If a durable appointment intent cannot be reconstructed to one exact parent ID,
+cleanup remains blocked: absence cannot distinguish an insert that never
+committed from a deleted parent with an orphaned buffer. A retry requires
+separate operator-controlled proof and, when a parent existed, restoration of
+the exact intended parent before cleanup continues.
 
 `calendar-race` creates only an owned synthetic service, customer, foreign
 provider and appointment. One transaction holds the request-specific synthetic
