@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use PHPUnit\Framework\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 use ReleaseGate\OrdinaryProbeEvidence;
 use ReleaseGate\OrdinaryProbeSessions;
 use Tests\Integration\Support\OrdinaryJournalSyncFault;
@@ -139,13 +140,19 @@ final class OrdinaryProbeEvidenceTest extends TestCase
         }
     }
 
-    public function testHandledSessionFailureIsDistinctFromAnInterruptedOperation(): void
+    public static function recordedPhases(): array
+    {
+        return [['session'], ['activate'], ['deactivate']];
+    }
+
+    #[DataProvider('recordedPhases')]
+    public function testHandledFailureIsDistinctFromAnInterruptedOperation(string $phase): void
     {
         $evidence = new OrdinaryProbeEvidence($this->directory);
         $evidence->begin('ea_synthetic');
         $error = new RuntimeException('private synthetic failure detail');
         try {
-            $evidence->run('session', static function () use ($evidence, $error): void {
+            $evidence->run($phase, static function () use ($evidence, $error): void {
                 $evidence->step('waiting', 'started');
                 throw $error;
             });
@@ -155,10 +162,62 @@ final class OrdinaryProbeEvidenceTest extends TestCase
         }
         $receipt = $evidence->read();
         self::assertSame(['started', 'started', 'failed'], array_column($receipt['events'], 'outcome'));
-        self::assertSame(['session', 'waiting', 'session'], array_column($receipt['events'], 'phase'));
+        self::assertSame([$phase, 'waiting', $phase], array_column($receipt['events'], 'phase'));
         self::assertStringNotContainsString($error->getMessage(), json_encode($receipt));
         self::assertSame('synthetic result', $evidence->run('session', static fn() => 'synthetic result'));
         self::assertSame('passed', $evidence->read()['events'][4]['outcome']);
+    }
+
+    public function testCleanupAttemptsRevocationDespiteDiagnosticFailure(): void
+    {
+        $evidence = new OrdinaryProbeEvidence($this->directory);
+        $evidence->begin('ea_synthetic');
+        file_put_contents($this->directory . '/last-evidence.json.tmp', 'pre-existing recovery evidence');
+        $attempted = false;
+        $original = new RuntimeException('synthetic ownership ambiguity');
+        try {
+            $evidence->run(
+                'deactivate',
+                static function () use (&$attempted, $original): void {
+                    $attempted = true;
+                    throw $original;
+                },
+                alwaysAttempt: true,
+            );
+            self::fail('The revoke failure must be propagated.');
+        } catch (RuntimeException $error) {
+            self::assertSame($original, $error);
+        }
+        self::assertTrue($attempted);
+        self::assertNull($evidence->read()['cleanup']);
+        self::assertSame(
+            'pre-existing recovery evidence',
+            file_get_contents($this->directory . '/last-evidence.json.tmp'),
+        );
+    }
+
+    public function testCompletedReceiptSurvivesRetryWithNonemptyJournal(): void
+    {
+        $evidence = new OrdinaryProbeEvidence($this->directory);
+        $evidence->begin('ea_synthetic');
+        $sessions = new OrdinaryProbeSessions($this->directory, $this->directory . '/sessions');
+        $cookie = bin2hex(random_bytes(16));
+        file_put_contents($this->directory . '/sessions/ea_session' . $cookie, 'synthetic');
+        $sessions->remember($cookie);
+        try {
+            $sessions->cleanup(static function (int $tracked, int $removed, int $absent) use ($evidence): void {
+                $evidence->cleaned($tracked, $removed, $absent);
+                throw new RuntimeException('stop before journal retirement');
+            });
+            self::fail('The synthetic interruption must retain the journal.');
+        } catch (RuntimeException) {
+            self::assertFileExists($this->directory . '/sessions.json');
+        }
+        $first = $evidence->read();
+        self::assertSame(1, $first['cleanup']['removed']);
+        $sessions->cleanup($evidence->cleaned(...));
+        self::assertSame($first, $evidence->read());
+        self::assertFileDoesNotExist($this->directory . '/sessions.json');
     }
 
     public function testOnlyFixedDiagnosticCodesAreAccepted(): void

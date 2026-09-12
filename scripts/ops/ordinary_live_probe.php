@@ -116,21 +116,26 @@ try {
     } elseif ($action === 'activate') {
         $sessions->assertCleanBeforeActivation();
         $evidence->begin($expectedRelease);
-        $evidence->step('activate', 'started');
-        $fixture->activate();
-        $evidence->step('activate', 'passed');
+        $evidence->run('activate', $fixture->activate(...));
         $result['fixture'] = $fixture->verify();
     } elseif ($action === 'verify') {
         $result['fixture'] = $fixture->verify();
     } elseif ($action === 'deactivate') {
-        // Revoke the identity first, then remove only journaled own session inodes.
-        $fixture->deactivate();
-        // Persist a non-secret known-object receipt before retiring private session provenance.
-        $sessions->cleanup($evidence->cleaned(...));
-        $result['fixture'] = $fixture->verify();
-        if ($result['fixture'] !== 'clean') {
-            throw new RuntimeException('Ordinary fixture cleanup is incomplete.');
-        }
+        $result['fixture'] = $evidence->run(
+            'deactivate',
+            static function () use ($fixture, $sessions, $evidence): string {
+                // Revoke the identity first, then remove only journaled own session inodes.
+                $fixture->deactivate();
+                // Persist a non-secret known-object receipt before retiring private session provenance.
+                $sessions->cleanup($evidence->cleaned(...));
+                $status = $fixture->verify();
+                if ($status !== 'clean') {
+                    throw new RuntimeException('Ordinary fixture cleanup is incomplete.');
+                }
+                return $status;
+            },
+            alwaysAttempt: true,
+        );
     } else {
         $context = $fixture->read();
         if ($context['expires_at'] <= time() + 60) {

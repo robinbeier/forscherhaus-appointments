@@ -219,8 +219,10 @@ is absent, synchronizes deletions, and durably publishes the aggregate receipt
 before retiring the private session journal. Publication failure retains the
 journal for retry. A handled publication failure removes only its own unpublished
 temporary inode, preserving the prior receipt; pre-existing or replaced temporary
-files remain blocked for explicit recovery. Repeated empty compensation preserves
-the original receipt.
+files remain blocked for explicit recovery. Repeated compensation preserves the
+first completed cleanup receipt, including retries before journal retirement.
+Diagnostic I/O failure cannot prevent the cleanup path from attempting identity
+revocation; a failed revocation retains the private journal and recovery marker.
 Archive the non-secret receipt with the run evidence before another activation.
 A receipt covers known journaled objects only: it never authorizes clearing a
 hard-interruption marker or silently treating unobserved requests as passed.

@@ -77,15 +77,31 @@ final class OrdinaryProbeEvidence
         $this->write($data);
     }
 
-    public function run(string $phase, callable $operation): mixed
+    /** Cleanup must attempt revocation even when diagnostic storage is unavailable. */
+    public function run(string $phase, callable $operation, bool $alwaysAttempt = false): mixed
     {
-        $this->step($phase, 'started');
+        $diagnosticFailure = null;
+        try {
+            $this->step($phase, 'started');
+        } catch (\Throwable $error) {
+            if (!$alwaysAttempt) {
+                throw $error;
+            }
+            $diagnosticFailure = $error;
+        }
         try {
             $result = $operation();
+            if ($diagnosticFailure !== null) {
+                throw $diagnosticFailure;
+            }
             $this->step($phase, 'passed');
             return $result;
         } catch (\Throwable $error) {
-            $this->step($phase, 'failed');
+            try {
+                $this->step($phase, 'failed');
+            } catch (\Throwable) {
+                // Preserve the operation failure; the caller retains its recovery marker.
+            }
             throw $error;
         }
     }
@@ -103,8 +119,8 @@ final class OrdinaryProbeEvidence
             throw new RuntimeException('Invalid cleanup counters.');
         }
         $data = $this->read();
-        // Repeated compensation must preserve the original nonempty receipt.
-        if ($data['cleanup'] !== null && $tracked === 0) {
+        // Retrying journal retirement must preserve the first completed receipt.
+        if ($data['cleanup'] !== null) {
             return;
         }
         $data['cleanup'] = [
