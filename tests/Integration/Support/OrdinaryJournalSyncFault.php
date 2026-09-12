@@ -21,6 +21,9 @@ if (!function_exists(__NAMESPACE__ . '\\fsync')) {
         ) {
             return false;
         }
+        if (is_string($uri) && OrdinaryJournalSyncFault::shouldFailFile($uri)) {
+            return false;
+        }
         return \fsync($stream);
     }
 }
@@ -30,8 +33,19 @@ namespace Tests\Integration\Support;
 final class OrdinaryJournalSyncFault
 {
     private static ?string $directory = null;
+    private static ?string $file = null;
     private static int $directorySyncs = 0;
     private static bool $fail = false;
+
+    public static function failFile(string $file): void
+    {
+        self::$file = $file;
+    }
+
+    public static function shouldFailFile(string $uri): bool
+    {
+        return self::$file !== null && $uri === self::$file;
+    }
 
     public static function failDirectory(string $directory): void
     {
@@ -50,6 +64,7 @@ final class OrdinaryJournalSyncFault
     public static function disable(): void
     {
         self::$directory = null;
+        self::$file = null;
         self::$fail = false;
     }
 

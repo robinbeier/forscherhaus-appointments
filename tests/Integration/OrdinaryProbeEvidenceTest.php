@@ -5,7 +5,9 @@ declare(strict_types=1);
 use PHPUnit\Framework\TestCase;
 use ReleaseGate\OrdinaryProbeEvidence;
 use ReleaseGate\OrdinaryProbeSessions;
+use Tests\Integration\Support\OrdinaryJournalSyncFault;
 
+require_once __DIR__ . '/Support/OrdinaryJournalSyncFault.php';
 require_once dirname(__DIR__, 2) . '/scripts/release-gate/lib/OrdinaryProbeEvidence.php';
 require_once dirname(__DIR__, 2) . '/scripts/release-gate/lib/OrdinaryProbeSessions.php';
 
@@ -25,6 +27,7 @@ final class OrdinaryProbeEvidenceTest extends TestCase
 
     protected function tearDown(): void
     {
+        OrdinaryJournalSyncFault::disable();
         if (!isset($this->directory)) {
             return;
         }
@@ -86,6 +89,33 @@ final class OrdinaryProbeEvidenceTest extends TestCase
         self::assertFileExists($this->directory . '/sessions.json');
         self::assertNull($evidence->read()['cleanup']);
         unlink($this->directory . '/last-evidence.json.tmp');
+        $sessions->cleanup($evidence->cleaned(...));
+        self::assertSame(1, $evidence->read()['cleanup']['already_absent']);
+        self::assertFileDoesNotExist($this->directory . '/sessions.json');
+    }
+
+    public function testHandledTemporaryWriteFailureAllowsCleanupRetry(): void
+    {
+        $evidence = new OrdinaryProbeEvidence($this->directory);
+        $evidence->begin('ea_synthetic');
+        $before = $evidence->read();
+        $sessions = new OrdinaryProbeSessions($this->directory, $this->directory . '/sessions');
+        $cookie = bin2hex(random_bytes(16));
+        $path = $this->directory . '/sessions/ea_session' . $cookie;
+        file_put_contents($path, 'synthetic');
+        $sessions->remember($cookie);
+        OrdinaryJournalSyncFault::failFile($this->directory . '/last-evidence.json.tmp');
+        try {
+            $sessions->cleanup($evidence->cleaned(...));
+            self::fail('Receipt fsync failure must propagate.');
+        } catch (RuntimeException) {
+            self::assertFileDoesNotExist($path);
+            self::assertFileDoesNotExist($this->directory . '/last-evidence.json.tmp');
+            self::assertFileExists($this->directory . '/sessions.json');
+            self::assertSame($before, $evidence->read());
+        } finally {
+            OrdinaryJournalSyncFault::disable();
+        }
         $sessions->cleanup($evidence->cleaned(...));
         self::assertSame(1, $evidence->read()['cleanup']['already_absent']);
         self::assertFileDoesNotExist($this->directory . '/sessions.json');

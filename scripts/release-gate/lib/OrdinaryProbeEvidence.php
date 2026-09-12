@@ -158,17 +158,40 @@ final class OrdinaryProbeEvidence
         if (!$file) {
             throw new RuntimeException('Evidence temporary file already exists or cannot be created.');
         }
+        $created = fstat($file);
         try {
             $json = json_encode($data, JSON_THROW_ON_ERROR);
             if (!chmod($tmp, 0600) || fwrite($file, $json) !== strlen($json) || !fflush($file) || !fsync($file)) {
                 throw new RuntimeException('Evidence synchronization failed.');
             }
+            if (!rename($tmp, $this->path)) {
+                throw new RuntimeException('Evidence publication failed.');
+            }
+        } catch (\Throwable $error) {
+            // Only undo this invocation's unpublished inode; stale/replaced files remain recovery evidence.
+            clearstatcache(true, $tmp);
+            $current = @lstat($tmp);
+            if (
+                $created &&
+                $current &&
+                !is_link($tmp) &&
+                is_file($tmp) &&
+                $current['dev'] === $created['dev'] &&
+                $current['ino'] === $created['ino'] &&
+                $current['nlink'] === 1 &&
+                unlink($tmp)
+            ) {
+                $this->syncDirectory();
+            }
+            throw $error;
         } finally {
             fclose($file);
         }
-        if (!rename($tmp, $this->path)) {
-            throw new RuntimeException('Evidence publication failed.');
-        }
+        $this->syncDirectory();
+    }
+
+    private function syncDirectory(): void
+    {
         $directory = fopen($this->directory, 'r');
         if (!$directory) {
             throw new RuntimeException('Evidence directory unavailable.');
