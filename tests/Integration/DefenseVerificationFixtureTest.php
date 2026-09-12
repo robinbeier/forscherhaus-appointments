@@ -308,6 +308,50 @@ final class DefenseVerificationFixtureTest extends TestCase
         );
     }
 
+    public function testPreparedServiceBeforeAppointmentJournalRejectsForeignAppointmentAndResumes(): void
+    {
+        $actor = $this->ordinary->activate();
+        $state = $this->fixture->activate('calendar_race', $actor);
+        $db = &get_instance()->db;
+        $db->delete('appointments', ['id' => (int) $state['appointment_id']]);
+        $db->insert('appointments', [
+            'create_datetime' => date('Y-m-d H:i:s'),
+            'update_datetime' => date('Y-m-d H:i:s'),
+            'book_datetime' => date('Y-m-d H:i:s'),
+            'start_datetime' => '2099-12-02 10:00:00',
+            'end_datetime' => '2099-12-02 10:30:00',
+            'location' => null,
+            'color' => '#6c757d',
+            'status' => 'Booked',
+            'notes' => 'foreign-prepared-appointment',
+            'hash' => bin2hex(random_bytes(32)),
+            'is_unavailability' => 0,
+            'id_users_provider' => (int) $state['foreign_provider_id'],
+            'id_users_customer' => (int) $state['customer_id'],
+            'id_services' => (int) $state['service_id'],
+            'id_parent_appointment' => null,
+            'id_google_calendar' => null,
+            'id_caldav_calendar' => null,
+        ]);
+        $foreignAppointmentId = (int) $db->insert_id();
+        $journalPath = $this->stateDirectory . '/defense-verification.json';
+        $state['phase'] = 'prepared';
+        unset($state['ids']['appointment'], $state['intents']['appointment']);
+        file_put_contents($journalPath, json_encode($state, JSON_THROW_ON_ERROR));
+        chmod($journalPath, 0600);
+        try {
+            $this->fixture->deactivate();
+            self::fail('Prepared cleanup must reject an unjournaled service appointment.');
+        } catch (RuntimeException $error) {
+            self::assertStringContainsString('appointment relationship', $error->getMessage());
+        }
+        self::assertSame(1, $db->get_where('appointments', ['id' => $foreignAppointmentId])->num_rows());
+        self::assertSame(1, $db->get_where('services', ['id' => $state['service_id']])->num_rows());
+        $db->delete('appointments', ['id' => $foreignAppointmentId]);
+        $this->fixture->deactivate();
+        self::assertSame('clean', $this->fixture->verify());
+    }
+
     public function testOwnershipDriftRefusesCleanupUntilExactStateIsRestored(): void
     {
         $actor = $this->ordinary->activate();

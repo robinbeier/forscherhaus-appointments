@@ -713,9 +713,6 @@ final class DefenseVerificationFixture
             throw new RuntimeException('Unexpected service provider relationship; refusing cleanup.');
         }
 
-        if (!isset($state['ids']['appointment'])) {
-            return;
-        }
         $appointmentRows = $this->db
             ->query(
                 'SELECT id FROM `' .
@@ -724,9 +721,13 @@ final class DefenseVerificationFixture
                 [$serviceId],
             )
             ->result_array();
-        $expectedAppointment = (int) $state['ids']['appointment'];
         $actualAppointmentIds = array_map(static fn(array $row): int => (int) $row['id'], $appointmentRows);
-        $expectedAppointmentIds = $serviceRows === [] && $alreadyCleaning ? [] : [$expectedAppointment];
+        if (!isset($state['ids']['appointment'])) {
+            $expectedAppointmentIds = [];
+        } else {
+            $expectedAppointment = (int) $state['ids']['appointment'];
+            $expectedAppointmentIds = $serviceRows === [] && $alreadyCleaning ? [] : [$expectedAppointment];
+        }
         if ($actualAppointmentIds !== $expectedAppointmentIds) {
             throw new RuntimeException('Synthetic service appointment relationship drifted; refusing cleanup.');
         }
