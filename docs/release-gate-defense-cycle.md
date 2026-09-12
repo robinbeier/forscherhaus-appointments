@@ -128,6 +128,9 @@ Replace `EXPECTED_RELEASE` with the previously verified release marker. Default
 application root is `/var/www/html/easyappointments`; changing `APP_ROOT` requires
 the same root-controlled, canonical application directory and release checks.
 The preflight may initialize its private root state directory; it creates no user.
+Any existing session journal or incomplete journal write blocks a fresh run before
+activation. Finish the previous run's controlled cleanup first; preflight never
+deletes prior session evidence to make a new run appear clean.
 Account/session runs arm an independent three-hour cleanup timer before inserting
 one identity. They retain that timer if compensation fails. The fixture lifetime
 is three hours; there is no new authorization exemption or increased global TTL.

@@ -152,6 +152,14 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
         self::assertNotContains('systemd-run', $this->prefixes($result['lines']));
     }
 
+    public function testFailedPreflightDoesNotArmTimerOrActivateIdentity(): void
+    {
+        $result = $this->executeWrapper('account', ['MOCK_PHP_FAIL_ACTIONS' => 'preflight']);
+        self::assertSame(42, $result['status']);
+        self::assertSame(['preflight'], $this->actions($result['lines']));
+        self::assertNotContains('systemd-run', $this->prefixes($result['lines']));
+    }
+
     public function testUnsafeRootGuardStopsBeforePhpOrSystemd(): void
     {
         $result = $this->executeWrapper('account', ['MOCK_UNSAFE' => '1']);

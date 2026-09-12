@@ -58,6 +58,41 @@ final class OrdinarySessionProbeTest extends TestCase
         }
     }
 
+    public function testActivationPreflightRejectsAnyExistingSessionJournalArtifact(): void
+    {
+        if (getenv('FH_DEFENSE_ISOLATED') !== '1' || !is_file('/.dockerenv')) {
+            self::markTestSkipped('Requires the explicitly owned isolated Docker runner.');
+        }
+        $directory = '/var/lib/fh-ordinary-preflight-test-' . bin2hex(random_bytes(8));
+        mkdir($directory, 0700);
+        $sessionsDirectory = $directory . '/sessions';
+        mkdir($sessionsDirectory, 0700);
+        $journal = $directory . '/sessions.json';
+        $probeSessions = new OrdinaryProbeSessions($directory, $sessionsDirectory);
+        try {
+            foreach ([$journal, $journal . '.tmp'] as $artifact) {
+                file_put_contents($artifact, $artifact === $journal ? '{}' : 'partial synthetic journal');
+                chmod($artifact, 0600);
+                try {
+                    $probeSessions->assertCleanBeforeActivation();
+                    self::fail('An existing journal artifact must block activation.');
+                } catch (RuntimeException $e) {
+                    self::assertStringContainsString('recovery', strtolower($e->getMessage()));
+                }
+                self::assertFileExists($artifact);
+                unlink($artifact);
+            }
+        } finally {
+            foreach ([$journal, $journal . '.tmp'] as $artifact) {
+                if (is_file($artifact) && !is_link($artifact)) {
+                    unlink($artifact);
+                }
+            }
+            rmdir($sessionsDirectory);
+            rmdir($directory);
+        }
+    }
+
     public function testOrdinaryProviderSessionExpiresAndAllOwnedFilesAreRemoved(): void
     {
         if (getenv('FH_DEFENSE_ISOLATED') !== '1' || !is_file('/.dockerenv')) {

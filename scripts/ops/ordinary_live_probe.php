@@ -79,12 +79,14 @@ try {
     $sessions = new OrdinaryProbeSessions($stateDirectory, $appRoot . '/storage/sessions');
     $result = ['action' => $action, 'release' => $expectedRelease];
     if ($action === 'preflight') {
+        $sessions->assertCleanBeforeActivation();
         $result += [
             'fixture' => $fixture->verify(),
             'session_expiration_seconds' => $expiration,
             'config_observation' => 'CLI bootstrap; direct web lifecycle is separate',
         ];
     } elseif ($action === 'activate') {
+        $sessions->assertCleanBeforeActivation();
         $fixture->activate();
         $result['fixture'] = $fixture->verify();
     } elseif ($action === 'verify') {

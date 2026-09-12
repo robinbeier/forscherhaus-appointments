@@ -63,6 +63,24 @@ final class OrdinaryProbeSessions
         }
     }
 
+    /**
+     * Refuse a new fixture activation while any previous session journal is
+     * present. Recovery is deliberately explicit via cleanup(), so an old
+     * timer failure cannot be mistaken for a clean starting point.
+     */
+    public function assertCleanBeforeActivation(): void
+    {
+        if (is_link($this->journal) || is_link($this->journal . '.tmp')) {
+            throw new RuntimeException('Stale or symlinked probe session journal requires explicit recovery.');
+        }
+        if (file_exists($this->journal . '.tmp')) {
+            throw new RuntimeException('Incomplete session journal requires explicit recovery.');
+        }
+        if (file_exists($this->journal)) {
+            throw new RuntimeException('Existing probe session journal requires explicit recovery.');
+        }
+    }
+
     /** Read only the identified probe session; never enumerate the shared session directory. */
     public function ownActivity(string $cookie, array $context): int
     {
