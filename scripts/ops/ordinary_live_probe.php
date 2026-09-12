@@ -13,15 +13,21 @@ if (PHP_SAPI !== 'cli' || !function_exists('posix_geteuid') || posix_geteuid() !
     fwrite(STDERR, "Root CLI required.\n");
     exit(77);
 }
-$options = getopt('', ['action:', 'app-root:', 'expected-release:']);
+$options = getopt('', ['action:', 'app-root:', 'active-app-root:', 'expected-app-identity:', 'expected-release:']);
 $action = $options['action'] ?? '';
 $appRoot = $options['app-root'] ?? '/var/www/html/easyappointments';
+$activeAppRoot = $options['active-app-root'] ?? $appRoot;
+$expectedAppIdentity = $options['expected-app-identity'] ?? '';
 $expectedRelease = $options['expected-release'] ?? '';
 if (
     !in_array($action, ['preflight', 'activate', 'account', 'session', 'deactivate', 'verify'], true) ||
     !is_string($appRoot) ||
     realpath($appRoot) !== $appRoot ||
     is_link($appRoot) ||
+    !is_string($activeAppRoot) ||
+    !str_starts_with($activeAppRoot, '/') ||
+    !is_string($expectedAppIdentity) ||
+    !preg_match('/\A[0-9]+:[0-9]+\z/D', $expectedAppIdentity) ||
     !preg_match('/\Aea_[a-zA-Z0-9_]+\z/D', $expectedRelease)
 ) {
     fwrite(STDERR, "Valid action, canonical application root and expected release required.\n");
@@ -31,6 +37,24 @@ umask(0077);
 $stateDirectory = '/var/lib/fh-defense-ordinary';
 $exitCode = 0;
 try {
+    $assertActive = static function () use ($activeAppRoot, $expectedAppIdentity, $expectedRelease): void {
+        clearstatcache(true, $activeAppRoot);
+        $stat = @stat($activeAppRoot);
+        if ($stat === false || is_link($activeAppRoot) || $stat['dev'] . ':' . $stat['ino'] !== $expectedAppIdentity) {
+            throw new RuntimeException('Active application identity changed during the probe.');
+        }
+        $markerPath = $activeAppRoot . '/_RELEASE';
+        if (
+            is_link($markerPath) ||
+            !is_file($markerPath) ||
+            explode(' ', trim((string) file_get_contents($markerPath)))[0] !== $expectedRelease
+        ) {
+            throw new RuntimeException('Active application release changed during the probe.');
+        }
+    };
+    if (!in_array($action, ['deactivate', 'verify'], true)) {
+        $assertActive();
+    }
     $rootStat = lstat($appRoot);
     if (!$rootStat || $rootStat['uid'] !== 0 || ($rootStat['mode'] & 0022) !== 0) {
         throw new RuntimeException('Application root is not root-controlled.');
@@ -114,7 +138,11 @@ try {
                     echo json_encode($progress, JSON_THROW_ON_ERROR) . PHP_EOL;
                     flush();
                 },
+                $assertActive,
             );
+        }
+        if (!in_array($action, ['deactivate', 'verify'], true)) {
+            $assertActive();
         }
         if (trim((string) file_get_contents($markerPath)) !== $marker) {
             throw new RuntimeException('Release changed during the probe; evidence is not valid.');

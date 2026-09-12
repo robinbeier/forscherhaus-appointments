@@ -108,7 +108,11 @@ final class OrdinarySessionProbeTest extends TestCase
             $sessions = new OrdinaryProbeSessions($directory, $server->directory . '/sessions');
             $client = new GateHttpClient($server->baseUrl, additionalHeaders: ['X-FH-Ordinary-Probe' => '1']);
             $probe = new OrdinarySessionProbe($client, $sessions, $server->baseUrl, 2);
-            $result = $probe->run($context);
+            $guardChecks = 0;
+            $result = $probe->run($context, null, static function () use (&$guardChecks): void {
+                $guardChecks++;
+            });
+            self::assertGreaterThanOrEqual(6, $guardChecks);
             self::assertSame('verified', $result['status']);
             self::assertTrue($result['file_present_before_expired_request']);
             self::assertTrue($result['activity_unchanged_while_idle']);
@@ -117,6 +121,26 @@ final class OrdinarySessionProbeTest extends TestCase
             $sessions->cleanup();
             self::assertSame([], glob($server->directory . '/sessions/*'));
             $sessions->cleanup();
+            $waiting = false;
+            $refused = false;
+            try {
+                $probe->run(
+                    $context,
+                    static function () use (&$waiting): void {
+                        $waiting = true;
+                    },
+                    static function () use (&$waiting): void {
+                        if ($waiting) {
+                            throw new RuntimeException('Synthetic active release changed.');
+                        }
+                    },
+                );
+            } catch (RuntimeException $error) {
+                $refused = $error->getMessage() === 'Synthetic active release changed.';
+            }
+            self::assertTrue($refused, 'Release change during idle must prevent successful evidence.');
+            $sessions->cleanup();
+            self::assertSame([], glob($server->directory . '/sessions/*'));
         } finally {
             try {
                 $sessions?->cleanup();

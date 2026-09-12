@@ -170,7 +170,9 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
     public function testCleanupCallbackUsesRenamedOriginalAndPinnedProbeIdentity(): void
     {
         $result = $this->executeWrapper('account', ['MOCK_CALLBACK_RENAME' => '1']);
-        self::assertSame(0, $result['status']);
+        self::assertSame(1, $result['status']);
+        self::assertNotContains('activate', $this->actions($result['lines']));
+        self::assertNotContains('account', $this->actions($result['lines']));
         $deactivations = array_values(
             array_filter(
                 $result['lines'],

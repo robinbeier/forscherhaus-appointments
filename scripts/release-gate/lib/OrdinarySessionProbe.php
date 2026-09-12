@@ -33,18 +33,21 @@ final class OrdinarySessionProbe
     }
 
     /** The caller must own the live fixture and an independent cleanup deadline. */
-    public function run(array $context, ?callable $progress = null): array
+    public function run(array $context, ?callable $progress = null, ?callable $assertActive = null): array
     {
+        $assertActive ??= static fn() => null;
         if (($context['expires_at'] ?? 0) < time() + $this->expiration + 120) {
             throw new RuntimeException('Fixture deadline cannot cover ordinary session expiration.');
         }
         $cookie = null;
         try {
+            $assertActive();
             $page = $this->client->get('login');
             $this->remember();
             if ($page->statusCode !== 200) {
                 throw new RuntimeException('Ordinary login page unavailable.');
             }
+            $assertActive();
             $login = $this->client->post('login/validate', [
                 'username' => $context['username'],
                 'password' => $context['password'],
@@ -53,6 +56,7 @@ final class OrdinarySessionProbe
             if ($login->statusCode !== 200 || (json_decode($login->body, true)['success'] ?? false) !== true) {
                 throw new RuntimeException('Ordinary synthetic login failed.');
             }
+            $assertActive();
             $account = $this->client->get('account');
             $this->remember();
             if ($account->statusCode !== 200) {
@@ -73,11 +77,13 @@ final class OrdinarySessionProbe
             }
             // No HTTP requests or session writes during the ordinary inactivity interval.
             while ((hrtime(true) - $start) / 1e9 < $waitSeconds) {
+                $assertActive();
                 if (time() >= (int) $context['expires_at'] - 60) {
                     throw new RuntimeException('Fixture cleanup deadline reached before evidence completed.');
                 }
                 usleep((int) (max(0.0, min(1.0, $waitSeconds - (hrtime(true) - $start) / 1e9)) * 1000000));
             }
+            $assertActive();
             // File and unchanged authenticated activity must still exist before expired request.
             if (
                 $this->sessions->ownActivity($cookie, $context) !== $activity ||
@@ -86,6 +92,7 @@ final class OrdinarySessionProbe
                 throw new RuntimeException('Inactivity/file-preservation precondition was not established.');
             }
             $expired = $this->ownCookieGet('account', $cookie);
+            $assertActive();
             if ($expired['status'] !== 307 || !preg_match('~/(?:index\.php/)?login(?:\?|$)~', $expired['location'])) {
                 throw new RuntimeException('Expired own session was not redirected to login.');
             }

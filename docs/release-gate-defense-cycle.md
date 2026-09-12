@@ -131,6 +131,9 @@ The preflight may initialize its private root state directory; it creates no use
 Any existing session journal or incomplete journal write blocks a fresh run before
 activation. Finish the previous run's controlled cleanup first; preflight never
 deletes prior session evidence to make a new run appear clean.
+The active application path must retain its pinned directory identity and release
+marker throughout evidence collection, including the inactivity wait. A deployment
+aborts evidence collection; cleanup still resolves the original directory by inode.
 Account/session runs arm an independent three-hour cleanup timer before inserting
 one identity. They retain that timer if compensation fails. The fixture lifetime
 is three hours; there is no new authorization exemption or increased global TTL.

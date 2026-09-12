@@ -39,10 +39,17 @@ probe_identity=$(stat -c '%d:%i' -- "$probe")
 invoke() {
     local candidate
     [[ $(stat -c '%d:%i' -- "$probe") == "$probe_identity" ]] || return 1
+    if [[ "$1" != deactivate && "$1" != verify ]]; then
+        [[ -d "$app_root" && ! -L "$app_root" && $(stat -c '%d:%i' -- "$app_root") == "$identity" ]] || {
+            echo 'active application identity changed; evidence collection stopped' >&2
+            return 1
+        }
+    fi
     for candidate in "$parent"/*; do
         [[ -d "$candidate" && ! -L "$candidate" ]] || continue
         [[ $(stat -c '%d:%i' -- "$candidate") == "$identity" ]] || continue
-        php "$probe" --action="$1" --app-root="$candidate" --expected-release="$release"
+        php "$probe" --action="$1" --app-root="$candidate" --active-app-root="$app_root" \
+            --expected-app-identity="$identity" --expected-release="$release"
         return $?
     done
     echo 'original ordinary probe application directory unavailable' >&2
@@ -70,7 +77,8 @@ callback='set -euo pipefail
 for candidate in "$1"/*; do
     [[ -d "$candidate" && ! -L "$candidate" ]] || continue
     [[ $(stat -c "%d:%i" -- "$candidate") == "$2" ]] || continue
-    exec php "$3" --action=deactivate --app-root="$candidate" --expected-release="$4"
+    exec php "$3" --action=deactivate --app-root="$candidate" --active-app-root="$candidate" \
+        --expected-app-identity="$2" --expected-release="$4"
 done
 echo "original ordinary probe application directory unavailable" >&2
 exit 1'
