@@ -26,7 +26,7 @@ final class OrdinaryAccountProbe
     private readonly mixed $rememberSession;
 
     /**
-     * @param array{user_id:int,username:string,password:string,run_id:string} $context
+     * @param array{user_id:int,username:string,password:string,run_id:string,email:string,marker:string} $context
      * @return array{status:string,coverage:string,login_status:int,account_status:int,save_status:int,get_save_status:int,logout_status:int,post_logout_account_status:int,observed:string}
      */
     public function run(array $context): array
@@ -34,13 +34,17 @@ final class OrdinaryAccountProbe
         $userId = (int) ($context['user_id'] ?? 0);
         $username = (string) ($context['username'] ?? '');
         $password = (string) ($context['password'] ?? '');
-        if ($userId < 1 || $username === '' || $password === '') {
+        $email = (string) ($context['email'] ?? '');
+        $marker = (string) ($context['marker'] ?? '');
+        if ($userId < 1 || $username === '' || $password === '' || $email === '' || $marker === '') {
             throw new RuntimeException('Ordinary account probe requires one complete synthetic user context.');
         }
 
-        $before = $this->snapshot($userId);
+        $before = $this->snapshot($userId, $username, $email, $marker);
         $loggedIn = false;
         $logoutStatus = 0;
+        $result = null;
+        $cleanupError = null;
         try {
             $loginPage = $this->client->get('login');
             $this->remember();
@@ -60,6 +64,7 @@ final class OrdinaryAccountProbe
             $account = $this->client->get('account');
             $this->remember();
             $this->expectStatus($account, 200, 'authenticated account page');
+            $this->assertAccountIdentity($account->body, $userId);
 
             $getSave = $this->client->get('account/save');
             $this->remember();
@@ -67,21 +72,20 @@ final class OrdinaryAccountProbe
             if (strtoupper((string) $getSave->header('allow')) !== 'POST') {
                 throw new RuntimeException('account/save GET did not advertise Allow: POST.');
             }
-            $afterGet = $this->snapshot($userId);
+            $afterGet = $this->snapshot($userId, $username, $email, $marker);
             $this->assertSnapshotEqual($before, $afterGet, 'account/save GET changed the synthetic account.');
 
             $payload = $before['user'];
             $payload['first_name'] = 'Synthetic Updated';
             $payload['settings'] = [
                 'username' => $before['settings']['username'],
-                'password' => '',
                 'notifications' => $before['settings']['notifications'],
                 'calendar_view' => $before['settings']['calendar_view'],
             ];
             $save = $this->client->post('account/save', ['account' => $payload]);
             $this->remember();
             $this->expectStatus($save, 200, 'account/save POST');
-            $after = $this->snapshot($userId);
+            $after = $this->snapshot($userId, $username, $email, $marker);
             if (($after['user']['first_name'] ?? null) !== 'Synthetic Updated') {
                 throw new RuntimeException('account/save did not persist the synthetic first name.');
             }
@@ -105,17 +109,28 @@ final class OrdinaryAccountProbe
                     $logout = $this->client->get('logout');
                     $this->remember();
                     $logoutStatus = $logout->statusCode;
-                    $result['logout_status'] = $logoutStatus;
-                } catch (\Throwable) {
-                    // The owning fixture teardown removes the synthetic account even if logout fails.
-                }
-                $afterLogout = $this->client->get('account');
-                $this->remember();
-                $result['post_logout_account_status'] = $afterLogout->statusCode;
-                if ($afterLogout->statusCode !== 307) {
-                    throw new RuntimeException('Authenticated account remained accessible after synthetic logout.');
+                    $this->expectStatus($logout, 200, 'synthetic logout');
+                    if (is_array($result)) {
+                        $result['logout_status'] = $logoutStatus;
+                    }
+                    $afterLogout = $this->client->get('account');
+                    $this->remember();
+                    if (is_array($result)) {
+                        $result['post_logout_account_status'] = $afterLogout->statusCode;
+                    }
+                    if ($afterLogout->statusCode !== 307) {
+                        throw new RuntimeException('Authenticated account remained accessible after synthetic logout.');
+                    }
+                } catch (\Throwable $error) {
+                    $cleanupError = $error;
                 }
             }
+        }
+        if ($cleanupError !== null) {
+            throw $cleanupError;
+        }
+        if (!is_array($result)) {
+            throw new RuntimeException('Ordinary account probe did not produce a result.');
         }
         return $result;
     }
@@ -126,14 +141,27 @@ final class OrdinaryAccountProbe
     }
 
     /** @return array{user:array<string,mixed>,settings:array<string,mixed>} */
-    private function snapshot(int $userId): array
+    private function snapshot(int $userId, string $username, string $email, string $marker): array
     {
-        $user = $this->db->get_where('users', ['id' => $userId])->row_array();
-        $settings = $this->db->get_where('user_settings', ['id_users' => $userId])->row_array();
+        $user = $this->db->get_where('users', ['id' => $userId, 'email' => $email, 'notes' => $marker])->row_array();
+        $settings = $this->db
+            ->get_where('user_settings', ['id_users' => $userId, 'username' => $username])
+            ->row_array();
         if (!is_array($user) || $user === [] || !is_array($settings) || $settings === []) {
             throw new RuntimeException('Synthetic account snapshot is incomplete.');
         }
         return ['user' => $user, 'settings' => $settings];
+    }
+
+    private function assertAccountIdentity(string $body, int $userId): void
+    {
+        if (preg_match('/const vars = (\{.*?\});/s', $body, $matches) !== 1) {
+            throw new RuntimeException('Authenticated account identity was not observable.');
+        }
+        $vars = json_decode($matches[1], true, 512, JSON_THROW_ON_ERROR);
+        if (!is_array($vars) || !isset($vars['account']['id']) || (int) $vars['account']['id'] !== $userId) {
+            throw new RuntimeException('Authenticated account page exposed a different user identity.');
+        }
     }
 
     private function expectStatus(GateHttpResponse $response, int $expected, string $operation): void
@@ -148,7 +176,6 @@ final class OrdinaryAccountProbe
     /** @param array{user:array<string,mixed>,settings:array<string,mixed>} $before */
     private function assertSnapshotEqual(array $before, array $after, string $message): void
     {
-        $before['user']['update_datetime'] = $after['user']['update_datetime'] ?? null;
         if ($before !== $after) {
             throw new RuntimeException($message);
         }

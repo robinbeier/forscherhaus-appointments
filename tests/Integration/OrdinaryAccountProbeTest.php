@@ -3,15 +3,15 @@
 declare(strict_types=1);
 
 use PHPUnit\Framework\TestCase;
-use ReleaseGate\GateHttpClient;
 use ReleaseGate\OrdinaryAccountProbe;
-use Tests\Integration\Support\DefenseCycleFixtures;
+use ReleaseGate\GateHttpClient;
+use ReleaseGate\OrdinaryLiveFixture;
 use Tests\Integration\Support\DefenseCycleHttpServer;
 
 require_once dirname(__DIR__, 2) . '/scripts/release-gate/lib/GateHttpClient.php';
 require_once dirname(__DIR__, 2) . '/scripts/release-gate/lib/OrdinaryAccountProbe.php';
-require_once __DIR__ . '/Support/DefenseCycleFixtures.php';
 require_once __DIR__ . '/Support/DefenseCycleHttpServer.php';
+require_once dirname(__DIR__, 2) . '/scripts/release-gate/lib/OrdinaryLiveFixture.php';
 
 final class OrdinaryAccountProbeTest extends TestCase
 {
@@ -21,10 +21,11 @@ final class OrdinaryAccountProbeTest extends TestCase
             self::markTestSkipped('Run scripts/ci/run_defense_cycle.sh with its fresh synthetic stack.');
         }
 
-        $fixture = new DefenseCycleFixtures();
+        $stateDirectory = '/var/lib/fh-ordinary-live-probe-' . bin2hex(random_bytes(8));
+        $fixture = new OrdinaryLiveFixture($stateDirectory);
         $server = null;
         try {
-            $fixture->create();
+            $state = $fixture->activate();
             $server = new DefenseCycleHttpServer();
             $client = new GateHttpClient(
                 $server->baseUrl,
@@ -37,11 +38,20 @@ final class OrdinaryAccountProbeTest extends TestCase
                     'X-FH-Ordinary-Probe' => '1',
                 ],
             );
-            $result = (new OrdinaryAccountProbe($client, \get_instance()->db))->run([
-                'user_id' => $fixture->actorId,
-                'username' => $fixture->run . '_actor',
-                'password' => $fixture->password,
-                'run_id' => $fixture->run,
+            $sessions = [];
+            $result = (new OrdinaryAccountProbe($client, \get_instance()->db, static function (?string $session) use (
+                &$sessions,
+            ): void {
+                if ($session !== null && $session !== '') {
+                    $sessions[] = $session;
+                }
+            }))->run([
+                'user_id' => (int) $state['user_id'],
+                'username' => (string) $state['username'],
+                'password' => (string) $state['password'],
+                'run_id' => (string) $state['run_id'],
+                'email' => (string) $state['email'],
+                'marker' => (string) $state['marker'],
             ]);
             self::assertSame('verified', $result['status']);
             self::assertSame('partial', $result['coverage']);
@@ -49,11 +59,21 @@ final class OrdinaryAccountProbeTest extends TestCase
             self::assertSame(200, $result['save_status']);
             self::assertSame(200, $result['logout_status']);
             self::assertSame(307, $result['post_logout_account_status']);
+            self::assertNotEmpty($sessions);
         } finally {
             try {
                 $server?->close();
             } finally {
-                $fixture->cleanup();
+                $fixture->deactivate();
+            }
+            foreach (['state.json', 'lifecycle.lock'] as $file) {
+                $path = $stateDirectory . '/' . $file;
+                if (is_file($path) && !is_link($path)) {
+                    unlink($path);
+                }
+            }
+            if (is_dir($stateDirectory) && !is_link($stateDirectory)) {
+                rmdir($stateDirectory);
             }
         }
     }

@@ -98,3 +98,70 @@ When a required invariant remains unproven, record its concrete method/runtime
 limitation in the existing Linear workpad. Do not start another discovery round
 or claim complete remediation. New product repairs require a separate proposal
 and operator approval. ROB-561 remains the separate documentation-drift Todo.
+
+## Ordinary live identity and operator probe
+
+The next operator probe uses one random, private provider with no services,
+appointments, customers, secretary links or external integrations. It logs in
+through the normal application route. It adds no reserved identity, authorization
+exception, global setting or application behavior change. Its root-only lifecycle
+journal binds the exact username, email, marker and user ID before any request;
+credential drift is rejected before a login could fall back to LDAP.
+
+The reviewed operator tools are `scripts/ops/run_ordinary_live_probe.sh` and
+`scripts/ops/ordinary_live_probe.php`. Run them only from a root-controlled copy
+of the reviewed tools outside the replaceable application release, against the
+verified installed release. The wrapper pins the tool inode and resolves the
+original application directory by inode before each call and independent cleanup.
+Do not rename, replace or delete this private operator bundle during a run. These are operator
+probes, not an alternative application release mechanism. If an application
+release is required, use the existing controlled deployment procedure.
+
+```bash
+bash scripts/ops/run_ordinary_live_probe.sh preflight EXPECTED_RELEASE
+bash scripts/ops/run_ordinary_live_probe.sh account EXPECTED_RELEASE
+bash scripts/ops/run_ordinary_live_probe.sh session EXPECTED_RELEASE
+bash scripts/ops/run_ordinary_live_probe.sh cleanup EXPECTED_RELEASE
+```
+
+Replace `EXPECTED_RELEASE` with the previously verified release marker. Default
+application root is `/var/www/html/easyappointments`; changing `APP_ROOT` requires
+the same root-controlled, canonical application directory and release checks.
+The preflight may initialize its private root state directory; it creates no user.
+Account/session runs arm an independent three-hour cleanup timer before inserting
+one identity. They retain that timer if compensation fails. The fixture lifetime
+is three hours; there is no new authorization exemption or increased global TTL.
+
+`account` checks normal login, exact own-account identity, a GET receiving
+405/Allow POST with no persisted change, a protected own POST matching the
+browser's omitted-empty-password behavior, persistence of only the intended
+first-name change and ordinary logout. It is partial evidence for ROB-552: other
+methods and the complete CSRF contract remain separate, unverified requirements.
+
+`session` first runs the account probe, then logs in afresh and waits for the
+configured inactivity duration plus two seconds without requests or session
+writes. Production expiration is never shortened or backdated. A retained own
+cookie prevents client cookie expiration from impersonating server enforcement.
+The original authenticated session file and unchanged activity marker must still
+exist before the expired request. If file cleanup runs first, this probe is not
+verified. CLI configuration is recorded separately from the actual web request.
+
+Only exact session cookies obtained from this probe's responses are journaled
+privately. Cleanup checks the recorded file inodes; it never enumerates or deletes
+other production session files. Incomplete journals, changed inodes, identity or
+relationship drift fail closed and retain private state for explicit recovery.
+A hard interruption between an HTTP response and journal persistence can leave
+an unrecorded anonymous session: such an interruption must not be reported as
+complete cleanup or successful verification. Do not copy the private journal,
+credentials or session contents into reports or Linear.
+
+The isolated gate exercises the same fixture and probe classes with a separate
+short-expiration HTTP server and disposable database. That short local session
+result remains isolated evidence. It does not establish production expiration.
+Complete cleanup, installed commit checks and independent observation review are
+required before promoting any live result into the six-invariant evidence ledger.
+
+This addition does not verify the full staff/customer read-write-delete boundary
+or calendar authorization during a concurrent responsibility change. Those
+production evidence gaps remain explicit in ROB-551 and ROB-550. No new discovery
+or product repair is part of the operator probe.

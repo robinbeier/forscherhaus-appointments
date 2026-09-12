@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Root operator wrapper for one reviewed, ordinary synthetic account/session run.
+action=${1:-preflight}
+release=${2:-}
+app_root=${APP_ROOT:-/var/www/html/easyappointments}
+case "$action" in preflight|account|session|cleanup|verify) ;; *) echo 'unsupported action' >&2; exit 64 ;; esac
+[[ $# == 2 && "$release" =~ ^ea_[a-zA-Z0-9_]+$ ]] || { echo 'action and expected release required' >&2; exit 64; }
+[[ $(id -u) == 0 ]] || { echo 'root required' >&2; exit 77; }
+umask 077
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+probe="$script_dir/ordinary_live_probe.php"
+app_root=$(realpath -e -- "$app_root")
+
+# Do not execute a root cleanup callback from a caller-writable tool checkout.
+for path in "$probe" "$script_dir/../release-gate/lib/OrdinaryLiveFixture.php" \
+    "$script_dir/../release-gate/lib/OrdinaryProbeSessions.php" \
+    "$script_dir/../release-gate/lib/OrdinarySessionProbe.php" \
+    "$script_dir/../release-gate/lib/OrdinaryAccountProbe.php" \
+    "$script_dir/../release-gate/lib/GateHttpClient.php"; do
+    path=$(realpath -e -- "$path")
+    [[ -f "$path" && ! -L "$path" && $(stat -c %u -- "$path") == 0 ]] || exit 77
+    while [[ "$path" != / ]]; do
+        mode=$(stat -c %a -- "$path")
+        [[ $(stat -c %u -- "$path") == 0 ]] && (( (8#$mode & 8#022) == 0 )) || exit 77
+        path=$(dirname -- "$path")
+    done
+done
+
+# The reviewed tool bundle is independent of the replaceable application tree.
+tool_root=$(cd "$script_dir/../.." && pwd -P)
+[[ "$tool_root" != "$app_root" && "$tool_root" != "$app_root/"* ]] || {
+    echo 'use an immutable root-controlled operator bundle outside the application release' >&2; exit 77;
+}
+parent=$(dirname -- "$app_root")
+identity=$(stat -c '%d:%i' -- "$app_root")
+probe_identity=$(stat -c '%d:%i' -- "$probe")
+invoke() {
+    local candidate
+    [[ $(stat -c '%d:%i' -- "$probe") == "$probe_identity" ]] || return 1
+    for candidate in "$parent"/*; do
+        [[ -d "$candidate" && ! -L "$candidate" ]] || continue
+        [[ $(stat -c '%d:%i' -- "$candidate") == "$identity" ]] || continue
+        php "$probe" --action="$1" --app-root="$candidate" --expected-release="$release"
+        return $?
+    done
+    echo 'original ordinary probe application directory unavailable' >&2
+    return 1
+}
+unit=fh-defense-ordinary-cleanup
+if [[ "$action" == preflight || "$action" == verify ]]; then
+    invoke "$action"
+    exit
+fi
+if [[ "$action" == cleanup ]]; then
+    invoke deactivate
+    invoke verify
+    systemctl stop "$unit.timer"
+    exit
+fi
+for suffix in timer service; do
+    [[ $(systemctl show "$unit.$suffix" --property=LoadState --value) == not-found ]] || {
+        echo 'ordinary cleanup unit already exists; inspect prior run' >&2; exit 75;
+    }
+done
+invoke preflight
+callback='set -euo pipefail
+[[ -f "$3" && ! -L "$3" && $(stat -c "%d:%i" -- "$3") == "$5" ]] || exit 1
+for candidate in "$1"/*; do
+    [[ -d "$candidate" && ! -L "$candidate" ]] || continue
+    [[ $(stat -c "%d:%i" -- "$candidate") == "$2" ]] || continue
+    exec php "$3" --action=deactivate --app-root="$candidate" --expected-release="$4"
+done
+echo "original ordinary probe application directory unavailable" >&2
+exit 1'
+# Timer is armed before any account insertion and remains armed if compensation fails.
+systemd-run --quiet --unit="$unit" --on-active=3h --collect \
+    /bin/bash -c "$callback" ordinary-cleanup "$parent" "$identity" "$probe" "$release" "$probe_identity"
+cleanup() {
+    local status=$?
+    trap - EXIT
+    if invoke deactivate && invoke verify; then
+        systemctl stop "$unit.timer" || status=1
+    else
+        echo 'ordinary cleanup incomplete; independent timer retained' >&2
+        status=1
+    fi
+    exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+invoke activate
+invoke account
+if [[ "$action" == session ]]; then
+    invoke session
+fi
