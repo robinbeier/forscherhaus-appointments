@@ -23,6 +23,7 @@ final class CustomerRoleBoundaryProbeTest extends TestCase
         $fixture = new DefenseCycleFixtures();
         $server = null;
         $deleteCustomerId = 0;
+        $foreignAppointmentId = 0;
         try {
             $fixture->create();
             $db = get_instance()->db;
@@ -64,6 +65,28 @@ final class CustomerRoleBoundaryProbeTest extends TestCase
                     'customer_update_id' => $fixture->customerId,
                     'customer_delete_id' => $deleteCustomerId,
                 ],
+                static function (string $phase, string $outcome) use (
+                    $db,
+                    $fixture,
+                    $deleteCustomerId,
+                    &$foreignAppointmentId,
+                ): void {
+                    if ($phase !== 'boundary_customer_update' || $outcome !== 'passed' || $foreignAppointmentId !== 0) {
+                        return;
+                    }
+                    $ci = &get_instance();
+                    $ci->load->model('appointments_model');
+                    $foreignAppointmentId = (int) $ci->appointments_model->save([
+                        'start_datetime' => date('Y-m-d 10:00:00', strtotime('+45 days')),
+                        'end_datetime' => date('Y-m-d 10:30:00', strtotime('+45 days')),
+                        'notes' => 'foreign-customer-delete-dependent',
+                        'is_unavailability' => false,
+                        'id_users_provider' => $fixture->providerId,
+                        'id_users_customer' => $deleteCustomerId,
+                        'id_services' => $fixture->serviceId,
+                    ]);
+                    self::assertGreaterThan(0, $foreignAppointmentId);
+                },
             );
 
             self::assertSame('verified', $result['status']);
@@ -76,12 +99,16 @@ final class CustomerRoleBoundaryProbeTest extends TestCase
                 ],
                 $result['denial_statuses'],
             );
-            self::assertSame(['find' => 200, 'update' => 200, 'destroy' => 200], $result['positive_statuses']);
-            self::assertSame(0, $db->get_where('users', ['id' => $deleteCustomerId])->num_rows());
+            self::assertSame(['find' => 200, 'update' => 200], $result['positive_statuses']);
+            self::assertSame(1, $db->get_where('users', ['id' => $deleteCustomerId])->num_rows());
+            self::assertSame(1, $db->get_where('appointments', ['id' => $foreignAppointmentId])->num_rows());
         } finally {
             try {
                 $server?->close();
             } finally {
+                if ($foreignAppointmentId > 0) {
+                    get_instance()->db->delete('appointments', ['id' => $foreignAppointmentId]);
+                }
                 if ($deleteCustomerId > 0) {
                     get_instance()->db->delete('users', ['id' => $deleteCustomerId, 'notes' => $fixture->run]);
                 }

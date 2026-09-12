@@ -24,7 +24,7 @@ final class CustomerRoleBoundaryProbe
     /**
      * @param array{user_id:int,username:string,password:string,email:string,marker:string} $actor
      * @param array{profile:string,marker:string,search_marker:string,provider_target_id:int,admin_target_id:int,customer_update_id:int,customer_delete_id:int} $fixture
-     * @return array{status:string,coverage:string,search_status:int,denial_statuses:array<string,array<string,int>>,positive_statuses:array<string,int>,observed:string}
+     * @return array{status:string,coverage:string,search_status:int,denial_statuses:array<string,array<string,int>>,positive_statuses:array{find:int,update:int},observed:string}
      */
     public function run(array $actor, array $fixture, ?callable $observe = null): array
     {
@@ -134,19 +134,6 @@ final class CustomerRoleBoundaryProbe
             }
             $observe('boundary_customer_update', 'passed');
 
-            $observe('boundary_customer_destroy', 'started');
-            $deleteBefore = $this->customerSnapshot($fixture['customer_delete_id'], $fixture['marker']);
-            if ($deleteBefore === []) {
-                throw new RuntimeException('Owned customer delete positive control is unavailable.');
-            }
-            $destroy = $this->client->post('customers/destroy', ['customer_id' => $fixture['customer_delete_id']]);
-            $this->remember();
-            $this->expectSuccessfulMutation($destroy, 'owned customer destroy positive control');
-            if ($this->db->get_where('users', ['id' => $fixture['customer_delete_id']])->num_rows() !== 0) {
-                throw new RuntimeException('Owned customer destroy positive control was not persisted.');
-            }
-            $observe('boundary_customer_destroy', 'passed');
-
             $result = [
                 'status' => 'verified',
                 'coverage' => 'complete',
@@ -155,10 +142,9 @@ final class CustomerRoleBoundaryProbe
                 'positive_statuses' => [
                     'find' => $find->statusCode,
                     'update' => $update->statusCode,
-                    'destroy' => $destroy->statusCode,
                 ],
                 'observed' =>
-                    'Owned synthetic provider and administrator identifiers were absent from customer responses; user rows, login settings, appointments, service assignments, and secretary links stayed unchanged across denied read, update, and delete requests; owned customer controls succeeded.',
+                    'Owned synthetic provider and administrator identifiers were absent from customer responses; user rows, login settings, appointments, service assignments, and secretary links stayed unchanged across denied read, update, and delete requests; non-destructive owned customer controls succeeded. A destructive customer positive control is intentionally omitted because unrelated back-office traffic could add dependents before that request.',
             ];
         } catch (Throwable $error) {
             $probeError = $error;

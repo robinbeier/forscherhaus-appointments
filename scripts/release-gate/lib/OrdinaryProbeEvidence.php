@@ -78,7 +78,6 @@ final class OrdinaryProbeEvidence
                     'boundary_admin_destroy',
                     'boundary_customer_find',
                     'boundary_customer_update',
-                    'boundary_customer_destroy',
                     'boundary_logout',
                     'race_parent_lock',
                     'race_request_wait',

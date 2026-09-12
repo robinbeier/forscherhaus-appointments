@@ -193,9 +193,12 @@ synthetic provider, administrator and customer targets sharing one unique marker
 Customer search must return exactly the two customer-role targets. Provider and
 administrator targets must be absent from search and return `403` for customer
 find, update and destroy, with an exact database snapshot comparison after every
-request. Positive customer find, update and destroy controls must succeed. The
-destroyed control is an expected journal state; cleanup still verifies all other
-owned rows and relationships are absent.
+request. Positive customer find and update controls must succeed. The live probe
+intentionally omits a destructive positive customer control: an unrelated
+back-office request could add a dependent row between fixture activation and the
+HTTP request, and the ordinary customer delete path would legitimately cascade
+that unjournaled row. Fixture cleanup instead locks and verifies complete
+dependency sets before removing its owned customer rows.
 
 `calendar-race` creates only an owned synthetic service, customer, foreign
 provider and appointment. One transaction holds the deterministic first

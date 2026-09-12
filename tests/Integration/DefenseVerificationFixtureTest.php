@@ -70,13 +70,6 @@ final class DefenseVerificationFixtureTest extends TestCase
         self::assertArrayNotHasKey('credential', $state);
         self::assertSame('customer_boundary', $state['profile']);
 
-        $db = &get_instance()->db;
-        $db->delete('users', [
-            'id' => $state['customer_delete_id'],
-            'notes' => $state['marker'],
-        ]);
-        self::assertSame('active', $this->fixture->verify());
-
         $this->fixture->deactivate();
         self::assertSame('clean', $this->fixture->verify());
         $this->fixture->deactivate();
@@ -186,6 +179,54 @@ final class DefenseVerificationFixtureTest extends TestCase
         self::assertSame('clean', $this->fixture->verify());
     }
 
+    public function testCleanupRefusesForeignSecretaryRelationshipAndCanResume(): void
+    {
+        $actor = $this->ordinary->activate();
+        $state = $this->fixture->activate('calendar_race', $actor);
+        $db = &get_instance()->db;
+        $secretaryRole = $db->get_where('roles', ['slug' => 'secretary'])->row_array();
+        self::assertIsArray($secretaryRole);
+        $db->insert('users', [
+            'first_name' => 'Synthetic secretary',
+            'last_name' => 'cleanup regression',
+            'email' => bin2hex(random_bytes(8)) . '@synthetic.invalid',
+            'phone_number' => '000000000',
+            'notes' => 'foreign-defense-verification-secretary',
+            'timezone' => 'UTC',
+            'language' => 'english',
+            'id_roles' => (int) $secretaryRole['id'],
+            'is_private' => 1,
+        ]);
+        $secretaryId = (int) $db->insert_id();
+        $db->insert('secretaries_providers', [
+            'id_users_provider' => (int) $state['foreign_provider_id'],
+            'id_users_secretary' => $secretaryId,
+        ]);
+        try {
+            $this->fixture->deactivate();
+            self::fail('Cleanup must refuse a foreign secretary relationship.');
+        } catch (RuntimeException $error) {
+            self::assertStringContainsString('secretary relationship', $error->getMessage());
+        }
+        self::assertSame(1, $db->get_where('services', ['id' => $state['service_id']])->num_rows());
+        self::assertSame(
+            1,
+            $db
+                ->get_where('secretaries_providers', [
+                    'id_users_provider' => (int) $state['foreign_provider_id'],
+                    'id_users_secretary' => $secretaryId,
+                ])
+                ->num_rows(),
+        );
+        $db->delete('secretaries_providers', [
+            'id_users_provider' => (int) $state['foreign_provider_id'],
+            'id_users_secretary' => $secretaryId,
+        ]);
+        $db->delete('users', ['id' => $secretaryId]);
+        $this->fixture->deactivate();
+        self::assertSame('clean', $this->fixture->verify());
+    }
+
     public function testPreparedJournalRecoversExactRowsWhenPublishedIdsAreMissing(): void
     {
         $actor = $this->ordinary->activate();
@@ -204,6 +245,67 @@ final class DefenseVerificationFixtureTest extends TestCase
         self::assertSame(0, $db->get_where('appointments', ['id' => $state['appointment_id']])->num_rows());
         self::assertSame(0, $db->get_where('services', ['id' => $state['service_id']])->num_rows());
         self::assertSame(0, $db->get_where('users', ['id' => $state['foreign_provider_id']])->num_rows());
+    }
+
+    public function testPreparedCleanupRetainsMissingLinkAllowanceAcrossAFailedAttempt(): void
+    {
+        $actor = $this->ordinary->activate();
+        $state = $this->fixture->activate('calendar_race', $actor);
+        $missingLink = $state['links']['foreign_service'];
+        $db = &get_instance()->db;
+        $db->delete('services_providers', [
+            'id_users' => (int) $missingLink['id_users'],
+            'id_services' => (int) $missingLink['id_services'],
+        ]);
+        $secretaryRole = $db->get_where('roles', ['slug' => 'secretary'])->row_array();
+        self::assertIsArray($secretaryRole);
+        $db->insert('users', [
+            'first_name' => 'Synthetic prepared secretary',
+            'last_name' => 'cleanup retry regression',
+            'email' => bin2hex(random_bytes(8)) . '@synthetic.invalid',
+            'phone_number' => '000000000',
+            'notes' => 'foreign-prepared-cleanup-secretary',
+            'timezone' => 'UTC',
+            'language' => 'english',
+            'id_roles' => (int) $secretaryRole['id'],
+            'is_private' => 1,
+        ]);
+        $secretaryId = (int) $db->insert_id();
+        $db->insert('secretaries_providers', [
+            'id_users_provider' => (int) $state['foreign_provider_id'],
+            'id_users_secretary' => $secretaryId,
+        ]);
+        $journalPath = $this->stateDirectory . '/defense-verification.json';
+        $state['phase'] = 'prepared';
+        file_put_contents($journalPath, json_encode($state, JSON_THROW_ON_ERROR));
+        chmod($journalPath, 0600);
+
+        self::assertSame('cleanup_pending', $this->fixture->verify());
+        try {
+            $this->fixture->deactivate();
+            self::fail('Prepared cleanup must still refuse an unjournaled secretary relationship.');
+        } catch (RuntimeException $error) {
+            self::assertStringContainsString('secretary relationship', $error->getMessage());
+        }
+        $persisted = json_decode((string) file_get_contents($journalPath), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame('cleaning', $persisted['phase']);
+        self::assertSame('prepared', $persisted['cleanup_origin_phase']);
+        $db->delete('secretaries_providers', [
+            'id_users_provider' => (int) $state['foreign_provider_id'],
+            'id_users_secretary' => $secretaryId,
+        ]);
+        $db->delete('users', ['id' => $secretaryId]);
+        $this->fixture->deactivate();
+        self::assertSame('clean', $this->fixture->verify());
+        self::assertSame(
+            0,
+            $db
+                ->get_where('services_providers', [
+                    'id_users' => (int) $missingLink['id_users'],
+                    'id_services' => (int) $missingLink['id_services'],
+                ])
+                ->num_rows(),
+        );
     }
 
     public function testOwnershipDriftRefusesCleanupUntilExactStateIsRestored(): void

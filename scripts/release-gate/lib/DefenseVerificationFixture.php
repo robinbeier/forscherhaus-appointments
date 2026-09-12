@@ -175,12 +175,16 @@ final class DefenseVerificationFixture
                 throw new RuntimeException('Defense verification fixture requires explicit request recovery.');
             }
             $wasCleaning = $state['phase'] === 'cleaning';
+            $wasPrepared = $state['phase'] === 'prepared' || ($state['cleanup_origin_phase'] ?? null) === 'prepared';
             $state = $this->recoverExactIds($state);
             if (!$wasCleaning) {
                 if ($state['phase'] === 'active') {
                     $this->assertOwnership($state);
                 } else {
                     $this->assertPreparedOwnership($state);
+                }
+                if ($wasPrepared) {
+                    $state['cleanup_origin_phase'] = 'prepared';
                 }
                 $state['phase'] = 'cleaning';
                 $this->writeState($state);
@@ -189,7 +193,7 @@ final class DefenseVerificationFixture
                 throw new RuntimeException('Defense verification cleanup transaction could not start.');
             }
             try {
-                $this->deleteOwned($state, $wasCleaning);
+                $this->deleteOwned($state, $wasCleaning, $wasPrepared);
                 if ($this->remainingIds($state) !== []) {
                     throw new RuntimeException('Defense verification fixture rows remain after cleanup.');
                 }
@@ -408,12 +412,6 @@ final class DefenseVerificationFixture
                     : ($key === 'appointment'
                         ? 'appointments'
                         : 'users'));
-            if ($key === 'customer_destroy' && $this->db->get_where($table, ['id' => $id])->num_rows() === 0) {
-                if ($this->db->get_where('user_settings', ['id_users' => $id])->num_rows() !== 0) {
-                    throw new RuntimeException('Deleted customer still has settings; refusing cleanup.');
-                }
-                continue;
-            }
             if ($this->db->get_where($table, ['id' => $id])->num_rows() !== 1) {
                 throw new RuntimeException('Fixture ownership is missing or ambiguous.');
             }
@@ -431,12 +429,6 @@ final class DefenseVerificationFixture
         ) {
             if (isset($state['ids'][$key])) {
                 $user = $this->db->get_where('users', ['id' => $state['ids'][$key]])->row_array();
-                if ($key === 'customer_destroy' && (!is_array($user) || $user === [])) {
-                    if ($this->db->get_where('user_settings', ['id_users' => $state['ids'][$key]])->num_rows() !== 0) {
-                        throw new RuntimeException('Deleted customer still has settings.');
-                    }
-                    continue;
-                }
                 if (($user['notes'] ?? null) !== $state['marker']) {
                     throw new RuntimeException('Fixture identity drift detected.');
                 }
@@ -559,10 +551,11 @@ final class DefenseVerificationFixture
     }
 
     /** @param array<string,mixed> $state */
-    private function deleteOwned(array $state, bool $alreadyCleaning): void
+    private function deleteOwned(array $state, bool $alreadyCleaning, bool $wasPrepared): void
     {
         $ids = $state['ids'];
-        $this->assertServiceDependencies($state, $alreadyCleaning);
+        $this->lockFixtureUsers($state, $alreadyCleaning);
+        $this->assertServiceDependencies($state, $alreadyCleaning, $wasPrepared);
         if (isset($ids['appointment'])) {
             $exists = $this->db->get_where('appointments', ['id' => (int) $ids['appointment']])->num_rows() !== 0;
             if ($exists || !$alreadyCleaning) {
@@ -612,14 +605,6 @@ final class DefenseVerificationFixture
                 continue;
             }
             $id = (int) $ids[$key];
-            // The ordinary customer destroy positive control is intentionally
-            // removed through the real application path before deactivation.
-            if ($key === 'customer_destroy' && $this->db->get_where('users', ['id' => $id])->num_rows() === 0) {
-                if ($this->db->get_where('user_settings', ['id_users' => $id])->num_rows() !== 0) {
-                    throw new RuntimeException('Deleted customer still has settings; refusing cleanup.');
-                }
-                continue;
-            }
             if ($alreadyCleaning && $this->db->get_where('users', ['id' => $id])->num_rows() === 0) {
                 continue;
             }
@@ -631,13 +616,53 @@ final class DefenseVerificationFixture
             ) {
                 throw new RuntimeException('Unexpected fixture relationship; refusing cleanup.');
             }
+            $this->assertNoSecretaryRelationships($id);
             $this->db->delete('user_settings', ['id_users' => $id, 'username' => $state['usernames'][$key] ?? '']);
             $this->db->delete('users', ['id' => $id, 'notes' => $state['marker']]);
         }
     }
 
+    /** Lock every synthetic user parent before service and relationship children. */
+    private function lockFixtureUsers(array $state, bool $alreadyCleaning): void
+    {
+        $ids = [];
+        foreach (
+            [
+                'provider_target',
+                'admin_target',
+                'foreign_provider',
+                'customer_find_update',
+                'customer_destroy',
+                'calendar_customer',
+            ]
+            as $key
+        ) {
+            if (isset($state['ids'][$key])) {
+                $ids[] = (int) $state['ids'][$key];
+            }
+        }
+        sort($ids, SORT_NUMERIC);
+        if ($ids === []) {
+            return;
+        }
+        $rows = $this->db
+            ->query(
+                'SELECT id FROM `' .
+                    $this->db->dbprefix('users') .
+                    '` WHERE id IN (' .
+                    implode(',', array_fill(0, count($ids), '?')) .
+                    ') ORDER BY id FOR UPDATE',
+                $ids,
+            )
+            ->result_array();
+        $actual = array_map(static fn(array $row): int => (int) $row['id'], $rows);
+        if (!$alreadyCleaning && $actual !== $ids) {
+            throw new RuntimeException('Synthetic fixture user disappeared before cleanup.');
+        }
+    }
+
     /** Lock and compare every child before deleting the synthetic service. */
-    private function assertServiceDependencies(array $state, bool $alreadyCleaning): void
+    private function assertServiceDependencies(array $state, bool $alreadyCleaning, bool $prepared = false): void
     {
         if (!isset($state['ids']['service'])) {
             return;
@@ -676,7 +701,15 @@ final class DefenseVerificationFixture
             if (!$alreadyCleaning || $actualLinks !== []) {
                 throw new RuntimeException('Synthetic service disappeared with dependent rows; refusing cleanup.');
             }
-        } elseif (count($serviceRows) !== 1 || $actualLinks !== $expectedLinks) {
+        } elseif (
+            count($serviceRows) !== 1 ||
+            (!$prepared && $actualLinks !== $expectedLinks) ||
+            ($prepared &&
+                array_filter(
+                    $actualLinks,
+                    static fn(array $actual): bool => !in_array($actual, $expectedLinks, true),
+                ) !== [])
+        ) {
             throw new RuntimeException('Unexpected service provider relationship; refusing cleanup.');
         }
 
@@ -696,6 +729,21 @@ final class DefenseVerificationFixture
         $expectedAppointmentIds = $serviceRows === [] && $alreadyCleaning ? [] : [$expectedAppointment];
         if ($actualAppointmentIds !== $expectedAppointmentIds) {
             throw new RuntimeException('Synthetic service appointment relationship drifted; refusing cleanup.');
+        }
+    }
+
+    private function assertNoSecretaryRelationships(int $userId): void
+    {
+        $rows = $this->db
+            ->query(
+                'SELECT id_users_provider, id_users_secretary FROM `' .
+                    $this->db->dbprefix('secretaries_providers') .
+                    '` WHERE id_users_provider = ? OR id_users_secretary = ? FOR UPDATE',
+                [$userId, $userId],
+            )
+            ->result_array();
+        if ($rows !== []) {
+            throw new RuntimeException('Unexpected secretary relationship; refusing cleanup.');
         }
     }
 
@@ -946,6 +994,12 @@ final class DefenseVerificationFixture
             ($state['recovery_reason'] ?? null) !== 'calendar_request_termination_unconfirmed'
         ) {
             throw new RuntimeException('Fixture recovery reason is invalid.');
+        }
+        if (
+            isset($state['cleanup_origin_phase']) &&
+            ($phase !== 'cleaning' || $state['cleanup_origin_phase'] !== 'prepared')
+        ) {
+            throw new RuntimeException('Fixture cleanup origin is invalid.');
         }
     }
 
