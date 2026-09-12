@@ -73,6 +73,30 @@ final class OrdinaryLiveFixtureTest extends TestCase
         self::assertSame(0, $db->get_where('user_settings', ['id_users' => $state['user_id']])->num_rows());
     }
 
+    public function testOrdinaryAdminLifecycleUsesOnlyTheRequestedSyntheticRole(): void
+    {
+        $state = $this->fixture->activate(roleSlug: 'admin');
+        self::assertSame('admin', $state['role_slug']);
+
+        $db = &get_instance()->db;
+        $role = $db->get_where('roles', ['id' => $state['role_id']])->row_array();
+        self::assertSame('admin', $role['slug']);
+
+        $this->fixture->deactivate();
+        self::assertSame('clean', $this->fixture->verify());
+    }
+
+    public function testUnsupportedOrdinaryRoleIsRejectedBeforeStateCreation(): void
+    {
+        try {
+            $this->fixture->activate(roleSlug: 'customer');
+            self::fail('Unsupported ordinary fixture role must be rejected.');
+        } catch (InvalidArgumentException) {
+            self::assertFileDoesNotExist($this->stateDirectory . '/state.json');
+            self::assertSame('clean', $this->fixture->verify());
+        }
+    }
+
     public function testDirectorySyncFailureLeavesPreparedJournalWithoutDatabaseMutation(): void
     {
         $db = &get_instance()->db;

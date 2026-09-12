@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Root operator wrapper for one reviewed, ordinary synthetic account/session run.
+# Root operator wrapper for one reviewed, ordinary synthetic verification run.
 action=${1:-preflight}
 release=${2:-}
 app_root=${APP_ROOT:-/var/www/html/easyappointments}
-case "$action" in preflight|account|session|cleanup|verify) ;; *) echo 'unsupported action' >&2; exit 64 ;; esac
+case "$action" in
+    preflight|account|methods|customer-boundary|calendar-race|session|cleanup|verify) ;;
+    *) echo 'unsupported action' >&2; exit 64 ;;
+esac
 [[ $# == 2 && "$release" =~ ^ea_[a-zA-Z0-9_]+$ ]] || { echo 'action and expected release required' >&2; exit 64; }
 [[ $(id -u) == 0 ]] || { echo 'root required' >&2; exit 77; }
 umask 077
@@ -19,6 +22,10 @@ for path in "$probe" "$script_dir/../release-gate/lib/OrdinaryLiveFixture.php" \
     "$script_dir/../release-gate/lib/OrdinaryProbeEvidence.php" \
     "$script_dir/../release-gate/lib/OrdinarySessionProbe.php" \
     "$script_dir/../release-gate/lib/OrdinaryAccountProbe.php" \
+    "$script_dir/../release-gate/lib/AccountSecurityMatrixProbe.php" \
+    "$script_dir/../release-gate/lib/CustomerRoleBoundaryProbe.php" \
+    "$script_dir/../release-gate/lib/CalendarResponsibilityRaceProbe.php" \
+    "$script_dir/../release-gate/lib/DefenseVerificationFixture.php" \
     "$script_dir/../release-gate/lib/GateHttpClient.php" \
     "$script_dir/../../deploy_ea.sh" /root/deploy_ea.sh; do
     path=$(realpath -e -- "$path")
@@ -49,6 +56,7 @@ identity=$(stat -c '%d:%i' -- "$app_root")
 probe_identity=$(stat -c '%d:%i' -- "$probe")
 invoke() {
     local candidate
+    local fixture_role=${2:-provider}
     [[ $(stat -c '%d:%i' -- "$probe") == "$probe_identity" ]] || return 1
     if [[ "$1" != deactivate && "$1" != verify ]]; then
         [[ -d "$app_root" && ! -L "$app_root" && $(stat -c '%d:%i' -- "$app_root") == "$identity" ]] || {
@@ -60,13 +68,14 @@ invoke() {
         [[ -d "$candidate" && ! -L "$candidate" ]] || continue
         [[ $(stat -c '%d:%i' -- "$candidate") == "$identity" ]] || continue
         php "$probe" --action="$1" --app-root="$candidate" --active-app-root="$app_root" \
-            --expected-app-identity="$identity" --expected-release="$release"
+            --expected-app-identity="$identity" --expected-release="$release" --fixture-role="$fixture_role"
         return $?
     done
     echo 'original ordinary probe application directory unavailable' >&2
     return 1
 }
 unit=fh-defense-ordinary-cleanup
+ordinary_state=/var/lib/fh-defense-ordinary
 stop_cleanup_units() {
     local load_state
     systemctl stop "$unit.timer" || return $?
@@ -74,6 +83,19 @@ stop_cleanup_units() {
     if [[ "$load_state" != not-found ]]; then
         systemctl stop "$unit.service" || return $?
     fi
+}
+retain_unconfirmed_request() {
+    local marker="$ordinary_state/request-unconfirmed"
+    ordinary_trusted_path "$ordinary_state" || return 1
+    [[ -d "$ordinary_state" && ! -L "$ordinary_state" && $(stat -c %u -- "$ordinary_state") == 0 ]] || return 1
+    [[ $(stat -c %a -- "$ordinary_state") == 700 ]] || return 1
+    if [[ ! -e "$marker" && ! -L "$marker" ]]; then
+        mkdir -m 700 -- "$marker" || return 1
+    fi
+    ordinary_trusted_path "$marker" || return 1
+    [[ -d "$marker" && ! -L "$marker" && $(stat -c %u -- "$marker") == 0 ]] || return 1
+    [[ $(stat -c %a -- "$marker") == 700 ]] || return 1
+    sync -f "$ordinary_state"
 }
 if [[ "$action" == preflight || "$action" == verify ]]; then
     ordinary_assert_no_pending_probe || exit $?
@@ -118,6 +140,15 @@ systemd-run --quiet --unit="$unit" --on-active=3h --collect \
 cleanup() {
     local status=$?
     trap - EXIT
+    if [[ "$status" == 86 ]]; then
+        if retain_unconfirmed_request; then
+            echo 'calendar request termination unconfirmed; automatic cleanup blocked' >&2
+            exit 86
+        fi
+        stop_cleanup_units || true
+        echo 'calendar request recovery marker failed; cleanup timer stopped for manual recovery' >&2
+        exit 1
+    fi
     if invoke deactivate && invoke verify; then
         stop_cleanup_units || status=1
         if [[ "$status" == 0 ]]; then
@@ -135,8 +166,24 @@ trap cleanup EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
-invoke activate
-invoke account
-if [[ "$action" == session ]]; then
-    invoke session
-fi
+fixture_role=provider
+[[ "$action" != customer-boundary ]] || fixture_role=admin
+invoke activate "$fixture_role"
+case "$action" in
+    account)
+        invoke account
+        ;;
+    methods)
+        invoke methods
+        ;;
+    customer-boundary)
+        invoke customer-boundary
+        ;;
+    calendar-race)
+        invoke calendar-race
+        ;;
+    session)
+        invoke account
+        invoke session
+        ;;
+esac
