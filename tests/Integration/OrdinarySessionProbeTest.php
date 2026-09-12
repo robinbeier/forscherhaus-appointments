@@ -8,11 +8,13 @@ use ReleaseGate\OrdinaryLiveFixture;
 use ReleaseGate\OrdinaryProbeSessions;
 use ReleaseGate\OrdinarySessionProbe;
 use Tests\Integration\Support\DefenseCycleHttpServer;
+use Tests\Integration\Support\OrdinaryJournalSyncFault;
 
 require_once dirname(__DIR__, 2) . '/scripts/release-gate/lib/OrdinaryLiveFixture.php';
 require_once dirname(__DIR__, 2) . '/scripts/release-gate/lib/OrdinaryProbeSessions.php';
 require_once dirname(__DIR__, 2) . '/scripts/release-gate/lib/OrdinarySessionProbe.php';
 require_once __DIR__ . '/Support/DefenseCycleHttpServer.php';
+require_once __DIR__ . '/Support/OrdinaryJournalSyncFault.php';
 
 final class OrdinarySessionProbeTest extends TestCase
 {
@@ -42,9 +44,21 @@ final class OrdinarySessionProbeTest extends TestCase
             self::assertSame('replacement synthetic file', file_get_contents($path));
             unlink($path);
             rename($path . '.original', $path);
+            OrdinaryJournalSyncFault::failDirectory($directory . '/sessions');
+            $syncFailed = false;
+            try {
+                $journal->cleanup();
+            } catch (RuntimeException $error) {
+                $syncFailed = str_contains($error->getMessage(), 'directory synchronization');
+            } finally {
+                OrdinaryJournalSyncFault::disable();
+            }
+            self::assertTrue($syncFailed);
+            self::assertFileExists($directory . '/sessions.json');
             $journal->cleanup();
             self::assertFileDoesNotExist($path);
         } finally {
+            OrdinaryJournalSyncFault::disable();
             foreach (glob($directory . '/sessions/*') ?: [] as $file) {
                 unlink($file);
             }

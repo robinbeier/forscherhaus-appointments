@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 use PHPUnit\Framework\TestCase;
 use ReleaseGate\OrdinaryLiveFixture;
+use Tests\Integration\Support\OrdinaryJournalSyncFault;
 
 require_once dirname(__DIR__, 2) . '/scripts/release-gate/lib/OrdinaryLiveFixture.php';
+require_once __DIR__ . '/Support/OrdinaryJournalSyncFault.php';
 
 final class OrdinaryLiveFixtureTest extends TestCase
 {
@@ -25,7 +27,15 @@ final class OrdinaryLiveFixtureTest extends TestCase
 
     protected function tearDown(): void
     {
-        if ($this->fixture !== null && file_exists($this->stateDirectory . '/state.json')) {
+        OrdinaryJournalSyncFault::disable();
+        if (!isset($this->stateDirectory)) {
+            return;
+        }
+        if (
+            isset($this->stateDirectory) &&
+            $this->fixture !== null &&
+            file_exists($this->stateDirectory . '/state.json')
+        ) {
             $this->fixture->deactivate();
         }
         foreach (['state.json', 'lifecycle.lock'] as $file) {
@@ -61,6 +71,42 @@ final class OrdinaryLiveFixtureTest extends TestCase
         $this->fixture->deactivate();
         self::assertSame(0, $db->get_where('users', ['id' => $state['user_id']])->num_rows());
         self::assertSame(0, $db->get_where('user_settings', ['id_users' => $state['user_id']])->num_rows());
+    }
+
+    public function testDirectorySyncFailureLeavesPreparedJournalWithoutDatabaseMutation(): void
+    {
+        $db = &get_instance()->db;
+        $before = $db->like('notes', 'ordinary-live:', 'after')->count_all_results('users');
+        OrdinaryJournalSyncFault::failDirectory($this->stateDirectory);
+        $failure = null;
+        try {
+            $this->fixture->activate();
+        } catch (RuntimeException $error) {
+            $failure = $error;
+        } finally {
+            OrdinaryJournalSyncFault::disable();
+        }
+        self::assertNotNull($failure);
+        self::assertStringContainsString('directory synchronization', $failure->getMessage());
+        self::assertFileExists($this->stateDirectory . '/state.json');
+        self::assertSame(
+            'prepared',
+            json_decode(file_get_contents($this->stateDirectory . '/state.json'), true)['phase'],
+        );
+        self::assertSame($before, $db->like('notes', 'ordinary-live:', 'after')->count_all_results('users'));
+        $this->fixture->deactivate();
+        self::assertSame('clean', $this->fixture->verify());
+    }
+
+    public function testSuccessfulLifecyclePerformsDurableDirectorySyncs(): void
+    {
+        OrdinaryJournalSyncFault::monitorDirectory($this->stateDirectory);
+        $state = $this->fixture->activate();
+        self::assertGreaterThanOrEqual(2, OrdinaryJournalSyncFault::directorySyncs());
+        OrdinaryJournalSyncFault::disable();
+        $this->fixture->deactivate();
+        self::assertSame('clean', $this->fixture->verify());
+        self::assertSame('ordinary-live:' . $state['run_id'], $state['marker']);
     }
 
     public function testSecondActivationIsRefused(): void

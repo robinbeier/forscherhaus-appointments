@@ -178,6 +178,11 @@ Only exact session cookies obtained from this probe's responses are journaled
 privately. Cleanup checks the recorded file inodes; it never enumerates or deletes
 other production session files. Incomplete journals, changed inodes, identity or
 relationship drift fail closed and retain private state for explicit recovery.
+Journal file contents and their renamed directory entries are synchronized before
+activation or further requests proceed. Cleanup synchronizes owned session
+removals before retiring the private journal. A synchronization failure preserves
+recovery state and prevents a successful result; the isolated gate injects this
+failure before DB insertion and before session-journal retirement.
 A hard interruption between an HTTP response and journal persistence can leave
 an unrecorded anonymous session: such an interruption must not be reported as
 complete cleanup or successful verification. Do not copy the private journal,

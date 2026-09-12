@@ -357,9 +357,11 @@ final class OrdinaryLiveFixture
         $handle = fopen($tmp, 'x');
         if (
             $handle === false ||
+            !chmod($tmp, 0600) ||
             fwrite($handle, $json) !== strlen($json) ||
             !fflush($handle) ||
-            (function_exists('fsync') && !fsync($handle))
+            !function_exists('fsync') ||
+            !fsync($handle)
         ) {
             if (is_resource($handle)) {
                 fclose($handle);
@@ -368,9 +370,20 @@ final class OrdinaryLiveFixture
             throw new RuntimeException('Fixture state could not be durably written.');
         }
         fclose($handle);
-        if (!chmod($tmp, 0600) || !rename($tmp, $this->stateFile)) {
+        if (!rename($tmp, $this->stateFile)) {
             @unlink($tmp);
             throw new RuntimeException('Fixture state could not be written atomically.');
+        }
+        $directory = fopen($this->stateDirectory, 'r');
+        if ($directory === false) {
+            throw new RuntimeException('Fixture journal directory could not be opened for synchronization.');
+        }
+        try {
+            if (!fsync($directory)) {
+                throw new RuntimeException('Fixture journal directory synchronization failed.');
+            }
+        } finally {
+            fclose($directory);
         }
         $this->assertOwnedFile($this->stateFile, 0600);
     }
@@ -461,7 +474,10 @@ final class OrdinaryLiveFixture
                 throw new RuntimeException('An existing state directory must already be mode 0700.');
             }
         } else {
-            if (!mkdir($path, 0700, true) && !is_dir($path)) {
+            if (!is_dir(dirname($path))) {
+                throw new RuntimeException('State directory parent must already exist.');
+            }
+            if (!mkdir($path, 0700) && !is_dir($path)) {
                 throw new RuntimeException('State directory could not be created.');
             }
         }
@@ -472,6 +488,17 @@ final class OrdinaryLiveFixture
             throw new RuntimeException('State directory must be mode 0700.');
         }
         $this->assertOwnedFile($path, 0700);
+        $parent = fopen(dirname($path), 'r');
+        if ($parent === false) {
+            throw new RuntimeException('State directory parent could not be opened for synchronization.');
+        }
+        try {
+            if (!fsync($parent)) {
+                throw new RuntimeException('State directory parent synchronization failed.');
+            }
+        } finally {
+            fclose($parent);
+        }
         return $path;
     }
 

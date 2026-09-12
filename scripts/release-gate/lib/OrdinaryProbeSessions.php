@@ -61,6 +61,7 @@ final class OrdinaryProbeSessions
         if (!rename($tmp, $this->journal)) {
             throw new RuntimeException('Could not commit private session journal.');
         }
+        $this->syncDirectory($this->stateDirectory);
     }
 
     /**
@@ -140,8 +141,26 @@ final class OrdinaryProbeSessions
                 throw new RuntimeException('Owned session cleanup failed.');
             }
         }
+        // Persist owned file removals before retiring their recovery journal.
+        $this->syncDirectory($this->sessionDirectory);
         if (is_file($this->journal) && !unlink($this->journal)) {
             throw new RuntimeException('Session journal cleanup failed.');
+        }
+        $this->syncDirectory($this->stateDirectory);
+    }
+
+    private function syncDirectory(string $path): void
+    {
+        $directory = fopen($path, 'r');
+        if ($directory === false) {
+            throw new RuntimeException('Session journal directory could not be opened for synchronization.');
+        }
+        try {
+            if (!fsync($directory)) {
+                throw new RuntimeException('Session journal directory synchronization failed.');
+            }
+        } finally {
+            fclose($directory);
         }
     }
 
