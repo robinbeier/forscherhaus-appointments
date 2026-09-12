@@ -64,6 +64,7 @@ This file stays intentionally short. It is a map, not a second runbook.
   - root/host prerequisite contract: [Docker test guidance](docker.md#linux-roothost-tests)
   - integration smoke browser evidence: [Dashboard release gate](release-gate-dashboard.md)
   - production provider UI smoke: [Provider UI smoke release gate](release-gate-provider-ui-smoke.md)
+  - isolated ordinary defense-cycle checks: [Defense-cycle evidence](release-gate-defense-cycle.md)
   - production Customers UI smoke: [Customers UI smoke release gate](release-gate-customers-ui-smoke.md)
   - architecture boundaries entry points: [AGENTS.md](../AGENTS.md)
 

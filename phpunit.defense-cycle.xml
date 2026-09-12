@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/10.5/phpunit.xsd"
+    bootstrap="tests/bootstrap.php" colors="true" cacheResult="false">
+    <testsuites>
+        <testsuite name="DefenseCycleOrdinaryFlows">
+            <file>./tests/Integration/Controllers/DefenseCycleOrdinaryFlowTest.php</file>
+            <file>./tests/Integration/SessionLifecycleTest.php</file>
+        </testsuite>
+    </testsuites>
+    <php><server name="APP_ENV" value="testing"/></php>
+</phpunit>

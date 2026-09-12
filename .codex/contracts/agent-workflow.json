@@ -86,7 +86,8 @@
             "phpstan-application": "1d9b591ffe18dbd3fd2a6c9aff46e135c0f67642d32993ba9faf1b3a12ea4ad7",
             "root-deployment-tests": "63ad3205658547ac510654792c48b64730a0aea75a1fae2d0ba42849b2ee5555",
             "typed-request-contracts": "91555da0ee339465906f5779ce4023ec53df037fa1c8f72ea8e69a7ccf586094",
-            "typed-request-dto": "ccd16fdafb2c6ac1f2b311e39f064c1d3ba1a1fe56b2a8f8333635ab97ce7e47"
+            "typed-request-dto": "ccd16fdafb2c6ac1f2b311e39f064c1d3ba1a1fe56b2a8f8333635ab97ce7e47",
+            "defense-cycle-ordinary-flows": "366ec2bba2d7a48fa5b394b985c91a011f227920ffafe8343995f83a02f9fa65"
         },
         "condition_grammar": {
             "version": 1,
@@ -256,6 +257,9 @@
                 "kind": "fingerprinted_execution"
             },
             "root-deployment-tests": {
+                "kind": "fingerprinted_execution"
+            },
+            "defense-cycle-ordinary-flows": {
                 "kind": "fingerprinted_execution"
             }
         }
