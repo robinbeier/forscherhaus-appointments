@@ -1,0 +1,251 @@
+<?php
+
+declare(strict_types=1);
+
+use PHPUnit\Framework\TestCase;
+use ReleaseGate\OrdinaryLiveFixture;
+use Tests\Integration\Support\OrdinaryJournalSyncFault;
+
+require_once dirname(__DIR__, 2) . '/scripts/release-gate/lib/OrdinaryLiveFixture.php';
+require_once __DIR__ . '/Support/OrdinaryJournalSyncFault.php';
+
+final class OrdinaryLiveFixtureTest extends TestCase
+{
+    private string $stateDirectory;
+    private ?OrdinaryLiveFixture $fixture = null;
+
+    protected function setUp(): void
+    {
+        if (getenv('FH_DEFENSE_ISOLATED') !== '1' || !function_exists('posix_geteuid') || posix_geteuid() !== 0) {
+            self::markTestSkipped('Requires the explicitly isolated root Docker fixture run.');
+        }
+        self::assertSame('testing', ENVIRONMENT);
+        $this->stateDirectory = '/var/lib/fh-ordinary-tests-' . bin2hex(random_bytes(8));
+        $this->fixture = new OrdinaryLiveFixture($this->stateDirectory);
+        self::assertSame('clean', $this->fixture->verify());
+    }
+
+    protected function tearDown(): void
+    {
+        OrdinaryJournalSyncFault::disable();
+        if (!isset($this->stateDirectory)) {
+            return;
+        }
+        if (
+            isset($this->stateDirectory) &&
+            $this->fixture !== null &&
+            file_exists($this->stateDirectory . '/state.json')
+        ) {
+            $this->fixture->deactivate();
+        }
+        foreach (['state.json', 'lifecycle.lock'] as $file) {
+            $path = $this->stateDirectory . '/' . $file;
+            if (is_file($path) && !is_link($path)) {
+                unlink($path);
+            }
+        }
+        if (is_dir($this->stateDirectory) && !is_link($this->stateDirectory)) {
+            rmdir($this->stateDirectory);
+        }
+    }
+
+    public function testOrdinaryProviderLifecycleIsExactAndIdempotentlyCleaned(): void
+    {
+        $state = $this->fixture->activate();
+        self::assertSame('active', $this->fixture->verify());
+        self::assertSame($state, $this->fixture->read());
+        self::assertSame(64, strlen((string) $state['password']));
+
+        $db = &get_instance()->db;
+        $user = $db->get_where('users', ['id' => $state['user_id']])->row_array();
+        $settings = $db->get_where('user_settings', ['id_users' => $state['user_id']])->row_array();
+        self::assertSame($state['marker'], $user['notes']);
+        self::assertSame($state['email'], $user['email']);
+        self::assertSame($state['username'], $settings['username']);
+        self::assertSame(0, $db->get_where('appointments', ['id_users_provider' => $state['user_id']])->num_rows());
+        self::assertSame(0, $db->get_where('services_providers', ['id_users' => $state['user_id']])->num_rows());
+        self::assertSame(0, $db->get_where('services', ['description' => $state['marker']])->num_rows());
+
+        $this->fixture->deactivate();
+        self::assertSame('clean', $this->fixture->verify());
+        $this->fixture->deactivate();
+        self::assertSame(0, $db->get_where('users', ['id' => $state['user_id']])->num_rows());
+        self::assertSame(0, $db->get_where('user_settings', ['id_users' => $state['user_id']])->num_rows());
+    }
+
+    public function testDirectorySyncFailureLeavesPreparedJournalWithoutDatabaseMutation(): void
+    {
+        $db = &get_instance()->db;
+        $before = $db->like('notes', 'ordinary-live:', 'after')->count_all_results('users');
+        OrdinaryJournalSyncFault::failDirectory($this->stateDirectory);
+        $failure = null;
+        try {
+            $this->fixture->activate();
+        } catch (RuntimeException $error) {
+            $failure = $error;
+        } finally {
+            OrdinaryJournalSyncFault::disable();
+        }
+        self::assertNotNull($failure);
+        self::assertStringContainsString('directory synchronization', $failure->getMessage());
+        self::assertFileExists($this->stateDirectory . '/state.json');
+        self::assertSame(
+            'prepared',
+            json_decode(file_get_contents($this->stateDirectory . '/state.json'), true)['phase'],
+        );
+        self::assertSame($before, $db->like('notes', 'ordinary-live:', 'after')->count_all_results('users'));
+        $this->fixture->deactivate();
+        self::assertSame('clean', $this->fixture->verify());
+    }
+
+    public function testSuccessfulLifecyclePerformsDurableDirectorySyncs(): void
+    {
+        OrdinaryJournalSyncFault::monitorDirectory($this->stateDirectory);
+        $state = $this->fixture->activate();
+        self::assertGreaterThanOrEqual(2, OrdinaryJournalSyncFault::directorySyncs());
+        OrdinaryJournalSyncFault::disable();
+        $this->fixture->deactivate();
+        self::assertSame('clean', $this->fixture->verify());
+        self::assertSame('ordinary-live:' . $state['run_id'], $state['marker']);
+    }
+
+    public function testSecondActivationIsRefused(): void
+    {
+        $this->fixture->activate();
+        self::expectException(RuntimeException::class);
+        $this->fixture->activate();
+    }
+
+    public function testCleanGuardAllowsCleanStateAndRefusesActiveState(): void
+    {
+        $this->fixture->assertCleanBeforeActivation();
+        $this->fixture->activate();
+        self::expectException(RuntimeException::class);
+        $this->fixture->assertCleanBeforeActivation();
+    }
+
+    public function testOrphanSelectorsEachBlockPreflightAndActivationWithoutNewMutation(): void
+    {
+        $db = &get_instance()->db;
+        $role = $db->get_where('roles', ['slug' => 'provider'])->row_array();
+        foreach (['user', 'settings', 'both'] as $selector) {
+            $marker = ($selector === 'settings' ? 'unrelated-synthetic:' : 'ordinary-live:') . bin2hex(random_bytes(8));
+            $username = ($selector === 'user' ? 'unrelated_synthetic_' : 'defense_live_') . bin2hex(random_bytes(16));
+            $email = bin2hex(random_bytes(16)) . '@synthetic.invalid';
+            $db->insert('users', [
+                'first_name' => 'Orphan',
+                'last_name' => 'Synthetic',
+                'email' => $email,
+                'phone_number' => '000000000',
+                'notes' => $marker,
+                'timezone' => 'UTC',
+                'language' => 'english',
+                'id_roles' => (int) $role['id'],
+                'is_private' => 1,
+            ]);
+            $userId = (int) $db->insert_id();
+            try {
+                $salt = generate_salt();
+                $db->insert('user_settings', [
+                    'id_users' => $userId,
+                    'username' => $username,
+                    'password' => hash_password($salt, bin2hex(random_bytes(16))),
+                    'salt' => $salt,
+                    'working_plan' => '{}',
+                    'working_plan_exceptions' => '{}',
+                    'notifications' => 0,
+                    'google_sync' => 0,
+                    'caldav_sync' => 0,
+                ]);
+                $userCount = $db->count_all('users');
+                $settingsCount = $db->count_all('user_settings');
+                self::assertSame('cleanup_pending', $this->fixture->verify());
+                foreach (['assertCleanBeforeActivation', 'activate'] as $operation) {
+                    $error = null;
+                    try {
+                        $this->fixture->{$operation}();
+                    } catch (RuntimeException $caught) {
+                        $error = $caught;
+                    }
+                    self::assertNotNull($error, $selector . ' must block ' . $operation);
+                    self::assertStringContainsString('Orphaned ordinary fixture rows', $error->getMessage());
+                    self::assertFileDoesNotExist($this->stateDirectory . '/state.json');
+                    self::assertSame($userCount, $db->count_all('users'));
+                    self::assertSame($settingsCount, $db->count_all('user_settings'));
+                }
+            } finally {
+                $db->delete('user_settings', ['id_users' => $userId, 'username' => $username]);
+                $db->delete('users', ['id' => $userId, 'notes' => $marker, 'email' => $email]);
+            }
+            self::assertSame('clean', $this->fixture->verify());
+        }
+    }
+
+    public function testPreparedJournalRecoversRowsCommittedBeforeFinalStateWrite(): void
+    {
+        $state = $this->fixture->activate();
+        $prepared = $state;
+        $prepared['phase'] = 'prepared';
+        $prepared['user_id'] = 0;
+        file_put_contents($this->stateDirectory . '/state.json', json_encode($prepared, JSON_THROW_ON_ERROR));
+        self::assertSame('cleanup_pending', $this->fixture->verify());
+        $refused = false;
+        try {
+            $this->fixture->read();
+        } catch (RuntimeException) {
+            $refused = true;
+        }
+        self::assertTrue($refused, 'An unfinished context must not start HTTP requests.');
+        $this->fixture->deactivate();
+        self::assertSame('clean', $this->fixture->verify());
+        self::assertSame(
+            0,
+            get_instance()
+                ->db->get_where('users', ['id' => $state['user_id']])
+                ->num_rows(),
+        );
+    }
+
+    public function testCleanupCanResumeAfterDatabaseCommitBeforeJournalRemoval(): void
+    {
+        $state = $this->fixture->activate();
+        $db = &get_instance()->db;
+        $db->delete('user_settings', ['id_users' => $state['user_id'], 'username' => $state['username']]);
+        $db->delete('users', ['id' => $state['user_id'], 'notes' => $state['marker']]);
+        $this->fixture->deactivate();
+        self::assertSame('clean', $this->fixture->verify());
+    }
+
+    public function testChangedCredentialCannotReachNormalLoginOrLdapFallback(): void
+    {
+        $state = $this->fixture->activate();
+        $db = &get_instance()->db;
+        $settings = $db->get_where('user_settings', ['id_users' => $state['user_id']])->row_array();
+        $db->update('user_settings', ['password' => 'changed'], ['id_users' => $state['user_id']]);
+        $refused = false;
+        try {
+            $this->fixture->read();
+        } catch (RuntimeException) {
+            $refused = true;
+        } finally {
+            $db->update('user_settings', ['password' => $settings['password']], ['id_users' => $state['user_id']]);
+        }
+        self::assertTrue($refused);
+    }
+
+    public function testOwnershipDriftRefusesCleanupUntilRestored(): void
+    {
+        $state = $this->fixture->activate();
+        $db = &get_instance()->db;
+        $db->update('users', ['notes' => 'foreign'], ['id' => $state['user_id']]);
+        try {
+            $this->fixture->deactivate();
+            self::fail('Cleanup must refuse a drifted identity.');
+        } catch (RuntimeException $e) {
+            self::assertStringContainsString('ambiguous', strtolower($e->getMessage()));
+        }
+        $db->update('users', ['notes' => $state['marker']], ['id' => $state['user_id']]);
+        $this->fixture->deactivate();
+        self::assertSame('clean', $this->fixture->verify());
+    }
+}

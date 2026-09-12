@@ -79,6 +79,82 @@ DEPLOY_RESULT_EXIT_FINALIZATION_ACTIVE=0
 
 SYSTEMCTL_BASE=(/bin/systemctl)
 
+# Shared with the reviewed ordinary probe wrapper. Production callers use the
+# fixed defaults; sourced root regressions may provide their own synthetic paths.
+ordinary_trusted_path() {
+  local path="$1" mode
+  [[ "$(id -u)" == 0 && "$(realpath -e -- "$path")" == "$path" ]] || return 1
+  while [[ "$path" != / ]]; do
+    [[ ! -L "$path" && "$(stat -c %u -- "$path")" == 0 ]] || return 1
+    mode="$(stat -c %a -- "$path")" || return 1
+    (( (8#$mode & 8#022) == 0 )) || return 1
+    path="$(dirname -- "$path")"
+  done
+}
+
+ordinary_production_change_lock() {
+  local lock_path="${1:-/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock}" wait_seconds="${2:-0}" before after opened ordinary_fd
+  [[ "$wait_seconds" =~ ^[0-9]+$ && "$wait_seconds" -le 300 ]] || return 1
+  ordinary_trusted_path "$lock_path" || return 1
+  [[ -f "$lock_path" && ! -L "$lock_path" ]] || return 1
+  before="$(stat -c '%a:%u:%h:%s:%d:%i' -- "$lock_path")" || return 1
+  [[ "$before" == 600:0:1:0:* ]] || return 1
+  # Never truncate or replace the shared lock inode. Hold the descriptor until exit.
+  if [[ -n "${ORDINARY_CHANGE_LOCK_FD:-}" ]]; then
+    [[ "$ORDINARY_CHANGE_LOCK_FD" =~ ^[0-9]+$ ]] || return 1
+    ordinary_fd="$ORDINARY_CHANGE_LOCK_FD"
+    opened="$(stat -Lc '%a:%u:%h:%s:%d:%i' -- "/proc/$$/fd/$ordinary_fd")" || return 1
+    [[ "$opened" == "$before" ]] || return 1
+  else
+    exec {ordinary_fd}<>"$lock_path" || return 1
+  fi
+  if ! flock -w "$wait_seconds" "$ordinary_fd"; then
+    exec {ordinary_fd}>&-
+    return 75
+  fi
+  opened="$(stat -Lc '%a:%u:%h:%s:%d:%i' -- "/proc/$$/fd/$ordinary_fd")" || { exec {ordinary_fd}>&-; return 1; }
+  after="$(stat -c '%a:%u:%h:%s:%d:%i' -- "$lock_path")" || { exec {ordinary_fd}>&-; return 1; }
+  if [[ -L "$lock_path" || "$opened" != "$before" || "$after" != "$before" ]]; then
+    exec {ordinary_fd}>&-
+    return 1
+  fi
+  ORDINARY_CHANGE_LOCK_FD="$ordinary_fd"
+}
+
+ordinary_assert_no_pending_probe() {
+  local state="${1:-/var/lib/fh-defense-ordinary}" artifact
+  [[ -e "$state" || -L "$state" ]] || return 0
+  ordinary_trusted_path "$state" || return 1
+  [[ -d "$state" && "$(stat -c %a -- "$state")" == 700 ]] || return 1
+  for artifact in run.pending state.json sessions.json sessions.json.tmp; do
+    if [[ -e "$state/$artifact" || -L "$state/$artifact" ]]; then
+      echo '[!] Ordinary probe recovery is pending; deployment/probe start refused.' >&2
+      return 75
+    fi
+  done
+}
+
+ordinary_probe_begin() {
+  local state="${1:-/var/lib/fh-defense-ordinary}"
+  ordinary_assert_no_pending_probe "$state" || return $?
+  [[ -d "$state" ]] || return 1
+  mkdir -m 700 -- "$state/run.pending" || return 1
+  sync -f "$state"
+}
+
+ordinary_probe_finish() {
+  local state="${1:-/var/lib/fh-defense-ordinary}" artifact
+  ordinary_trusted_path "$state/run.pending" || return 1
+  [[ -d "$state/run.pending" && "$(stat -c %a -- "$state/run.pending")" == 700 ]] || return 1
+  for artifact in state.json sessions.json sessions.json.tmp; do
+    [[ ! -e "$state/$artifact" && ! -L "$state/$artifact" ]] || return 1
+  done
+  # Only the successful foreground wrapper calls this after verified cleanup.
+  # Timer recovery deliberately retains the marker after an interrupted run.
+  rmdir -- "$state/run.pending" || return 1
+  sync -f "$state"
+}
+
 deploy_result_set_switch_phase() {
   local phase="$1"
 
@@ -2379,6 +2455,10 @@ validate_trusted_deploy_script "$CURRENT_SCRIPT_PATH" "$WEBUSER" \
   || die "[!] Host deploy script trust contract failed."
 
 if [[ "$DRYRUN" -eq 0 ]]; then
+  ordinary_production_change_lock \
+    || die "[!] Shared production-change lock is unavailable; deployment refused."
+  ordinary_assert_no_pending_probe \
+    || die "[!] Ordinary probe recovery must finish before deployment."
   [[ -n "$HEALTHZ_TOKEN_FILE" ]] || die "[!] --healthz-token-file is required for non-dry deployments."
   [[ -r "$HEALTHZ_TOKEN_FILE" ]] || die "[!] Token file is not readable: $HEALTHZ_TOKEN_FILE"
   if [[ "$REQUIRE_ZERO_SURPRISE" -eq 1 ]]; then

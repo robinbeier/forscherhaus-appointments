@@ -103,6 +103,18 @@ because an application rollout failed.
 
 ## Deploy
 
+The host deploy script acquires the existing trusted production-change lock for
+the entire normal deployment, including storage copying, atomic switching and
+rollback. It refuses a pending ordinary synthetic-probe recovery state before any
+storage copy. Keep the lock file and root ownership intact; retry conflicting work
+after the probe and verified cleanup finish. See
+[ordinary live verification](release-gate-defense-cycle.md) for the persistent
+interruption marker and recovery boundary. Dry runs do not acquire this lock.
+An operator holding the same lock across an approved migration and deployment can
+export the `ORDINARY_CHANGE_LOCK_FD` obtained from the sourced deploy helper. The
+child verifies that inherited descriptor against the trusted lock inode before
+reusing it; an arbitrary or stale descriptor is refused.
+
 After resolving any pending production migrations above, run the deployment
 from the production host using the uploaded archive:
 
