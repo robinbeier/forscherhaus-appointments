@@ -144,3 +144,18 @@ a new exclusion, or an unsupported model capability promise.
 Record human interruptions, elapsed time to verified evidence, and harness rework
 against a named gap in the next run's existing note. These measurements support
 comparison without inventing historical values or adding another tracking system.
+
+## Ordinary local staff HTTP regressions
+
+`StaffSettingsApiHttpTest` runs only in the fresh synthetic stack owned by
+`scripts/ci/run_defense_cycle.sh`, using the existing loopback HTTP helper.
+It exercises the real Admin, Secretary and Settings controller entry points:
+Basic/Bearer collection and detail reads, unauthenticated challenges, public staff
+response fields, and ordinary Admin/Secretary create-update persistence. Password
+omission and clearing Secretary provider assignments are checked against stored
+rows. Owned identities are registered before writes and cleaned with the fixture.
+
+These tests supplement model rollback tests; they do not inject HTTP failures,
+prove every concurrent schedule or verify production. Settings API token visibility
+retains its existing privileged contract; staff secret-projection assertions do
+not imply that every Settings value is public or that tokens are write-only.
