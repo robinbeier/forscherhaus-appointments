@@ -33,6 +33,7 @@ uncertain commit result.
 | `Services_model::delete` | Route permission/authentication precedes this operation. | Locks service and ordinary appointment parents, removes generated children and deletes the service inside one transaction; checked commit and propagated errors. |
 | `Appointments_model::sync_service_buffer_unavailabilities` | Dependent internal model work, not a separate user authorization endpoint. | Opens/nests a transaction and locks provider/service/appointment parents before replacing children. Service save calls it before committing. Direct calls finish their own transaction. |
 | `Account::save` -> `Users_model::save` | POST-only, user-settings edit permission, session-bound user ID and field allowlist. | User row and all settings form one model operation. Standalone save owns begin/commit/rollback; an outer caller retains ownership when present. A settings failure propagates. Account session updates follow successful save. |
+| `Secretaries::store/update` and `Secretaries_api_v1::store/update` -> `Secretaries_model::save` | Backoffice users permission or API authentication; existing targets must remain secretary users and assignments must reference existing providers. Integer IDs and the UI's positive decimal strings are normalized as a set; malformed or out-of-range IDs fail before mutation. | The model locks the secretary and requested provider users in ascending order before user/settings/assignment writes. Standalone save owns the transaction; an outer caller retains it. Settings and assignment writes, transaction status and commit are checked. The public `set_provider_ids` operation has the same standalone/outer ownership and parent validation for direct use. |
 
 ## Narrow updates and drift
 
@@ -62,6 +63,10 @@ record or move notifications into a model transaction.
   failed transaction start/commit suppressing success and notifications.
 - `UsersModelAtomicWriteTest`: coupled user/settings success, failure rollback
   and explicit outer ownership.
+- `SecretariesModelAtomicWriteTest`: coupled secretary/settings/assignment writes,
+  ordinary string-ID and empty-assignment behavior, rejected relationships,
+  failure rollback and explicit outer ownership. Model-level checks do not
+  establish HTTP authentication or all concurrent schedules.
 - Existing `TwoConnectionWriteContractTest` and authorization suites cover their
   documented current-state checks; see [the harness scope](two-connection-test-harness.md).
 

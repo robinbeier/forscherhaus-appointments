@@ -61,12 +61,35 @@ class Secretaries_model extends EA_Model
      */
     public function save(array $secretary): int
     {
-        $this->validate($secretary);
+        $secretary['providers'] = $this->normalize_provider_ids($secretary['providers'] ?? []);
+        $secretary_id = empty($secretary['id']) ? null : $this->normalize_provider_ids([$secretary['id']])[0];
+        if ($secretary_id !== null) {
+            $secretary['id'] = $secretary_id;
+        }
 
-        if (empty($secretary['id'])) {
-            return $this->insert($secretary);
-        } else {
-            return $this->update($secretary);
+        $owns_transaction = !$this->db->trans_active();
+        if ($owns_transaction && !$this->db->trans_begin()) {
+            throw new RuntimeException('Could not start secretary save transaction.');
+        }
+
+        try {
+            $this->lock_assignment_parents($secretary_id, $secretary['providers']);
+            $this->validate($secretary);
+            $saved_id = $secretary_id === null ? $this->insert($secretary) : $this->update($secretary);
+
+            if (!$this->db->trans_status()) {
+                throw new RuntimeException('Could not save secretary.');
+            }
+            if ($owns_transaction && !$this->db->trans_commit()) {
+                throw new RuntimeException('Could not commit secretary save transaction.');
+            }
+
+            return $saved_id;
+        } catch (Throwable $exception) {
+            if ($owns_transaction) {
+                $this->db->trans_rollback();
+            }
+            throw $exception;
         }
     }
 
@@ -81,7 +104,12 @@ class Secretaries_model extends EA_Model
     {
         // If a secretary ID is provided then check whether the record really exists in the database.
         if (!empty($secretary['id'])) {
-            $count = $this->db->get_where('users', ['id' => $secretary['id']])->num_rows();
+            $count = $this->db
+                ->get_where('users', [
+                    'id' => $secretary['id'],
+                    'id_roles' => $this->get_secretary_role_id(),
+                ])
+                ->num_rows();
 
             if (!$count) {
                 throw new InvalidArgumentException(
@@ -102,15 +130,26 @@ class Secretaries_model extends EA_Model
             throw new InvalidArgumentException('Invalid email address provided for the secretary record.');
         }
 
-        // Validate secretary providers.
-        if (!empty($secretary['providers'])) {
-            // Make sure the provided provider entries are numeric values.
-            foreach ($secretary['providers'] as $provider_id) {
-                if (!is_numeric($provider_id)) {
-                    throw new InvalidArgumentException(
-                        'The provided secretary providers are invalid; provider IDs must be numeric.',
-                    );
-                }
+        if (isset($secretary['id_roles'])) {
+            $role_id = $this->normalize_provider_ids([$secretary['id_roles']])[0];
+            if ($role_id !== $this->get_secretary_role_id()) {
+                throw new InvalidArgumentException('The secretary role cannot be changed by this operation.');
+            }
+        }
+
+        // UI requests use decimal strings; the API uses integer IDs.
+        $provider_ids = $this->normalize_provider_ids($secretary['providers'] ?? []);
+        if ($provider_ids !== []) {
+            $provider_role = $this->db->get_where('roles', ['slug' => DB_SLUG_PROVIDER])->row_array();
+            if (empty($provider_role)) {
+                throw new RuntimeException('The provider role was not found in the database.');
+            }
+            $count = $this->db
+                ->where_in('id', $provider_ids)
+                ->get_where('users', ['id_roles' => $provider_role['id']])
+                ->num_rows();
+            if ($count !== count($provider_ids)) {
+                throw new InvalidArgumentException('Secretary assignments require existing provider users.');
             }
         }
 
@@ -334,7 +373,9 @@ class Secretaries_model extends EA_Model
         $count = $this->db->get_where('user_settings', ['id_users' => $secretary_id])->num_rows();
 
         if (!$count) {
-            $this->db->insert('user_settings', ['id_users' => $secretary_id]);
+            if (!$this->db->insert('user_settings', ['id_users' => $secretary_id])) {
+                throw new RuntimeException('Could not initialize secretary settings.');
+            }
         }
 
         foreach ($settings as $name => $value) {
@@ -407,16 +448,102 @@ class Secretaries_model extends EA_Model
      */
     public function set_provider_ids(int $secretary_id, array $provider_ids): void
     {
-        // Re-insert the secretary-provider connections.
-        $this->db->delete('secretaries_providers', ['id_users_secretary' => $secretary_id]);
+        $provider_ids = $this->normalize_provider_ids($provider_ids);
+        $owns_transaction = !$this->db->trans_active();
+        if ($owns_transaction && !$this->db->trans_begin()) {
+            throw new RuntimeException('Could not start secretary assignment transaction.');
+        }
 
+        try {
+            $this->lock_assignment_parents($secretary_id, $provider_ids);
+            if (!$this->db->delete('secretaries_providers', ['id_users_secretary' => $secretary_id])) {
+                throw new RuntimeException('Could not replace secretary assignments.');
+            }
+
+            foreach ($provider_ids as $provider_id) {
+                if (
+                    !$this->db->insert('secretaries_providers', [
+                        'id_users_secretary' => $secretary_id,
+                        'id_users_provider' => $provider_id,
+                    ])
+                ) {
+                    throw new RuntimeException('Could not save secretary assignment.');
+                }
+            }
+
+            if (!$this->db->trans_status()) {
+                throw new RuntimeException('Could not save secretary assignments.');
+            }
+            if ($owns_transaction && !$this->db->trans_commit()) {
+                throw new RuntimeException('Could not commit secretary assignments.');
+            }
+        } catch (Throwable $exception) {
+            if ($owns_transaction) {
+                $this->db->trans_rollback();
+            }
+            throw $exception;
+        }
+    }
+
+    /** Normalize documented integer IDs and the backoffice's decimal strings. */
+    private function normalize_provider_ids(mixed $provider_ids): array
+    {
+        if (!is_array($provider_ids)) {
+            throw new InvalidArgumentException('Secretary provider IDs must be an array.');
+        }
+
+        $normalized = [];
         foreach ($provider_ids as $provider_id) {
-            $secretary_provider_connection = [
-                'id_users_secretary' => $secretary_id,
-                'id_users_provider' => $provider_id,
-            ];
+            if (
+                (!is_int($provider_id) && !is_string($provider_id)) ||
+                !preg_match('/^[1-9][0-9]*$/D', (string) $provider_id)
+            ) {
+                throw new InvalidArgumentException('Secretary provider IDs must be positive integers.');
+            }
+            $id = filter_var($provider_id, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+            if ($id === false) {
+                throw new InvalidArgumentException('Secretary provider ID is outside the supported range.');
+            }
+            $normalized[$id] = $id;
+        }
+        sort($normalized, SORT_NUMERIC);
+        return $normalized;
+    }
 
-            $this->db->insert('secretaries_providers', $secretary_provider_connection);
+    /** Lock all user parents in canonical order before settings or assignment writes. */
+    private function lock_assignment_parents(?int $secretary_id, array $provider_ids): void
+    {
+        if (!$this->db->trans_active()) {
+            throw new RuntimeException('Secretary assignment validation requires a transaction.');
+        }
+        $user_ids = $provider_ids;
+        if ($secretary_id !== null) {
+            $user_ids[] = $secretary_id;
+        }
+        $user_ids = $this->normalize_provider_ids($user_ids);
+        $provider_role = $this->db->get_where('roles', ['slug' => DB_SLUG_PROVIDER])->row_array();
+        if (empty($provider_role)) {
+            throw new RuntimeException('The provider role was not found in the database.');
+        }
+        $secretary_role_id = $this->get_secretary_role_id();
+        foreach ($user_ids as $user_id) {
+            $query = $this->db->query(
+                'SELECT `id`, `id_roles` FROM `' . $this->db->dbprefix('users') . '` WHERE `id` = ? FOR UPDATE',
+                [$user_id],
+            );
+            if ($query === false) {
+                throw new RuntimeException('Could not lock secretary assignment parents.');
+            }
+            $user = $query->row_array();
+            if (
+                !$user ||
+                ($user_id === $secretary_id && (int) $user['id_roles'] !== $secretary_role_id) ||
+                (in_array($user_id, $provider_ids, true) && (int) $user['id_roles'] !== (int) $provider_role['id'])
+            ) {
+                throw new InvalidArgumentException(
+                    'Secretary assignments require a secretary and existing provider users.',
+                );
+            }
         }
     }
 
