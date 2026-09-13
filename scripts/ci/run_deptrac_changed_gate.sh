@@ -4,6 +4,7 @@ set -euo pipefail
 
 ROOT_DIR="$(git rev-parse --show-toplevel)"
 cd "$ROOT_DIR"
+source ./scripts/ci/git_helpers.sh
 
 LOG_DIR="storage/logs/ci"
 mkdir -p "$LOG_DIR"
@@ -32,6 +33,7 @@ detect_diff_range() {
 
   if [[ "$event_name" == "pull_request" ]]; then
     base_ref="${GITHUB_BASE_REF:-main}"
+    base_ref="$(git_ci_normalize_base_ref "$base_ref")"
     git fetch --no-tags origin "$base_ref" >/dev/null 2>&1 || true
 
     base_sha="$(git merge-base HEAD "origin/$base_ref" 2>/dev/null || true)"
@@ -40,8 +42,8 @@ detect_diff_range() {
       return 0
     fi
 
-    echo "HEAD~1...HEAD"
-    return 0
+    echo "Unable to resolve pull-request base ref '$base_ref'." >&2
+    return 1
   fi
 
   if [[ "$event_name" == "push" ]]; then
