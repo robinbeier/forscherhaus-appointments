@@ -19,6 +19,8 @@ final class DefenseCycleFixtures
     private array $users = [];
     private array $settings = [];
     private array $baselineCounts = [];
+    private ?array $providerHttpAuthSettings = null;
+    private ?array $providerHttpAuthTokenSetting = null;
 
     public function __construct()
     {
@@ -138,6 +140,62 @@ final class DefenseCycleFixtures
         return $ci->appointments_model->find($id);
     }
 
+    /**
+     * Opt in to the local HTTP provider-auth fixture and return its synthetic credentials.
+     *
+     * @return array{admin_username:string,provider_username:string,password:string,token:string}
+     */
+    public function enableProviderHttpAuth(): array
+    {
+        if ($this->providerHttpAuthSettings !== null || !isset($this->providerId)) {
+            throw new RuntimeException('Provider HTTP auth fixture was already enabled or is not created.');
+        }
+
+        $tokenRow = $this->db->get_where('settings', ['name' => 'api_token'])->row_array();
+        $providerSettings = $this->db->get_where('user_settings', ['id_users' => $this->providerId])->row_array();
+        if (!$tokenRow || !$providerSettings) {
+            throw new RuntimeException('Provider HTTP auth fixture prerequisites are missing.');
+        }
+
+        $this->providerHttpAuthTokenSetting = $tokenRow;
+        $this->providerHttpAuthSettings = [
+            'google_token' => $providerSettings['google_token'] ?? null,
+            'caldav_password' => $providerSettings['caldav_password'] ?? null,
+        ];
+        $token = bin2hex(random_bytes(32));
+        $this->db->update('settings', ['value' => $token], ['name' => 'api_token']);
+        $this->db->update(
+            'user_settings',
+            [
+                'google_token' => $this->run . '_google_integration',
+                'caldav_password' => $this->run . '_caldav_integration',
+            ],
+            ['id_users' => $this->providerId],
+        );
+        $stored = $this->db->get_where('user_settings', ['id_users' => $this->providerId])->row_array();
+        if (
+            ($stored['google_token'] ?? '') !== $this->run . '_google_integration' ||
+            ($stored['caldav_password'] ?? '') !== $this->run . '_caldav_integration'
+        ) {
+            throw new RuntimeException('Provider HTTP auth integration fixture was not stored.');
+        }
+
+        $stored = $this->db->get_where('user_settings', ['id_users' => $this->providerId])->row_array();
+        if (
+            ($stored['google_token'] ?? null) !== $this->run . '_google_integration' ||
+            ($stored['caldav_password'] ?? null) !== $this->run . '_caldav_integration'
+        ) {
+            throw new RuntimeException('Synthetic integration values were not stored.');
+        }
+
+        return [
+            'admin_username' => $this->run . '_actor',
+            'provider_username' => $this->run . '_provider',
+            'password' => $this->password,
+            'token' => $token,
+        ];
+    }
+
     public function row(string $table, int $id): array
     {
         if (!in_array($table, ['users', 'appointments', 'services'], true)) {
@@ -148,6 +206,29 @@ final class DefenseCycleFixtures
 
     public function cleanup(): void
     {
+        if ($this->providerHttpAuthSettings !== null && isset($this->providerId)) {
+            $this->db->update('user_settings', $this->providerHttpAuthSettings, ['id_users' => $this->providerId]);
+            $restored = $this->db->get_where('user_settings', ['id_users' => $this->providerId])->row_array();
+            if (
+                ($restored['google_token'] ?? null) !== $this->providerHttpAuthSettings['google_token'] ||
+                ($restored['caldav_password'] ?? null) !== $this->providerHttpAuthSettings['caldav_password']
+            ) {
+                throw new RuntimeException('Provider HTTP auth fixture settings were not restored.');
+            }
+            $this->providerHttpAuthSettings = null;
+        }
+        if ($this->providerHttpAuthTokenSetting !== null) {
+            $this->db->update(
+                'settings',
+                ['value' => $this->providerHttpAuthTokenSetting['value']],
+                ['name' => 'api_token'],
+            );
+            $restored = $this->db->get_where('settings', ['name' => 'api_token'])->row_array();
+            if (($restored['value'] ?? null) !== $this->providerHttpAuthTokenSetting['value']) {
+                throw new RuntimeException('Provider HTTP auth token was not restored.');
+            }
+            $this->providerHttpAuthTokenSetting = null;
+        }
         if (isset($this->serviceId)) {
             // A new relationship outside this exact fixture must not be swept away.
             $rows = $this->db->get_where('appointments', ['id_services' => $this->serviceId])->result_array();

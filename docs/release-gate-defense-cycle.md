@@ -44,6 +44,10 @@ are not evidence that the gate passed.
 
 ## What the tests establish
 
+The bounded [Provider HTTP authentication regressions](provider-api-regression-followups.md#bounded-http-authentication-regression)
+also exercise list/detail reads through the actual local API authentication boundary,
+using synthetic Basic/Bearer credentials and the existing isolated lifecycle.
+
 - Normal login, protected own-account save, customer read/update, and calendar
   appointment creation/update through HTTP, with persisted-value assertions.
 - New appointment format from the real insert path, linked to the separately
