@@ -67,6 +67,58 @@ class Settings_model extends EA_Model
     }
 
     /**
+     * Save an ordered batch of settings atomically.
+     *
+     * Existing outer transactions remain the caller's responsibility.
+     *
+     * @param array $settings Associative setting records in caller order.
+     *
+     * @throws Throwable
+     */
+    public function save_batch(array $settings): void
+    {
+        foreach ($settings as $setting) {
+            if (!is_array($setting)) {
+                throw new InvalidArgumentException(
+                    'Not all required fields are provided for the setting record: name.',
+                );
+            }
+            $this->validate_shape($setting);
+        }
+
+        if ($settings === []) {
+            return;
+        }
+
+        $owns_transaction = !$this->db->trans_active();
+        if ($owns_transaction && !$this->db->trans_begin()) {
+            throw new RuntimeException('Could not start settings batch transaction.');
+        }
+
+        try {
+            foreach ($settings as $setting) {
+                $existing_setting = $this->db->get_where('settings', ['name' => $setting['name']])->row_array();
+                if (!empty($existing_setting)) {
+                    $setting['id'] = $existing_setting['id'];
+                }
+                $this->save($setting);
+            }
+
+            if (!$this->db->trans_status()) {
+                throw new RuntimeException('Could not save settings batch.');
+            }
+            if ($owns_transaction && !$this->db->trans_commit()) {
+                throw new RuntimeException('Could not commit settings batch transaction.');
+            }
+        } catch (Throwable $exception) {
+            if ($owns_transaction) {
+                $this->db->trans_rollback();
+            }
+            throw $exception;
+        }
+    }
+
+    /**
      * Validate the setting data.
      *
      * @param array $setting Associative array with the setting data.
@@ -86,6 +138,16 @@ class Settings_model extends EA_Model
             }
         }
 
+        $this->validate_shape($setting);
+    }
+
+    /**
+     * Validate fields that do not require a database lookup.
+     *
+     * @param array $setting Associative array with the setting data.
+     */
+    private function validate_shape(array $setting): void
+    {
         // Make sure all required fields are provided.
         if (empty($setting['name'])) {
             throw new InvalidArgumentException('Not all required fields are provided for the setting record: name.');
