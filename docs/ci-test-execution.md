@@ -130,3 +130,21 @@ Use GitHub Actions job and step timestamps for a specific before/after
 comparison. Record both run links and the changed workload. A shorter parallel
 job does not necessarily shorten the overall workflow by the same amount.
 Do not describe two runs as an established statistical baseline.
+
+## Defense job build timing
+
+The Defense job retains its complete isolated application/session suite and
+fresh Docker data lifecycle. Only its PHP image preparation uses the
+[bounded layer cache](docker.md#defense-ci-php-layer-cache). Its additional
+`php-build-defense-cycle-ordinary-flows` artifact contains the cache state,
+recipe key, loaded image ID and measured phase times. Existing gate evidence
+and cleanup failure handling are unchanged.
+
+The pre-change observation was 182 seconds for the job, including 111.9 seconds
+for PHP build and 22.2 seconds for 97 tests / 668 assertions. This single run is
+not a statistical baseline. The provisional warm-job target is at most 100
+seconds, including transfers and setup; implementation and contract tests do
+not prove that target. Use regular PR/main runs only. Record cold, warm and
+unavailable-cache runs separately; if ROB-564 has no natural warm observation,
+carry that measurement gap into ROB-565. Report the job and complete workflow
+separately rather than treating their durations as interchangeable.

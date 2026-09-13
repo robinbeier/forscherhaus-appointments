@@ -365,3 +365,35 @@ A production image of Easy!Appointments can be found at: https://github.com/alex
 *This document applies to Easy!Appointments v1.5.2.*
 
 [Back](readme.md)
+
+## Defense CI PHP layer cache
+
+The Defense job builds the same resolved Compose PHP recipe with Buildx and
+loads its result under the existing local image key. The build context remains
+`docker/php-fpm`; application mounts, databases, sessions, credentials, fixtures
+and test results are never cached. The recipe key describes inputs, not image
+provenance. The timing report records the loaded image ID separately. GitHub's
+native branch/cache access restrictions remain in force; there is no registry
+push, privileged PR event or added write permission.
+
+`scripts/ci/defense_php_cache.py` uses the GHA v2 backend with a 15-second backend
+operation timeout. An outer 45-second deadline bounds the complete cache-assisted
+build, including lazy layer transfers and image loading. A cold or slow candidate
+may exceed that budget: it is cancelled and the normal build runs without remote
+cache import. Missing runtime cache credentials also select the normal build.
+Only structured cache-import errors or positively identified lazy cache-read
+errors after a completed cached build permit a retry; ordinary or unknown
+build/load errors fail. Recovery disables imported build records with
+`--no-cache`. A successful import and cached vertices establish recovery
+eligibility, not cache provenance. The optional export happens after a successful loaded image, uses
+`mode=min`, and has a separate 20-second deadline. Cancellation allows at most
+two additional seconds before killing the client process. The normal build and
+all application tests remain blocking. The job's existing overall timeout and
+the Buildx action's builder cleanup remain active.
+
+A hit requires completed Dockerfile RUN/COPY/ADD vertices reported cached by
+BuildKit; a successful command alone is not a hit. Reports retain cache-build,
+normal-build and export wall time separately and include all these phases in
+`total_seconds`. The job duration also includes builder setup, dependencies,
+fresh Docker/MySQL startup, the full Defense suite, teardown and artifacts.
+Cache availability and actual speedup must therefore be evaluated separately.
