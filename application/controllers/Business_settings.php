@@ -122,6 +122,10 @@ class Business_settings extends EA_Controller
             if (cannot('edit', PRIV_SYSTEM_SETTINGS)) {
                 throw new RuntimeException('You do not have the required permissions for this task.');
             }
+            if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+                abort(405, 'Method Not Allowed', ['Allow: POST']);
+                return;
+            }
 
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityPayloadRequestDto('working_plan');
             $working_plan_payload = $request_dto->payload;
@@ -136,8 +140,33 @@ class Business_settings extends EA_Controller
 
             $providers = $this->providers_model->get();
 
-            foreach ($providers as $provider) {
-                $this->providers_model->set_setting($provider['id'], 'working_plan', $working_plan);
+            if ($providers === []) {
+                response();
+                return;
+            }
+
+            $db = $this->providers_model->db;
+            $owns_transaction = !$db->trans_active();
+            if ($owns_transaction && !$db->trans_begin()) {
+                throw new RuntimeException('Could not start global working plan transaction.');
+            }
+
+            try {
+                foreach ($providers as $provider) {
+                    $this->providers_model->set_setting($provider['id'], 'working_plan', $working_plan);
+                }
+
+                if (!$db->trans_status()) {
+                    throw new RuntimeException('Could not apply global working plan.');
+                }
+                if ($owns_transaction && !$db->trans_commit()) {
+                    throw new RuntimeException('Could not commit global working plan transaction.');
+                }
+            } catch (Throwable $exception) {
+                if ($owns_transaction) {
+                    $db->trans_rollback();
+                }
+                throw $exception;
             }
 
             response();

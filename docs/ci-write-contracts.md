@@ -105,6 +105,12 @@ vollständige Vorvalidierung und vorbereiteten IDs bei und speichert diese in
 einer gemeinsamen Transaktion. Die getrennten Datenbanknachweise und Grenzen
 beschreibt [der atomare Schreibvertrag](atomic-write-contracts.md#backoffice-settings-batches).
 
+Die separate Aktion `business_settings/apply_global_working_plan` verlangt
+ebenfalls zuerst die bestehende Edit-Berechtigung und anschließend POST. Ihre
+beabsichtigte Übertragung des Editorplans auf alle serverseitig ausgewählten
+Anbieter bleibt erhalten. Die gemeinsame Transaktion und getrennten
+Testnachweise beschreibt [der atomare Arbeitsplan-Vertrag](atomic-write-contracts.md#global-working-plan-application).
+
 ## Write-only Integrationsgeheimnisse
 
 Die authentifizierte REST-v1-API behandelt
@@ -223,3 +229,11 @@ zeitlich begrenzte CI-Änderung zulässig; dabei bleibt
 schwächt kein Gate ab und beschreibt keine alternative Warnphase. Die in
 [WORKFLOW.md](../WORKFLOW.md) geforderte Rückkehrfrist und das Follow-up-Issue
 bleiben verbindlich.
+
+Die Legacy-Aliase `backend_api/ajax_save_settings` und
+`backend_api/ajax_apply_global_working_plan` verwenden explizite
+Location-Weiterleitungen mit Status 307, damit POST und Request-Body beim
+Client erhalten bleiben. Die Zielcontroller prüfen weiterhin Berechtigung
+und POST; die normale CSRF-Prüfung bleibt aktiv. Der isolierte Alias-Test
+belegt Ziel, Redirect-Methode und Status sowie unveränderte Eingabedaten,
+keine vollständige HTTP-/Browser-/CSRF-Weiterleitungskette.
