@@ -37,20 +37,29 @@ git_ci_refresh_base_ref_if_safe() {
     git fetch --no-tags --no-write-fetch-head origin "$base_ref" >/dev/null 2>&1 || true
 }
 
-git_ci_collect_changed_paths() {
+git_ci_normalize_base_ref() {
     local base_ref="${1:?base ref is required}"
+    if [[ "$base_ref" == origin/* ]]; then
+        printf '%s\n' "${base_ref#origin/}"
+    else
+        printf '%s\n' "$base_ref"
+    fi
+}
+
+git_ci_collect_changed_paths() {
+    local base_ref
+    base_ref="$(git_ci_normalize_base_ref "${1:?base ref is required}")"
     local diff_range
     local branch_paths=""
     local unstaged_paths=""
     local staged_paths=""
 
-    if [[ "$base_ref" == origin/* ]]; then
-        diff_range="${base_ref}...HEAD"
-    else
-        diff_range="origin/${base_ref}...HEAD"
-    fi
+    diff_range="origin/${base_ref}...HEAD"
 
-    branch_paths="$(git diff --name-only "$diff_range" 2>/dev/null || git diff --name-only HEAD~1...HEAD 2>/dev/null || true)"
+    if ! branch_paths="$(git diff --name-only "$diff_range" 2>/dev/null)"; then
+        echo "[git-ci] Unable to determine changed files for range '$diff_range'." >&2
+        return 1
+    fi
     unstaged_paths="$(git diff --name-only 2>/dev/null || true)"
     staged_paths="$(git diff --cached --name-only 2>/dev/null || true)"
 

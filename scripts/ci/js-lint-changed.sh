@@ -24,12 +24,14 @@ range=""
 
 if [[ "$event_name" == "pull_request" ]]; then
     base_ref="${GITHUB_BASE_REF:-main}"
+    base_ref="$(git_ci_normalize_base_ref "$base_ref")"
     git_ci_refresh_base_ref_if_safe "$base_ref" "js-lint-changed"
     if git rev-parse --verify "origin/$base_ref" >/dev/null 2>&1; then
         base_sha="$(git merge-base HEAD "origin/$base_ref")"
         range="$base_sha...HEAD"
     else
-        range="HEAD~1...HEAD"
+        echo "Unable to resolve pull-request base ref '$base_ref'." >&2
+        exit 1
     fi
 elif [[ "$event_name" == "push" ]]; then
     before_sha="${GITHUB_EVENT_BEFORE:-}"

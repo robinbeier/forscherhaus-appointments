@@ -281,6 +281,12 @@ includes the main `composer test` suite through its quick-gate stage:
 PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh
 ```
 
+Local quick/full gates accept `PRE_PR_BASE_REF=main` (the default) or
+`PRE_PR_BASE_REF=origin/main`; both compare the whole branch against the same
+remote base. An unresolved PR base or invalid requested diff is a failed scope
+check, not evidence that no files need checking. Refresh the intended base and
+rerun the affected gate instead of substituting the last commit.
+
 For the full gate matrix, optional scope-specific smokes, and rollback notes,
 route through `docs/agent-harness-index.md` and then `AGENTS.md`.
 

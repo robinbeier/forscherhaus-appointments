@@ -12,7 +12,7 @@ source ./scripts/ci/git_helpers.sh
 source ./scripts/ci/docker_compose_helpers.sh
 source ./scripts/ci/lib/local_full_gate_selection.sh
 
-BASE_REF="${PRE_PR_BASE_REF:-main}"
+BASE_REF="$(git_ci_normalize_base_ref "${PRE_PR_BASE_REF:-main}")"
 RUN_COVERAGE="${PRE_PR_RUN_COVERAGE:-0}"
 REQUEST_CONTRACTS_L2_BLOCKING="${PRE_PR_REQUEST_CONTRACTS_L2_BLOCKING:-1}"
 REQUEST_CONTRACTS_L2_WARNED=0
@@ -69,7 +69,10 @@ pre_pr_full_should_include_ldap_guardrail() {
         return 1
     fi
 
-    changed_paths="$(git_ci_collect_changed_paths "$BASE_REF")"
+    if ! changed_paths="$(git_ci_collect_changed_paths "$BASE_REF")"; then
+        echo "[pre-pr-full] Cannot determine LDAP guardrail scope." >&2
+        return 2
+    fi
 
     while IFS= read -r path; do
         case "$path" in
@@ -173,6 +176,11 @@ STACK_SERVICES=(mysql php-fpm nginx)
 if pre_pr_full_should_include_ldap_guardrail; then
     INTEGRATION_SMOKE_INCLUDE_LDAP=1
     STACK_SERVICES+=(openldap)
+else
+    ldap_scope_status=$?
+    if [[ "$ldap_scope_status" != "1" ]]; then
+        exit "$ldap_scope_status"
+    fi
 fi
 echo "[pre-pr-full] LDAP guardrail checks enabled: ${INTEGRATION_SMOKE_INCLUDE_LDAP}"
 ci_docker_compose up -d "${STACK_SERVICES[@]}"
