@@ -68,6 +68,21 @@ erteilt keine Credentials und erweitert keine Toolrechte.
   autorisierte unabhängige Arbeit läuft weiter; bekannte Freigaben werden nicht
   erneut abgefragt.
 
+### Dokumentation und abgelehnte Mutationen
+
+Eine innerhalb des autorisierten Scopes vorbereitete lokale Dokumentation oder
+ein lokaler Checkpoint erteilt keine zusätzliche externe Freigabe und ersetzt
+keine Linear-Aktualisierung. Zu den bestehenden WORKFLOW-Meilensteinen wird der
+konkrete Workpad- oder PR-Text vor dem autorisierten Schreiben lokal in einem
+privaten, Git-ignorierten Laufartefakt gespeichert und der persistierte Zielstand
+erneut gelesen. Ausstehende Texte werden nicht committet.
+Wird die Mutation durch Plattform, Policy oder fehlende Laufzeitfähigkeit
+abgelehnt, bleibt der Checkpoint erhalten; die Ablehnung wird mit ihrer sicheren,
+genauen Fehlermeldung klassifiziert und nicht durch Tool- oder Modellwechsel
+wiederholt. Unabhängige erlaubte Arbeit läuft weiter. Eine neue Freigabe wird
+einmal gebündelt nach konkreter Aktion und Scope angefragt; der primäre Agent
+bleibt der einzige externe Schreiber.
+
 ## Übergabe
 
 ```text

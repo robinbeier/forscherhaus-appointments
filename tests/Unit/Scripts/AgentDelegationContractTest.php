@@ -19,7 +19,7 @@ class AgentDelegationContractTest extends TestCase
     public function testImplementationWorkerPinsLunaAndPureSubordinateBoundary(): void
     {
         $role = $this->readRepoFile('.codex/agents/implementation-worker.toml');
-        $resolved = $this->resolveImplementationWorkerConfiguration();
+        $resolved = $this->resolveRoleConfiguration('implementation_worker');
 
         self::assertSame('agents/implementation-worker.toml', $resolved['config_file']);
         self::assertSame('gpt-5.6-luna', $resolved['model']);
@@ -72,6 +72,18 @@ class AgentDelegationContractTest extends TestCase
         self::assertStringContainsString('primary-agent synthesis', $reviewGuide);
     }
 
+    public function testReviewerCorrectnessPinsSupportedReadOnlyConfiguration(): void
+    {
+        $role = $this->readRepoFile('.codex/agents/reviewer-correctness.toml');
+        $resolved = $this->resolveRoleConfiguration('reviewer_correctness');
+
+        self::assertSame('agents/reviewer-correctness.toml', $resolved['config_file']);
+        self::assertSame('gpt-6-astra', $resolved['model']);
+        self::assertSame('high', $resolved['model_reasoning_effort']);
+        self::assertSame('read-only', $resolved['sandbox_mode']);
+        self::assertStringContainsString('merges, or any external system. Return findings only to the primary.', $role);
+    }
+
     private function readRepoFile(string $relativePath): string
     {
         $contents = file_get_contents($this->repoRoot . '/' . $relativePath);
@@ -81,7 +93,7 @@ class AgentDelegationContractTest extends TestCase
     }
 
     /** @return array<string, int|string> */
-    private function resolveImplementationWorkerConfiguration(): array
+    private function resolveRoleConfiguration(string $roleName): array
     {
         $script = <<<'PYTHON'
         import json
@@ -95,8 +107,11 @@ class AgentDelegationContractTest extends TestCase
             config = tomllib.load(stream)
 
         agents = config["agents"]
-        declaration = agents["implementation_worker"]
-        role_path = config_path.parent / declaration["config_file"]
+        declaration = agents[sys.argv[2]]
+        agents_root = (config_path.parent / "agents").resolve()
+        role_path = (config_path.parent / declaration["config_file"]).resolve()
+        if agents_root not in role_path.parents or not role_path.is_file():
+            raise SystemExit("role config path escapes .codex/agents or is not a file")
         with role_path.open("rb") as stream:
             role = tomllib.load(stream)
 
@@ -112,7 +127,7 @@ class AgentDelegationContractTest extends TestCase
         PYTHON;
 
         $process = proc_open(
-            ['python3', '-I', '-B', '-c', $script, $this->repoRoot],
+            ['python3', '-I', '-B', '-c', $script, $this->repoRoot, $roleName],
             [['file', '/dev/null', 'r'], ['pipe', 'w'], ['pipe', 'w']],
             $pipes,
         );
