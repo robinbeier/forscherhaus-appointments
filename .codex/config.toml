@@ -11,3 +11,7 @@ config_file = "agents/implementation-worker.toml"
 [agents.reviewer_correctness]
 description = "Read-only reviewer focused on correctness, regressions, security, and edge cases."
 config_file = "agents/reviewer-correctness.toml"
+
+[agents.daybreak_defensive]
+description = "Read-only Daybreak specialist for bounded defensive source assessment and supplied regression evidence."
+config_file = "agents/daybreak-defensive.toml"

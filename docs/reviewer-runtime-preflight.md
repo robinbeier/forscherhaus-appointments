@@ -65,6 +65,29 @@ model/role/tools or expired reviewer session requires a fresh startup check.
 A runtime launch or tool failure is a harness issue, not a PR finding. Do not
 repeat a known-unsupported role or weaken a review gate to obtain output.
 
+## Daybreak defensive role
+
+The optional `daybreak_defensive` project role pins `gpt-daybreak-blue-latest`,
+high reasoning, `sandbox_mode = "read-only"`, and `approval_policy = "never"`.
+It assesses bounded local source and supplied ordinary regression evidence;
+the primary owns tests, implementation, connectors, and external writes.
+
+Check the current spawn surface, not only the file. Use a fresh context with no
+repository extracts for the first handshake. Capture actual session/model and
+effective permission evidence. Parent runtime overrides can change child
+permissions; a role file alone does not prove effective isolation. Also check
+that mutating connector tools are unavailable or denied; filesystem read-only
+alone does not constrain remote actions.
+
+If a running app session has a stale role catalog, a fresh supported runtime may
+load the role. Record the surface and configuration used. A separately launched
+read-only CLI assessment is a disclosed alternate surface, not proof that app
+subagent dispatch worked. It must preserve context, tool, credential, network,
+and approval boundaries, and is never a route around a refused method.
+If support or isolation cannot be established, leave Daybreak pending; an allowed
+fallback must not mark the model plan fulfilled. Never change global access or
+weaken managed policy to make a launch succeed.
+
 ## Short readiness request
 
 ```text

@@ -34,6 +34,24 @@ class AgentDelegationContractTest extends TestCase
         self::assertSame(1, $resolved['max_depth']);
     }
 
+    public function testDaybreakDefensiveRolePinsReadOnlyHighAssuranceBoundary(): void
+    {
+        $role = $this->readRepoFile('.codex/agents/daybreak-defensive.toml');
+        $resolved = $this->resolveRoleConfiguration('daybreak_defensive');
+
+        self::assertSame('agents/daybreak-defensive.toml', $resolved['config_file']);
+        self::assertSame('gpt-daybreak-blue-latest', $resolved['model']);
+        self::assertSame('high', $resolved['model_reasoning_effort']);
+        self::assertSame('read-only', $resolved['sandbox_mode']);
+        self::assertSame('never', $resolved['approval_policy']);
+        self::assertSame('gpt-5.6-luna', $resolved['default_subagent_model']);
+        self::assertSame('medium', $resolved['default_subagent_reasoning_effort']);
+        self::assertStringContainsString('Do not delegate', $role);
+        self::assertStringContainsString('Do not mutate files, Git, GitHub, Linear,', $role);
+        self::assertStringContainsString('No exploit development, offensive reproduction', $role);
+        self::assertStringContainsString('refusal. A blocked method stays blocked', $role);
+    }
+
     public function testSteeringSourcesMakeBoundedLunaDelegationTheDefault(): void
     {
         $agents = $this->readRepoFile('AGENTS.md');
@@ -120,6 +138,7 @@ class AgentDelegationContractTest extends TestCase
             "model": role["model"],
             "model_reasoning_effort": role["model_reasoning_effort"],
             "sandbox_mode": role["sandbox_mode"],
+            "approval_policy": role.get("approval_policy"),
             "max_depth": agents["max_depth"],
             "default_subagent_model": agents["default_subagent_model"],
             "default_subagent_reasoning_effort": agents["default_subagent_reasoning_effort"],

@@ -16,6 +16,10 @@ workflows. Here, each kind of knowledge has one maintained home:
 | What happened in a particular round and why | [Dated first-cycle retrospective](retrospectives/defense-factory-2026-09-13.md) |
 | Current release identities, per-run results, open gaps, pending updates | Existing private evidence report and, where applicable, the single `## Codex Workpad` |
 
+The accepted [Provider regression follow-ups](provider-api-regression-followups.md)
+record concrete improvements to existing tests; their implementation status does
+not change the evidence level of a prior pilot.
+
 ## Use the skills at the relevant handoff
 
 The repo skills live under `.agents/skills/`, Codex's repository skill location.
@@ -44,7 +48,7 @@ authority for delegation, independent review, external writes, and landing.
 | Responsibility | Preferred model/role | Required output |
 | --- | --- | --- |
 | Context, scope, coordination, architecture, integration, and closeout | Astra primary | Current cycle record, acceptance criteria, evidence gaps, and next permitted action |
-| Bounded defensive source assessment and finding triage | Daybreak Blue specialist, when available with applicable access | Source-bound observations, existing-finding comparison, uncertainty, and affected acceptance criteria |
+| Bounded defensive source assessment and finding triage | Registered `daybreak_defensive`, when available with applicable access | Source-bound observations, existing-finding comparison, uncertainty, and affected acceptance criteria |
 | Assessment of existing local regression evidence and patch validation | Separate Daybreak Blue assessment | Observed results tied to the tested version, covered criteria, and remaining gaps |
 | Security-sensitive implementation decisions | Astra primary | Narrow remediation and its rationale |
 | Independently verifiable implementation slices | Registered `implementation_worker` | Owned local diff and focused validation; model/runtime resolution follows WORKFLOW |
@@ -85,9 +89,25 @@ name. A different model does not itself make a review independent.
 
 The primary may dispatch the next bounded role without asking again when the
 existing grant covers that action, required evidence is present, and the runtime
-supports the role. This document does not itself implement a scheduler or register
-a Daybreak specialist. Record the actual role/model at dispatch; do not claim a
+supports the role. This document does not implement a scheduler. The project
+registers `daybreak_defensive` in `.codex/config.toml` with its model, high reasoning,
+read-only sandbox, and no approval escalation in `.codex/agents/daybreak-defensive.toml`.
+Record the actual role/model at dispatch; do not claim a
 preferred model ran when it did not.
+
+Before the first substantive Daybreak handoff, follow the
+[runtime preflight](reviewer-runtime-preflight.md#daybreak-defensive-role): verify
+the actual model and effective isolation in a fresh no-content handshake. An old
+session may not expose a newly registered role. Do not substitute a generic
+workspace-write agent just to obtain the requested model name.
+
+Record two independent completion fields in every cycle: `assessment_status`
+(complete/partial/blocked at the stated evidence level) and `model_plan_status`
+(fulfilled/fallback/not_started). A successful Astra fallback can complete a
+bounded assessment, but does not fulfill a planned Daybreak handoff. Record the
+fallback reason and remaining model-validation step explicitly. A no-content
+handshake is not a completed assessment. Test changes that were excluded from a
+run cannot make zero harness corrections evidence of an improved correction rate.
 
 For unavailable tooling or models, record the technical limitation and use only
 a disclosed, capable fallback permitted by WORKFLOW and the current grant. A
