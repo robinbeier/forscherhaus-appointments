@@ -105,6 +105,12 @@ vollständige Vorvalidierung und vorbereiteten IDs bei und speichert diese in
 einer gemeinsamen Transaktion. Die getrennten Datenbanknachweise und Grenzen
 beschreibt [der atomare Schreibvertrag](atomic-write-contracts.md#backoffice-settings-batches).
 
+Die separate Aktion `business_settings/apply_global_working_plan` verlangt
+ebenfalls zuerst die bestehende Edit-Berechtigung und anschließend POST. Ihre
+beabsichtigte Übertragung des Editorplans auf alle serverseitig ausgewählten
+Anbieter bleibt erhalten. Die gemeinsame Transaktion und getrennten
+Testnachweise beschreibt [der atomare Arbeitsplan-Vertrag](atomic-write-contracts.md#global-working-plan-application).
+
 ## Write-only Integrationsgeheimnisse
 
 Die authentifizierte REST-v1-API behandelt
