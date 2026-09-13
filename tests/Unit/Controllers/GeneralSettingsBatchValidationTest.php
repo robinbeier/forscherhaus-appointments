@@ -91,7 +91,17 @@ class GeneralSettingsBatchValidationTest extends TestCase
     private function saveBatch(array $settings): void
     {
         $controller = $this->createController($settings);
-        $controller->save();
+        $previousMethod = $_SERVER['REQUEST_METHOD'] ?? null;
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+        try {
+            $controller->save();
+        } finally {
+            if ($previousMethod === null) {
+                unset($_SERVER['REQUEST_METHOD']);
+            } else {
+                $_SERVER['REQUEST_METHOD'] = $previousMethod;
+            }
+        }
     }
 
     private function createController(array $settings): General_settings
