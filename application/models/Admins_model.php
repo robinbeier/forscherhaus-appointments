@@ -392,14 +392,44 @@ class Admins_model extends EA_Model
     public function delete(int $admin_id): void
     {
         $role_id = $this->get_admin_role_id();
-
-        $count = $this->db->get_where('users', ['id_roles' => $role_id])->num_rows();
-
-        if ($count <= 1) {
-            throw new RuntimeException('Record could not be deleted as the app requires at least one admin user.');
+        $owns_transaction = !$this->db->trans_active();
+        if ($owns_transaction && !$this->db->trans_begin()) {
+            throw new RuntimeException('Could not start admin delete transaction.');
         }
 
-        $this->db->delete('users', ['id' => $admin_id]);
+        try {
+            // A current locking read serializes the existing last-admin decision.
+            $query = $this->db->query(
+                'SELECT `id` FROM `' .
+                    $this->db->dbprefix('users') .
+                    '` WHERE `id_roles` = ? ORDER BY `id` ASC FOR UPDATE',
+                [$role_id],
+            );
+            if ($query === false) {
+                throw new RuntimeException('Could not lock admin users for deletion.');
+            }
+            $admin_ids = array_map(static fn(array $row): int => (int) $row['id'], $query->result_array());
+            if (!in_array($admin_id, $admin_ids, true)) {
+                throw new InvalidArgumentException('The admin deletion target was not found.');
+            }
+            if (count($admin_ids) <= 1) {
+                throw new RuntimeException('Record could not be deleted as the app requires at least one admin user.');
+            }
+            if (!$this->db->delete('users', ['id' => $admin_id, 'id_roles' => $role_id])) {
+                throw new RuntimeException('Could not delete admin.');
+            }
+            if ($this->db->affected_rows() !== 1 || !$this->db->trans_status()) {
+                throw new RuntimeException('Admin deletion was not completed.');
+            }
+            if ($owns_transaction && !$this->db->trans_commit()) {
+                throw new RuntimeException('Could not commit admin deletion.');
+            }
+        } catch (Throwable $exception) {
+            if ($owns_transaction) {
+                $this->db->trans_rollback();
+            }
+            throw $exception;
+        }
     }
 
     /**

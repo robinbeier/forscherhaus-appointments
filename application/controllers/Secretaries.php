@@ -244,8 +244,6 @@ class Secretaries extends EA_Controller
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityIdRequestDto('secretary_id');
             $secretary_id = $request_dto->id;
 
-            $secretary = $this->secretaries_model->find($secretary_id);
-
             $this->secretaries_model->delete($secretary_id);
 
             json_response([
