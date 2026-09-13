@@ -32,6 +32,16 @@ tool or filesystem isolation.
 
 ## Reviewer selection and boundary
 
+The project registers `reviewer_correctness` through
+`.codex/config.toml`, with `gpt-6-astra` / `high` and `read-only` in
+`.codex/agents/reviewer-correctness.toml`. This explicit binding avoids inheriting
+an obsolete default model. An already running session may retain its earlier
+role catalog; loading the updated project configuration in a fresh session and
+checking actual launch compatibility are still necessary. App and separately
+installed CLI versions can differ. A launch failure in an older CLI does not
+establish that the current app lacks access. Do not update global tools or
+weaken isolation merely to complete a review.
+
 Select a preferred correctness and security reviewer independently of model
 brand or a fixed model name. If it is unavailable, use an equally qualified
 available reviewer in an enforced read-only runtime whose coverage includes:

@@ -7,3 +7,7 @@ default_subagent_reasoning_effort = "medium"
 [agents.implementation_worker]
 description = "Bounded implementation worker for independently verifiable code, test, and documentation slices."
 config_file = "agents/implementation-worker.toml"
+
+[agents.reviewer_correctness]
+description = "Read-only reviewer focused on correctness, regressions, security, and edge cases."
+config_file = "agents/reviewer-correctness.toml"

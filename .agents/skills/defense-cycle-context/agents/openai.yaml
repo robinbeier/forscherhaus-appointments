@@ -1,0 +1,4 @@
+interface:
+    display_name: 'Defense-Zyklus-Kontext'
+    short_description: 'Vorhandene Belege und Prüfumfang fortschreiben'
+    default_prompt: 'Nutze $defense-cycle-context, um den vorhandenen Defense-Zyklus für die angefragte Runde präzise zu rekonstruieren.'

@@ -20,6 +20,8 @@ This file stays intentionally short. It is a map, not a second runbook.
 | --- | --- | --- |
 | Local onboarding and quickstart | `README.md` | Operator-first entry point. |
 | Agent runtime and issue-to-merge state model | `WORKFLOW.md` | Single source for active agent behavior. |
+| Security context | [Root SECURITY.md](../SECURITY.md) | System boundaries, required properties, reportability, and evidence limits. |
+| Defense Factory cycle coordination | [Cycle guide](defense-factory.md) | Routes repo skills for resuming context and assessing closeout; [first-cycle retrospective](retrospectives/defense-factory-2026-09-13.md). |
 | Ticket-bound mutation authorization | `docs/ticket-mutation-authorization.md` | Explicit per-action scope, existing grants, exclusions and current platform approvals. |
 | Machine-readable workflow and CI invariants | `.codex/contracts/agent-workflow.json` | Structured exact-head, review, public-write, evidence, and blocking-job contract. |
 | Model-aware implementation delegation | `WORKFLOW.md`, `.codex/agents/implementation-worker.toml` | Primary-agent authority plus the pinned Luna worker boundary. |

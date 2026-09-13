@@ -6,6 +6,7 @@ Purpose: durable repo instructions for Codex. Keep this file short; long or topi
 
 - `README.md`: onboarding, local setup, services, shortest operator path.
 - `WORKFLOW.md`: agent runtime, Linear states, Codex Workpad, and ticket-to-merge flow.
+- `SECURITY.md`: security boundaries, required properties, and evidence limits.
 - `code_review.md`: canonical review priorities, findings format, and repo-specific review checks.
 - `docs/agent-harness-index.md`: routing across CI, architecture, ownership, and specialist docs.
 - `.github/workflows/ci.yml`: source of truth for CI triggers, blocking status, and artifacts.
@@ -62,6 +63,7 @@ bash ./scripts/ci/pre_pr_quick.sh
 - Docker stack, local services, dump restore, PDF renderer, LDAP: `docs/docker.md`
 - Console commands: `docs/console.md`
 - Write-path contracts: `docs/ci-write-contracts.md`
+- Defense Factory cycles and evidence handoffs: `docs/defense-factory.md`
 - Release gates: `docs/release-gate-dashboard.md`, `docs/release-gate-booking-confirmation-pdf.md`, `docs/release-gate-provider-ui-smoke.md`, `docs/release-gate-customers-ui-smoke.md`, `docs/release-gate-zero-surprise.md`
 - Observability and ops monitors: `docs/observability.md`, `scripts/ops/README.md`
 - Production SSH operations harness: `docs/ops/agent-operations.md`
