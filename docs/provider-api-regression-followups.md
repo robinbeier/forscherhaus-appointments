@@ -2,13 +2,14 @@
 
 The bounded Provider write-only pilot identified four partial acceptance rows in
 the existing regression evidence. These are test-quality improvements, not
-confirmed product vulnerabilities. Implementation is pending; this document
-records the accepted follow-up scope.
+confirmed product vulnerabilities. The four improvements below are implemented
+in the existing controller test. They establish stronger local controller-level
+evidence; they do not retroactively change the result of an earlier pilot.
 
 Primary file: `tests/Integration/Controllers/ApiIntegrationSecretsWriteOnlyFlowTest.php`.
 Preserve its synthetic fixtures, existing local execution context, and cleanup.
 
-| Row | Existing evidence gap | Required improvement |
+| Row | Original evidence gap | Implemented improvement |
 | --- | --- | --- |
 | R1: list/search | Absence checks can accept an empty result | Assert successful, nonempty expected results and the concrete fixture identity before checking secret absence. Empty results and error objects must fail the acceptance assertion. |
 | R2: detail/projection/expansion | Expected successful response and expansion are not positively asserted | Assert the expected response shape and fixture identity where selected, and the expected service relationship for expansion. Respect intentional `fields` projection when choosing identity assertions. Then assert secret absence. |
@@ -19,6 +20,12 @@ Validate these improvements in the existing integration test context. Check that
 the assertions reject empty/error responses and accidental sibling changes;
 do not merely mirror implementation details. Record test selection, results and
 synthetic-resource cleanup. No new harness or application change is implied.
+
+The same four controller test methods now check positive fixture identity,
+settings projection identity, service expansion, input-derived store/update
+results, and separate rotations followed by a repeated same-value write. The
+unchanged model and OpenAPI tests remain part of the bounded pilot. Record fresh
+test counts and outcomes in the private run report, not as permanent guarantees.
 
 These controller-level improvements do not establish full HTTP routing,
 authentication, deployment, or production coverage. Keep those evidence levels
