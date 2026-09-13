@@ -78,6 +78,14 @@ und eine globale Lock-Reihenfolge ausdrücklich mitzudenken, damit keine
 Prüfung ihre eigene uncommitted Sicht als Authority verwendet oder ein
 Deadlock entsteht.
 
+## API-Einstellungen im Backoffice
+
+`api_settings/save` verlangt System-Settings-Edit-Berechtigung und POST vor
+DTO-Verarbeitung und Modellzugriff. Der bestehende globale CSRF-Schutz bleibt
+für POST aktiv; die Oberfläche sendet bereits diesen Request-Typ. Die isolierten
+Controller-Regressionen belegen die Aufrufreihenfolge mit Test-Doubles, keine
+echte HTTP-/CSRF-Verifikation oder Batch-Atomarität.
+
 ## Write-only Integrationsgeheimnisse
 
 Die authentifizierte REST-v1-API behandelt
