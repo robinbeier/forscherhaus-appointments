@@ -127,6 +127,14 @@ final class ProviderApiHttpAuthTest extends TestCase
         $data = json_decode($response->body, true, 512, JSON_THROW_ON_ERROR);
         self::assertTrue(is_array($data), 'HTTP response must decode to an array.');
         self::assertFalse(array_key_exists('exception', $data), 'HTTP response must not be an error object.');
+        // Normalize JSON escaping and inspect the entire response, including nested fields and other list items.
+        $normalizedBody = json_encode($data, JSON_THROW_ON_ERROR);
+        foreach (['_google_integration', '_caldav_integration'] as $suffix) {
+            self::assertFalse(
+                str_contains($normalizedBody, $this->fixture->run . $suffix),
+                'Successful HTTP response must not contain a seeded integration secret value.',
+            );
+        }
         return $data;
     }
 
