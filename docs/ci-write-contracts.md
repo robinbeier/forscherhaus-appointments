@@ -84,7 +84,9 @@ Deadlock entsteht.
 DTO-Verarbeitung und Modellzugriff. Der bestehende globale CSRF-Schutz bleibt
 für POST aktiv; die Oberfläche sendet bereits diesen Request-Typ. Die isolierten
 Controller-Regressionen belegen die Aufrufreihenfolge mit Test-Doubles, keine
-echte HTTP-/CSRF-Verifikation oder Batch-Atomarität.
+echte HTTP-/CSRF-Verifikation. Der API-Controller übergibt den vollständigen
+Batch an `Settings_model::save_batch`; Transaktionszuständigkeit und die getrennten
+Datenbanknachweise beschreibt [der atomare Schreibvertrag](atomic-write-contracts.md#api-settings-batches).
 
 ## Write-only Integrationsgeheimnisse
 

@@ -46,6 +46,19 @@ exceptions propagate to the owner. This does not make the entire CLI seed atomic
 `AdminsModelAtomicWriteTest` covers ordinary synthetic writes and dependent-failure
 rollback; HTTP behavior and complete concurrent schedules remain separate evidence.
 
+### API settings batches
+
+`Api_settings::save` checks system-settings edit permission and POST before
+handing the complete batch to `Settings_model::save_batch`. Stateless payload
+validation precedes writes; target IDs are resolved afresh by name in input
+order inside the transaction. Repeated names, supplied-ID fallback and color
+normalization retain their existing semantics. Standalone batches check begin,
+transaction status and commit and roll back failures; joined batches retain the
+outer owner's rollback obligation described above. Empty batches are no-ops.
+This does not make other settings controllers atomic or serialize concurrent
+name upserts. Local model regressions prove ordinary rollback/ownership cases;
+controller doubles separately prove the batch handoff, not real HTTP behavior.
+
 ## Narrow updates and drift
 
 `Services_model::update` locks only the service for a buffer-neutral update.
