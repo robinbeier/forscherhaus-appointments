@@ -381,8 +381,11 @@ operation timeout. An outer 45-second deadline bounds the complete cache-assiste
 build, including lazy layer transfers and image loading. A cold or slow candidate
 may exceed that budget: it is cancelled and the normal build runs without remote
 cache import. Missing runtime cache credentials also select the normal build.
-Only structured cache-import errors permit a retry; ordinary or unknown build
-errors fail. The optional export happens after a successful loaded image, uses
+Only structured cache-import errors or positively identified lazy cache-read
+errors after a completed cached build permit a retry; ordinary or unknown
+build/load errors fail. Recovery disables imported build records with
+`--no-cache`. A successful import and cached vertices establish recovery
+eligibility, not cache provenance. The optional export happens after a successful loaded image, uses
 `mode=min`, and has a separate 20-second deadline. Cancellation allows at most
 two additional seconds before killing the client process. The normal build and
 all application tests remain blocking. The job's existing overall timeout and

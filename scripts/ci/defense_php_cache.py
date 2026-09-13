@@ -11,6 +11,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import local_php_image_key
 
@@ -64,18 +65,44 @@ def vertices(output):
 
 
 def cache_import_failure(output):
-    errors = [item for item in vertices(output) if item.get("error")]
+    entries = vertices(output)
+    errors = [item for item in entries if item.get("error")]
     # A successful import elsewhere in the output never excuses a RUN failure.
-    return bool(errors) and all(
+    if not errors:
+        return False
+    if all(
         str(item.get("name", "")).startswith("importing cache manifest from gha")
         for item in errors
-    )
+    ):
+        return True
+    imported = any(str(item.get("name", "")).startswith("importing cache manifest from gha")
+                   and item.get("completed") and not item.get("error") for item in entries)
+    if not imported or cache_state(output) != "hit":
+        return False
+    # Lazy cache reads occur in the Docker exporter. These guards permit a
+    # recovery build, not a provenance claim. Generic load/disk/daemon errors
+    # and errors on Dockerfile vertices remain fatal.
+    export_names = {"exporting to docker image format", "exporting to image", "sending tarball"}
+    return all(item.get("name") in export_names and cache_read_error(str(item["error"]))
+               for item in errors)
+
+
+def cache_read_error(error):
+    if re.search(r"\bblob sha256:[0-9a-f]{64}: not found\b", error):
+        return True
+    if not re.search(r"invalid status response|\bGet [\"']?https://", error):
+        return False
+    for url in re.findall(r"https://[^\s\"']+", error):
+        host = urlsplit(url).hostname or ""
+        if host.endswith((".actions.githubusercontent.com", ".blob.core.windows.net")):
+            return True
+    return False
 
 
 def cache_state(output):
     executed = [item for item in vertices(output)
-                if re.search(r"\] (RUN|COPY|ADD)\b", str(item.get("name", ""))) and item.get("completed")]
-    if not executed:
+                if re.search(r"\] (RUN|COPY|ADD)\b", str(item.get("name", "")))]
+    if not executed or not all(item.get("completed") for item in executed):
         return "unknown"
     return "hit" if all(item.get("cached") is True for item in executed) else "miss"
 
@@ -147,7 +174,10 @@ def main():
             else:
                 return timing["exit_code"] or 1
         if needs_build:
-            timing, _ = phase("build", command + ["--load", context])
+            # Do not reuse records that the failed importer may have installed
+            # in this builder. A cache-free recovery must execute the recipe.
+            recovery = ["--no-cache"] if cache else []
+            timing, _ = phase("build", command + recovery + ["--load", context])
             if timing["exit_code"] != 0:
                 return timing["exit_code"] or 1
         image_id = subprocess.check_output(

@@ -51,6 +51,7 @@ final class DefensePhpCacheTest extends TestCase
         self::assertSame('import_error', $result['report']['cache']);
         self::assertCount(2, $result['commands']);
         self::assertNotContains('--cache-from', $result['commands'][1]);
+        self::assertContains('--no-cache', $result['commands'][1]);
     }
 
     public function testSuccessfulImportAndRunFailureDoesNotFallback(): void
@@ -99,6 +100,7 @@ final class DefensePhpCacheTest extends TestCase
         self::assertTrue($result['report']['phases'][0]['timed_out']);
         self::assertCount(3, $result['commands']);
         self::assertNotContains('--cache-from', $result['commands'][1]);
+        self::assertContains('--no-cache', $result['commands'][1]);
         self::assertLessThan(2, $result['report']['phases'][0]['seconds']);
     }
 
@@ -125,6 +127,7 @@ final class DefensePhpCacheTest extends TestCase
         self::assertSame('import_error', $result['report']['cache']);
         self::assertSame(['cache_build', 'build', 'cache_export'], array_column($result['report']['phases'], 'phase'));
         self::assertNotContains('--cache-from', $result['commands'][1]);
+        self::assertContains('--no-cache', $result['commands'][1]);
     }
 
     public function testUnknownFailureRemainsFatal(): void
@@ -142,6 +145,31 @@ final class DefensePhpCacheTest extends TestCase
         self::assertSame('built', $result['report']['status']);
         self::assertTrue($result['report']['phases'][1]['timed_out']);
         self::assertLessThan(2, $result['report']['phases'][1]['seconds']);
+    }
+
+    public function testLazyCacheReadsRecoverOnlyWithCompletedCachedBuildAndSpecificReadError(): void
+    {
+        foreach (['lazy-missing', 'lazy-http'] as $mode) {
+            $result = $this->runHelper($mode);
+            self::assertSame(0, $result['code'], $result['stderr']);
+            self::assertSame('import_error', $result['report']['cache']);
+            self::assertCount(3, $result['commands']);
+            self::assertNotContains('--cache-from', $result['commands'][1]);
+            self::assertContains('--no-cache', $result['commands'][1]);
+        }
+    }
+
+    public function testLazyReadRecoveryNeverMasksOtherBuildOrLoadErrors(): void
+    {
+        foreach (
+            ['lazy-run', 'lazy-disk', 'lazy-no-import', 'lazy-incomplete', 'lazy-generic', 'lazy-registry']
+            as $mode
+        ) {
+            $result = $this->runHelper($mode);
+            self::assertSame(25, $result['code'], $mode);
+            self::assertCount(1, $result['commands'], $mode);
+            self::assertSame('build_failed', $result['report']['status']);
+        }
     }
 
     private function runHelper(string $mode, bool $runtime = true, array $build = [], float $timeout = 0.0): array
@@ -168,6 +196,23 @@ final class DefensePhpCacheTest extends TestCase
         def emit(identity, name, **values):
             vertex = {'digest': identity, 'name': name, **values}
             print(json.dumps({'vertexes': [vertex]}), flush=True)
+        if mode.startswith('lazy-') and '--cache-from' in args:
+            if mode != 'lazy-no-import':
+                emit('cache', 'importing cache manifest from gha', completed='2026-09-13T12:00:00Z')
+            emit('run', '[2/2] RUN dependencies', completed='2026-09-13T12:00:00Z', cached=True)
+            if mode == 'lazy-incomplete':
+                emit('copy', '[3/3] COPY runtime /runtime', started='2026-09-13T12:00:00Z')
+            error = 'blob sha256:' + 'a' * 64 + ': not found'
+            if mode == 'lazy-http':
+                error = 'invalid status response 503 for https://cache.blob.core.windows.net/layer'
+            if mode == 'lazy-generic':
+                error = 'unexpected EOF'
+            if mode == 'lazy-registry':
+                error = 'invalid status response 503 for https://registry.example/layer'
+            emit('export', '[2/2] RUN dependencies' if mode == 'lazy-run' else 'sending tarball', error=error)
+            if mode == 'lazy-disk':
+                emit('disk', 'exporting to docker image format', error='no space left on device')
+            sys.exit(25)
         if mode == 'timeout' and '--cache-from' in args:
             time.sleep(3)
         if mode in ('import-error', 'import-error-build-error') and '--cache-from' in args:
