@@ -62,11 +62,13 @@ are not evidence that the gate passed.
 - Repeated row cleanup following an interrupted ordinary operation, plus owned
   runtime teardown by the shell runner.
 
-These are positive functional and lifecycle checks. They do not independently
-establish all staff-role denials, all HTTP-method/CSRF negatives, or authorization
-under concurrent responsibility changes. Existing fixed-commit defensive reviews
-and regression results for those properties must be retained separately. A green
-ordinary calendar save is not a concurrency guarantee.
+The isolated suite now also exercises the safe verification modules described
+below: the full account method/CSRF matrix, customer-path denials against owned
+synthetic staff rows, and one deterministic calendar responsibility-change
+schedule. Isolated results remain local evidence and cannot be promoted to
+production evidence. Existing fixed-commit defensive reviews and historical
+results must be retained separately; a green ordinary calendar save is not a
+concurrency guarantee.
 
 ## Report contract and release decision
 
@@ -101,15 +103,16 @@ and operator approval. ROB-561 remains the separate documentation-drift Todo.
 
 ## Ordinary live identity and operator probe
 
-The next operator probe uses one random, private provider with no services,
+Each operator probe uses one random, private provider or administrator, selected
+by the fixed action. Before supplemental rows exist, that actor has no services,
 appointments, customers, secretary links or external integrations. It logs in
-through the normal application route. It adds no reserved identity, authorization
-exception, global setting or application behavior change. Its root-only lifecycle
-journal binds the exact username, email, marker and user ID before any request;
-credential drift is rejected before a login could fall back to LDAP.
+through the normal application route. The harness adds no reserved identity,
+authorization exception, global setting or application behavior change. Its
+root-only lifecycle journal binds the exact username, email, role, marker and user
+ID before any request; credential or role drift is rejected before login.
 
 The reviewed operator bundle includes `deploy_ea.sh`, `scripts/ops/run_ordinary_live_probe.sh`,
-`scripts/ops/ordinary_live_probe.php` and their six release-gate libraries. Run them only from a root-controlled copy
+`scripts/ops/ordinary_live_probe.php` and their ten release-gate libraries. Run them only from a root-controlled copy
 of the reviewed tools outside the replaceable application release, against the
 verified installed release. The wrapper pins the tool inode and resolves the
 original application directory by inode before each call and independent cleanup.
@@ -142,6 +145,9 @@ older uncoordinated deploy script while a run or its recovery marker is pending.
 ```bash
 bash scripts/ops/run_ordinary_live_probe.sh preflight EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh account EXPECTED_RELEASE
+bash scripts/ops/run_ordinary_live_probe.sh methods EXPECTED_RELEASE
+bash scripts/ops/run_ordinary_live_probe.sh customer-boundary EXPECTED_RELEASE
+bash scripts/ops/run_ordinary_live_probe.sh calendar-race EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh session EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh cleanup EXPECTED_RELEASE
 ```
@@ -156,21 +162,89 @@ deletes prior session evidence to make a new run appear clean.
 The active application path must retain its pinned directory identity and release
 marker throughout evidence collection, including the inactivity wait. A deployment
 aborts evidence collection; cleanup still resolves the original directory by inode.
-Account/session runs arm an independent three-hour cleanup timer before inserting
-one identity. They retain that timer if compensation fails. A callback that cannot
+All mutating probe actions arm an independent three-hour cleanup timer before
+inserting one identity. They retain that timer if compensation fails. A callback that cannot
 acquire the shared lock within five minutes exits unsuccessfully; its service
 retries after 60 seconds without a start limit, including after the foreground
 owner eventually releases the lock. Successful foreground compensation stops both
 the timer and any pending cleanup service. A permanently stuck owner still needs
 operator intervention; the persistent marker continues blocking deployments.
-The fixture lifetime
-is three hours; there is no new authorization exemption or increased global TTL.
+The actor fixture lifetime is three hours. Supplemental staff, customer, service
+and appointment rows have a separate ten-minute validity window and exact durable
+intent journal. Their cleanup runs before actor revocation. There is no new
+authorization exemption or increased application TTL.
 
 `account` checks normal login, exact own-account identity, a GET receiving
 405/Allow POST with no persisted change, a protected own POST matching the
 browser's omitted-empty-password behavior, persistence of only the intended
 first-name change and ordinary logout. It is partial evidence for ROB-552: other
 methods and the complete CSRF contract remain separate, unverified requirements.
+
+`methods` uses a fresh owned session for every case. `GET`, `HEAD`, `PUT`,
+`PATCH` and `DELETE` must return `405` with `Allow: POST` and leave the complete
+owned user/settings snapshot unchanged. The application's global `OPTIONS`
+preflight must return `200` but remain equally inert. Missing and invalid CSRF
+POSTs must return `403` without mutation; one valid CSRF POST is the positive
+control and may change only the intended first name. `TRACE`, `CONNECT` and
+unknown methods are rejected by the operator client before a network request.
+
+`customer-boundary` uses an owned synthetic administrator plus separate owned
+synthetic provider, administrator and customer targets sharing one unique marker.
+Customer search must return exactly the two customer-role targets. Provider and
+administrator targets must be absent from search and return `403` for customer
+find, update and destroy, with an exact database snapshot comparison after every
+request. Positive customer find and update controls must succeed. The live probe
+intentionally omits a destructive positive customer control: an unrelated
+back-office request could add a dependent row between fixture activation and the
+HTTP request, and the ordinary customer delete path would legitimately cascade
+that unjournaled row. Fixture cleanup instead locks and verifies complete
+dependency sets before removing its owned customer rows.
+
+Fixture service cleanup follows the application lock order: synthetic user
+parents, then the service, its appointment parent and generated buffer children.
+Every child whose `id_parent_appointment` references the owned appointment is
+locked and must be absent. An unexpected generated child is left untouched and
+blocks parent and service removal until a separately controlled recovery proves
+it safe to continue. If a prepared journal has no parent ID, cleanup also locks
+the production buffer shape attributable to the synthetic provider: an
+unavailability with a non-null parent link and null customer/service references.
+If a durable appointment intent cannot be reconstructed to one exact parent ID,
+cleanup remains blocked: absence cannot distinguish an insert that never
+committed from a deleted parent with an orphaned buffer. A retry requires
+separate operator-controlled proof and, when a parent existed, restoration of
+the exact intended parent before cleanup continues.
+
+`calendar-race` creates only an owned synthetic service, customer, foreign
+provider and appointment. One transaction holds the request-specific synthetic
+customer parent while the real authenticated calendar request begins. Before the
+request starts, the harness records the existing database process IDs. It then
+accepts only one newly created process whose complete normalized user-parent lock
+query contains exactly the synthetic provider/customer pair; an actor-only query,
+a different customer or multiple candidates fail closed. A separate database
+transaction then commits the appointment's provider reassignment; after the lock
+is released, the request must return `403` and must not produce any appointment
+change beyond that administrative reassignment. The appointment is restored to
+its exact prior snapshot before wrapper cleanup only after a transaction locks
+its parents and full row and confirms that no field other than the expected
+provider reassignment changed; restoration updates only the provider field. Any
+other drift remains untouched and fails closed. This is direct evidence for one
+specified responsibility-change schedule, not proof of all possible interleavings.
+If an error occurs while the HTTP request is still active, the harness identifies
+its exact synthetic parent-lock query when possible and attempts to terminate that
+database connection before releasing the held parent lock. Restoration is allowed
+only after either a normal HTTP completion with a valid response status or both
+connection disappearance and HTTP termination have been confirmed. If attribution
+or termination cannot be confirmed, it does not restore the appointment or log
+out. Instead it first creates the separate
+root-only `request-unconfirmed` recovery marker and also marks the fixture
+`recovery_required`. Exit code `86` independently forces the wrapper to establish
+that marker and skip cleanup; if the marker cannot be established, the wrapper
+stops the cleanup timer rather than permitting a later automatic deactivation.
+Foreground and timer cleanup reject a valid marker, and the persistent run marker
+continues blocking deployments and probes. No ordinary command clears either
+state. An operator must first establish externally that the request has ended,
+document the remaining exact synthetic rows, and approve a separate recovery
+procedure.
 
 `session` first runs the account probe, then logs in afresh and waits for the
 configured inactivity duration plus two seconds without requests or session
@@ -184,6 +258,8 @@ Only exact session cookies obtained from this probe's responses are journaled
 privately. Cleanup checks the recorded file inodes; it never enumerates or deletes
 other production session files. Incomplete journals, changed inodes, identity or
 relationship drift fail closed and retain private state for explicit recovery.
+The fixed `defense-verification.json.tmp` name is itself a blocking recovery
+artifact; preflight, deployment coordination and successful finish all reject it.
 Journal file contents and their renamed directory entries are synchronized before
 activation or further requests proceed. Cleanup synchronizes owned session
 removals before retiring the private journal. A synchronization failure preserves
@@ -200,10 +276,11 @@ result remains isolated evidence. It does not establish production expiration.
 Complete cleanup, installed commit checks and independent observation review are
 required before promoting any live result into the six-invariant evidence ledger.
 
-This addition does not verify the full staff/customer read-write-delete boundary
-or calendar authorization during a concurrent responsibility change. Those
-production evidence gaps remain explicit in ROB-551 and ROB-550. No new discovery
-or product repair is part of the operator probe.
+Adding or locally passing this framework does not verify production. ROB-550,
+ROB-551 and ROB-552 remain open until their matching action runs against the
+pinned installed release, produces complete cleanup evidence, and the result is
+independently reviewed. No new discovery or product repair is part of these
+operator probes.
 
 ### Ordinary probe diagnostics and cleanup receipts
 
@@ -217,7 +294,8 @@ postconditions, probe context/deadline checks and final active-release checks ar
 recorded as verify events. Standalone preflight/verify commands keep the receipt
 read-only.
 
-The owned fixture is revoked first. Session cleanup checks every journaled path
+Supplemental dependent fixtures are removed first, then the owned actor is
+revoked. Session cleanup checks every journaled path
 is absent, synchronizes deletions, and durably publishes the aggregate receipt
 before retiring the private session journal. Publication failure retains the
 journal for retry. A handled publication failure removes only its own unpublished

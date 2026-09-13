@@ -129,7 +129,16 @@ final class OrdinaryDeploymentCoordinationTest extends TestCase
     {
         $state = $this->directory . '/state';
         self::assertTrue(mkdir($state, 0700));
-        foreach (['state.json', 'sessions.json.tmp'] as $artifact) {
+        foreach (
+            [
+                'request-unconfirmed',
+                'state.json',
+                'defense-verification.json',
+                'defense-verification.json.tmp',
+                'sessions.json.tmp',
+            ]
+            as $artifact
+        ) {
             self::assertSame(
                 strlen('synthetic incomplete state'),
                 file_put_contents($state . '/' . $artifact, 'synthetic incomplete state'),

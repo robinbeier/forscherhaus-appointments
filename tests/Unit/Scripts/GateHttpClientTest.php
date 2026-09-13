@@ -7,11 +7,91 @@ namespace Tests\Unit\Scripts;
 use PHPUnit\Framework\TestCase;
 use ReflectionMethod;
 use ReleaseGate\GateHttpClient;
+use RuntimeException;
 
 require_once __DIR__ . '/../../../scripts/release-gate/lib/GateHttpClient.php';
 
 class GateHttpClientTest extends TestCase
 {
+    public function testRequestAppNormalizesAndAllowsTheRob552Methods(): void
+    {
+        $client = new GateHttpClient('https://example.test/app', 'index.php');
+        $method = new ReflectionMethod(GateHttpClient::class, 'normalizeAppRequestMethod');
+        $method->setAccessible(true);
+
+        foreach (
+            [
+                'get' => 'GET',
+                'HEAD' => 'HEAD',
+                ' post ' => 'POST',
+                'PUT' => 'PUT',
+                'PATCH' => 'PATCH',
+                'delete' => 'DELETE',
+                'OPTIONS' => 'OPTIONS',
+            ]
+            as $input => $expected
+        ) {
+            self::assertSame($expected, $method->invoke($client, $input));
+        }
+    }
+
+    public function testRequestAppRejectsUnsupportedMethodsBeforeNetworkAccess(): void
+    {
+        $client = new GateHttpClient('https://example.test/app', 'index.php');
+
+        foreach (['TRACE', 'connect', 'BREW', ''] as $method) {
+            try {
+                $client->requestApp($method, 'health');
+                self::fail('Unsupported method was accepted: ' . $method);
+            } catch (RuntimeException $exception) {
+                self::assertStringContainsString('Unsupported app request method', $exception->getMessage());
+            }
+        }
+    }
+
+    public function testRequestAppCsrfInjectionIsExplicitAndPostOnly(): void
+    {
+        $client = new GateHttpClient('https://example.test/app', 'index.php');
+        $prepare = new ReflectionMethod(GateHttpClient::class, 'prepareAppRequestForm');
+        $prepare->setAccessible(true);
+        $consume = new ReflectionMethod(GateHttpClient::class, 'consumeSetCookies');
+        $consume->setAccessible(true);
+        $consume->invoke($client, ['csrf_cookie=token-123; Path=/app/'], 'https://example.test/app/index.php/login');
+
+        self::assertSame(
+            ['name' => 'alice', 'csrf_token' => 'token-123'],
+            $prepare->invoke($client, 'POST', ['name' => 'alice'], true, 'users/update'),
+        );
+        self::assertSame(
+            ['name' => 'alice'],
+            $prepare->invoke($client, 'POST', ['name' => 'alice'], false, 'users/update'),
+        );
+
+        $missingCookieClient = new GateHttpClient('https://example.test/app', 'index.php');
+        $this->expectException(RuntimeException::class);
+        $missingCookieClient->requestApp('POST', 'users/update', [], null, true);
+    }
+
+    public function testRequestAppRejectsCsrfInjectionForNonPostMethods(): void
+    {
+        $client = new GateHttpClient('https://example.test/app', 'index.php');
+        $prepare = new ReflectionMethod(GateHttpClient::class, 'prepareAppRequestForm');
+        $prepare->setAccessible(true);
+
+        $this->expectException(RuntimeException::class);
+        $prepare->invoke($client, 'PUT', [], true, 'users/update');
+    }
+
+    public function testHeadRequestSuppressesResponseBody(): void
+    {
+        $client = new GateHttpClient('https://example.test/app', 'index.php');
+        $method = new ReflectionMethod(GateHttpClient::class, 'shouldSuppressResponseBody');
+        $method->setAccessible(true);
+
+        self::assertTrue($method->invoke($client, 'HEAD'));
+        self::assertFalse($method->invoke($client, 'GET'));
+    }
+
     public function testConsumeSetCookiesPreservesPathAndDomainForBrowserReuse(): void
     {
         $client = new GateHttpClient('https://example.test/app', 'index.php');

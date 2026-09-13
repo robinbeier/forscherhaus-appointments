@@ -126,7 +126,7 @@ ordinary_assert_no_pending_probe() {
   [[ -e "$state" || -L "$state" ]] || return 0
   ordinary_trusted_path "$state" || return 1
   [[ -d "$state" && "$(stat -c %a -- "$state")" == 700 ]] || return 1
-  for artifact in run.pending state.json sessions.json sessions.json.tmp; do
+  for artifact in run.pending request-unconfirmed state.json defense-verification.json defense-verification.json.tmp sessions.json sessions.json.tmp; do
     if [[ -e "$state/$artifact" || -L "$state/$artifact" ]]; then
       echo '[!] Ordinary probe recovery is pending; deployment/probe start refused.' >&2
       return 75
@@ -146,7 +146,7 @@ ordinary_probe_finish() {
   local state="${1:-/var/lib/fh-defense-ordinary}" artifact
   ordinary_trusted_path "$state/run.pending" || return 1
   [[ -d "$state/run.pending" && "$(stat -c %a -- "$state/run.pending")" == 700 ]] || return 1
-  for artifact in state.json sessions.json sessions.json.tmp; do
+  for artifact in request-unconfirmed state.json defense-verification.json defense-verification.json.tmp sessions.json sessions.json.tmp; do
     [[ ! -e "$state/$artifact" && ! -L "$state/$artifact" ]] || return 1
   done
   # Only the successful foreground wrapper calls this after verified cleanup.

@@ -8,10 +8,10 @@ use InvalidArgumentException;
 use RuntimeException;
 use Throwable;
 
-/** Root-only lifecycle for one ordinary, disposable provider account. */
+/** Root-only lifecycle for one ordinary, disposable operator account. */
 final class OrdinaryLiveFixture
 {
-    private const SCHEMA = 'ordinary-live-fixture.v1';
+    private const SCHEMA = 'ordinary-live-fixture.v2';
     private const MAX_TTL = 10800;
 
     private object $db;
@@ -30,20 +30,23 @@ final class OrdinaryLiveFixture
     }
 
     /** @return array<string, mixed> */
-    public function activate(int $ttlSeconds = self::MAX_TTL): array
+    public function activate(int $ttlSeconds = self::MAX_TTL, string $roleSlug = 'provider'): array
     {
         if ($ttlSeconds !== self::MAX_TTL) {
             throw new InvalidArgumentException('The ordinary live fixture TTL is fixed at 10800 seconds.');
         }
+        if (!in_array($roleSlug, ['provider', 'admin'], true)) {
+            throw new InvalidArgumentException('The ordinary live fixture role must be provider or admin.');
+        }
 
-        return $this->withLock(function () use ($ttlSeconds): array {
+        return $this->withLock(function () use ($ttlSeconds, $roleSlug): array {
             if (is_link($this->stateFile) || is_file($this->stateFile)) {
                 throw new RuntimeException('An ordinary live fixture already exists; deactivate it first.');
             }
             $this->assertCleanDatabaseBeforeActivation();
-            $role = $this->db->get_where('roles', ['slug' => 'provider'])->row_array();
+            $role = $this->db->get_where('roles', ['slug' => $roleSlug])->row_array();
             if (empty($role['id'])) {
-                throw new RuntimeException('Provider role is missing.');
+                throw new RuntimeException('Requested ordinary fixture role is missing.');
             }
             $runId = 'ordinary-live-' . bin2hex(random_bytes(16));
             $username = 'defense_live_' . bin2hex(random_bytes(16));
@@ -57,6 +60,7 @@ final class OrdinaryLiveFixture
                 'marker' => $marker,
                 'user_id' => 0,
                 'role_id' => (int) $role['id'],
+                'role_slug' => $roleSlug,
                 'username' => $username,
                 'email' => $email,
                 'password' => $password,
@@ -75,7 +79,7 @@ final class OrdinaryLiveFixture
                 try {
                     $this->db->insert('users', [
                         'first_name' => 'Defense',
-                        'last_name' => 'Live Provider',
+                        'last_name' => $roleSlug === 'admin' ? 'Live Admin' : 'Live Provider',
                         'email' => $email,
                         'phone_number' => '000000000',
                         'notes' => $marker,
@@ -308,6 +312,7 @@ final class OrdinaryLiveFixture
         }
         $user = $this->db->get_where('users', ['id' => $userId])->row_array();
         $settings = $this->db->get_where('user_settings', ['id_users' => $userId])->row_array();
+        $role = $this->db->get_where('roles', ['id' => (int) $state['role_id']])->row_array();
         if (
             !is_array($user) ||
             !is_array($settings) ||
@@ -316,6 +321,7 @@ final class OrdinaryLiveFixture
             $user['notes'] !== $state['marker'] ||
             $user['email'] !== $state['email'] ||
             (int) $user['id_roles'] !== (int) $state['role_id'] ||
+            ($role['slug'] ?? null) !== $state['role_slug'] ||
             (int) ($user['is_private'] ?? 0) !== 1 ||
             $settings['username'] !== $state['username'] ||
             (int) ($settings['notifications'] ?? 1) !== 0 ||
@@ -429,6 +435,7 @@ final class OrdinaryLiveFixture
                 'marker',
                 'user_id',
                 'role_id',
+                'role_slug',
                 'username',
                 'email',
                 'password',
@@ -448,6 +455,7 @@ final class OrdinaryLiveFixture
             $state['marker'] !== 'ordinary-live:' . $state['run_id'] ||
             !preg_match('/^defense_live_[0-9a-f]{32}$/', (string) $state['username']) ||
             $state['email'] !== $state['username'] . '@synthetic.invalid' ||
+            !in_array($state['role_slug'], ['provider', 'admin'], true) ||
             !in_array($state['phase'], ['prepared', 'active'], true) ||
             !is_int($state['user_id']) ||
             $state['user_id'] < 0 ||
