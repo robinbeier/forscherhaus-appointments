@@ -14,6 +14,7 @@ $status = 200;
 $headers = [];
 $body = '';
 $saved = [];
+$saved_batches = [];
 
 function cannot(string $verb, string $permission): bool
 {
@@ -58,17 +59,21 @@ function &get_instance(): object
 }
 function emit_probe(): void
 {
-    global $events, $status, $headers, $body, $saved;
-    echo json_encode(compact('events', 'status', 'headers', 'body', 'saved'), JSON_THROW_ON_ERROR);
+    global $events, $status, $headers, $body, $saved, $saved_batches;
+    echo json_encode(compact('events', 'status', 'headers', 'body', 'saved', 'saved_batches'), JSON_THROW_ON_ERROR);
 }
 
 final class ProbeQuery
 {
+    public function __construct(private string $name) {}
+
     public function where(string $column, string $value): self
     {
-        if ($column !== 'name' || $value !== 'synthetic_setting') {
+        if ($column !== 'name' || !in_array($value, ['synthetic_setting', 'synthetic_second'], true)) {
             throw new RuntimeException('Unexpected settings query predicate.');
         }
+        $GLOBALS['query_name'] = $value;
+        $this->name = $value;
         return $this;
     }
     public function get(): self
@@ -77,15 +82,51 @@ final class ProbeQuery
     }
     public function row_array(): array
     {
-        return ['id' => 42, 'name' => 'synthetic_setting'];
+        return ['id' => $this->name === 'synthetic_setting' ? 41 : 42, 'name' => $this->name];
+    }
+}
+final class ProbeDatabase
+{
+    private bool $active = false;
+    public function trans_active(): bool
+    {
+        return $this->active;
+    }
+    public function trans_begin(): bool
+    {
+        $GLOBALS['events'][] = 'transaction:begin';
+        $this->active = true;
+        return true;
+    }
+    public function trans_status(): bool
+    {
+        return true;
+    }
+    public function trans_commit(): bool
+    {
+        $GLOBALS['events'][] = 'transaction:commit';
+        $this->active = false;
+        return true;
+    }
+    public function trans_rollback(): bool
+    {
+        $GLOBALS['events'][] = 'transaction:rollback';
+        $this->active = false;
+        return true;
     }
 }
 final class ProbeSettingsModel
 {
+    public ProbeDatabase $db;
+    public function __construct()
+    {
+        $this->db = new ProbeDatabase();
+    }
+
     public function query(): ProbeQuery
     {
         $GLOBALS['events'][] = 'query';
-        return new ProbeQuery();
+        return new ProbeQuery($GLOBALS['query_name'] ?? 'synthetic_setting');
     }
     public function validate(array $setting): void {}
     public function only(array &$setting, array $fields): void
@@ -99,6 +140,15 @@ final class ProbeSettingsModel
         $GLOBALS['saved'][] = $setting;
         return 42;
     }
+    public function save_batch(array $settings): void
+    {
+        global $scenario;
+        $GLOBALS['events'][] = 'save_batch:' . count($settings);
+        $GLOBALS['saved_batches'][] = $settings;
+        if ($scenario === 'batch_failure') {
+            throw new RuntimeException('synthetic batch failure');
+        }
+    }
 }
 class Backoffice_request_dto_factory
 {
@@ -106,7 +156,12 @@ class Backoffice_request_dto_factory
     {
         global $events;
         $events[] = 'dto:' . $key;
-        return (object) ['settings' => [['name' => 'synthetic_setting', 'value' => 'synthetic-value']]];
+        return (object) [
+            'settings' => [
+                ['name' => 'synthetic_setting', 'value' => 'synthetic-value', 'extra' => 'drop-me'],
+                ['name' => 'synthetic_second', 'value' => 'second-value', 'extra' => 'drop-me-too'],
+            ],
+        ];
     }
 }
 #[AllowDynamicProperties]

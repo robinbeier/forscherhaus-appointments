@@ -24,6 +24,9 @@ class GeneralSettingsBatchValidationTest extends TestCase
 {
     private Settings_model $settingsModel;
 
+    /** @var list<string> */
+    private array $ownedNames = [];
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -37,7 +40,13 @@ class GeneralSettingsBatchValidationTest extends TestCase
 
     protected function tearDown(): void
     {
-        $this->settingsModel->db->trans_rollback();
+        $db = $this->settingsModel->db;
+        if ($db->trans_active()) {
+            $db->trans_rollback();
+        }
+        foreach ($this->ownedNames as $name) {
+            $db->delete('settings', ['name' => $name]);
+        }
         get_instance()->output->set_output('');
         session(['role_slug' => null, 'user_id' => null]);
 
@@ -70,6 +79,131 @@ class GeneralSettingsBatchValidationTest extends TestCase
         $this->assertSame('', get_instance()->output->get_output());
         $this->assertSame('Temporary name', $this->findSetting('company_name')['value']);
         $this->assertSame('#aabbcc', $this->findSetting('company_color')['value']);
+        $this->assertTrue($this->settingsModel->db->trans_active());
+    }
+
+    public function testStandaloneFailureRollsBackEarlierUpdateAndLaterInsert(): void
+    {
+        $db = $this->settingsModel->db;
+        $db->trans_rollback();
+        $existingName = $this->ownedName('standalone-existing');
+        $newName = $this->ownedName('standalone-new');
+        $this->settingsModel->save(['name' => $existingName, 'value' => 'before']);
+        $before = $this->findSetting($existingName);
+        try {
+            $this->saveBatchWithModel(
+                [['name' => $existingName, 'value' => 'changed'], ['name' => $newName, 'value' => 'must roll back']],
+                new FailingGeneralSettingsModel(),
+            );
+
+            $response = json_decode(get_instance()->output->get_output(), true, flags: JSON_THROW_ON_ERROR);
+            $this->assertFalse($response['success']);
+            $this->assertSame($before, $this->findSetting($existingName));
+            $this->assertSame(0, $db->get_where('settings', ['name' => $newName])->num_rows());
+            $this->assertFalse($db->trans_active());
+        } finally {
+            $this->deleteOwnedNames();
+        }
+    }
+
+    public function testJoinedFailureLeavesTransactionForCallerRollback(): void
+    {
+        $db = $this->settingsModel->db;
+        $db->trans_rollback();
+        $existingName = $this->ownedName('joined-existing');
+        $newName = $this->ownedName('joined-new');
+        $priorName = $this->ownedName('joined-prior');
+        $this->settingsModel->save(['name' => $existingName, 'value' => 'before']);
+        $before = $this->findSetting($existingName);
+        $db->trans_begin();
+        try {
+            $this->settingsModel->save(['name' => $priorName, 'value' => 'caller write']);
+            $this->saveBatchWithModel(
+                [
+                    ['name' => $existingName, 'value' => 'changed'],
+                    ['name' => $newName, 'value' => 'must remain until caller rollback'],
+                ],
+                new FailingGeneralSettingsModel(),
+            );
+
+            $this->assertTrue($db->trans_active());
+            $this->assertSame('changed', $this->findSetting($existingName)['value']);
+            $this->assertSame(1, $db->get_where('settings', ['name' => $newName])->num_rows());
+            $db->trans_rollback();
+            $this->assertSame($before, $this->findSetting($existingName));
+            $this->assertSame(0, $db->get_where('settings', ['name' => $newName])->num_rows());
+            $this->assertSame(0, $db->get_where('settings', ['name' => $priorName])->num_rows());
+            $this->assertFalse($db->trans_active());
+        } finally {
+            $this->deleteOwnedNames();
+        }
+    }
+
+    public function testInitiallyAbsentDuplicateNamesRemainPreparedAsTwoRecords(): void
+    {
+        $name = $this->ownedName('duplicate');
+        $this->saveBatch([['name' => $name, 'value' => 'first'], ['name' => $name, 'value' => 'second']]);
+
+        $rows = $this->settingsModel->db
+            ->order_by('id', 'ASC')
+            ->get_where('settings', ['name' => $name])
+            ->result_array();
+        $this->assertCount(2, $rows);
+        $this->assertSame(['first', 'second'], array_column($rows, 'value'));
+    }
+
+    public function testPreparedExistingIdWinsAcrossRenameOrdering(): void
+    {
+        $db = $this->settingsModel->db;
+        $db->trans_rollback();
+        $existingName = $this->ownedName('prepared-existing');
+        $renamedName = $this->ownedName('prepared-renamed');
+        $this->settingsModel->save(['name' => $existingName, 'value' => 'before']);
+        $before = $this->findSetting($existingName);
+        $db->trans_begin();
+        try {
+            $existingId = (int) $before['id'];
+            $this->saveBatch([
+                ['name' => $renamedName, 'id' => $existingId, 'value' => 'renamed'],
+                ['name' => $existingName, 'value' => 'final'],
+            ]);
+
+            $this->assertSame(1, $db->get_where('settings', ['id' => $existingId])->num_rows());
+            $this->assertSame($existingName, $this->findSetting($existingName)['name']);
+            $this->assertSame('final', $this->findSetting($existingName)['value']);
+            $this->assertSame($existingId, (int) $this->findSetting($existingName)['id']);
+            $this->assertSame(0, $db->get_where('settings', ['name' => $renamedName])->num_rows());
+            $db->trans_rollback();
+            $this->assertSame($before, $this->findSetting($existingName));
+            $this->assertSame(0, $db->get_where('settings', ['name' => $renamedName])->num_rows());
+        } finally {
+            $this->deleteOwnedNames();
+        }
+    }
+
+    public function testInvalidLaterEntryDoesNotCallSave(): void
+    {
+        $model = new CountingGeneralSettingsModel();
+        $this->saveBatchWithModel(
+            [
+                ['name' => 'company_name', 'value' => 'must not write'],
+                ['name' => 'company_color', 'value' => '#abc; color: red'],
+            ],
+            $model,
+        );
+
+        $this->assertSame(0, $model->saveCount());
+        $this->assertTrue($this->settingsModel->db->trans_active());
+    }
+
+    public function testEmptyBatchDoesNotOpenOwnedTransaction(): void
+    {
+        $db = $this->settingsModel->db;
+        $db->trans_rollback();
+        $this->saveBatch([]);
+
+        $this->assertSame('', get_instance()->output->get_output());
+        $this->assertFalse($db->trans_active());
     }
 
     public function testSettingsApiUpdateAndShowReturnNormalizedCompanyColor(): void
@@ -90,7 +224,12 @@ class GeneralSettingsBatchValidationTest extends TestCase
 
     private function saveBatch(array $settings): void
     {
-        $controller = $this->createController($settings);
+        $this->saveBatchWithModel($settings, $this->settingsModel);
+    }
+
+    private function saveBatchWithModel(array $settings, Settings_model $settingsModel): void
+    {
+        $controller = $this->createController($settings, $settingsModel);
         $previousMethod = $_SERVER['REQUEST_METHOD'] ?? null;
         $_SERVER['REQUEST_METHOD'] = 'POST';
         try {
@@ -104,7 +243,7 @@ class GeneralSettingsBatchValidationTest extends TestCase
         }
     }
 
-    private function createController(array $settings): General_settings
+    private function createController(array $settings, ?Settings_model $settingsModel = null): General_settings
     {
         $factory = new class ($settings) extends Backoffice_request_dto_factory {
             public function __construct(private readonly array $settings) {}
@@ -121,7 +260,7 @@ class GeneralSettingsBatchValidationTest extends TestCase
 
             public function __construct() {}
         };
-        $controller->settings_model = $this->settingsModel;
+        $controller->settings_model = $settingsModel ?? $this->settingsModel;
         $controller->backoffice_request_dto_factory = $factory;
 
         return $controller;
@@ -151,5 +290,55 @@ class GeneralSettingsBatchValidationTest extends TestCase
     private function findSetting(string $name): array
     {
         return $this->settingsModel->query()->where('name', $name)->get()->row_array();
+    }
+
+    private function ownedName(string $suffix): string
+    {
+        $name = 'general_settings_' . $suffix . '_' . bin2hex(random_bytes(4));
+        $this->ownedNames[] = $name;
+        return $name;
+    }
+
+    private function deleteOwnedNames(): void
+    {
+        $db = $this->settingsModel->db;
+        if ($db->trans_active()) {
+            $db->trans_rollback();
+        }
+        foreach ($this->ownedNames as $name) {
+            $db->delete('settings', ['name' => $name]);
+        }
+        $this->ownedNames = [];
+    }
+}
+
+final class FailingGeneralSettingsModel extends Settings_model
+{
+    private int $saveCount = 0;
+
+    public function save(array $setting): int
+    {
+        $id = parent::save($setting);
+        $this->saveCount++;
+        if ($this->saveCount === 2) {
+            throw new \RuntimeException('Injected general settings failure.');
+        }
+        return $id;
+    }
+}
+
+final class CountingGeneralSettingsModel extends Settings_model
+{
+    private int $saveCount = 0;
+
+    public function save(array $setting): int
+    {
+        $this->saveCount++;
+        return parent::save($setting);
+    }
+
+    public function saveCount(): int
+    {
+        return $this->saveCount;
     }
 }

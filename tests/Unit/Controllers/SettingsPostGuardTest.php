@@ -24,16 +24,35 @@ final class SettingsPostGuardTest extends TestCase
         'Google_analytics_settings' => 'google_analytics_settings',
     ];
 
-    public function testAuthorizedPostHandsOffOneExistingSettingForEveryController(): void
+    public function testAuthorizedPostPreservesCompleteOrderedSettingsHandoff(): void
     {
         foreach ($this->controllers as $controller => $key) {
             $result = $this->probe($controller, 'authorized', 'POST');
             self::assertSame(200, $result['status'], $controller);
-            self::assertSame(
-                [['name' => 'synthetic_setting', 'value' => 'synthetic-value', 'id' => 42]],
-                $result['saved'],
-                $controller,
-            );
+            $expected = [
+                ['name' => 'synthetic_setting', 'value' => 'synthetic-value', 'extra' => 'drop-me'],
+                ['name' => 'synthetic_second', 'value' => 'second-value', 'extra' => 'drop-me-too'],
+            ];
+            if (in_array($controller, ['Business_settings', 'Booking_settings'], true)) {
+                $expected = array_map(
+                    static fn(array $setting): array => array_diff_key($setting, ['extra' => true]),
+                    $expected,
+                );
+            }
+            if ($controller === 'General_settings') {
+                self::assertSame([], $result['saved_batches'], $controller);
+                self::assertSame(
+                    [
+                        ['name' => 'synthetic_setting', 'value' => 'synthetic-value', 'extra' => 'drop-me', 'id' => 41],
+                        ['name' => 'synthetic_second', 'value' => 'second-value', 'extra' => 'drop-me-too', 'id' => 42],
+                    ],
+                    $result['saved'],
+                    $controller,
+                );
+            } else {
+                self::assertSame([$expected], $result['saved_batches'], $controller);
+                self::assertSame([], $result['saved'], $controller);
+            }
             self::assertSame(
                 ['dto:' . $key],
                 array_values(
@@ -41,7 +60,11 @@ final class SettingsPostGuardTest extends TestCase
                 ),
                 $controller,
             );
-            self::assertSame(1, substr_count(implode('|', $result['events']), 'save:synthetic_setting'), $controller);
+            self::assertSame(
+                $controller === 'General_settings' ? 0 : 1,
+                substr_count(implode('|', $result['events']), 'save_batch:2'),
+                $controller,
+            );
             self::assertSame(1, substr_count(implode('|', $result['events']), 'response'), $controller);
             self::assertLessThan(
                 array_search('dto:' . $key, $result['events'], true),
@@ -62,6 +85,7 @@ final class SettingsPostGuardTest extends TestCase
                 self::assertNotContains('dto:' . $key, $result['events'], $controller . ' ' . $method);
                 self::assertNotContains('query', $result['events'], $controller . ' ' . $method);
                 self::assertSame([], $result['saved'], $controller . ' ' . $method);
+                self::assertSame([], $result['saved_batches'], $controller . ' ' . $method);
             }
         }
     }
@@ -75,6 +99,7 @@ final class SettingsPostGuardTest extends TestCase
             self::assertNotContains('dto:' . $key, $result['events'], $controller);
             self::assertNotContains('query', $result['events'], $controller);
             self::assertSame([], $result['saved'], $controller);
+            self::assertSame([], $result['saved_batches'], $controller);
         }
     }
 
@@ -86,6 +111,30 @@ final class SettingsPostGuardTest extends TestCase
             self::assertContains('json_exception', $result['events'], $controller);
             self::assertNotContains('abort:405', $result['events'], $controller);
             self::assertNotContains('dto:' . $key, $result['events'], $controller);
+        }
+    }
+
+    public function testBatchFailureDelegatesCompletePayloadAndSuppressesResponse(): void
+    {
+        foreach ($this->controllers as $controller => $key) {
+            if ($controller === 'General_settings') {
+                continue;
+            }
+            $result = $this->probe($controller, 'batch_failure', 'POST');
+            self::assertSame(500, $result['status'], $controller);
+            self::assertContains('json_exception', $result['events'], $controller);
+            self::assertNotContains('response', $result['events'], $controller);
+            $expected = [
+                ['name' => 'synthetic_setting', 'value' => 'synthetic-value', 'extra' => 'drop-me'],
+                ['name' => 'synthetic_second', 'value' => 'second-value', 'extra' => 'drop-me-too'],
+            ];
+            if (in_array($controller, ['Business_settings', 'Booking_settings'], true)) {
+                $expected = array_map(
+                    static fn(array $setting): array => array_diff_key($setting, ['extra' => true]),
+                    $expected,
+                );
+            }
+            self::assertSame([$expected], $result['saved_batches'], $controller);
         }
     }
 

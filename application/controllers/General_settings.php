@@ -108,8 +108,33 @@ class General_settings extends EA_Controller
                 $validated_settings[] = $setting;
             }
 
-            foreach ($validated_settings as $setting) {
-                $this->settings_model->save($setting);
+            if ($validated_settings === []) {
+                response();
+                return;
+            }
+
+            $db = $this->settings_model->db;
+            $owns_transaction = !$db->trans_active();
+            if ($owns_transaction && !$db->trans_begin()) {
+                throw new RuntimeException('Could not start general settings transaction.');
+            }
+
+            try {
+                foreach ($validated_settings as $setting) {
+                    $this->settings_model->save($setting);
+                }
+
+                if (!$db->trans_status()) {
+                    throw new RuntimeException('Could not save general settings.');
+                }
+                if ($owns_transaction && !$db->trans_commit()) {
+                    throw new RuntimeException('Could not commit general settings transaction.');
+                }
+            } catch (Throwable $exception) {
+                if ($owns_transaction) {
+                    $db->trans_rollback();
+                }
+                throw $exception;
             }
 
             response();

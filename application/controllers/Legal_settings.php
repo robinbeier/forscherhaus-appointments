@@ -85,15 +85,7 @@ class Legal_settings extends EA_Controller
             $settings_request = $this->backofficeRequestDtoFactory()->buildSettingsRequestDto('legal_settings');
             $settings = $settings_request->settings;
 
-            foreach ($settings as $setting) {
-                $existing_setting = $this->settings_model->query()->where('name', $setting['name'])->get()->row_array();
-
-                if (!empty($existing_setting)) {
-                    $setting['id'] = $existing_setting['id'];
-                }
-
-                $this->settings_model->save($setting);
-            }
+            $this->settings_model->save_batch($settings);
 
             response();
         } catch (Throwable $e) {
