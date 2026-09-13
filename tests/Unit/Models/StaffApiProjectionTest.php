@@ -32,6 +32,35 @@ final class StaffApiProjectionTest extends TestCase
         $this->{$modelProperty}->api_encode($staff);
         $normalized = json_encode($staff, JSON_THROW_ON_ERROR);
 
+        $expectedKeys = [
+            'id',
+            'firstName',
+            'lastName',
+            'email',
+            'mobile',
+            'phone',
+            'address',
+            'city',
+            'state',
+            'zip',
+            'notes',
+            'timezone',
+            'language',
+            'ldapDn',
+            'settings',
+        ];
+        if ($modelProperty === 'secretariesModel') {
+            $expectedKeys[] = 'providers';
+        }
+        $actualKeys = array_keys($staff);
+        sort($expectedKeys);
+        sort($actualKeys);
+        $this->assertSame($expectedKeys, $actualKeys);
+
+        $settingKeys = array_keys($staff['settings']);
+        sort($settingKeys);
+        $this->assertSame(['calendarView', 'notifications', 'username'], $settingKeys);
+
         $this->assertSame(42, $staff['id']);
         $this->assertSame('Synthetic', $staff['firstName']);
         $this->assertSame('Staff', $staff['lastName']);
