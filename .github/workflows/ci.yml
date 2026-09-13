@@ -1561,6 +1561,9 @@ jobs:
           retention-days: 7
 
   defense-cycle-ordinary-flows:
+    needs:
+      - changes
+    if: needs.changes.outputs.runtime_checks_required == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
