@@ -18,13 +18,63 @@ final class DashboardExportProviderSelectionTest extends TestCase
     private Appointments_model $appointments;
     private Providers_model $providers;
 
+    /** @var array<string, array{present: bool, value: mixed}>|null */
+    private ?array $modelState = null;
+
+    /** @var list<string>|null */
+    private ?array $loaderModels = null;
+
     protected function setUp(): void
     {
         parent::setUp();
-        get_instance()->load->model('appointments_model');
-        get_instance()->load->model('providers_model');
-        $this->appointments = get_instance()->appointments_model;
-        $this->providers = get_instance()->providers_model;
+        $ci = get_instance();
+        $this->snapshotLoaderState($ci);
+        try {
+            $ci->load->model('appointments_model');
+            $ci->load->model('providers_model');
+            $this->appointments = $ci->appointments_model;
+            $this->providers = $ci->providers_model;
+        } catch (\Throwable $error) {
+            $this->restoreLoaderState($ci);
+            throw $error;
+        }
+    }
+
+    protected function tearDown(): void
+    {
+        $this->restoreLoaderState(get_instance());
+        parent::tearDown();
+    }
+
+    private function snapshotLoaderState(object $ci): void
+    {
+        $this->modelState = [];
+        foreach (['appointments_model', 'unavailabilities_model', 'services_model', 'providers_model'] as $name) {
+            $this->modelState[$name] = [
+                'present' => array_key_exists($name, get_object_vars($ci)),
+                'value' => $ci->{$name} ?? null,
+            ];
+        }
+        $reflection = new \ReflectionProperty($ci->load, '_ci_models');
+        $this->loaderModels = $reflection->getValue($ci->load);
+    }
+
+    private function restoreLoaderState(object $ci): void
+    {
+        if ($this->modelState === null || $this->loaderModels === null) {
+            return;
+        }
+        foreach ($this->modelState as $name => $state) {
+            if ($state['present']) {
+                $ci->{$name} = $state['value'];
+            } elseif (array_key_exists($name, get_object_vars($ci))) {
+                unset($ci->{$name});
+            }
+        }
+        $reflection = new \ReflectionProperty($ci->load, '_ci_models');
+        $reflection->setValue($ci->load, $this->loaderModels);
+        $this->modelState = null;
+        $this->loaderModels = null;
     }
 
     public function test_loader_selects_only_booked_in_period_rows_for_each_provider(): void
