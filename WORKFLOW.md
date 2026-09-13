@@ -18,9 +18,9 @@ conflict, follow `AGENTS.md`.
 - Use [the database lock hierarchy](docs/database-lock-order.md) when changing
   appointment, service, customer, calendar, booking, or generated-buffer
   writes.
-- For a Defense Factory cycle, use [the cycle guide](docs/defense-factory.md)
-  to resume evidence, establish the achievable verification scope, and coordinate
-  handoffs before preparing additional harness changes.
+- For a Defense Factory cycle, read [SECURITY.md](SECURITY.md) for system context
+  and [the cycle guide](docs/defense-factory.md) for the repo skills that resume
+  evidence and assess closeout. This workflow retains operational authority.
 
 ## Non-Negotiables
 

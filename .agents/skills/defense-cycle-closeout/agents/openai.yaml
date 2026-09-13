@@ -1,0 +1,4 @@
+interface:
+    display_name: 'Defense-Zyklus-Abschluss'
+    short_description: 'Nachweise je Invariante sauber bewerten'
+    default_prompt: 'Nutze $defense-cycle-closeout, um die vorhandenen Defense-Nachweise je Invariante zu bewerten.'

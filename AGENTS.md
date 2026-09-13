@@ -6,6 +6,7 @@ Purpose: durable repo instructions for Codex. Keep this file short; long or topi
 
 - `README.md`: onboarding, local setup, services, shortest operator path.
 - `WORKFLOW.md`: agent runtime, Linear states, Codex Workpad, and ticket-to-merge flow.
+- `SECURITY.md`: security boundaries, required properties, and evidence limits.
 - `code_review.md`: canonical review priorities, findings format, and repo-specific review checks.
 - `docs/agent-harness-index.md`: routing across CI, architecture, ownership, and specialist docs.
 - `.github/workflows/ci.yml`: source of truth for CI triggers, blocking status, and artifacts.
