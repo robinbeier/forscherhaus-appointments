@@ -237,3 +237,10 @@ Client erhalten bleiben. Die Zielcontroller prüfen weiterhin Berechtigung
 und POST; die normale CSRF-Prüfung bleibt aktiv. Der isolierte Alias-Test
 belegt Ziel, Redirect-Methode und Status sowie unveränderte Eingabedaten,
 keine vollständige HTTP-/Browser-/CSRF-Weiterleitungskette.
+
+Der isolierte gewöhnliche HTTP-Test für `backend_api/ajax_save_settings`
+prüft zusätzlich eine echte Anmeldung, Status 307 und das feste lokale Ziel,
+dann einen kontrollierten zweiten POST mit identischem Formular und CSRF-Token.
+Er verändert nur eine eigene synthetische Einstellung und prüft Persistenz sowie
+Bereinigung. Dieser Nachweis umfasst weder automatische Browser-Weiterleitung
+noch den globalen Arbeitsplan-Endpunkt oder Produktion.
