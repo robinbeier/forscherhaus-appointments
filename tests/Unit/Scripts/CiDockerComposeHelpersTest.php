@@ -8,6 +8,35 @@ use PHPUnit\Framework\TestCase;
 
 class CiDockerComposeHelpersTest extends TestCase
 {
+    public function testBuildCallerPropagatesSelectorFailureAndKeepsNormalBuildDecisions(): void
+    {
+        $script = <<<'BASH'
+        set -euo pipefail
+        source "$REPO_ROOT/scripts/ci/docker_compose_helpers.sh"
+        ci_docker_init_compose() { CI_DOCKER_PHP_FPM_IMAGE=""; }
+        ci_docker_compose() { printf 'BUILD\n'; }
+        git_ci_collect_changed_paths() {
+          if [[ "$(cat "$CHANGED_PATHS_FILE")" == "__failure__" ]]; then
+            return 2
+          fi
+          cat "$CHANGED_PATHS_FILE"
+        }
+        ci_docker_build_php_fpm_if_inputs_changed origin/main test
+        BASH;
+
+        $failure = $this->runShellScript($script, "__failure__\n");
+        self::assertSame(2, $failure['exit_code'], $failure['stderr']);
+        self::assertStringNotContainsString('BUILD', $failure['stdout']);
+
+        $unchanged = $this->runShellScript($script, "application/controllers/Dashboard.php\n");
+        self::assertSame(0, $unchanged['exit_code'], $unchanged['stderr']);
+        self::assertStringNotContainsString('BUILD', $unchanged['stdout']);
+
+        $changed = $this->runShellScript($script, "docker/php-fpm/Dockerfile\n");
+        self::assertSame(0, $changed['exit_code'], $changed['stderr']);
+        self::assertSame(1, substr_count($changed['stdout'], "BUILD\n"));
+    }
+
     public function testCiDockerPhpFpmInputsChangedMatchesDockerRuntimeFiles(): void
     {
         $result = $this->runShellScript(
@@ -137,7 +166,7 @@ class CiDockerComposeHelpersTest extends TestCase
             $setup = $this->runCommand(
                 [
                     'bash',
-                    '-lc',
+                    '-c',
                     <<<'BASH'
                     set -euo pipefail
                     git init -b main
@@ -146,6 +175,7 @@ class CiDockerComposeHelpersTest extends TestCase
                     printf 'base\n' > tracked.txt
                     git add tracked.txt
                     git commit -m 'base'
+                    git update-ref refs/remotes/origin/main HEAD
                     printf 'branch\n' > branch.txt
                     git add branch.txt
                     git commit -m 'branch'
@@ -162,7 +192,7 @@ class CiDockerComposeHelpersTest extends TestCase
             $result = $this->runCommand(
                 [
                     'bash',
-                    '-lc',
+                    '-c',
                     'set -euo pipefail; source "$1"; git_ci_collect_changed_paths main',
                     'bash',
                     $this->repoRoot() . '/scripts/ci/git_helpers.sh',

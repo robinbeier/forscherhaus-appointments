@@ -253,12 +253,13 @@ def detect_diff_range() -> str:
 
     if event_name == "pull_request":
         base_ref = os.getenv("GITHUB_BASE_REF", "main")
+        base_ref = base_ref.removeprefix("origin/")
         run(["git", "fetch", "--no-tags", "origin", base_ref], check=False)
         merge_base_proc = run(["git", "merge-base", "HEAD", f"origin/{base_ref}"], check=False)
         base_sha = merge_base_proc.stdout.strip()
         if merge_base_proc.returncode == 0 and base_sha:
             return f"{base_sha}...HEAD"
-        return "HEAD~1...HEAD"
+        raise RuntimeError(f"Unable to resolve pull-request base ref '{base_ref}'.")
 
     if event_name == "push":
         before_sha = os.getenv("GITHUB_EVENT_BEFORE", "").strip()
@@ -272,8 +273,8 @@ def detect_diff_range() -> str:
 def get_changed_files(diff_range: str) -> list[str]:
     proc = run(["git", "diff", "--name-only", "--diff-filter=ACMR", diff_range], check=False)
     if proc.returncode != 0:
-        # for edge cases like first commit in local contexts
-        return []
+        details = proc.stderr.strip() or "unknown git diff error"
+        raise RuntimeError(f"Failed to compute changed files for diff range '{diff_range}': {details}")
 
     changed = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
     return changed

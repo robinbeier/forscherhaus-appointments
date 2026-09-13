@@ -128,7 +128,10 @@ ci_docker_php_fpm_inputs_changed() {
     local base_ref="${1:?base ref is required}"
     local changed_paths
 
-    changed_paths="$(git_ci_collect_changed_paths "$base_ref")"
+    if ! changed_paths="$(git_ci_collect_changed_paths "$base_ref")"; then
+        echo "[ci-docker] Cannot determine PHP runtime input scope." >&2
+        return 2
+    fi
 
     while IFS= read -r path; do
         case "$path" in
@@ -236,8 +239,15 @@ ci_docker_build_php_fpm_if_inputs_changed() {
         return
     fi
 
-    if ! ci_docker_php_fpm_inputs_changed "$base_ref"; then
-        return 0
+    local scope_status
+    if ci_docker_php_fpm_inputs_changed "$base_ref"; then
+        scope_status=0
+    else
+        scope_status=$?
+        if [[ "$scope_status" == "1" ]]; then
+            return 0
+        fi
+        return "$scope_status"
     fi
 
     echo "[$log_prefix] Rebuilding php-fpm image because Docker runtime inputs changed."

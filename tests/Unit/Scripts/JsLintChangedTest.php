@@ -137,6 +137,53 @@ final class JsLintChangedTest extends TestCase
         self::assertFileDoesNotExist($result['eslint_log']);
     }
 
+    public function testPullRequestBaseFormsIncludeEarlyJavaScriptCommitBeforeUnrelatedTip(): void
+    {
+        $repository = $this->repository();
+        file_put_contents($repository . '/README.md', "base\n");
+        $this->commit($repository, 'base');
+        $this->execute($repository, ['git', 'branch', 'origin/main']);
+        file_put_contents($repository . '/assets/js/early.js', "const early = true;\n");
+        $this->commit($repository, 'early javascript');
+        file_put_contents($repository . '/README.md', "tip\n");
+        $this->commit($repository, 'unrelated tip');
+
+        foreach (['main', 'origin/main'] as $baseRef) {
+            $result = $this->runLint(
+                $repository,
+                ['--check-only'],
+                [
+                    'GITHUB_EVENT_NAME' => 'pull_request',
+                    'GITHUB_BASE_REF' => $baseRef,
+                ],
+            );
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            self::assertSame("needs_node=true\nhas_changes=true\n", file_get_contents($result['output_file']));
+        }
+    }
+
+    public function testPullRequestMissingBaseFailsWithoutHeadFallback(): void
+    {
+        $repository = $this->repository();
+        file_put_contents($repository . '/README.md', "base\n");
+        $this->commit($repository, 'base');
+        file_put_contents($repository . '/assets/js/early.js', "const early = true;\n");
+        $this->commit($repository, 'early javascript');
+        file_put_contents($repository . '/README.md', "tip\n");
+        $this->commit($repository, 'unrelated tip');
+
+        $result = $this->runLint(
+            $repository,
+            ['--check-only'],
+            [
+                'GITHUB_EVENT_NAME' => 'pull_request',
+                'GITHUB_BASE_REF' => 'missing/base',
+            ],
+        );
+        self::assertNotSame(0, $result['exit_code']);
+        self::assertStringContainsString('Unable to resolve pull-request base ref', $result['stderr']);
+    }
+
     private function repository(): string
     {
         $repository = sys_get_temp_dir() . '/js-lint-changed-' . bin2hex(random_bytes(8));
@@ -193,6 +240,7 @@ final class JsLintChangedTest extends TestCase
     {
         $outputFile = $repository . '/github-output';
         $eslintLog = $repository . '/eslint-log';
+        file_put_contents($outputFile, '');
         $environment = array_merge(
             [
                 'GITHUB_EVENT_NAME' => 'local',

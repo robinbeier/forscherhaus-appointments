@@ -6,7 +6,7 @@ cd "$ROOT_DIR"
 source ./scripts/ci/git_helpers.sh
 source ./scripts/ci/docker_compose_helpers.sh
 
-BASE_REF="${PRE_PR_BASE_REF:-main}"
+BASE_REF="$(git_ci_normalize_base_ref "${PRE_PR_BASE_REF:-main}")"
 # Keep the quick gate aligned with the repo's frontend tooling baseline.
 ROOT_NODE_MINIMUM_VERSION=24.0.0
 CI_DOCKER_LOG_PREFIX="pre-pr-quick"

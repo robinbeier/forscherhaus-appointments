@@ -175,6 +175,7 @@ def detect_diff_range(explicit: str | None, env_var_name: str) -> str:
 
     if event_name == "pull_request":
         base_ref = os.getenv("GITHUB_BASE_REF", "main")
+        base_ref = base_ref.removeprefix("origin/")
         run(["git", "fetch", "--no-tags", "origin", base_ref], check=False)
 
         merge_base = run(["git", "merge-base", "HEAD", f"origin/{base_ref}"], check=False)
@@ -182,7 +183,7 @@ def detect_diff_range(explicit: str | None, env_var_name: str) -> str:
         if merge_base.returncode == 0 and base_sha:
             return f"{base_sha}...HEAD"
 
-        return "HEAD~1...HEAD"
+        raise RuntimeError(f"Unable to resolve pull-request base ref '{base_ref}'.")
 
     if event_name == "push":
         before_sha = os.getenv("GITHUB_EVENT_BEFORE", "").strip()
