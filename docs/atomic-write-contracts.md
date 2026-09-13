@@ -85,6 +85,29 @@ the failed response and roll back; joined partial writes are not independently
 undone. These checks establish no concurrent upsert, actual HTTP/CSRF or production
 verification.
 
+### Global working plan application
+
+`Business_settings::apply_global_working_plan` requires system-settings edit
+permission followed by POST before request or provider access. It applies the
+current editor payload to the server-selected providers; it does not save the
+company working plan first. Existing request normalization, descending key sorting
+and empty-plan `{}` encoding remain unchanged. An empty provider list succeeds
+without transaction work.
+
+The provider write loop uses a checked owned or joined transaction and changes
+only `working_plan`. Unchanged values may legitimately affect zero rows. Owned
+failures roll back before the existing JSON error response; an outer caller retains
+transaction ownership and must detect the error response and roll back itself.
+Success is emitted only after an owned commit succeeds. Provider selection precedes
+the transaction; this is not a claim that concurrently added providers are included.
+
+The controller subprocess tests use framework/DTO/model/transaction doubles. The
+separate synthetic database tests create their own providers, use real model writes
+and verify rollback after a later write, full settings snapshots, idempotent
+application and caller-owned rollback including an earlier caller change. Their
+provider query is restricted to owned IDs, so they do not prove global target
+selection or real HTTP/CSRF/production behavior.
+
 ## Narrow updates and drift
 
 `Services_model::update` locks only the service for a buffer-neutral update.
