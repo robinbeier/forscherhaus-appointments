@@ -1563,9 +1563,21 @@ jobs:
   defense-cycle-ordinary-flows:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
     steps:
       - name: Git clone
         uses: actions/checkout@v6
+      - name: Set up PHP layer-cache builder
+        uses: docker/setup-buildx-action@v4
+        with:
+          cache-binary: false
+          cleanup: true
+      - name: Build PHP with bounded layer cache
+        uses: actions/github-script@v9
+        with:
+          script: |
+            await exec.exec('python3', ['-B', 'scripts/ci/defense_php_cache.py', '--resolve-compose', '--report', 'storage/logs/ci/php-build/summary.json']);
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
@@ -1584,6 +1596,13 @@ jobs:
       - name: Run isolated ordinary application and session lifecycle checks
         run: |
           python3 -B scripts/ci/run_gate_with_summary.py --label defense-cycle -- bash scripts/ci/run_defense_cycle.sh
+      - name: Upload PHP build timing evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: php-build-${{ github.job }}
+          path: storage/logs/ci/php-build/
+          retention-days: 7
       - name: Upload gate diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v7

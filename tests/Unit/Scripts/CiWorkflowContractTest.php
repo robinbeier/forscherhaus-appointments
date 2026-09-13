@@ -9,6 +9,37 @@ use Symfony\Component\Yaml\Yaml;
 
 class CiWorkflowContractTest extends TestCase
 {
+    public function testDefenseCachePreparationPreservesBlockingSuiteAndEvidence(): void
+    {
+        $job = $this->workflowJob('defense-cycle-ordinary-flows');
+        self::assertArrayNotHasKey('if', $job);
+        self::assertSame(['contents' => 'read'], $job['permissions']);
+        $steps = $this->namedSteps($job);
+        foreach ($steps as $step) {
+            self::assertArrayNotHasKey('continue-on-error', $step);
+        }
+        $builder = $steps['Set up PHP layer-cache builder'];
+        self::assertSame('docker/setup-buildx-action@v4', $builder['uses']);
+        self::assertFalse($builder['with']['cache-binary']);
+        self::assertTrue($builder['with']['cleanup']);
+        $build = $steps['Build PHP with bounded layer cache'];
+        self::assertSame('actions/github-script@v9', $build['uses']);
+        self::assertStringContainsString(
+            "await exec.exec('python3', ['-B', 'scripts/ci/defense_php_cache.py', '--resolve-compose', '--report', 'storage/logs/ci/php-build/summary.json']);",
+            $build['with']['script'],
+        );
+        self::assertSame(
+            'python3 -B scripts/ci/run_gate_with_summary.py --label defense-cycle -- bash scripts/ci/run_defense_cycle.sh',
+            $this->stepRun($steps, 'Run isolated ordinary application and session lifecycle checks'),
+        );
+        foreach (['Upload PHP build timing evidence', 'Upload gate diagnostic evidence'] as $name) {
+            self::assertSame('always()', $steps[$name]['if']);
+            self::assertSame('actions/upload-artifact@v7', $steps[$name]['uses']);
+        }
+        self::assertSame('storage/logs/ci/php-build/', $steps['Upload PHP build timing evidence']['with']['path']);
+        self::assertSame('storage/logs/ci/gate-summary/', $steps['Upload gate diagnostic evidence']['with']['path']);
+    }
+
     public function testJavaScriptLintSelectsChangesBeforeInstallingDependencies(): void
     {
         $steps = $this->namedSteps($this->workflowJob('js-lint-changed'));
