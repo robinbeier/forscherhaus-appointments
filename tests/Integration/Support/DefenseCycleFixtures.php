@@ -15,11 +15,14 @@ final class DefenseCycleFixtures
     public int $providerId;
     public int $customerId;
     public int $serviceId;
+    /** @var array<string, int> */
+    private array $secretaryWriteIds = [];
     private object $db;
     private array $users = [];
     private array $settings = [];
     private array $baselineCounts = [];
     private array $providerWriteEmails = [];
+    private array $adminWriteEmails = [];
     private ?array $providerHttpAuthSettings = null;
     private ?array $providerHttpAuthTokenSetting = null;
 
@@ -38,7 +41,10 @@ final class DefenseCycleFixtures
         }
         $ci = &\get_instance();
         $this->db = $ci->db;
-        foreach (['users', 'services', 'appointments', 'user_settings', 'services_providers'] as $table) {
+        foreach (
+            ['users', 'services', 'appointments', 'user_settings', 'services_providers', 'secretaries_providers']
+            as $table
+        ) {
             $this->baselineCounts[$table] = $this->db->count_all($table);
         }
         $this->run = 'defense_' . bin2hex(random_bytes(8));
@@ -249,6 +255,83 @@ final class DefenseCycleFixtures
         ];
     }
 
+    /** Register an exact synthetic Secretary identity before an HTTP write. */
+    public function secretaryWritePayload(string $case, array $providers = []): array
+    {
+        if (!preg_match('/^[a-z0-9_-]+$/D', $case) || isset($this->secretaryWriteIds[$case])) {
+            throw new RuntimeException('Invalid Secretary write fixture case.');
+        }
+        $username = $this->run . '_secretary_' . $case;
+        $email = $username . '@synthetic.invalid';
+        $this->secretaryWriteIds[$case] = 0;
+        return [
+            'firstName' => 'Synthetic',
+            'lastName' => 'Secretary ' . $case,
+            'email' => $email,
+            'notes' => $username,
+            'providers' => $providers,
+            'settings' => ['username' => $username, 'password' => $this->password],
+        ];
+    }
+
+    public function adminWritePayload(string $case): array
+    {
+        if (!preg_match('/^[a-z0-9_-]+$/D', $case) || isset($this->adminWriteEmails[$case])) {
+            throw new RuntimeException('Invalid Admin write fixture case.');
+        }
+        $username = $this->run . '_admin_' . $case;
+        $email = $username . '@synthetic.invalid';
+        $this->adminWriteEmails[$case] = $email;
+        return [
+            'firstName' => 'Synthetic',
+            'lastName' => 'Admin ' . $case,
+            'email' => $email,
+            'notes' => $username,
+            'settings' => ['username' => $username, 'password' => $this->password],
+        ];
+    }
+
+    public function secretaryWriteState(string $email): array
+    {
+        $row = $this->db->get_where('users', ['email' => $email])->row_array();
+        if (!$row) {
+            return [];
+        }
+        $id = (int) $row['id'];
+        return [
+            'user' => $row,
+            'settings' => $this->db->get_where('user_settings', ['id_users' => $id])->row_array() ?? [],
+            'providers' => array_map(
+                static fn(array $connection): int => (int) $connection['id_users_provider'],
+                $this->db
+                    ->order_by('id_users_provider')
+                    ->get_where('secretaries_providers', ['id_users_secretary' => $id])
+                    ->result_array(),
+            ),
+        ];
+    }
+
+    /** Only owned synthetic staff rows may be seeded with integration sentinels. */
+    public function seedStaffIntegrationSecrets(int $id): void
+    {
+        $row = $this->row('users', $id);
+        if (!$row || !str_starts_with((string) $row['email'], $this->run . '_')) {
+            throw new RuntimeException('Not an owned staff fixture.');
+        }
+        if (
+            !$this->db->update(
+                'user_settings',
+                [
+                    'google_token' => $this->run . '_staff_google_' . $id,
+                    'caldav_password' => $this->run . '_staff_caldav_' . $id,
+                ],
+                ['id_users' => $id],
+            )
+        ) {
+            throw new RuntimeException('Could not seed staff integration values.');
+        }
+    }
+
     /** Complete deterministic snapshots cover both row counts and changed values in the owned seed. */
     public function providerWriteSnapshot(): array
     {
@@ -296,6 +379,45 @@ final class DefenseCycleFixtures
         }
     }
 
+    private function cleanupSecretaryWrites(): void
+    {
+        foreach ($this->secretaryWriteIds as $case => $_) {
+            $email = $this->run . '_secretary_' . $case . '@synthetic.invalid';
+            $state = $this->secretaryWriteState($email);
+            if (!$state) {
+                continue;
+            }
+            $role = $this->db->get_where('roles', ['slug' => 'secretary'])->row_array();
+            if (!$role || (int) $state['user']['id_roles'] !== (int) $role['id']) {
+                throw new RuntimeException('Unexpected Secretary write fixture identity.');
+            }
+            $id = (int) $state['user']['id'];
+            $this->db->delete('secretaries_providers', ['id_users_secretary' => $id]);
+            $this->db->delete('user_settings', ['id_users' => $id]);
+            $this->db->delete('users', ['id' => $id, 'email' => $email]);
+            if ($this->secretaryWriteState($email)) {
+                throw new RuntimeException('Secretary write cleanup was not confirmed.');
+            }
+        }
+    }
+
+    private function cleanupAdminWrites(): void
+    {
+        foreach ($this->adminWriteEmails as $email) {
+            $row = $this->db->get_where('users', ['email' => $email])->row_array();
+            if (!$row) {
+                continue;
+            }
+            $role = $this->db->get_where('roles', ['slug' => 'admin'])->row_array();
+            if (!$role || (int) $row['id_roles'] !== (int) $role['id']) {
+                throw new RuntimeException('Unexpected Admin write fixture identity.');
+            }
+            $id = (int) $row['id'];
+            $this->db->delete('user_settings', ['id_users' => $id]);
+            $this->db->delete('users', ['id' => $id, 'email' => $email]);
+        }
+    }
+
     public function row(string $table, int $id): array
     {
         if (!in_array($table, ['users', 'appointments', 'services'], true)) {
@@ -304,9 +426,42 @@ final class DefenseCycleFixtures
         return $this->db->get_where($table, ['id' => $id])->row_array() ?? [];
     }
 
+    public function userSettingsRow(int $id): array
+    {
+        return $this->db->get_where('user_settings', ['id_users' => $id])->row_array() ?? [];
+    }
+
+    /** @return list<string> */
+    public function seededStaffSecretValues(): array
+    {
+        $ids = [$this->actorId, $this->providerId];
+        $emails = array_values($this->adminWriteEmails);
+        foreach (array_keys($this->secretaryWriteIds) as $case) {
+            $emails[] = $this->run . '_secretary_' . $case . '@synthetic.invalid';
+        }
+        foreach ($emails as $email) {
+            $row = $this->db->get_where('users', ['email' => $email])->row_array();
+            if ($row) {
+                $ids[] = (int) $row['id'];
+            }
+        }
+        $values = [$this->password];
+        foreach (array_unique($ids) as $id) {
+            $settings = $this->userSettingsRow($id);
+            foreach (['password', 'salt', 'google_token', 'caldav_password'] as $key) {
+                if (is_string($settings[$key] ?? null) && $settings[$key] !== '') {
+                    $values[] = $settings[$key];
+                }
+            }
+        }
+        return array_values(array_unique($values));
+    }
+
     public function cleanup(): void
     {
         $this->cleanupProviderWrites();
+        $this->cleanupSecretaryWrites();
+        $this->cleanupAdminWrites();
         if ($this->providerHttpAuthSettings !== null && isset($this->providerId)) {
             $this->db->update('user_settings', $this->providerHttpAuthSettings, ['id_users' => $this->providerId]);
             $restored = $this->db->get_where('user_settings', ['id_users' => $this->providerId])->row_array();
