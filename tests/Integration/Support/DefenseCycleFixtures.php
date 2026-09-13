@@ -20,6 +20,8 @@ final class DefenseCycleFixtures
     private object $db;
     private array $users = [];
     private array $settings = [];
+    /** @var array<string, int> */
+    private array $ownedSettingIds = [];
     private array $baselineCounts = [];
     private array $providerWriteEmails = [];
     private array $adminWriteEmails = [];
@@ -431,6 +433,54 @@ final class DefenseCycleFixtures
         return $this->db->get_where('user_settings', ['id_users' => $id])->row_array() ?? [];
     }
 
+    /** Create an owned setting only after proving its run-derived name is absent. */
+    public function ownedSetting(string $suffix, string $value): array
+    {
+        if (!preg_match('/^[a-z0-9_-]+$/D', $suffix)) {
+            throw new RuntimeException('Invalid owned setting suffix.');
+        }
+        $name = $this->run . '_setting_' . $suffix;
+        if ($this->db->get_where('settings', ['name' => $name])->num_rows() !== 0) {
+            throw new RuntimeException('Owned setting name already exists.');
+        }
+        $this->ownedSettingIds[$name] = 0;
+        if (!$this->db->insert('settings', ['name' => $name, 'value' => $value])) {
+            throw new RuntimeException('Could not create owned setting.');
+        }
+        $id = (int) $this->db->insert_id();
+        $this->ownedSettingIds[$name] = $id;
+        $row = $this->db->get_where('settings', ['id' => $id, 'name' => $name])->row_array();
+        if (!$row) {
+            throw new RuntimeException('Owned setting identity was not confirmed.');
+        }
+        return $row;
+    }
+
+    private function cleanupOwnedSettings(): void
+    {
+        foreach ($this->ownedSettingIds as $name => $id) {
+            $row = $this->db->get_where('settings', ['id' => $id, 'name' => $name])->row_array();
+            if ($row && !$this->db->delete('settings', ['id' => $id, 'name' => $name])) {
+                throw new RuntimeException('Owned setting delete failed.');
+            }
+            if (
+                $this->db->get_where('settings', ['id' => $id, 'name' => $name])->num_rows() !== 0 ||
+                $this->db->get_where('settings', ['name' => $name])->num_rows() !== 0
+            ) {
+                throw new RuntimeException('Owned setting cleanup was not confirmed.');
+            }
+        }
+    }
+
+    public function settingRow(int $id): array
+    {
+        $name = array_search($id, $this->ownedSettingIds, true);
+        if (!is_string($name)) {
+            throw new RuntimeException('Setting ID is outside the owned fixture.');
+        }
+        return $this->db->get_where('settings', ['id' => $id, 'name' => $name])->row_array() ?? [];
+    }
+
     /** @return list<string> */
     public function seededStaffSecretValues(): array
     {
@@ -459,6 +509,7 @@ final class DefenseCycleFixtures
 
     public function cleanup(): void
     {
+        $this->cleanupOwnedSettings();
         $this->cleanupProviderWrites();
         $this->cleanupSecretaryWrites();
         $this->cleanupAdminWrites();

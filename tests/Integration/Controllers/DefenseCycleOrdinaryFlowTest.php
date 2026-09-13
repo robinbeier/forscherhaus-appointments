@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use PHPUnit\Framework\TestCase;
+use ReleaseGate\GateHttpClient;
 use ReleaseGate\GateHttpResponse;
 use Tests\Integration\Support\DefenseCycleFixtures;
 use Tests\Integration\Support\DefenseCycleHttpServer;
@@ -20,9 +21,18 @@ final class DefenseCycleOrdinaryFlowTest extends TestCase
         if (getenv('FH_DEFENSE_ISOLATED') !== '1') {
             self::markTestSkipped('Run scripts/ci/run_defense_cycle.sh with its fresh synthetic stack.');
         }
-        $this->fixture = new DefenseCycleFixtures();
-        $this->fixture->create();
-        $this->server = new DefenseCycleHttpServer();
+        try {
+            $this->fixture = new DefenseCycleFixtures();
+            $this->fixture->create();
+            $this->server = new DefenseCycleHttpServer();
+        } catch (Throwable $error) {
+            try {
+                $this->server?->close();
+            } finally {
+                $this->fixture?->cleanup();
+            }
+            throw $error;
+        }
     }
 
     protected function tearDown(): void
@@ -189,5 +199,38 @@ final class DefenseCycleOrdinaryFlowTest extends TestCase
         );
         self::assertSame(200, $client->get('booking/reschedule/' . $appointment['hash'])->statusCode);
         // Legacy-format compatibility, not a historical live-link claim.
+    }
+
+    // Controlled real HTTP continuation, not automatic browser redirect handling.
+    public function testOrdinaryLegacySettingsAliasHandoffPreservesCsrfAndMethod(): void
+    {
+        $f = $this->fixture;
+        $owned = $f->ownedSetting('http', 'before');
+        $client = new GateHttpClient(
+            $this->server->baseUrl,
+            additionalHeaders: ['X-Requested-With' => 'XMLHttpRequest'],
+        );
+        self::assertSame(200, $client->get('login')->statusCode);
+        self::assertTrue(
+            $this->json(
+                $client->post('login/validate', [
+                    'username' => $f->run . '_actor',
+                    'password' => $f->password,
+                ]),
+            )['success'],
+        );
+        $csrf = $client->getCookie('csrf_cookie') ?? '';
+        self::assertNotSame('', $csrf);
+        $form = ['csrf_token' => $csrf, 'general_settings' => [['name' => $owned['name'], 'value' => 'expected']]];
+        $first = $client->post('backend_api/ajax_save_settings', $form);
+        self::assertSame(307, $first->statusCode);
+        self::assertSame($this->server->baseUrl . '/index.php/general_settings/save', $first->header('location'));
+        self::assertSame('before', $f->settingRow((int) $owned['id'])['value'] ?? null);
+        $second = $client->post('general_settings/save', $form);
+        self::assertSame(200, $second->statusCode);
+        self::assertSame('', $second->body);
+        self::assertSame('expected', $f->settingRow((int) $owned['id'])['value'] ?? null);
+        $f->cleanup();
+        self::assertSame([], $f->settingRow((int) $owned['id']));
     }
 }
