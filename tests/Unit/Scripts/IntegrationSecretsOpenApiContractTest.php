@@ -19,6 +19,12 @@ final class IntegrationSecretsOpenApiContractTest extends TestCase
 
     public function testRecordSchemasDoNotExposeIntegrationCredentials(): void
     {
+        foreach (['AdminRecord', 'ProviderRecord', 'SecretaryRecord'] as $schema) {
+            $settings = $this->schemaProperties($schema)['settings']['properties'] ?? null;
+            self::assertIsArray($settings);
+            self::assertFalse(array_key_exists('password', $settings));
+        }
+
         $providerSettings = $this->schemaProperties('ProviderRecord')['settings']['properties'] ?? null;
         self::assertIsArray($providerSettings);
         self::assertFalse(array_key_exists('googleToken', $providerSettings));
@@ -27,6 +33,14 @@ final class IntegrationSecretsOpenApiContractTest extends TestCase
 
     public function testPayloadSchemasDeclareIntegrationCredentialsWriteOnly(): void
     {
+        foreach (['AdminPayload', 'ProviderPayload', 'SecretaryPayload'] as $schema) {
+            $settings = $this->schemaProperties($schema)['settings']['properties'] ?? null;
+            self::assertIsArray($settings);
+            self::assertSame('string', $settings['password']['type'] ?? null);
+            self::assertSame('password', $settings['password']['format'] ?? null);
+            self::assertTrue(($settings['password']['writeOnly'] ?? null) === true);
+        }
+
         $providerSettings = $this->schemaProperties('ProviderPayload')['settings']['properties'] ?? null;
         self::assertIsArray($providerSettings);
 
@@ -44,6 +58,18 @@ final class IntegrationSecretsOpenApiContractTest extends TestCase
 
     public function testExamplesDoNotContainIntegrationCredentials(): void
     {
+        foreach (['AdminRecord', 'ProviderRecord', 'SecretaryRecord'] as $schema) {
+            $settings = $this->schemaExample($schema)['settings'] ?? null;
+            self::assertIsArray($settings);
+            self::assertFalse(array_key_exists('password', $settings));
+        }
+
+        foreach (['AdminPayload', 'ProviderPayload', 'SecretaryPayload'] as $schema) {
+            $settings = $this->schemaExample($schema)['settings'] ?? null;
+            self::assertIsArray($settings);
+            self::assertArrayHasKey('password', $settings);
+        }
+
         $providerRecordSettings = $this->schemaExample('ProviderRecord')['settings'] ?? null;
         self::assertIsArray($providerRecordSettings);
         self::assertFalse(array_key_exists('googleToken', $providerRecordSettings));
