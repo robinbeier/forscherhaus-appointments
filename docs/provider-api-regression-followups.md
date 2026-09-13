@@ -30,3 +30,29 @@ test counts and outcomes in the private run report, not as permanent guarantees.
 These controller-level improvements do not establish full HTTP routing,
 authentication, deployment, or production coverage. Keep those evidence levels
 separate. Refer to [Defense Factory](defense-factory.md) for cycle handoffs.
+
+## Bounded HTTP authentication regression
+
+`tests/Integration/Controllers/ProviderApiHttpAuthTest.php` extends the evidence
+through the actual local HTTP router, Provider controller constructor, and API
+authentication. It uses the existing isolated Defense-cycle lifecycle and only
+reads its own synthetic Provider through list and detail routes.
+
+The cases cover successful synthetic administrator Basic authentication and the
+configured global API Bearer token, plus ordinary rejection without credentials,
+with an incorrect synthetic password, with a synthetic Provider Basic account,
+and with a nonmatching synthetic Bearer token. Successful responses must identify
+the expected fixture and omit integration secrets even when the fixture stores
+nonempty synthetic values. The global Bearer token has no per-user role mapping;
+these tests do not introduce one.
+
+The opt-in fixture setup restores the local API-token setting during cleanup.
+The existing lifecycle removes owned fixture rows, HTTP resources and the disposable
+Docker environment. Record actual test results and final resource checks in the
+private cycle report. Use the existing `scripts/ci/run_defense_cycle.sh` entry point;
+no external target or production data is needed.
+
+This adds local HTTP read/authentication evidence. It does not establish Provider
+write authorization, every non-admin role, mixed authentication precedence,
+all header parsing behavior, production proxy configuration or a production
+release. The prior controller/model/schema evidence retains its own scope.
