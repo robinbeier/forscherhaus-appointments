@@ -88,6 +88,19 @@ echte HTTP-/CSRF-Verifikation. Der API-Controller übergibt den vollständigen
 Batch an `Settings_model::save_batch`; Transaktionszuständigkeit und die getrennten
 Datenbanknachweise beschreibt [der atomare Schreibvertrag](atomic-write-contracts.md#api-settings-batches).
 
+## Weitere Einstellungen im Backoffice
+
+Die Save-Aktionen von General-, LDAP-, Legal-, Business-, Booking-, Matomo-
+und Google-Analytics-Einstellungen prüfen zuerst die System-Settings-Edit-
+Berechtigung und verlangen anschließend POST vor DTO-Verarbeitung, Abfragen
+oder Speicherung. Andere Methoden erhalten nach erfolgreicher Berechtigungsprüfung
+405 mit `Allow: POST`. Die vorhandenen Oberflächen senden bereits POST.
+
+Die gemeinsame isolierte Controller-Matrix prüft Berechtigungsreihenfolge,
+Methodenablehnung und den unveränderten normalen Modell-Handoff mit Test-Doubles.
+Sie belegt weder echte HTTP-/CSRF-Verifikation noch Datenbank-Atomarität dieser
+sieben Save-Aktionen. Bestehende Feldfilter und Validierung bleiben erhalten.
+
 ## Write-only Integrationsgeheimnisse
 
 Die authentifizierte REST-v1-API behandelt

@@ -77,6 +77,10 @@ class Ldap_settings extends EA_Controller
             if (cannot('edit', PRIV_SYSTEM_SETTINGS)) {
                 throw new RuntimeException('You do not have the required permissions for this task.');
             }
+            if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+                abort(405, 'Method Not Allowed', ['Allow: POST']);
+                return;
+            }
 
             $settings_request = $this->backofficeRequestDtoFactory()->buildSettingsRequestDto('ldap_settings');
             $settings = $settings_request->settings;
