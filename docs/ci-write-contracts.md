@@ -98,8 +98,12 @@ oder Speicherung. Andere Methoden erhalten nach erfolgreicher Berechtigungsprüf
 
 Die gemeinsame isolierte Controller-Matrix prüft Berechtigungsreihenfolge,
 Methodenablehnung und den unveränderten normalen Modell-Handoff mit Test-Doubles.
-Sie belegt weder echte HTTP-/CSRF-Verifikation noch Datenbank-Atomarität dieser
-sieben Save-Aktionen. Bestehende Feldfilter und Validierung bleiben erhalten.
+Sie belegt keine echte HTTP-/CSRF-Verifikation. Sechs Save-Aktionen übergeben
+den vollständigen Batch an `Settings_model::save_batch`; Business und Booking
+behalten ihre vorherige Feldfilterung bei. General Settings behält dagegen die
+vollständige Vorvalidierung und vorbereiteten IDs bei und speichert diese in
+einer gemeinsamen Transaktion. Die getrennten Datenbanknachweise und Grenzen
+beschreibt [der atomare Schreibvertrag](atomic-write-contracts.md#backoffice-settings-batches).
 
 ## Write-only Integrationsgeheimnisse
 

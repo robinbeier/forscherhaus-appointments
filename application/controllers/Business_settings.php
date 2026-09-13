@@ -100,19 +100,12 @@ class Business_settings extends EA_Controller
             $settings_request = $this->backofficeRequestDtoFactory()->buildSettingsRequestDto('business_settings');
             $settings = $settings_request->settings;
 
-            foreach ($settings as $setting) {
-                $existing_setting = $this->settings_model->query()->where('name', $setting['name'])->get()->row_array();
-
-                if (!empty($existing_setting)) {
-                    $setting['id'] = $existing_setting['id'];
-                }
-
+            foreach ($settings as &$setting) {
                 $this->settings_model->only($setting, $this->allowed_setting_fields);
-
                 $this->settings_model->optional($setting, $this->optional_setting_fields);
-
-                $this->settings_model->save($setting);
             }
+            unset($setting);
+            $this->settings_model->save_batch($settings);
 
             response();
         } catch (Throwable $e) {

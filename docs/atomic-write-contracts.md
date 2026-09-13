@@ -59,6 +59,32 @@ This does not make other settings controllers atomic or serialize concurrent
 name upserts. Local model regressions prove ordinary rollback/ownership cases;
 controller doubles separately prove the batch handoff, not real HTTP behavior.
 
+### Backoffice settings batches
+
+Legal, LDAP, Matomo, Google Analytics, Business and Booking settings use the same
+ordered `Settings_model::save_batch` contract. Business and Booking retain their
+`only(id, name, value)` then `optional()` field preparation before the single
+batch handoff. No new setting-name allowlist is introduced. The shared model
+regressions prove its database rollback behavior; controller doubles separately
+prove the complete handoff, preserved field filtering and failure response.
+
+General settings retains its different existing semantics: it resolves IDs and
+validates every record before starting writes. Prepared records are then saved in
+order without resolving names again. This preserves initially absent duplicate
+names as separate prepared inserts and preserves pre-write ID selection across
+rename/order combinations. Its local transaction checks owned begin, status and
+owned commit, and rolls back only transactions it owns. An empty batch performs
+no transaction work.
+
+General's real synthetic database regressions cover rollback after a later actual
+write, full row restoration, caller-owned transaction rollback including prior
+caller writes, prepared-name/ID semantics and validation before any save call.
+The controller retains its existing JSON error response rather than rethrowing to
+a PHP caller. A caller with an outer transaction retains ownership and must detect
+the failed response and roll back; joined partial writes are not independently
+undone. These checks establish no concurrent upsert, actual HTTP/CSRF or production
+verification.
+
 ## Narrow updates and drift
 
 `Services_model::update` locks only the service for a buffer-neutral update.
