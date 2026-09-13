@@ -56,35 +56,13 @@ function &get_instance(): object
     return $instance;
 }
 
-final class ProbeQuery
-{
-    public function where(string $column, string $value): self
-    {
-        global $events;
-        $events[] = 'where:' . $column . ':' . $value;
-        return $this;
-    }
-    public function get(): self
-    {
-        return $this;
-    }
-    public function row_array(): array
-    {
-        return ['id' => 42, 'name' => 'api_token'];
-    }
-}
 final class ProbeSettingsModel
 {
-    public function query(): ProbeQuery
-    {
-        $GLOBALS['events'][] = 'query';
-        return new ProbeQuery();
-    }
-    public function save(array $setting): void
+    public function save_batch(array $settings): void
     {
         global $scenario, $events, $saved;
-        $events[] = 'save:' . $setting['name'];
-        $saved[] = $setting;
+        $events[] = 'save_batch';
+        $saved[] = $settings;
         if ($scenario === 'write_failure') {
             throw new RuntimeException('synthetic settings failure');
         }
@@ -99,7 +77,12 @@ final class Backoffice_request_dto_factory
             throw new RuntimeException('Unexpected DTO key.');
         }
         $events[] = 'dto:build';
-        return (object) ['settings' => [['name' => 'api_token', 'value' => 'synthetic-token']]];
+        return (object) [
+            'settings' => [
+                ['name' => 'api_token', 'value' => 'synthetic-token'],
+                ['name' => 'synthetic_setting', 'value' => 'second-value'],
+            ],
+        ];
     }
 }
 final class ProbeLoader

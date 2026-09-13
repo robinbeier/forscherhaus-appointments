@@ -21,7 +21,7 @@ final class ApiSettingsPostGuardTest extends TestCase
         self::assertContains('json_exception', $result['events']);
         self::assertNotContains('dto:build', $result['events']);
         self::assertNotContains('query', $result['events']);
-        self::assertNotContains('save:api_token', $result['events']);
+        self::assertNotContains('save_batch', $result['events']);
         self::assertSame([], $result['saved']);
     }
 
@@ -35,7 +35,7 @@ final class ApiSettingsPostGuardTest extends TestCase
             self::assertContains('auth_check:edit:system_settings', $result['events']);
             self::assertNotContains('dto:build', $result['events']);
             self::assertNotContains('query', $result['events']);
-            self::assertNotContains('save:api_token', $result['events']);
+            self::assertNotContains('save_batch', $result['events']);
             self::assertSame([], $result['saved']);
         }
     }
@@ -46,12 +46,19 @@ final class ApiSettingsPostGuardTest extends TestCase
 
         self::assertSame(200, $result['status']);
         self::assertContains('dto:build', $result['events']);
-        self::assertContains('query', $result['events']);
-        self::assertContains('save:api_token', $result['events']);
+        self::assertContains('save_batch', $result['events']);
         self::assertContains('response', $result['events']);
         self::assertSame('', $result['body']);
-        self::assertSame([['name' => 'api_token', 'value' => 'synthetic-token', 'id' => 42]], $result['saved']);
-        self::assertSame(1, substr_count(implode('|', $result['events']), 'save:api_token'));
+        self::assertSame(
+            [
+                [
+                    ['name' => 'api_token', 'value' => 'synthetic-token'],
+                    ['name' => 'synthetic_setting', 'value' => 'second-value'],
+                ],
+            ],
+            $result['saved'],
+        );
+        self::assertSame(1, substr_count(implode('|', $result['events']), 'save_batch'));
         self::assertStringNotContainsString('synthetic-token', $result['body']);
         self::assertLessThan(
             array_search('dto:build', $result['events'], true),
@@ -64,10 +71,18 @@ final class ApiSettingsPostGuardTest extends TestCase
         $result = $this->probe('write_failure', 'POST');
 
         self::assertSame(500, $result['status']);
-        self::assertContains('save:api_token', $result['events']);
+        self::assertContains('save_batch', $result['events']);
         self::assertContains('json_exception', $result['events']);
         self::assertNotContains('response', $result['events']);
-        self::assertSame([['name' => 'api_token', 'value' => 'synthetic-token', 'id' => 42]], $result['saved']);
+        self::assertSame(
+            [
+                [
+                    ['name' => 'api_token', 'value' => 'synthetic-token'],
+                    ['name' => 'synthetic_setting', 'value' => 'second-value'],
+                ],
+            ],
+            $result['saved'],
+        );
         self::assertStringContainsString('synthetic settings failure', $result['body']);
         self::assertStringNotContainsString('synthetic-token', $result['body']);
     }
