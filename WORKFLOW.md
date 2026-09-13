@@ -39,6 +39,10 @@ conflict, follow `AGENTS.md`.
 
 ## Model-Aware Delegation
 
+For Defense Factory cycles, apply the bounded [role and transition contract](docs/defense-factory.md#role-and-transition-contract).
+It defines phase handoffs and evidence requirements; the runtime and authority
+rules below remain canonical.
+
 The primary agent owns the end-to-end goal, authority boundary, sequencing,
 file ownership, integration, validation, issue and PR state, merge decision,
 and every production action. Delegation does not transfer those
