@@ -47,6 +47,9 @@ are not evidence that the gate passed.
 The bounded [Provider HTTP authentication regressions](provider-api-regression-followups.md#bounded-http-authentication-regression)
 also exercise list/detail reads through the actual local API authentication boundary,
 using synthetic Basic/Bearer credentials and the existing isolated lifecycle.
+The bounded [Provider HTTP write regressions](provider-api-regression-followups.md#bounded-http-write-regression)
+add ordinary JSON POST/PUT requests, direct persistence checks, denial snapshots
+and response-independent registration for cleanup in the same owned environment.
 
 - Normal login, protected own-account save, customer read/update, and calendar
   appointment creation/update through HTTP, with persisted-value assertions.

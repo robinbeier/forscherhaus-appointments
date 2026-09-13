@@ -49,6 +49,20 @@ class GateHttpClientTest extends TestCase
         }
     }
 
+    public function testRequestJsonAppRejectsNonWriteMethodsBeforeNetworkAccess(): void
+    {
+        $client = new GateHttpClient('https://example.test/app', 'index.php');
+
+        foreach (['GET', 'PATCH', 'DELETE', ''] as $method) {
+            try {
+                $client->requestJsonApp($method, 'api/v1/providers', []);
+                self::fail('Unsupported JSON method was accepted: ' . $method);
+            } catch (RuntimeException $exception) {
+                self::assertStringContainsString('Unsupported JSON app request method', $exception->getMessage());
+            }
+        }
+    }
+
     public function testRequestAppCsrfInjectionIsExplicitAndPostOnly(): void
     {
         $client = new GateHttpClient('https://example.test/app', 'index.php');
