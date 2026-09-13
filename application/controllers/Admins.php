@@ -233,8 +233,6 @@ class Admins extends EA_Controller
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityIdRequestDto('admin_id');
             $admin_id = $request_dto->id;
 
-            $admin = $this->admins_model->find($admin_id);
-
             $this->admins_model->delete($admin_id);
 
             json_response([

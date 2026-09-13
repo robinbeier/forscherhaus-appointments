@@ -109,3 +109,12 @@ asserted ordering clause fails the corresponding contract test. They are not
 proof of every physical InnoDB index/gap lock or every concurrent schedule;
 the [two-connection test harness](two-connection-test-harness.md) provides
 focused administrative consistency and parent-lock contention references.
+
+## Admin deletion guard
+
+`Admins_model::delete` locks the current Admin user set with `ORDER BY id ASC
+FOR UPDATE` before checking the deletion target and minimum remaining count.
+Standalone calls own the transaction; an outer owner retains its commit/rollback
+responsibility. Callers must not acquire conflicting user locks out of order before
+joining this operation. This is a narrow last-Admin delete guard, not a new global
+role-management lock protocol or proof of every concurrent role change.

@@ -87,3 +87,20 @@ concurrent inserts. Notifications are post-commit effects, not an exactly-once
 outbox: a delivery failure does not undo a committed booking. Nested composition
 requires the outer rollback contract above. These boundaries must not be
 misrepresented as broader concurrency or delivery guarantees.
+
+## Staff deletion
+
+`Admins_model::delete` and `Secretaries_model::delete` scope the actual deletion
+to the expected role and require one affected user row. Database failure or a
+missing/wrong-role target propagates as an exception; backoffice destroy delegates
+to this model boundary without an unused, role-neutral preliminary read. Existing
+route permissions and API authentication remain unchanged.
+
+Admin deletion owns or joins a transaction. A current locking read selects all
+Admin user IDs in ascending order, validates the target and preserves the existing
+at-least-one-Admin rule before deletion. Status and owned commit are checked;
+outer owners must roll back exceptions. Secretary deletion is one checked InnoDB
+statement with existing settings/relation cascades, not a new multi-step workflow.
+The lock contract covers these delete operations; it does not establish all possible
+role-changing callers or concurrent schedules. `StaffModelDeleteTest` provides
+ordinary model/fixture evidence and a synthetic last-Admin guard test.

@@ -550,13 +550,18 @@ class Secretaries_model extends EA_Model
     /**
      * Remove an existing secretary from the database.
      *
-     * @param int $secretary_id Provider ID.
+     * @param int $secretary_id Secretary ID.
      *
      * @throws RuntimeException
      */
     public function delete(int $secretary_id): void
     {
-        $this->db->delete('users', ['id' => $secretary_id]);
+        if (!$this->db->delete('users', ['id' => $secretary_id, 'id_roles' => $this->get_secretary_role_id()])) {
+            throw new RuntimeException('Could not delete secretary.');
+        }
+        if ($this->db->affected_rows() !== 1) {
+            throw new InvalidArgumentException('The secretary deletion target was not found.');
+        }
     }
 
     /**
