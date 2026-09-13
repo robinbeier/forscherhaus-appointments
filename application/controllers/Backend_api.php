@@ -254,7 +254,7 @@ class Backend_api extends EA_Controller
      */
     public function ajax_save_settings(): void
     {
-        redirect('general_settings/save'); // or "business_settings/save", "booking_settings/save", "legal_settings/save"
+        redirect('general_settings/save', 'location', 307); // or "business_settings/save", "booking_settings/save", "legal_settings/save"
     }
 
     /**
@@ -278,6 +278,6 @@ class Backend_api extends EA_Controller
      */
     public function ajax_apply_global_working_plan(): void
     {
-        redirect('business_settings/apply_global_working_plan');
+        redirect('business_settings/apply_global_working_plan', 'location', 307);
     }
 }

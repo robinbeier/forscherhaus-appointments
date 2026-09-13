@@ -229,3 +229,11 @@ zeitlich begrenzte CI-Änderung zulässig; dabei bleibt
 schwächt kein Gate ab und beschreibt keine alternative Warnphase. Die in
 [WORKFLOW.md](../WORKFLOW.md) geforderte Rückkehrfrist und das Follow-up-Issue
 bleiben verbindlich.
+
+Die Legacy-Aliase `backend_api/ajax_save_settings` und
+`backend_api/ajax_apply_global_working_plan` verwenden explizite
+Location-Weiterleitungen mit Status 307, damit POST und Request-Body beim
+Client erhalten bleiben. Die Zielcontroller prüfen weiterhin Berechtigung
+und POST; die normale CSRF-Prüfung bleibt aktiv. Der isolierte Alias-Test
+belegt Ziel, Redirect-Methode und Status sowie unveränderte Eingabedaten,
+keine vollständige HTTP-/Browser-/CSRF-Weiterleitungskette.
