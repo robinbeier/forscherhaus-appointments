@@ -56,3 +56,35 @@ This adds local HTTP read/authentication evidence. It does not establish Provide
 write authorization, every non-admin role, mixed authentication precedence,
 all header parsing behavior, production proxy configuration or a production
 release. The prior controller/model/schema evidence retains its own scope.
+
+## Bounded HTTP write regression
+
+`tests/Integration/Controllers/ProviderApiHttpWriteTest.php` uses the existing
+isolated lifecycle for ordinary Provider POST and PUT requests with JSON bodies.
+Administrator Basic and the configured global Bearer each create and update a
+separate synthetic Provider. Responses must identify the expected record; direct
+database reads verify identity, notes, settings and service relationships.
+
+Requests without authentication, with an incorrect synthetic password, with an
+ordinary synthetic Provider Basic account, or with a nonmatching Bearer must
+return 401 without changes to snapshots of users, services, appointments,
+user settings and service-provider relations. Successful responses are checked
+recursively for forbidden secret keys and for the synthetic secret values in the
+complete normalized JSON. These are ordinary bounded regression cases, not a
+complete authentication or data-integrity proof.
+
+Before POST, the fixture registers the exact future synthetic email independently
+of the response. Cleanup only removes its registered Provider identities with
+expected roles and relationships, including partially created settings/links;
+unexpected relationships fail cleanup and leave disposal to the owned stack.
+An additional regression exercises repeated cleanup without relying on a decoded
+creation response. API-token restoration and owned-resource teardown remain part
+of the existing lifecycle.
+
+The shared HTTP client adds a JSON-only POST/PUT entry point; existing form
+requests retain their behavior. Its existing Kuma runtime-bundle manifest tracks
+the changed source hash; this is not an installation or production update.
+No application code or additional CI job changes.
+The earlier controller tests remain the evidence for single-secret rotation,
+omission and null handling. DELETE, concurrent writes, other roles, production
+HTTP configuration and deployment remain outside this pilot.

@@ -19,6 +19,7 @@ final class DefenseCycleFixtures
     private array $users = [];
     private array $settings = [];
     private array $baselineCounts = [];
+    private array $providerWriteEmails = [];
     private ?array $providerHttpAuthSettings = null;
     private ?array $providerHttpAuthTokenSetting = null;
 
@@ -196,6 +197,105 @@ final class DefenseCycleFixtures
         ];
     }
 
+    /** Register an exact synthetic identity before sending a POST, independent of its response. */
+    public function providerWritePayload(string $case): array
+    {
+        if (!isset($this->serviceId) || !preg_match('/^[a-z0-9_-]+$/D', $case)) {
+            throw new RuntimeException('Invalid Provider write fixture case.');
+        }
+        $username = $this->run . '_write_' . $case;
+        $email = $username . '@synthetic.invalid';
+        if (isset($this->providerWriteEmails[$email])) {
+            throw new RuntimeException('Provider write fixture identity is already registered.');
+        }
+        $this->providerWriteEmails[$email] = $username;
+        return [
+            'firstName' => 'Synthetic',
+            'lastName' => 'HTTP ' . $case,
+            'email' => $email,
+            'phone' => '000000000',
+            'notes' => $username,
+            'services' => [$this->serviceId],
+            'settings' => [
+                'username' => $username,
+                'password' => $this->password,
+                'googleToken' => $username . '_google',
+                'caldavPassword' => $username . '_caldav',
+            ],
+        ];
+    }
+
+    public function providerWriteState(string $email): array
+    {
+        if (!isset($this->providerWriteEmails[$email])) {
+            throw new RuntimeException('Unregistered Provider write identity.');
+        }
+        $rows = $this->db->get_where('users', ['email' => $email])->result_array();
+        if (!$rows) {
+            return [];
+        }
+        if (count($rows) !== 1) {
+            throw new RuntimeException('Ambiguous Provider write identity.');
+        }
+        $id = (int) $rows[0]['id'];
+        $services = $this->db
+            ->order_by('id_services')
+            ->get_where('services_providers', ['id_users' => $id])
+            ->result_array();
+        return [
+            'user' => $rows[0],
+            'settings' => $this->db->get_where('user_settings', ['id_users' => $id])->row_array() ?? [],
+            'services' => array_map(static fn(array $row): int => (int) $row['id_services'], $services),
+        ];
+    }
+
+    /** Complete deterministic snapshots cover both row counts and changed values in the owned seed. */
+    public function providerWriteSnapshot(): array
+    {
+        $snapshot = [];
+        foreach (['users', 'services', 'appointments', 'user_settings', 'services_providers'] as $table) {
+            $rows = $this->db->get($table)->result_array();
+            usort($rows, static fn(array $left, array $right): int => strcmp(json_encode($left), json_encode($right)));
+            $snapshot[$table] = $rows;
+        }
+        return $snapshot;
+    }
+
+    private function cleanupProviderWrites(): void
+    {
+        if (!$this->providerWriteEmails) {
+            return;
+        }
+        $providerRole = $this->db->get_where('roles', ['slug' => 'provider'])->row_array();
+        foreach ($this->providerWriteEmails as $email => $username) {
+            $state = $this->providerWriteState($email);
+            if (!$state) {
+                continue;
+            }
+            $id = (int) $state['user']['id'];
+            if (
+                !$providerRole ||
+                (int) $state['user']['id_roles'] !== (int) $providerRole['id'] ||
+                (isset($state['settings']['username']) && $state['settings']['username'] !== $username) ||
+                array_diff($state['services'], [$this->serviceId]) ||
+                $this->db->get_where('appointments', ['id_users_provider' => $id])->num_rows() !== 0
+            ) {
+                throw new RuntimeException('Unexpected Provider write fixture relationship; dispose owned stack.');
+            }
+            // Missing settings or service rows are allowed after a partial POST.
+            $this->db->delete('services_providers', ['id_users' => $id, 'id_services' => $this->serviceId]);
+            $this->db->delete('user_settings', ['id_users' => $id]);
+            $this->db->delete('users', ['id' => $id, 'email' => $email]);
+            if (
+                $this->providerWriteState($email) ||
+                $this->db->get_where('user_settings', ['id_users' => $id])->num_rows() !== 0 ||
+                $this->db->get_where('services_providers', ['id_users' => $id])->num_rows() !== 0
+            ) {
+                throw new RuntimeException('Provider write cleanup was not confirmed.');
+            }
+        }
+    }
+
     public function row(string $table, int $id): array
     {
         if (!in_array($table, ['users', 'appointments', 'services'], true)) {
@@ -206,6 +306,7 @@ final class DefenseCycleFixtures
 
     public function cleanup(): void
     {
+        $this->cleanupProviderWrites();
         if ($this->providerHttpAuthSettings !== null && isset($this->providerId)) {
             $this->db->update('user_settings', $this->providerHttpAuthSettings, ['id_users' => $this->providerId]);
             $restored = $this->db->get_where('user_settings', ['id_users' => $this->providerId])->row_array();

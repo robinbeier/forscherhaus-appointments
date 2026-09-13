@@ -106,6 +106,35 @@ final class GateHttpClient
         );
     }
 
+    /**
+     * Send a JSON request to an app-relative path. Only ordinary entity writes
+     * are supported here; the existing form request path remains unchanged.
+     *
+     * @param array<string, mixed> $payload
+     */
+    public function requestJsonApp(
+        string $method,
+        string $path,
+        array $payload = [],
+        ?int $timeoutSeconds = null,
+    ): GateHttpResponse {
+        $normalizedMethod = strtoupper(trim($method));
+        if (!in_array($normalizedMethod, ['POST', 'PUT'], true)) {
+            throw new RuntimeException('Unsupported JSON app request method: "' . $method . '".');
+        }
+
+        return $this->request(
+            $normalizedMethod,
+            $this->buildAppUrl($path),
+            $payload,
+            $timeoutSeconds ?? $this->defaultTimeoutSeconds,
+            true,
+            true,
+            false,
+            true,
+        );
+    }
+
     public function getAbsolute(string $url, ?int $timeoutSeconds = null): GateHttpResponse
     {
         return $this->request('GET', $url, null, $timeoutSeconds ?? $this->defaultTimeoutSeconds, false, false);
@@ -155,6 +184,7 @@ final class GateHttpClient
         bool $useCookieJar = true,
         bool $consumeResponseCookies = true,
         bool $noBody = false,
+        bool $jsonBody = false,
     ): GateHttpResponse {
         if (!function_exists('curl_init')) {
             throw new RuntimeException('ext-curl is required for the release gate.');
@@ -221,6 +251,9 @@ final class GateHttpClient
         };
 
         $requestHeaders = ['Accept: */*'];
+        if ($jsonBody) {
+            $requestHeaders[] = 'Content-Type: application/json';
+        }
         if ($this->isSameOrigin($url, $this->baseUrl)) {
             foreach ($this->additionalHeaders as $name => $value) {
                 if (trim($name) !== '' && trim($value) !== '') {
@@ -254,7 +287,10 @@ final class GateHttpClient
         ]);
 
         if ($form !== null) {
-            curl_setopt($curl, CURLOPT_POSTFIELDS, http_build_query($form, '', '&', PHP_QUERY_RFC3986));
+            $body = $jsonBody
+                ? json_encode($form, JSON_THROW_ON_ERROR)
+                : http_build_query($form, '', '&', PHP_QUERY_RFC3986);
+            curl_setopt($curl, CURLOPT_POSTFIELDS, $body);
         }
 
         $startedAt = microtime(true);
