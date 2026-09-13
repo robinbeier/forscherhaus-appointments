@@ -20,4 +20,9 @@ Do not:
 - Merge, push, publish a PR, or change issue state.
 - Perform production actions or other irreversible external actions.
 - Claim that your result is review-complete or merge-ready.
+
+For mutating DB regressions, use
+test-owned synthetic fixtures with bounded selection and cleanup, including
+setup failures, and report executed test bodies separately from syntax or
+bootstrap validation.
 """

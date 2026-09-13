@@ -41,6 +41,11 @@ If the method is unavailable, refused, or unauthorized, preserve that exact
 category and stop that method; do not switch models or tools to bypass a refusal.
 Do not dispatch another model to evade a platform boundary.
 
+For an HTTP method or authority boundary, include directly related legacy
+aliases and redirects in the bounded entry-point inventory. Check method,
+payload, and CSRF continuity across those paths; tests of only the target
+controller do not establish alias compatibility.
+
 Use the existing report and, where applicable, the single persisted `## Codex
 Workpad` comment. A local pending note may preserve proposed text, but it is not
 a persisted external update. External writes, issue ownership, and approvals
