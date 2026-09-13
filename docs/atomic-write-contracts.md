@@ -35,6 +35,17 @@ uncertain commit result.
 | `Account::save` -> `Users_model::save` | POST-only, user-settings edit permission, session-bound user ID and field allowlist. | User row and all settings form one model operation. Standalone save owns begin/commit/rollback; an outer caller retains ownership when present. A settings failure propagates. Account session updates follow successful save. |
 | `Secretaries::store/update` and `Secretaries_api_v1::store/update` -> `Secretaries_model::save` | Backoffice users permission or API authentication; existing targets must remain secretary users and assignments must reference existing providers. Integer IDs and the UI's positive decimal strings are normalized as a set; malformed or out-of-range IDs fail before mutation. | The model locks the secretary and requested provider users in ascending order before user/settings/assignment writes. Standalone save owns the transaction; an outer caller retains it. Settings and assignment writes, transaction status and commit are checked. The public `set_provider_ids` operation has the same standalone/outer ownership and parent validation for direct use. |
 
+### Admin account persistence
+
+`Admins::store/update`, `Admins_api_v1::store/update` and CLI `Instance::seed` share
+`Admins_model::save`. Existing route permissions, authentication and field filters
+remain responsible for authority. Save couples the user and its settings in one
+owned transaction, or joins an existing outer transaction without finishing it.
+Settings-row initialization, transaction status and owned commit are checked;
+exceptions propagate to the owner. This does not make the entire CLI seed atomic.
+`AdminsModelAtomicWriteTest` covers ordinary synthetic writes and dependent-failure
+rollback; HTTP behavior and complete concurrent schedules remain separate evidence.
+
 ## Narrow updates and drift
 
 `Services_model::update` locks only the service for a buffer-neutral update.
