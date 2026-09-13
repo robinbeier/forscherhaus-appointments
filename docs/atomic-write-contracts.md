@@ -34,6 +34,17 @@ uncertain commit result.
 | `Appointments_model::sync_service_buffer_unavailabilities` | Dependent internal model work, not a separate user authorization endpoint. | Opens/nests a transaction and locks provider/service/appointment parents before replacing children. Service save calls it before committing. Direct calls finish their own transaction. |
 | `Account::save` -> `Users_model::save` | POST-only, user-settings edit permission, session-bound user ID and field allowlist. | User row and all settings form one model operation. Standalone save owns begin/commit/rollback; an outer caller retains ownership when present. A settings failure propagates. Account session updates follow successful save. |
 
+### Admin account persistence
+
+`Admins::store/update`, `Admins_api_v1::store/update` and CLI `Instance::seed` share
+`Admins_model::save`. Existing route permissions, authentication and field filters
+remain responsible for authority. Save couples the user and its settings in one
+owned transaction, or joins an existing outer transaction without finishing it.
+Settings-row initialization, transaction status and owned commit are checked;
+exceptions propagate to the owner. This does not make the entire CLI seed atomic.
+`AdminsModelAtomicWriteTest` covers ordinary synthetic writes and dependent-failure
+rollback; HTTP behavior and complete concurrent schedules remain separate evidence.
+
 ## Narrow updates and drift
 
 `Services_model::update` locks only the service for a buffer-neutral update.

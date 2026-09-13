@@ -63,10 +63,27 @@ class Admins_model extends EA_Model
     {
         $this->validate($admin);
 
-        if (empty($admin['id'])) {
-            return $this->insert($admin);
-        } else {
-            return $this->update($admin);
+        $owns_transaction = !$this->db->trans_active();
+        if ($owns_transaction && !$this->db->trans_begin()) {
+            throw new RuntimeException('Could not start admin save transaction.');
+        }
+
+        try {
+            $admin_id = empty($admin['id']) ? $this->insert($admin) : $this->update($admin);
+
+            if (!$this->db->trans_status()) {
+                throw new RuntimeException('Could not save admin.');
+            }
+            if ($owns_transaction && !$this->db->trans_commit()) {
+                throw new RuntimeException('Could not commit admin save transaction.');
+            }
+
+            return $admin_id;
+        } catch (Throwable $exception) {
+            if ($owns_transaction) {
+                $this->db->trans_rollback();
+            }
+            throw $exception;
         }
     }
 
@@ -298,7 +315,9 @@ class Admins_model extends EA_Model
         $count = $this->db->get_where('user_settings', ['id_users' => $admin_id])->num_rows();
 
         if (!$count) {
-            $this->db->insert('user_settings', ['id_users' => $admin_id]);
+            if (!$this->db->insert('user_settings', ['id_users' => $admin_id])) {
+                throw new RuntimeException('Could not initialize admin settings.');
+            }
         }
 
         foreach ($settings as $name => $value) {
