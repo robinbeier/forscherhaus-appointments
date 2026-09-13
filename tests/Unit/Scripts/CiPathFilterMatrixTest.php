@@ -75,6 +75,71 @@ class CiPathFilterMatrixTest extends TestCase
         }
     }
 
+    public function testDefenseRuntimeInputsRemainSelectedIncludingDeletedFiles(): void
+    {
+        // Rules have no change-type restriction: these paths also cover deletions.
+        foreach (
+            [
+                'application/controllers/Booking.php',
+                'system/core/CodeIgniter.php',
+                'composer.json',
+                'composer.lock',
+                'tests/Bootstrap.php',
+                'tests/Unit/Scripts/DefensePhpCacheTest.php',
+                'phpunit.defense-cycle.xml',
+                'docker/php-fpm/Dockerfile',
+                'docker-compose.yml',
+                'scripts/ci/run_defense_cycle.sh',
+                '.github/workflows/ci.yml',
+                'future-runtime-input.bin',
+            ]
+            as $path
+        ) {
+            self::assertTrue($this->applyFilters([$path])['runtime_checks_required'], $path);
+            self::assertTrue($this->applyFilters(['docs/notes.md', $path])['runtime_checks_required'], $path);
+        }
+        self::assertFalse($this->applyFilters(['docs/deleted-notes.md'])['runtime_checks_required']);
+    }
+
+    public function testDefenseRenamesKeepBothSourceAndDestinationProtection(): void
+    {
+        // paths-filter exposes renames as a deleted source and added destination.
+        foreach (
+            [
+                ['application/retired.php', 'docs/retired.md'],
+                ['docs/notes.md', 'application/new.php'],
+                ['docs/agent-harness-index.md', 'docs/old-index.md'],
+            ]
+            as $paths
+        ) {
+            self::assertTrue($this->applyFilters($paths)['runtime_checks_required']);
+        }
+        self::assertFalse($this->applyFilters(['docs/old-notes.md', 'docs/new-notes.md'])['runtime_checks_required']);
+    }
+
+    public function testDefenseRetrospectiveScopeLikePr571StillRuns(): void
+    {
+        self::assertTrue(
+            $this->applyFilters([
+                '.agents/skills/defense-cycle-closeout/SKILL.md',
+                '.agents/skills/defense-cycle-closeout/agents/openai.yaml',
+                '.agents/skills/defense-cycle-context/SKILL.md',
+                '.agents/skills/defense-cycle-context/agents/openai.yaml',
+                '.codex/agents/reviewer-correctness.toml',
+                '.codex/config.toml',
+                'AGENTS.md',
+                'SECURITY.md',
+                'WORKFLOW.md',
+                'docs/agent-harness-index.md',
+                'docs/defense-factory.md',
+                'docs/retrospectives/defense-factory-2026-09-13.md',
+                'docs/reviewer-runtime-preflight.md',
+                'docs/ticket-mutation-authorization.md',
+                'tests/Unit/Scripts/AgentDelegationContractTest.php',
+            ])['runtime_checks_required'],
+        );
+    }
+
     public function testCoverageGateScriptChangeOnlyTriggersCoverageHeavyJobs(): void
     {
         $matches = $this->applyFilters(['scripts/ci/check_coverage_delta.php']);

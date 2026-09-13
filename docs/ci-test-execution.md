@@ -131,7 +131,27 @@ comparison. Record both run links and the changed workload. A shorter parallel
 job does not necessarily shorten the overall workflow by the same amount.
 Do not describe two runs as an established statistical baseline.
 
-## Defense job build timing
+## Defense job selection and build timing
+
+`defense-cycle-ordinary-flows` depends on `changes` and reuses its existing
+`runtime_checks_required` output without a separate allowlist or draft exception.
+Ordinary Markdown under `docs/` skips the complete job; runtime, contract,
+unknown and mixed changes select it. The same filter includes both rename paths
+and deleted files. A scope like PR #571 remains selected.
+
+Workflow triggers stay unchanged: pull requests compare against their base,
+while pushes to `main` compare against the preceding push through
+[paths-filter's existing defaults](https://github.com/dorny/paths-filter/tree/v3).
+The workflow still starts for prose changes, so its job-level skip can finish
+without leaving a path-filtered workflow pending. GitHub documents this
+[job-condition behavior](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-jobs-with-conditions).
+A skip is not evidence that tests passed. Failed, pending or missing required
+checks still block landing; a failed `changes` job must not be mistaken for a
+legitimate prose skip.
+
+Measure the `changes` dependency and the complete workflow as well as the
+selected Defense job. A local selector matrix verifies routing, not a real
+hosted prose skip: retain that evidence gap until a regular prose change occurs.
 
 The Defense job retains its complete isolated application/session suite and
 fresh Docker data lifecycle. Only its PHP image preparation uses the

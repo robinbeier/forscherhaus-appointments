@@ -12,7 +12,9 @@ class CiWorkflowContractTest extends TestCase
     public function testDefenseCachePreparationPreservesBlockingSuiteAndEvidence(): void
     {
         $job = $this->workflowJob('defense-cycle-ordinary-flows');
-        self::assertArrayNotHasKey('if', $job);
+        self::assertSame(['changes'], $job['needs']);
+        self::assertSame("needs.changes.outputs.runtime_checks_required == 'true'", $job['if']);
+        self::assertArrayNotHasKey('continue-on-error', $job);
         self::assertSame(['contents' => 'read'], $job['permissions']);
         $steps = $this->namedSteps($job);
         foreach ($steps as $step) {
@@ -38,6 +40,34 @@ class CiWorkflowContractTest extends TestCase
         }
         self::assertSame('storage/logs/ci/php-build/', $steps['Upload PHP build timing evidence']['with']['path']);
         self::assertSame('storage/logs/ci/gate-summary/', $steps['Upload gate diagnostic evidence']['with']['path']);
+    }
+
+    public function testDefenseSelectionRetainsPullRequestAndMainPushDiffSemantics(): void
+    {
+        $workflow = Yaml::parseFile(__DIR__ . '/../../../.github/workflows/ci.yml');
+        foreach (['push', 'pull_request'] as $event) {
+            self::assertSame(['main'], $workflow['on'][$event]['branches']);
+            self::assertArrayNotHasKey('paths', $workflow['on'][$event]);
+            self::assertArrayNotHasKey('paths-ignore', $workflow['on'][$event]);
+        }
+        $changes = $workflow['jobs']['changes'];
+        self::assertArrayNotHasKey('if', $changes);
+        self::assertArrayNotHasKey('continue-on-error', $changes);
+        $steps = $this->namedSteps($changes);
+        self::assertSame(0, $steps['Git clone']['with']['fetch-depth']);
+        $filter = $steps['Detect relevant file changes'];
+        self::assertSame('dorny/paths-filter@v3', $filter['uses']);
+        self::assertSame('filter', $filter['id']);
+        // Preserve the action defaults: PR base diff, or previous push on main.
+        foreach (['base', 'ref', 'predicate-quantifier'] as $input) {
+            self::assertArrayNotHasKey($input, $filter['with']);
+        }
+        self::assertArrayNotHasKey('if', $filter);
+        self::assertArrayNotHasKey('continue-on-error', $filter);
+        self::assertSame(
+            '${{ steps.filter.outputs.runtime_checks_required }}',
+            $changes['outputs']['runtime_checks_required'],
+        );
     }
 
     public function testJavaScriptLintSelectsChangesBeforeInstallingDependencies(): void
