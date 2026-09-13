@@ -20,7 +20,20 @@
 <div class="container">
     <div class="row">
         <div class="col">
-            <?php if (vars('success')): ?>
+            <?php if (vars('success') === null): ?>
+                <div class="jumbotron">
+                    <h1 class="display-4">Update database</h1>
+                    <p class="lead">
+                        Apply the database updates included in the installed version.
+                        Make sure a current database backup is available before continuing.
+                    </p>
+                    <form method="post" action="<?= site_url('update') ?>">
+                        <input type="hidden" name="<?= e(vars('csrf_token_name')) ?>"
+                               value="<?= e(vars('csrf_token')) ?>">
+                        <button type="submit" class="btn btn-primary btn-large">Update database</button>
+                    </form>
+                </div>
+            <?php elseif (vars('success')): ?>
                 <div class="jumbotron">
                     <h1 class="display-4">Success!</h1>
                     <p class="lead">
@@ -56,7 +69,7 @@
                 </div>
 
                 <div class="well text-start">
-                    Error Message: <?= vars('exception') ?>
+                    Error Message: <?= e(vars('exception')) ?>
                 </div>
             <?php endif; ?>
         </div>
