@@ -70,8 +70,12 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
 - Ownership notes: Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.
 - Key files:
   - `application/libraries/Instance.php`
+  - `application/controllers/Update.php`
+  - `application/views/pages/update.php`
 - Path rules:
   - `application/libraries/Instance.php` (exact_file)
+  - `application/controllers/Update.php` (exact_file)
+  - `application/views/pages/update.php` (exact_file)
 
 ### `booking-public`
 

@@ -91,7 +91,7 @@
     {
       "component_id": "installation-bootstrap",
       "role": "Installation & Bootstrap",
-      "summary": "CLI installation and test-data bootstrap; no public web installer.",
+      "summary": "CLI installation, test-data bootstrap, and authenticated web updater.",
       "primary_handle": "@robinbeier",
       "secondary_handle": "@robinbeier",
       "ownership_mode": "single-owner",
@@ -103,10 +103,20 @@
         {
           "path": "application/libraries/Instance.php",
           "match": "exact_file"
+        },
+        {
+          "path": "application/controllers/Update.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/pages/update.php",
+          "match": "exact_file"
         }
       ],
       "key_files": [
-        "application/libraries/Instance.php"
+        "application/libraries/Instance.php",
+        "application/controllers/Update.php",
+        "application/views/pages/update.php"
       ],
       "depends_on": [
         "people-services-admin",
