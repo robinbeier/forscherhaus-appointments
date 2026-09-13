@@ -11,7 +11,7 @@ This map defines component boundaries, path ownership scope, and dependency edge
 | Component | Role | Depends On | Path Rules | Key Files |
 |---|---|---|---:|---:|
 | `auth-session` | Access & Session | integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 15 | 3 |
-| `installation-bootstrap` | Installation & Bootstrap | people-services-admin, settings-compliance, shared-core | 1 | 1 |
+| `installation-bootstrap` | Installation & Bootstrap | people-services-admin, settings-compliance, shared-core | 3 | 3 |
 | `booking-public` | Public Booking | integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 9 | 6 |
 | `booking-lifecycle` | Booking Confirmation/Cancellation | booking-public, integrations-sync, people-services-admin, scheduling-backoffice, shared-core | 5 | 3 |
 | `scheduling-backoffice` | Calendar & Scheduling | integrations-sync, people-services-admin, settings-compliance, shared-core | 19 | 5 |
@@ -60,7 +60,7 @@ Key files:
 
 ### `installation-bootstrap` - Installation & Bootstrap
 
-CLI installation and test-data bootstrap; no public web installer.
+CLI installation, test-data bootstrap, and authenticated web updater.
 
 Dependencies:
 - `people-services-admin`
@@ -69,9 +69,13 @@ Dependencies:
 
 Path rules:
 - `application/libraries/Instance.php` (exact_file)
+- `application/controllers/Update.php` (exact_file)
+- `application/views/pages/update.php` (exact_file)
 
 Key files:
 - `application/libraries/Instance.php`
+- `application/controllers/Update.php`
+- `application/views/pages/update.php`
 
 ### `booking-public` - Public Booking
 

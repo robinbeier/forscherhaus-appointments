@@ -32,8 +32,6 @@ class Update extends EA_Controller
         $this->load->model('services_model');
         $this->load->model('providers_model');
         $this->load->model('customers_model');
-
-        $this->load->library('instance');
     }
 
     /**
@@ -42,8 +40,8 @@ class Update extends EA_Controller
      * IMPORTANT: The code files must exist in the server, this method will not fetch any new files but will update
      * the database schema.
      *
-     * This method can be used either by loading the page in the browser or by an ajax request. But it will answer with
-     * JSON encoded data.
+     * GET/HEAD display a confirmation page. Only an authorized POST, protected by
+     * the framework's CSRF verification, may initialize and run migrations.
      */
     public function index(): void
     {
@@ -60,9 +58,24 @@ class Update extends EA_Controller
                 return;
             }
 
-            $this->instance->migrate();
+            $method = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? ''));
 
-            $view = ['success' => true];
+            if ($method === 'POST') {
+                // Instance construction can initialize migration tracking. Keep it behind both guards.
+                $this->load->library('instance');
+                $this->instance->migrate();
+                $view = ['success' => true];
+            } elseif (in_array($method, ['GET', 'HEAD'], true)) {
+                $view = [
+                    'success' => null,
+                    'csrf_token_name' => $this->security->get_csrf_token_name(),
+                    'csrf_token' => $this->security->get_csrf_hash(),
+                ];
+            } else {
+                abort(405, 'Method Not Allowed', ['Allow: GET, HEAD, POST']);
+
+                return;
+            }
         } catch (Throwable $e) {
             $view = ['success' => false, 'exception' => $e->getMessage()];
         }
