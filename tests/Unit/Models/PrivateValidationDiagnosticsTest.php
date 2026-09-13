@@ -164,7 +164,7 @@ final class PrivateValidationDiagnosticsTest extends TestCase
             'email' => 'secretary@example.test',
             'providers' => ['provider-sentinel'],
         ]);
-        $this->assertStringContainsString('provider IDs must be numeric', $secretaryMessage);
+        $this->assertStringContainsString('Secretary provider IDs must be positive integers.', $secretaryMessage);
         $this->assertStringNotContainsString('sentinel', strtolower($secretaryMessage));
 
         $adminMessage = $this->captureValidationException('admins_model', [
