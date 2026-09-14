@@ -90,6 +90,8 @@ Before the first delegation in a session, inspect the active spawn interface:
   defaults apply Luna/medium. Because this legacy path cannot apply the role's
   dedicated instructions, the task message must repeat the bounded ownership,
   no-delegation, no-push/merge/PR/issue-state, and no-production boundaries.
+  For regression tasks, also repeat the acceptance-to-assertion mapping and
+  the double/unexecuted-criterion reporting requirements below.
 
 `task_name` always names the delegated task path; it never selects an agent
 role or model. If the active runtime cannot honor either registered roles or
