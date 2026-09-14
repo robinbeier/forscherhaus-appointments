@@ -63,6 +63,8 @@ The primary agent must provide each implementation worker with:
 - one bounded outcome and explicit file or module ownership
 - relevant constraints and acceptance criteria
 - the narrow validation expected from the worker
+- for regression work, observable expectations for each acceptance criterion,
+  including negative cases and the intended use of real components or doubles
 - notice that other agents may be editing the repository and that their work
   must not be reverted
 
@@ -107,6 +109,15 @@ After a worker returns, the primary agent inspects the diff, reconciles it with
 concurrent work, runs integration-level validation, and obtains independent
 review. A worker's completion report is implementation evidence, not review,
 merge, or production authority.
+
+For regression handoffs, map each acceptance criterion to the test method and
+actual assertions, then state the executed command/result and any remaining
+gap. Identify components replaced by doubles: a recorded call proves the
+handoff, not the downstream HTTP, authorization, or database behavior. Report
+missing or unexecuted criteria explicitly; a success status or nonempty response
+alone does not establish payload, access, persistence, or confidentiality claims.
+The primary agent checks this mapping against the assertions before integration;
+summary wording cannot substitute for the requested coverage.
 
 ## Controlled Parallel Work
 
