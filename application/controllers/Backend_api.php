@@ -198,7 +198,7 @@ class Backend_api extends EA_Controller
      */
     public function ajax_delete_admin(): void
     {
-        redirect('admins/destroy');
+        redirect('admins/destroy', 'location', 307);
     }
 
     /**
@@ -246,7 +246,7 @@ class Backend_api extends EA_Controller
      */
     public function ajax_delete_secretary(): void
     {
-        redirect('secretaries/destroy');
+        redirect('secretaries/destroy', 'location', 307);
     }
 
     /**

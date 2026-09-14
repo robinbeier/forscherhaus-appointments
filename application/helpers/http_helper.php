@@ -207,11 +207,8 @@ if (!function_exists('abort')) {
      */
     function abort(int $code, string $message = '', array $headers = []): void
     {
-        /** @var EA_Controller $CI */
-        $CI = &get_instance();
-
         foreach ($headers as $header) {
-            $CI->output->set_header($header);
+            header($header);
         }
 
         show_error($message, $code);

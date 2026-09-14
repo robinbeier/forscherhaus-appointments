@@ -244,3 +244,19 @@ dann einen kontrollierten zweiten POST mit identischem Formular und CSRF-Token.
 Er verändert nur eine eigene synthetische Einstellung und prüft Persistenz sowie
 Bereinigung. Dieser Nachweis umfasst weder automatische Browser-Weiterleitung
 noch den globalen Arbeitsplan-Endpunkt oder Produktion.
+
+Die Backoffice-Aktionen für Admins und Sekretariate prüfen nach der jeweiligen
+Berechtigung zusätzlich POST und antworten bei anderen Methoden mit 405 und
+`Allow: POST`, bevor DTO- oder Modellzugriff erfolgt. Die Legacy-Löschaliase
+leiten weiterhin mit 307 und unverändertem Request-Body an feste Destroy-Ziele
+weiter; die Save-Aliase bleiben eine gesonderte Kompatibilitätsfrage.
+Die isolierten Controller-Regressionen prüfen `store`, `update` und `destroy`
+beider Controller mit synthetischen DTO- und Modell-Doubles sowie die
+Redirect-Argumente der beiden Löschaliase. Sie belegen keine echte HTTP-Kette,
+Framework-CSRF-Prüfung oder Datenbankpersistenz.
+
+Der gemeinsame `abort()`-Helper sendet explizit übergebene Header unmittelbar,
+bevor `show_error()` den Request beendet. Ein lokaler HTTP-Helper-Test prüft
+den tatsächlich ausgegebenen Status, `Allow`-Header und Fehlertext dieses
+Abbruchpfads. Das ergänzt die Controller-Doubles, ohne deren Aussagen auf
+Routing, Authentifizierung oder Datenbankverhalten auszuweiten.
