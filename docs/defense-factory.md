@@ -166,3 +166,15 @@ These tests supplement model rollback tests; they do not inject HTTP failures,
 prove every concurrent schedule or verify production. Settings API token visibility
 retains its existing privileged contract; staff secret-projection assertions do
 not imply that every Settings value is public or that tokens are write-only.
+
+## Ordinary blocked-period controller regressions
+
+`BlockedPeriodPostGuardTest` covers the store, update and destroy controller
+handoffs with synthetic request, authorization and model doubles. Existing
+capability checks precede the POST requirement; authorized GET, HEAD, PUT and
+DELETE stop before DTO creation or model calls with a 405/Allow: POST handoff.
+Ordinary POST cases assert the DTO fields, exact saved payload, returned ID and
+response; denied capabilities and model failures cannot report success.
+These controller tests do not prove real HTTP headers, authentication, CSRF,
+database persistence, date validation or production behavior. The existing
+blocked-period JavaScript client uses POST for all three mutations.
