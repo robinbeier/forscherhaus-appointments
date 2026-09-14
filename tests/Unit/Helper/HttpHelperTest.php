@@ -380,6 +380,56 @@ class HttpHelperTest extends TestCase
         $this->assertSame(1, $response_declarations);
     }
 
+    public function testAbortEmitsAllowHeaderBeforeRealShowErrorAndTerminatesHttpResponse(): void
+    {
+        $scriptPath = tempnam(sys_get_temp_dir(), 'abort-http-');
+        $this->assertIsString($scriptPath);
+        $repoRoot = dirname(__DIR__, 3);
+
+        try {
+            $script = <<<'PHP'
+            <?php
+            $repoRoot = __REPO_ROOT__;
+            define('BASEPATH', $repoRoot . '/system/');
+            define('VIEWPATH', $repoRoot . '/application/views/');
+            function is_cli(): bool { return false; }
+            function config_item(string $key): mixed { return null; }
+            require BASEPATH . 'core/Output.php';
+            require BASEPATH . 'core/Exceptions.php';
+            function &get_instance(): object
+            {
+                static $instance;
+                $instance ??= (object) ['output' => (new ReflectionClass(CI_Output::class))->newInstanceWithoutConstructor()];
+                return $instance;
+            }
+            function &load_class(string $class, string $directory): object
+            {
+                if ($class !== 'Exceptions' || $directory !== 'core') {
+                    throw new RuntimeException('Unexpected framework class');
+                }
+                static $exceptions;
+                $exceptions ??= new CI_Exceptions();
+                return $exceptions;
+            }
+            require BASEPATH . 'core/Common.php';
+            require $repoRoot . '/application/helpers/http_helper.php';
+            abort(405, 'Method Not Allowed', ['Allow: POST']);
+            echo 'after-abort';
+            PHP;
+            file_put_contents($scriptPath, str_replace('__REPO_ROOT__', var_export($repoRoot, true), $script));
+            $result = $this->runHttpScript($scriptPath);
+            $this->assertSame(0, $result['exit_code'], $result['stderr']);
+            $this->assertStringContainsString('HTTP/1.1 405 Method Not Allowed', $result['headers']);
+            $this->assertStringContainsString('Allow: POST', $result['headers']);
+            $this->assertStringContainsString('Method Not Allowed', $result['body']);
+            $this->assertStringNotContainsString('after-abort', $result['body']);
+        } finally {
+            if (is_file($scriptPath)) {
+                unlink($scriptPath);
+            }
+        }
+    }
+
     public function testHttpHelperContainsSingleResponseGuardBlock(): void
     {
         $source = file_get_contents(APPPATH . 'helpers/http_helper.php');
@@ -501,76 +551,83 @@ class HttpHelperTest extends TestCase
         $serverLog = tempnam(sys_get_temp_dir(), 'json-exception-http-log-');
         $this->assertIsString($serverLog);
 
-        $descriptorSpec = [
-            0 => ['file', '/dev/null', 'r'],
-            1 => ['file', $serverLog, 'w'],
-            2 => ['file', $serverLog, 'a'],
-        ];
+        try {
+            $descriptorSpec = [
+                0 => ['file', '/dev/null', 'r'],
+                1 => ['file', $serverLog, 'w'],
+                2 => ['file', $serverLog, 'a'],
+            ];
 
-        for ($serverAttempt = 0; $serverAttempt < 10; $serverAttempt++) {
-            $port = random_int(20000, 45000);
-            $server = proc_open(
-                ['php', '-S', '127.0.0.1:' . $port, $scriptPath],
-                $descriptorSpec,
-                $pipes,
-                dirname($scriptPath),
-                null,
-            );
-            $this->assertIsResource($server);
+            for ($serverAttempt = 0; $serverAttempt < 10; $serverAttempt++) {
+                $port = random_int(20000, 45000);
+                $server = proc_open(
+                    ['php', '-S', '127.0.0.1:' . $port, $scriptPath],
+                    $descriptorSpec,
+                    $pipes,
+                    dirname($scriptPath),
+                    null,
+                );
+                $this->assertIsResource($server);
 
-            try {
-                $requestHeaders = '';
-                $requestBody = '';
-                $requestSucceeded = false;
+                try {
+                    $requestHeaders = '';
+                    $requestBody = '';
+                    $requestSucceeded = false;
 
-                for ($requestAttempt = 0; $requestAttempt < 50; $requestAttempt++) {
-                    $context = stream_context_create([
-                        'http' => [
-                            'ignore_errors' => true,
-                            'timeout' => 1,
-                        ],
-                    ]);
+                    for ($requestAttempt = 0; $requestAttempt < 50; $requestAttempt++) {
+                        $context = stream_context_create([
+                            'http' => [
+                                'ignore_errors' => true,
+                                'timeout' => 1,
+                            ],
+                        ]);
 
-                    $body = @file_get_contents('http://127.0.0.1:' . $port . '/', false, $context);
-                    $headers = function_exists('http_get_last_response_headers')
-                        ? http_get_last_response_headers()
-                        : $http_response_header ?? [];
+                        $body = @file_get_contents('http://127.0.0.1:' . $port . '/', false, $context);
+                        $headers = function_exists('http_get_last_response_headers')
+                            ? http_get_last_response_headers()
+                            : $http_response_header ?? [];
 
-                    if (is_string($body) && is_array($headers) && $headers !== []) {
-                        $requestHeaders = implode("\r\n", $headers);
-                        $requestBody = $body;
-                        $requestSucceeded = true;
-                        break;
+                        if (is_string($body) && is_array($headers) && $headers !== []) {
+                            $requestHeaders = implode("\r\n", $headers);
+                            $requestBody = $body;
+                            $requestSucceeded = true;
+                            break;
+                        }
+
+                        $serverStatus = proc_get_status($server);
+                        $this->assertIsArray($serverStatus);
+
+                        if (!(bool) ($serverStatus['running'] ?? false)) {
+                            break;
+                        }
+
+                        usleep(100000);
                     }
 
-                    $serverStatus = proc_get_status($server);
-                    $this->assertIsArray($serverStatus);
+                    if ($requestSucceeded) {
+                        $serverStatus = proc_get_status($server);
+                        $this->assertIsArray($serverStatus);
+                        $this->assertTrue((bool) ($serverStatus['running'] ?? false));
 
-                    if (!(bool) ($serverStatus['running'] ?? false)) {
-                        break;
+                        $result = [
+                            'exit_code' => 0,
+                            'headers' => $requestHeaders,
+                            'body' => $requestBody,
+                            'stderr' => (string) file_get_contents($serverLog),
+                        ];
+                        return $result;
                     }
-
-                    usleep(100000);
+                } finally {
+                    proc_terminate($server);
+                    proc_close($server);
                 }
+            }
 
-                if ($requestSucceeded) {
-                    $serverStatus = proc_get_status($server);
-                    $this->assertIsArray($serverStatus);
-                    $this->assertTrue((bool) ($serverStatus['running'] ?? false));
-
-                    return [
-                        'exit_code' => 0,
-                        'headers' => $requestHeaders,
-                        'body' => $requestBody,
-                        'stderr' => (string) file_get_contents($serverLog),
-                    ];
-                }
-            } finally {
-                proc_terminate($server);
-                proc_close($server);
+            $this->fail((string) file_get_contents($serverLog));
+        } finally {
+            if (is_file($serverLog)) {
+                unlink($serverLog);
             }
         }
-
-        $this->fail((string) file_get_contents($serverLog));
     }
 }

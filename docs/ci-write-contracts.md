@@ -254,3 +254,9 @@ Die isolierten Controller-Regressionen prüfen `store`, `update` und `destroy`
 beider Controller mit synthetischen DTO- und Modell-Doubles sowie die
 Redirect-Argumente der beiden Löschaliase. Sie belegen keine echte HTTP-Kette,
 Framework-CSRF-Prüfung oder Datenbankpersistenz.
+
+Der gemeinsame `abort()`-Helper sendet explizit übergebene Header unmittelbar,
+bevor `show_error()` den Request beendet. Ein lokaler HTTP-Helper-Test prüft
+den tatsächlich ausgegebenen Status, `Allow`-Header und Fehlertext dieses
+Abbruchpfads. Das ergänzt die Controller-Doubles, ohne deren Aussagen auf
+Routing, Authentifizierung oder Datenbankverhalten auszuweiten.
