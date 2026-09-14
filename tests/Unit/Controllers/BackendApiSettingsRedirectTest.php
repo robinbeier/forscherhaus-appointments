@@ -15,6 +15,7 @@ final class BackendApiSettingsRedirectTest extends TestCase
             [
                 'ajax_save_settings' => 'general_settings/save',
                 'ajax_apply_global_working_plan' => 'business_settings/apply_global_working_plan',
+                'ajax_delete_customer' => 'customers/destroy',
                 'ajax_delete_admin' => 'admins/destroy',
                 'ajax_delete_secretary' => 'secretaries/destroy',
             ]
