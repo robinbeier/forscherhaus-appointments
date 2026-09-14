@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use PHPUnit\Framework\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 use ReleaseGate\GateHttpClient;
 use ReleaseGate\GateHttpResponse;
 use Tests\Integration\Support\DefenseCycleFixtures;
@@ -94,13 +95,36 @@ final class StaffSettingsApiHttpTest extends TestCase
         }
     }
 
-    public function testUnauthenticatedStaffAndSettingsReadsReturnChallengeWithoutFixtureValues(): void
+    public static function unauthenticatedReadAuthCases(): array
+    {
+        return [
+            'no-credentials' => ['no-credentials'],
+            'wrong-admin-password' => ['wrong-admin-password'],
+            'missing-admin-username' => ['missing-admin-username'],
+            'invalid-bearer-token' => ['invalid-bearer-token'],
+        ];
+    }
+
+    #[DataProvider('unauthenticatedReadAuthCases')]
+    public function testStaffAndSettingsReadsRejectInvalidAuthenticationWithoutFixtureValues(string $case): void
     {
         $admin = $this->basicClient($this->credentials['admin_username'], $this->credentials['password']);
         $secretaryPayload = $this->fixture->secretaryWritePayload('noauth', [$this->fixture->providerId]);
         $secretary = $this->success($admin->requestJsonApp('POST', 'api/v1/secretaries', $secretaryPayload), 201);
         $secretaryId = (int) $secretary['id'];
-        $client = $this->server->client();
+        $this->fixture->seedStaffIntegrationSecrets($secretaryId);
+        $client = match ($case) {
+            'no-credentials' => $this->server->client(),
+            'wrong-admin-password' => $this->basicClient(
+                $this->credentials['admin_username'],
+                $this->credentials['password'] . '-invalid',
+            ),
+            'missing-admin-username' => $this->basicClient(
+                $this->credentials['admin_username'] . '-missing',
+                $this->credentials['password'],
+            ),
+            'invalid-bearer-token' => $this->bearerClient($this->credentials['token'] . '-invalid'),
+        };
         foreach (
             [
                 'api/v1/admins',
@@ -114,8 +138,9 @@ final class StaffSettingsApiHttpTest extends TestCase
         ) {
             $response = $client->get($path);
             self::assertSame(401, $response->statusCode, $path . ' must require authentication.');
-            self::assertNotNull($response->header('www-authenticate'));
-            self::assertFalse(str_contains($response->body, $this->fixture->run));
+            self::assertNotEmpty(trim((string) $response->header('www-authenticate')));
+            self::assertStringNotContainsString($this->fixture->run, $response->body);
+            $this->assertNoSyntheticSecrets($response->body);
         }
     }
 

@@ -155,6 +155,13 @@ response fields, and ordinary Admin/Secretary create-update persistence. Passwor
 omission and clearing Secretary provider assignments are checked against stored
 rows. Owned identities are registered before writes and cleaned with the fixture.
 
+The six staff/settings read paths also cover absent credentials, a wrong synthetic
+Admin password, a nonexistent synthetic username, and an invalid Bearer token.
+Each case requires HTTP401 and a nonempty authentication challenge, with no
+fixture marker or seeded staff secret values in the response body. This read
+matrix does not establish invalid-write behavior or every authentication
+configuration.
+
 These tests supplement model rollback tests; they do not inject HTTP failures,
 prove every concurrent schedule or verify production. Settings API token visibility
 retains its existing privileged contract; staff secret-projection assertions do
