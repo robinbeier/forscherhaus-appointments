@@ -117,6 +117,10 @@ class Blocked_periods extends EA_Controller
             if (cannot('add', PRIV_BLOCKED_PERIODS)) {
                 abort(403, 'Forbidden');
             }
+            if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+                abort(405, 'Method Not Allowed', ['Allow: POST']);
+                return;
+            }
 
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityPayloadRequestDto('blocked_period');
             $blocked_period = $request_dto->payload;
@@ -168,6 +172,10 @@ class Blocked_periods extends EA_Controller
             if (cannot('edit', PRIV_BLOCKED_PERIODS)) {
                 abort(403, 'Forbidden');
             }
+            if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+                abort(405, 'Method Not Allowed', ['Allow: POST']);
+                return;
+            }
 
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityPayloadRequestDto('blocked_period');
             $blocked_period = $request_dto->payload;
@@ -197,6 +205,10 @@ class Blocked_periods extends EA_Controller
         try {
             if (cannot('delete', PRIV_BLOCKED_PERIODS)) {
                 abort(403, 'Forbidden');
+            }
+            if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+                abort(405, 'Method Not Allowed', ['Allow: POST']);
+                return;
             }
 
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityIdRequestDto('blocked_period_id');
