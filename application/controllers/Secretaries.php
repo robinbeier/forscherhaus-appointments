@@ -153,6 +153,10 @@ class Secretaries extends EA_Controller
             if (cannot('add', PRIV_USERS)) {
                 abort(403, 'Forbidden');
             }
+            if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+                abort(405, 'Method Not Allowed', ['Allow: POST']);
+                return;
+            }
 
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityPayloadRequestDto('secretary');
             $secretary = $request_dto->payload;
@@ -208,6 +212,10 @@ class Secretaries extends EA_Controller
             if (cannot('edit', PRIV_USERS)) {
                 abort(403, 'Forbidden');
             }
+            if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+                abort(405, 'Method Not Allowed', ['Allow: POST']);
+                return;
+            }
 
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityPayloadRequestDto('secretary');
             $secretary = $request_dto->payload;
@@ -239,6 +247,10 @@ class Secretaries extends EA_Controller
         try {
             if (cannot('delete', PRIV_USERS)) {
                 abort(403, 'Forbidden');
+            }
+            if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+                abort(405, 'Method Not Allowed', ['Allow: POST']);
+                return;
             }
 
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityIdRequestDto('secretary_id');
