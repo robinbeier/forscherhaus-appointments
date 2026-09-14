@@ -126,7 +126,7 @@ class Backend_api extends EA_Controller
      */
     public function ajax_delete_customer(): void
     {
-        redirect('customers/destroy');
+        redirect('customers/destroy', 'location', 307);
     }
 
     /**

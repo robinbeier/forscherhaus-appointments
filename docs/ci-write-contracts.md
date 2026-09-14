@@ -250,6 +250,7 @@ Berechtigung zusätzlich POST und antworten bei anderen Methoden mit 405 und
 `Allow: POST`, bevor DTO- oder Modellzugriff erfolgt. Die Legacy-Löschaliase
 leiten weiterhin mit 307 und unverändertem Request-Body an feste Destroy-Ziele
 weiter; die Save-Aliase bleiben eine gesonderte Kompatibilitätsfrage.
+
 Die isolierten Controller-Regressionen prüfen `store`, `update` und `destroy`
 beider Controller mit synthetischen DTO- und Modell-Doubles sowie die
 Redirect-Argumente der beiden Löschaliase. Sie belegen keine echte HTTP-Kette,
@@ -260,3 +261,10 @@ bevor `show_error()` den Request beendet. Ein lokaler HTTP-Helper-Test prüft
 den tatsächlich ausgegebenen Status, `Allow`-Header und Fehlertext dieses
 Abbruchpfads. Das ergänzt die Controller-Doubles, ohne deren Aussagen auf
 Routing, Authentifizierung oder Datenbankverhalten auszuweiten.
+
+Die Customer-Store-, Update- und Destroy-Aktionen prüfen nach der Berechtigung
+zusätzlich POST und antworten sonst mit 405 und `Allow: POST`, bevor DTO- oder
+Modellzugriff erfolgt. Der Customer-Löschalias verwendet eine feste
+307-Weiterleitung. Die isolierten Controller-Tests halten Sichtbarkeitsregeln,
+Datensatz-Zugriffsprüfungen und synthetische DTO-/Modellübergaben fest; sie
+belegen keine echte DB-, HTTP- oder CSRF-Kette.

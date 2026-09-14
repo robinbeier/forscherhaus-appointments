@@ -226,6 +226,10 @@ class Customers extends EA_Controller
             if (cannot('add', PRIV_CUSTOMERS)) {
                 abort(403, 'Forbidden');
             }
+            if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+                abort(405, 'Method Not Allowed', ['Allow: POST']);
+                return;
+            }
 
             if (session('role_slug') !== DB_SLUG_ADMIN && setting('limit_customer_visibility')) {
                 abort(403);
@@ -268,6 +272,10 @@ class Customers extends EA_Controller
             if (cannot('edit', PRIV_CUSTOMERS)) {
                 abort(403, 'Forbidden');
             }
+            if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+                abort(405, 'Method Not Allowed', ['Allow: POST']);
+                return;
+            }
 
             $user_id = session('user_id');
 
@@ -303,6 +311,10 @@ class Customers extends EA_Controller
         try {
             if (cannot('delete', PRIV_CUSTOMERS)) {
                 abort(403, 'Forbidden');
+            }
+            if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+                abort(405, 'Method Not Allowed', ['Allow: POST']);
+                return;
             }
 
             $user_id = session('user_id');
