@@ -15,6 +15,10 @@ Working rules:
 - Add or update the narrow regression coverage required by the assigned behavior.
 - Run the narrowest relevant validation and report the exact commands and results.
 - Return changed files, validation evidence, assumptions, and blockers to the primary agent.
+- For regression work, map each acceptance criterion to its test method and actual assertions;
+  report missing or unexecuted criteria explicitly. Identify doubles and the downstream behavior
+  they cannot prove. A success status or nonempty response alone does not establish payload,
+  access, persistence, or confidentiality claims.
 
 Do not:
 - Merge, push, publish a PR, or change issue state.
