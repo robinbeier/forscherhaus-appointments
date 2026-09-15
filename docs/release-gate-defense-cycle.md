@@ -77,6 +77,33 @@ production evidence. Existing fixed-commit defensive reviews and historical
 results must be retained separately; a green ordinary calendar save is not a
 concurrency guarantee.
 
+### Staff, settings and backoffice regression evidence
+
+`StaffSettingsApiHttpTest` exercises ordinary Admin/Secretary API writes with
+Basic and Bearer authentication, password omission, relationship clearing and
+owned Settings PUT persistence. `BackofficeWriteHttpTest` covers authenticated
+Customer and Blocked-period CRUD plus cleanup before destroy requests.
+`BackofficeHttpContractTest` checks GET/HEAD method rejection on the four
+backoffice controllers, missing-CSRF store/settings/updater requests, and the
+specified provider permission denials. Rejected requests compare deterministic
+hashes of the relevant synthetic database tables. General Settings retains its
+existing permission-error response (500 with an explicit failure message);
+this is distinct from the staff controllers' 403 response.
+
+The ordinary updater tests cover confirmation GET/HEAD and a valid POST on an
+already current disposable installation. They do not execute a pending migration
+or establish rollback safety. These cases are a bounded matrix, not every role,
+method, credential or update/destroy payload combination.
+
+The Admins/Secretaries atomic-write, Staff-delete and Settings-batch model tests
+run in the normal database-backed Unit suite. Their cleanup asserts owned row
+absence; partial-fixture tests register identities before writes and preserve
+unowned sentinels. Settings also verifies rollback of an uncommitted sentinel
+change. Last-admin concurrency and real driver/commit faults retain the limits
+of the existing test doubles. Keep individual test receipts, exact source
+binding and outer-stack cleanup outcome in the private cycle report; a source
+mapping or aggregate green count is not an individual execution receipt.
+
 ## Report contract and release decision
 
 `ReleaseGate\DefenseCycleEvidence` stores append-only observations for ROB-538,

@@ -144,9 +144,30 @@ final class StaffSettingsApiHttpTest extends TestCase
         }
     }
 
-    public function testAdminAndSecretaryWritesPersistWithoutPasswordOnUpdateAndSecretaryClear(): void
+    public static function validWriteAuthenticationCases(): array
     {
-        $admin = $this->basicClient($this->credentials['admin_username'], $this->credentials['password']);
+        return ['basic-admin' => ['basic'], 'bearer' => ['bearer']];
+    }
+
+    #[DataProvider('validWriteAuthenticationCases')]
+    public function testOwnedSettingWritePersistsThroughHttp(string $authentication): void
+    {
+        $setting = $this->fixture->ownedSetting('api-write', 'before');
+        $value = $this->fixture->run . '_updated';
+        $response = $this->success(
+            $this->writeClient($authentication)->requestJsonApp('PUT', 'api/v1/settings/' . $setting['name'], [
+                'value' => $value,
+            ]),
+        );
+        self::assertSame(['name' => $setting['name'], 'value' => $value], $response);
+        self::assertSame($value, $this->fixture->settingRow((int) $setting['id'])['value']);
+    }
+
+    #[DataProvider('validWriteAuthenticationCases')]
+    public function testAdminAndSecretaryWritesPersistWithoutPasswordOnUpdateAndSecretaryClear(
+        string $authentication,
+    ): void {
+        $admin = $this->writeClient($authentication);
         $adminPayload = $this->fixture->adminWritePayload('write');
         $adminPayload['notes'] = $this->fixture->run . '_admin_notes';
         $adminCreate = $this->success($admin->requestJsonApp('POST', 'api/v1/admins', $adminPayload), 201);
@@ -209,6 +230,13 @@ final class StaffSettingsApiHttpTest extends TestCase
         self::assertSame('Updated Secretary', $this->fixture->row('users', $secretaryId)['first_name']);
         self::assertSame([], $this->fixture->secretaryWriteState($secretaryPayload['email'])['providers']);
         $this->assertNoSyntheticSecrets($adminCreate, $adminUpdate, $secretaryCreate, $updated);
+    }
+
+    private function writeClient(string $authentication): GateHttpClient
+    {
+        return $authentication === 'bearer'
+            ? $this->bearerClient($this->credentials['token'])
+            : $this->basicClient($this->credentials['admin_username'], $this->credentials['password']);
     }
 
     private function basicClient(string $username, string $password): GateHttpClient

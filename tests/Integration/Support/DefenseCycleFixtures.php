@@ -25,6 +25,8 @@ final class DefenseCycleFixtures
     private array $baselineCounts = [];
     private array $providerWriteEmails = [];
     private array $adminWriteEmails = [];
+    private array $customerWriteEmails = [];
+    private array $blockedPeriodWriteNames = [];
     private ?array $providerHttpAuthSettings = null;
     private ?array $providerHttpAuthTokenSetting = null;
 
@@ -44,7 +46,15 @@ final class DefenseCycleFixtures
         $ci = &\get_instance();
         $this->db = $ci->db;
         foreach (
-            ['users', 'services', 'appointments', 'user_settings', 'services_providers', 'secretaries_providers']
+            [
+                'users',
+                'services',
+                'appointments',
+                'user_settings',
+                'services_providers',
+                'secretaries_providers',
+                'blocked_periods',
+            ]
             as $table
         ) {
             $this->baselineCounts[$table] = $this->db->count_all($table);
@@ -293,6 +303,50 @@ final class DefenseCycleFixtures
         ];
     }
 
+    /** Register exact identities before ordinary authenticated backoffice writes. */
+    public function customerWritePayload(string $case): array
+    {
+        if (!preg_match('/^[a-z0-9_-]+$/D', $case)) {
+            throw new RuntimeException('Invalid Customer write fixture case.');
+        }
+        $email = $this->run . '_customer_' . $case . '@synthetic.invalid';
+        if (
+            isset($this->customerWriteEmails[$email]) ||
+            $this->db->get_where('users', ['email' => $email])->num_rows() !== 0
+        ) {
+            throw new RuntimeException('Customer write fixture identity is already registered.');
+        }
+        $this->customerWriteEmails[$email] = 0;
+        return [
+            'first_name' => 'Synthetic',
+            'last_name' => 'Customer ' . $case,
+            'email' => $email,
+            'phone_number' => '0000000000',
+            'notes' => $this->run,
+        ];
+    }
+
+    public function blockedPeriodWritePayload(string $case): array
+    {
+        if (!preg_match('/^[a-z0-9_-]+$/D', $case)) {
+            throw new RuntimeException('Invalid Blocked-period write fixture case.');
+        }
+        $name = $this->run . '_blocked_' . $case;
+        if (
+            isset($this->blockedPeriodWriteNames[$name]) ||
+            $this->db->get_where('blocked_periods', ['name' => $name])->num_rows() !== 0
+        ) {
+            throw new RuntimeException('Blocked-period write fixture name is already registered.');
+        }
+        $this->blockedPeriodWriteNames[$name] = 0;
+        return [
+            'name' => $name,
+            'start_datetime' => date('Y-m-d 12:00:00', strtotime('+21 days')),
+            'end_datetime' => date('Y-m-d 13:00:00', strtotime('+21 days')),
+            'notes' => $this->run,
+        ];
+    }
+
     public function secretaryWriteState(string $email): array
     {
         $row = $this->db->get_where('users', ['email' => $email])->row_array();
@@ -420,12 +474,61 @@ final class DefenseCycleFixtures
         }
     }
 
+    private function cleanupCustomerWrites(): void
+    {
+        $role = $this->db->get_where('roles', ['slug' => 'customer'])->row_array();
+        foreach ($this->customerWriteEmails as $email => $_) {
+            $rows = $this->db->get_where('users', ['email' => $email])->result_array();
+            if (count($rows) > 1) {
+                throw new RuntimeException('Ambiguous Customer write fixture identity.');
+            }
+            foreach ($rows as $row) {
+                if (!$role || (int) $row['id_roles'] !== (int) $role['id']) {
+                    throw new RuntimeException('Unexpected Customer write fixture identity.');
+                }
+                $id = (int) $row['id'];
+                if ($this->db->get_where('appointments', ['id_users_customer' => $id])->num_rows() !== 0) {
+                    throw new RuntimeException('Unexpected Customer write fixture appointment relationship.');
+                }
+                $this->db->delete('user_settings', ['id_users' => $id]);
+                $this->db->delete('users', ['id' => $id, 'email' => $email]);
+                if ($this->db->get_where('user_settings', ['id_users' => $id])->num_rows() !== 0) {
+                    throw new RuntimeException('Customer write settings cleanup was not confirmed.');
+                }
+            }
+            if ($this->db->get_where('users', ['email' => $email])->num_rows() !== 0) {
+                throw new RuntimeException('Customer write cleanup was not confirmed.');
+            }
+        }
+    }
+
+    private function cleanupBlockedPeriodWrites(): void
+    {
+        foreach ($this->blockedPeriodWriteNames as $name => $_) {
+            $rows = $this->db->get_where('blocked_periods', ['name' => $name])->result_array();
+            if (count($rows) > 1) {
+                throw new RuntimeException('Ambiguous Blocked-period write fixture identity.');
+            }
+            foreach ($rows as $row) {
+                $this->db->delete('blocked_periods', ['id' => (int) $row['id'], 'name' => $name]);
+            }
+            if ($this->db->get_where('blocked_periods', ['name' => $name])->num_rows() !== 0) {
+                throw new RuntimeException('Blocked-period write cleanup was not confirmed.');
+            }
+        }
+    }
+
     public function row(string $table, int $id): array
     {
         if (!in_array($table, ['users', 'appointments', 'services'], true)) {
             throw new RuntimeException('Unsupported fixture table.');
         }
         return $this->db->get_where($table, ['id' => $id])->row_array() ?? [];
+    }
+
+    public function blockedPeriodRow(int $id): array
+    {
+        return $this->db->get_where('blocked_periods', ['id' => $id])->row_array() ?? [];
     }
 
     public function userSettingsRow(int $id): array
@@ -510,6 +613,8 @@ final class DefenseCycleFixtures
     public function cleanup(): void
     {
         $this->cleanupOwnedSettings();
+        $this->cleanupCustomerWrites();
+        $this->cleanupBlockedPeriodWrites();
         $this->cleanupProviderWrites();
         $this->cleanupSecretaryWrites();
         $this->cleanupAdminWrites();

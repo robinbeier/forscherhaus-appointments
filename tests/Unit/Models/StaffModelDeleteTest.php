@@ -39,7 +39,67 @@ final class StaffModelDeleteTest extends TestCase
 
     protected function tearDown(): void
     {
+        try {
+            $this->cleanupOwnedFixtures();
+            $this->assertOwnedFixturesAbsent();
+        } finally {
+            parent::tearDown();
+        }
+    }
+
+    public function test_partial_fixture_cleanup_is_bounded_to_owned_identities(): void
+    {
+        $owned = $this->adminData('partial-admin');
+        $ownedId = 0;
+        try {
+            $db = get_instance()->db;
+            self::assertTrue(
+                $db->insert('users', [
+                    'first_name' => $owned['first_name'],
+                    'last_name' => $owned['last_name'],
+                    'email' => $owned['email'],
+                    'id_roles' => $this->admins->get_admin_role_id(),
+                    'create_datetime' => date('Y-m-d H:i:s'),
+                    'update_datetime' => date('Y-m-d H:i:s'),
+                ]),
+            );
+            $ownedId = (int) $db->insert_id();
+            self::assertGreaterThan(0, $ownedId);
+            throw new RuntimeException('simulated fixture creation failure');
+        } catch (RuntimeException $exception) {
+            self::assertSame('simulated fixture creation failure', $exception->getMessage());
+        }
+
+        $sentinelData = $this->adminData('sentinel-admin');
+        $sentinel = 0;
         $db = get_instance()->db;
+        try {
+            $sentinel = $this->admins->save($sentinelData);
+            self::assertGreaterThan(0, $sentinel);
+            unset($this->ownedEmails[$sentinelData['email']]);
+            $sentinelSnapshot = $this->snapshot($sentinel);
+            self::assertNotEmpty($sentinelSnapshot['user']);
+            self::assertNotEmpty($sentinelSnapshot['settings']);
+            $this->cleanupOwnedFixtures();
+            self::assertSame(0, $db->get_where('users', ['id' => $ownedId])->num_rows());
+            self::assertSame($sentinelSnapshot, $this->snapshot($sentinel));
+        } finally {
+            if ($sentinel > 0) {
+                $db->delete('user_settings', ['id_users' => $sentinel]);
+                $db->delete('users', ['id' => $sentinel]);
+                self::assertSame(0, $db->get_where('users', ['id' => $sentinel])->num_rows());
+                self::assertSame(0, $db->get_where('user_settings', ['id_users' => $sentinel])->num_rows());
+            }
+        }
+    }
+
+    private function cleanupOwnedFixtures(): void
+    {
+        $db = get_instance()->db;
+        if ($db->trans_active()) {
+            self::assertTrue($db->trans_rollback());
+            self::assertFalse($db->trans_active());
+        }
         foreach ($this->ownedEmails as $email => $role) {
             $row = $db
                 ->select('users.id')
@@ -53,11 +113,39 @@ final class StaffModelDeleteTest extends TestCase
             }
         }
         foreach (array_unique($this->ownedIds) as $id) {
-            $db->delete('secretaries_providers', ['id_users_secretary' => $id]);
+            $db->where('id_users_provider', $id)->or_where('id_users_secretary', $id)->delete('secretaries_providers');
             $db->delete('user_settings', ['id_users' => $id]);
             $db->delete('users', ['id' => $id]);
         }
-        parent::tearDown();
+    }
+
+    private function assertOwnedFixturesAbsent(): void
+    {
+        $db = get_instance()->db;
+        foreach ($this->ownedEmails as $email => $role) {
+            self::assertSame(
+                0,
+                $db
+                    ->select('users.id')
+                    ->from('users')
+                    ->join('roles', 'roles.id = users.id_roles')
+                    ->where(['users.email' => $email, 'roles.slug' => $role])
+                    ->get()
+                    ->num_rows(),
+            );
+        }
+        foreach (array_unique($this->ownedIds) as $id) {
+            self::assertSame(0, $db->get_where('users', ['id' => $id])->num_rows());
+            self::assertSame(0, $db->get_where('user_settings', ['id_users' => $id])->num_rows());
+            self::assertSame(
+                0,
+                $db
+                    ->where('id_users_provider', $id)
+                    ->or_where('id_users_secretary', $id)
+                    ->get('secretaries_providers')
+                    ->num_rows(),
+            );
+        }
     }
 
     public function test_admin_and_secretary_delete_remove_owned_rows_and_relations(): void
