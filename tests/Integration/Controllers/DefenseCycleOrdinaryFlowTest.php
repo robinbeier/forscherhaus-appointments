@@ -69,6 +69,36 @@ final class DefenseCycleOrdinaryFlowTest extends TestCase
         self::assertSame([], $this->fixture->row('services', $this->fixture->serviceId));
     }
 
+    public function testOrdinaryUpdaterConfirmationAndCurrentVersionPost(): void
+    {
+        $client = $this->server->client();
+        self::assertSame(200, $client->get('login')->statusCode);
+        self::assertTrue(
+            $this->json(
+                $client->post('login/validate', [
+                    'username' => $this->fixture->run . '_actor',
+                    'password' => $this->fixture->password,
+                ]),
+            )['success'],
+        );
+        $db = get_instance()->db;
+        $before = $db->get('migrations')->result_array();
+        self::assertNotEmpty($before, 'Fresh install must already have migration tracking.');
+        $confirmation = $client->get('update');
+        self::assertSame(200, $confirmation->statusCode);
+        self::assertStringContainsString('<form method="post"', $confirmation->body);
+        self::assertStringContainsString('name="csrf_token"', $confirmation->body);
+        self::assertSame($before, $db->get('migrations')->result_array());
+        $updated = $client->post('update');
+        self::assertSame(200, $updated->statusCode);
+        self::assertStringContainsString('The database got updated successfully.', $updated->body);
+        self::assertSame(
+            $before,
+            $db->get('migrations')->result_array(),
+            'Current-version update must remain current.',
+        );
+    }
+
     public function testOrdinaryAccountCustomerAndCalendarSave(): void
     {
         $f = $this->fixture;

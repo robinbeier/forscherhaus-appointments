@@ -27,14 +27,73 @@ final class SettingsModelAtomicBatchTest extends TestCase
 
     protected function tearDown(): void
     {
+        try {
+            $this->cleanupOwnedFixtures();
+            $this->assertOwnedFixturesAbsent();
+        } finally {
+            parent::tearDown();
+        }
+    }
+
+    public function test_partial_fixture_cleanup_rolls_back_and_preserves_unowned_sentinel(): void
+    {
+        $ownedName = $this->ownedSettingName('partial');
+        $sentinelName = 'atomic_batch_sentinel_' . bin2hex(random_bytes(4));
+        $this->settingsModel->save(['name' => $ownedName, 'value' => 'owned']);
         $db = get_instance()->db;
+        self::assertSame('owned', $db->get_where('settings', ['name' => $ownedName])->row_array()['value']);
+        try {
+            self::assertTrue($db->insert('settings', ['name' => $sentinelName, 'value' => 'sentinel']));
+            $sentinelSnapshot = $db->get_where('settings', ['name' => $sentinelName])->row_array();
+            self::assertNotEmpty($sentinelSnapshot);
+            self::assertTrue($db->trans_begin());
+            try {
+                self::assertTrue(
+                    $db->update('settings', ['value' => 'uncommitted sentinel change'], ['name' => $sentinelName]),
+                );
+                self::assertSame(
+                    'uncommitted sentinel change',
+                    $db->get_where('settings', ['name' => $sentinelName])->row_array()['value'],
+                );
+                $this->settingsModel->save(['name' => $ownedName, 'value' => 'partial update']);
+                throw new RuntimeException('simulated fixture creation failure');
+            } catch (RuntimeException $exception) {
+                self::assertSame('simulated fixture creation failure', $exception->getMessage());
+            }
+            $this->cleanupOwnedFixtures();
+            self::assertFalse($db->trans_active());
+            self::assertSame(0, $db->get_where('settings', ['name' => $ownedName])->num_rows());
+            self::assertSame($sentinelSnapshot, $db->get_where('settings', ['name' => $sentinelName])->row_array());
+        } finally {
+            if ($db->trans_active()) {
+                self::assertTrue($db->trans_rollback());
+            }
+            self::assertTrue($db->delete('settings', ['name' => $sentinelName]));
+            self::assertSame(0, $db->get_where('settings', ['name' => $sentinelName])->num_rows());
+        }
+    }
+
+    private function cleanupOwnedFixtures(): void
+    {
+        $db = get_instance()->db;
+        if ($db->trans_active()) {
+            self::assertTrue($db->trans_rollback());
+            self::assertFalse($db->trans_active());
+        }
         foreach ($this->ownedNames as $name) {
             $rows = $db->get_where('settings', ['name' => $name])->result_array();
             foreach ($rows as $row) {
                 $db->delete('settings', ['id' => (int) $row['id'], 'name' => $name]);
             }
         }
-        parent::tearDown();
+    }
+
+    private function assertOwnedFixturesAbsent(): void
+    {
+        $db = get_instance()->db;
+        foreach ($this->ownedNames as $name) {
+            self::assertSame(0, $db->get_where('settings', ['name' => $name])->num_rows());
+        }
     }
 
     public function testBatchCreatesUpdatesInOrderAndPreservesCallerIdFallback(): void
