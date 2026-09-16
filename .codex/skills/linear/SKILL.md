@@ -37,7 +37,8 @@ not require a particular GraphQL transport or tool name.
 6. Verify the resulting issue, comment, or attachment state. Treat reported
    errors as failures and do not infer success from a partial response. Check
    existing state before retrying an uncertain write to avoid duplicates. A
-   replacement must target the same destination and contain only the minimum
+   replacement must preserve the leading `## Codex Workpad` marker, target the
+   same destination, and contain only the minimum
    allowed status/evidence/next-action content; ask once if it cannot be made
    safe within the authorized scope.
 

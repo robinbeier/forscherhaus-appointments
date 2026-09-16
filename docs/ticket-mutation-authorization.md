@@ -102,7 +102,10 @@ Entscheidung ausdrücklich eine sichere Alternative zulässt:
    Betriebsdaten oder Logs nicht erneut an dasselbe oder ein anderes Ziel senden.
 2. Für genau dasselbe Ziel einen neuen, kleinsten Text aus dem erlaubten Scope
    formulieren. Für das Workpad genügen Zielaktion, aktueller Status,
-   überprüfbarer Kurzbefund und die nächste gebundene Aktion, zum Beispiel:
+   überprüfbarer Kurzbefund und die nächste gebundene Aktion. Beim Ersetzen des
+   bestehenden Kommentars die erste Zeile `## Codex Workpad` unverändert erhalten,
+   damit spätere Läufe denselben Workpad wiederfinden. Beispiel für den Text
+   unter dieser verpflichtenden ersten Zeile:
    `Repository change ready; local checks passed; independent review no findings;
    next: GitHub checks; detailed evidence local.`
 3. Nur diesen sanitisierten Ersatztext einmal über den autorisierten Zielkanal
