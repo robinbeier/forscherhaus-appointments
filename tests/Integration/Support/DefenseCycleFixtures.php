@@ -378,6 +378,28 @@ final class DefenseCycleFixtures
         ];
     }
 
+    /** Return direct deletion postconditions for a registered Secretary identity. */
+    public function secretaryDeleteState(int $id): array
+    {
+        return [
+            'user' => $this->row('users', $id),
+            'settings' => $this->userSettingsRow($id),
+            'providers' => $this->db->get_where('secretaries_providers', ['id_users_secretary' => $id])->result_array(),
+        ];
+    }
+
+    /** Snapshot staff rows and relationships so unrelated synthetic sentinels remain observable. */
+    public function secretaryDeleteSnapshot(): array
+    {
+        $snapshot = [];
+        foreach (['users', 'user_settings', 'services_providers', 'secretaries_providers', 'appointments'] as $table) {
+            $rows = $this->db->get($table)->result_array();
+            usort($rows, static fn(array $left, array $right): int => strcmp(json_encode($left), json_encode($right)));
+            $snapshot[$table] = $rows;
+        }
+        return $snapshot;
+    }
+
     /** Only owned synthetic staff rows may be seeded with integration sentinels. */
     public function seedStaffIntegrationSecrets(int $id): void
     {

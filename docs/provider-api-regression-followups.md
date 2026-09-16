@@ -93,3 +93,19 @@ authentication, and repeated deletion returning 404. The fixture registers each
 future identity before its HTTP request and cleanup remains repeatable.
 These cases are ordinary local HTTP evidence only; concurrent writes, other
 roles, production HTTP configuration and deployment remain outside this pilot.
+
+## Bounded Secretary DELETE regression
+
+`tests/Integration/Controllers/StaffSettingsApiHttpTest.php` now covers
+authorized synthetic Secretary deletion through administrator Basic and the
+global Bearer token. Each case registers and creates its own Secretary with a
+known Provider link, asserts a positive ID and settings/link preconditions,
+then verifies HTTP `204`, direct absence of the user/settings/link rows, and
+unchanged unrelated Provider and second-Secretary sentinel state. Repeated
+deletion returns `404`; missing authentication returns `401` with a challenge
+and leaves the fixture unchanged. The fixture cleanup is explicitly repeated
+after DELETE and confirms both owned identities are absent.
+
+This is ordinary local HTTP evidence for the API route and authentication
+boundary. It does not cover administrator deletion, deletion with appointments,
+concurrent writes, other roles, production configuration, or deployment.
