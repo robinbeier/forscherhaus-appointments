@@ -1652,6 +1652,13 @@ jobs:
       - name: Run isolated ordinary application and session lifecycle checks
         run: |
           python3 -B scripts/ci/run_gate_with_summary.py --label defense-cycle -- bash scripts/ci/run_defense_cycle.sh
+      - name: Upload Defense phase and testcase evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: defense-cycle-receipts-${{ github.job }}
+          path: storage/logs/ci/defense-cycle/*.summary.json
+          retention-days: 7
       - name: Upload PHP build timing evidence
         if: always()
         uses: actions/upload-artifact@v7

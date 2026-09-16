@@ -42,6 +42,24 @@ redirected to another daemon. The dedicated required workflow job in
 coverage runs skip these tests unless the isolated flag is present; those skips
 are not evidence that the gate passed.
 
+## Phase and testcase receipts
+
+Each runner invocation writes a unique `storage/logs/ci/defense-cycle/*.summary.json`
+receipt with its source commit, tracked dirty state, isolated environment,
+monotonic durations for startup/readiness/seed/PHPUnit/cleanup, and per-test
+class, method, assertion count, duration and result. Skipped, failed and errored
+cases remain distinct. Missing phases or unavailable JUnit data cannot yield a
+complete passing receipt. The cleanup field describes the owned Docker stack;
+it does not substitute for a test's own row-level cleanup assertions or establish
+production cleanup.
+
+The CI artifact `defense-cycle-receipts-defense-cycle-ordinary-flows` contains
+only these JSON receipts. Private raw JUnit XML and event files remain local;
+failure text, stdout and testcase properties are excluded from the summary.
+Diagnostics never replace the original test exit code or prevent stack cleanup.
+A missing receipt is an evidence gap even if the gate itself passed. Compare
+phase durations across ordinary runs before changing readiness or test ordering.
+
 ## What the tests establish
 
 The bounded [Provider HTTP authentication regressions](provider-api-regression-followups.md#bounded-http-authentication-regression)
