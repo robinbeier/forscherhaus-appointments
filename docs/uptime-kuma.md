@@ -24,25 +24,30 @@ Host-owned:
 
 ## Production Snapshot
 
-The repository desired state now pins `2.5.5-slim` and its digest in
-`docker/compose.uptime-kuma.yml`. This update is pending its separately
-authorized production execution; the historical installed production image is
-`2.5.3-slim` with the previously recorded digest.
+The repository desired state pins `2.5.5-slim` and its digest in
+`docker/compose.uptime-kuma.yml`. On 2026-09-16, the production update to this
+image completed successfully: the live instance was healthy at 19:36 UTC after
+the change, 18 configuration tables were preserved, and the full-backup
+old-image restore and new-image offline-upgrade checks passed. Production
+validation passed at 19:37 UTC. This dated observation is bound to the
+deployed update and does not replace a fresh check for a later release;
+ordinary post-update observation remains pending in this snapshot.
 
 - desired image: `2.5.5-slim@sha256:9c56a772a7df53f444a404c579e87a27bd0c201375d00d6745a75bf8138f4342`
-- historical installed image: `2.5.3-slim@sha256:7d70c3bd3127dc4ad2910f9d2d18481a6ac4f195a4e23e32f0c50869f977985a`
+- deployed image: `2.5.5-slim@sha256:9c56a772a7df53f444a404c579e87a27bd0c201375d00d6745a75bf8138f4342`
+- saved rollback image: `2.5.3-slim@sha256:7d70c3bd3127dc4ad2910f9d2d18481a6ac4f195a4e23e32f0c50869f977985a`
 - listen address: `127.0.0.1:3001`
 - data mount: `/var/lib/uptime-kuma-data` bind-mounted at `/app/data`
 - database file: `/app/data/kuma.db` (SQLite)
 
 The slim image omits Chromium and embedded MariaDB; this instance uses SQLite
 and HTTP, keyword, JSON, and Push monitors. It does not use browser monitors.
-The last completed switch preserved the monitor and notification configuration.
-For the pending update, take a fresh complete Kuma data and Compose backup
-before execution. Preserve the existing monitor and notification
-configuration. If rollback is required, restore the matching old data backup
-together with the historical `2.5.3-slim` image and its digest. This new
-rollback backup is excluded from ROB-513.
+The completed update preserved the existing monitor and notification
+configuration. The full-backup restore and offline-upgrade checks are dated
+evidence for this update. If rollback is required, restore the matching saved
+old data backup together with the saved `2.5.3-slim` image and digest. The new
+rollback backup is excluded from ROB-513. Any later upgrade requires its own
+fresh backup and verification.
 
 Active monitors were captured on 2026-05-14. The repo desired-state catalog now
 also includes reviewed follow-up changes, such as the ROB-385 split between
@@ -155,6 +160,15 @@ not apply it. Verify the saved value and a fresh normal heartbeat afterward.
 The catalog above records the non-secret monitor shape. Live monitor history,
 Push URLs, and other credentials remain host-owned.
 
+## Operational decision (2026-09-15)
+
+The automatic release/archive/dump retention timer is intentionally disabled
+and inactive. The host resource monitor remains active, but its optional
+retention-success check is disabled with the host-local setting
+`KUMA_RELEASE_RETENTION_MONITOR_ENABLED=0`. The installed helper is retained
+for read-only inventory; any manual cleanup requires a separate, explicit
+production authorization for the exact bounded pass.
+
 ## Health Monitor Boundary
 
 `/health` and `/index.php/healthz` intentionally have different trust
@@ -222,9 +236,15 @@ install -m 0600 scripts/ops/uptime-kuma-push.env.example /root/backups/uptime-ku
 Fill in real Push URLs on the host only.
 
 The retention-success check in `kuma_push_host_resources.sh` reads
-`KUMA_RELEASE_RETENTION_MONITOR_ENABLED=1` from the protected host-local Env.
-The completed one-time activation helper is retired; regular monitoring does
-not depend on it. Keep the enabled setting and existing recovery files.
+`KUMA_RELEASE_RETENTION_MONITOR_ENABLED=0` from the protected host-local Env
+and is therefore disabled by the operational decision above. The completed
+one-time activation helper is retired; regular resource monitoring does not
+depend on it. Keep existing recovery files.
+
+Reactivation of the retention timer or its success check is a future,
+separately authorized operational change. It requires a fresh read-only
+inventory, review of the retention policy, and explicit approval of the exact
+timer/monitor change before enabling either setting.
 
 Future Env changes need explicit approval for the concrete change, a verified
 backup, root-only permissions, protection against concurrent writes, and a

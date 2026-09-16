@@ -246,6 +246,13 @@ final class ReleaseArchiveDumpRetentionContractTest extends TestCase
             self::assertNotFalse($position);
         }
         self::assertTrue($install < $dryRun && $dryRun < $execute && $execute < $postflight && $postflight < $timer);
+        $retiredMonitor = strpos($docs, 'KUMA_RELEASE_RETENTION_MONITOR_ENABLED=0');
+        $reactivatedMonitor = strpos($docs, 'KUMA_RELEASE_RETENTION_MONITOR_ENABLED=0` to `=1');
+        $timerEnable = strpos($docs, '/usr/bin/systemctl enable fh-release-archive-dump-retention.timer');
+        self::assertNotFalse($retiredMonitor);
+        self::assertNotFalse($reactivatedMonitor);
+        self::assertNotFalse($timerEnable);
+        self::assertTrue($retiredMonitor < $reactivatedMonitor && $reactivatedMonitor < $timerEnable);
         self::assertStringContainsString('that yields no single canonical helper result', $docs);
         self::assertStringContainsString('operator-side mutation', $docs);
         self::assertStringContainsString('Never infer `deletion_performed:false`', $docs);
@@ -261,7 +268,8 @@ final class ReleaseArchiveDumpRetentionContractTest extends TestCase
                 'bash scripts/ops/prod_doctor.sh',
                 'bash scripts/ops/prod_cleanup_inventory.sh',
                 'marker-status 691200',
-                'KUMA_RELEASE_RETENTION_MONITOR_ENABLED=1',
+                'KUMA_RELEASE_RETENTION_MONITOR_ENABLED=0',
+                'KUMA_RELEASE_RETENTION_MONITOR_ENABLED=0` to `=1',
                 '/usr/bin/systemctl enable fh-release-archive-dump-retention.timer',
                 'approval must explicitly',
                 '/usr/bin/systemctl start fh-release-archive-dump-retention.timer',
@@ -285,7 +293,8 @@ final class ReleaseArchiveDumpRetentionContractTest extends TestCase
                 'bash scripts/ops/prod_doctor.sh',
                 'bash scripts/ops/prod_cleanup_inventory.sh',
                 'marker-status 691200',
-                'KUMA_RELEASE_RETENTION_MONITOR_ENABLED=1',
+                'KUMA_RELEASE_RETENTION_MONITOR_ENABLED=0',
+                'KUMA_RELEASE_RETENTION_MONITOR_ENABLED=0` to `=1',
                 '/usr/bin/systemctl enable fh-release-archive-dump-retention.timer',
                 'approval must explicitly',
                 '/usr/bin/systemctl start fh-release-archive-dump-retention.timer',
