@@ -201,6 +201,13 @@ Rules:
   in GitHub.
 - Update it when entering a new run, before opening or updating a PR, whenever
   the Linear state changes, and immediately after merge.
+- Classify rejected updates before another mutation. Policy refusals, missing
+  authorization, and unclear reasons stop the affected method. Only a confirmed
+  content/schema rejection within existing authority whose decision permits a
+  safer alternative allows one minimal replacement at the same destination.
+  Preserve the leading `## Codex Workpad` marker and private evidence; verify the
+  saved state. Never resend rejected raw details or change tools/models to bypass
+  a refusal. See [bounded replacement guidance](docs/ticket-mutation-authorization.md#sichere-übergabe-nach-einer-ablehnung).
 
 ## Run Playbook
 
@@ -216,6 +223,10 @@ Rules:
   Quickstart `docker compose up -d`. The report is not authorization.
 - If the current branch already exists, sync it before editing.
 - Reproduce the problem or gather concrete evidence before changing code.
+- Bind release code, operating documentation, and the release plan to one
+  verified checkout SHA. Record the deployed SHA and historical report SHAs
+  separately; a stale checkout or historical report cannot establish the
+  current gate state.
 - For authority-, secret-, identity-, transaction-, or concurrency-sensitive
   writes, record the complete path before editing:
   `route -> request classification -> server-side authority -> locks and
