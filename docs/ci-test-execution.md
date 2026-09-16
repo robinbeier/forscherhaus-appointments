@@ -168,3 +168,34 @@ not prove that target. Use regular PR/main runs only. Record cold, warm and
 unavailable-cache runs separately; if ROB-564 has no natural warm observation,
 carry that measurement gap into ROB-565. Report the job and complete workflow
 separately rather than treating their durations as interchangeable.
+
+
+### PHP cache reliability follow-up (2026-09-16)
+
+Natural hosted runs showed a real earlier cache hit, followed by repeated
+missing-layer failures with the same Buildx 0.37.0 / BuildKit 0.32.2 versions.
+These are observations, not a controlled benchmark:
+
+| Run | Event | PHP helper total | Cache attempt | Recovery build | Export |
+| --- | --- | ---: | ---: | ---: | ---: |
+| [34758769174](https://github.com/robinbeier/forscherhaus-appointments/actions/runs/34758769174) | PR #572 | 24.809 s | 24.550 s, hit | — | — |
+| [34801289293](https://github.com/robinbeier/forscherhaus-appointments/actions/runs/34801289293) | PR #599 | 180.743 s | 45.272 s, timeout | 124.632 s | 10.651 s |
+| [34801868088](https://github.com/robinbeier/forscherhaus-appointments/actions/runs/34801868088) | main | 182.916 s | 45.277 s, timeout | 127.809 s | 9.575 s |
+| [34802719894](https://github.com/robinbeier/forscherhaus-appointments/actions/runs/34802719894) | main | 166.801 s | 45.245 s, timeout | 108.696 s | 12.551 s |
+| [34936824102](https://github.com/robinbeier/forscherhaus-appointments/actions/runs/34936824102) | PR #601 | 175.742 s | 45.248 s, timeout | 118.863 s | 11.272 s |
+| [34937299471](https://github.com/robinbeier/forscherhaus-appointments/actions/runs/34937299471) | main | 192.876 s | 45.273 s, timeout | 127.234 s | 20.023 s, timeout |
+
+Run 34936824102 took 302 seconds for the Defense job, including 176 seconds
+for the build step and 65 seconds for the test step. The historical 122-second
+job is not directly comparable because suite and setup costs have changed.
+The repeated 45-second attempts followed cached-vertex missing-blob errors;
+successful optional exports did not establish reuse in the next run.
+
+The archive transport change must be measured on its ordinary PR run and later
+natural main/PR runs. Record restore/save step durations alongside helper phases,
+cache outcome, exact SHA and total Defense/workflow duration. The first archive
+miss is a cold observation, not warm-cache proof. Acceptance requires repeated
+natural warm reuse without missing-blob recovery and lower total PHP preparation
+including transport. Keep this evidence gap open until those runs exist; do not
+create no-op changes or rerun CI solely to generate measurements. An unavailable
+cache must still permit the normal build, tests and cleanup to finish.

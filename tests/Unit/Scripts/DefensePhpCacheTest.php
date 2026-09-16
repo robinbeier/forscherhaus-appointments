@@ -32,7 +32,7 @@ final class DefensePhpCacheTest extends TestCase
             '/^forscherhaus-local\/php-fpm:[0-9a-f]{64}$/',
             $this->after($command, '--tag'),
         );
-        self::assertStringContainsString('type=gha,version=2,scope=defense-php-', implode(' ', $command));
+        self::assertStringContainsString('type=local,src=', implode(' ', $command));
     }
 
     public function testCacheMissBuildsThenExports(): void
@@ -41,7 +41,8 @@ final class DefensePhpCacheTest extends TestCase
         self::assertSame(0, $result['code'], $result['stderr']);
         self::assertSame('miss', $result['report']['cache']);
         self::assertSame(['cache_build', 'cache_export'], array_column($result['report']['phases'], 'phase'));
-        self::assertContains('--output=type=cacheonly', $result['commands'][1]);
+        self::assertStringContainsString('type=local,dest=', implode(' ', $result['commands'][1]));
+        self::assertTrue($result['report']['cache_export_ready']);
     }
 
     public function testImporterFailureFallsBackButLaterBuildFailureIsFatal(): void
@@ -149,7 +150,7 @@ final class DefensePhpCacheTest extends TestCase
 
     public function testLazyCacheReadsRecoverOnlyWithCompletedCachedBuildAndSpecificReadError(): void
     {
-        foreach (['lazy-missing', 'lazy-http'] as $mode) {
+        foreach (['lazy-missing'] as $mode) {
             $result = $this->runHelper($mode);
             self::assertSame(0, $result['code'], $result['stderr']);
             self::assertSame('import_error', $result['report']['cache']);
@@ -162,7 +163,7 @@ final class DefensePhpCacheTest extends TestCase
     public function testLazyReadRecoveryNeverMasksOtherBuildOrLoadErrors(): void
     {
         foreach (
-            ['lazy-run', 'lazy-disk', 'lazy-no-import', 'lazy-incomplete', 'lazy-generic', 'lazy-registry']
+            ['lazy-http', 'lazy-run', 'lazy-disk', 'lazy-no-import', 'lazy-incomplete', 'lazy-generic', 'lazy-registry']
             as $mode
         ) {
             $result = $this->runHelper($mode);
@@ -172,8 +173,48 @@ final class DefensePhpCacheTest extends TestCase
         }
     }
 
-    private function runHelper(string $mode, bool $runtime = true, array $build = [], float $timeout = 0.0): array
+    public function testMissingImportBuildsColdAndExports(): void
     {
+        $result = $this->runHelper('miss', true, [], 0.0, 'absent');
+        self::assertSame(0, $result['code'], $result['stderr']);
+        self::assertSame('cold', $result['report']['cache']);
+        self::assertSame(['build', 'cache_export'], array_column($result['report']['phases'], 'phase'));
+    }
+
+    public function testInvalidImportIndexBuildsCold(): void
+    {
+        $result = $this->runHelper('miss', true, [], 0.0, 'invalid');
+        self::assertSame(0, $result['code'], $result['stderr']);
+        self::assertSame('cold', $result['report']['cache']);
+        self::assertSame(['build', 'cache_export'], array_column($result['report']['phases'], 'phase'));
+    }
+
+    public function testCacheExportReadinessRequiresFreshIndex(): void
+    {
+        $result = $this->runHelper('export-no-index', true);
+        self::assertSame(0, $result['code'], $result['stderr']);
+        self::assertFalse($result['report']['cache_export_ready']);
+
+        $result = $this->runHelper('miss', true, [], 0.0, 'export-file');
+        self::assertSame(0, $result['code'], $result['stderr']);
+        self::assertFalse($result['report']['cache_export_ready']);
+    }
+
+    public function testCacheDirectoryCommaIsRejected(): void
+    {
+        $result = $this->runHelper('miss', true, [], 0.0, 'valid', 'cache,invalid');
+        self::assertSame(1, $result['code']);
+        self::assertSame([], $result['commands']);
+    }
+
+    private function runHelper(
+        string $mode,
+        bool $runtime = true,
+        array $build = [],
+        float $timeout = 0.0,
+        string $cacheSetup = 'valid',
+        ?string $cachePath = null,
+    ): array {
         $fixture = sys_get_temp_dir() . '/defense-php-cache-' . bin2hex(random_bytes(5));
         mkdir($fixture . '/docker/php-fpm', 0700, true);
         $this->fixtures[] = $fixture;
@@ -182,6 +223,17 @@ final class DefensePhpCacheTest extends TestCase
         $bin = $fixture . '-bin';
         mkdir($bin, 0700, true);
         $this->fixtures[] = $bin;
+        $cacheRoot = $cachePath === null ? $fixture . '/cache' : $fixture . '/' . $cachePath;
+        mkdir($cacheRoot, 0700, true);
+        if ($cacheSetup === 'valid') {
+            mkdir($cacheRoot . '/import', 0700, true);
+            file_put_contents($cacheRoot . '/import/index.json', '{}');
+        } elseif ($cacheSetup === 'invalid') {
+            mkdir($cacheRoot . '/import', 0700, true);
+            file_put_contents($cacheRoot . '/import/index.json', '{invalid');
+        } elseif ($cacheSetup === 'export-file') {
+            file_put_contents($cacheRoot . '/export', 'directory sentinel');
+        }
         $docker = $bin . '/docker';
         $script = <<<'PYTHON'
         #!/usr/bin/env python3
@@ -198,7 +250,7 @@ final class DefensePhpCacheTest extends TestCase
             print(json.dumps({'vertexes': [vertex]}), flush=True)
         if mode.startswith('lazy-') and '--cache-from' in args:
             if mode != 'lazy-no-import':
-                emit('cache', 'importing cache manifest from gha', completed='2026-09-13T12:00:00Z')
+                emit('cache', 'importing cache manifest from local', completed='2026-09-13T12:00:00Z')
             emit('run', '[2/2] RUN dependencies', completed='2026-09-13T12:00:00Z', cached=True)
             if mode == 'lazy-incomplete':
                 emit('copy', '[3/3] COPY runtime /runtime', started='2026-09-13T12:00:00Z')
@@ -216,13 +268,13 @@ final class DefensePhpCacheTest extends TestCase
         if mode == 'timeout' and '--cache-from' in args:
             time.sleep(3)
         if mode in ('import-error', 'import-error-build-error') and '--cache-from' in args:
-            emit('cache', 'importing cache manifest from gha', error='cache unavailable')
+            emit('cache', 'importing cache manifest from local', error='cache unavailable')
             sys.exit(17)
         if mode == 'import-error-build-error' and '--cache-from' not in args:
             emit('run', '[2/2] RUN dependencies', error='compiler failed')
             sys.exit(23)
         if mode == 'import-success-run-error' and '--cache-from' in args:
-            emit('cache', 'importing cache manifest from gha', completed='2026-09-13T12:00:00Z')
+            emit('cache', 'importing cache manifest from local', completed='2026-09-13T12:00:00Z')
             emit('run', '[2/2] RUN dependencies', error='compiler failed')
             sys.exit(23)
         if mode == 'unknown-error':
@@ -234,6 +286,12 @@ final class DefensePhpCacheTest extends TestCase
             time.sleep(3)
         if mode != 'unknown':
             emit('run', '[2/2] RUN dependencies', completed='2026-09-13T12:00:00Z', cached=mode == 'hit')
+        if '--output=type=cacheonly' in args and mode != 'export-no-index':
+            for value in args:
+                if value.startswith('type=local,dest='):
+                    destination = value.split('dest=', 1)[1].split(',', 1)[0]
+                    os.makedirs(destination, exist_ok=True)
+                    open(os.path.join(destination, 'index.json'), 'w').write('{}')
         PYTHON;
         file_put_contents($docker, $script);
         chmod($docker, 0700);
@@ -254,10 +312,17 @@ final class DefensePhpCacheTest extends TestCase
             $env['ACTIONS_RESULTS_URL'] = 'https://example.test/';
         }
         $command = ['python3', __DIR__ . '/../../../scripts/ci/defense_php_cache.py', '--platform', 'linux/amd64'];
+        if ($runtime) {
+            $command[] = '--cache-dir';
+            $command[] = $cacheRoot;
+        }
         if ($timeout > 0) {
             $code =
-                'import sys; sys.path.insert(0, sys.argv[1]); import defense_php_cache as h; h.CACHE_BUILD_SECONDS=float(sys.argv[2]); h.CACHE_EXPORT_SECONDS=float(sys.argv[2]); sys.argv=["helper","--platform","linux/amd64"]; raise SystemExit(h.main())';
+                'import sys; sys.path.insert(0, sys.argv[1]); import defense_php_cache as h; h.CACHE_BUILD_SECONDS=float(sys.argv[2]); h.CACHE_EXPORT_SECONDS=float(sys.argv[2]); sys.argv=["helper","--platform","linux/amd64","--cache-dir",sys.argv[3]]; raise SystemExit(h.main())';
             $command = ['python3', '-c', $code, dirname(__DIR__, 3) . '/scripts/ci', (string) $timeout];
+            if ($runtime) {
+                $command[] = $cacheRoot;
+            }
         }
         $process = proc_open(
             $command,
@@ -273,10 +338,13 @@ final class DefensePhpCacheTest extends TestCase
         $stderr = stream_get_contents($pipes[2]);
         fclose($pipes[2]);
         $code = proc_close($process);
+        if (!$runtime) {
+            $this->remove($fixture . '/cache');
+        }
         $report = json_decode(trim($stdout), true) ?: [];
         $commands = array_map(
             static fn(string $line): array => json_decode($line, true),
-            file($log, FILE_IGNORE_NEW_LINES) ?: [],
+            is_file($log) ? file($log, FILE_IGNORE_NEW_LINES) : [],
         );
         return compact('code', 'stderr', 'report', 'commands');
     }

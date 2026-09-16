@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build only the existing PHP recipe; remote layers are an optional accelerator."""
+"""Build only the existing PHP recipe with an optional local OCI cache."""
 from __future__ import annotations
 
 import argparse
@@ -11,15 +11,13 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from urllib.parse import urlsplit
 
 import local_php_image_key
 
-# Backend limits also apply to individual cache operations. The outer deadlines
-# include lazy layer downloads, image loading and exporter transfer overhead.
+# Outer deadlines include local layer reads, image loading and export.
+# Archive upload/download are bounded separately by the workflow.
 CACHE_BUILD_SECONDS = 45
 CACHE_EXPORT_SECONDS = 20
-CACHE_TIMEOUT = "15s"
 
 
 def run(command, timeout=None):
@@ -71,11 +69,11 @@ def cache_import_failure(output):
     if not errors:
         return False
     if all(
-        str(item.get("name", "")).startswith("importing cache manifest from gha")
+        str(item.get("name", "")).startswith("importing cache manifest from local")
         for item in errors
     ):
         return True
-    imported = any(str(item.get("name", "")).startswith("importing cache manifest from gha")
+    imported = any(str(item.get("name", "")).startswith("importing cache manifest from local")
                    and item.get("completed") and not item.get("error") for item in entries)
     if not imported or cache_state(output) != "hit":
         return False
@@ -90,12 +88,6 @@ def cache_import_failure(output):
 def cache_read_error(error):
     if re.search(r"\bblob sha256:[0-9a-f]{64}: not found\b", error):
         return True
-    if not re.search(r"invalid status response|\bGet [\"']?https://", error):
-        return False
-    for url in re.findall(r"https://[^\s\"']+", error):
-        host = urlsplit(url).hostname or ""
-        if host.endswith((".actions.githubusercontent.com", ".blob.core.windows.net")):
-            return True
     return False
 
 
@@ -105,6 +97,13 @@ def cache_state(output):
     if not executed or not all(item.get("completed") for item in executed):
         return "unknown"
     return "hit" if all(item.get("cached") is True for item in executed) else "miss"
+
+
+def valid_cache_index(path):
+    try:
+        return isinstance(json.loads(path.read_text()), dict)
+    except (OSError, ValueError, TypeError):
+        return False
 
 
 def build_command(config, platform):
@@ -132,6 +131,7 @@ def main():
     parser.add_argument("--platform", default=os.environ.get("DOCKER_DEFAULT_PLATFORM", ""))
     parser.add_argument("--resolve-compose", action="store_true")
     parser.add_argument("--report")
+    parser.add_argument("--cache-dir", type=Path)
     args = parser.parse_args()
     started = time.monotonic()
     report = {"schema": "defense_php_cache.v1", "status": "build_failed", "phases": []}
@@ -156,14 +156,18 @@ def main():
             config = json.load(sys.stdin)
         key, command, context = build_command(config, platform)
         report["image"] = key
-        scope = "defense-php-" + key.rsplit(":", 1)[1]
-        cache = bool(os.environ.get("ACTIONS_RUNTIME_TOKEN") and os.environ.get("ACTIONS_RESULTS_URL"))
-        report["cache"] = "unavailable"
+        if args.cache_dir and "," in str(args.cache_dir):
+            raise ValueError("cache directory must not contain commas")
+        cache_dir = args.cache_dir
+        import_dir = cache_dir / "import" if cache_dir else None
+        export_dir = cache_dir / "export" if cache_dir else None
+        cache = bool(import_dir and valid_cache_index(import_dir / "index.json"))
+        report["cache"] = "cold" if cache_dir else "unavailable"
         needs_build = True
         if cache:
             report["cache"] = "unknown"
             timing, output = phase("cache_build", command + ["--load", "--cache-from",
-                f"type=gha,version=2,scope={scope},timeout={CACHE_TIMEOUT}", context], CACHE_BUILD_SECONDS)
+                f"type=local,src={import_dir}", context], CACHE_BUILD_SECONDS)
             if timing["timed_out"]:
                 report["cache"] = "timeout"
             elif timing["exit_code"] == 0:
@@ -186,12 +190,22 @@ def main():
             raise ValueError("Loaded PHP image identity is unavailable")
         report["image_id"] = image_id
         report["status"] = "built"
-        if cache and report["cache"] != "hit":
+        if cache_dir and report["cache"] != "hit":
             # The image has already been built and loaded successfully. Only
             # this optional export may fail; it cannot mask a build/test error.
-            phase("cache_export", command + ["--output=type=cacheonly", "--cache-to",
-                f"type=gha,version=2,scope={scope},mode=min,ignore-error=true,timeout={CACHE_TIMEOUT}",
-                context], CACHE_EXPORT_SECONDS)
+            report["cache_export_ready"] = False
+            try:
+                export_dir.mkdir(parents=True, exist_ok=True)
+                # A failed attempt must not leave an older index looking fresh
+                # to the workflow's archive step.
+                (export_dir / "index.json").unlink(missing_ok=True)
+                timing, _ = phase("cache_export", command + ["--output=type=cacheonly", "--cache-to",
+                    f"type=local,dest={export_dir},mode=min", context], CACHE_EXPORT_SECONDS)
+                report["cache_export_ready"] = bool(
+                    timing["exit_code"] == 0 and (export_dir / "index.json").is_file()
+                )
+            except OSError:
+                print("PHP cache export unavailable", file=sys.stderr)
         return 0
     except (OSError, ValueError, KeyError, TypeError, subprocess.CalledProcessError) as exc:
         print(f"PHP build preparation failed: {type(exc).__name__}", file=sys.stderr)

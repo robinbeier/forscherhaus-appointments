@@ -557,7 +557,7 @@ function agentHarnessReadinessEvaluateBlockingJobContracts(
 
 /**
  * @param array<string, mixed> $job
- * @param array<string, array<int, string>> $failureControls
+ * @param array<string, mixed> $failureControls
  * @return array<int, string>
  */
 function agentHarnessReadinessEvaluateBlockingJobFailureMasks(
@@ -589,6 +589,19 @@ function agentHarnessReadinessEvaluateBlockingJobFailureMasks(
                 continue;
             }
             foreach ($failureControls['forbidden_step_keys'] as $key) {
+                // Only bounded archive transport is optional. Build/test commands
+                // and the enclosing job retain strict failure propagation.
+                if (
+                    $key === 'continue-on-error' &&
+                    ($failureControls['allow_defense_archive_transport'] ?? false) &&
+                    $jobName === 'defense-cycle-ordinary-flows' &&
+                    ($step[$key] ?? null) === true &&
+                    in_array($step['uses'] ?? null, ['actions/cache/restore@v4', 'actions/cache/save@v4'], true) &&
+                    ($step['timeout-minutes'] ?? null) === 1 &&
+                    !array_key_exists('run', $step)
+                ) {
+                    continue;
+                }
                 if (array_key_exists($key, $step)) {
                     $failures[] = sprintf('step %s declares forbidden %s', (string) $stepIndex, $key);
                 }
@@ -599,10 +612,10 @@ function agentHarnessReadinessEvaluateBlockingJobFailureMasks(
     return array_map(static fn(string $failure): string => $jobName . ': ' . $failure, $failures);
 }
 
-/** @return array<string, array<int, string>> */
+/** @return array<string, mixed> */
 function agentHarnessReadinessFailureControlsForPolicy(string $policy): array
 {
-    if ($policy !== 'strict-v1') {
+    if (!in_array($policy, ['strict-v1', 'strict-v2'], true)) {
         throw new RuntimeException('Unknown workflow contract blocking failure-control policy.');
     }
     return [
@@ -610,6 +623,7 @@ function agentHarnessReadinessFailureControlsForPolicy(string $policy): array
         'forbidden_job_keys' => ['continue-on-error'],
         'forbidden_job_run_default_keys' => ['shell'],
         'forbidden_step_keys' => ['continue-on-error', 'shell'],
+        'allow_defense_archive_transport' => $policy === 'strict-v2',
     ];
 }
 

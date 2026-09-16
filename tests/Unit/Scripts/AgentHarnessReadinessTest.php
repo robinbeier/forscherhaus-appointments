@@ -29,6 +29,57 @@ class AgentHarnessReadinessTest extends TestCase
         parent::tearDown();
     }
 
+    public function testArchiveExceptionCannotMaskBlockingCommands(): void
+    {
+        $controls = agentHarnessReadinessFailureControlsForPolicy('strict-v2');
+        $step = ['uses' => 'actions/cache/restore@v4', 'continue-on-error' => true, 'timeout-minutes' => 1];
+        $jobName = 'defense-cycle-ordinary-flows';
+        foreach (['actions/cache/restore@v4', 'actions/cache/save@v4'] as $action) {
+            $candidate = array_replace($step, ['uses' => $action]);
+            self::assertSame(
+                [],
+                agentHarnessReadinessEvaluateBlockingJobFailureMasks(['steps' => [$candidate]], $jobName, $controls),
+            );
+        }
+        foreach (
+            [
+                ['run' => 'composer test'],
+                ['uses' => 'actions/github-script@v9'],
+                ['uses' => 'actions/cache/restore@main'],
+                ['timeout-minutes' => 2],
+                ['timeout-minutes' => null],
+                ['continue-on-error' => '${{ true }}'],
+                ['shell' => 'bash {0}'],
+            ]
+            as $mutation
+        ) {
+            self::assertNotEmpty(
+                agentHarnessReadinessEvaluateBlockingJobFailureMasks(
+                    ['steps' => [array_replace($step, $mutation)]],
+                    $jobName,
+                    $controls,
+                ),
+            );
+        }
+        self::assertNotEmpty(
+            agentHarnessReadinessEvaluateBlockingJobFailureMasks(['steps' => [$step]], 'build-test', $controls),
+        );
+        self::assertNotEmpty(
+            agentHarnessReadinessEvaluateBlockingJobFailureMasks(
+                ['continue-on-error' => true, 'steps' => [$step]],
+                $jobName,
+                $controls,
+            ),
+        );
+        self::assertNotEmpty(
+            agentHarnessReadinessEvaluateBlockingJobFailureMasks(
+                ['steps' => [$step]],
+                $jobName,
+                agentHarnessReadinessFailureControlsForPolicy('strict-v1'),
+            ),
+        );
+    }
+
     public function testEvaluateSteeringSourcesFailsWhenCanonicalReferenceIsMissing(): void
     {
         file_put_contents($this->tmpDir . '/README.md', "See WORKFLOW.md only.\n");
@@ -299,7 +350,7 @@ class AgentHarnessReadinessTest extends TestCase
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('Unknown workflow contract blocking failure-control policy');
 
-        agentHarnessReadinessFailureControlsForPolicy('strict-v2');
+        agentHarnessReadinessFailureControlsForPolicy('strict-v999');
     }
 
     public function testEvaluateClassifiedJobInventoryRejectsUnclassifiedAndMissingJobs(): void
@@ -622,7 +673,7 @@ class AgentHarnessReadinessTest extends TestCase
                 'schema_version' => 2,
                 'ci' => [
                     'workflow' => 'ci.yml',
-                    'blocking_failure_control_policy' => 'strict-v2',
+                    'blocking_failure_control_policy' => 'strict-v999',
                     'job_classification_policy' => 'explicit-v1',
                     'advisory_jobs' => [],
                     'blocking_execution_fingerprints' => [
