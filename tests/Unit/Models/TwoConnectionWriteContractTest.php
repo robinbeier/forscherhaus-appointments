@@ -271,6 +271,9 @@ final class TwoConnectionWriteContractTest extends TestCase
                 $peer->trans_begin();
                 // NOWAIT provides bounded, actual lock-contention evidence, without sleeps.
                 $peer->db_debug = false;
+                $serverInfo = strtolower((string) mysqli_get_server_info($peer->conn_id));
+                // MariaDB reports lock timeout 1205 for NOWAIT; MySQL reports 3572.
+                $expectedNowaitCode = str_contains($serverInfo, 'mariadb') ? 1205 : 3572;
                 $lockSql =
                     'SELECT id FROM `' . $peer->dbprefix('appointments') . '` WHERE id = ' . $id . ' FOR UPDATE NOWAIT';
                 try {
@@ -281,9 +284,9 @@ final class TwoConnectionWriteContractTest extends TestCase
                     $error = $exception->getCode();
                 }
                 $this->assertSame(
-                    3572,
+                    $expectedNowaitCode,
                     $error,
-                    'Expected MySQL NOWAIT contention, not a deadlock or unrelated SQL error.',
+                    'Expected vendor-specific NOWAIT contention, not a deadlock or unrelated SQL error.',
                 );
                 $peer->trans_rollback();
                 $checkpoint(TwoConnectionHarness::BEFORE_WRITE);
