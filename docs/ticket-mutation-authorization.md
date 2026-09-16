@@ -90,7 +90,12 @@ Eine vorhandene Session-Autorisierung erlaubt daher die vorgesehene Aktion nur
 innerhalb ihres Scopes; sie garantiert weder die Annahme eines Workpad- oder
 PR-Texts noch eine spätere Plattformfreigabe.
 
-Wenn ein Zieltext abgelehnt wird:
+Wenn ein Zieltext abgelehnt wird, zuerst den Grund klassifizieren. Bei einer
+Policy-Verweigerung, fehlender Autorisierung oder unklarem Grund bleibt die
+betroffene Methode gestoppt und die Mutation offen; Sanitizing erzeugt keine
+neue Autorität. Die folgende Ersatzübermittlung gilt nur für einen bestätigten
+Inhalts- oder Schemafehler innerhalb bestehender Autorisierung, wenn die
+Entscheidung ausdrücklich eine sichere Alternative zulässt:
 
 1. Den privaten, Git-ignorierten Checkpoint und die sichere Ablehnungsnachricht
    erhalten. Den abgelehnten Text mit seinen Rohdetails, Konfigurationen,

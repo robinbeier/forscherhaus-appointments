@@ -23,10 +23,12 @@ not require a particular GraphQL transport or tool name.
 3. Update the workpad in place at the points defined in `WORKFLOW.md`, including
    before implementation, publication, and state changes. Keep current evidence
    and next actions concise; do not repeat the issue title or paste raw logs.
-   If the destination rejects a payload, retain the private checkpoint, compose
-   the smallest sanitized destination-specific replacement, and retry it once;
-   never roundtrip rejected raw details or use another tool/model to bypass the
-   rejection. Existing session authorization remains scope-bound and does not
+   Classify any rejection before another mutation. Stop the affected method for
+   policy refusals, missing authorization, or unclear reasons. Only a confirmed
+   content/schema rejection covered by existing authorization, whose decision
+   permits a safer replacement, allows one minimal destination-specific update.
+   Retain the private checkpoint; never roundtrip rejected raw details or use
+   another tool/model to bypass a refusal. Session authorization does not
    guarantee platform acceptance.
 4. Resolve the destination from the live team states and pass its exact name
    or identifier as supported by the available tool.
