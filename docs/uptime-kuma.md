@@ -24,19 +24,25 @@ Host-owned:
 
 ## Production Snapshot
 
-Refreshed after the authorized 2026-09-07 switch to the slim image:
+The repository desired state now pins `2.5.5-slim` and its digest in
+`docker/compose.uptime-kuma.yml`. This update is pending its separately
+authorized production execution; the historical installed production image is
+`2.5.3-slim` with the previously recorded digest.
 
-- image: pinned in `docker/compose.uptime-kuma.yml` to `2.5.3-slim` and its digest
+- desired image: `2.5.5-slim@sha256:9c56a772a7df53f444a404c579e87a27bd0c201375d00d6745a75bf8138f4342`
+- historical installed image: `2.5.3-slim@sha256:7d70c3bd3127dc4ad2910f9d2d18481a6ac4f195a4e23e32f0c50869f977985a`
 - listen address: `127.0.0.1:3001`
 - data mount: `/var/lib/uptime-kuma-data` bind-mounted at `/app/data`
 - database file: `/app/data/kuma.db` (SQLite)
 
 The slim image omits Chromium and embedded MariaDB; this instance uses SQLite
 and HTTP, keyword, JSON, and Push monitors. It does not use browser monitors.
-After the switch, container health and production validation passed, with the
-monitor and notification configuration preserved. The previous `2.5.0` image
-and the complete pre-switch data/Compose backup remain available for recovery;
-rollback must restore the old data together with the old image.
+The last completed switch preserved the monitor and notification configuration.
+For the pending update, take a fresh complete Kuma data and Compose backup
+before execution. Preserve the existing monitor and notification
+configuration. If rollback is required, restore the matching old data backup
+together with the historical `2.5.3-slim` image and its digest. This new
+rollback backup is excluded from ROB-513.
 
 Active monitors were captured on 2026-05-14. The repo desired-state catalog now
 also includes reviewed follow-up changes, such as the ROB-385 split between
