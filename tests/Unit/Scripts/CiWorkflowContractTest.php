@@ -51,6 +51,9 @@ class CiWorkflowContractTest extends TestCase
             self::assertSame('always()', $steps[$name]['if']);
             self::assertSame('actions/upload-artifact@v7', $steps[$name]['uses']);
         }
+        $receipt = $steps['Upload Defense phase and testcase evidence'];
+        self::assertSame('always()', $receipt['if']);
+        self::assertSame('storage/logs/ci/defense-cycle/*.summary.json', $receipt['with']['path']);
         self::assertSame('storage/logs/ci/php-build/', $steps['Upload PHP build timing evidence']['with']['path']);
         self::assertSame('storage/logs/ci/gate-summary/', $steps['Upload gate diagnostic evidence']['with']['path']);
     }
