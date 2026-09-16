@@ -267,6 +267,17 @@ final class DefenseCycleFixtures
         ];
     }
 
+    /** Return direct deletion postconditions for a registered Provider identity. */
+    public function providerDeleteState(int $id): array
+    {
+        return [
+            'user' => $this->row('users', $id),
+            'settings' => $this->userSettingsRow($id),
+            'services' => $this->db->get_where('services_providers', ['id_users' => $id])->result_array(),
+            'appointments' => $this->db->get_where('appointments', ['id_users_provider' => $id])->result_array(),
+        ];
+    }
+
     /** Register an exact synthetic Secretary identity before an HTTP write. */
     public function secretaryWritePayload(string $case, array $providers = []): array
     {
