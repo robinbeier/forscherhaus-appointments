@@ -216,6 +216,10 @@ Rules:
   Quickstart `docker compose up -d`. The report is not authorization.
 - If the current branch already exists, sync it before editing.
 - Reproduce the problem or gather concrete evidence before changing code.
+- Bind release code, operating documentation, and the release plan to one
+  verified checkout SHA. Record the deployed SHA and historical report SHAs
+  separately; a stale checkout or historical report cannot establish the
+  current gate state.
 - For authority-, secret-, identity-, transaction-, or concurrency-sensitive
   writes, record the complete path before editing:
   `route -> request classification -> server-side authority -> locks and

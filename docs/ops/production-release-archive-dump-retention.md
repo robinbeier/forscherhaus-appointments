@@ -5,6 +5,13 @@ production artifacts that are outside session and Docker build-cache
 retention. Repository delivery does not activate the timer and does not grant
 permission to run the helper on production.
 
+As of 2026-09-15, automatic retention is intentionally retired: the production
+timer is disabled/inactive and its optional Kuma success-marker check is off.
+Resource and session-retention monitoring remain active. Keep this helper for
+read-only inventory and preserve current/rollback and backup protections.
+The installation and activation sequence below is a reference for separately
+approved future reactivation, not a routine maintenance instruction.
+
 ## Fixed classes
 
 The helper recognizes only these protected roots and identities:
@@ -235,12 +242,14 @@ rollout has this exact order:
    marker. A `partial`, `blocked`, `known`, or `unknown` mutation outcome never
    substitutes for this postflight.
 
-6. Preserve the existing `KUMA_RELEASE_RETENTION_MONITOR_ENABLED=1` setting
-   in the protected Env. Its one-time activation is complete; the regular
-   resource monitor reads it without an activation helper. If the setting is
-   missing or disabled, stop and plan a separately approved Env change under
+6. The current operational decision (2026-09-15) keeps
+   `KUMA_RELEASE_RETENTION_MONITOR_ENABLED=0` in the protected Env and leaves
+   the retention timer disabled and inactive. Host resource monitoring remains
+   active. Do not enable the retention check or timer as part of routine
+   maintenance. Any reactivation requires a fresh read-only inventory and
+   separate explicit approval for the exact Env and timer changes under
    `docs/uptime-kuma.md`. An explicitly approved manual Push can verify the
-   existing signal without changing the setting:
+   retained resource monitor without changing the setting:
 
    ```bash
      ssh -o StrictHostKeyChecking=accept-new \
@@ -276,9 +285,12 @@ rollout has this exact order:
    inactive service result. Then repeat the marker and full postflight checks
    from step 5 before declaring activation complete.
 
-The shipped weekly timer is deliberately not enabled or started by repository
-code. Monitoring of the success marker is separately disabled by default until
-activation is explicitly approved.
+The shipped weekly timer remains deliberately disabled and inactive. Monitoring
+of the success marker is explicitly disabled by the 2026-09-15 operational
+decision. The helper remains available for read-only inventory; manual cleanup
+requires separate authorization for the exact bounded pass. Reactivation of
+the timer or marker monitoring is future operational work and requires fresh
+read-only checks and explicit approval.
 
 An execute process terminated by a signal, SSH loss, or any other condition
 that yields no single canonical helper result has an operator-side mutation
