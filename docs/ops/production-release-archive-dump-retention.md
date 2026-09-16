@@ -257,9 +257,19 @@ rollout has this exact order:
      'KUMA_PUSH_ENV_FILE=/root/backups/uptime-kuma-push.env /usr/local/libexec/fh-kuma-push-runtime-v1/scripts/ops/kuma_push_host_resources.sh'
    ```
 
-7. Enabling and starting are separate gates because `Persistent=true` may run
-   a missed schedule immediately when the timer starts. First enable the timer
-   without starting it and prove that it remains inactive:
+7. Reactivate the optional Kuma retention-success check first, only during a
+   separately approved activation window. Follow the secure existing-Env
+   procedure in `docs/uptime-kuma.md`: verify the protected Env backup,
+   root-only permissions and write lock, change exactly
+   `KUMA_RELEASE_RETENTION_MONITOR_ENABLED=0` to `=1`, reread the saved value,
+   and verify a fresh successful resource-monitor Push. If any check fails,
+   restore or retain `=0` and keep the timer disabled. The monitor reactivation
+   is a separate production change and does not authorize timer activation.
+
+   Enabling and starting are separate gates because `Persistent=true` may run
+   a missed schedule immediately when the timer starts. After the monitor
+   reactivation is verified, first enable the timer without starting it and
+   prove that it remains inactive:
 
    ```bash
    ssh -o StrictHostKeyChecking=accept-new \
