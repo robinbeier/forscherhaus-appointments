@@ -44,16 +44,20 @@ PHPUnit suite and the integration coverage shard, using disposable seeded data:
   requested update and sends exactly one no-op notification. This guards
   against fixtures that merely fail before reaching the intended write path.
 - A service-buffer transaction acquires real production parent locks. The peer
-  tries an appointment `FOR UPDATE NOWAIT` lock and must receive MySQL 3572.
-  The service update/regeneration then commits, after which the peer completes
-  the real appointment reschedule and regenerates the expected buffer.
+  tries an appointment `FOR UPDATE NOWAIT` lock and must receive the
+  engine-specific contention code: MariaDB reports 1205 and MySQL reports
+  3572. The service update/regeneration then commits, after which the peer
+  completes the real appointment reschedule and regenerates the expected
+  buffer.
 
 NOWAIT is the bounded wait contract for the lock-contention reference: it
-produces immediate database evidence without timing sleeps. A deadlock (1213),
-lock wait timeout (1205), missing fixture, or other SQL error is a test failure,
-not equivalent to the expected contention result. The service scenario proves
-that the peer cannot acquire the parent during resync and can reschedule after
-commit; it does not claim to exercise a queued asynchronous controller request.
+produces immediate database evidence without timing sleeps. The test derives
+the expected code from the actual server family (`1205` for MariaDB, `3572`
+for MySQL); it does not accept either code for every engine. A deadlock (1213),
+the wrong engine-specific code, missing fixture, or other SQL error is a test
+failure. The service scenario proves that the peer cannot acquire the parent
+during resync and can reschedule after commit; it does not claim to exercise a
+queued asynchronous controller request.
 
 Existing Calendar permission tests remain responsible for ordinary 403
 rejection coverage. These new references use authorized administrative actions
