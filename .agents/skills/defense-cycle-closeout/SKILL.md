@@ -29,6 +29,13 @@ Reuse unchanged relevant evidence only with recorded provenance, release/method/
 scope compatibility, and the current requirement's acceptance. Never promote
 isolated or source evidence to production coverage.
 
+Reconcile each carried-forward gap with later evidence for the same invariant
+before assigning its current status. Preserve both the original gap and the
+superseding receipt/PR identity, including the exact covered scope and remaining
+limits. Do not reopen an accepted isolated result merely because production
+verification is still absent; those are separate requirements. Likewise, later
+CI success alone does not close an unobserved production requirement.
+
 For each row, require an observed result and a complete cleanup receipt for any
 mutating verification; mark cleanup not applicable for read-only/source evidence.
 Treat an incomplete cleanup, unresolved marker, unknown request completion, missing

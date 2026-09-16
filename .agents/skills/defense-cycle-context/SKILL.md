@@ -32,6 +32,13 @@ only when the release requirement, method, scope, and relevant code/configuratio
 remain compatible, and record its source and reason. A prior closeout is context,
 not proof for a changed release.
 
+Before carrying forward an open item from a dated report, check for later
+receipts, follow-up PRs and closeouts for that same finding or acceptance row.
+Reconcile their exact source binding and stated coverage with the current tree.
+Keep the earlier gap as history, and record which later evidence closes it or
+which specific part remains open. A newer timestamp alone does not establish
+coverage; an older open-items list alone does not justify repeating completed work.
+
 Before proposing a harness PR, name one concrete evidence gap, the smallest
 feasible permitted method, its expected observation, owner, and cleanup receipt.
 Use the existing checks; do not rerun an unchanged result already supplied by
