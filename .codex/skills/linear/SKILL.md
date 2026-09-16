@@ -23,13 +23,21 @@ not require a particular GraphQL transport or tool name.
 3. Update the workpad in place at the points defined in `WORKFLOW.md`, including
    before implementation, publication, and state changes. Keep current evidence
    and next actions concise; do not repeat the issue title or paste raw logs.
+   If the destination rejects a payload, retain the private checkpoint, compose
+   the smallest sanitized destination-specific replacement, and retry it once;
+   never roundtrip rejected raw details or use another tool/model to bypass the
+   rejection. Existing session authorization remains scope-bound and does not
+   guarantee platform acceptance.
 4. Resolve the destination from the live team states and pass its exact name
    or identifier as supported by the available tool.
 5. Attach the actual GitHub PR after it exists. Keep the PR URL on the issue
    attachment, not in the workpad.
 6. Verify the resulting issue, comment, or attachment state. Treat reported
    errors as failures and do not infer success from a partial response. Check
-   existing state before retrying an uncertain write to avoid duplicates.
+   existing state before retrying an uncertain write to avoid duplicates. A
+   replacement must target the same destination and contain only the minimum
+   allowed status/evidence/next-action content; ask once if it cannot be made
+   safe within the authorized scope.
 
 If Linear access is unavailable, report the affected action as blocked and
 continue independent authorized work. Never invent issue states, identifiers,

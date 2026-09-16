@@ -83,6 +83,33 @@ wiederholt. Unabhängige erlaubte Arbeit läuft weiter. Eine neue Freigabe wird
 einmal gebündelt nach konkreter Aktion und Scope angefragt; der primäre Agent
 bleibt der einzige externe Schreiber.
 
+### Sichere Übergabe nach einer Ablehnung
+
+Eine Plattformfreigabe gilt immer für das konkrete Ziel und den konkreten Inhalt.
+Eine vorhandene Session-Autorisierung erlaubt daher die vorgesehene Aktion nur
+innerhalb ihres Scopes; sie garantiert weder die Annahme eines Workpad- oder
+PR-Texts noch eine spätere Plattformfreigabe.
+
+Wenn ein Zieltext abgelehnt wird:
+
+1. Den privaten, Git-ignorierten Checkpoint und die sichere Ablehnungsnachricht
+   erhalten. Den abgelehnten Text mit seinen Rohdetails, Konfigurationen,
+   Betriebsdaten oder Logs nicht erneut an dasselbe oder ein anderes Ziel senden.
+2. Für genau dasselbe Ziel einen neuen, kleinsten Text aus dem erlaubten Scope
+   formulieren. Für das Workpad genügen Zielaktion, aktueller Status,
+   überprüfbarer Kurzbefund und die nächste gebundene Aktion, zum Beispiel:
+   `Repository change ready; local checks passed; independent review no findings;
+   next: GitHub checks; detailed evidence local.`
+3. Nur diesen sanitisierten Ersatztext einmal über den autorisierten Zielkanal
+   übermitteln und den persistierten Zielstand erneut lesen. Scheitert auch die
+   Übermittlung oder ist eine notwendige Übertragung nicht sicher sanitisiert,
+   die Mutation offen lassen und eine einzelne, nach Ziel und Inhalt begrenzte
+   Rückfrage stellen.
+
+Eine Ablehnung wird niemals durch Wiederholung, Toolwechsel, Modellwechsel oder
+eine umfassendere Freigabe umgangen. Der lokale Checkpoint bleibt Beleg für die
+vorbereitete Arbeit, nicht für eine angenommene externe Aktualisierung.
+
 ## Übergabe
 
 ```text
