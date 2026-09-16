@@ -11,7 +11,7 @@ use Tests\Integration\Support\DefenseCycleHttpServer;
 require_once dirname(__DIR__) . '/Support/DefenseCycleFixtures.php';
 require_once dirname(__DIR__) . '/Support/DefenseCycleHttpServer.php';
 
-/** Ordinary local JSON POST/PUT coverage for the provider API. */
+/** Ordinary local HTTP POST/PUT/DELETE coverage for the provider API. */
 final class ProviderApiHttpWriteTest extends TestCase
 {
     private ?DefenseCycleFixtures $fixture = null;
@@ -142,6 +142,66 @@ final class ProviderApiHttpWriteTest extends TestCase
                 );
             }
         }
+    }
+
+    public function testProviderDeleteUsesAuthorizedAdminAndBearerAndIsIdempotent(): void
+    {
+        $f = $this->fixture;
+        $admin = $this->basicClient($this->credentials['admin_username'], $this->credentials['password']);
+        $bearer = $this->bearerClient($this->credentials['token']);
+
+        foreach (['admin-delete' => $admin, 'bearer-delete' => $bearer] as $case => $client) {
+            $before = $f->providerWriteSnapshot();
+            $payload = $f->providerWritePayload($case);
+            $created = $this->success($admin->requestJsonApp('POST', 'api/v1/providers', $payload), 201);
+            $state = $f->providerWriteState($payload['email']);
+            $id = (int) ($state['user']['id'] ?? 0);
+            self::assertGreaterThan(0, $id, $case . ' fixture must have a positive Provider ID.');
+            self::assertSame($id, (int) ($created['id'] ?? 0), $case . ' fixture creation must identify its Provider.');
+            self::assertNotSame([], $state, $case . ' fixture must be registered before its HTTP requests.');
+            self::assertNotSame([], $state['settings'], $case . ' fixture must have a settings row before deletion.');
+            self::assertSame(
+                [$f->serviceId],
+                $state['services'],
+                $case . ' fixture must have its expected service relation.',
+            );
+            self::assertSame([], $f->providerDeleteState($id)['appointments'], $case . ' must have no appointments.');
+
+            $deleted = $client->requestApp('DELETE', 'api/v1/providers/' . $id);
+            self::assertSame(204, $deleted->statusCode, $case . ' authorized delete must return 204.');
+            self::assertSame(
+                ['user' => [], 'settings' => [], 'services' => [], 'appointments' => []],
+                $f->providerDeleteState($id),
+                $case . ' must remove the Provider and owned rows/relations.',
+            );
+            self::assertSame($before, $f->providerWriteSnapshot(), $case . ' must preserve unrelated sentinel data.');
+
+            $repeat = $client->requestApp('DELETE', 'api/v1/providers/' . $id);
+            self::assertSame(404, $repeat->statusCode, $case . ' repeated delete must return 404.');
+            self::assertSame($before, $f->providerWriteSnapshot(), $case . ' repeated delete must not mutate state.');
+        }
+
+        $f->cleanup();
+        $f->cleanup();
+        foreach (['admin-delete', 'bearer-delete'] as $case) {
+            self::assertSame([], $f->providerWriteState($f->run . '_write_' . $case . '@synthetic.invalid'));
+        }
+    }
+
+    public function testProviderDeleteRejectsMissingAuthWithoutMutation(): void
+    {
+        $f = $this->fixture;
+        $admin = $this->basicClient($this->credentials['admin_username'], $this->credentials['password']);
+        $payload = $f->providerWritePayload('delete-no-auth');
+        $created = $this->success($admin->requestJsonApp('POST', 'api/v1/providers', $payload), 201);
+        $id = (int) ($created['id'] ?? 0);
+        self::assertNotSame([], $f->providerWriteState($payload['email']));
+        $before = $f->providerWriteSnapshot();
+
+        $response = $this->server->client()->requestApp('DELETE', 'api/v1/providers/' . $id);
+        self::assertSame(401, $response->statusCode, 'Missing authentication must be rejected.');
+        self::assertNotNull($response->header('www-authenticate'));
+        self::assertSame($before, $f->providerWriteSnapshot(), 'Missing authentication must not mutate state.');
     }
 
     public function testProviderWriteCleanupIsRepeatableAfterResponseIsIgnored(): void

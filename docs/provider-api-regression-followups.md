@@ -86,5 +86,10 @@ requests retain their behavior. Its existing Kuma runtime-bundle manifest tracks
 the changed source hash; this is not an installation or production update.
 No application code or additional CI job changes.
 The earlier controller tests remain the evidence for single-secret rotation,
-omission and null handling. DELETE, concurrent writes, other roles, production
-HTTP configuration and deployment remain outside this pilot.
+omission and null handling. A bounded DELETE extension now covers authorized
+synthetic administrator Basic and global Bearer deletion, direct absence of the
+user/settings/service-link rows, unchanged unrelated fixture data, missing
+authentication, and repeated deletion returning 404. The fixture registers each
+future identity before its HTTP request and cleanup remains repeatable.
+These cases are ordinary local HTTP evidence only; concurrent writes, other
+roles, production HTTP configuration and deployment remain outside this pilot.
