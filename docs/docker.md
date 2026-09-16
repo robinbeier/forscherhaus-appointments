@@ -376,24 +376,35 @@ provenance. The timing report records the loaded image ID separately. GitHub's
 native branch/cache access restrictions remain in force; there is no registry
 push, privileged PR event or added write permission.
 
-`scripts/ci/defense_php_cache.py` uses the GHA v2 backend with a 15-second backend
-operation timeout. An outer 45-second deadline bounds the complete cache-assisted
-build, including lazy layer transfers and image loading. A cold or slow candidate
-may exceed that budget: it is cancelled and the normal build runs without remote
-cache import. Missing runtime cache credentials also select the normal build.
-Only structured cache-import errors or positively identified lazy cache-read
-errors after a completed cached build permit a retry; ordinary or unknown
-build/load errors fail. Recovery disables imported build records with
-`--no-cache`. A successful import and cached vertices establish recovery
-eligibility, not cache provenance. The optional export happens after a successful loaded image, uses
-`mode=min`, and has a separate 20-second deadline. Cancellation allows at most
-two additional seconds before killing the client process. The normal build and
-all application tests remain blocking. The job's existing overall timeout and
-the Buildx action's builder cleanup remain active.
+`scripts/ci/defense_php_cache.py --cache-dir PATH` imports a local BuildKit
+OCI layer directory. The workflow restores that directory as one Actions cache
+archive, keyed by the resolved recipe/platform and an immutable run suffix.
+Restore prefixes never cross recipes. This replaces independent GHA manifest/blob
+retrieval, which repeatedly reported cached vertices followed by missing blobs.
+The archive contains only PHP build layers; GitHub branch access restrictions
+still apply. A complete export is saved under a new key, so an unusable older
+entry can be superseded without deleting shared caches.
+
+Restore and save each have a one-minute step limit and are optional. A failed
+restore discards its partial directory. Without an imported index, the helper
+starts the normal build directly, avoiding the previous 45-second cold-cache
+attempt. With a candidate, an outer 45-second deadline bounds the cache-assisted
+build and image loading. Only identified cache-import failures permit recovery;
+ordinary or unknown build/load errors remain fatal. Recovery uses `--no-cache`.
+A successful import or cached vertices do not establish image provenance.
+
+After a successfully loaded image, a separate optional local export uses
+`mode=min` and a 20-second deadline. Only a successful export with an index is
+eligible for archiving. Import and export use separate directories, avoiding
+accumulated layers from prior snapshots. Cancellation allows at most two extra
+seconds before killing the client. The normal build, full application suite,
+cleanup and overall job timeout remain blocking and unchanged. Without
+`--cache-dir`, the helper performs an ordinary uncached build.
 
 A hit requires completed Dockerfile RUN/COPY/ADD vertices reported cached by
 BuildKit; a successful command alone is not a hit. Reports retain cache-build,
 normal-build and export wall time separately and include all these phases in
-`total_seconds`. The job duration also includes builder setup, dependencies,
+`total_seconds`. Archive restore/save are separate workflow steps: add their
+wall times when comparing PHP preparation. The job duration also includes builder setup, dependencies,
 fresh Docker/MySQL startup, the full Defense suite, teardown and artifacts.
 Cache availability and actual speedup must therefore be evaluated separately.

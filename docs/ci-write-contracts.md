@@ -211,9 +211,13 @@ Glob-Filter behalten wegen reihenfolgeabhaengiger Negationen ihre Reihenfolge;
 Job- und Step-`if`-Ausdruecke werden ueber die versionierte Grammatik in eine
 kanonische semantische Form gebracht. Nicht unterstuetzte Ausdruecke schlagen
 fail-closed fehl; ausfuehrungsrelevante Inhalte bleiben vollstaendig gebunden.
-Jede explizite `continue-on-error`-Deklaration sowie
-jeder Workflow-/Job-/Step-`shell`-Override laesst die Readiness-Pruefung
-unabhaengig davon fehlschlagen. Advisory-Signal-Jobs gehoeren nicht zum
+Jeder Workflow-/Job-/Step-`shell`-Override und jede nicht ausdruecklich
+ausgenommene `continue-on-error`-Deklaration lassen die Readiness-Pruefung
+fehlschlagen. `strict-v2` erlaubt ausschliesslich den optionalen Archivtransport:
+`actions/cache/restore@v4` und `actions/cache/save@v4` im Defense-Job duerfen
+mit literalem `continue-on-error: true`, exakt einer Minute Timeout und ohne
+`run` ausgefuehrt werden. Build, Tests und Bereinigung bleiben blocking; der
+vollstaendige Job-Fingerprint bindet auch Cache-Keys, Pfade und Conditions. Advisory-Signal-Jobs gehoeren nicht zum
 Blocking-Vertrag, bleiben aber namentlich klassifiziert, damit kein neuer
 Blocking-Job versehentlich ausserhalb des Vertrags landet.
 Bei einer beabsichtigten Aenderung einer fingerprinted Blocking-Ausfuehrung

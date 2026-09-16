@@ -17,19 +17,32 @@ class CiWorkflowContractTest extends TestCase
         self::assertArrayNotHasKey('continue-on-error', $job);
         self::assertSame(['contents' => 'read'], $job['permissions']);
         $steps = $this->namedSteps($job);
-        foreach ($steps as $step) {
-            self::assertArrayNotHasKey('continue-on-error', $step);
+        $optional = ['Restore complete PHP layer archive', 'Save complete PHP layer archive'];
+        foreach ($steps as $name => $step) {
+            if (in_array($name, $optional, true)) {
+                self::assertTrue($step['continue-on-error']);
+                self::assertSame(1, $step['timeout-minutes']);
+            } else {
+                self::assertArrayNotHasKey('continue-on-error', $step);
+            }
         }
+        $restore = $steps['Restore complete PHP layer archive'];
+        $save = $steps['Save complete PHP layer archive'];
+        self::assertSame($restore['with']['path'], $save['with']['path']);
+        self::assertSame($restore['with']['key'], $save['with']['key']);
+        self::assertSame('${{ steps.php-cache-key.outputs.prefix }}', $restore['with']['restore-keys']);
+        self::assertStringContainsString('github.run_id', $save['with']['key']);
+        self::assertSame("steps.php-cache-save-preparation.outputs.cache_export_ready == 'true'", $save['if']);
         $builder = $steps['Set up PHP layer-cache builder'];
         self::assertSame('docker/setup-buildx-action@v4', $builder['uses']);
         self::assertFalse($builder['with']['cache-binary']);
         self::assertTrue($builder['with']['cleanup']);
         $build = $steps['Build PHP with bounded layer cache'];
-        self::assertSame('actions/github-script@v9', $build['uses']);
         self::assertStringContainsString(
-            "await exec.exec('python3', ['-B', 'scripts/ci/defense_php_cache.py', '--resolve-compose', '--report', 'storage/logs/ci/php-build/summary.json']);",
-            $build['with']['script'],
+            'python3 -B scripts/ci/defense_php_cache.py --resolve-compose --cache-dir "$PHP_CACHE_DIR" --report storage/logs/ci/php-build/summary.json',
+            $build['run'],
         );
+        self::assertStringContainsString('if [[ "$RESTORE_OUTCOME" != success || -z "$RESTORED_KEY" ]]', $build['run']);
         self::assertSame(
             'python3 -B scripts/ci/run_gate_with_summary.py --label defense-cycle -- bash scripts/ci/run_defense_cycle.sh',
             $this->stepRun($steps, 'Run isolated ordinary application and session lifecycle checks'),

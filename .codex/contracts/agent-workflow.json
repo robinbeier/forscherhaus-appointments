@@ -65,7 +65,7 @@
     },
     "ci": {
         "workflow": ".github/workflows/ci.yml",
-        "blocking_failure_control_policy": "strict-v1",
+        "blocking_failure_control_policy": "strict-v2",
         "job_classification_policy": "explicit-v1",
         "advisory_jobs": [],
         "blocking_execution_fingerprints": {
@@ -87,7 +87,7 @@
             "root-deployment-tests": "63ad3205658547ac510654792c48b64730a0aea75a1fae2d0ba42849b2ee5555",
             "typed-request-contracts": "91555da0ee339465906f5779ce4023ec53df037fa1c8f72ea8e69a7ccf586094",
             "typed-request-dto": "ccd16fdafb2c6ac1f2b311e39f064c1d3ba1a1fe56b2a8f8333635ab97ce7e47",
-            "defense-cycle-ordinary-flows": "49091bf95a7ae88fab37cc6c511fba5e36f1605152577d54bceaa4a218fba665"
+            "defense-cycle-ordinary-flows": "5c15d152a8d4222e8ace1740baaeb384fc374abdb4c8f1488bd8553c2fbbfc20"
         },
         "condition_grammar": {
             "version": 1,

@@ -1576,11 +1576,64 @@ jobs:
         with:
           cache-binary: false
           cleanup: true
-      - name: Build PHP with bounded layer cache
-        uses: actions/github-script@v9
+      - name: Resolve PHP cache recipe
+        id: php-cache-key
+        run: |
+          platform="$(docker info --format '{{.OSType}}/{{.Architecture}}')"
+          image="$(docker compose -f docker-compose.yml -f docker/compose.ci-local.yml config --format json | python3 -B scripts/ci/local_php_image_key.py --platform "$platform")"
+          [[ "$image" =~ ^forscherhaus-local/php-fpm:[0-9a-f]{64}$ ]]
+          echo "prefix=defense-php-oci-v1-${image##*:}-" >> "$GITHUB_OUTPUT"
+      - name: Restore complete PHP layer archive
+        id: php-cache-restore
+        uses: actions/cache/restore@v4
+        continue-on-error: true
+        timeout-minutes: 1
         with:
-          script: |
-            await exec.exec('python3', ['-B', 'scripts/ci/defense_php_cache.py', '--resolve-compose', '--report', 'storage/logs/ci/php-build/summary.json']);
+          path: ${{ runner.temp }}/defense-php-cache/import
+          key: ${{ steps.php-cache-key.outputs.prefix }}${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ${{ steps.php-cache-key.outputs.prefix }}
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: 1
+      - name: Build PHP with bounded layer cache
+        id: php-build
+        env:
+          PHP_CACHE_DIR: ${{ runner.temp }}/defense-php-cache
+          RESTORE_OUTCOME: ${{ steps.php-cache-restore.outcome }}
+          RESTORED_KEY: ${{ steps.php-cache-restore.outputs.cache-matched-key }}
+        run: |
+          # Never consume a partially extracted archive after a failed restore.
+          if [[ "$RESTORE_OUTCOME" != success || -z "$RESTORED_KEY" ]]; then
+            rm -rf -- "$PHP_CACHE_DIR/import"
+          fi
+          python3 -B scripts/ci/defense_php_cache.py --resolve-compose --cache-dir "$PHP_CACHE_DIR" --report storage/logs/ci/php-build/summary.json
+      - name: Prepare complete PHP layer archive
+        id: php-cache-save-preparation
+        env:
+          PHP_CACHE_DIR: ${{ runner.temp }}/defense-php-cache
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, shutil
+          report = json.loads(pathlib.Path('storage/logs/ci/php-build/summary.json').read_text())
+          root = pathlib.Path(os.environ['PHP_CACHE_DIR'])
+          ready = report.get('cache_export_ready') is True
+          if ready:
+              try:
+                  shutil.rmtree(root / 'import', ignore_errors=True)
+                  (root / 'export').rename(root / 'import')
+              except OSError:
+                  ready = False
+                  print('PHP cache archive preparation unavailable')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f"cache_export_ready={str(ready).lower()}\n")
+          PY
+      - name: Save complete PHP layer archive
+        if: steps.php-cache-save-preparation.outputs.cache_export_ready == 'true'
+        uses: actions/cache/save@v4
+        continue-on-error: true
+        timeout-minutes: 1
+        with:
+          path: ${{ runner.temp }}/defense-php-cache/import
+          key: ${{ steps.php-cache-key.outputs.prefix }}${{ github.run_id }}-${{ github.run_attempt }}
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
