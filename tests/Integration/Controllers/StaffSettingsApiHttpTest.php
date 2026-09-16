@@ -232,6 +232,63 @@ final class StaffSettingsApiHttpTest extends TestCase
         $this->assertNoSyntheticSecrets($adminCreate, $adminUpdate, $secretaryCreate, $updated);
     }
 
+    #[DataProvider('validWriteAuthenticationCases')]
+    public function testAuthorizedSecretaryDeleteRemovesOnlyOwnedRowsAndIsIdempotent(string $authentication): void
+    {
+        $f = $this->fixture;
+        $client = $this->writeClient($authentication);
+        $sentinelPayload = $f->secretaryWritePayload('delete-sentinel', [$f->providerId]);
+        $sentinel = $this->success($client->requestJsonApp('POST', 'api/v1/secretaries', $sentinelPayload), 201);
+        $sentinelId = (int) ($sentinel['id'] ?? 0);
+        self::assertGreaterThan(0, $sentinelId);
+        self::assertSame([$f->providerId], $f->secretaryWriteState($sentinelPayload['email'])['providers']);
+        $before = $f->secretaryDeleteSnapshot();
+
+        $payload = $f->secretaryWritePayload('delete-target', [$f->providerId]);
+        $created = $this->success($client->requestJsonApp('POST', 'api/v1/secretaries', $payload), 201);
+        $state = $f->secretaryWriteState($payload['email']);
+        $id = (int) ($state['user']['id'] ?? 0);
+        self::assertGreaterThan(0, $id, 'Secretary fixture must have a positive ID.');
+        self::assertSame($id, (int) ($created['id'] ?? 0));
+        self::assertNotSame([], $state['settings'], 'Secretary fixture must have settings before deletion.');
+        self::assertSame([$f->providerId], $state['providers'], 'Secretary fixture must have its provider link.');
+
+        $deleted = $client->requestApp('DELETE', 'api/v1/secretaries/' . $id);
+        self::assertSame(204, $deleted->statusCode);
+        self::assertSame(['user' => [], 'settings' => [], 'providers' => []], $f->secretaryDeleteState($id));
+        self::assertSame(
+            $before,
+            $f->secretaryDeleteSnapshot(),
+            'Unrelated sentinel rows and links must remain unchanged.',
+        );
+
+        $repeat = $client->requestApp('DELETE', 'api/v1/secretaries/' . $id);
+        self::assertSame(404, $repeat->statusCode);
+        self::assertSame($before, $f->secretaryDeleteSnapshot(), 'Repeated deletion must not mutate state.');
+
+        $f->cleanup();
+        $f->cleanup();
+        self::assertSame([], $f->secretaryWriteState($sentinelPayload['email']));
+        self::assertSame([], $f->secretaryWriteState($payload['email']));
+    }
+
+    public function testSecretaryDeleteRejectsMissingAuthWithoutMutation(): void
+    {
+        $f = $this->fixture;
+        $admin = $this->writeClient('basic');
+        $payload = $f->secretaryWritePayload('delete-no-auth', [$f->providerId]);
+        $created = $this->success($admin->requestJsonApp('POST', 'api/v1/secretaries', $payload), 201);
+        $id = (int) ($created['id'] ?? 0);
+        self::assertGreaterThan(0, $id);
+        self::assertNotSame([], $f->secretaryWriteState($payload['email']));
+        $before = $f->secretaryDeleteSnapshot();
+
+        $response = $this->server->client()->requestApp('DELETE', 'api/v1/secretaries/' . $id);
+        self::assertSame(401, $response->statusCode);
+        self::assertNotEmpty((string) $response->header('www-authenticate'));
+        self::assertSame($before, $f->secretaryDeleteSnapshot());
+    }
+
     private function writeClient(string $authentication): GateHttpClient
     {
         return $authentication === 'bearer'
