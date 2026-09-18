@@ -86,13 +86,24 @@ requests retain their behavior. Its existing Kuma runtime-bundle manifest tracks
 the changed source hash; this is not an installation or production update.
 No application code or additional CI job changes.
 The earlier controller tests remain the evidence for single-secret rotation,
-omission and null handling. A bounded DELETE extension now covers authorized
-synthetic administrator Basic and global Bearer deletion, direct absence of the
-user/settings/service-link rows, unchanged unrelated fixture data, missing
-authentication, and repeated deletion returning 404. The fixture registers each
-future identity before its HTTP request and cleanup remains repeatable.
+omission and null handling. Provider DELETE coverage remains scoped to Provider
+targets; its `admin-delete` case means an administrator-authenticated Provider
+delete. Administrator-target DELETE has its own bounded HTTP regression in
+`StaffSettingsApiHttpTest`: authorized synthetic administrator Basic and global
+Bearer deletion, direct absence of the user/settings rows, unchanged unrelated
+fixture data, invalid and non-admin authentication, and repeated deletion
+returning 404. The fixture registers each future identity before its HTTP request
+and cleanup remains repeatable.
 These cases are ordinary local HTTP evidence only; concurrent writes, other
 roles, production HTTP configuration and deployment remain outside this pilot.
+
+The same test also runs a narrowly scoped real-database last-admin guard check
+inside the fresh isolated stack. It temporarily reassigns the other seeded admin
+rows inside an outer transaction, verifies the synthetic actor is the only
+remaining admin, and confirms `Admins_model::delete` rejects the actor while
+retaining the outer transaction. The test rolls back that transaction and
+rechecks the original seeded roles and rows. This is model/database guard
+evidence, not HTTP response-contract or concurrency evidence.
 
 ## Bounded Secretary DELETE regression
 
