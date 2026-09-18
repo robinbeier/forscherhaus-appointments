@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use PHPUnit\Framework\TestCase;
 use ReleaseGate\GateHttpClient;
+use ReleaseGate\GateHttpResponse;
 use Tests\Integration\Support\DefenseCycleFixtures;
 use Tests\Integration\Support\DefenseCycleHttpServer;
 
@@ -86,6 +87,163 @@ final class BackofficeHttpContractTest extends TestCase
             self::assertSame(403, $response->statusCode, 'Missing CSRF must be rejected for ' . $path . '.');
             self::assertSame($before, $this->dbSnapshot());
         }
+    }
+
+    public function testBlockedPeriodWritesWithoutSessionAreRejectedWithValidCsrf(): void
+    {
+        $f = $this->fixture;
+        $admin = $this->login($this->credentials['admin_username'], $this->credentials['password']);
+        $target = $f->blockedPeriodWritePayload('no-session-target');
+        $created = $this->json($admin->post('blocked_periods/store', ['blocked_period' => $target]));
+        $targetId = (int) ($created['id'] ?? 0);
+        self::assertGreaterThan(0, $targetId);
+        self::assertSame($target['name'], $f->blockedPeriodRow($targetId)['name']);
+
+        $client = $this->server->client();
+        self::assertSame(200, $client->get('login')->statusCode);
+        $requests = [
+            ['blocked_periods/store', ['blocked_period' => $f->blockedPeriodWritePayload('no-session-store')]],
+            [
+                'blocked_periods/update',
+                [
+                    'blocked_period' => [
+                        'id' => $targetId,
+                        'name' => $target['name'],
+                        'start_datetime' => $target['start_datetime'],
+                        'end_datetime' => $target['end_datetime'],
+                        'notes' => 'no-session-update',
+                    ],
+                ],
+            ],
+            ['blocked_periods/destroy', ['blocked_period_id' => $targetId]],
+        ];
+        foreach ($requests as [$path, $payload]) {
+            $before = $this->dbSnapshot();
+            $response = $client->post($path, $payload);
+            self::assertSame(403, $response->statusCode, 'No session must be rejected for ' . $path . '.');
+            self::assertSame($before, $this->dbSnapshot());
+        }
+
+        $f->cleanup();
+        $f->cleanup();
+        self::assertSame([], $f->blockedPeriodRow($targetId));
+    }
+
+    public function testProviderSessionIsRejectedForAllBlockedPeriodWrites(): void
+    {
+        $f = $this->fixture;
+        $admin = $this->login($this->credentials['admin_username'], $this->credentials['password']);
+        $target = $f->blockedPeriodWritePayload('provider-target');
+        $created = $this->json($admin->post('blocked_periods/store', ['blocked_period' => $target]));
+        $targetId = (int) ($created['id'] ?? 0);
+        self::assertGreaterThan(0, $targetId);
+        self::assertSame($target['name'], $f->blockedPeriodRow($targetId)['name']);
+
+        $provider = $this->login($this->credentials['provider_username'], $this->credentials['password']);
+        $requests = [
+            ['blocked_periods/store', ['blocked_period' => $f->blockedPeriodWritePayload('provider-store')]],
+            [
+                'blocked_periods/update',
+                [
+                    'blocked_period' => [
+                        'id' => $targetId,
+                        'name' => $target['name'],
+                        'start_datetime' => $target['start_datetime'],
+                        'end_datetime' => $target['end_datetime'],
+                        'notes' => 'provider-update',
+                    ],
+                ],
+            ],
+            ['blocked_periods/destroy', ['blocked_period_id' => $targetId]],
+        ];
+        foreach ($requests as [$path, $payload]) {
+            $before = $this->dbSnapshot();
+            $response = $provider->post($path, $payload);
+            self::assertSame(403, $response->statusCode, 'Provider must be rejected for ' . $path . '.');
+            self::assertSame($before, $this->dbSnapshot());
+        }
+
+        $f->cleanup();
+        $f->cleanup();
+        self::assertSame([], $f->blockedPeriodRow($targetId));
+    }
+
+    public function testBlockedPeriodUpdateAndDestroyWithoutCsrfAreRejectedWithoutMutation(): void
+    {
+        $f = $this->fixture;
+        $client = $this->login($this->credentials['admin_username'], $this->credentials['password']);
+        $target = $f->blockedPeriodWritePayload('missing-csrf-target');
+        $created = $this->json($client->post('blocked_periods/store', ['blocked_period' => $target]));
+        $targetId = (int) ($created['id'] ?? 0);
+        self::assertGreaterThan(0, $targetId);
+        self::assertSame($target['name'], $f->blockedPeriodRow($targetId)['name']);
+
+        $requests = [
+            [
+                'blocked_periods/update',
+                [
+                    'blocked_period' => [
+                        'id' => $targetId,
+                        'name' => $target['name'],
+                        'start_datetime' => $target['start_datetime'],
+                        'end_datetime' => $target['end_datetime'],
+                        'notes' => 'missing-csrf-update',
+                    ],
+                ],
+            ],
+            ['blocked_periods/destroy', ['blocked_period_id' => $targetId]],
+        ];
+        foreach ($requests as [$path, $payload]) {
+            $before = $this->dbSnapshot();
+            $response = $client->requestApp('POST', $path, $payload, withCsrfToken: false);
+            self::assertSame(403, $response->statusCode, 'Missing CSRF must be rejected for ' . $path . '.');
+            self::assertSame($before, $this->dbSnapshot());
+        }
+
+        $f->cleanup();
+        $f->cleanup();
+        self::assertSame([], $f->blockedPeriodRow($targetId));
+    }
+
+    public function testAdminBlockedPeriodPutAndDeleteMethodsAreRejectedWithoutMutation(): void
+    {
+        $f = $this->fixture;
+        $client = $this->login($this->credentials['admin_username'], $this->credentials['password']);
+        $target = $f->blockedPeriodWritePayload('wrong-method-target');
+        $created = $this->json($client->post('blocked_periods/store', ['blocked_period' => $target]));
+        $targetId = (int) ($created['id'] ?? 0);
+        self::assertGreaterThan(0, $targetId);
+        self::assertSame($target['name'], $f->blockedPeriodRow($targetId)['name']);
+
+        $requests = [
+            ['blocked_periods/store', ['blocked_period' => $f->blockedPeriodWritePayload('wrong-method-store')]],
+            [
+                'blocked_periods/update',
+                [
+                    'blocked_period' => [
+                        'id' => $targetId,
+                        'name' => $target['name'],
+                        'start_datetime' => $target['start_datetime'],
+                        'end_datetime' => $target['end_datetime'],
+                        'notes' => 'wrong-method-update',
+                    ],
+                ],
+            ],
+            ['blocked_periods/destroy', ['blocked_period_id' => $targetId]],
+        ];
+        foreach (['PUT', 'DELETE'] as $method) {
+            foreach ($requests as [$path, $payload]) {
+                $before = $this->dbSnapshot();
+                $response = $client->requestApp($method, $path, $payload);
+                self::assertSame(405, $response->statusCode, $method . ' ' . $path . ' must be rejected.');
+                self::assertSame('POST', $response->header('allow'));
+                self::assertSame($before, $this->dbSnapshot());
+            }
+        }
+
+        $f->cleanup();
+        $f->cleanup();
+        self::assertSame([], $f->blockedPeriodRow($targetId));
     }
 
     public function testProviderSessionIsRejectedForAdminOnlyStaffWrites(): void
@@ -171,5 +329,14 @@ final class BackofficeHttpContractTest extends TestCase
         self::assertSame(200, $response->statusCode);
         self::assertTrue((bool) (json_decode($response->body, true, 512, JSON_THROW_ON_ERROR)['success'] ?? false));
         return $client;
+    }
+
+    private function json(GateHttpResponse $response): array
+    {
+        self::assertSame(200, $response->statusCode);
+        $data = json_decode($response->body, true, 512, JSON_THROW_ON_ERROR);
+        self::assertIsArray($data);
+        self::assertArrayNotHasKey('exception', $data);
+        return $data;
     }
 }

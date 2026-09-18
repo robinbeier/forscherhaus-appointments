@@ -175,6 +175,12 @@ capability checks precede the POST requirement; authorized GET, HEAD, PUT and
 DELETE stop before DTO creation or model calls with a 405/Allow: POST handoff.
 Ordinary POST cases assert the DTO fields, exact saved payload, returned ID and
 response; denied capabilities and model failures cannot report success.
-These controller tests do not prove real HTTP headers, authentication, CSRF,
-database persistence, date validation or production behavior. The existing
-blocked-period JavaScript client uses POST for all three mutations.
+`BackofficeHttpContractTest` supplements this with real loopback HTTP on the
+fresh isolated stack: missing-session POSTs with a valid CSRF token, Provider
+role denials for all three mutations, missing-CSRF update/destroy, and Admin
+PUT/DELETE method rejection for all three actions. Each case snapshots the DB
+before every request and requires the expected 403 or 405/Allow: POST outcome
+without mutation; owned targets are confirmed and cleaned repeatably. The
+existing blocked-period JavaScript client uses POST for all three mutations.
+These checks do not prove concurrent behavior, production state, or transaction
+rollback beyond the observed no-mutation denial paths.
