@@ -23,6 +23,10 @@
           "match": "exact_file"
         },
         {
+          "path": "application/controllers/User.php",
+          "match": "exact_file"
+        },
+        {
           "path": "application/controllers/Recovery.php",
           "match": "exact_file"
         },

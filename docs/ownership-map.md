@@ -44,6 +44,7 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
 - Path rules:
   - `application/controllers/Login.php` (exact_file)
   - `application/controllers/Logout.php` (exact_file)
+  - `application/controllers/User.php` (exact_file)
   - `application/controllers/Recovery.php` (exact_file)
   - `application/controllers/Account.php` (exact_file)
   - `application/controllers/Localization.php` (exact_file)
