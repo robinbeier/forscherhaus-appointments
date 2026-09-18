@@ -314,6 +314,25 @@ final class DefenseCycleFixtures
         ];
     }
 
+    public function adminWriteState(string $email): array
+    {
+        if (!in_array($email, $this->adminWriteEmails, true)) {
+            throw new RuntimeException('Unregistered Admin write identity.');
+        }
+        $rows = $this->db->get_where('users', ['email' => $email])->result_array();
+        if (!$rows) {
+            return [];
+        }
+        if (count($rows) !== 1) {
+            throw new RuntimeException('Ambiguous Admin write identity.');
+        }
+        $id = (int) $rows[0]['id'];
+        return [
+            'user' => $rows[0],
+            'settings' => $this->userSettingsRow($id),
+        ];
+    }
+
     /** Register exact identities before ordinary authenticated backoffice writes. */
     public function customerWritePayload(string $case): array
     {
@@ -391,6 +410,18 @@ final class DefenseCycleFixtures
     /** Snapshot staff rows and relationships so unrelated synthetic sentinels remain observable. */
     public function secretaryDeleteSnapshot(): array
     {
+        return $this->staffDeleteSnapshot();
+    }
+
+    /** Snapshot staff rows and relationships for an Admin deletion assertion. */
+    public function adminDeleteSnapshot(): array
+    {
+        return $this->staffDeleteSnapshot();
+    }
+
+    /** @return array<string, list<array<string, mixed>>> */
+    private function staffDeleteSnapshot(): array
+    {
         $snapshot = [];
         foreach (['users', 'user_settings', 'services_providers', 'secretaries_providers', 'appointments'] as $table) {
             $rows = $this->db->get($table)->result_array();
@@ -398,6 +429,15 @@ final class DefenseCycleFixtures
             $snapshot[$table] = $rows;
         }
         return $snapshot;
+    }
+
+    /** Return direct deletion postconditions for a registered Admin identity. */
+    public function adminDeleteState(int $id): array
+    {
+        return [
+            'user' => $this->row('users', $id),
+            'settings' => $this->userSettingsRow($id),
+        ];
     }
 
     /** Only owned synthetic staff rows may be seeded with integration sentinels. */

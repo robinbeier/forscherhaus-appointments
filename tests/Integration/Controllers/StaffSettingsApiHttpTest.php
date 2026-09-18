@@ -233,6 +233,154 @@ final class StaffSettingsApiHttpTest extends TestCase
     }
 
     #[DataProvider('validWriteAuthenticationCases')]
+    public function testAuthorizedAdminDeleteRemovesOnlyOwnedRowsAndIsIdempotent(string $authentication): void
+    {
+        $f = $this->fixture;
+        $client = $this->writeClient($authentication);
+        $before = $f->adminDeleteSnapshot();
+        $payload = $f->adminWritePayload('delete-' . $authentication);
+        $created = $this->success(
+            $this->basicClient($this->credentials['admin_username'], $this->credentials['password'])->requestJsonApp(
+                'POST',
+                'api/v1/admins',
+                $payload,
+            ),
+            201,
+        );
+        $state = $f->adminWriteState($payload['email']);
+        $id = (int) ($state['user']['id'] ?? 0);
+        self::assertGreaterThan(0, $id, $authentication . ' Admin fixture must have a positive ID.');
+        self::assertSame($id, (int) ($created['id'] ?? 0));
+        self::assertNotSame([], $state['settings'], 'Admin fixture must have settings before deletion.');
+
+        $deleted = $client->requestApp('DELETE', 'api/v1/admins/' . $id);
+        self::assertSame(204, $deleted->statusCode, $authentication . ' authorized delete must return 204.');
+        self::assertSame(['user' => [], 'settings' => []], $f->adminDeleteState($id));
+        self::assertSame($before, $f->adminDeleteSnapshot(), 'Unrelated staff state must remain unchanged.');
+
+        $repeat = $client->requestApp('DELETE', 'api/v1/admins/' . $id);
+        self::assertSame(404, $repeat->statusCode, $authentication . ' repeated delete must return 404.');
+        self::assertSame($before, $f->adminDeleteSnapshot(), 'Repeated deletion must not mutate state.');
+
+        $f->cleanup();
+        $f->cleanup();
+        self::assertSame([], $f->adminWriteState($payload['email']));
+    }
+
+    public static function invalidAdminDeleteAuthenticationCases(): array
+    {
+        return [
+            'no-credentials' => ['no-credentials'],
+            'wrong-admin-password' => ['wrong-admin-password'],
+            'missing-admin-username' => ['missing-admin-username'],
+            'invalid-bearer-token' => ['invalid-bearer-token'],
+            'provider-basic' => ['provider-basic'],
+        ];
+    }
+
+    #[DataProvider('invalidAdminDeleteAuthenticationCases')]
+    public function testAdminDeleteRejectsInvalidAuthenticationWithoutMutation(string $case): void
+    {
+        $f = $this->fixture;
+        $admin = $this->basicClient($this->credentials['admin_username'], $this->credentials['password']);
+        $payload = $f->adminWritePayload(
+            'deny-' .
+                match ($case) {
+                    'wrong-admin-password' => 'wrongpw',
+                    'missing-admin-username' => 'missinguser',
+                    'invalid-bearer-token' => 'bearer',
+                    'no-credentials' => 'noauth',
+                    'provider-basic' => 'provider',
+                },
+        );
+        $created = $this->success($admin->requestJsonApp('POST', 'api/v1/admins', $payload), 201);
+        $id = (int) ($created['id'] ?? 0);
+        self::assertGreaterThan(0, $id);
+        self::assertNotSame([], $f->adminWriteState($payload['email']));
+        $before = $f->adminDeleteSnapshot();
+        $client = match ($case) {
+            'no-credentials' => $this->server->client(),
+            'wrong-admin-password' => $this->basicClient(
+                $this->credentials['admin_username'],
+                $this->credentials['password'] . '-invalid',
+            ),
+            'missing-admin-username' => $this->basicClient(
+                $this->credentials['admin_username'] . '-missing',
+                $this->credentials['password'],
+            ),
+            'invalid-bearer-token' => $this->bearerClient($this->credentials['token'] . '-invalid'),
+            'provider-basic' => $this->basicClient(
+                $this->credentials['provider_username'],
+                $this->credentials['password'],
+            ),
+        };
+
+        $response = $client->requestApp('DELETE', 'api/v1/admins/' . $id);
+        self::assertSame(401, $response->statusCode, $case . ' must be rejected.');
+        self::assertNotEmpty((string) $response->header('www-authenticate'));
+        self::assertSame($before, $f->adminDeleteSnapshot(), $case . ' must not mutate state.');
+    }
+
+    public function testRealDatabaseLastAdminGuardRejectsActorAndOuterRollbackRestoresSeedRoles(): void
+    {
+        $db = get_instance()->db;
+        $adminRole = $db->get_where('roles', ['slug' => 'admin'])->row_array();
+        $providerRole = $db->get_where('roles', ['slug' => 'provider'])->row_array();
+        self::assertNotEmpty($adminRole);
+        self::assertNotEmpty($providerRole);
+        $adminRoleId = (int) $adminRole['id'];
+        $providerRoleId = (int) $providerRole['id'];
+        $adminRows = $db
+            ->order_by('id')
+            ->get_where('users', ['id_roles' => $adminRoleId])
+            ->result_array();
+        $otherIds = array_values(
+            array_diff(array_map(static fn(array $row): int => (int) $row['id'], $adminRows), [
+                $this->fixture->actorId,
+            ]),
+        );
+        self::assertNotEmpty($otherIds, 'The isolated install seed must provide another admin.');
+        $originalRows = [];
+        foreach ($otherIds as $id) {
+            $row = $db->get_where('users', ['id' => $id])->row_array();
+            self::assertNotEmpty($row);
+            $originalRows[$id] = $row;
+        }
+        $actorBefore = $db->get_where('users', ['id' => $this->fixture->actorId])->row_array();
+
+        self::assertTrue($db->trans_begin());
+        try {
+            self::assertTrue($db->where_in('id', $otherIds)->update('users', ['id_roles' => $providerRoleId]));
+            $currentAdmins = $db
+                ->order_by('id')
+                ->get_where('users', ['id_roles' => $adminRoleId])
+                ->result_array();
+            self::assertSame(
+                [$this->fixture->actorId],
+                array_map(static fn(array $row): int => (int) $row['id'], $currentAdmins),
+            );
+
+            get_instance()->load->model('admins_model');
+            try {
+                get_instance()->admins_model->delete($this->fixture->actorId);
+                self::fail('Expected the real database last-admin guard to reject deletion.');
+            } catch (RuntimeException $exception) {
+                self::assertStringContainsString('requires at least one admin user', $exception->getMessage());
+                self::assertTrue($db->trans_active(), 'The model must retain the outer transaction.');
+                self::assertSame(1, $db->get_where('users', ['id' => $this->fixture->actorId])->num_rows());
+            }
+        } finally {
+            if ($db->trans_active()) {
+                self::assertTrue($db->trans_rollback());
+            }
+        }
+        self::assertSame($actorBefore, $db->get_where('users', ['id' => $this->fixture->actorId])->row_array());
+        foreach ($originalRows as $id => $row) {
+            self::assertSame($row, $db->get_where('users', ['id' => $id])->row_array());
+        }
+    }
+
+    #[DataProvider('validWriteAuthenticationCases')]
     public function testAuthorizedSecretaryDeleteRemovesOnlyOwnedRowsAndIsIdempotent(string $authentication): void
     {
         $f = $this->fixture;
