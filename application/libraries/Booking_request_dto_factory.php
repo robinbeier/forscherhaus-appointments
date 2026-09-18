@@ -73,14 +73,6 @@ final class BookingThemeRequestDto
 }
 
 /**
- * Typed booking cancellation request DTO.
- */
-final class BookingCancellationRequestDto
-{
-    public function __construct(public readonly mixed $cancellationReason) {}
-}
-
-/**
  * Booking request DTO factory.
  *
  * @package Libraries
@@ -137,11 +129,6 @@ class Booking_request_dto_factory
     public function buildThemeRequest(?string $default_theme = null): BookingThemeRequestDto
     {
         return $this->fromThemePayload(request('theme', $default_theme), $default_theme);
-    }
-
-    public function buildCancellationRequest(): BookingCancellationRequestDto
-    {
-        return $this->fromCancellationPayload(request('cancellation_reason'));
     }
 
     public function fromRegisterPayload(mixed $post_data, mixed $captcha): BookingRegisterRequestDto
@@ -211,11 +198,6 @@ class Booking_request_dto_factory
         $normalized_theme = $this->request_normalizer->normalizeString($theme, $default_theme, false);
 
         return new BookingThemeRequestDto($normalized_theme ?? '');
-    }
-
-    public function fromCancellationPayload(mixed $cancellation_reason): BookingCancellationRequestDto
-    {
-        return new BookingCancellationRequestDto($cancellation_reason);
     }
 
     private function normalizeProviderIdCompat(mixed $provider_id): string|int|null

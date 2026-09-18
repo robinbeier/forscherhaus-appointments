@@ -54,7 +54,6 @@ class BookingCancellationControllerFlowTest extends TestCase
         $appointment = $this->fixtures->findAppointmentById($appointmentId);
         $this->assertNotNull($appointment);
 
-        $_POST['cancellation_reason'] = 'Flow cancellation test';
         $_SERVER['REQUEST_METHOD'] = 'POST';
 
         $controller = $this->createCancellationController();
@@ -75,7 +74,6 @@ class BookingCancellationControllerFlowTest extends TestCase
             new DateTimeImmutable('+2 days 12:00:00'),
         );
 
-        $_POST['cancellation_reason'] = 'Flow cancellation not-found';
         $_SERVER['REQUEST_METHOD'] = 'POST';
 
         $controller = $this->createCancellationController();
