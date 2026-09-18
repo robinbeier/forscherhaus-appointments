@@ -41,7 +41,7 @@ class Account extends EA_Controller
         //
     ];
 
-    public array $allowed_user_setting_fields = ['username', 'password', 'notifications', 'calendar_view'];
+    public array $allowed_user_setting_fields = ['username', 'password', 'calendar_view'];
 
     public array $optional_user_setting_fields = [
         //
@@ -62,7 +62,6 @@ class Account extends EA_Controller
         $this->load->model('settings_model');
 
         $this->load->library('accounts');
-        $this->load->library('notifications');
         $this->load->library('timezones');
     }
 

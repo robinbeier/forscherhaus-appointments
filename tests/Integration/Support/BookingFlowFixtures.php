@@ -285,20 +285,6 @@ class BookingFlowFixtures
         $this->cleanupRegistry = [];
     }
 
-    public static function createNoopNotifications(): object
-    {
-        return new class {
-            public int $savedCalls = 0;
-
-            public function notify_appointment_saved(...$args): void
-            {
-                $this->savedCalls++;
-            }
-
-            public function notify_appointment_deleted(...$args): void {}
-        };
-    }
-
     private function registerCleanup(string $table, int $id): void
     {
         if ($id <= 0) {

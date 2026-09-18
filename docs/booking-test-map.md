@@ -29,7 +29,7 @@ ist eine Orientierung, keine vollständige Testliste.
 | Browser lädt Bestätigungs-PDF und Download wird ausgewertet | `scripts/release-gate/booking_confirmation_pdf_gate.php` plus `scripts/release-gate/playwright/booking_confirmation_download.js` | Browser-/Release-Gate, read-only; reale Bestätigungsseite, PDF/Download und Parser |
 | Download-Sentinel bleibt stabil | `tests/Unit/Scripts/BookingConfirmationDownloadSnippetTest.php`, `BookingConfirmationRunCodeResultTest.php` | Source-/Parser-Unit; Marker, Fallback-Ausgabe und ungültige Playwright-Ausgabe |
 
-| Mail-Konfiguration und Kalenderdatei | `tests/Unit/Libraries/EmailMessagesTest.php`, `IcsFileTest.php` | Unit; SMTP-/HTML-Konfiguration und Verwaltungslink; kein Nachweis einer Mailzustellung |
+| Kalenderdatei und Download | `tests/Unit/Libraries/IcsFileTest.php` plus `Appointments::ics` coverage | Unit/HTTP; ICS generation and parent download remain available; application mail is intentionally absent |
 
 ## Verwalten, verschieben, stornieren
 

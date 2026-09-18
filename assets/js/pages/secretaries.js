@@ -33,7 +33,6 @@ App.Pages.Secretaries = (function () {
     const $username = $('#username');
     const $password = $('#password');
     const $passwordConfirmation = $('#password-confirm');
-    const $notifications = $('#notifications');
     const $calendarView = $('#calendar-view');
     const $filterSecretaries = $('#filter-secretaries');
     let filterResults = {};
@@ -194,7 +193,6 @@ App.Pages.Secretaries = (function () {
                 ldap_dn: $ldapDn.val(),
                 settings: {
                     username: $username.val(),
-                    notifications: Number($notifications.prop('checked')),
                     calendar_view: $calendarView.val(),
                 },
             };
@@ -348,7 +346,6 @@ App.Pages.Secretaries = (function () {
         $secretaries.find('.record-details #calendar-view').val('default');
         $secretaries.find('.record-details #timezone').val(vars('default_timezone'));
         $secretaries.find('.record-details #language').val(vars('default_language'));
-        $secretaries.find('.record-details #notifications').prop('checked', true);
         $secretaries.find('.add-edit-delete-group').show();
         $secretaries.find('.save-cancel-group').hide();
         $secretaries.find('.form-message').hide();
@@ -380,7 +377,6 @@ App.Pages.Secretaries = (function () {
 
         $username.val(secretary.settings.username);
         $calendarView.val(secretary.settings.calendar_view);
-        $notifications.prop('checked', Boolean(Number(secretary.settings.notifications)));
 
         $('#secretary-providers input:checkbox').prop('checked', false);
 

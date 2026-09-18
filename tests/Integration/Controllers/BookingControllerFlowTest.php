@@ -290,7 +290,6 @@ class BookingControllerFlowTest extends TestCase
         $this->assertSame($winningCustomer, $this->fixtures->findCustomerById((int) $winningCustomer['id']));
         $this->assertSame($winningAppointment, $this->fixtures->findAppointmentById((int) $winningAppointment['id']));
         $this->assertSame(1, $this->fixtures->countAppointmentsForCustomer((int) $winningCustomer['id']));
-        $this->assertSame(0, $controller->notifications->savedCalls);
     }
 
     public function testRegisterManageModeUpdatesExistingAppointment(): void
@@ -457,7 +456,6 @@ class BookingControllerFlowTest extends TestCase
             }
         };
         $this->wireBookingDependencies($controller);
-        $controller->notifications = BookingFlowFixtures::createNoopNotifications();
         $this->setReschedulePayload($scenario, true, $scenario['appointment_id'], $scenario['customer_id'], [], 2);
         $_POST['post_data']['appointment']['end_datetime'] = $startAt
             ->add(new DateInterval('PT5M'))
@@ -470,7 +468,6 @@ class BookingControllerFlowTest extends TestCase
             $this->assertFalse($response['success'] ?? true);
             $this->assertSame(lang('requested_hour_is_unavailable'), $response['message'] ?? null);
             $this->assertSame(409, get_instance()->output->statusCode);
-            $this->assertSame(0, $controller->notifications->savedCalls);
         } finally {
             $secondary->close();
             if ($controller->conflictAppointmentId !== null) {
@@ -864,7 +861,6 @@ class BookingControllerFlowTest extends TestCase
         $this->assertSame(409, get_instance()->output->statusCode);
         $this->assertSame($beforeAppointment, $this->fixtures->findAppointmentById($scenario['appointment_id']));
         $this->assertSame($beforeCustomer, $this->fixtures->findCustomerById($scenario['customer_id']));
-        $this->assertSame(0, $controller->notifications->savedCalls);
     }
 
     public function testAppointmentRaceDriftAfterIssuanceRejectsWithoutMutation(): void
@@ -913,7 +909,6 @@ class BookingControllerFlowTest extends TestCase
         $this->assertFalse($response['captcha_verification'] ?? true);
         $this->assertSame($beforeAppointment, $this->fixtures->findAppointmentById($scenario['appointment_id']));
         $this->assertSame($beforeCustomer, $this->fixtures->findCustomerById($scenario['customer_id']));
-        $this->assertSame(0, $controller->notifications->savedCalls);
 
         $this->resetRuntimeState('POST');
         $this->setReschedulePayload($scenario);
@@ -1152,8 +1147,6 @@ class BookingControllerFlowTest extends TestCase
 
         $this->wireBookingDependencies($controller, $injectCache);
 
-        $controller->notifications = BookingFlowFixtures::createNoopNotifications();
-
         return $controller;
     }
 
@@ -1256,7 +1249,6 @@ class BookingControllerFlowTest extends TestCase
         $this->assertSame(lang('appointment_not_found'), $response['message'] ?? null);
         $this->assertSame($expectedAppointment, $this->fixtures->findAppointmentById($appointmentId));
         $this->assertSame($expectedCustomer, $this->fixtures->findCustomerById($customerId));
-        $this->assertSame(0, $controller->notifications->savedCalls);
     }
 
     private function wireBookingDependencies(Booking $controller, bool $injectCache = true): void

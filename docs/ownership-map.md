@@ -140,8 +140,6 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
   - `application/controllers/Calendar.php`
   - `application/models/Appointments_model.php`
   - `assets/js/pages/calendar.js`
-  - `application/libraries/Notifications.php`
-  - `application/libraries/Email_messages.php`
 - Path rules:
   - `application/controllers/Calendar.php` (exact_file)
   - `application/controllers/Appointments.php` (exact_file)
@@ -160,8 +158,6 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
   - `assets/js/pages/blocked_periods.js` (exact_file)
   - `assets/js/components/appointments_modal.js` (exact_file)
   - `assets/js/components/unavailabilities_modal.js` (exact_file)
-  - `application/libraries/Notifications.php` (exact_file)
-  - `application/libraries/Email_messages.php` (exact_file)
 
 ### `dashboard-exports`
 

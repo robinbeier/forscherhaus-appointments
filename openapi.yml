@@ -2228,8 +2228,6 @@ components:
                     properties:
                         username:
                             type: string
-                        notifications:
-                            type: boolean
                         calendarView:
                             type: string
             example:
@@ -2248,7 +2246,6 @@ components:
                 ldapDn: null
                 settings:
                     username: jasondoe
-                    notifications: true
                     calendarView: default
         AdminPayload:
             type: object
@@ -2286,8 +2283,6 @@ components:
                             type: string
                             format: password
                             writeOnly: true
-                        notifications:
-                            type: boolean
                         calendarView:
                             type: string
             example:
@@ -2306,7 +2301,6 @@ components:
                 settings:
                     username: jasondoe
                     password: Password@123
-                    notifications: true
                     calendarView: default
         ProviderRecord:
             type: object
@@ -2348,8 +2342,6 @@ components:
                     properties:
                         username:
                             type: string
-                        notifications:
-                            type: boolean
                         calendarView:
                             type: string
                         googleSync:
@@ -2386,7 +2378,6 @@ components:
                 ldapDn: null
                 settings:
                     username: chrisdoe
-                    notifications: true
                     calendarView: default
                     googleSync: false
                     googleCalendar: null
@@ -2460,8 +2451,6 @@ components:
                             type: string
                             format: password
                             writeOnly: true
-                        notifications:
-                            type: boolean
                         calendarView:
                             type: string
                         googleSync:
@@ -2511,7 +2500,6 @@ components:
                 settings:
                     username: chrisdoe
                     password: Password@123
-                    notifications: true
                     calendarView: default
                     googleSync: false
                     googleCalendar: null
@@ -2581,8 +2569,6 @@ components:
                     properties:
                         username:
                             type: string
-                        notifications:
-                            type: boolean
                         calendarView:
                             type: string
             example:
@@ -2602,7 +2588,6 @@ components:
                 providers: []
                 settings:
                     username: jessydoe
-                    notifications: true
                     calendarView: default
         SecretaryPayload:
             type: object
@@ -2644,8 +2629,6 @@ components:
                             type: string
                             format: password
                             writeOnly: true
-                        notifications:
-                            type: boolean
                         calendarView:
                             type: string
             example:
@@ -2665,7 +2648,6 @@ components:
                 settings:
                     username: jessydoe
                     password: Password@123
-                    notifications: true
                     calendarView: default
         SettingRecord:
             type: object

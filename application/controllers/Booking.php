@@ -76,7 +76,6 @@ class Booking extends EA_Controller
         $this->load->model('consents_model');
 
         $this->load->library('timezones');
-        $this->load->library('notifications');
         $this->load->library('availability');
         $this->load->library('booking_request_dto_factory');
         $this->load->library('reschedule_authority');
@@ -585,27 +584,6 @@ class Booking extends EA_Controller
                 $this->rescheduleAuthority()->releaseCreationIdentityLock($creation_identity_lock);
             }
             $creation_identity_lock = null;
-
-            $company_color = setting('company_color');
-
-            $settings = [
-                'company_name' => setting('company_name'),
-                'company_link' => setting('company_link'),
-                'company_email' => setting('company_email'),
-                'company_color' =>
-                    !empty($company_color) && $company_color != DEFAULT_COMPANY_COLOR ? $company_color : null,
-                'date_format' => setting('date_format'),
-                'time_format' => setting('time_format'),
-            ];
-
-            $this->notifications->notify_appointment_saved(
-                $appointment,
-                $service,
-                $provider,
-                $customer,
-                $settings,
-                $authority_claim instanceof RescheduleAuthorityClaim,
-            );
 
             $response = [
                 'appointment_id' => $appointment['id'],

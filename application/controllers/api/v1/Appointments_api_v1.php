@@ -34,7 +34,6 @@ class Appointments_api_v1 extends EA_Controller
 
         $this->load->library('api');
         $this->load->library('api_request_dto_factory');
-        $this->load->library('notifications');
 
         $this->api->auth();
 
@@ -253,52 +252,12 @@ class Appointments_api_v1 extends EA_Controller
 
             $created_appointment = $this->appointments_model->find($appointment_id);
 
-            $this->notify_and_sync_appointment($created_appointment);
-
             $this->appointments_model->api_encode($created_appointment);
 
             json_response($created_appointment, 201);
         } catch (Throwable $e) {
             json_exception($e);
         }
-    }
-
-    /**
-     * Send the required notifications and trigger syncing after saving an appointment.
-     *
-     * @param array $appointment Appointment data.
-     * @param string $action Performed action ("store" or "update").
-     */
-    private function notify_and_sync_appointment(array $appointment, string $action = 'store'): void
-    {
-        $manage_mode = $action === 'update';
-
-        $service = $this->services_model->find($appointment['id_services']);
-
-        $provider = $this->providers_model->find($appointment['id_users_provider']);
-
-        $customer = $this->customers_model->find($appointment['id_users_customer']);
-
-        $company_color = setting('company_color');
-
-        $settings = [
-            'company_name' => setting('company_name'),
-            'company_email' => setting('company_email'),
-            'company_link' => setting('company_link'),
-            'company_color' =>
-                !empty($company_color) && $company_color != DEFAULT_COMPANY_COLOR ? $company_color : null,
-            'date_format' => setting('date_format'),
-            'time_format' => setting('time_format'),
-        ];
-
-        $this->notifications->notify_appointment_saved(
-            $appointment,
-            $service,
-            $provider,
-            $customer,
-            $settings,
-            $manage_mode,
-        );
     }
 
     /**
@@ -327,8 +286,6 @@ class Appointments_api_v1 extends EA_Controller
 
             $updated_appointment = $this->appointments_model->find($appointment_id);
 
-            $this->notify_and_sync_appointment($updated_appointment, 'update');
-
             $this->appointments_model->api_encode($updated_appointment);
 
             json_response($updated_appointment);
@@ -353,35 +310,7 @@ class Appointments_api_v1 extends EA_Controller
                 return;
             }
 
-            $deleted_appointment = $occurrences[0];
-
-            $service = $this->services_model->find($deleted_appointment['id_services']);
-
-            $provider = $this->providers_model->find($deleted_appointment['id_users_provider']);
-
-            $customer = $this->customers_model->find($deleted_appointment['id_users_customer']);
-
-            $company_color = setting('company_color');
-
-            $settings = [
-                'company_name' => setting('company_name'),
-                'company_email' => setting('company_email'),
-                'company_link' => setting('company_link'),
-                'company_color' =>
-                    !empty($company_color) && $company_color != DEFAULT_COMPANY_COLOR ? $company_color : null,
-                'date_format' => setting('date_format'),
-                'time_format' => setting('time_format'),
-            ];
-
             $this->appointments_model->delete($id);
-
-            $this->notifications->notify_appointment_deleted(
-                $deleted_appointment,
-                $service,
-                $provider,
-                $customer,
-                $settings,
-            );
 
             response('', 204);
         } catch (Throwable $e) {

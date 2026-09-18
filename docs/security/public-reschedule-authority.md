@@ -24,8 +24,8 @@ at the write boundary:
    and then passed the caller's appointment ID to `Appointments_model::save()`.
 6. An appointment ID caused an update. No hash, session, one-time token,
    canonical appointment identity, or state snapshot was verified first.
-7. Synchronization, notifications, and the save webhook ran after the database
-   writes. Customer and appointment writes were not enclosed by one controller
+7. Synchronization and the save webhook ran after the database writes. Customer
+   and appointment writes were not enclosed by one controller
    transaction.
 
 Consequently, a forged `manage_mode` or appointment ID could reach an existing
@@ -121,8 +121,8 @@ connection is the final release boundary.
 
 Consent, customer, appointment, and generated buffer writes happen inside that
 outer transaction. Any exception or failed check rolls the transaction back.
-Notifications run only after commit, preserving
-their existing behavior without allowing them to weaken the authority gate.
+The success response is emitted only after the commit, and no application
+email or notification dispatch runs on this path.
 
 ## Rejection contract
 
@@ -135,7 +135,7 @@ For every rejected existing-appointment request:
 
 - the appointment row is unchanged by the request;
 - the customer row is unchanged by the request;
-- no consent or notification side effect runs; and
+- no consent or application email side effect runs; and
 - existing CAPTCHA, availability, overlap, buffer, provider-smoke, and
   booking-conflict behavior remains in force.
 

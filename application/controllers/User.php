@@ -28,7 +28,6 @@ class User extends EA_Controller
         parent::__construct();
 
         $this->load->library('accounts');
-        $this->load->library('email_messages');
     }
 
     /**

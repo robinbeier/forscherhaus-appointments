@@ -123,17 +123,9 @@ final class TwoConnectionWriteContractTest extends TestCase
         $_POST['appointment_data']['notes'] = 'Administrative concurrency control';
         $shared = get_instance()->db;
         $harness = new TwoConnectionHarness();
-        $notifications = BookingFlowFixtures::createNoopNotifications();
         $writeReached = false;
         $harness->run(
-            function ($primary, $peer, $checkpoint) use (
-                $reassign,
-                $id,
-                $replacement,
-                $notifications,
-                &$writeReached,
-                $harness,
-            ): void {
+            function ($primary, $peer, $checkpoint) use ($reassign, $id, $replacement, &$writeReached, $harness): void {
                 $this->assertNotSame($primary->conn_id->thread_id, $peer->conn_id->thread_id);
                 $checkpoint(TwoConnectionHarness::BEFORE_AUTHORITY);
                 $controller = new class extends Calendar {
@@ -192,7 +184,6 @@ final class TwoConnectionWriteContractTest extends TestCase
                 }
                 $controller->db = $primary;
                 $controller->appointments_model = $model;
-                $controller->notifications = $notifications;
                 $controller->save_appointment();
                 $this->assertFalse($primary->trans_active());
                 $result = json_decode(get_instance()->output->get_output(), true);
@@ -220,7 +211,6 @@ final class TwoConnectionWriteContractTest extends TestCase
         $stored = $this->fixtures->findAppointmentById($id);
         $this->assertSame($reassign ? $replacement : $pair['provider_id'], (int) $stored['id_users_provider']);
         $this->assertSame($reassign ? $row['notes'] : 'Administrative concurrency control', $stored['notes']);
-        $this->assertSame($reassign ? 0 : 1, $notifications->savedCalls);
     }
 
     public function testServiceBufferChangeSerializesBeforeLegitimateReschedule(): void

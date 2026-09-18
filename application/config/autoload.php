@@ -99,7 +99,7 @@ $autoload['helper'] = [
 |
 */
 
-$autoload['config'] = ['app', 'email'];
+$autoload['config'] = ['app'];
 
 /*
 | -------------------------------------------------------------------

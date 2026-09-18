@@ -26,7 +26,6 @@ final class CalendarCombinedAuthorizationTestExceptions extends \EA_Exceptions
 final class CalendarCombinedAuthorizationTest extends TestCase
 {
     private BookingFlowFixtures $fixtures;
-    private object $notifications;
     private object $originalExceptions;
     private \EA_Output $originalOutput;
     private ?array $providerRoleSnapshot = null;
@@ -57,7 +56,6 @@ final class CalendarCombinedAuthorizationTest extends TestCase
         $this->providerRoleSnapshot = get_instance()
             ->db->get_where('roles', ['slug' => DB_SLUG_PROVIDER])
             ->row_array();
-        $this->notifications = BookingFlowFixtures::createNoopNotifications();
         $this->resetRequest();
     }
 
@@ -115,7 +113,6 @@ final class CalendarCombinedAuthorizationTest extends TestCase
         $this->assertSame('Before', $this->customerLastName($customer));
         $this->assertSame($foreignProvider, (int) $this->storedAppointment($appointment)['id_users_provider']);
         $this->assertSame('2035-05-01 09:00:00', $this->storedAppointment($appointment)['start_datetime']);
-        $this->assertSame(0, $this->notifications->savedCalls);
     }
 
     public function testOwnAppointmentForeignTargetAndCustomerMismatchAreDeniedAtomically(): void
@@ -149,7 +146,6 @@ final class CalendarCombinedAuthorizationTest extends TestCase
         $this->assertDenied();
         $this->assertSame('Linked', $this->customerLastName($customer));
         $this->assertSame($customer, (int) $this->storedAppointment($appointment)['id_users_customer']);
-        $this->assertSame(0, $this->notifications->savedCalls);
     }
 
     public function testAllowedOwnCustomerAndDateChangeCommitsTogether(): void
@@ -236,7 +232,6 @@ final class CalendarCombinedAuthorizationTest extends TestCase
         $this->assertSame(403, get_instance()->output->statusCode);
         $this->assertDenied();
         $this->assertSame('Before', $this->customerLastName($customer));
-        $this->assertSame(0, $this->notifications->savedCalls);
     }
 
     public function testSecretaryAndAdminMayUseCrossProviderCombination(): void
@@ -342,7 +337,6 @@ final class CalendarCombinedAuthorizationTest extends TestCase
                 'stored_provider' => $foreignProvider,
                 'stored_customer' => $customer,
                 'stored_start' => '2035-05-06 09:00:00',
-                'notifications' => 0,
             ],
             [
                 'parallel_reassignment' => $permissions->reassigned,
@@ -351,7 +345,6 @@ final class CalendarCombinedAuthorizationTest extends TestCase
                 'stored_provider' => (int) $stored['id_users_provider'],
                 'stored_customer' => (int) $stored['id_users_customer'],
                 'stored_start' => $stored['start_datetime'],
-                'notifications' => $this->notifications->savedCalls,
             ],
         );
     }
@@ -417,7 +410,6 @@ final class CalendarCombinedAuthorizationTest extends TestCase
         $stored = $this->storedAppointment($appointment);
         $this->assertSame($foreignProvider, (int) $stored['id_users_provider']);
         $this->assertSame('2035-05-08 09:00:00', $stored['start_datetime']);
-        $this->assertSame(0, $this->notifications->savedCalls);
     }
 
     public function testCustomerAccessIsRevalidatedAfterGrantAppointmentDrift(): void
@@ -484,7 +476,6 @@ final class CalendarCombinedAuthorizationTest extends TestCase
         $this->assertDenied();
         $this->assertSame($customerA, (int) $this->storedAppointment($appointment)['id_users_customer']);
         $this->assertSame('Requested', $this->customerLastName($customerB));
-        $this->assertSame(0, $this->notifications->savedCalls);
     }
 
     public function testManageModeLocksUserParentsBeforeAppointment(): void
@@ -587,7 +578,6 @@ final class CalendarCombinedAuthorizationTest extends TestCase
             $controller->{$property} = $CI->{$property};
         }
         $controller->appointments_model = $CI->appointments_model;
-        $controller->notifications = $this->notifications;
         return $controller;
     }
 

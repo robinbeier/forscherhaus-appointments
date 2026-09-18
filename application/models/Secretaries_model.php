@@ -735,7 +735,6 @@ class Secretaries_model extends EA_Model
             'ldapDn' => $secretary['ldap_dn'],
             'settings' => [
                 'username' => $secretary['settings']['username'],
-                'notifications' => filter_var($secretary['settings']['notifications'], FILTER_VALIDATE_BOOLEAN),
                 'calendarView' => $secretary['settings']['calendar_view'],
             ],
         ];
@@ -824,13 +823,6 @@ class Secretaries_model extends EA_Model
 
             if (array_key_exists('password', $secretary['settings'])) {
                 $decoded_resource['settings']['password'] = $secretary['settings']['password'];
-            }
-
-            if (array_key_exists('notifications', $secretary['settings'])) {
-                $decoded_resource['settings']['notifications'] = filter_var(
-                    $secretary['settings']['notifications'],
-                    FILTER_VALIDATE_BOOLEAN,
-                );
             }
 
             if (array_key_exists('calendarView', $secretary['settings'])) {

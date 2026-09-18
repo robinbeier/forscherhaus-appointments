@@ -100,11 +100,10 @@ tooling are present in both the staged tree and the final tarball.
 ## Local Services (Docker)
 
 Provider calendar synchronization with Google/CalDAV is not supported. Calendar
-files in confirmation emails and the parent-facing calendar links remain available.
+files and the parent-facing calendar links remain available.
 
 - App: `http://localhost`
 - phpMyAdmin: `http://localhost:8080` (`root` / `secret`)
-- Mailpit: `http://localhost:8025`
 - PDF renderer: `http://localhost:3003`
 
 For deterministic LDAP fixtures, reset and smoke the local directory with:

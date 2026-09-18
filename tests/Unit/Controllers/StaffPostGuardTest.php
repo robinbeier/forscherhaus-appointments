@@ -80,8 +80,7 @@ final class StaffPostGuardTest extends TestCase
         if ($controller === 'Admins' || $action === 'store') {
             $events[] = $controller === 'Admins' ? 'optional:[]' : 'optional:{"providers":[]}';
         }
-        $events[] =
-            'only:' . json_encode(['username', 'password', 'notifications', 'calendar_view'], JSON_THROW_ON_ERROR);
+        $events[] = 'only:' . json_encode(['username', 'password', 'calendar_view'], JSON_THROW_ON_ERROR);
         if ($controller === 'Secretaries' && $action === 'update') {
             $events[] = 'optional:{"providers":[]}';
         } else {

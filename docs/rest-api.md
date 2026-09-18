@@ -295,7 +295,6 @@ You can also try the GET requests with your browser by navigating to the respect
     "settings":{
         "username": "chrisdoe",
         "password": "Password@123",
-        "notifications": true,
         "calendarView": "default"
     }
 }
@@ -335,7 +334,6 @@ You can also try the GET requests with your browser by navigating to the respect
     "settings":{
         "username": "chrisdoe",
         "password": "Password@123",
-        "notifications": true,
         "googleSync": false,
         "googleCalendar": null,
         "syncFutureDays": 90,
@@ -451,7 +449,6 @@ historical webhook data is retained without an active application interface.
     "settings":{
         "username":"jessydoe",
         "password":"Password@123",
-        "notifications": true,
         "calendarView": "default"
     }
 }
@@ -480,6 +477,11 @@ historical webhook data is retained without an active application interface.
 - `GET /api/v1/settings[/:name]` Get all the settings or a specific one by providing the setting name in the URI.
 - `PUT /api/v1/settings/:name` Insert or update a setting in the database. Provide a snake_case name in order to keep the conventions.
 - `DELETE /api/v1/settings/:name` Remove a setting from the database. **Notice:** Be careful when removing settings that are required by the application because this will cause error later on.
+
+Legacy notification settings may remain in storage for rollback compatibility,
+but they have no application behavior and are not part of staff resource
+projections. The generic settings API continues to expose arbitrary stored
+settings according to its existing contract.
 
 ## API Roadmap
 

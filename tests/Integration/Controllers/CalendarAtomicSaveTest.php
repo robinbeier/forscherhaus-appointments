@@ -112,7 +112,7 @@ class CalendarAtomicSaveTest extends TestCase
         $this->assertSame($customerEmail, $customer['email']);
     }
 
-    public function testTransactionFailuresDoNotPersistCustomerOrSendNotifications(): void
+    public function testTransactionFailuresDoNotPersistCustomer(): void
     {
         $pair = $this->fixtures->resolveProviderServicePair();
         foreach (['trans_begin', 'trans_commit'] as $failure) {
@@ -149,13 +149,6 @@ class CalendarAtomicSaveTest extends TestCase
                     return $this->appointment;
                 }
             };
-            $controller->notifications = new class {
-                public int $calls = 0;
-                public function notify_appointment_saved(...$arguments): void
-                {
-                    $this->calls++;
-                }
-            };
             $controller->save_appointment();
             $response = json_decode(get_instance()->output->get_output(), true);
             $this->assertFalse($response['success'] ?? true);
@@ -166,7 +159,6 @@ class CalendarAtomicSaveTest extends TestCase
                 $response['message'] ?? null,
             );
             $this->assertFalse($this->fixtures->customerExistsByEmail($email));
-            $this->assertSame(0, $controller->notifications->calls);
             $this->assertFalse(get_instance()->db->trans_active());
             $this->assertSame(
                 $failure === 'trans_begin'
@@ -225,7 +217,6 @@ class CalendarAtomicSaveTest extends TestCase
                 throw new RuntimeException(lang('buffer_conflict_error'));
             }
         };
-        $controller->notifications = BookingFlowFixtures::createNoopNotifications();
 
         return $controller;
     }

@@ -42,12 +42,6 @@ services:
             - 'PMA_HOST=mysql'
             - 'UPLOAD_LIMIT=102400K'
 
-    mailpit:
-        image: 'axllent/mailpit:v1.29.3'
-        ports:
-            - '8025:8025'
-            - '1025:1025'
-
     swagger-ui:
         platform: linux/amd64
         image: swaggerapi/swagger-ui:v5.32.0

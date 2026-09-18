@@ -52,7 +52,6 @@ class Providers extends EA_Controller
         'password',
         'working_plan',
         'working_plan_exceptions',
-        'notifications',
         'calendar_view',
     ];
 

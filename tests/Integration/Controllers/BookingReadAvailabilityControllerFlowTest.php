@@ -345,8 +345,6 @@ class BookingReadAvailabilityControllerFlowTest extends TestCase
 
         $this->wireBookingDependencies($controller);
 
-        $controller->notifications = BookingFlowFixtures::createNoopNotifications();
-
         return $controller;
     }
 
