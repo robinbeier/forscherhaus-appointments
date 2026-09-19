@@ -71,4 +71,65 @@ class DashboardTeacherPdfViewTest extends TestCase
         $this->assertStringContainsString('logo.decode().catch', $output);
         $this->assertStringContainsString('window.chartsReady = true', $output);
     }
+
+    public function testOptionalTimeSuffixRendersEmptyAndGermanValuesWithoutMissingKey(): void
+    {
+        $school_name = 'Forscherhaus';
+        $logo_data_url = null;
+        $generated_at_text = '27. Juli 2026, 08:15';
+        $period_label = '27. Jul 2026';
+        $teachers = [
+            [
+                'provider_name' => 'Adina Rossmeisl',
+                'progress' => ['booked_percent' => 50, 'open_percent' => 50],
+                'slot_info_text' => '50 % gebucht',
+                'target_formatted' => '2',
+                'booked_formatted' => '1',
+                'booked_percent_formatted' => '50 %',
+                'open_formatted' => '1',
+                'slots_planned_formatted' => '2',
+                'slots_required_formatted' => '2',
+            ],
+        ];
+        $teacher_pages = [
+            [
+                'teacher' => $teachers[0],
+                'chunk_index' => 0,
+                'chunks_total' => 1,
+                'appointments' => [
+                    [
+                        'parent_lastname' => 'Becker',
+                        'date' => 'Mo, 27.07.2026',
+                        'start' => '08:00',
+                        'end' => '08:20',
+                    ],
+                ],
+                'has_any_appointments' => true,
+            ],
+        ];
+        $language = get_instance()->lang->language;
+        $time_format = setting('time_format');
+
+        try {
+            setting(['time_format' => 'military']);
+            foreach (['' => false, 'Uhr' => true] as $suffix => $has_suffix) {
+                get_instance()->lang->language['pdf_export_time_suffix'] = $suffix;
+                ob_start();
+                include APPPATH . 'views/exports/dashboard_teacher_pdf.php';
+                $output = (string) ob_get_clean();
+                $this->assertStringContainsString('08:00', $output);
+                $this->assertSame($has_suffix, str_contains($output, '08:00 Uhr'));
+                $this->assertStringNotContainsString('pdf_export_time_suffix', $output);
+            }
+            unset(get_instance()->lang->language['pdf_export_time_suffix']);
+            ob_start();
+            include APPPATH . 'views/exports/dashboard_teacher_pdf.php';
+            $output = (string) ob_get_clean();
+            $this->assertStringContainsString('08:00', $output);
+            $this->assertStringNotContainsString('pdf_export_time_suffix', $output);
+        } finally {
+            get_instance()->lang->language = $language;
+            setting(['time_format' => $time_format]);
+        }
+    }
 }

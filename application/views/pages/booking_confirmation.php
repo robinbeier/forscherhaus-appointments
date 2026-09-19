@@ -581,8 +581,8 @@ $book_another_link = lang('book_another_appointment_link') ?: lang('go_to_bookin
 $pdf_export_preparing_message = lang('pdf_export_preparing') ?: 'Preparing PDF download...';
 $pdf_export_ready_message = lang('pdf_export_ready') ?: 'PDF download started.';
 $pdf_export_failed_message = lang('pdf_export_failed') ?: 'PDF export failed. Please try again.';
-$pdf_time_suffix_raw = lang('pdf_export_time_suffix');
-$pdf_time_suffix = $pdf_time_suffix_raw === false ? '' : $pdf_time_suffix_raw;
+$pdf_time_suffix_raw = get_instance()->lang->line('pdf_export_time_suffix', false);
+$pdf_time_suffix = is_string($pdf_time_suffix_raw) ? trim($pdf_time_suffix_raw) : '';
 $pdf_filename_prefix = lang('pdf_export_filename_prefix') ?: 'Appointment-Confirmation';
 $share_payload = vars('share_payload') ?? [];
 $share_fallback_title = lang('share_link_title');

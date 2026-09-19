@@ -65,7 +65,7 @@ $appointmentPages = $appointment_pages ?? [
         'has_any_appointments' => false,
     ],
 ];
-$timeSuffixRaw = lang('pdf_export_time_suffix');
+$timeSuffixRaw = get_instance()->lang->line('pdf_export_time_suffix', false);
 $timeSuffixLabel = is_string($timeSuffixRaw) ? trim($timeSuffixRaw) : '';
 $timeFormatSetting = setting('time_format') ?: 'military';
 $appendTimeSuffix = $timeSuffixLabel !== '' && $timeFormatSetting === 'military';
