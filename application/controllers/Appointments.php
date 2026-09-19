@@ -48,8 +48,14 @@ class Appointments extends EA_Controller
     /**
      * Download an appointment as an ICS file.
      */
-    public function ics(string $appointment_hash): void
+    public function ics(string $appointment_hash = ''): void
     {
+        if ($appointment_hash === '') {
+            show_404();
+
+            return;
+        }
+
         $occurrences = $this->appointments_model->get(['hash' => $appointment_hash]);
 
         if (!$occurrences) {
