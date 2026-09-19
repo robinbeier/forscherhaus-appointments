@@ -148,6 +148,50 @@ final class RescheduleAuthorityLockOrderTest extends TestCase
         $this->assertStringContainsString('FOR UPDATE', $query['sql']);
     }
 
+    public function testAdvanceCutoffUsesProviderTimezoneWhenPhpDefaultTimezoneDiffers(): void
+    {
+        $authority = $this->createAuthority(new RescheduleAuthorityLockOrderFakeDatabase());
+        $previousTimezone = date_default_timezone_get();
+        date_default_timezone_set('America/Los_Angeles');
+
+        try {
+            $now = new \DateTimeImmutable('2026-01-15 00:00:00', new \DateTimeZone('UTC'));
+
+            $this->assertTrue(
+                $authority->isAdvanceCutoffReached('2026-01-15 09:30:00', 60, 'Asia/Tokyo', $now),
+                'The provider-local 09:30 slot is inside the one-hour cutoff at 09:00 Tokyo.',
+            );
+            $this->assertFalse(
+                $authority->isAdvanceCutoffReached('2026-01-15 10:00:00', 60, 'Asia/Tokyo', $now),
+                'The provider-local 10:00 slot is exactly at the cutoff and remains allowed.',
+            );
+        } finally {
+            date_default_timezone_set($previousTimezone);
+        }
+    }
+
+    public function testAdvanceCutoffFailsClosedForInvalidTimezoneTimeOrTimeout(): void
+    {
+        $authority = $this->createAuthority(new RescheduleAuthorityLockOrderFakeDatabase());
+        $now = new \DateTimeImmutable('2026-01-15 00:00:00', new \DateTimeZone('UTC'));
+
+        $this->assertTrue($authority->isAdvanceCutoffReached('2026-01-15 10:00:00', 60, 'Invalid/Timezone', $now));
+        $this->assertTrue($authority->isAdvanceCutoffReached('2026-03-29 02:30:00', 60, 'Europe/Berlin', $now));
+        $this->assertTrue($authority->isAdvanceCutoffReached('2026-01-15 10:00:00', -1, 'Europe/Berlin', $now));
+    }
+
+    public function testAdvanceCutoffMatchesProviderWallClockAcrossDstTransition(): void
+    {
+        $authority = $this->createAuthority(new RescheduleAuthorityLockOrderFakeDatabase());
+        $timezone = new \DateTimeZone('Europe/Berlin');
+        $now = new \DateTimeImmutable('2026-03-29 01:30:00', $timezone);
+
+        $this->assertFalse(
+            $authority->isAdvanceCutoffReached('2026-03-29 04:00:00', 120, $timezone->getName(), $now),
+            'Availability advances 120 provider-local wall-clock minutes to 03:30, so 04:00 must remain usable.',
+        );
+    }
+
     private function createAuthority(object $database): Reschedule_authority
     {
         $reflection = new ReflectionClass(Reschedule_authority::class);
@@ -266,7 +310,13 @@ final class RescheduleAuthorityCurrentReadFakeDatabase
     private array $currentRows = [
         'users' => [
             20 => ['id' => 20, 'first_name' => 'Current customer', 'id_roles' => 3, 'update_datetime' => '2'],
-            30 => ['id' => 30, 'first_name' => 'Current provider', 'id_roles' => 2, 'update_datetime' => '2'],
+            30 => [
+                'id' => 30,
+                'first_name' => 'Current provider',
+                'id_roles' => 2,
+                'timezone' => 'UTC',
+                'update_datetime' => '2',
+            ],
         ],
         'services' => [40 => ['id' => 40, 'name' => 'Current service', 'duration' => 25, 'update_datetime' => '2']],
         'user_settings' => [30 => ['id_users' => 30, 'working_plan' => '{}', 'working_plan_exceptions' => '{}']],

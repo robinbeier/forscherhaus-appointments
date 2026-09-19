@@ -96,6 +96,35 @@ final class RescheduleCutoffHttpTest extends TestCase
         );
     }
 
+    public function testReschedulePageUsesProviderTimezoneForAdvanceCutoff(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $db = get_instance()->db;
+        $client = $this->server?->client();
+        self::assertNotNull($client);
+
+        $providerTimezone = new DateTimeZone('America/Adak');
+        $start = new DateTimeImmutable('+90 minutes', $providerTimezone);
+        $appointment = $fixture->appointment();
+
+        self::assertTrue(
+            $db->where('id', $fixture->providerId)->update('users', ['timezone' => $providerTimezone->getName()]),
+        );
+        self::assertTrue($db->where('name', 'book_advance_timeout')->update('settings', ['value' => '60']));
+        self::assertTrue(
+            $db->where('id', (int) $appointment['id'])->update('appointments', [
+                'start_datetime' => $start->format('Y-m-d H:i:s'),
+                'end_datetime' => $start->modify('+30 minutes')->format('Y-m-d H:i:s'),
+            ]),
+        );
+
+        $page = $client->get('booking/reschedule/' . $appointment['hash']);
+
+        self::assertSame(200, $page->statusCode);
+        self::assertStringContainsString('manage_mode', $page->body);
+    }
+
     private function issueAuthority(object $client, string $hash): void
     {
         $page = $client->get('booking/reschedule/' . $hash);

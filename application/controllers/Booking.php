@@ -217,12 +217,15 @@ class Booking extends EA_Controller
                 (int) $results[0]['id_services'],
             );
 
+            $provider = $this->providers_model->find($results[0]['id_users_provider']);
+
             // Make sure the appointment can still be rescheduled.
 
             if (
                 $this->rescheduleAuthority()->isAdvanceCutoffReached(
                     $results[0]['start_datetime'],
                     $book_advance_timeout,
+                    (string) ($provider['timezone'] ?? ''),
                 )
             ) {
                 $hours = floor($book_advance_timeout / 60);
@@ -248,7 +251,6 @@ class Booking extends EA_Controller
             }
 
             $appointment = $results[0];
-            $provider = $this->providers_model->find($appointment['id_users_provider']);
             $customer = $this->customers_model->find($appointment['id_users_customer']);
 
             // Only expose the fields required by the public booking page.
