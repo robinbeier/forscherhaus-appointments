@@ -162,6 +162,16 @@ fixture marker or seeded staff secret values in the response body. This read
 matrix does not establish invalid-write behavior or every authentication
 configuration.
 
+The ordinary write matrix also covers Admin POST/PUT, Secretary POST/PUT/DELETE,
+and Settings PUT with the same five rejected credentials: absent credentials,
+wrong Admin password, nonexistent Admin username, invalid Bearer token, and
+valid Provider Basic credentials. Each request requires HTTP401, a challenge,
+no fixture marker or seeded secret, and an exact pre-request snapshot; Settings
+uses its owned setting row as the separate snapshot. Admin DELETE has its own
+ROB573 regression and is not duplicated here. These checks establish sequential
+authorization and no mutation on the fresh synthetic stack only; they do not
+prove concurrent behavior, proxy/deployment behavior, or production state.
+
 These tests supplement model rollback tests; they do not inject HTTP failures,
 prove every concurrent schedule or verify production. Settings API token visibility
 retains its existing privileged contract; staff secret-projection assertions do
