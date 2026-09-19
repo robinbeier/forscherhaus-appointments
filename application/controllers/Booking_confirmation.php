@@ -42,6 +42,12 @@ class Booking_confirmation extends EA_Controller
     {
         $appointment_hash = $this->uri->segment(3);
 
+        if (!is_string($appointment_hash) || $appointment_hash === '') {
+            redirect('appointments');
+
+            return;
+        }
+
         $occurrences = $this->appointments_model->get(['hash' => $appointment_hash]);
 
         if (empty($occurrences)) {
