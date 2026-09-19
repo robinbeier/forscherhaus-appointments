@@ -112,7 +112,7 @@ $checklistStepOne = lang('dashboard_teacher_pdf_checklist_step_one') ?: 'Erinner
 $checklistStepTwo = lang('dashboard_teacher_pdf_checklist_step_two') ?: 'Telefonversuch dokumentiert';
 $checklistStepThree = lang('dashboard_teacher_pdf_checklist_step_three') ?: 'Alternative Zeiten angeboten';
 $noDataLabel = lang('dashboard_teacher_pdf_empty') ?: 'Keine Lehrkräfte für die ausgewählten Filter vorhanden.';
-$timeSuffixRaw = lang('pdf_export_time_suffix');
+$timeSuffixRaw = get_instance()->lang->line('pdf_export_time_suffix', false);
 $timeSuffixLabel = is_string($timeSuffixRaw) ? trim($timeSuffixRaw) : '';
 $timeFormatSetting = setting('time_format') ?: 'military';
 $appendTimeSuffix = $timeSuffixLabel !== '' && $timeFormatSetting === 'military';

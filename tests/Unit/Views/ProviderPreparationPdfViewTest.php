@@ -74,4 +74,52 @@ class ProviderPreparationPdfViewTest extends TestCase
         $this->assertStringContainsString('Keine gebuchten Termine im Zeitraum.', $output);
         $this->assertSame(0, substr_count($output, 'class="notes__line"'));
     }
+
+    public function testOptionalTimeSuffixRendersEmptyAndGermanValuesWithoutMissingKey(): void
+    {
+        $school_name = 'Forscherhaus';
+        $logo_data_url = null;
+        $generated_at_text = '20. August 2026, 08:15';
+        $period_label = '20.–23. Aug 2026';
+        $provider_name = 'Adina Rossmeisl';
+        $appointment_pages = [
+            [
+                'chunk_index' => 0,
+                'chunks_total' => 1,
+                'has_any_appointments' => true,
+                'appointments' => [
+                    [
+                        'parent_name' => 'Familie Becker',
+                        'date' => 'Do, 20.08.2026',
+                        'start' => '14:00',
+                        'end' => '14:20',
+                    ],
+                ],
+            ],
+        ];
+        $language = get_instance()->lang->language;
+        $time_format = setting('time_format');
+
+        try {
+            setting(['time_format' => 'military']);
+            foreach (['' => false, 'Uhr' => true] as $suffix => $has_suffix) {
+                get_instance()->lang->language['pdf_export_time_suffix'] = $suffix;
+                ob_start();
+                include APPPATH . 'views/exports/provider_preparation_pdf.php';
+                $output = (string) ob_get_clean();
+                $this->assertStringContainsString('14:20', $output);
+                $this->assertSame($has_suffix, str_contains($output, '14:20 Uhr'));
+                $this->assertStringNotContainsString('pdf_export_time_suffix', $output);
+            }
+            unset(get_instance()->lang->language['pdf_export_time_suffix']);
+            ob_start();
+            include APPPATH . 'views/exports/provider_preparation_pdf.php';
+            $output = (string) ob_get_clean();
+            $this->assertStringContainsString('14:20', $output);
+            $this->assertStringNotContainsString('pdf_export_time_suffix', $output);
+        } finally {
+            get_instance()->lang->language = $language;
+            setting(['time_format' => $time_format]);
+        }
+    }
 }
