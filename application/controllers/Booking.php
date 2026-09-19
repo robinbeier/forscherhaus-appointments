@@ -219,11 +219,12 @@ class Booking extends EA_Controller
 
             // Make sure the appointment can still be rescheduled.
 
-            $start_datetime = strtotime($results[0]['start_datetime']);
-
-            $limit = strtotime('+' . $book_advance_timeout . ' minutes', strtotime('now'));
-
-            if ($start_datetime < $limit) {
+            if (
+                $this->rescheduleAuthority()->isAdvanceCutoffReached(
+                    $results[0]['start_datetime'],
+                    $book_advance_timeout,
+                )
+            ) {
                 $hours = floor($book_advance_timeout / 60);
 
                 $minutes = $book_advance_timeout % 60;
