@@ -168,6 +168,22 @@ final class OrdinaryDeploymentCoordinationTest extends TestCase
         self::assertTrue(is_link($link));
     }
 
+    public function testLockRemovedAfterPreOpenStatIsRejectedWithoutRecreatingThePath(): void
+    {
+        $result = $this->runShell(
+            'lock_path="$1"; ' .
+                'stat() { /usr/bin/stat "$@"; status=$?; ' .
+                'if [[ "$2" == "%a:%u:%h:%s:%d:%i" && "$4" == "$lock_path" && ! -e "$lock_path.removed" ]]; then ' .
+                'mkdir -- "$lock_path.removed"; rm -- "$lock_path"; fi; ' .
+                'return "$status"; }; ' .
+                'source ./deploy_ea.sh; ordinary_production_change_lock "$lock_path"',
+            [$this->lock],
+        );
+        self::assertDirectoryExists($this->lock . '.removed', 'The pre-open removal must actually run.');
+        self::assertFileDoesNotExist($this->lock);
+        self::assertSame(1, $result['exit_code'], $result['stderr']);
+    }
+
     public function testVerifiedInheritedLockSupportsAnExistingMigrationDeploymentWindow(): void
     {
         $result = $this->runShell(
