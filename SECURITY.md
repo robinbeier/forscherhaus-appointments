@@ -41,6 +41,12 @@ important boundaries, not an exhaustive list of reportable security issues.
 | Account updates require the permitted method, valid CSRF protection, and the current user's authority. | [Account](application/controllers/Account.php) requires POST and restricts fields and target identity; [EA_Security](application/core/EA_Security.php) handles CSRF validation. Rejected requests must not mutate state.                                                                                   |
 | The application sends no appointment, staff, or account notification email.                            | Booking confirmation is delivered through the existing on-page PDF download path; contact email fields remain stored for identity and contact data, and ICS/calendar downloads remain available.                                                                                                           |
 
+Anonymous booking-confirmation and ICS downloads require a nonempty stored
+appointment hash. Reject a missing capability before looking up appointment or
+related data; nullable or empty historical hash fields do not grant access.
+Keep existing nonempty legacy hashes compatible. The isolated HTTP regression
+in `BookingDownloadHttpTest` covers these routes, not every booking operation.
+
 Across write paths, establish server-side authority before mutation, reject
 without partial changes, and keep dependent effects consistent with commit
 success. Follow the [write-path contracts](docs/ci-write-contracts.md) and
