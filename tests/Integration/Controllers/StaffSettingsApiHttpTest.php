@@ -512,6 +512,220 @@ final class StaffSettingsApiHttpTest extends TestCase
         }
     }
 
+    public function testConcurrentAdminDeletesWaitAndRejectTheSecondLastAdminDelete(): void
+    {
+        $db = get_instance()->db;
+        $server = $this->server;
+        $fixture = $this->fixture;
+        $adminRole = $db->get_where('roles', ['slug' => 'admin'])->row_array();
+        $providerRole = $db->get_where('roles', ['slug' => 'provider'])->row_array();
+        self::assertNotEmpty($adminRole);
+        self::assertNotEmpty($providerRole);
+        $adminRoleId = (int) $adminRole['id'];
+        $providerRoleId = (int) $providerRole['id'];
+        $seedAdminRows = $db
+            ->order_by('id')
+            ->get_where('users', ['id_roles' => $adminRoleId])
+            ->result_array();
+        self::assertNotEmpty($seedAdminRows, 'The isolated install must provide admin seed rows.');
+
+        $targetA = 0;
+        $targetB = 0;
+        $multi = null;
+        $handle = null;
+        $observer = null;
+        $outerTransaction = false;
+
+        try {
+            $admin = $this->basicClient($this->credentials['admin_username'], $this->credentials['password']);
+            $createdA = $this->success(
+                $admin->requestJsonApp('POST', 'api/v1/admins', $fixture->adminWritePayload('race-a')),
+                201,
+            );
+            $createdB = $this->success(
+                $admin->requestJsonApp('POST', 'api/v1/admins', $fixture->adminWritePayload('race-b')),
+                201,
+            );
+            $targetA = (int) ($createdA['id'] ?? 0);
+            $targetB = (int) ($createdB['id'] ?? 0);
+            self::assertGreaterThan(0, $targetA);
+            self::assertGreaterThan(0, $targetB);
+            self::assertNotSame($targetA, $targetB);
+
+            $beforeDelete = $fixture->adminDeleteSnapshot();
+            $demoteIds = array_map(static fn(array $row): int => (int) $row['id'], $seedAdminRows);
+            if ($demoteIds !== []) {
+                self::assertTrue($db->where_in('id', $demoteIds)->update('users', ['id_roles' => $providerRoleId]));
+            }
+            self::assertSame(
+                [$targetA, $targetB],
+                array_map(
+                    static fn(array $row): int => (int) $row['id'],
+                    $db
+                        ->order_by('id')
+                        ->get_where('users', ['id_roles' => $adminRoleId])
+                        ->result_array(),
+                ),
+            );
+
+            $targetBBefore = $fixture->adminDeleteState($targetB);
+            self::assertNotEmpty($targetBBefore['user']);
+            self::assertNotEmpty($targetBBefore['settings']);
+            self::assertTrue($db->trans_begin());
+            $outerTransaction = true;
+            get_instance()->load->model('admins_model');
+            get_instance()->admins_model->delete($targetA);
+            self::assertTrue($db->trans_active(), 'The first delete must retain the outer transaction.');
+            self::assertSame(['user' => [], 'settings' => []], $fixture->adminDeleteState($targetA));
+            self::assertSame($targetBBefore, $fixture->adminDeleteState($targetB));
+
+            $ownerConnectionId = mysqli_thread_id($db->conn_id);
+            self::assertGreaterThan(0, $ownerConnectionId);
+            // DefenseCycleFixtures has already enforced the exact fresh Docker
+            // credentials/environment. Only this observer uses the disposable
+            // Compose root account to read MySQL lock instrumentation; the
+            // application connection and its grants remain unchanged.
+            $observer = get_instance()->load->database(
+                [
+                    'hostname' => 'mysql',
+                    'username' => 'root',
+                    'password' => 'secret',
+                    'database' => 'easyappointments',
+                    'dbdriver' => 'mysqli',
+                    'dbprefix' => $db->dbprefix,
+                    'pconnect' => false,
+                    'db_debug' => false,
+                    'char_set' => 'utf8mb4',
+                    'dbcollat' => 'utf8mb4_general_ci',
+                ],
+                true,
+            );
+            self::assertNotSame($ownerConnectionId, mysqli_thread_id($observer->conn_id));
+            self::assertTrue($observer->query('SET SESSION TRANSACTION READ ONLY'));
+
+            $multi = curl_multi_init();
+            $handle = curl_init($server->baseUrl . '/index.php/api/v1/admins/' . $targetB);
+            if ($multi === false || $handle === false) {
+                throw new RuntimeException('Could not initialize the concurrent admin delete request.');
+            }
+            curl_setopt_array($handle, [
+                CURLOPT_CUSTOMREQUEST => 'DELETE',
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_FOLLOWLOCATION => false,
+                CURLOPT_CONNECTTIMEOUT => 3,
+                CURLOPT_TIMEOUT => 8,
+                CURLOPT_HTTPHEADER => ['Accept: */*', 'Authorization: Bearer ' . $this->credentials['token']],
+            ]);
+            self::assertSame(CURLM_OK, curl_multi_add_handle($multi, $handle));
+
+            $baselineWaitKeys = array_map(
+                static fn(array $wait): string => (string) ($wait['REQUESTING_THREAD_ID'] ?? '') .
+                    ':' .
+                    (string) ($wait['BLOCKING_THREAD_ID'] ?? ''),
+                $this->adminDeleteLockWaitRows($observer, $ownerConnectionId),
+            );
+            $running = 0;
+            $waitObserved = false;
+            $deadline = microtime(true) + 8.0;
+            do {
+                do {
+                    $multiResult = curl_multi_exec($multi, $running);
+                } while ($multiResult === CURLM_CALL_MULTI_PERFORM);
+                self::assertSame(CURLM_OK, $multiResult);
+                $waitObserved = $this->adminDeleteLockWaitObserved(
+                    $observer,
+                    $ownerConnectionId,
+                    $adminRoleId,
+                    $db->dbprefix('users'),
+                    $baselineWaitKeys,
+                );
+                if ($waitObserved || $running === 0) {
+                    break;
+                }
+                if (microtime(true) >= $deadline) {
+                    break;
+                }
+                curl_multi_select($multi, 0.05);
+            } while (true);
+
+            self::assertTrue($waitObserved, 'The second delete must wait on the first transaction before commit.');
+            self::assertTrue($db->trans_commit());
+            $outerTransaction = false;
+
+            $responseDeadline = microtime(true) + 8.0;
+            do {
+                do {
+                    $multiResult = curl_multi_exec($multi, $running);
+                } while ($multiResult === CURLM_CALL_MULTI_PERFORM);
+                self::assertSame(CURLM_OK, $multiResult);
+                if ($running === 0) {
+                    break;
+                }
+                if (microtime(true) >= $responseDeadline) {
+                    break;
+                }
+                curl_multi_select($multi, 0.05);
+            } while (true);
+            self::assertSame(0, $running, 'The second delete HTTP request must drain after the first commits.');
+            self::assertSame(CURLE_OK, curl_errno($handle), curl_error($handle));
+            $responseStatus = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
+            $responseBody = (string) curl_multi_getcontent($handle);
+            self::assertSame(500, $responseStatus);
+            self::assertStringContainsString('requires at least one admin user', $responseBody);
+            self::assertSame($targetBBefore, $fixture->adminDeleteState($targetB));
+            self::assertSame(
+                [$targetB],
+                array_map(
+                    static fn(array $row): int => (int) $row['id'],
+                    $db
+                        ->order_by('id')
+                        ->get_where('users', ['id_roles' => $adminRoleId])
+                        ->result_array(),
+                ),
+            );
+        } finally {
+            if ($outerTransaction && $db->trans_active()) {
+                $db->trans_rollback();
+            }
+            $drained = true;
+            if ($handle instanceof \CurlHandle && $multi instanceof \CurlMultiHandle) {
+                $drained = $this->drainConcurrentAdminDelete($multi, $handle);
+            }
+            if (!$drained) {
+                $server->close();
+            }
+            if (is_resource($handle) || $handle instanceof \CurlHandle) {
+                if (is_resource($multi) || $multi instanceof \CurlMultiHandle) {
+                    curl_multi_remove_handle($multi, $handle);
+                }
+                curl_close($handle);
+            }
+            if (is_resource($multi) || $multi instanceof \CurlMultiHandle) {
+                curl_multi_close($multi);
+            }
+            if (is_object($observer) && isset($observer->conn_id)) {
+                $observer->close();
+            }
+            foreach ($seedAdminRows as $row) {
+                $id = (int) $row['id'];
+                $db->update('users', ['id_roles' => $row['id_roles']], ['id' => $id]);
+            }
+            foreach ($seedAdminRows as $row) {
+                self::assertSame($row, $db->get_where('users', ['id' => (int) $row['id']])->row_array());
+            }
+        }
+        foreach (['users' => 'id', 'user_settings' => 'id_users'] as $table => $key) {
+            $beforeDelete[$table] = array_values(
+                array_filter($beforeDelete[$table], static fn(array $row): bool => (int) $row[$key] !== $targetA),
+            );
+        }
+        self::assertSame(
+            $beforeDelete,
+            $fixture->adminDeleteSnapshot(),
+            'Only target A and its settings may disappear; all seed and sentinel data must be restored.',
+        );
+    }
+
     #[DataProvider('validWriteAuthenticationCases')]
     public function testAuthorizedSecretaryDeleteRemovesOnlyOwnedRowsAndIsIdempotent(string $authentication): void
     {
@@ -616,6 +830,87 @@ final class StaffSettingsApiHttpTest extends TestCase
     private function bearerClient(string $token): GateHttpClient
     {
         return new GateHttpClient($this->server->baseUrl, additionalHeaders: ['Authorization' => 'Bearer ' . $token]);
+    }
+
+    private function adminDeleteLockWaitObserved(
+        object $observer,
+        int $ownerConnectionId,
+        int $adminRoleId,
+        string $usersTable,
+        array $baselineWaitKeys,
+    ): bool {
+        $expectedSql = sprintf(
+            'SELECT `id` FROM `%s` WHERE `id_roles` = %d ORDER BY `id` ASC FOR UPDATE',
+            $usersTable,
+            $adminRoleId,
+        );
+        $normalize = static fn(string $value): string => (string) preg_replace('/\s+/', ' ', strtoupper(trim($value)));
+        foreach ($this->adminDeleteLockWaitRows($observer, $ownerConnectionId) as $wait) {
+            $waitKey =
+                (string) ($wait['REQUESTING_THREAD_ID'] ?? '') . ':' . (string) ($wait['BLOCKING_THREAD_ID'] ?? '');
+            if (in_array($waitKey, $baselineWaitKeys, true)) {
+                continue;
+            }
+            if (
+                ($wait['REQUESTING_SCHEMA'] ?? null) === \Config::DB_NAME &&
+                ($wait['REQUESTING_TABLE'] ?? null) === $usersTable &&
+                $normalize((string) ($wait['REQUESTING_SQL'] ?? '')) === $normalize($expectedSql)
+            ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function adminDeleteLockWaitRows(object $observer, int $ownerConnectionId): array
+    {
+        $result = $observer->query(
+            'SELECT ' .
+                'waits.REQUESTING_THREAD_ID, waits.BLOCKING_THREAD_ID, ' .
+                'requesting_lock.OBJECT_SCHEMA AS REQUESTING_SCHEMA, ' .
+                'requesting_lock.OBJECT_NAME AS REQUESTING_TABLE, ' .
+                'COALESCE(requesting_statement.SQL_TEXT, requesting_thread.PROCESSLIST_INFO) AS REQUESTING_SQL ' .
+                'FROM performance_schema.data_lock_waits waits ' .
+                'JOIN performance_schema.data_locks requesting_lock ' .
+                'ON requesting_lock.ENGINE_LOCK_ID = waits.REQUESTING_ENGINE_LOCK_ID ' .
+                'JOIN performance_schema.data_locks blocking_lock ' .
+                'ON blocking_lock.ENGINE_LOCK_ID = waits.BLOCKING_ENGINE_LOCK_ID ' .
+                'JOIN performance_schema.threads requesting_thread ' .
+                'ON requesting_thread.THREAD_ID = waits.REQUESTING_THREAD_ID ' .
+                'JOIN performance_schema.threads blocking_thread ' .
+                'ON blocking_thread.THREAD_ID = waits.BLOCKING_THREAD_ID ' .
+                'LEFT JOIN performance_schema.events_statements_current requesting_statement ' .
+                'ON requesting_statement.THREAD_ID = requesting_thread.THREAD_ID ' .
+                'WHERE blocking_thread.PROCESSLIST_ID = ' .
+                (int) $ownerConnectionId,
+        );
+        if ($result === false) {
+            throw new RuntimeException('The independent lock observer could not read performance_schema.');
+        }
+
+        return $result->result_array();
+    }
+
+    private function drainConcurrentAdminDelete(\CurlMultiHandle $multi, \CurlHandle $handle): bool
+    {
+        $running = 0;
+        $deadline = microtime(true) + 8.0;
+        do {
+            do {
+                $multiResult = curl_multi_exec($multi, $running);
+            } while ($multiResult === CURLM_CALL_MULTI_PERFORM);
+            if ($multiResult !== CURLM_OK) {
+                return false;
+            }
+            if ($running === 0) {
+                return curl_errno($handle) === CURLE_OK;
+            }
+            if (microtime(true) >= $deadline) {
+                return false;
+            }
+            curl_multi_select($multi, 0.05);
+        } while (true);
     }
 
     private function success(GateHttpResponse $response, int $status = 200): array
