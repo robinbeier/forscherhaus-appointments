@@ -38,8 +38,7 @@
         "guzzlehttp/guzzle": "^7.9.2",
         "ezyang/htmlpurifier": "^4.17",
         "symfony/options-resolver": "^7.4",
-        "symfony/finder": "^7.4",
-        "phpmailer/phpmailer": "^7.0.2"
+        "symfony/finder": "^7.4"
     },
     "require-dev": {
         "roave/security-advisories": "dev-master",

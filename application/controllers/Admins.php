@@ -42,7 +42,7 @@ class Admins extends EA_Controller
         //
     ];
 
-    public array $allowed_admin_setting_fields = ['username', 'password', 'notifications', 'calendar_view'];
+    public array $allowed_admin_setting_fields = ['username', 'password', 'calendar_view'];
 
     public array $optional_admin_setting_fields = [
         //

@@ -299,22 +299,6 @@
                                 <div class="border rounded mb-3 p-3">
                                     <div class="mb-3">
                                         <div class="form-check form-switch">
-                                            <input class="form-check-input" type="checkbox" id="customer-notifications"
-                                                   data-field="customer_notifications">
-                                            <label class="form-check-label" for="customer-notifications">
-                                                <?= lang('customer_notifications') ?>
-                                            </label>
-                                        </div>
-
-                                        <div class="form-text text-muted">
-                                            <small>
-                                                <?= lang('customer_notifications_hint') ?>
-                                            </small>
-                                        </div>
-                                    </div>
-
-                                    <div class="mb-3">
-                                        <div class="form-check form-switch">
                                             <input class="form-check-input" type="checkbox" id="limit-customer-access"
                                                    data-field="limit_customer_access">
                                             <label class="form-check-label" for="limit-customer-access">
@@ -437,6 +421,5 @@
 <script src="<?= asset_url('assets/js/pages/booking_settings.js') ?>"></script>
 
 <?php end_section('scripts'); ?>
-
 
 

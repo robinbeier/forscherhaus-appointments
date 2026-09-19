@@ -38,7 +38,6 @@ class RecoveryControllerTest extends TestCase
         $this->assertFalse($response['success']);
         $this->assertSame(lang('password_recovery_contact_robin'), $response['message']);
         $this->assertFalse($controller->accounts->regeneratePasswordCalled);
-        $this->assertFalse($controller->email_messages->sendPasswordCalled);
     }
 
     public function testRecoveryRejectsMissingEmailWithoutException(): void
@@ -59,7 +58,6 @@ class RecoveryControllerTest extends TestCase
         $this->assertFalse($response['success']);
         $this->assertSame(lang('password_recovery_contact_robin'), $response['message']);
         $this->assertFalse($controller->accounts->regeneratePasswordCalled);
-        $this->assertFalse($controller->email_messages->sendPasswordCalled);
     }
 
     public function testRecoveryNeutralizesCompleteRequestWithoutResettingPassword(): void
@@ -80,7 +78,6 @@ class RecoveryControllerTest extends TestCase
         $this->assertTrue($response['success']);
         $this->assertSame(lang('password_recovery_contact_robin'), $response['message']);
         $this->assertFalse($controller->accounts->regeneratePasswordCalled);
-        $this->assertFalse($controller->email_messages->sendPasswordCalled);
     }
 
     private function createController(): object
@@ -105,15 +102,6 @@ class RecoveryControllerTest extends TestCase
                 $this->regeneratePasswordCalled = true;
 
                 return 'generated-password';
-            }
-        };
-
-        $controller->email_messages = new class {
-            public bool $sendPasswordCalled = false;
-
-            public function send_password(): void
-            {
-                $this->sendPasswordCalled = true;
             }
         };
 

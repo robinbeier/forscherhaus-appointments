@@ -222,15 +222,6 @@
                         </label>
                     </div>
 
-                    <div class="border rounded mb-3 p-3">
-                        <div class="form-check form-switch">
-                            <input class="form-check-input" type="checkbox" id="notifications" disabled>
-                            <label class="form-check-label" for="notifications">
-                                <?= lang('receive_notifications') ?>
-                            </label>
-                        </div>
-                    </div>
-
                     <?php slot('after_secondary_fields'); ?>
                 </div>
             </div>
@@ -247,4 +238,3 @@
 <script src="<?= asset_url('assets/js/pages/admins.js') ?>"></script>
 
 <?php end_section('scripts'); ?>
-

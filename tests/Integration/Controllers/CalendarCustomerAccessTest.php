@@ -18,8 +18,6 @@ class CalendarCustomerAccessTest extends TestCase
 {
     private BookingFlowFixtures $fixtures;
 
-    private object $notifications;
-
     private ?int $syntheticSecretaryId = null;
 
     /** @var array<string> */
@@ -34,7 +32,6 @@ class CalendarCustomerAccessTest extends TestCase
         $this->fixtures = new BookingFlowFixtures();
         $this->fixtures->snapshotSettings(['limit_customer_access']);
         get_instance()->load->library('permissions');
-        $this->notifications = BookingFlowFixtures::createNoopNotifications();
         $this->resetRuntimeState();
     }
 
@@ -100,7 +97,6 @@ class CalendarCustomerAccessTest extends TestCase
         $this->assertDeniedResponse();
         $this->assertSame('Foreign', $this->customerLastName($foreignCustomerId));
         $this->assertSame($linkedCustomerId, $this->appointmentCustomerId($appointmentId));
-        $this->assertSame(0, $this->notifications->savedCalls);
 
         // An appointment-only customer assignment must be checked as well.
         $this->postCalendarSavePayload(
@@ -111,7 +107,6 @@ class CalendarCustomerAccessTest extends TestCase
 
         $this->assertDeniedResponse();
         $this->assertSame($linkedCustomerId, $this->appointmentCustomerId($appointmentId));
-        $this->assertSame(0, $this->notifications->savedCalls);
 
         // The reverse mismatch must also be rejected.
         $this->postCalendarSavePayload(
@@ -123,7 +118,6 @@ class CalendarCustomerAccessTest extends TestCase
         $this->assertDeniedResponse();
         $this->assertSame('Linked', $this->customerLastName($linkedCustomerId));
         $this->assertSame($linkedCustomerId, $this->appointmentCustomerId($appointmentId));
-        $this->assertSame(0, $this->notifications->savedCalls);
     }
 
     public function testProviderCanEditLinkedCustomerAndKeepAppointmentLinked(): void
@@ -189,7 +183,6 @@ class CalendarCustomerAccessTest extends TestCase
         $this->assertDeniedResponse();
         $this->assertSame('Secretary Foreign', $this->customerLastName($foreignCustomerId));
         $this->assertSame($linkedCustomerId, $this->appointmentCustomerId($appointmentId));
-        $this->assertSame(0, $this->notifications->savedCalls);
 
         $this->postCalendarSavePayload(
             [],
@@ -199,7 +192,6 @@ class CalendarCustomerAccessTest extends TestCase
 
         $this->assertDeniedResponse();
         $this->assertSame($linkedCustomerId, $this->appointmentCustomerId($appointmentId));
-        $this->assertSame(0, $this->notifications->savedCalls);
 
         $this->postCalendarSavePayload(
             $this->customerPayload($linkedCustomerId, 'Secretary Changed'),
@@ -279,7 +271,6 @@ class CalendarCustomerAccessTest extends TestCase
         $this->assertDeniedResponse();
         $this->assertSame('Staff', $this->customerLastName($staffId));
         $this->assertSame($customerId, $this->appointmentCustomerId($appointmentId));
-        $this->assertSame(0, $this->notifications->savedCalls);
 
         get_instance()->load->model('customers_model');
         $this->assertRejectsStaffRow(fn() => get_instance()->customers_model->find($staffId));
@@ -477,7 +468,6 @@ class CalendarCustomerAccessTest extends TestCase
         $controller->appointments_model = $CI->appointments_model;
         $controller->secretaries_model = $CI->secretaries_model;
         $controller->permissions = $CI->permissions;
-        $controller->notifications = $this->notifications;
 
         return $controller;
     }

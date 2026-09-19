@@ -10,11 +10,11 @@ This map defines component boundaries, path ownership scope, and dependency edge
 
 | Component | Role | Depends On | Path Rules | Key Files |
 |---|---|---|---:|---:|
-| `auth-session` | Access & Session | integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 15 | 3 |
+| `auth-session` | Access & Session | integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 16 | 3 |
 | `installation-bootstrap` | Installation & Bootstrap | people-services-admin, settings-compliance, shared-core | 3 | 3 |
 | `booking-public` | Public Booking | integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 9 | 6 |
 | `booking-lifecycle` | Booking Confirmation/Cancellation | booking-public, integrations-sync, people-services-admin, scheduling-backoffice, shared-core | 5 | 3 |
-| `scheduling-backoffice` | Calendar & Scheduling | integrations-sync, people-services-admin, settings-compliance, shared-core | 19 | 5 |
+| `scheduling-backoffice` | Calendar & Scheduling | integrations-sync, people-services-admin, settings-compliance, shared-core | 17 | 3 |
 | `dashboard-exports` | Dashboard & Exports | scheduling-backoffice, people-services-admin, shared-core | 11 | 3 |
 | `people-services-admin` | People, Providers, Services | integrations-sync, scheduling-backoffice, settings-compliance, shared-core | 25 | 3 |
 | `settings-compliance` | Settings & Compliance | auth-session, integrations-sync, people-services-admin, scheduling-backoffice, shared-core | 27 | 3 |
@@ -39,6 +39,7 @@ Dependencies:
 Path rules:
 - `application/controllers/Login.php` (exact_file)
 - `application/controllers/Logout.php` (exact_file)
+- `application/controllers/User.php` (exact_file)
 - `application/controllers/Recovery.php` (exact_file)
 - `application/controllers/Account.php` (exact_file)
 - `application/controllers/Localization.php` (exact_file)
@@ -132,7 +133,7 @@ Key files:
 
 ### `scheduling-backoffice` - Calendar & Scheduling
 
-Backoffice scheduling operations, calendar interactions, appointment orchestration and appointment notification delivery.
+Backoffice scheduling operations, calendar interactions and appointment orchestration.
 
 Dependencies:
 - `integrations-sync`
@@ -158,15 +159,11 @@ Path rules:
 - `assets/js/pages/blocked_periods.js` (exact_file)
 - `assets/js/components/appointments_modal.js` (exact_file)
 - `assets/js/components/unavailabilities_modal.js` (exact_file)
-- `application/libraries/Notifications.php` (exact_file)
-- `application/libraries/Email_messages.php` (exact_file)
 
 Key files:
 - `application/controllers/Calendar.php`
 - `application/models/Appointments_model.php`
 - `assets/js/pages/calendar.js`
-- `application/libraries/Notifications.php`
-- `application/libraries/Email_messages.php`
 
 ### `dashboard-exports` - Dashboard & Exports
 

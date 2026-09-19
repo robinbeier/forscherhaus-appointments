@@ -483,12 +483,18 @@ function runBookingContractsAttempt(
                         throw new ContractAssertionException('cancel_success requires primary appointment hash.');
                     }
 
-                    $response = $client->post(
-                        'booking_cancellation/of/' . rawurlencode($appointmentHash),
-                        ['cancellation_reason' => 'run:' . $state['run_id'] . ':cancel-success'],
-                        $config['http_timeout'],
-                        true,
-                    );
+                    $cancellationPath = 'booking_cancellation/of/' . rawurlencode($appointmentHash);
+                    $beforeCancellation = apiGetById($config, 'appointments', $appointmentId, [200]);
+                    if (!is_array($beforeCancellation)) {
+                        throw new ContractAssertionException('cancel_success requires an existing appointment.');
+                    }
+                    $denied = $client->get($cancellationPath, [], $config['http_timeout']);
+                    GateAssertions::assertStatus($denied->statusCode, 403, 'GET cancellation must be denied');
+                    if (apiGetById($config, 'appointments', $appointmentId, [200]) !== $beforeCancellation) {
+                        throw new ContractAssertionException('Denied cancellation changed the appointment.');
+                    }
+
+                    $response = $client->post($cancellationPath, [], $config['http_timeout'], true);
 
                     GateAssertions::assertStatus($response->statusCode, 200, 'POST /booking_cancellation/of/{hash}');
 
@@ -557,7 +563,7 @@ function runBookingContractsAttempt(
                     $unknownHash = 'missing-' . $state['run_id'];
                     $response = $client->post(
                         'booking_cancellation/of/' . rawurlencode($unknownHash),
-                        ['cancellation_reason' => 'run:' . $state['run_id'] . ':cancel-unknown'],
+                        [],
                         $config['http_timeout'],
                         true,
                     );

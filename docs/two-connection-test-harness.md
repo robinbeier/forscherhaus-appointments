@@ -21,7 +21,7 @@ A scenario records these checkpoints in order:
 A rejected operation has a shorter trace. Assert the exact expected trace and
 an explicit branch marker reached inside the scenario. Calling `run()` with a
 branch name is not proof that the branch executed. Also assert the HTTP/result
-status, persisted records, and notification count where applicable. A test that
+status and persisted records. A test that
 never reaches its intended checkpoint is a fixture/control-flow failure, not
 successful evidence of concurrency behavior.
 
@@ -39,10 +39,11 @@ PHPUnit suite and the integration coverage shard, using disposable seeded data:
   permission checks. A second connection commits an administrative provider
   reassignment on the synthetic appointment. The original request detects the
   changed parent IDs and returns 409 before its write method. The peer change
-  remains intact; the rejected request changes neither notes nor notifications.
-- A positive administrative control reaches all checkpoints, persists its
-  requested update and sends exactly one no-op notification. This guards
-  against fixtures that merely fail before reaching the intended write path.
+  remains intact; the rejected request changes neither notes nor the appointment
+  record.
+- A positive administrative control reaches all checkpoints and persists its
+  requested update. This guards against fixtures that merely fail before
+  reaching the intended write path.
 - A service-buffer transaction acquires real production parent locks. The peer
   tries an appointment `FOR UPDATE NOWAIT` lock and must receive the
   engine-specific contention code: MariaDB reports 1205 and MySQL reports

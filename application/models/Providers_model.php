@@ -857,7 +857,6 @@ class Providers_model extends EA_Model
         if (array_key_exists('settings', $provider)) {
             $encoded_resource['settings'] = [
                 'username' => $provider['settings']['username'],
-                'notifications' => filter_var($provider['settings']['notifications'], FILTER_VALIDATE_BOOLEAN),
                 'calendarView' => $provider['settings']['calendar_view'],
                 'googleSync' => array_key_exists('google_sync', $provider['settings'])
                     ? filter_var($provider['settings']['google_sync'], FILTER_VALIDATE_BOOLEAN)
@@ -981,13 +980,6 @@ class Providers_model extends EA_Model
 
             if (array_key_exists('calendarView', $provider['settings'])) {
                 $decoded_resource['settings']['calendar_view'] = $provider['settings']['calendarView'];
-            }
-
-            if (array_key_exists('notifications', $provider['settings'])) {
-                $decoded_resource['settings']['notifications'] = filter_var(
-                    $provider['settings']['notifications'],
-                    FILTER_VALIDATE_BOOLEAN,
-                );
             }
 
             if (array_key_exists('googleSync', $provider['settings'])) {

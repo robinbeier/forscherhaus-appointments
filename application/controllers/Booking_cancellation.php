@@ -31,8 +31,6 @@ class Booking_cancellation extends EA_Controller
         $this->load->model('providers_model');
         $this->load->model('services_model');
         $this->load->model('customers_model');
-
-        $this->load->library('notifications');
     }
 
     /**
@@ -53,10 +51,7 @@ class Booking_cancellation extends EA_Controller
                 abort(403);
             }
 
-            $request_dto = $this->bookingRequestDtoFactory()->buildCancellationRequest();
-            $cancellation_reason = $request_dto->cancellationReason;
-
-            if ($this->input->method() !== 'post' || empty($cancellation_reason)) {
+            if ($this->input->method() !== 'post') {
                 abort(403, 'Forbidden');
             }
 
@@ -87,28 +82,7 @@ class Booking_cancellation extends EA_Controller
 
             $service = $this->services_model->find($appointment['id_services']);
 
-            $company_color = setting('company_color');
-
-            $settings = [
-                'company_name' => setting('company_name'),
-                'company_email' => setting('company_email'),
-                'company_link' => setting('company_link'),
-                'company_color' =>
-                    !empty($company_color) && $company_color != DEFAULT_COMPANY_COLOR ? $company_color : null,
-                'date_format' => setting('date_format'),
-                'time_format' => setting('time_format'),
-            ];
-
             $this->appointments_model->delete($appointment['id']);
-
-            $this->notifications->notify_appointment_deleted(
-                $appointment,
-                $service,
-                $provider,
-                $customer,
-                $settings,
-                $cancellation_reason,
-            );
         } catch (Throwable $e) {
             log_message('error', 'Booking Cancellation Exception: ' . $e->getMessage());
         }
@@ -122,29 +96,5 @@ class Booking_cancellation extends EA_Controller
         ]);
 
         $this->load->view('pages/booking_cancellation');
-    }
-
-    protected function bookingRequestDtoFactory(): Booking_request_dto_factory
-    {
-        if (
-            isset($this->booking_request_dto_factory) &&
-            $this->booking_request_dto_factory instanceof Booking_request_dto_factory
-        ) {
-            return $this->booking_request_dto_factory;
-        }
-
-        /** @var EA_Controller|CI_Controller $CI */
-        $CI = &get_instance();
-
-        if (
-            !isset($CI->booking_request_dto_factory) ||
-            !$CI->booking_request_dto_factory instanceof Booking_request_dto_factory
-        ) {
-            $CI->load->library('booking_request_dto_factory');
-        }
-
-        $this->booking_request_dto_factory = $CI->booking_request_dto_factory;
-
-        return $this->booking_request_dto_factory;
     }
 }

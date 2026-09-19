@@ -607,7 +607,6 @@ class Admins_model extends EA_Model
             'ldapDn' => $admin['ldap_dn'],
             'settings' => [
                 'username' => $admin['settings']['username'],
-                'notifications' => filter_var($admin['settings']['notifications'], FILTER_VALIDATE_BOOLEAN),
                 'calendarView' => $admin['settings']['calendar_view'],
             ],
         ];
@@ -692,13 +691,6 @@ class Admins_model extends EA_Model
 
             if (array_key_exists('password', $admin['settings'])) {
                 $decoded_resource['settings']['password'] = $admin['settings']['password'];
-            }
-
-            if (array_key_exists('notifications', $admin['settings'])) {
-                $decoded_resource['settings']['notifications'] = filter_var(
-                    $admin['settings']['notifications'],
-                    FILTER_VALIDATE_BOOLEAN,
-                );
             }
 
             if (array_key_exists('calendarView', $admin['settings'])) {

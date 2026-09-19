@@ -23,6 +23,10 @@
           "match": "exact_file"
         },
         {
+          "path": "application/controllers/User.php",
+          "match": "exact_file"
+        },
+        {
           "path": "application/controllers/Recovery.php",
           "match": "exact_file"
         },
@@ -238,7 +242,7 @@
     {
       "component_id": "scheduling-backoffice",
       "role": "Calendar & Scheduling",
-      "summary": "Backoffice scheduling operations, calendar interactions, appointment orchestration and appointment notification delivery.",
+      "summary": "Backoffice scheduling operations, calendar interactions and appointment orchestration.",
       "primary_handle": "@robinbeier",
       "secondary_handle": "@robinbeier",
       "ownership_mode": "single-owner",
@@ -314,22 +318,12 @@
         {
           "path": "assets/js/components/unavailabilities_modal.js",
           "match": "exact_file"
-        },
-        {
-          "path": "application/libraries/Notifications.php",
-          "match": "exact_file"
-        },
-        {
-          "path": "application/libraries/Email_messages.php",
-          "match": "exact_file"
         }
       ],
       "key_files": [
         "application/controllers/Calendar.php",
         "application/models/Appointments_model.php",
-        "assets/js/pages/calendar.js",
-        "application/libraries/Notifications.php",
-        "application/libraries/Email_messages.php"
+        "assets/js/pages/calendar.js"
       ],
       "depends_on": [
         "integrations-sync",

@@ -59,13 +59,11 @@ require_once __DIR__ . '/Customers_ui_smoke_access_policy.php';
  * @property Accounts $accounts
  * @property Api $api
  * @property Availability $availability
- * @property Email_messages $email_messages
  * @property Captcha_builder $captcha_builder
  * @property Ics_file $ics_file
  * @property Instance $instance
  * @property Ldap_client $ldap_client
  * @property Zero_surprise_canary $zero_surprise_canary
- * @property Notifications $notifications
  * @property Permissions $permissions
  * @property Timezones $timezones
  */

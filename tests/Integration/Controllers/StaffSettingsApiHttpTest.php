@@ -62,6 +62,7 @@ final class StaffSettingsApiHttpTest extends TestCase
             'firstName' => $secretary['firstName'],
             'email' => $secretary['email'],
         ];
+        $ownedSetting = $this->fixture->ownedSetting('api-read', '0');
         foreach ([$admin, $this->bearerClient($this->credentials['token'])] as $client) {
             $admins = $this->success($client->get('api/v1/admins', ['q' => $this->fixture->run]));
             $adminMatch = array_values(
@@ -85,11 +86,11 @@ final class StaffSettingsApiHttpTest extends TestCase
                 $secretaryIdentity,
                 true,
             );
-            $settings = $this->success($client->get('api/v1/settings'));
-            self::assertContains(['name' => 'customer_notifications', 'value' => '0'], $settings);
+            $settings = $this->success($client->get('api/v1/settings', ['q' => $ownedSetting['name']]));
+            self::assertContains(['name' => $ownedSetting['name'], 'value' => '0'], $settings);
             self::assertSame(
-                ['name' => 'customer_notifications', 'value' => '0'],
-                $this->success($client->get('api/v1/settings/customer_notifications')),
+                ['name' => $ownedSetting['name'], 'value' => '0'],
+                $this->success($client->get('api/v1/settings/' . $ownedSetting['name'])),
             );
             $this->assertNoSyntheticSecrets($admins, $secretaries, $settings);
         }
@@ -481,8 +482,8 @@ final class StaffSettingsApiHttpTest extends TestCase
         self::assertSame($identity['email'], $row['email']);
         $settings = $row['settings'];
         self::assertIsArray($settings);
-        self::assertSame([], array_diff(['username', 'notifications', 'calendarView'], array_keys($settings)));
-        self::assertSame([], array_diff(array_keys($settings), ['username', 'notifications', 'calendarView']));
+        self::assertSame([], array_diff(['username', 'calendarView'], array_keys($settings)));
+        self::assertSame([], array_diff(array_keys($settings), ['username', 'calendarView']));
         self::assertArrayNotHasKey('password', $row);
         self::assertArrayNotHasKey('salt', $row);
         self::assertArrayNotHasKey('password', $settings);

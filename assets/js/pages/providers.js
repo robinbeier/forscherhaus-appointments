@@ -36,7 +36,6 @@ App.Pages.Providers = (function () {
     const $username = $('#username');
     const $password = $('#password');
     const $passwordConfirmation = $('#password-confirm');
-    const $notifications = $('#notifications');
     const $calendarView = $('#calendar-view');
     const $filterProviders = $('#filter-providers');
     let filterResults = {};
@@ -177,7 +176,6 @@ App.Pages.Providers = (function () {
                     username: $username.val(),
                     working_plan: JSON.stringify(workingPlanManager.get()),
                     working_plan_exceptions: JSON.stringify(workingPlanManager.getWorkingPlanExceptions()),
-                    notifications: Number($notifications.prop('checked')),
                     calendar_view: $calendarView.val(),
                 },
             };
@@ -362,7 +360,6 @@ App.Pages.Providers = (function () {
         $providers.find('.record-details #language').val(vars('default_language'));
         $providers.find('.record-details #timezone').val(vars('default_timezone'));
         $providers.find('.record-details #is-private').prop('checked', false);
-        $providers.find('.record-details #notifications').prop('checked', true);
         $providers.find('.add-break, .add-working-plan-exception, #reset-working-plan').prop('disabled', true);
 
         workingPlanManager.timepickers(true);
@@ -413,7 +410,6 @@ App.Pages.Providers = (function () {
 
         $username.val(provider.settings.username);
         $calendarView.val(provider.settings.calendar_view);
-        $notifications.prop('checked', Boolean(Number(provider.settings.notifications)));
 
         // Add dedicated provider link.
         let dedicatedUrl = App.Utils.Url.siteUrl('?provider=' + encodeURIComponent(provider.id));

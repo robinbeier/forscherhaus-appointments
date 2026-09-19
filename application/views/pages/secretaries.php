@@ -221,15 +221,6 @@
                         </label>
                     </div>
 
-                    <div class="border rounded mb-3 p-3">
-                        <div class="form-check form-switch">
-                            <input class="form-check-input" type="checkbox" id="notifications" disabled>
-                            <label class="form-check-label" for="notifications">
-                                <?= lang('receive_notifications') ?>
-                            </label>
-                        </div>
-                    </div>
-
                     <div>
                         <label class="form-label mb-3">
                             <?= lang('providers') ?>
@@ -256,4 +247,3 @@
 <script src="<?= asset_url('assets/js/pages/secretaries.js') ?>"></script>
 
 <?php end_section('scripts'); ?>
-

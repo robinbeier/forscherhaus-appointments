@@ -78,7 +78,6 @@ class Calendar extends EA_Controller
         $this->load->model('roles_model');
 
         $this->load->library('accounts');
-        $this->load->library('notifications');
         $this->load->library('permissions');
         $this->load->library('timezones');
     }
@@ -355,27 +354,6 @@ class Calendar extends EA_Controller
                 throw $e;
             }
 
-            $company_color = setting('company_color');
-
-            $settings = [
-                'company_name' => setting('company_name'),
-                'company_link' => setting('company_link'),
-                'company_email' => setting('company_email'),
-                'company_color' =>
-                    !empty($company_color) && $company_color != DEFAULT_COMPANY_COLOR ? $company_color : null,
-                'date_format' => setting('date_format'),
-                'time_format' => setting('time_format'),
-            ];
-
-            $this->notifications->notify_appointment_saved(
-                $appointment,
-                $service,
-                $provider,
-                $customer,
-                $settings,
-                $manage_mode,
-            );
-
             json_response([
                 'success' => true,
             ]);
@@ -479,7 +457,7 @@ class Calendar extends EA_Controller
      * Delete appointment from the database.
      *
      * This method deletes an existing appointment from the database. Once this action is finished it cannot be undone.
-     * Notification emails are sent to both provider and customer.
+     * Appointment changes are persisted through the calendar write path.
      */
     public function delete_appointment(): void
     {
@@ -490,7 +468,6 @@ class Calendar extends EA_Controller
 
             $request_dto = $this->calendarRequestDtoFactory()->buildDeleteAppointmentRequestDto();
             $appointment_id = $request_dto->appointmentId;
-            $cancellation_reason = (string) ($request_dto->cancellationReason ?? '');
 
             if (empty($appointment_id)) {
                 throw new InvalidArgumentException('No appointment id provided.');
@@ -505,29 +482,8 @@ class Calendar extends EA_Controller
             $customer = $this->customers_model->find($appointment['id_users_customer']);
             $service = $this->services_model->find($appointment['id_services']);
 
-            $company_color = setting('company_color');
-
-            $settings = [
-                'company_name' => setting('company_name'),
-                'company_email' => setting('company_email'),
-                'company_link' => setting('company_link'),
-                'company_color' =>
-                    !empty($company_color) && $company_color != DEFAULT_COMPANY_COLOR ? $company_color : null,
-                'date_format' => setting('date_format'),
-                'time_format' => setting('time_format'),
-            ];
-
             // Delete appointment record from the database.
             $this->appointments_model->delete($appointment_id);
-
-            $this->notifications->notify_appointment_deleted(
-                $appointment,
-                $service,
-                $provider,
-                $customer,
-                $settings,
-                $cancellation_reason,
-            );
 
             json_response([
                 'success' => true,

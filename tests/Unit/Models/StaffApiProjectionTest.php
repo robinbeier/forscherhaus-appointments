@@ -59,14 +59,13 @@ final class StaffApiProjectionTest extends TestCase
 
         $settingKeys = array_keys($staff['settings']);
         sort($settingKeys);
-        $this->assertSame(['calendarView', 'notifications', 'username'], $settingKeys);
+        $this->assertSame(['calendarView', 'username'], $settingKeys);
 
         $this->assertSame(42, $staff['id']);
         $this->assertSame('Synthetic', $staff['firstName']);
         $this->assertSame('Staff', $staff['lastName']);
         $this->assertSame('synthetic.staff@example.test', $staff['email']);
         $this->assertSame('synthetic-user', $staff['settings']['username']);
-        $this->assertTrue($staff['settings']['notifications']);
         $this->assertSame('default', $staff['settings']['calendarView']);
 
         if ($modelProperty === 'secretariesModel') {
@@ -119,7 +118,6 @@ final class StaffApiProjectionTest extends TestCase
             'ldap_dn' => 'uid=synthetic,dc=example,dc=test',
             'settings' => [
                 'username' => 'synthetic-user',
-                'notifications' => '1',
                 'calendar_view' => 'default',
                 'password' => 'SYNTHETIC_PASSWORD_VALUE',
                 'salt' => 'SYNTHETIC_SALT_VALUE',

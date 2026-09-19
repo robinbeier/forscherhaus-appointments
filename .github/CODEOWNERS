@@ -38,6 +38,7 @@
 /application/controllers/Service_categories.php @robinbeier
 /application/controllers/Services.php @robinbeier
 /application/controllers/Update.php @robinbeier
+/application/controllers/User.php @robinbeier
 /application/controllers/api/v1/** @robinbeier
 /application/core/Customers_ui_smoke_access_policy.php @robinbeier
 /application/core/EA_Session.php @robinbeier
@@ -56,13 +57,11 @@
 /application/libraries/Dashboard_heatmap.php @robinbeier
 /application/libraries/Dashboard_metrics.php @robinbeier
 /application/libraries/Dashboard_request_dto_factory.php @robinbeier
-/application/libraries/Email_messages.php @robinbeier
 /application/libraries/Ics_calendar.php @robinbeier
 /application/libraries/Ics_file.php @robinbeier
 /application/libraries/Ics_provider.php @robinbeier
 /application/libraries/Instance.php @robinbeier
 /application/libraries/Ldap_client.php @robinbeier
-/application/libraries/Notifications.php @robinbeier
 /application/libraries/Pdf_renderer.php @robinbeier
 /application/libraries/Permissions.php @robinbeier
 /application/libraries/Provider_ui_smoke_fixture.php @robinbeier

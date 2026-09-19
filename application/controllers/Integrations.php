@@ -35,7 +35,6 @@ class Integrations extends EA_Controller
         $this->load->model('settings_model');
 
         $this->load->library('accounts');
-        $this->load->library('notifications');
         $this->load->library('timezones');
     }
 

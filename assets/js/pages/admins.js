@@ -33,7 +33,6 @@ App.Pages.Admins = (function () {
     const $username = $('#username');
     const $password = $('#password');
     const $passwordConfirmation = $('#password-confirm');
-    const $notifications = $('#notifications');
     const $calendarView = $('#calendar-view');
     const $filterAdmins = $('#filter-admins');
     let filterResults = {};
@@ -190,7 +189,6 @@ App.Pages.Admins = (function () {
                 ldap_dn: $ldapDn.val(),
                 settings: {
                     username: $username.val(),
-                    notifications: Number($notifications.prop('checked')),
                     calendar_view: $calendarView.val(),
                 },
             };
@@ -340,7 +338,6 @@ App.Pages.Admins = (function () {
         $admins.find('.record-details #calendar-view').val('default');
         $admins.find('.record-details #language').val(vars('default_language'));
         $admins.find('.record-details #timezone').val(vars('default_timezone'));
-        $admins.find('.record-details #notifications').prop('checked', true);
         $('#edit-admin, #delete-admin').prop('disabled', true);
 
         $('#admins .is-invalid').removeClass('is-invalid');
@@ -370,7 +367,6 @@ App.Pages.Admins = (function () {
 
         $username.val(admin.settings.username);
         $calendarView.val(admin.settings.calendar_view);
-        $notifications.prop('checked', Boolean(Number(admin.settings.notifications)));
     }
 
     /**

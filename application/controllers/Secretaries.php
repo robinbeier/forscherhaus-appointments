@@ -46,7 +46,7 @@ class Secretaries extends EA_Controller
         'providers' => [],
     ];
 
-    public array $allowed_secretary_setting_fields = ['username', 'password', 'notifications', 'calendar_view'];
+    public array $allowed_secretary_setting_fields = ['username', 'password', 'calendar_view'];
 
     public array $optional_secretary_setting_fields = [
         //
