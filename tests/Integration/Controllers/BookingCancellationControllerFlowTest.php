@@ -24,9 +24,10 @@ class BookingCancellationControllerFlowTest extends TestCase
         parent::setUp();
 
         $this->fixtures = new BookingFlowFixtures();
-        $this->fixtures->snapshotSettings(['disable_booking']);
+        $this->fixtures->snapshotSettings(['disable_booking', 'book_advance_timeout']);
 
         $this->fixtures->setSetting('disable_booking', '0');
+        $this->fixtures->setSetting('book_advance_timeout', '60');
 
         $this->resetRuntimeState('POST');
     }
@@ -103,6 +104,7 @@ class BookingCancellationControllerFlowTest extends TestCase
         $CI->load->model('services_model');
         $CI->load->model('customers_model');
 
+        $controller->db = $CI->db;
         $controller->load = $CI->load;
         $controller->input = $CI->input;
         $controller->output = $CI->output;

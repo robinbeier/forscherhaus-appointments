@@ -26,6 +26,24 @@ dass die angefragte Zeit nicht verfügbar ist. Die Antwort unterscheidet nicht
 zwischen einem belegten Zeitfenster und einer Überschneidung beim Kunden.
 Die Überschneidungsprüfung und das vollständige Zurückrollen bleiben erhalten.
 
+## Öffentliche Stornierung
+
+`POST /booking_cancellation/of/{hash}` verlangt eine nicht leere gespeicherte
+Linkberechtigung und aktivierte Buchung. Der Controller öffnet nach dem ersten
+Lookup eine äußere Transaktion, sperrt den Termin und prüft Hash, Terminart und
+`book_advance_timeout` erneut auf dem gesperrten Datensatz. Wie die bestehende
+Verwaltungsseite lehnt er `start_datetime < now + timeout` ab; Gleichheit bleibt
+erlaubt. Die bisherige serverseitige `strtotime`-Zeitinterpretation bleibt erhalten.
+Der geschachtelte Modellaufruf löscht Puffer und Termin; erst der äußere Commit
+bestätigt den Erfolg. Ablehnungen und Fehler rollen vorher zurück. Dies ist die
+bestehende Termin-/Kind-Sperrfolge, keine neue globale Elternsperre.
+
+Die isolierten HTTP-Tests prüfen Frist, Methode, deaktivierte Buchung,
+Nichtmutation und erfolgreiche frühe Stornierung. Der Konkurrenztest beobachtet
+den tatsächlichen Datenbank-Lock-Wait einer zweiten HTTP-Verbindung und prüft
+anschließend geänderte Startzeit, ausgetauschten Hash und gelöschten Datensatz.
+Diese lokalen Nachweise ersetzen keine Produktionsprüfung.
+
 ## Local Repro (Docker CI-Parity)
 
 ```bash
