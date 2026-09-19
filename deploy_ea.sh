@@ -106,7 +106,7 @@ ordinary_production_change_lock() {
     opened="$(stat -Lc '%a:%u:%h:%s:%d:%i' -- "/proc/$$/fd/$ordinary_fd")" || return 1
     [[ "$opened" == "$before" ]] || return 1
   else
-    exec {ordinary_fd}<>"$lock_path" || return 1
+    exec {ordinary_fd}<"$lock_path" || return 1
   fi
   if ! flock -w "$wait_seconds" "$ordinary_fd"; then
     exec {ordinary_fd}>&-

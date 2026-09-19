@@ -68,6 +68,16 @@ There is no time-based expiry or operator flag that converts uncertainty into
 permission. The shared flock prevents concurrent admission; durable pending
 state prevents admission after an owner dies while work may still exist.
 
+Manual `docker builder prune` needs an operation-specific terminal proof. Its
+CLI delegates mutation to the Docker daemon; CLI termination, timeout or a free
+flock does not establish that daemon-side work ended. Unlike a restore
+container, this command supplies no container identity to reconcile. Publish
+pending state before dispatch and preserve it on an unknown outcome. Before
+enrollment, demonstrate a supported daemon-level completion/reconciliation
+mechanism, or keep manual prune unavailable under the new protocol. Do not
+substitute container inspection, process names or elapsed time for that proof.
+This requirement does not change native BuildKit GC's separate boundary.
+
 The state directory, bounded schema, atomic publication protocol, per-service
 write permissions and recovery interface must be implemented and reviewed
 before enabling this contract. They are proposed requirements, not permissions
@@ -87,11 +97,12 @@ source head, test doubles and any missing systemd sandbox coverage.
 | Direct-child owner dies | Independent lock attempt remains busy while child lives; locks release after verified child exit and reaping |
 | Actual trusted dump executable | Descriptor retention in the deployed client version is verified; synthetic-child success alone is insufficient |
 | Detached launch before identity receipt | Crash leaves pending state; reconciliation proves exact terminal resources before admission resumes |
+| Manual prune CLI exits or is killed | Operation-specific daemon evidence establishes completion; unknown outcome retains pending state and blocks admission |
 | TERM/KILL, timeout, stopped child, inspection failure | Bounded diagnostics; no unrelated process signals or cleanup; unknown outcome blocks |
 | Invalid/truncated/oversized record, fsync/rename failure | No silent empty-state fallback or premature admission |
 | Reboot and identity reuse | Old boot/PID/container-name evidence cannot certify terminal state |
 | Interrupted recovery | Pending veto remains until recovery actually completes |
-| Mixed versions and interrupted installation | No old participant ignores new pending state; inconsistent epoch blocks activation |
+| Mixed versions and interrupted installation | Epoch-aware participants refuse inconsistent state; legacy direct paths are demonstrably fenced before activation |
 | Rollback | Pending operations are settled before reverting readers; state is not deleted to restore availability |
 
 Use a negative control against the original implementation for each local
@@ -110,10 +121,24 @@ entrypoints, protocol epoch, lock identity, state-path permissions and fallback
 copies. Before installation, specify and validate the exact absolute state path,
 root-controlled ancestor chain, owner/mode/link-count and filesystem guarantees,
 service sandbox permissions, bounded record schema and Docker identity fields.
-Demonstrate how every mixed-version reader rejects before mutation and how a
-pre-launch record is reconciled without a received container ID. Missing any of
-these is an installation blocker. Obtain separate production-change approval
-for the complete manifest.
+Demonstrate how every supported entrypoint is prevented from mutation during
+mixed-version installation and how a pre-launch record is reconciled without a
+received resource identity. Missing any of these is an installation blocker.
+Obtain separate production-change approval for the complete manifest.
+
+An old binary cannot reject an epoch it does not read. The cutover therefore
+needs an external admission fence: inhibit all supported scheduler and manual
+entrypoints, settle active operations under the old contract, then replace and
+verify the complete tool/unit set before enabling the new epoch. Stopping a
+timer alone does not fence a direct manual call. The installation manifest must
+identify how each legacy executable or wrapper is retired or made unreachable
+through supported invocation paths, including retained rollback copies. A
+shared lock held only during installation is insufficient if an old process can
+resume afterward. Interrupted installation must leave the fence in place;
+tests must exercise direct legacy invocation and prove refusal or unavailability,
+not attribute new protocol awareness to unchanged code. Epoch checks apply only
+to updated participants. Rollback requires the same fence and settled pending
+operations; reverting only some tools must not reopen legacy admission.
 
 Remove command-name inference only after every supported retained scheduler,
 manual and recovery path is enrolled, versions agree, crash/recovery evidence
