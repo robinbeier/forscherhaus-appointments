@@ -356,6 +356,91 @@ final class ProdBuildCacheRetentionTest extends TestCase
         }
     }
 
+    public function testMissingCanonicalProductionChangeLockBlocksPrune(): void
+    {
+        $workspace = $this->workspace();
+
+        try {
+            $environment = $this->prepareStubs($workspace);
+            unlink($environment['BUILD_CACHE_RETENTION_GLOBAL_LOCK_PATH']);
+            $result = $this->runScript(['--execute', '--confirm-live-write', 'ROB-450'], $environment);
+
+            self::assertSame(2, $result['exit_code']);
+            self::assertStringContainsString('reason=global_change_lock_missing', $result['stdout']);
+            self::assertStringContainsString('deletion_performed=no', $result['stdout']);
+            self::assertFileDoesNotExist($environment['BUILD_CACHE_RETENTION_GLOBAL_LOCK_PATH']);
+            self::assertDoesNotMatchRegularExpression(
+                '/builder prune .*--force/',
+                (string) file_get_contents($environment['DOCKER_LOG']),
+            );
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testSymlinkCanonicalProductionChangeLockBlocksPrune(): void
+    {
+        $workspace = $this->workspace();
+
+        try {
+            $environment = $this->prepareStubs($workspace);
+            unlink($environment['BUILD_CACHE_RETENTION_GLOBAL_LOCK_PATH']);
+            symlink(
+                $environment['BUILD_CACHE_RETENTION_LOCK_DIR'],
+                $environment['BUILD_CACHE_RETENTION_GLOBAL_LOCK_PATH'],
+            );
+            $result = $this->runScript(['--execute', '--confirm-live-write', 'ROB-450'], $environment);
+
+            self::assertSame(2, $result['exit_code']);
+            self::assertStringContainsString('reason=global_change_lock_unsafe', $result['stdout']);
+            self::assertStringContainsString('deletion_performed=no', $result['stdout']);
+            self::assertDoesNotMatchRegularExpression(
+                '/builder prune .*--force/',
+                (string) file_get_contents($environment['DOCKER_LOG']),
+            );
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testNonEmptyCanonicalProductionChangeLockBlocksPrune(): void
+    {
+        $workspace = $this->workspace();
+
+        try {
+            $environment = $this->prepareStubs($workspace);
+            file_put_contents($environment['BUILD_CACHE_RETENTION_GLOBAL_LOCK_PATH'], 'busy');
+            $result = $this->runScript(['--execute', '--confirm-live-write', 'ROB-450'], $environment);
+
+            self::assertSame(2, $result['exit_code']);
+            self::assertStringContainsString('reason=global_change_lock_unsafe', $result['stdout']);
+            self::assertStringContainsString('deletion_performed=no', $result['stdout']);
+            self::assertDoesNotMatchRegularExpression(
+                '/builder prune .*--force/',
+                (string) file_get_contents($environment['DOCKER_LOG']),
+            );
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testDryRunSucceedsWhenCanonicalProductionChangeLockIsMissing(): void
+    {
+        $workspace = $this->workspace();
+
+        try {
+            $environment = $this->prepareStubs($workspace);
+            unlink($environment['BUILD_CACHE_RETENTION_GLOBAL_LOCK_PATH']);
+            $result = $this->runScript([], $environment);
+
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            self::assertStringContainsString('mode=dry-run', $result['stdout']);
+            self::assertStringContainsString('status=pass', $result['stdout']);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
     public function testInvalidInventoryAndProtectedInventoryChangeFailClosed(): void
     {
         $workspace = $this->workspace();
@@ -422,6 +507,9 @@ final class ProdBuildCacheRetentionTest extends TestCase
         file_put_contents($dockerLog, '');
         file_put_contents($counter, '0');
         mkdir($lockDirectory, 0700);
+        $globalLockPath = $workspace . '/global-production-change.lock';
+        touch($globalLockPath);
+        chmod($globalLockPath, 0600);
 
         file_put_contents(
             $bin . '/ssh',
@@ -558,7 +646,7 @@ final class ProdBuildCacheRetentionTest extends TestCase
             'SSH_LOG' => $sshLog,
             'DF_COUNTER' => $counter,
             'BUILD_CACHE_RETENTION_LOCK_DIR' => $lockDirectory,
-            'BUILD_CACHE_RETENTION_GLOBAL_LOCK_PATH' => $workspace . '/global-production-change.lock',
+            'BUILD_CACHE_RETENTION_GLOBAL_LOCK_PATH' => $globalLockPath,
             'CACHE_DF_BEFORE' => $this->cacheDf('12', '4.249GB', '3.459GB (81%)'),
             'CACHE_DF_AFTER' => $this->cacheDf('12', '4.249GB', '3.459GB (81%)'),
             'IMAGE_LIST' => "sha256:image-a\nsha256:image-b\n",
