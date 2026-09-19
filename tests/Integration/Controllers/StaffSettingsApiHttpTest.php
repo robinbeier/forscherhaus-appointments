@@ -96,6 +96,47 @@ final class StaffSettingsApiHttpTest extends TestCase
         }
     }
 
+    public function testValidProviderBasicCannotReadAdminSecretaryOrSettingsRoutes(): void
+    {
+        $provider = $this->fixture->row('users', $this->fixture->providerId);
+        $providerSettings = $this->fixture->userSettingsRow($this->fixture->providerId);
+        $providerRole = get_instance()
+            ->db->get_where('roles', ['id' => (int) $provider['id_roles']])
+            ->row_array();
+        self::assertSame('provider', $providerRole['slug'] ?? null);
+        self::assertSame($this->credentials['provider_username'], $providerSettings['username'] ?? null);
+        self::assertSame(
+            hash_password((string) $providerSettings['salt'], $this->credentials['password']),
+            $providerSettings['password'] ?? null,
+        );
+
+        $admin = $this->basicClient($this->credentials['admin_username'], $this->credentials['password']);
+        $secretaryPayload = $this->fixture->secretaryWritePayload('provider-read-denial', [$this->fixture->providerId]);
+        $secretary = $this->success($admin->requestJsonApp('POST', 'api/v1/secretaries', $secretaryPayload), 201);
+        $secretaryId = (int) $secretary['id'];
+        $this->fixture->seedStaffIntegrationSecrets($secretaryId);
+
+        $providerClient = $this->basicClient($this->credentials['provider_username'], $this->credentials['password']);
+        foreach (
+            [
+                'api/v1/admins',
+                'api/v1/admins/' . $this->fixture->actorId,
+                'api/v1/secretaries',
+                'api/v1/secretaries/' . $secretaryId,
+                'api/v1/settings',
+                'api/v1/settings/api_token',
+            ]
+            as $path
+        ) {
+            $response = $providerClient->get($path);
+            self::assertSame(401, $response->statusCode, $path . ' must reject Provider Basic credentials.');
+            self::assertNotEmpty(trim((string) $response->header('www-authenticate')));
+            self::assertStringNotContainsString($this->fixture->run, $response->body);
+            self::assertStringNotContainsString($this->credentials['token'], $response->body);
+            $this->assertNoSyntheticSecrets($response->body);
+        }
+    }
+
     public static function unauthenticatedReadAuthCases(): array
     {
         return [

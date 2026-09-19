@@ -162,6 +162,14 @@ fixture marker or seeded staff secret values in the response body. This read
 matrix does not establish invalid-write behavior or every authentication
 configuration.
 
+The same six read paths are also exercised with the fixture's valid Provider
+Basic credentials after asserting the synthetic username, password hash, and
+Provider role. They must return HTTP401 with a nonempty challenge and must not
+contain fixture markers, seeded staff secrets, or the synthetic API token.
+Existing Admin Basic/Bearer positive controls remain in the neighboring read
+test; this added case closes the Provider-read coverage gap without asserting
+any new authentication behavior.
+
 The ordinary write matrix also covers Admin POST/PUT, Secretary POST/PUT/DELETE,
 and Settings PUT with the same five rejected credentials: absent credentials,
 wrong Admin password, nonexistent Admin username, invalid Bearer token, and
