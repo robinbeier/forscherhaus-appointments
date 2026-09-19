@@ -425,7 +425,8 @@ def publish_marker(backups, marker_value, nonce, expected_marker):
     os.fsync(backups)
 
 
-def stream_dump(target, gzip_mtime, dump_descriptor, dump_identity, config_descriptor, config_identity):
+def stream_dump(target, gzip_mtime, dump_descriptor, dump_identity, config_descriptor, config_identity,
+                global_lock, private_lock):
     executable = '/proc/self/fd/' + str(dump_descriptor)
     config = '/proc/self/fd/' + str(config_descriptor)
     arguments = [
@@ -450,7 +451,7 @@ def stream_dump(target, gzip_mtime, dump_descriptor, dump_identity, config_descr
         process = subprocess.Popen(
             arguments,
             executable=executable,
-            pass_fds=(dump_descriptor, config_descriptor),
+            pass_fds=(dump_descriptor, config_descriptor, global_lock, private_lock),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -607,7 +608,8 @@ def cleanup_current_staging(backups, staging, marker_temporary):
     os.fsync(backups)
 
 
-def create_backup(backups, backup_id, nonce, dump_descriptor, dump_identity, config_descriptor, config_identity):
+def create_backup(backups, backup_id, nonce, dump_descriptor, dump_identity, config_descriptor, config_identity,
+                  global_lock, private_lock):
     gzip_mtime = int(datetime.datetime.strptime(backup_id, '%Y%m%dT%H%M%SZ').replace(
         tzinfo=datetime.timezone.utc).timestamp())
     staging = '.backup-set-producer-' + nonce + '.tmp'
@@ -623,7 +625,8 @@ def create_backup(backups, backup_id, nonce, dump_descriptor, dump_identity, con
                              0o600, dir_fd=database)
             try:
                 unpacked = stream_dump(
-                    target, gzip_mtime, dump_descriptor, dump_identity, config_descriptor, config_identity)
+                    target, gzip_mtime, dump_descriptor, dump_identity, config_descriptor, config_identity,
+                    global_lock, private_lock)
                 os.fsync(target)
                 digest, compressed = validate_dump(target, unpacked, gzip_mtime)
                 if file_identity(os.fstat(target)) != file_identity(
@@ -991,7 +994,8 @@ def main():
         staging = '.backup-set-producer-' + nonce + '.tmp'
         marker_temporary = '.last_backup_success.utc.tmp-' + nonce
         digest, compressed, unpacked = create_backup(
-            backups, backup_id, nonce, dump_descriptor, dump_identity, config_descriptor, config_identity)
+            backups, backup_id, nonce, dump_descriptor, dump_identity, config_descriptor, config_identity,
+            global_lock, private_lock)
         staging = None
         pending_handoff = json.loads(handoff_bytes(backup_id, digest, compressed, unpacked))
         publish_continuity_state(backups, 'pending', pending_handoff, nonce, expected_state)
