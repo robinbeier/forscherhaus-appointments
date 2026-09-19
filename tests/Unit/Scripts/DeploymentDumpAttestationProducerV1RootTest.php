@@ -464,6 +464,68 @@ final class DeploymentDumpAttestationProducerV1RootTest extends TestCase
         self::assertSame(75, $result['exit']);
     }
 
+    public function testGlobalLockMustBeEmptyBeforeDownstreamAdmission(): void
+    {
+        $trustedRoot = '/var/lib/fh-dump-attestation-admission-' . bin2hex(random_bytes(8));
+        $locks = $trustedRoot . '/orchestrator/locks';
+        $lockPath = $locks . '/fh-production-change.lock';
+        mkdir($trustedRoot, 0700);
+        mkdir($trustedRoot . '/orchestrator', 0700);
+        mkdir($locks, 0700);
+        try {
+            touch($lockPath);
+            chmod($lockPath, 0600);
+            $empty = $this->runMainAdmission($trustedRoot);
+            self::assertSame(0, $empty['exit'], $empty['stderr']);
+            self::assertFileExists($trustedRoot . '/downstream-reached');
+            unlink($trustedRoot . '/downstream-reached');
+
+            file_put_contents($lockPath, 'x');
+            chmod($lockPath, 0600);
+            $before = lstat($lockPath);
+            $nonempty = $this->runMainAdmission($trustedRoot);
+            self::assertSame(70, $nonempty['exit'], $nonempty['stderr']);
+            self::assertFileDoesNotExist($trustedRoot . '/downstream-reached');
+            self::assertSame('x', file_get_contents($lockPath));
+            clearstatcache(true, $lockPath);
+            $after = lstat($lockPath);
+            self::assertSame($before['ino'], $after['ino']);
+            self::assertSame($before['mode'], $after['mode']);
+            self::assertSame($before['size'], $after['size']);
+
+            file_put_contents($lockPath, '');
+            chmod($lockPath, 0640);
+            $wrongMode = $this->runMainAdmission($trustedRoot);
+            self::assertSame(70, $wrongMode['exit'], $wrongMode['stderr']);
+            clearstatcache(true, $lockPath);
+            self::assertSame(0640, fileperms($lockPath) & 0777);
+            self::assertSame('', file_get_contents($lockPath));
+            self::assertFileDoesNotExist($trustedRoot . '/downstream-reached');
+
+            chmod($lockPath, 0600);
+            $target = $trustedRoot . '/lock-target';
+            touch($target);
+            chmod($target, 0600);
+            unlink($lockPath);
+            symlink($target, $lockPath);
+            $symlink = $this->runMainAdmission($trustedRoot);
+            self::assertSame(70, $symlink['exit'], $symlink['stderr']);
+            self::assertSame($target, readlink($lockPath));
+            self::assertSame('', file_get_contents($target));
+            self::assertFileDoesNotExist($trustedRoot . '/downstream-reached');
+
+            unlink($lockPath);
+            $missing = $this->runMainAdmission($trustedRoot);
+            self::assertSame(70, $missing['exit'], $missing['stderr']);
+            self::assertFileDoesNotExist($lockPath);
+            self::assertFileDoesNotExist($trustedRoot . '/downstream-reached');
+        } finally {
+            if (is_dir($trustedRoot)) {
+                $this->removeTree($trustedRoot);
+            }
+        }
+    }
+
     public function testClosedStreamingDumpGrammarCountsTablesAndRejectsExecutableBypasses(): void
     {
         $result = $this->python(
@@ -695,7 +757,46 @@ final class DeploymentDumpAttestationProducerV1RootTest extends TestCase
     }
 
     /** @return array{exit:int,stdout:string,stderr:string} */
-    private function python(string $body): array
+    private function runMainAdmission(string $root): array
+    {
+        return $this->python(
+            <<<'PY'
+            import os
+            import sys
+            module = load()
+            root = os.environ['ROB465_TEST_ROOT']
+            module.ORCHESTRATOR_ROOT = root + '/orchestrator'
+            module.EVIDENCE_ROOT = root + '/evidence'
+            module.BACKUP_ROOT = root + '/backups'
+            module.bind_to_parent_death = lambda: None
+            # This test isolates the shared-file admission. The container's
+            # overlay ancestors have nlink=1; absolute ancestor validation and
+            # parent-death behavior are separate contracts. Child-directory,
+            # file metadata, open, flock and post-open identity checks are real.
+            def fixture_root(path, exact_mode=None):
+                assert path == module.ORCHESTRATOR_ROOT and exact_mode == 0o700
+                descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW)
+                module.safe_directory(os.fstat(descriptor), exact_mode)
+                return descriptor
+            module.open_absolute_directory = fixture_root
+            def downstream(orchestrator):
+                with open(root + '/downstream-reached', 'w', encoding='ascii'):
+                    pass
+                raise SystemExit(0)
+            module.assert_no_nonterminal_runs = downstream
+            sys.argv = ['deployment_dump_attestation_v1.py', '--latest-handoff']
+            try:
+                module.main()
+            except OSError:
+                module.reject()
+            PY
+            ,
+            $root,
+        );
+    }
+
+    /** @return array{exit:int,stdout:string,stderr:string} */
+    private function python(string $body, ?string $rootOverride = null): array
     {
         $loader =
             "import importlib.util\n" .
@@ -712,7 +813,7 @@ final class DeploymentDumpAttestationProducerV1RootTest extends TestCase
             [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']],
             $pipes,
             null,
-            ['ROB465_TEST_ROOT' => $this->root],
+            ['ROB465_TEST_ROOT' => $rootOverride ?? $this->root],
         );
         self::assertIsResource($process);
         fclose($pipes[0]);
