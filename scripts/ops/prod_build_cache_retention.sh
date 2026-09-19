@@ -385,23 +385,21 @@ lock_path_after="$(stat -Lc '%F|%a|%u|%d|%i' "$LOCK_DIR" 2>/dev/null)" \
 [[ "$lock_fd_meta" == "$lock_path_meta" && "$lock_path_after" == "$lock_path_meta" ]] \
     || blocked cleanup_lock_unsafe 2
 
-global_lock_state=absent
-if [[ -e "$GLOBAL_LOCK_PATH" || -L "$GLOBAL_LOCK_PATH" ]]; then
-    [[ -f "$GLOBAL_LOCK_PATH" && ! -L "$GLOBAL_LOCK_PATH" ]] || blocked global_change_lock_unsafe 2
-    global_lock_meta="$(stat -Lc '%F|%a|%u|%h|%d|%i' "$GLOBAL_LOCK_PATH" 2>/dev/null)" \
-        || blocked global_change_lock_unsafe 2
-    [[ "$global_lock_meta" == regular\ empty\ file\|600\|0\|1\|* ]] \
-        || blocked global_change_lock_unsafe 2
-    exec 8>>"$GLOBAL_LOCK_PATH" || blocked global_change_lock_failed 2
-    flock -n 8 || blocked active_production_work 75
-    global_lock_fd_meta="$(stat -Lc '%F|%a|%u|%h|%d|%i' "/proc/$$/fd/8" 2>/dev/null)" \
-        || blocked global_change_lock_unsafe 2
-    global_lock_after="$(stat -Lc '%F|%a|%u|%h|%d|%i' "$GLOBAL_LOCK_PATH" 2>/dev/null)" \
-        || blocked global_change_lock_unsafe 2
-    [[ "$global_lock_fd_meta" == "$global_lock_meta" && "$global_lock_after" == "$global_lock_meta" ]] \
-        || blocked global_change_lock_unsafe 2
-    global_lock_state=acquired
-fi
+[[ -e "$GLOBAL_LOCK_PATH" || -L "$GLOBAL_LOCK_PATH" ]] || blocked global_change_lock_missing 2
+[[ -f "$GLOBAL_LOCK_PATH" && ! -L "$GLOBAL_LOCK_PATH" ]] || blocked global_change_lock_unsafe 2
+global_lock_meta="$(stat -Lc '%F|%a|%u|%h|%d|%i' "$GLOBAL_LOCK_PATH" 2>/dev/null)" \
+    || blocked global_change_lock_unsafe 2
+[[ "$global_lock_meta" == regular\ empty\ file\|600\|0\|1\|* ]] \
+    || blocked global_change_lock_unsafe 2
+exec 8<"$GLOBAL_LOCK_PATH" || blocked global_change_lock_failed 2
+flock -n 8 || blocked active_production_work 75
+global_lock_fd_meta="$(stat -Lc '%F|%a|%u|%h|%d|%i' "/proc/$$/fd/8" 2>/dev/null)" \
+    || blocked global_change_lock_unsafe 2
+global_lock_after="$(stat -Lc '%F|%a|%u|%h|%d|%i' "$GLOBAL_LOCK_PATH" 2>/dev/null)" \
+    || blocked global_change_lock_unsafe 2
+[[ "$global_lock_fd_meta" == "$global_lock_meta" && "$global_lock_after" == "$global_lock_meta" ]] \
+    || blocked global_change_lock_unsafe 2
+global_lock_state=acquired
 
 activity="$(activity_count)" || blocked activity_unknown 2
 [[ "$activity" == '0' ]] || blocked active_production_work 75
