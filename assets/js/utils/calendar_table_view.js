@@ -349,9 +349,7 @@ App.Utils.CalendarTableView = (function () {
                         click: (event, messageModal) => {
                             const appointmentId = lastFocusedEventData.extendedProps.data.id;
 
-                            const cancellationReason = $('#cancellation-reason').val();
-
-                            App.Http.Calendar.deleteAppointment(appointmentId, cancellationReason).done(() => {
+                            App.Http.Calendar.deleteAppointment(appointmentId).done(() => {
                                 messageModal.hide();
 
                                 // Refresh calendar event items.
@@ -361,17 +359,7 @@ App.Utils.CalendarTableView = (function () {
                     },
                 ];
 
-                App.Utils.Message.show(
-                    lang('delete_appointment_title'),
-                    lang('write_appointment_removal_reason'),
-                    buttons,
-                );
-
-                $('<textarea/>', {
-                    'class': 'form-control w-100',
-                    'id': 'cancellation-reason',
-                    'rows': '3',
-                }).appendTo('#message-modal .modal-body');
+                App.Utils.Message.show(lang('delete_appointment_title'), lang('delete_record_prompt'), buttons);
             } else {
                 // Do not display confirmation prompt.
                 const unavailabilityId = lastFocusedEventData.extendedProps.data.id;

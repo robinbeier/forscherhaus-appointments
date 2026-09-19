@@ -106,11 +106,4 @@ class BookingRequestDtoFactoryTest extends TestCase
 
         $this->assertSame('default', $dto->theme);
     }
-
-    public function testCancellationDtoPreservesRawCompatibilityValue(): void
-    {
-        $dto = $this->factory->fromCancellationPayload('  keep spaces  ');
-
-        $this->assertSame('  keep spaces  ', $dto->cancellationReason);
-    }
 }

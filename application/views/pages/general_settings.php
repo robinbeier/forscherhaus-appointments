@@ -42,19 +42,6 @@
                                 </div>
 
                                 <div class="mb-3">
-                                    <label class="form-label" for="company-email">
-                                        <?= lang('company_email') ?>
-                                        <span class="text-danger">*</span>
-                                    </label>
-                                    <input id="company-email" data-field="company_email" class="required form-control">
-                                    <div class="form-text text-muted">
-                                        <small>
-                                            <?= lang('company_email_hint') ?>
-                                        </small>
-                                    </div>
-                                </div>
-
-                                <div class="mb-3">
                                     <label class="form-label" for="company-link">
                                         <?= lang('company_link') ?>
                                         <span class="text-danger">*</span>
@@ -73,12 +60,6 @@
                                     </label>
                                     <input type="file" id="company-logo" data-field="company_logo" class="form-control"
                                            accept="image/*">
-                                    <div class="form-text text-muted">
-                                        <small>
-                                            <?= lang('company_logo_hint') ?>
-                                        </small>
-                                    </div>
-
                                     <div class="d-flex justify-content-center">
                                         <img src="#" alt="Company Logo Preview" id="company-logo-preview"
                                              class="img-thumbnail my-3" hidden>

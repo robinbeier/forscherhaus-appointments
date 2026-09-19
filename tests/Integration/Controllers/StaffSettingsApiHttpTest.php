@@ -150,6 +150,17 @@ final class StaffSettingsApiHttpTest extends TestCase
         return ['basic-admin' => ['basic'], 'bearer' => ['bearer']];
     }
 
+    public static function invalidWriteAuthenticationCases(): array
+    {
+        return [
+            'no-credentials' => ['no-credentials'],
+            'wrong-admin-password' => ['wrong-admin-password'],
+            'missing-admin-username' => ['missing-admin-username'],
+            'invalid-bearer-token' => ['invalid-bearer-token'],
+            'provider-basic' => ['provider-basic'],
+        ];
+    }
+
     #[DataProvider('validWriteAuthenticationCases')]
     public function testOwnedSettingWritePersistsThroughHttp(string $authentication): void
     {
@@ -231,6 +242,85 @@ final class StaffSettingsApiHttpTest extends TestCase
         self::assertSame('Updated Secretary', $this->fixture->row('users', $secretaryId)['first_name']);
         self::assertSame([], $this->fixture->secretaryWriteState($secretaryPayload['email'])['providers']);
         $this->assertNoSyntheticSecrets($adminCreate, $adminUpdate, $secretaryCreate, $updated);
+    }
+
+    #[DataProvider('invalidWriteAuthenticationCases')]
+    public function testStaffAndSettingsWritesRejectInvalidAuthenticationWithoutMutation(string $case): void
+    {
+        $f = $this->fixture;
+        $client = $this->invalidWriteClient($case);
+
+        $adminPostPayload = $f->adminWritePayload('deny-' . $case);
+        $before = $f->adminDeleteSnapshot();
+        $response = $client->requestJsonApp('POST', 'api/v1/admins', $adminPostPayload);
+        $this->assertRejectedWrite($response, $case);
+        self::assertSame($before, $f->adminDeleteSnapshot(), $case . ' Admin POST must not mutate state.');
+        self::assertSame([], $f->adminWriteState($adminPostPayload['email']));
+
+        $adminPutPayload = $f->adminWritePayload('put-' . $case);
+        $admin = $this->basicClient($this->credentials['admin_username'], $this->credentials['password']);
+        $adminCreated = $this->success($admin->requestJsonApp('POST', 'api/v1/admins', $adminPutPayload), 201);
+        $adminId = (int) $adminCreated['id'];
+        $adminState = $f->adminWriteState($adminPutPayload['email']);
+        self::assertGreaterThan(0, $adminId);
+        self::assertSame($adminId, (int) ($adminState['user']['id'] ?? 0));
+        self::assertNotSame([], $adminState['settings']);
+        $adminBefore = $f->adminDeleteSnapshot();
+        $adminPutPayload['firstName'] = 'Denied Admin Update';
+        $response = $client->requestJsonApp('PUT', 'api/v1/admins/' . $adminId, $adminPutPayload);
+        $this->assertRejectedWrite($response, $case);
+        self::assertSame($adminBefore, $f->adminDeleteSnapshot(), $case . ' Admin PUT must not mutate state.');
+
+        $secretaryPostPayload = $f->secretaryWritePayload('deny-' . $case, [$f->providerId]);
+        $before = $f->adminDeleteSnapshot();
+        $response = $client->requestJsonApp('POST', 'api/v1/secretaries', $secretaryPostPayload);
+        $this->assertRejectedWrite($response, $case);
+        self::assertSame($before, $f->adminDeleteSnapshot(), $case . ' Secretary POST must not mutate state.');
+        self::assertSame([], $f->secretaryWriteState($secretaryPostPayload['email']));
+
+        $secretaryPutPayload = $f->secretaryWritePayload('put-' . $case, [$f->providerId]);
+        $secretaryCreated = $this->success(
+            $admin->requestJsonApp('POST', 'api/v1/secretaries', $secretaryPutPayload),
+            201,
+        );
+        $secretaryId = (int) $secretaryCreated['id'];
+        $secretaryState = $f->secretaryWriteState($secretaryPutPayload['email']);
+        self::assertGreaterThan(0, $secretaryId);
+        self::assertSame($secretaryId, (int) ($secretaryState['user']['id'] ?? 0));
+        self::assertNotSame([], $secretaryState['settings']);
+        self::assertSame([$f->providerId], $secretaryState['providers']);
+        $secretaryBefore = $f->secretaryDeleteSnapshot();
+        $secretaryPutPayload['firstName'] = 'Denied Secretary Update';
+        $secretaryPutPayload['providers'] = [];
+        $response = $client->requestJsonApp('PUT', 'api/v1/secretaries/' . $secretaryId, $secretaryPutPayload);
+        $this->assertRejectedWrite($response, $case);
+        self::assertSame(
+            $secretaryBefore,
+            $f->secretaryDeleteSnapshot(),
+            $case . ' Secretary PUT must not mutate state.',
+        );
+
+        $response = $client->requestApp('DELETE', 'api/v1/secretaries/' . $secretaryId);
+        $this->assertRejectedWrite($response, $case);
+        self::assertSame(
+            $secretaryBefore,
+            $f->secretaryDeleteSnapshot(),
+            $case . ' Secretary DELETE must not mutate state.',
+        );
+
+        $setting = $f->ownedSetting('deny-' . $case, 'before');
+        $settingBefore = $f->settingRow((int) $setting['id']);
+        $response = $client->requestJsonApp('PUT', 'api/v1/settings/' . $setting['name'], [
+            'value' => $f->run . '_denied',
+        ]);
+        $this->assertRejectedWrite($response, $case);
+        self::assertSame($settingBefore, $f->settingRow((int) $setting['id']));
+
+        $f->cleanup();
+        $f->cleanup();
+        self::assertSame([], $f->adminWriteState($adminPutPayload['email']));
+        self::assertSame([], $f->secretaryWriteState($secretaryPutPayload['email']));
+        self::assertSame([], $f->settingRow((int) $setting['id']));
     }
 
     #[DataProvider('validWriteAuthenticationCases')]
@@ -443,6 +533,35 @@ final class StaffSettingsApiHttpTest extends TestCase
         return $authentication === 'bearer'
             ? $this->bearerClient($this->credentials['token'])
             : $this->basicClient($this->credentials['admin_username'], $this->credentials['password']);
+    }
+
+    private function invalidWriteClient(string $case): GateHttpClient
+    {
+        return match ($case) {
+            'no-credentials' => $this->server->client(),
+            'wrong-admin-password' => $this->basicClient(
+                $this->credentials['admin_username'],
+                $this->credentials['password'] . '-invalid',
+            ),
+            'missing-admin-username' => $this->basicClient(
+                $this->credentials['admin_username'] . '-missing',
+                $this->credentials['password'],
+            ),
+            'invalid-bearer-token' => $this->bearerClient($this->credentials['token'] . '-invalid'),
+            'provider-basic' => $this->basicClient(
+                $this->credentials['provider_username'],
+                $this->credentials['password'],
+            ),
+            default => throw new InvalidArgumentException('Unknown invalid write authentication case.'),
+        };
+    }
+
+    private function assertRejectedWrite(GateHttpResponse $response, string $case): void
+    {
+        self::assertSame(401, $response->statusCode, $case . ' write must be rejected.');
+        self::assertNotEmpty((string) $response->header('www-authenticate'));
+        self::assertStringNotContainsString($this->fixture->run, $response->body);
+        $this->assertNoSyntheticSecrets($response->body);
     }
 
     private function basicClient(string $username, string $password): GateHttpClient

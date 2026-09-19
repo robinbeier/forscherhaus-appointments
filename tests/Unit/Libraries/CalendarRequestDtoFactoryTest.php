@@ -28,12 +28,11 @@ class CalendarRequestDtoFactoryTest extends TestCase
         $this->assertSame(['id_users_provider' => 5], $dto->appointmentData);
     }
 
-    public function testCreateDeleteAppointmentRequestDtoNormalizesIdAndReason(): void
+    public function testCreateDeleteAppointmentRequestDtoNormalizesId(): void
     {
-        $dto = $this->factory->createDeleteAppointmentRequestDto('44', '  sick leave ');
+        $dto = $this->factory->createDeleteAppointmentRequestDto('44');
 
         $this->assertSame(44, $dto->appointmentId);
-        $this->assertSame('sick leave', $dto->cancellationReason);
     }
 
     public function testCreateWorkingPlanExceptionRequestDtoNormalizesDateFields(): void

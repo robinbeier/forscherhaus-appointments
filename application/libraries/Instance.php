@@ -90,7 +90,6 @@ class Instance
 
         setting([
             'company_name' => 'Company Name',
-            'company_email' => 'info@example.org',
             'company_link' => 'https://example.org',
             'dashboard_conflict_threshold' => '0.90',
         ]);

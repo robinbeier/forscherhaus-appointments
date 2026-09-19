@@ -59,17 +59,14 @@ App.Http.Calendar = (function () {
      * Remove an appointment.
      *
      * @param {Number} appointmentId
-     * @param {String} cancellationReason
-     *
      * @return {*|jQuery}
      */
-    function deleteAppointment(appointmentId, cancellationReason) {
+    function deleteAppointment(appointmentId) {
         const url = App.Utils.Url.siteUrl('calendar/delete_appointment');
 
         const data = {
             csrf_token: vars('csrf_token'),
             appointment_id: appointmentId,
-            cancellation_reason: cancellationReason,
         };
 
         return $.post(url, data);
