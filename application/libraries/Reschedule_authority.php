@@ -331,6 +331,15 @@ class Reschedule_authority
             throw new RescheduleAuthorityException('canonical-identity-mismatch');
         }
 
+        if (
+            $this->isAdvanceCutoffReached(
+                (string) ($appointment['start_datetime'] ?? ''),
+                setting('book_advance_timeout'),
+            )
+        ) {
+            throw new RescheduleAuthorityException('advance-cutoff-reached');
+        }
+
         if (!$this->providerOffersService($target_provider_id, $target_service_id, true)) {
             throw new RescheduleAuthorityException('target-assignment-mismatch');
         }
@@ -342,6 +351,17 @@ class Reschedule_authority
         }
 
         return $state;
+    }
+
+    /**
+     * Apply the public reschedule page's strict advance-cutoff rule.
+     */
+    public function isAdvanceCutoffReached(string $start_datetime, string|int $book_advance_timeout): bool
+    {
+        $start = strtotime($start_datetime);
+        $limit = strtotime('+' . $book_advance_timeout . ' minutes', strtotime('now'));
+
+        return $start < $limit;
     }
 
     /**

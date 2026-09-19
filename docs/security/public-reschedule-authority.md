@@ -65,6 +65,9 @@ fail closed unless all of these hold:
 - the caller's customer ID is present and equals the authority's customer ID;
 - the canonical appointment still has the same customer, provider, service,
   hash, content, and scheduling state captured at issuance;
+- the currently configured advance-time boundary still permits changing the
+  locked canonical appointment, using the same strict comparison and time
+  calculation shared with the reschedule page;
 - the canonical customer, provider availability state, provider-service
   assignment, and service state still match the issuance fingerprint; and
 - the requested target provider, service, time, customer overlap, CAPTCHA,
@@ -104,7 +107,11 @@ concurrent edit; the user can reload the canonical reschedule link to continue.
 After a successful claim, the write path starts one outer database transaction
 and locks the canonical appointment, its customer, original provider and
 service, and the requested target scheduling context. It then recomputes the
-fingerprint and reruns the existing availability and overlap checks. Public
+fingerprint, rechecks the current advance-time boundary against the locked
+original appointment, and reruns the existing availability and overlap checks.
+An authority issued while rescheduling was allowed therefore cannot preserve
+write access after the appointment enters a newly configured cutoff window.
+Public
 register writes for the same target provider serialize before their final
 availability check. Normal creation first acquires a bounded database advisory
 lock derived from the database name and a one-way digest of the normalized
