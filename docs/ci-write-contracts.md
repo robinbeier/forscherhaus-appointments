@@ -33,16 +33,20 @@ Linkberechtigung und aktivierte Buchung. Der Controller öffnet nach dem ersten
 Lookup eine äußere Transaktion, sperrt den Termin und prüft Hash, Terminart und
 `book_advance_timeout` erneut auf dem gesperrten Datensatz. Wie die bestehende
 Verwaltungsseite lehnt er `start_datetime < now + timeout` ab; Gleichheit bleibt
-erlaubt. Die bisherige serverseitige `strtotime`-Zeitinterpretation bleibt erhalten.
-Der geschachtelte Modellaufruf löscht Puffer und Termin; erst der äußere Commit
-bestätigt den Erfolg. Ablehnungen und Fehler rollen vorher zurück. Dies ist die
-bestehende Termin-/Kind-Sperrfolge, keine neue globale Elternsperre.
+erlaubt. Der zeitzonenlose gespeicherte Termin und die aktuelle Zeit werden dabei
+sekundengenau in der Zeitzone des zugehörigen Anbieters ausgewertet. Nicht
+existente lokale Uhrzeiten während eines Zeitzonenwechsels werden nicht still
+normalisiert, sondern fail-closed abgelehnt. Der geschachtelte Modellaufruf
+löscht Puffer und Termin; erst der äußere Commit bestätigt den Erfolg.
+Ablehnungen und Fehler rollen vorher zurück. Dies ist die bestehende
+Termin-/Kind-Sperrfolge, keine neue globale Elternsperre.
 
-Die isolierten HTTP-Tests prüfen Frist, Methode, deaktivierte Buchung,
-Nichtmutation und erfolgreiche frühe Stornierung. Der Konkurrenztest beobachtet
-den tatsächlichen Datenbank-Lock-Wait einer zweiten HTTP-Verbindung und prüft
-anschließend geänderte Startzeit, ausgetauschten Hash und gelöschten Datensatz.
-Diese lokalen Nachweise ersetzen keine Produktionsprüfung.
+Die isolierten HTTP-Tests prüfen Frist einschließlich abweichender
+Anbieterzeitzone, Methode, deaktivierte Buchung, Nichtmutation und erfolgreiche
+frühe Stornierung. Der Konkurrenztest beobachtet den tatsächlichen
+Datenbank-Lock-Wait einer zweiten HTTP-Verbindung und prüft anschließend
+geänderte Startzeit, ausgetauschten Hash und gelöschten Datensatz. Diese lokalen
+Nachweise ersetzen keine Produktionsprüfung.
 
 ## Local Repro (Docker CI-Parity)
 

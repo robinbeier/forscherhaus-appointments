@@ -4,6 +4,9 @@ namespace Tests\Integration\Controllers;
 
 use Booking_cancellation;
 use DateTimeImmutable;
+use DateTimeZone;
+use ReflectionMethod;
+use RuntimeException;
 use Tests\Integration\Support\BookingFlowFixtures;
 use Tests\TestCase;
 
@@ -85,6 +88,26 @@ class BookingCancellationControllerFlowTest extends TestCase
         $this->assertSame(lang('appointment_does_not_exist_in_db'), html_vars('message_text'));
     }
 
+    public function testCancellationCutoffKeepsExactEqualityAllowedAtSecondPrecision(): void
+    {
+        $timezone = new DateTimeZone('Europe/Berlin');
+        $now = new DateTimeImmutable('2026-01-15 10:00:00.900000', $timezone);
+
+        $this->assertFalse(
+            $this->invokeCancellationCutoff('2026-01-15 11:00:00', $timezone, 60, $now),
+            'A stored appointment exactly at the second-resolution limit must remain cancellable.',
+        );
+    }
+
+    public function testCancellationCutoffRejectsNonexistentProviderLocalTime(): void
+    {
+        $timezone = new DateTimeZone('Europe/Berlin');
+        $now = new DateTimeImmutable('2026-03-28 10:00:00', $timezone);
+
+        $this->expectException(RuntimeException::class);
+        $this->invokeCancellationCutoff('2026-03-29 02:30:00', $timezone, 60, $now);
+    }
+
     private function createCancellationController(): Booking_cancellation
     {
         $controller = new class extends Booking_cancellation {
@@ -94,6 +117,17 @@ class BookingCancellationControllerFlowTest extends TestCase
         $this->wireCancellationDependencies($controller);
 
         return $controller;
+    }
+
+    private function invokeCancellationCutoff(
+        string $startDatetime,
+        DateTimeZone $timezone,
+        int $advanceTimeout,
+        DateTimeImmutable $now,
+    ): bool {
+        $method = new ReflectionMethod(Booking_cancellation::class, 'isCancellationCutoffReached');
+
+        return $method->invoke($this->createCancellationController(), $startDatetime, $timezone, $advanceTimeout, $now);
     }
 
     private function wireCancellationDependencies(Booking_cancellation $controller): void

@@ -168,6 +168,39 @@ final class BookingCancellationHttpTest extends TestCase
         }
     }
 
+    public function testCancellationCutoffUsesProviderTimezone(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $db = get_instance()->db;
+
+        self::assertTrue($db->update('settings', ['value' => '60'], ['name' => 'book_advance_timeout']));
+        self::assertTrue(
+            $db->where('id', $fixture->providerId)->update('users', [
+                'timezone' => 'Pacific/Kiritimati',
+            ]),
+        );
+
+        $appointment = $fixture->appointment();
+        $providerTimezone = new DateTimeZone('Pacific/Kiritimati');
+        $start = (new DateTimeImmutable('now', $providerTimezone))->modify('+30 minutes');
+        self::assertTrue(
+            $db->where('id', (int) $appointment['id'])->update('appointments', [
+                'start_datetime' => $start->format('Y-m-d H:i:s'),
+                'end_datetime' => $start->modify('+30 minutes')->format('Y-m-d H:i:s'),
+            ]),
+        );
+        $before = $fixture->row('appointments', (int) $appointment['id']);
+
+        $response = $this->server
+            ?->client()
+            ->requestApp('POST', 'booking_cancellation/of/' . $appointment['hash'], [], 15);
+
+        self::assertNotNull($response);
+        self::assertSame(403, $response->statusCode);
+        self::assertSame($before, $fixture->row('appointments', (int) $appointment['id']));
+    }
+
     private function addBuffer(array $appointment): array
     {
         $db = get_instance()->db;

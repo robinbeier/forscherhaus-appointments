@@ -116,22 +116,29 @@ class Booking_cancellation extends EA_Controller
             $advance_timeout = filter_var(setting('book_advance_timeout'), FILTER_VALIDATE_INT, [
                 'options' => ['min_range' => 0],
             ]);
-            $start = strtotime($appointment['start_datetime']);
-            $limit = $advance_timeout === false ? false : strtotime('+' . $advance_timeout . ' minutes', time());
-            if ($start === false || $limit === false) {
+            $provider = $this->providers_model->find($appointment['id_users_provider']);
+
+            if ($advance_timeout === false) {
                 throw new RuntimeException('Invalid cancellation deadline.');
             }
 
+            $provider_timezone = new DateTimeZone($provider['timezone']);
+
             // Preserve the existing booking-page cutoff: equality remains allowed.
-            if ($start < $limit) {
+            if (
+                $this->isCancellationCutoffReached(
+                    $appointment['start_datetime'],
+                    $provider_timezone,
+                    $advance_timeout,
+                    new DateTimeImmutable('now', $provider_timezone),
+                )
+            ) {
                 $this->db->trans_rollback();
                 $transaction_open = false;
                 abort(403, lang('appointment_locked'));
 
                 return;
             }
-
-            $provider = $this->providers_model->find($appointment['id_users_provider']);
 
             $customer = $this->customers_model->find($appointment['id_users_customer']);
 
@@ -161,5 +168,34 @@ class Booking_cancellation extends EA_Controller
         ]);
 
         $this->load->view('pages/booking_cancellation');
+    }
+
+    protected function isCancellationCutoffReached(
+        string $start_datetime,
+        DateTimeZone $provider_timezone,
+        int $advance_timeout,
+        DateTimeImmutable $now,
+    ): bool {
+        $start = DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $start_datetime, $provider_timezone);
+        $parse_errors = DateTimeImmutable::getLastErrors();
+
+        if (
+            $start === false ||
+            $start->format('Y-m-d H:i:s') !== $start_datetime ||
+            ($parse_errors !== false && ($parse_errors['warning_count'] > 0 || $parse_errors['error_count'] > 0))
+        ) {
+            throw new RuntimeException('Invalid cancellation deadline.');
+        }
+
+        $current = $now->setTimezone($provider_timezone);
+        $current = $current->setTime(
+            (int) $current->format('H'),
+            (int) $current->format('i'),
+            (int) $current->format('s'),
+            0,
+        );
+        $limit = $current->add(new DateInterval('PT' . $advance_timeout . 'M'));
+
+        return $start < $limit;
     }
 }
