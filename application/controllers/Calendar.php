@@ -468,7 +468,6 @@ class Calendar extends EA_Controller
 
             $request_dto = $this->calendarRequestDtoFactory()->buildDeleteAppointmentRequestDto();
             $appointment_id = $request_dto->appointmentId;
-            $cancellation_reason = (string) ($request_dto->cancellationReason ?? '');
 
             if (empty($appointment_id)) {
                 throw new InvalidArgumentException('No appointment id provided.');

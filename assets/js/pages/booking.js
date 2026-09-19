@@ -741,8 +741,6 @@ App.Pages.Booking = (function () {
             $('#cancel-appointment').on('click', () => {
                 const $cancelAppointmentForm = $('#cancel-appointment-form');
 
-                let $cancellationReason;
-
                 const buttons = [
                     {
                         text: lang('close'),
@@ -753,30 +751,12 @@ App.Pages.Booking = (function () {
                     {
                         text: lang('confirm'),
                         click: () => {
-                            if ($cancellationReason.val() === '') {
-                                $cancellationReason.css('border', '2px solid #DC3545');
-                                return;
-                            }
-                            $cancelAppointmentForm.find('#hidden-cancellation-reason').val($cancellationReason.val());
                             $cancelAppointmentForm.submit();
                         },
                     },
                 ];
 
-                App.Utils.Message.show(
-                    lang('cancel_appointment_title'),
-                    lang('write_appointment_removal_reason'),
-                    buttons,
-                );
-
-                $cancellationReason = $('<textarea/>', {
-                    'class': 'form-control mt-2',
-                    'id': 'cancellation-reason',
-                    'rows': '3',
-                    'css': {
-                        'width': '100%',
-                    },
-                }).appendTo('#message-modal .modal-body');
+                App.Utils.Message.show(lang('cancel_appointment_title'), lang('delete_record_prompt'), buttons);
 
                 return false;
             });

@@ -56,7 +56,7 @@ echo "[setup] Worktree setup completed."
 [[actions]]
 name = "Docker Up"
 icon = "tool"
-command = "docker compose up -d mysql php-fpm nginx phpmyadmin mailpit pdf-renderer"
+command = "docker compose up -d mysql php-fpm nginx phpmyadmin pdf-renderer"
 
 [[actions]]
 name = "Docker Down"

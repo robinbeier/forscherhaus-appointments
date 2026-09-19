@@ -20,9 +20,7 @@ final class CalendarSaveAppointmentRequestDto
      * @param array<string, mixed> $customerData
      * @param array<string, mixed> $appointmentData
      */
-    public function __construct(public readonly array $customerData, public readonly array $appointmentData)
-    {
-    }
+    public function __construct(public readonly array $customerData, public readonly array $appointmentData) {}
 }
 
 /**
@@ -30,9 +28,7 @@ final class CalendarSaveAppointmentRequestDto
  */
 final class CalendarDeleteAppointmentRequestDto
 {
-    public function __construct(public readonly ?int $appointmentId, public readonly ?string $cancellationReason)
-    {
-    }
+    public function __construct(public readonly ?int $appointmentId) {}
 }
 
 /**
@@ -43,9 +39,7 @@ final class CalendarUnavailabilityRequestDto
     /**
      * @param array<string, mixed> $unavailability
      */
-    public function __construct(public readonly array $unavailability)
-    {
-    }
+    public function __construct(public readonly array $unavailability) {}
 }
 
 /**
@@ -61,8 +55,7 @@ final class CalendarWorkingPlanExceptionRequestDto
         public readonly ?string $date,
         public readonly ?string $originalDate,
         public readonly array $workingPlanException,
-    ) {
-    }
+    ) {}
 }
 
 /**
@@ -70,9 +63,7 @@ final class CalendarWorkingPlanExceptionRequestDto
  */
 final class CalendarRangeRequestDto
 {
-    public function __construct(public readonly ?string $startDate, public readonly ?string $endDate)
-    {
-    }
+    public function __construct(public readonly ?string $startDate, public readonly ?string $endDate) {}
 }
 
 /**
@@ -84,8 +75,7 @@ final class CalendarFilterRequestDto
         public readonly string|int|null $recordId,
         public readonly ?string $filterType,
         public readonly bool $isAll,
-    ) {
-    }
+    ) {}
 }
 
 /**
@@ -93,9 +83,7 @@ final class CalendarFilterRequestDto
  */
 final class CalendarViewRequestDto
 {
-    public function __construct(public readonly ?string $calendarView)
-    {
-    }
+    public function __construct(public readonly ?string $calendarView) {}
 }
 
 /**
@@ -103,9 +91,7 @@ final class CalendarViewRequestDto
  */
 final class CalendarEntityIdRequestDto
 {
-    public function __construct(public readonly ?int $id)
-    {
-    }
+    public function __construct(public readonly ?int $id) {}
 }
 
 /**
@@ -142,7 +128,7 @@ class Calendar_request_dto_factory
 
     public function buildDeleteAppointmentRequestDto(): CalendarDeleteAppointmentRequestDto
     {
-        return $this->createDeleteAppointmentRequestDto(request('appointment_id'), request('cancellation_reason'));
+        return $this->createDeleteAppointmentRequestDto(request('appointment_id'));
     }
 
     public function buildUnavailabilityRequestDto(string $key = 'unavailability'): CalendarUnavailabilityRequestDto
@@ -195,13 +181,10 @@ class Calendar_request_dto_factory
         );
     }
 
-    public function createDeleteAppointmentRequestDto(
-        mixed $appointment_id,
-        mixed $cancellation_reason,
-    ): CalendarDeleteAppointmentRequestDto {
+    public function createDeleteAppointmentRequestDto(mixed $appointment_id): CalendarDeleteAppointmentRequestDto
+    {
         return new CalendarDeleteAppointmentRequestDto(
             $this->request_normalizer->normalizePositiveInt($appointment_id, null),
-            $this->request_normalizer->normalizeString($cancellation_reason, null, true),
         );
     }
 

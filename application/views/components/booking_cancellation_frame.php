@@ -17,8 +17,6 @@
             <form id="cancel-appointment-form" method="post"
                   action="<?= site_url('booking_cancellation/of/' . $appointment_data['hash']) ?>">
 
-                <input id="hidden-cancellation-reason" name="cancellation_reason" type="hidden">
-
                 <button id="cancel-appointment" class="btn btn-warning btn-sm">
                     <i class="fas fa-trash me-2"></i>
                     <?= lang('cancel') ?>

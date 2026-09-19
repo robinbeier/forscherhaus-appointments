@@ -10,7 +10,7 @@ This map defines component boundaries, path ownership scope, and dependency edge
 
 | Component | Role | Depends On | Path Rules | Key Files |
 |---|---|---|---:|---:|
-| `auth-session` | Access & Session | integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 15 | 3 |
+| `auth-session` | Access & Session | integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 16 | 3 |
 | `installation-bootstrap` | Installation & Bootstrap | people-services-admin, settings-compliance, shared-core | 3 | 3 |
 | `booking-public` | Public Booking | integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 9 | 6 |
 | `booking-lifecycle` | Booking Confirmation/Cancellation | booking-public, integrations-sync, people-services-admin, scheduling-backoffice, shared-core | 5 | 3 |
@@ -39,6 +39,7 @@ Dependencies:
 Path rules:
 - `application/controllers/Login.php` (exact_file)
 - `application/controllers/Logout.php` (exact_file)
+- `application/controllers/User.php` (exact_file)
 - `application/controllers/Recovery.php` (exact_file)
 - `application/controllers/Account.php` (exact_file)
 - `application/controllers/Localization.php` (exact_file)
