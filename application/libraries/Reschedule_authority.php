@@ -331,10 +331,14 @@ class Reschedule_authority
             throw new RescheduleAuthorityException('canonical-identity-mismatch');
         }
 
+        $provider = $this->selectOne('users', 'id', (int) ($appointment['id_users_provider'] ?? 0), true);
+
         if (
+            empty($provider) ||
             $this->isAdvanceCutoffReached(
                 (string) ($appointment['start_datetime'] ?? ''),
                 setting('book_advance_timeout'),
+                (string) ($provider['timezone'] ?? ''),
             )
         ) {
             throw new RescheduleAuthorityException('advance-cutoff-reached');
@@ -356,12 +360,42 @@ class Reschedule_authority
     /**
      * Apply the public reschedule page's strict advance-cutoff rule.
      */
-    public function isAdvanceCutoffReached(string $start_datetime, string|int $book_advance_timeout): bool
-    {
-        $start = strtotime($start_datetime);
-        $limit = strtotime('+' . $book_advance_timeout . ' minutes', strtotime('now'));
+    public function isAdvanceCutoffReached(
+        string $start_datetime,
+        string|int $book_advance_timeout,
+        string $provider_timezone,
+        ?DateTimeImmutable $now = null,
+    ): bool {
+        try {
+            $timeout = filter_var($book_advance_timeout, FILTER_VALIDATE_INT, [
+                'options' => ['min_range' => 0],
+            ]);
+            $timezone = new DateTimeZone($provider_timezone);
+            $start = DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $start_datetime, $timezone);
+            $parse_errors = DateTimeImmutable::getLastErrors();
 
-        return $start < $limit;
+            if (
+                $timeout === false ||
+                $start === false ||
+                $start->format('Y-m-d H:i:s') !== $start_datetime ||
+                ($parse_errors !== false && ($parse_errors['warning_count'] > 0 || $parse_errors['error_count'] > 0))
+            ) {
+                return true;
+            }
+
+            $current = ($now ?? new DateTimeImmutable('now', $timezone))->setTimezone($timezone);
+            $current = $current->setTime(
+                (int) $current->format('H'),
+                (int) $current->format('i'),
+                (int) $current->format('s'),
+                0,
+            );
+            $limit = $current->modify('+' . $timeout . ' minutes');
+
+            return $start < $limit;
+        } catch (Throwable) {
+            return true;
+        }
     }
 
     /**
