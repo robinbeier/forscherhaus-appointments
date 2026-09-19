@@ -37,6 +37,7 @@ This file stays intentionally short. It is a map, not a second runbook.
 | CI test execution and timing comparisons | `docs/ci-test-execution.md` | Main tests, application coverage, and direct GitHub job timing. |
 | Observability runtime ownership | `docs/observability.md` | Runtime split between release gates, Kuma, application logs, and diagnostics. |
 | Production SSH operations harness | `docs/ops/agent-operations.md` | Agent-first production orientation, read-only diagnostics, and post-change validation. |
+| Coordinated maintenance admission | `docs/ops/maintenance-admission-contract.md` | ROB-532 target protocol, participant enrollment, crash/recovery matrix, and migration gate; not installed-state evidence. |
 | Production Docker build-cache retention | `docs/ops/production-build-cache-retention.md` | Fixed dry-run/execute boundary, cache policy, stop conditions, and validation. |
 | Production backup-set producer | `docs/ops/production-backup-set-producer.md` | Closed connection/dump authority, atomic set publication, protected handoff-to-attestation selection, disabled ROB-480 recurring continuity units, and no-gap legacy scheduler cutover. |
 | Production dump-producer admission | `docs/ops/production-dump-producer-admission.md` | Pinned single-producer registry, canonical manifest/attestation binding, on-demand read-only observation, and cleanup-inventory integration. |

@@ -44,24 +44,31 @@ final class BackupSetProducerRootTest extends TestCase
         $dump = $this->root . '/mariadb-dump';
         file_put_contents(
             $dump,
-            <<<'SH'
-            #!/bin/sh
-            case "$*" in *Rob466_Backup_Only_*) exit 88 ;; esac
-            env | grep -q 'Rob466_Backup_Only_' && exit 89
-            printf '%s' '/*M!999999\- enable the sandbox mode */
-            /*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
-            DROP TABLE IF EXISTS `ea_test`;
-            /*!40101 SET CHARACTER_SET_CLIENT=utf8mb4 */;
-            CREATE TABLE `ea_test` (`id` int) ENGINE=InnoDB;
-            LOCK TABLES `ea_test` WRITE;
-            ALTER TABLE `ea_test` DISABLE KEYS;
-            INSERT INTO `ea_test` VALUES (1);
-            ALTER TABLE `ea_test` ENABLE KEYS;
-            UNLOCK TABLES;
-            /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
-            '
-            SH
-            ,
+            str_replace(
+                '__ROOT__',
+                $this->root,
+                <<<'SH'
+                #!/bin/sh
+                case "$*" in *Rob466_Backup_Only_*) exit 88 ;; esac
+                env | grep -q 'Rob466_Backup_Only_' && exit 89
+                if [ -f '__ROOT__/hold-dump' ]; then
+                    exec /usr/bin/python3 -c 'import os,signal,sys,time; root=sys.argv[1]; stopped=os.path.exists(root+"/hold-dump-no-pid"); stopped and open(root+"/before-stop","w").close(); stopped and os.kill(os.getpid(),signal.SIGSTOP); temporary=root+"/dump-child.pid.tmp"; stream=open(temporary,"w",encoding="ascii"); stream.write(str(os.getpid())); stream.flush(); os.fsync(stream.fileno()); stream.close(); os.replace(temporary,root+"/dump-child.pid"); time.sleep(3600)' '__ROOT__'
+                fi
+                printf '%s' '/*M!999999\- enable the sandbox mode */
+                /*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
+                DROP TABLE IF EXISTS `ea_test`;
+                /*!40101 SET CHARACTER_SET_CLIENT=utf8mb4 */;
+                CREATE TABLE `ea_test` (`id` int) ENGINE=InnoDB;
+                LOCK TABLES `ea_test` WRITE;
+                ALTER TABLE `ea_test` DISABLE KEYS;
+                INSERT INTO `ea_test` VALUES (1);
+                ALTER TABLE `ea_test` ENABLE KEYS;
+                UNLOCK TABLES;
+                /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
+                '
+                SH
+                ,
+            ),
         );
         chmod($dump, 0555);
         file_put_contents(
@@ -152,6 +159,7 @@ final class BackupSetProducerRootTest extends TestCase
         sleep(2);
         $second = $this->runProducer();
         self::assertSame(0, $second['exit'], $second['stderr']);
+        $this->assertLocksAvailable();
 
         $sets = array_values(
             array_filter(
@@ -250,6 +258,153 @@ final class BackupSetProducerRootTest extends TestCase
         } finally {
             flock($lock, LOCK_UN);
             fclose($lock);
+        }
+    }
+
+    public function testTrustedDumpChildRetainsBothLocksAfterProducerDeath(): void
+    {
+        $this->runHeldDumpCase(false);
+    }
+
+    public function testStoppedDumpWithoutPidIsTerminatedAndReaped(): void
+    {
+        $this->runHeldDumpCase(true);
+    }
+
+    private function runHeldDumpCase(bool $stopBeforePid): void
+    {
+        touch($this->root . '/hold-dump');
+        if ($stopBeforePid) {
+            touch($this->root . '/hold-dump-no-pid');
+        }
+        $coordinator = <<<'PY'
+        import ctypes
+        import fcntl
+        import json
+        import os
+        import signal
+        import subprocess
+        import sys
+        import time
+
+        root, runner, helper, mode = sys.argv[1:]
+        libc = ctypes.CDLL(None, use_errno=True)
+        assert libc.prctl(36, 1, 0, 0, 0) == 0  # PR_SET_CHILD_SUBREAPER
+        signal.signal(signal.SIGTERM, lambda *_: sys.exit(76))
+        producer = subprocess.Popen(
+            ['/usr/bin/python3', '-I', '-B', runner, helper, root],
+            start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        locks = [root + '/orchestrator/locks/fh-production-change.lock',
+                 root + '/backups/.backup-set-producer.lock']
+
+        def wait_for(predicate, seconds=5.0):
+            deadline = time.monotonic() + seconds
+            while time.monotonic() < deadline:
+                if predicate():
+                    return True
+                time.sleep(0.01)
+            return False
+
+        def producer_is_zombie():
+            with open('/proc/%d/stat' % producer.pid, encoding='ascii') as stream:
+                return stream.read().rsplit(') ', 1)[1][0] == 'Z'
+
+        def assert_locks(busy):
+            for path in locks:
+                with open(path, 'rb') as stream:
+                    try:
+                        fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        acquired = True
+                    except BlockingIOError:
+                        acquired = False
+                    assert acquired != busy, (path, 'expected busy' if busy else 'expected free')
+
+        try:
+            if mode == 'stopped':
+                # This marker precedes SIGSTOP and PID publication. The helper must
+                # clean up even though its normal readiness PID never becomes known.
+                assert wait_for(lambda: os.path.exists(root + '/before-stop'))
+                assert not wait_for(lambda: os.path.exists(root + '/dump-child.pid'), 0.25)
+            else:
+                assert wait_for(lambda: os.path.exists(root + '/dump-child.pid'))
+                os.kill(producer.pid, signal.SIGKILL)
+                assert wait_for(producer_is_zombie)
+                # Do not wait/poll/reap the producer yet: its zombie PID reserves
+                # this process-group identity until our last group signal below.
+                assert_locks(True)
+        finally:
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            # The group leader is our unreaped child even on readiness failure.
+            # Kill once before any reaping; never signal a recycled PID/PGID.
+            try:
+                os.killpg(producer.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            producer.wait(timeout=5.0)
+            deadline = time.monotonic() + 5.0
+            while True:
+                try:
+                    waited, _ = os.waitpid(-1, os.WNOHANG)
+                except ChildProcessError:
+                    break
+                if time.monotonic() >= deadline:
+                    raise RuntimeError('owned descendants did not terminate and reap')
+                if waited == 0:
+                    time.sleep(0.01)
+        assert_locks(False)
+        print(json.dumps({'mode': mode, 'children_reaped': True, 'locks_free': True}))
+        PY;
+        $process = proc_open(
+            [
+                '/usr/bin/python3',
+                '-I',
+                '-B',
+                '-c',
+                $coordinator,
+                $this->root,
+                $this->runner,
+                $this->helper,
+                $stopBeforePid ? 'stopped' : 'ready',
+            ],
+            [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+            $pipes,
+            null,
+            [],
+        );
+        self::assertIsResource($process);
+        fclose($pipes[0]);
+        try {
+            $deadline = microtime(true) + 20.0;
+            do {
+                $status = proc_get_status($process);
+                if (!$status['running']) {
+                    break;
+                }
+                usleep(10_000);
+            } while (microtime(true) < $deadline);
+            self::assertFalse($status['running'], 'dump coordinator exceeded its bounded lifecycle');
+            $stdout = stream_get_contents($pipes[1]);
+            $stderr = stream_get_contents($pipes[2]);
+            self::assertSame(0, $status['exitcode'], $stdout . $stderr);
+            self::assertSame(
+                ['mode' => $stopBeforePid ? 'stopped' : 'ready', 'children_reaped' => true, 'locks_free' => true],
+                json_decode($stdout, true, 512, JSON_THROW_ON_ERROR),
+            );
+        } finally {
+            if (proc_get_status($process)['running']) {
+                proc_terminate($process, SIGTERM);
+                $deadline = microtime(true) + 12.0;
+                while (proc_get_status($process)['running'] && microtime(true) < $deadline) {
+                    usleep(10_000);
+                }
+                if (proc_get_status($process)['running']) {
+                    proc_terminate($process, SIGKILL);
+                }
+            }
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+            proc_close($process);
         }
     }
 
@@ -539,6 +694,24 @@ final class BackupSetProducerRootTest extends TestCase
         $state['status'] = 'verified';
         file_put_contents($path, json_encode($state, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n");
         chmod($path, 0600);
+    }
+
+    private function assertLocksAvailable(): void
+    {
+        foreach (['fh-production-change.lock', '.backup-set-producer.lock'] as $leaf) {
+            $path =
+                $leaf === 'fh-production-change.lock'
+                    ? $this->root . '/orchestrator/locks/' . $leaf
+                    : $this->root . '/backups/' . $leaf;
+            $lock = fopen($path, 'r+');
+            self::assertIsResource($lock);
+            try {
+                self::assertTrue(flock($lock, LOCK_EX | LOCK_NB), $leaf . ' remained locked after successful run');
+                flock($lock, LOCK_UN);
+            } finally {
+                fclose($lock);
+            }
+        }
     }
 
     private function removeTree(string $path): void
