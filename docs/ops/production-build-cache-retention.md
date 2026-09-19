@@ -12,8 +12,8 @@ The fixed initial policy is deliberately conservative:
 - active or unclassifiable build, deploy, dump, replay, or smoke activity
   blocks the run;
 - a non-blocking root-only lock prevents parallel execute runs;
-- when the canonical Host Runner global production-change lock exists, the
-  execute path must acquire and hold it as well;
+- the canonical Host Runner global production-change lock must already exist;
+  the execute path validates, acquires, and holds it as well;
 - image, container, and volume inventories must remain exactly unchanged.
 
 ## Proposed Native Docker GC Configuration
@@ -92,6 +92,8 @@ Do not execute when:
 - `prod_doctor.sh` or the read-only cleanup inventory is unhealthy or unclear;
 - a deploy, rollback, Zero-Surprise replay, UI smoke, dump,
   backup, or Docker/BuildKit build is active or expected to start;
+- the canonical Host Runner global production-change lock is missing, unsafe,
+  or busy;
 - another retention process owns the cleanup lock;
 - Docker does not support the fixed age and storage-reservation flags;
 - build-cache accounting is absent, duplicated, malformed, or reports
