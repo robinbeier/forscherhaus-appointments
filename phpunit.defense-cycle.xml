@@ -9,6 +9,8 @@
             <file>./tests/Integration/Controllers/ProviderApiHttpWriteTest.php</file>
             <file>./tests/Integration/Controllers/StaffSettingsApiHttpTest.php</file>
             <file>./tests/Integration/Controllers/RescheduleCutoffHttpTest.php</file>
+            <file>./tests/Integration/Controllers/BookingCancellationHttpTest.php</file>
+            <file>./tests/Integration/Controllers/BookingCancellationRaceHttpTest.php</file>
             <file>./tests/Integration/Controllers/BackofficeWriteHttpTest.php</file>
             <file>./tests/Integration/Controllers/BackofficeHttpContractTest.php</file>
             <file>./tests/Integration/SessionLifecycleTest.php</file>
