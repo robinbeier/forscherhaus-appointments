@@ -162,6 +162,16 @@ fixture marker or seeded staff secret values in the response body. This read
 matrix does not establish invalid-write behavior or every authentication
 configuration.
 
+The ordinary write matrix also covers Admin POST/PUT, Secretary POST/PUT/DELETE,
+and Settings PUT with the same five rejected credentials: absent credentials,
+wrong Admin password, nonexistent Admin username, invalid Bearer token, and
+valid Provider Basic credentials. Each request requires HTTP401, a challenge,
+no fixture marker or seeded secret, and an exact pre-request snapshot; Settings
+uses its owned setting row as the separate snapshot. Admin DELETE has its own
+ROB573 regression and is not duplicated here. These checks establish sequential
+authorization and no mutation on the fresh synthetic stack only; they do not
+prove concurrent behavior, proxy/deployment behavior, or production state.
+
 These tests supplement model rollback tests; they do not inject HTTP failures,
 prove every concurrent schedule or verify production. Settings API token visibility
 retains its existing privileged contract; staff secret-projection assertions do
@@ -175,6 +185,12 @@ capability checks precede the POST requirement; authorized GET, HEAD, PUT and
 DELETE stop before DTO creation or model calls with a 405/Allow: POST handoff.
 Ordinary POST cases assert the DTO fields, exact saved payload, returned ID and
 response; denied capabilities and model failures cannot report success.
-These controller tests do not prove real HTTP headers, authentication, CSRF,
-database persistence, date validation or production behavior. The existing
-blocked-period JavaScript client uses POST for all three mutations.
+`BackofficeHttpContractTest` supplements this with real loopback HTTP on the
+fresh isolated stack: missing-session POSTs with a valid CSRF token, Provider
+role denials for all three mutations, missing-CSRF update/destroy, and Admin
+PUT/DELETE method rejection for all three actions. Each case snapshots the DB
+before every request and requires the expected 403 or 405/Allow: POST outcome
+without mutation; owned targets are confirmed and cleaned repeatably. The
+existing blocked-period JavaScript client uses POST for all three mutations.
+These checks do not prove concurrent behavior, production state, or transaction
+rollback beyond the observed no-mutation denial paths.
