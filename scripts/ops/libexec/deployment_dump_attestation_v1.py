@@ -1644,7 +1644,7 @@ def main():
     global_lock = os.open('fh-production-change.lock', os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW, dir_fd=locks)
     global_meta = os.fstat(global_lock)
     if (not stat.S_ISREG(global_meta.st_mode) or global_meta.st_uid != 0 or global_meta.st_gid != 0 or
-            global_meta.st_nlink != 1 or stat.S_IMODE(global_meta.st_mode) != 0o600):
+            global_meta.st_nlink != 1 or stat.S_IMODE(global_meta.st_mode) != 0o600 or global_meta.st_size != 0):
         reject()
     try:
         fcntl.flock(global_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
