@@ -96,6 +96,7 @@ class CiWorkflowContractTest extends TestCase
                 'Setup Node.js',
                 'Install npm dependencies',
                 'ESLint changed JS files',
+                'Resolve system Chrome for CSP probe',
                 'Frontend compiler regression tests',
                 'Gate diagnostic summary',
                 'Upload gate diagnostic evidence',
@@ -123,7 +124,15 @@ class CiWorkflowContractTest extends TestCase
         );
         self::assertSame("steps.js_changes.outputs.has_changes == 'true'", $steps['ESLint changed JS files']['if']);
         self::assertSame(
-            'node --test tests/JavaScript/gulp_build.test.js tests/JavaScript/dashboard_date_range.test.js tests/JavaScript/dashboard_zero_target.test.js tests/JavaScript/blocked_periods.test.js',
+            "steps.js_changes.outputs.csp_probe_changed == 'true'",
+            $steps['Resolve system Chrome for CSP probe']['if'],
+        );
+        self::assertSame(
+            "chrome_path=\"\$(command -v google-chrome || true)\"\ntest -n \"\$chrome_path\"\ntest -x \"\$chrome_path\"\necho \"PLAYWRIGHT_MCP_EXECUTABLE_PATH=\$chrome_path\" >> \"\$GITHUB_ENV\"",
+            $this->gateBody($steps, 'Resolve system Chrome for CSP probe', 'js-lint-changed-5'),
+        );
+        self::assertSame(
+            'node --test tests/JavaScript/gulp_build.test.js tests/JavaScript/dashboard_date_range.test.js tests/JavaScript/dashboard_zero_target.test.js tests/JavaScript/blocked_periods.test.js tests/JavaScript/csp_compatibility_probe.test.js',
             $this->gateBody($steps, 'Frontend compiler regression tests', 'js-lint-changed-4'),
         );
     }

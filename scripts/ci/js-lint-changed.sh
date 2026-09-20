@@ -46,6 +46,7 @@ fi
 
 changed_files=()
 build_tools_changed=false
+csp_probe_changed=false
 changed_file_list="$(mktemp "${TMPDIR:-/tmp}/js-lint-changed.XXXXXX")"
 trap 'rm -f -- "$changed_file_list"' EXIT
 
@@ -59,8 +60,13 @@ while IFS= read -r -d '' file; do
         changed_files+=("$file")
     fi
     case "$file" in
-        gulpfile.js|babel.config.json|package.json|package-lock.json|tests/JavaScript/gulp_build.test.js|scripts/ci/js-lint-changed.sh|.github/workflows/ci.yml)
+        gulpfile.js|babel.config.json|package.json|package-lock.json|tests/JavaScript/gulp_build.test.js|tests/JavaScript/csp_compatibility_probe.test.js|scripts/ci/csp_compatibility_probe.js|scripts/ci/js-lint-changed.sh|.github/workflows/ci.yml)
             build_tools_changed=true
+            ;;
+    esac
+    case "$file" in
+        package.json|package-lock.json|scripts/ci/csp_compatibility_probe.js|scripts/ci/js-lint-changed.sh|tests/JavaScript/csp_compatibility_probe.test.js|.github/workflows/ci.yml)
+            csp_probe_changed=true
             ;;
     esac
 done <"$changed_file_list"
@@ -73,6 +79,9 @@ if [[ "$mode" == "check" ]]; then
         printf 'needs_node=true\n' >>"$GITHUB_OUTPUT"
     else
         printf 'needs_node=false\n' >>"$GITHUB_OUTPUT"
+    fi
+    if [[ "$csp_probe_changed" == "true" ]]; then
+        printf 'csp_probe_changed=true\n' >>"$GITHUB_OUTPUT"
     fi
 fi
 
