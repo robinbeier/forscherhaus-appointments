@@ -80,6 +80,63 @@ final class CspReportOnlyTest extends TestCase
         self::assertStringContainsString('$synced = function_exists(\'fsync\') && @fsync($parentHandle);', $source);
     }
 
+    public function testAggregateStorageProbeWritesAndCleansOnlyItsExclusiveProbe(): void
+    {
+        $directory = $this->temporaryRoot() . '/csp-report-only-probe-' . bin2hex(random_bytes(4));
+        mkdir($directory, 0700, true);
+        $path = $directory . '/aggregate.json';
+        $lockPath = $path . '.lock';
+        file_put_contents($path, '{"sentinel":true}');
+        file_put_contents($lockPath, 'lock-sentinel');
+
+        try {
+            $result = Csp_report_only::probeAggregateStorage($path);
+            self::assertSame(['status' => 'passed', 'result_class' => 'write_ready'], $result);
+            self::assertSame('{"sentinel":true}', (string) file_get_contents($path));
+            self::assertSame('lock-sentinel', (string) file_get_contents($lockPath));
+            self::assertSame([], glob($directory . '/.' . Csp_report_only::AGGREGATE_FILENAME . '.probe-*') ?: []);
+        } finally {
+            if (is_file($lockPath)) {
+                unlink($lockPath);
+            }
+            if (is_file($path)) {
+                unlink($path);
+            }
+            rmdir($directory);
+        }
+    }
+
+    public function testAggregateStorageProbeRejectsMissingAndSymlinkDirectories(): void
+    {
+        $root = $this->temporaryRoot() . '/csp-report-only-probe-fail-' . bin2hex(random_bytes(4));
+        mkdir($root, 0700, true);
+        $missing = $root . '/missing/aggregate.json';
+        $realDirectory = $root . '/real';
+        $symlinkDirectory = $root . '/link';
+        mkdir($realDirectory, 0700);
+
+        try {
+            self::assertSame(
+                ['status' => 'failed', 'result_class' => 'directory_unavailable'],
+                Csp_report_only::probeAggregateStorage($missing),
+            );
+            if (!function_exists('symlink') || !@symlink($realDirectory, $symlinkDirectory)) {
+                self::markTestSkipped('Symlinks are unavailable in this test environment.');
+            }
+            self::assertSame(
+                ['status' => 'failed', 'result_class' => 'directory_identity_failed'],
+                Csp_report_only::probeAggregateStorage($symlinkDirectory . '/aggregate.json'),
+            );
+            self::assertSame([], glob($realDirectory . '/.' . Csp_report_only::AGGREGATE_FILENAME . '.probe-*') ?: []);
+        } finally {
+            if (is_link($symlinkDirectory)) {
+                unlink($symlinkDirectory);
+            }
+            rmdir($realDirectory);
+            rmdir($root);
+        }
+    }
+
     public function testPolicyRequiresExactHttpsHtmlHostAndNeverTargetsCollector(): void
     {
         $config = $this->config(['matomo_origin' => 'https://matomo.example.test']);

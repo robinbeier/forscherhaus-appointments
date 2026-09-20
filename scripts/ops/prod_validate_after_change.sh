@@ -67,6 +67,7 @@ run_remote() {
     sensitive_path_functions="$(
         declare -f prod_sensitive_path_specs
         declare -f prod_sensitive_paths_check_all
+        declare -f prod_loopback_http_code
         declare -f prod_scanner_path_specs
         declare -f prod_scanner_paths_check_all
         declare -f prod_scanner_default_host_path_specs
@@ -309,7 +310,7 @@ check_eq www_https "$(http_code https://www.dasforscherhaus-leg.de/)" 200
 check_eq monitor_https "$(http_code https://monitor.dasforscherhaus-leg.de/)" 302
 check_eq renderer_http "$(http_code http://127.0.0.1:3003/healthz)" 200
 if [[ -n "$health_token" ]]; then
-    check_eq deep_health_http "$(http_code http://localhost/index.php/healthz -H "X-Health-Token: ${health_token}")" 200
+    check_eq deep_health_http "$(prod_loopback_http_code http://127.0.0.1/index.php/healthz -H "X-Health-Token: ${health_token}")" 200
 else
     printf 'FAIL deep_health_http health_token_missing\n' >&2
     failures=$((failures + 1))

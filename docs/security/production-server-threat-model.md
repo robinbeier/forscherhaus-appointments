@@ -100,7 +100,21 @@ App-Risiken, die stark an Serverkonfiguration haengen:
 - Logs/session/cache exposure: PII, Session-Daten, technische Fehler und
   Betriebsindikatoren.
 - Health endpoints: `/health` ist public shallow health;
-  `/index.php/healthz` ist token-geschuetzter Deep Health.
+  `/index.php/healthz` ist token-geschuetzter Deep Health. Die gesonderte
+  CSP-Schreibbereitschaftsroute ist zusaetzlich POST- und Loopback-gebunden,
+  schreibt nur eine sofort geloeschte exklusive Probe im festen
+  Aggregatverzeichnis und gibt ausschliesslich feste Ergebnisklassen aus. Der
+  Root-Client nutzt numerisches Loopback, deaktiviert geerbte Proxys und prueft
+  die tatsaechliche Peer-IP, bevor er den Nachweis akzeptiert.
+- CSP-Pilotautoritaet: Die feste Kandidatendatei, die root-kontrollierte
+  Release-Identitaet und der bereits vorhandene Produktions-Lock bleiben die
+  Autoritaetsquellen. Eine root-eigene Modus-`0600`-Lease bindet den
+  Rueckfall an genau eine zufaellige Run-ID, einen Kandidaten-Hash und die
+  anfangs beobachtete Release-Bindung. Vom Aufrufer gelieferte Werte sind nur
+  zu verifizierende Behauptungen. Solange diese Lease existiert, verweigert der
+  normale Deployment-Einstieg unter demselben Produktions-Lock jeden
+  Release-Wechsel. Der release-lokale Rueckfallhelfer bleibt damit im
+  unterstuetzten Ablauf bis zur verifizierten Bereinigung verfuegbar.
 
 ## 5. Existing Mitigations
 

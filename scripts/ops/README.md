@@ -74,11 +74,24 @@ Script inventory:
 - `kuma_push_backup_creation.sh` monitors backup-creation marker freshness
 - `kuma_push_pdf_export.sh` runs the dashboard PDF release gate as a synthetic smoke
 - `lib/kuma_push_common.sh` provides shared env, curl, and log helpers
-- `prod_doctor.sh` prints redacted read-only production status
-- `prod_csp_report_only_status.sh` combines the existing redacted header posture
-  with the bounded class-only collector summary for an expected inactive or
-  active ROB-586 phase. It never sends a report. Its first production run
-  requires the separate approval defined in
+- `prod_doctor.sh` prints redacted read-only production status. Its
+  token-protected deep-health request uses numeric loopback, disables inherited
+  proxies, and accepts only a loopback peer.
+- `prod_csp_report_only_status.sh` keeps activation identity, public header
+  delivery, web-runtime write readiness, the bounded class-only aggregate, and
+  functional health as separate ROB-586 evidence. `--phase preflight` is fully
+  read-only and also validates the release binding, reviewed candidate,
+  canonical pre-existing production lock, target and lease paths, health token,
+  and HTTP client. `--phase active` adds one immediate-cleanup write probe
+  through numeric loopback with proxy use disabled. It has no FastCGI client or
+  socket-path assumption and never sends a CSP report.
+- `prod_csp_report_only_pilot.sh` runs one read-only preflight or, after separate
+  production approval, one activation with 0/15/60-minute evidence and a single
+  server-side run-lease- and release-bound removal on completion or first
+  failure. While the lease exists, `deploy_ea.sh` refuses a release switch under
+  the same production lock. It never retries an unknown, release-drifted, or
+  contradictory result. Its productive mode requires the separate
+  approval defined in
   [`docs/security/ROB-586-production-csp-report-only-plan.md`](../../docs/security/ROB-586-production-csp-report-only-plan.md).
 - `run_read_only_http_probe.sh` performs four bounded anonymous GET checks through
   the fixed loopback ingress for modern and legacy booking-confirmation and ICS

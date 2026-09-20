@@ -25,6 +25,39 @@ prod_require_cmd() {
     }
 }
 
+prod_loopback_http_code() {
+    local url="$1"
+    local observed
+    local status
+    local peer
+    shift
+
+    case "$url" in
+        http://127.0.0.1/*|https://127.0.0.1/*|http://\[::1\]/*|https://\[::1\]/*)
+            ;;
+        *)
+            printf 'loopback_url_required'
+            return 0
+            ;;
+    esac
+
+    if ! observed="$(
+        curl -sS -o /dev/null -w $'%{http_code}\t%{remote_ip}' "$@" \
+            --proxy '' --noproxy '*' "$url" 2>/dev/null
+    )"; then
+        printf 'curl_failed'
+        return 0
+    fi
+
+    IFS=$'\t' read -r status peer <<< "$observed"
+    if [[ "$status" =~ ^[0-9]{3}$ && ( "$peer" == 127.0.0.1 || "$peer" == ::1 ) ]]; then
+        printf '%s' "$status"
+        return 0
+    fi
+
+    printf 'loopback_peer_mismatch'
+}
+
 prod_print_plan() {
     local script_name="$1"
     local target="$2"

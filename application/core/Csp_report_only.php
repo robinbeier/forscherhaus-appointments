@@ -19,6 +19,16 @@ final class Csp_report_only
     public const MAX_AGGREGATE_BYTES = 2_000_000;
     public const DEFAULT_MAX_REPORTS_PER_MINUTE = 120;
     public const DEFAULT_RETENTION_HOURS = 48;
+    public const AGGREGATE_PROBE_RESULT_CLASSES = [
+        'write_ready',
+        'directory_unavailable',
+        'directory_identity_failed',
+        'probe_create_failed',
+        'probe_identity_failed',
+        'probe_write_failed',
+        'probe_cleanup_failed',
+        'parent_sync_failed',
+    ];
 
     private const MAX_COUNTER_VALUE = 1_000_000_000;
 
@@ -88,6 +98,118 @@ final class Csp_report_only
     public static function aggregatePath(): string
     {
         return dirname(APPPATH) . '/storage/logs/' . self::AGGREGATE_FILENAME;
+    }
+
+    /**
+     * Probe whether the aggregate directory can be used by this process.
+     *
+     * The probe deliberately uses a fresh, exclusive file and never opens the
+     * aggregate or its lock and leaves no application state behind.
+     *
+     * @return array{status:'passed'|'failed',result_class:string}
+     */
+    public static function probeAggregateStorage(?string $path = null): array
+    {
+        $directory = dirname($path ?? self::aggregatePath());
+        if ($directory === '' || $directory[0] !== '/') {
+            return ['status' => 'failed', 'result_class' => 'directory_unavailable'];
+        }
+
+        $current = '';
+        foreach (explode('/', trim($directory, '/')) as $part) {
+            $current .= '/' . $part;
+            $identity = @lstat($current);
+            if (!is_array($identity)) {
+                return ['status' => 'failed', 'result_class' => 'directory_unavailable'];
+            }
+            if (is_link($current)) {
+                return ['status' => 'failed', 'result_class' => 'directory_identity_failed'];
+            }
+        }
+
+        $directoryIdentity = @lstat($directory);
+        $parentHandle = @fopen($directory, 'rb');
+        $openedDirectory = is_resource($parentHandle) ? @fstat($parentHandle) : false;
+        if (!is_array($directoryIdentity) || !is_resource($parentHandle) || !is_array($openedDirectory)) {
+            if (is_resource($parentHandle)) {
+                fclose($parentHandle);
+            }
+            return ['status' => 'failed', 'result_class' => 'directory_unavailable'];
+        }
+        if (
+            (($directoryIdentity['mode'] ?? 0) & 0170000) !== 0040000 ||
+            (($openedDirectory['mode'] ?? 0) & 0170000) !== 0040000 ||
+            (int) ($directoryIdentity['ino'] ?? -1) !== (int) ($openedDirectory['ino'] ?? -2) ||
+            (int) ($directoryIdentity['dev'] ?? -1) !== (int) ($openedDirectory['dev'] ?? -2) ||
+            !is_writable($directory)
+        ) {
+            fclose($parentHandle);
+            return ['status' => 'failed', 'result_class' => 'directory_identity_failed'];
+        }
+
+        $temporary = null;
+        $handle = null;
+        $resultClass = 'write_ready';
+        for ($attempt = 0; $attempt < 5; $attempt++) {
+            try {
+                $candidate = $directory . '/.' . self::AGGREGATE_FILENAME . '.probe-' . bin2hex(random_bytes(16));
+            } catch (Throwable $exception) {
+                $resultClass = 'probe_create_failed';
+                break;
+            }
+            $candidateHandle = @fopen($candidate, 'x+b');
+            if (is_resource($candidateHandle)) {
+                $temporary = $candidate;
+                $handle = $candidateHandle;
+                break;
+            }
+        }
+        if (!is_resource($handle)) {
+            fclose($parentHandle);
+            return [
+                'status' => 'failed',
+                'result_class' => $resultClass === 'write_ready' ? 'probe_create_failed' : $resultClass,
+            ];
+        }
+
+        $identity = @lstat($temporary);
+        $opened = @fstat($handle);
+        if (
+            !is_array($identity) ||
+            !is_array($opened) ||
+            (($identity['mode'] ?? 0) & 0170000) !== 0100000 ||
+            (($opened['mode'] ?? 0) & 0170000) !== 0100000 ||
+            (int) ($identity['nlink'] ?? 0) !== 1 ||
+            (int) ($opened['nlink'] ?? 0) !== 1 ||
+            (int) ($identity['ino'] ?? -1) !== (int) ($opened['ino'] ?? -2) ||
+            (int) ($identity['dev'] ?? -1) !== (int) ($opened['dev'] ?? -2)
+        ) {
+            $resultClass = 'probe_identity_failed';
+        } else {
+            $probe = 'csp-report-only-storage-probe-v1';
+            $written = @fwrite($handle, $probe);
+            if ($written !== strlen($probe) || !@fflush($handle) || (function_exists('fsync') && !@fsync($handle))) {
+                $resultClass = 'probe_write_failed';
+            }
+        }
+        fclose($handle);
+        $handle = null;
+
+        $cleaned = @unlink($temporary) && @lstat($temporary) === false;
+        if (!$cleaned) {
+            $resultClass = 'probe_cleanup_failed';
+        }
+
+        $parentSynced = !function_exists('fsync') || @fsync($parentHandle);
+        fclose($parentHandle);
+        if ($cleaned && !$parentSynced && $resultClass === 'write_ready') {
+            $resultClass = 'parent_sync_failed';
+        }
+
+        return [
+            'status' => $resultClass === 'write_ready' ? 'passed' : 'failed',
+            'result_class' => $resultClass,
+        ];
     }
 
     /**

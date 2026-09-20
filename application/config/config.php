@@ -376,6 +376,7 @@ $config['csrf_exclude_uris'] = [
     'booking_cancellation/.*',
     'booking_confirmation/.*',
     'csp-report',
+    'healthz/csp-report-only-write-readiness',
 ];
 
 /*

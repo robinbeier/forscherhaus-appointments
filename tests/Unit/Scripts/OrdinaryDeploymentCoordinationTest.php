@@ -193,6 +193,42 @@ final class OrdinaryDeploymentCoordinationTest extends TestCase
         self::assertSame(0, $result['exit_code'], $result['stderr']);
     }
 
+    public function testActiveCspReportOnlyPilotLeaseBlocksDeploymentWithoutRemovingState(): void
+    {
+        $lease = $this->directory . '/csp-report-only-pilot.state.json';
+        self::assertSame(strlen('synthetic lease'), file_put_contents($lease, 'synthetic lease'));
+        self::assertTrue(chmod($lease, 0600));
+
+        $blocked = $this->runShell(
+            'source ./deploy_ea.sh; ordinary_production_change_lock "$1"; ordinary_assert_no_active_csp_report_only_pilot "$2"',
+            [$this->lock, $lease],
+        );
+
+        self::assertSame(75, $blocked['exit_code'], $blocked['stderr']);
+        self::assertSame('synthetic lease', file_get_contents($lease));
+        unlink($lease);
+
+        $allowed = $this->runShell(
+            'source ./deploy_ea.sh; ordinary_production_change_lock "$1"; ordinary_assert_no_active_csp_report_only_pilot "$2"',
+            [$this->lock, $lease],
+        );
+        self::assertSame(0, $allowed['exit_code'], $allowed['stderr']);
+    }
+
+    public function testCspPilotAdmissionRunsUnderTheProductionLockBeforeTheAtomicSwitch(): void
+    {
+        $source = (string) file_get_contents(dirname(__DIR__, 3) . '/deploy_ea.sh');
+        $lock = strpos($source, "ordinary_production_change_lock \\\n");
+        $admission = strpos($source, "ordinary_assert_no_active_csp_report_only_pilot \\\n");
+        $switch = strrpos($source, "\nperform_atomic_switch\n");
+
+        self::assertIsInt($lock);
+        self::assertIsInt($admission);
+        self::assertIsInt($switch);
+        self::assertLessThan($admission, $lock);
+        self::assertLessThan($switch, $admission);
+    }
+
     private function removeOwnedTree(string $directory): void
     {
         foreach (scandir($directory) ?: [] as $leaf) {

@@ -134,6 +134,17 @@ ordinary_assert_no_pending_probe() {
   done
 }
 
+ordinary_assert_no_active_csp_report_only_pilot() {
+  local state="${1:-/var/lib/fh-deploy-orchestrator/csp-report-only-pilot.state.json}" parent
+  parent="$(dirname -- "$state")" || return 1
+  ordinary_trusted_path "$parent" || return 1
+  [[ -d "$parent" && "$(stat -c %a -- "$parent")" == 700 ]] || return 1
+  if [[ -e "$state" || -L "$state" ]]; then
+    echo '[!] Active or unresolved CSP report-only pilot lease blocks deployment.' >&2
+    return 75
+  fi
+}
+
 ordinary_probe_begin() {
   local state="${1:-/var/lib/fh-defense-ordinary}"
   ordinary_assert_no_pending_probe "$state" || return $?
@@ -2459,6 +2470,8 @@ if [[ "$DRYRUN" -eq 0 ]]; then
     || die "[!] Shared production-change lock is unavailable; deployment refused."
   ordinary_assert_no_pending_probe \
     || die "[!] Ordinary probe recovery must finish before deployment."
+  ordinary_assert_no_active_csp_report_only_pilot \
+    || die "[!] CSP report-only pilot cleanup must finish before deployment."
   [[ -n "$HEALTHZ_TOKEN_FILE" ]] || die "[!] --healthz-token-file is required for non-dry deployments."
   [[ -r "$HEALTHZ_TOKEN_FILE" ]] || die "[!] Token file is not readable: $HEALTHZ_TOKEN_FILE"
   if [[ "$REQUIRE_ZERO_SURPRISE" -eq 1 ]]; then
