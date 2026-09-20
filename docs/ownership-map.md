@@ -50,6 +50,7 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
   - `application/controllers/Localization.php` (exact_file)
   - `application/libraries/Auth_request_dto_factory.php` (exact_file)
   - `application/libraries/Session/EA_Session.php` (exact_file)
+  - `application/libraries/Session/drivers/Session_null_driver.php` (exact_file)
   - `application/core/EA_Session.php` (exact_file)
   - `application/views/pages/login.php` (exact_file)
   - `application/views/pages/logout.php` (exact_file)
