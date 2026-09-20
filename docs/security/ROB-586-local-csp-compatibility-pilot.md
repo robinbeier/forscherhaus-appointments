@@ -22,9 +22,10 @@ printf '%s\n' '{"url":"http://127.0.0.1:8080/booking","surface":"booking"}' \
 The URL guard accepts loopback HTTP targets only. The receipt contains no raw
 URLs, paths, query strings, fragments, source snippets, headers, bodies,
 tokens, cookies, or user-agent values. No browser CSP report is persisted.
-HTTP redirects do not bypass the exact local-origin classifier, service workers
-are blocked, and WebSockets are either confined to that origin or denied. Each
-run waits for the page load plus a bounded 500 ms observation window by default;
+Redirecting fixtures fail closed instead of bypassing the exact local-origin
+classifier or omitting the candidate header. Service workers are blocked, and
+WebSockets are either confined to that origin or denied. Each run waits for the
+page load plus a bounded 500 ms observation window by default;
 `observation_ms` may explicitly select 0 through 5000 ms for slower local
 fixtures.
 

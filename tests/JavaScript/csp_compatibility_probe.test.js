@@ -96,7 +96,7 @@ test('unknown surfaces fail closed and element directives normalize to policy cl
 test('CLI emits a closed failure receipt without echoing a secret-bearing target', () => {
     const rawTarget = 'http://127.0.0.1:8080/booking/capability?token=secret-value';
     const result = spawnSync(process.execPath, [path.join(__dirname, '../../scripts/ci/csp_compatibility_probe.js')], {
-        input: JSON.stringify({url: rawTarget, surface: 'booking'}),
+        input: JSON.stringify({url: rawTarget, surface: 'booking', browser: 'unsupported'}),
         encoding: 'utf8',
         env: process.env,
     });
@@ -130,7 +130,7 @@ const browser = {
       routeWebSocket: async (_pattern, handler) => { context.socketHandler = handler; },
       newPage: async () => ({
         goto: async () => {
-          const response = { ok: () => true, headers: () => ({'content-type': 'text/html'} ) };
+          const response = { ok: () => true, status: () => 200, headers: () => ({'content-type': 'text/html'} ) };
           await context.routeHandler({
             request: () => ({url: () => 'https://external.test/private?token=secret'}),
             fetch: async () => { record.externalFetched = true; save(); return response; },
@@ -228,7 +228,16 @@ const browser = {
         goto: async () => {
           await context.routeHandler({
             request: () => ({url: () => 'http://127.0.0.1:8080/private?token=secret-value'}),
-            fetch: async () => { throw new Error('http://127.0.0.1:8080/private?token=secret-value'); },
+            fetch: async () => {
+              if (process.env.CSP_PROBE_ROUTE_SCENARIO === 'redirect') {
+                return {
+                  ok: () => false,
+                  status: () => 302,
+                  headers: () => ({location: 'https://external.test/private?token=secret-value'}),
+                };
+              }
+              throw new Error('http://127.0.0.1:8080/private?token=secret-value');
+            },
             abort: async () => {},
           });
           return response;
@@ -256,15 +265,19 @@ Module._load = (request, parent, isMain) => request === 'playwright'
     );
     try {
         const scriptPath = path.join(__dirname, '../../scripts/ci/csp_compatibility_probe.js');
-        const result = spawnSync(process.execPath, ['--require', preloadPath, scriptPath], {
-            input: JSON.stringify({url: 'http://127.0.0.1:8080/private?token=secret-value', surface: 'app'}),
-            encoding: 'utf8',
-        });
-        assert.equal(result.status, 1);
-        assert.equal(result.stderr, '');
-        const receipt = JSON.parse(result.stdout);
-        assert.equal(receipt.error_class, 'probe_failed');
-        assert.equal(result.stdout.includes('secret-value'), false);
+        for (const scenario of ['fetch_error', 'redirect']) {
+            const result = spawnSync(process.execPath, ['--require', preloadPath, scriptPath], {
+                input: JSON.stringify({url: 'http://127.0.0.1:8080/private?token=secret-value', surface: 'app'}),
+                encoding: 'utf8',
+                env: {...process.env, CSP_PROBE_ROUTE_SCENARIO: scenario},
+            });
+            assert.equal(result.status, 1, scenario);
+            assert.equal(result.stderr, '', scenario);
+            const receipt = JSON.parse(result.stdout);
+            assert.equal(receipt.error_class, 'probe_failed', scenario);
+            assert.equal(result.stdout.includes('secret-value'), false, scenario);
+            assert.equal(result.stdout.includes('external.test'), false, scenario);
+        }
     } finally {
         fs.rmSync(tempDirectory, {recursive: true, force: true});
     }

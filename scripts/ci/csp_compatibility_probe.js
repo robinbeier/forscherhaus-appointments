@@ -244,6 +244,13 @@ const runProbe = async (input) => {
                         return;
                     }
                     const response = await route.fetch({maxRedirects: 0});
+                    const responseStatus = typeof response.status === 'function' ? response.status() : 0;
+                    if (responseStatus >= 300 && responseStatus < 400) {
+                        blockedRequests.push('redirect');
+                        routeFailures.push('http_redirect_blocked');
+                        await route.abort('blockedbyclient');
+                        return;
+                    }
                     const headers = response.headers();
                     headers['content-security-policy-report-only'] = CANDIDATE_POLICY;
                     await route.fulfill({response, headers});
