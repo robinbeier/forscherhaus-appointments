@@ -304,7 +304,9 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
                 'folded_content_disposition',
                 'whitespace_only_continuation',
                 'trailer_location',
-                'whitespace_before_header_colon',
+                'whitespace_location',
+                'whitespace_content_type',
+                'whitespace_content_disposition',
             ]
             as $scenario
         ) {
@@ -313,7 +315,24 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
             self::assertSame(20, $status, $scenario);
             self::assertCount(1, $output, $scenario);
             self::assertSame('', $stderr, $scenario);
-            self::assertSame('application_failed', ReadOnlyProbeReceiptV1::decode($output[0] . "\n")['outcome']);
+            $receipt = ReadOnlyProbeReceiptV1::decode($output[0] . "\n");
+            self::assertSame('application_failed', $receipt['outcome']);
+            if ($scenario === 'whitespace_location') {
+                self::assertSame(
+                    ['modern' => 'malformed', 'legacy' => 'malformed'],
+                    $receipt['redirect_class'],
+                    $scenario,
+                );
+            }
+            if (in_array($scenario, ['whitespace_content_type', 'whitespace_content_disposition'], true)) {
+                self::assertSame(
+                    ['modern' => 'malformed', 'legacy' => 'malformed'],
+                    $receipt['ics_header_class'],
+                    $scenario,
+                );
+                self::assertFalse($receipt['checks']['modern_ics_headers_safe']);
+                self::assertFalse($receipt['checks']['legacy_ics_headers_safe']);
+            }
         }
     }
 
@@ -647,12 +666,32 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
                     fi
                     exit 0
                     ;;
-                whitespace_before_header_colon)
+                whitespace_location)
                     if printf '%s' "${url}" | grep -q '/appointments/ics/'; then
-                        [ -n "${header}" ] && printf 'HTTP/1.1 404 Not Found\r\nContent-Type : text/calendar\r\nContent-Disposition : attachment\r\n\r\n' >"${header}"
+                        [ -n "${header}" ] && printf 'HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\n\r\n' >"${header}"
                         printf '404'
                     else
                         [ -n "${header}" ] && printf 'HTTP/1.1 307 Temporary Redirect\r\nLocation : /appointments\r\n\r\n' >"${header}"
+                        printf '307'
+                    fi
+                    exit 0
+                    ;;
+                whitespace_content_type)
+                    if printf '%s' "${url}" | grep -q '/appointments/ics/'; then
+                        [ -n "${header}" ] && printf 'HTTP/1.1 404 Not Found\r\nContent-Type : text/calendar\r\n\r\n' >"${header}"
+                        printf '404'
+                    else
+                        [ -n "${header}" ] && printf 'HTTP/1.1 307 Temporary Redirect\r\nLocation: /appointments\r\n\r\n' >"${header}"
+                        printf '307'
+                    fi
+                    exit 0
+                    ;;
+                whitespace_content_disposition)
+                    if printf '%s' "${url}" | grep -q '/appointments/ics/'; then
+                        [ -n "${header}" ] && printf 'HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\nContent-Disposition : attachment\r\n\r\n' >"${header}"
+                        printf '404'
+                    else
+                        [ -n "${header}" ] && printf 'HTTP/1.1 307 Temporary Redirect\r\nLocation: /appointments\r\n\r\n' >"${header}"
                         printf '307'
                     fi
                     exit 0

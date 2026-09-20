@@ -155,7 +155,7 @@ redirect_class() {
         tolower($0) ~ /^http\/[0-9.]+[[:space:]]/ {blocks++; in_headers=1; locations=0; folded=0; malformed=0; location=""; next}
         blocks > 0 && in_headers && ($0 == "" || $0 == "\r") {in_headers=0; next}
         blocks > 0 && in_headers && /^[ \t]/ {folded=1}
-        blocks > 0 && in_headers && tolower($0) ~ /^location[ \t]+:/ {malformed=1}
+        blocks > 0 && in_headers && tolower($0) ~ /^location[[:blank:]]+:/ {malformed=1}
         blocks > 0 && in_headers && tolower($0) ~ /^location:[[:space:]]*/ {locations++; location=$0; sub(/^[^:]*:[[:space:]]*/, "", location)}
         END {printf "%d|%d|%d|%d|%s", blocks, locations, folded, malformed, location}
     ' "${header_file}" 2>/dev/null)" || return 1
@@ -165,15 +165,15 @@ redirect_class() {
         REDIRECT_RESULT='malformed'
         return
     fi
+    if [[ "${folded}" == '1' || "${malformed}" == '1' ]]; then
+        REDIRECT_RESULT='malformed'
+        return
+    fi
     if [[ "${locations}" == '0' ]]; then
         REDIRECT_RESULT='missing'
         return
     fi
     if [[ "${locations}" != '1' ]]; then
-        REDIRECT_RESULT='malformed'
-        return
-    fi
-    if [[ "${folded}" == '1' || "${malformed}" == '1' ]]; then
         REDIRECT_RESULT='malformed'
         return
     fi
@@ -203,8 +203,8 @@ ics_header_class() {
         tolower($0) ~ /^http\/[0-9.]+[[:space:]]/ {blocks++; in_headers=1; calendar=0; disposition=0; folded=0; malformed=0; next}
         blocks > 0 && in_headers && ($0 == "" || $0 == "\r") {in_headers=0; next}
         blocks > 0 && in_headers && /^[ \t]/ {folded=1}
-        blocks > 0 && in_headers && tolower($0) ~ /^content-type[ \t]+:/ {malformed=1}
-        blocks > 0 && in_headers && tolower($0) ~ /^content-disposition[ \t]+:/ {malformed=1}
+        blocks > 0 && in_headers && tolower($0) ~ /^content-type[[:blank:]]+:/ {malformed=1}
+        blocks > 0 && in_headers && tolower($0) ~ /^content-disposition[[:blank:]]+:/ {malformed=1}
         blocks > 0 && in_headers && tolower($0) ~ /^content-type:[[:space:]]*text\/calendar/ {calendar=1}
         blocks > 0 && in_headers && tolower($0) ~ /^content-disposition:/ {disposition=1}
         END {printf "%d|%d|%d|%d|%d", blocks, calendar, disposition, folded, malformed}
