@@ -37,6 +37,52 @@ final class CspReportOnlyStatusScriptTest extends TestCase
         }
     }
 
+    public function testInactiveExpectationNeverRunsWriteProbeWhenConfigUnexpectedlyActive(): void
+    {
+        if (!function_exists('posix_geteuid') || posix_geteuid() !== 0) {
+            self::markTestSkipped('The root-controlled active config contract is verified in the CI container.');
+        }
+        $directory = '/var/lib/fh-csp-status-active-config-' . bin2hex(random_bytes(6));
+        mkdir($directory, 0755, true);
+        $configPath = $directory . '/config.json';
+        copy($this->repoRoot() . '/scripts/ops/config/csp_report_only.production.v1.json', $configPath);
+        chmod($configPath, 0644);
+        $aggregatePath = $directory . '/aggregate.json';
+
+        try {
+            $result = $this->runCommand([
+                PHP_BINARY,
+                'scripts/ops/csp_report_only_status.php',
+                '--expect=inactive',
+                '--config-path=' . $configPath,
+                '--aggregate-path=' . $aggregatePath,
+            ]);
+
+            self::assertSame(1, $result['exit_code'], $result['stderr']);
+            self::assertStringContainsString('"status":"failed"', $result['stdout']);
+            $receipt = json_decode($result['stdout'], true, 8, JSON_THROW_ON_ERROR);
+            self::assertSame('active', $receipt['config']['status']);
+            self::assertSame('missing', $receipt['aggregate']['status']);
+            self::assertSame([], glob($directory . '/.csp-status-probe-*'));
+            self::assertFileDoesNotExist($aggregatePath);
+            self::assertFileDoesNotExist($aggregatePath . '.lock');
+        } finally {
+            if (is_file($configPath)) {
+                unlink($configPath);
+            }
+            if (is_file($aggregatePath)) {
+                unlink($aggregatePath);
+            }
+            if (is_file($aggregatePath . '.lock')) {
+                unlink($aggregatePath . '.lock');
+            }
+            foreach (glob($directory . '/.csp-status-probe-*') ?: [] as $probe) {
+                unlink($probe);
+            }
+            rmdir($directory);
+        }
+    }
+
     public function testInactiveCliCanSummarizeThePreservedAggregateWithoutActivationConfig(): void
     {
         $temporaryRoot = realpath(sys_get_temp_dir()) ?: sys_get_temp_dir();
@@ -202,6 +248,7 @@ final class CspReportOnlyStatusScriptTest extends TestCase
             self::assertSame(1, $receipt['aggregate']['summary']['accepted']);
             self::assertSame(1, $receipt['aggregate']['summary']['classes']['blocked_origin']['unknown-external']);
             self::assertStringNotContainsString($directory, $receiptResult['stdout'] . $receiptResult['stderr']);
+            self::assertSame([], glob($aggregateDirectory . '/.csp-status-probe-*'));
 
             chmod($aggregatePath . '.lock', 0000);
             $wrongLockMode = $this->runCommand([

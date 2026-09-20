@@ -2,7 +2,10 @@
 
 Status: local implementation and production plan. Nothing in this document
 activates a production header, installs a production configuration, runs the new
-production status probe, or changes Uptime Kuma.
+production status probe, or changes Uptime Kuma. The active status probe
+includes one bounded readiness mutation under the effective `www-data`
+identity: it creates, flushes, fsyncs, closes, and immediately unlinks a
+random same-directory probe file. The inactive probe remains mutation-free.
 
 ## Decision
 
@@ -206,7 +209,10 @@ This section is a future operation requiring the separate production approval.
 4. Confirm App and `www` expose Report-Only only, enforcement stays missing,
    and Monitor exposes neither.
 5. Run the approved existing synthetic browser smokes with their normal cleanup
-   receipts, plus the new read-only class-only status probe.
+   receipts, plus the new class-only status probe. When `--expect=active` is
+   used, this includes the bounded `www-data` same-directory write-readiness
+   probe; an unknown or failed probe is fail-closed. The inactive status probe
+   remains read-only.
 6. Observe for 60 minutes, with class-only snapshots at activation, 15 minutes,
    and 60 minutes. Do not repeat an unknown or contradictory run
    automatically.

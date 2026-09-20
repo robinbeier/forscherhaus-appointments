@@ -68,16 +68,16 @@ function readRegularFileSafely(string $path, int $maxBytes): ?string
         throw new RuntimeException('Aggregate directory is unavailable.');
     }
     $lockPath = $path . '.lock';
-    $initialAggregate = @lstat($path);
     $lockIdentity = @lstat($lockPath);
-    if (!is_array($initialAggregate) && !is_array($lockIdentity)) {
-        return null;
+    if (!is_array($lockIdentity)) {
+        // A missing sidecar is only a zero-observation state when the
+        // aggregate is missing too. Do not create or open a lock here.
+        if (!is_array(@lstat($path))) {
+            return null;
+        }
+        throw new RuntimeException('Aggregate lock is missing.');
     }
-    if (
-        !is_array($lockIdentity) ||
-        (($lockIdentity['mode'] ?? 0) & 0170000) !== 0100000 ||
-        (int) ($lockIdentity['nlink'] ?? 0) !== 1
-    ) {
+    if (($lockIdentity['mode'] & 0170000) !== 0100000 || (int) ($lockIdentity['nlink'] ?? 0) !== 1) {
         throw new RuntimeException('Aggregate lock identity is invalid.');
     }
 
@@ -260,11 +260,86 @@ function isAggregateStorageUsableByRuntime(string $path, string $username): bool
         runtimeModeAllows($lock, $identity, 6);
 }
 
+function performRuntimeWriteProbe(string $directory): bool
+{
+    if (!isSafeAggregateDirectory($directory)) {
+        return false;
+    }
+
+    for ($attempt = 0; $attempt < 5; $attempt++) {
+        try {
+            $path = $directory . '/.csp-status-probe-' . bin2hex(random_bytes(16));
+        } catch (Throwable) {
+            return false;
+        }
+        $stream = @fopen($path, 'x+b');
+        if (!is_resource($stream)) {
+            continue;
+        }
+        $ok = false;
+        try {
+            $identity = fstat($stream);
+            $ok =
+                is_array($identity) &&
+                (($identity['mode'] ?? 0) & 0170000) === 0100000 &&
+                (int) ($identity['nlink'] ?? 0) === 1 &&
+                fwrite($stream, "probe\n") === 6 &&
+                fflush($stream);
+            $ok = $ok && function_exists('fsync') && fsync($stream);
+        } finally {
+            fclose($stream);
+            if (is_link($path) || !@unlink($path)) {
+                $ok = false;
+            }
+        }
+        return $ok;
+    }
+
+    return false;
+}
+
+function runtimeWriteProbe(string $directory, string $username): bool
+{
+    $identity = runtimeIdentity($username);
+    if ($identity === null) {
+        return false;
+    }
+    if (function_exists('posix_geteuid') && posix_geteuid() === $identity['uid']) {
+        return performRuntimeWriteProbe($directory);
+    }
+    if (!function_exists('posix_geteuid') || posix_geteuid() !== 0 || !is_executable('/usr/sbin/runuser')) {
+        return false;
+    }
+    $process = @proc_open(
+        ['/usr/sbin/runuser', '--user', $username, '--', PHP_BINARY, __FILE__, '--write-probe', $directory, $username],
+        [['file', '/dev/null', 'r'], ['file', '/dev/null', 'w'], ['file', '/dev/null', 'w']],
+        $pipes,
+    );
+    if (!is_resource($process)) {
+        return false;
+    }
+    return proc_close($process) === 0;
+}
+
 /** @param array<string,mixed> $receipt */
 function emitReceipt(array $receipt, int $exitCode): never
 {
     echo json_encode($receipt, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES), PHP_EOL;
     exit($exitCode);
+}
+
+if (($argv[1] ?? null) === '--write-probe') {
+    $probeIdentity = isset($argv[3]) && is_string($argv[3]) ? runtimeIdentity($argv[3]) : null;
+    if (
+        count($argv) !== 4 ||
+        !isSafeAggregateDirectory($argv[2]) ||
+        $probeIdentity === null ||
+        !function_exists('posix_geteuid') ||
+        posix_geteuid() !== $probeIdentity['uid']
+    ) {
+        exit(1);
+    }
+    exit(performRuntimeWriteProbe($argv[2]) ? 0 : 1);
 }
 
 try {
@@ -282,9 +357,11 @@ try {
     $aggregateExists = @lstat($options['aggregate_path']) !== false;
     $aggregateBytes = null;
     $aggregateStatus = $aggregateExists ? 'invalid' : 'missing';
+    $activeReadinessCheck = $options['expect'] === 'active' && $configStatus === 'active';
     $runtimeStorageUsable =
-        $configStatus !== 'active' ||
-        isAggregateStorageUsableByRuntime($options['aggregate_path'], CSP_STATUS_RUNTIME_USER);
+        !$activeReadinessCheck ||
+        (isAggregateStorageUsableByRuntime($options['aggregate_path'], CSP_STATUS_RUNTIME_USER) &&
+            runtimeWriteProbe(dirname($options['aggregate_path']), CSP_STATUS_RUNTIME_USER));
     try {
         if (!$runtimeStorageUsable) {
             throw new RuntimeException('Aggregate storage is unavailable to the runtime user.');

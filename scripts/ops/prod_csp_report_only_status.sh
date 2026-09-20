@@ -141,7 +141,7 @@ main() {
     prod_require_cmd bash
     prod_require_cmd php
     prod_require_cmd ssh
-    prod_print_plan 'prod-csp-report-only-status' "$PROD_SSH_TARGET" 'read-only'
+    prod_print_plan 'prod-csp-report-only-status' "$PROD_SSH_TARGET" 'read-only plus bounded www-data readiness probe when active'
     run_status
 }
 
