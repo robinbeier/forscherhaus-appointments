@@ -657,6 +657,14 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
         } finally {
             unlink($curl);
             unlink($mktemp);
+            if ($scenario === 'missing_rm') {
+                foreach (['od', 'tr', 'awk'] as $command) {
+                    $link = $directory . '/' . $command;
+                    if (is_link($link)) {
+                        unlink($link);
+                    }
+                }
+            }
             if (isset($stderrFile) && is_file($stderrFile)) {
                 unlink($stderrFile);
             }
