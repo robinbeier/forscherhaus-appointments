@@ -533,6 +533,9 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
             if (isset($stderrFile) && is_file($stderrFile)) {
                 unlink($stderrFile);
             }
+            if (isset($headerLog) && is_file($headerLog)) {
+                unlink($headerLog);
+            }
             rmdir($directory);
         }
     }
