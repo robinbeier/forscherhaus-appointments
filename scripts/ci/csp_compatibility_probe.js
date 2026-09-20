@@ -30,6 +30,12 @@ const ALLOWED_DIRECTIVES = new Set([
     'worker-src',
     'media-src',
 ]);
+const DIRECTIVE_ALIASES = new Map([
+    ['script-src-elem', 'script-src'],
+    ['script-src-attr', 'script-src'],
+    ['style-src-elem', 'style-src'],
+    ['style-src-attr', 'style-src'],
+]);
 
 const normalizeSurface = (surface) => (ALLOWED_SURFACES.has(surface) ? surface : 'unknown');
 
@@ -52,7 +58,7 @@ const validateLocalTarget = (value) => {
     return parsed;
 };
 
-const blockedOriginClass = (blockedUri) => {
+const blockedOriginClass = (blockedUri, selfOrigin) => {
     if (typeof blockedUri !== 'string' || blockedUri === '') {
         return 'unknown';
     }
@@ -62,29 +68,30 @@ const blockedOriginClass = (blockedUri) => {
     if (blockedUri === 'data:') {
         return 'data';
     }
-    if (
-        blockedUri.startsWith('http://127.0.0.1') ||
-        blockedUri.startsWith('http://localhost') ||
-        blockedUri.startsWith('http://[::1]')
-    ) {
-        return 'self';
-    }
-    if (
-        blockedUri.startsWith('https://www.googletagmanager.com') ||
-        blockedUri.startsWith('https://www.google-analytics.com')
-    ) {
-        return 'google-analytics';
-    }
     if (blockedUri.startsWith('moz-extension:') || blockedUri.startsWith('chrome-extension:')) {
         return 'extension';
     }
-    if (blockedUri.startsWith('http:') || blockedUri.startsWith('https:')) {
-        return 'unknown-external';
+    try {
+        const parsed = new URL(blockedUri);
+        if (typeof selfOrigin === 'string' && parsed.origin === selfOrigin) {
+            return 'self';
+        }
+        if (
+            parsed.protocol === 'https:' &&
+            ['www.googletagmanager.com', 'www.google-analytics.com'].includes(parsed.hostname)
+        ) {
+            return 'google-analytics';
+        }
+        if (['http:', 'https:'].includes(parsed.protocol)) {
+            return 'unknown-external';
+        }
+    } catch (_error) {
+        return 'unknown';
     }
     return 'unknown';
 };
 
-const requestClass = (value) => {
+const requestClass = (value, allowedOrigin) => {
     if (typeof value !== 'string' || value === '') {
         return 'unknown';
     }
@@ -93,7 +100,7 @@ const requestClass = (value) => {
     }
     try {
         const parsed = new URL(value);
-        if (parsed.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(parsed.hostname)) {
+        if (parsed.protocol === 'http:' && typeof allowedOrigin === 'string' && parsed.origin === allowedOrigin) {
             return 'loopback';
         }
     } catch (_error) {
@@ -102,15 +109,45 @@ const requestClass = (value) => {
     return 'external';
 };
 
-const sanitizeViolation = (violation, surface) => {
-    const directive =
-        typeof violation?.effectiveDirective === 'string' && ALLOWED_DIRECTIVES.has(violation.effectiveDirective)
-            ? violation.effectiveDirective
-            : 'unknown';
+const webSocketClass = (value, target) => {
+    if (typeof value !== 'string' || value === '') {
+        return 'unknown';
+    }
+    try {
+        const parsed = new URL(value);
+        const expectedTarget = target instanceof URL ? target : new URL(target);
+        if (
+            parsed.protocol === 'ws:' &&
+            parsed.hostname === expectedTarget.hostname &&
+            parsed.port === expectedTarget.port
+        ) {
+            return 'loopback';
+        }
+    } catch (_error) {
+        return 'unknown';
+    }
+    return 'external';
+};
+
+const boundedObservationMs = (value) => {
+    if (value === undefined) {
+        return 500;
+    }
+    const parsed = Number(value);
+    if (!Number.isInteger(parsed) || parsed < 0 || parsed > 5000) {
+        throw new Error('Invalid CSP compatibility observation window.');
+    }
+    return parsed;
+};
+
+const sanitizeViolation = (violation, surface, selfOrigin) => {
+    const rawDirective = typeof violation?.effectiveDirective === 'string' ? violation.effectiveDirective : 'unknown';
+    const normalizedDirective = DIRECTIVE_ALIASES.get(rawDirective) || rawDirective;
+    const directive = ALLOWED_DIRECTIVES.has(normalizedDirective) ? normalizedDirective : 'unknown';
     return {
         surface: normalizeSurface(surface),
         directive,
-        blocked_origin: blockedOriginClass(violation?.blockedURI),
+        blocked_origin: blockedOriginClass(violation?.blockedURI, selfOrigin),
         disposition: 'report',
     };
 };
@@ -157,6 +194,7 @@ const makeFailureReceipt = (errorClass = 'probe_failed') => ({
 
 const runProbe = async (input) => {
     const target = validateLocalTarget(input.url);
+    const observationMs = boundedObservationMs(input.observation_ms);
     const playwright = require('playwright');
     const browserTypes = {
         chromium: playwright.chromium,
@@ -174,8 +212,12 @@ const runProbe = async (input) => {
         headless: !Boolean(input.headed),
         timeout: Number(input.launch_timeout) > 0 ? Number(input.launch_timeout) * 1000 : 30000,
     });
+    const routeFailures = [];
+    const pendingOperations = new Set();
+    let context;
+    let page;
     try {
-        const context = await browser.newContext();
+        context = await browser.newContext({serviceWorkers: 'block'});
         const violations = [];
         const blockedRequests = [];
         await context.addInitScript(() => {
@@ -187,30 +229,91 @@ const runProbe = async (input) => {
                 });
             });
         });
-        await context.route('**/*', async (route) => {
-            const requestUrl = typeof route.request === 'function' ? route.request().url() : '';
-            const classification = requestClass(requestUrl);
-            if (classification === 'external' || classification === 'unknown') {
-                blockedRequests.push(classification);
-                await route.abort('blockedbyclient');
-                return;
-            }
-            const response = await route.fetch();
-            const headers = response.headers();
-            headers['content-security-policy-report-only'] = CANDIDATE_POLICY;
-            await route.fulfill({response, headers});
+        await context.route('**/*', (route) => {
+            const pending = (async () => {
+                try {
+                    const requestUrl = typeof route.request === 'function' ? route.request().url() : '';
+                    const classification = requestClass(requestUrl, target.origin);
+                    if (classification === 'external' || classification === 'unknown') {
+                        blockedRequests.push(classification);
+                        await route.abort('blockedbyclient');
+                        return;
+                    }
+                    if (classification === 'browser-local') {
+                        await route.continue();
+                        return;
+                    }
+                    const response = await route.fetch({maxRedirects: 0});
+                    const headers = response.headers();
+                    headers['content-security-policy-report-only'] = CANDIDATE_POLICY;
+                    await route.fulfill({response, headers});
+                } catch (_error) {
+                    routeFailures.push('http_route_failed');
+                    try {
+                        await route.abort('failed');
+                    } catch (_abortError) {
+                        // The route can already be closed; retain only the fixed failure class.
+                    }
+                }
+            })();
+            pendingOperations.add(pending);
+            return pending.finally(() => pendingOperations.delete(pending));
         });
-        const page = await context.newPage();
+        await context.routeWebSocket('**/*', (webSocketRoute) => {
+            const pending = (async () => {
+                try {
+                    const classification = webSocketClass(webSocketRoute.url(), target);
+                    if (classification !== 'loopback') {
+                        blockedRequests.push(`websocket_${classification}`);
+                        await webSocketRoute.close({code: 1008});
+                        return;
+                    }
+                    webSocketRoute.connectToServer();
+                } catch (_error) {
+                    routeFailures.push('websocket_route_failed');
+                    try {
+                        await webSocketRoute.close({code: 1011});
+                    } catch (_closeError) {
+                        // Retain only the fixed failure class.
+                    }
+                }
+            })();
+            pendingOperations.add(pending);
+            return pending.finally(() => pendingOperations.delete(pending));
+        });
+        page = await context.newPage();
         const response = await page.goto(target.toString(), {
-            waitUntil: 'domcontentloaded',
+            waitUntil: 'load',
             timeout: Number(input.open_timeout) > 0 ? Number(input.open_timeout) * 1000 : 30000,
         });
+        await page.waitForTimeout(observationMs);
         const pageViolations = await page.evaluate(() => window.__CSP_COMPATIBILITY_VIOLATIONS__ || []);
         for (const violation of pageViolations) {
-            violations.push(sanitizeViolation(violation, input.surface));
+            violations.push(sanitizeViolation(violation, input.surface, target.origin));
+        }
+        await page.close({runBeforeUnload: false});
+        page = undefined;
+        await Promise.allSettled([...pendingOperations]);
+        if (routeFailures.length > 0) {
+            throw new Error('CSP compatibility route failed.');
         }
         return makeReceipt(input.surface, violations, Boolean(response && response.ok()), blockedRequests);
     } finally {
+        if (page !== undefined) {
+            try {
+                await page.close({runBeforeUnload: false});
+            } catch (_error) {
+                // The CLI emits only a fixed failure receipt for any close failure.
+            }
+        }
+        await Promise.allSettled([...pendingOperations]);
+        if (context !== undefined) {
+            try {
+                await context.close();
+            } catch (_error) {
+                // Browser close below is the final local cleanup boundary.
+            }
+        }
         await browser.close();
     }
 };
@@ -243,4 +346,6 @@ module.exports = {
     runProbe,
     sanitizeViolation,
     validateLocalTarget,
+    webSocketClass,
+    boundedObservationMs,
 };

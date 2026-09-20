@@ -22,6 +22,11 @@ printf '%s\n' '{"url":"http://127.0.0.1:8080/booking","surface":"booking"}' \
 The URL guard accepts loopback HTTP targets only. The receipt contains no raw
 URLs, paths, query strings, fragments, source snippets, headers, bodies,
 tokens, cookies, or user-agent values. No browser CSP report is persisted.
+HTTP redirects do not bypass the exact local-origin classifier, service workers
+are blocked, and WebSockets are either confined to that origin or denied. Each
+run waits for the page load plus a bounded 500 ms observation window by default;
+`observation_ms` may explicitly select 0 through 5000 ms for slower local
+fixtures.
 
 ## Surfaces and policy boundary
 
@@ -120,6 +125,8 @@ Implemented in ROB-586 now:
 - aggregate, class-only violation receipts;
 - receipt privacy tests covering raw URLs, paths, query strings, tokens, and
   browser source fields;
+- redirect, service-worker, WebSocket, route-failure, and observation-window
+  network boundaries;
 - the local policy and target guard.
 
 Still required before a production decision:

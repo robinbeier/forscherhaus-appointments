@@ -59,7 +59,7 @@ while IFS= read -r -d '' file; do
         changed_files+=("$file")
     fi
     case "$file" in
-        gulpfile.js|babel.config.json|package.json|package-lock.json|tests/JavaScript/gulp_build.test.js|tests/JavaScript/csp_compatibility_probe.test.js|scripts/ci/js-lint-changed.sh|.github/workflows/ci.yml)
+        gulpfile.js|babel.config.json|package.json|package-lock.json|tests/JavaScript/gulp_build.test.js|tests/JavaScript/csp_compatibility_probe.test.js|scripts/ci/csp_compatibility_probe.js|scripts/ci/js-lint-changed.sh|.github/workflows/ci.yml)
             build_tools_changed=true
             ;;
     esac
