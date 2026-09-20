@@ -10,8 +10,10 @@ The confirmation checks require HTTP `307` with a redirect classified only as
 `appointments`. The ICS checks require HTTP `404`, no `Content-Disposition`,
 and a `Content-Type` that is not `text/calendar`. URLs, capabilities,
 redirect targets, header values, and response bodies never appear in output or
-the receipt. The only receipt details are six fixed boolean checks and closed
-classes.
+the receipt. The receipt includes a closed `target_class` (`production`,
+`local`, or `unapproved`) so local test evidence cannot be mistaken for a
+production result. All other details are six fixed boolean checks and closed
+classes. Ambiguous responses with more than one `Location` header fail closed.
 
 The command emits exactly one canonical JSON line using
 `read_only_probe.v1`, including on a controlled curl, assertion, or runtime

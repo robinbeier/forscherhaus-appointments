@@ -17,6 +17,9 @@ final class ReadOnlyProbeReceiptV1
     public const SCHEMA = 'read_only_probe.v1';
     public const PROBE = 'anonymous_booking_download_capabilities';
 
+    /** @var array<int,string> */
+    private const TARGET_CLASSES = ['production', 'local', 'unapproved'];
+
     public const OUTCOME_EXIT_CODES = [
         'passed' => 0,
         'application_failed' => 20,
@@ -44,6 +47,7 @@ final class ReadOnlyProbeReceiptV1
     private const TOP_LEVEL_FIELDS = [
         'schema',
         'probe',
+        'target_class',
         'outcome',
         'exit_code',
         'checks',
@@ -61,6 +65,7 @@ final class ReadOnlyProbeReceiptV1
      */
     public static function create(
         string $outcome,
+        string $targetClass,
         array $checks = [],
         array $redirectClass = ['modern' => 'malformed', 'legacy' => 'malformed'],
         array $icsHeaderClass = ['modern' => 'malformed', 'legacy' => 'malformed'],
@@ -68,6 +73,7 @@ final class ReadOnlyProbeReceiptV1
         $receipt = [
             'schema' => self::SCHEMA,
             'probe' => self::PROBE,
+            'target_class' => $targetClass,
             'outcome' => $outcome,
             'exit_code' => self::OUTCOME_EXIT_CODES[$outcome] ?? -1,
             'checks' => array_merge(self::CHECK_DEFAULTS, $checks),
@@ -96,6 +102,9 @@ final class ReadOnlyProbeReceiptV1
         }
         if ($receipt['schema'] !== self::SCHEMA || $receipt['probe'] !== self::PROBE) {
             throw new RuntimeException('read-only probe receipt identity is invalid');
+        }
+        if (!is_string($receipt['target_class']) || !in_array($receipt['target_class'], self::TARGET_CLASSES, true)) {
+            throw new RuntimeException('read-only probe target class is invalid');
         }
         if (!is_string($receipt['outcome']) || !array_key_exists($receipt['outcome'], self::OUTCOME_EXIT_CODES)) {
             throw new RuntimeException('read-only probe receipt outcome is invalid');

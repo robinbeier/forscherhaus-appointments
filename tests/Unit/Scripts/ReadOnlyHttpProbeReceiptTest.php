@@ -21,6 +21,7 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
         ];
         $receipt = ReadOnlyProbeReceiptV1::create(
             'passed',
+            'production',
             $checks,
             ['modern' => 'appointments', 'legacy' => 'appointments'],
             ['modern' => 'not_calendar_no_disposition', 'legacy' => 'not_calendar_no_disposition'],
@@ -31,12 +32,14 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
         self::assertStringNotContainsString('http', $encoded);
         self::assertStringNotContainsString('capability', $encoded);
         self::assertStringNotContainsString('location', $encoded);
+        self::assertSame('production', $receipt['target_class']);
     }
 
     public function testApplicationFailureKeepsClosedFailedProperties(): void
     {
         $receipt = ReadOnlyProbeReceiptV1::create(
             'application_failed',
+            'production',
             [
                 'legacy_confirmation_redirect' => true,
                 'modern_ics_missing' => true,
@@ -51,9 +54,15 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
         self::assertSame($receipt, ReadOnlyProbeReceiptV1::decode(ReadOnlyProbeReceiptV1::canonicalJson($receipt)));
     }
 
+    public function testReceiptRejectsUnknownTargetClass(): void
+    {
+        $this->expectException(RuntimeException::class);
+        ReadOnlyProbeReceiptV1::create('environment_failed', 'other');
+    }
+
     public function testCanonicalJsonUsesFixedTopLevelFieldOrder(): void
     {
-        $receipt = ReadOnlyProbeReceiptV1::create('environment_failed');
+        $receipt = ReadOnlyProbeReceiptV1::create('environment_failed', 'production');
         $reordered = array_reverse($receipt, true);
 
         self::assertSame(
@@ -93,7 +102,13 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
         ) {
             $thrown = false;
             try {
-                ReadOnlyProbeReceiptV1::create('application_failed', $checks, $redirectClass, $icsHeaderClass);
+                ReadOnlyProbeReceiptV1::create(
+                    'application_failed',
+                    'production',
+                    $checks,
+                    $redirectClass,
+                    $icsHeaderClass,
+                );
             } catch (RuntimeException) {
                 $thrown = true;
             }
@@ -104,7 +119,7 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
     public function testEnvironmentAndUnknownOutcomesCannotClaimProperties(): void
     {
         foreach (['environment_failed' => 21, 'unknown' => 70] as $outcome => $exitCode) {
-            $receipt = ReadOnlyProbeReceiptV1::create($outcome);
+            $receipt = ReadOnlyProbeReceiptV1::create($outcome, 'production');
 
             self::assertSame($exitCode, $receipt['exit_code']);
             self::assertSame($receipt, ReadOnlyProbeReceiptV1::decode(ReadOnlyProbeReceiptV1::canonicalJson($receipt)));
@@ -113,6 +128,7 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
             try {
                 ReadOnlyProbeReceiptV1::create(
                     $outcome,
+                    'production',
                     ['modern_confirmation_redirect' => true],
                     ['modern' => 'appointments', 'legacy' => 'malformed'],
                     ['modern' => 'malformed', 'legacy' => 'malformed'],
@@ -129,6 +145,7 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
         $this->expectException(RuntimeException::class);
         ReadOnlyProbeReceiptV1::create(
             'passed',
+            'production',
             ['modern_confirmation_redirect' => true],
             ['modern' => 'appointments', 'legacy' => 'appointments'],
             ['modern' => 'not_calendar_no_disposition', 'legacy' => 'not_calendar_no_disposition'],
@@ -144,9 +161,24 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
         self::assertSame('', $stderr);
         $receipt = ReadOnlyProbeReceiptV1::decode($output[0] . "\n");
         self::assertSame('passed', $receipt['outcome']);
+        self::assertSame('production', $receipt['target_class']);
         self::assertSame(6, $receipt['check_count']);
         self::assertStringNotContainsString('dasforscherhaus', $output[0]);
         self::assertStringNotContainsString('booking_confirmation', $output[0]);
+    }
+
+    public function testReceiptBindsEvidenceToProductionOrLocalTargetClass(): void
+    {
+        [$productionStatus, $productionOutput] = $this->runWrapper('success');
+        [$localStatus, $localOutput] = $this->runWrapper('success', 'http://127.0.0.1:8123');
+
+        self::assertSame(0, $productionStatus);
+        self::assertSame(0, $localStatus);
+        $productionReceipt = ReadOnlyProbeReceiptV1::decode($productionOutput[0] . "\n");
+        $localReceipt = ReadOnlyProbeReceiptV1::decode($localOutput[0] . "\n");
+        self::assertSame('production', $productionReceipt['target_class']);
+        self::assertSame('local', $localReceipt['target_class']);
+        self::assertNotSame($productionOutput[0], $localOutput[0]);
     }
 
     public function testWrapperAcceptsExpectedRelativeAndSameOriginAppRedirects(): void
@@ -164,7 +196,14 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
     public function testWrapperClassifiesHttpHeaderAndRedirectFailuresAsApplicationFailure(): void
     {
         foreach (
-            ['unexpected_http', 'unexpected_header', 'unexpected_redirect', 'external_redirect', 'suffix_redirect']
+            [
+                'unexpected_http',
+                'unexpected_header',
+                'unexpected_redirect',
+                'external_redirect',
+                'suffix_redirect',
+                'duplicate_location',
+            ]
             as $scenario
         ) {
             [$status, $output, $stderr] = $this->runWrapper($scenario);
@@ -179,6 +218,16 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
     public function testWrapperClassifiesHeaderReadFailureAsEnvironmentFailure(): void
     {
         [$status, $output, $stderr] = $this->runWrapper('header_read_failure');
+
+        self::assertSame(21, $status);
+        self::assertCount(1, $output);
+        self::assertSame('', $stderr);
+        self::assertSame('environment_failed', ReadOnlyProbeReceiptV1::decode($output[0] . "\n")['outcome']);
+    }
+
+    public function testTemporaryFileFailureEmitsOnlyEnvironmentReceipt(): void
+    {
+        [$status, $output, $stderr] = $this->runWrapper('mktemp_failure');
 
         self::assertSame(21, $status);
         self::assertCount(1, $output);
@@ -243,12 +292,13 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
         self::assertCount(1, $output);
         self::assertSame('', (string) file_get_contents($stderrFile));
         self::assertSame('unknown', ReadOnlyProbeReceiptV1::decode($output[0] . "\n")['outcome']);
+        self::assertSame('unapproved', ReadOnlyProbeReceiptV1::decode($output[0] . "\n")['target_class']);
         self::assertStringNotContainsString('unapproved.example', $output[0]);
         unlink($stderrFile);
     }
 
     /** @return array{0:int,1:array<int,string>,2:string} */
-    private function runWrapper(string $scenario): array
+    private function runWrapper(string $scenario, string $baseUrl = 'https://dasforscherhaus-leg.de'): array
     {
         $directory = sys_get_temp_dir() . '/read-only-probe-curl-' . bin2hex(random_bytes(8));
         mkdir($directory, 0700, true);
@@ -361,6 +411,16 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
                     printf '307'
                     exit 0
                     ;;
+                duplicate_location)
+                    if printf '%s' "${url}" | grep -q '/appointments/ics/'; then
+                        [ -n "${header}" ] && printf 'HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\n\r\n' >"${header}"
+                        printf '404'
+                    else
+                        [ -n "${header}" ] && printf 'HTTP/1.1 307 Temporary Redirect\r\nLocation: https://external.example/appointments\r\nLocation: /appointments\r\n\r\n' >"${header}"
+                        printf '307'
+                    fi
+                    exit 0
+                    ;;
                 header_read_failure)
                     rm -f -- "${header}"
                     printf '307'
@@ -392,6 +452,20 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
             ,
         );
         chmod($curl, 0700);
+        $mktemp = $directory . '/mktemp';
+        file_put_contents(
+            $mktemp,
+            <<<'SH'
+            #!/bin/sh
+            if [ "${MOCK_CURL_SCENARIO}" = 'mktemp_failure' ]; then
+                printf 'private-local-template\n' >&2
+                exit 1
+            fi
+            exec /usr/bin/mktemp "$@"
+            SH
+            ,
+        );
+        chmod($mktemp, 0700);
 
         try {
             $output = [];
@@ -402,7 +476,9 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
                 escapeshellarg($directory . ':/usr/bin:/bin') .
                 ' MOCK_CURL_SCENARIO=' .
                 escapeshellarg($scenario) .
-                ' READ_ONLY_PROBE_BASE_URL=https://dasforscherhaus-leg.de bash ' .
+                ' READ_ONLY_PROBE_BASE_URL=' .
+                escapeshellarg($baseUrl) .
+                ' bash ' .
                 escapeshellarg(__DIR__ . '/../../../scripts/ops/run_read_only_http_probe.sh') .
                 ' 2>' .
                 escapeshellarg($stderrFile);
@@ -411,6 +487,7 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
             return [$status, $output, (string) file_get_contents($stderrFile)];
         } finally {
             unlink($curl);
+            unlink($mktemp);
             if (isset($stderrFile) && is_file($stderrFile)) {
                 unlink($stderrFile);
             }

@@ -7,6 +7,7 @@ set +x
 readonly PROBE='anonymous_booking_download_capabilities'
 readonly PROD_ORIGIN='https://dasforscherhaus-leg.de'
 BASE_URL="${READ_ONLY_PROBE_BASE_URL:-${PROD_ORIGIN}}"
+TARGET_CLASS='unapproved'
 OUTCOME='unknown'
 EXIT_CODE=70
 RECEIPT_EMITTED=0
@@ -43,8 +44,8 @@ clear_observations() {
 emit_receipt() {
     [[ "${RECEIPT_EMITTED}" == '1' ]] && return
     RECEIPT_EMITTED=1
-    printf '{"schema":"read_only_probe.v1","probe":"%s","outcome":"%s","exit_code":%s,"checks":{"modern_confirmation_redirect":%s,"legacy_confirmation_redirect":%s,"modern_ics_missing":%s,"legacy_ics_missing":%s,"modern_ics_headers_safe":%s,"legacy_ics_headers_safe":%s},"redirect_class":{"modern":"%s","legacy":"%s"},"ics_header_class":{"modern":"%s","legacy":"%s"},"check_count":6,"cleanup":"not_applicable"}\n' \
-        "${PROBE}" "${OUTCOME}" "${EXIT_CODE}" \
+    printf '{"schema":"read_only_probe.v1","probe":"%s","target_class":"%s","outcome":"%s","exit_code":%s,"checks":{"modern_confirmation_redirect":%s,"legacy_confirmation_redirect":%s,"modern_ics_missing":%s,"legacy_ics_missing":%s,"modern_ics_headers_safe":%s,"legacy_ics_headers_safe":%s},"redirect_class":{"modern":"%s","legacy":"%s"},"ics_header_class":{"modern":"%s","legacy":"%s"},"check_count":6,"cleanup":"not_applicable"}\n' \
+        "${PROBE}" "${TARGET_CLASS}" "${OUTCOME}" "${EXIT_CODE}" \
         "${CHECK_MODERN_CONFIRMATION}" "${CHECK_LEGACY_CONFIRMATION}" \
         "${CHECK_MODERN_ICS_MISSING}" "${CHECK_LEGACY_ICS_MISSING}" \
         "${CHECK_MODERN_ICS_HEADERS}" "${CHECK_LEGACY_ICS_HEADERS}" \
@@ -84,7 +85,11 @@ die_environment() { OUTCOME='environment_failed'; EXIT_CODE=21; exit 21; }
 die_application() { OUTCOME='application_failed'; EXIT_CODE=20; exit 20; }
 die_unknown() { OUTCOME='unknown'; EXIT_CODE=70; exit 70; }
 
-if [[ "${BASE_URL}" != "${PROD_ORIGIN}" && ! "${BASE_URL}" =~ ^http://127\.0\.0\.1:[1-9][0-9]*$ ]]; then
+if [[ "${BASE_URL}" == "${PROD_ORIGIN}" ]]; then
+    TARGET_CLASS='production'
+elif [[ "${BASE_URL}" =~ ^http://127\.0\.0\.1:[1-9][0-9]*$ ]]; then
+    TARGET_CLASS='local'
+else
     die_unknown
 fi
 for command_name in curl od tr mktemp awk; do
@@ -102,7 +107,7 @@ request() {
     local header_file
     local http_status
     local curl_status
-    header_file="$(mktemp)" || die_environment
+    header_file="$(mktemp 2>/dev/null)" || die_environment
     TEMP_FILES+=("${header_file}")
     set +e
     http_status="$(curl --disable --config /dev/null --request GET --retry 0 --max-redirs 0 --silent --show-error --max-time 15 --dump-header "${header_file}" --output /dev/null --write-out '%{http_code}' "${BASE_URL}/index.php/${route}" 2>/dev/null)"
@@ -124,14 +129,23 @@ redirect_class() {
     fi
     local summary
     local blocks
+    local locations
     summary="$(awk '
-        tolower($0) ~ /^http\/[0-9.]+[[:space:]]/ {blocks++; location=""; next}
-        blocks > 0 && tolower($0) ~ /^location:[[:space:]]*/ {location=$0; sub(/^[^:]*:[[:space:]]*/, "", location)}
-        END {printf "%d|%s", blocks, location}
+        tolower($0) ~ /^http\/[0-9.]+[[:space:]]/ {blocks++; locations=0; location=""; next}
+        blocks > 0 && tolower($0) ~ /^location:[[:space:]]*/ {locations++; location=$0; sub(/^[^:]*:[[:space:]]*/, "", location)}
+        END {printf "%d|%d|%s", blocks, locations, location}
     ' "${header_file}" 2>/dev/null)" || return 1
-    IFS='|' read -r blocks location <<< "${summary}"
+    IFS='|' read -r blocks locations location <<< "${summary}"
     location="${location//$'\r'/}"
     if [[ "${blocks}" == '0' ]]; then
+        REDIRECT_RESULT='malformed'
+        return
+    fi
+    if [[ "${locations}" == '0' ]]; then
+        REDIRECT_RESULT='missing'
+        return
+    fi
+    if [[ "${locations}" != '1' ]]; then
         REDIRECT_RESULT='malformed'
         return
     fi
@@ -141,7 +155,6 @@ redirect_class() {
             "${BASE_URL}/index.php/appointments"|"${BASE_URL}/index.php/appointments/")
             REDIRECT_RESULT='appointments'
             ;;
-        '') REDIRECT_RESULT='missing' ;;
         *) REDIRECT_RESULT='unexpected' ;;
     esac
 }
