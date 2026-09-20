@@ -277,7 +277,10 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
 
     public function testWrapperAcceptsExpectedRelativeAndSameOriginAppRedirects(): void
     {
-        foreach (['absolute_same_origin', 'app_relative', 'intermediate_unsafe_final_safe'] as $scenario) {
+        foreach (
+            ['absolute_same_origin', 'app_relative', 'intermediate_unsafe_final_safe', 'trailer_ics_headers']
+            as $scenario
+        ) {
             [$status, $output, $stderr] = $this->runWrapper($scenario);
 
             self::assertSame(0, $status, $scenario);
@@ -299,6 +302,7 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
                 'duplicate_location',
                 'folded_content_type',
                 'folded_content_disposition',
+                'trailer_location',
             ]
             as $scenario
         ) {
@@ -583,6 +587,21 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
                 folded_content_disposition)
                     if printf '%s' "${url}" | grep -q '/appointments/ics/'; then
                         [ -n "${header}" ] && printf 'HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\nContent-Disposition:\r\n attachment\r\n\r\n' >"${header}"
+                        printf '404'
+                    else
+                        [ -n "${header}" ] && printf 'HTTP/1.1 307 Temporary Redirect\r\nLocation: /appointments\r\n\r\n' >"${header}"
+                        printf '307'
+                    fi
+                    exit 0
+                    ;;
+                trailer_location)
+                    [ -n "${header}" ] && printf 'HTTP/1.1 307 Temporary Redirect\r\nX-Test: normal\r\n\r\nLocation: /appointments\r\n' >"${header}"
+                    printf '307'
+                    exit 0
+                    ;;
+                trailer_ics_headers)
+                    if printf '%s' "${url}" | grep -q '/appointments/ics/'; then
+                        [ -n "${header}" ] && printf 'HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\n\r\nContent-Type: text/calendar\r\nContent-Disposition: attachment\r\n' >"${header}"
                         printf '404'
                     else
                         [ -n "${header}" ] && printf 'HTTP/1.1 307 Temporary Redirect\r\nLocation: /appointments\r\n\r\n' >"${header}"
