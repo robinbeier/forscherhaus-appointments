@@ -771,6 +771,14 @@
       "ownership_notes": "Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.",
       "path_rules": [
         {
+          "path": "application/controllers/Csp_report.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/core/Csp_report_only.php",
+          "match": "exact_file"
+        },
+        {
           "path": "application/views/components/jquery_compat_inline.php",
           "match": "exact_file"
         },
@@ -812,6 +820,7 @@
         }
       ],
       "key_files": [
+        "application/core/Csp_report_only.php",
         "application/libraries/Request_normalizer.php",
         "application/libraries/Accounts.php"
       ],

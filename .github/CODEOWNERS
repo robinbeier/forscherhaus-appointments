@@ -18,6 +18,7 @@
 /application/controllers/Calendar.php @robinbeier
 /application/controllers/Consents.php @robinbeier
 /application/controllers/Console.php @robinbeier
+/application/controllers/Csp_report.php @robinbeier
 /application/controllers/Customers.php @robinbeier
 /application/controllers/Dashboard.php @robinbeier
 /application/controllers/Dashboard_export.php @robinbeier
@@ -40,6 +41,7 @@
 /application/controllers/Update.php @robinbeier
 /application/controllers/User.php @robinbeier
 /application/controllers/api/v1/** @robinbeier
+/application/core/Csp_report_only.php @robinbeier
 /application/core/Customers_ui_smoke_access_policy.php @robinbeier
 /application/core/EA_Session.php @robinbeier
 /application/core/Provider_ui_smoke_access_policy.php @robinbeier

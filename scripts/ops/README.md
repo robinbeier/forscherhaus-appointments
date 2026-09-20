@@ -75,6 +75,11 @@ Script inventory:
 - `kuma_push_pdf_export.sh` runs the dashboard PDF release gate as a synthetic smoke
 - `lib/kuma_push_common.sh` provides shared env, curl, and log helpers
 - `prod_doctor.sh` prints redacted read-only production status
+- `prod_csp_report_only_status.sh` combines the existing redacted header posture
+  with the bounded class-only collector summary for an expected inactive or
+  active ROB-586 phase. It never sends a report. Its first production run
+  requires the separate approval defined in
+  [`docs/security/ROB-586-production-csp-report-only-plan.md`](../../docs/security/ROB-586-production-csp-report-only-plan.md).
 - `run_read_only_http_probe.sh` performs four bounded anonymous GET checks through
   the fixed loopback ingress for modern and legacy booking-confirmation and ICS
   capability routes. The application recognizes only those exact loopback GET

@@ -20,7 +20,7 @@ This map defines component boundaries, path ownership scope, and dependency edge
 | `settings-compliance` | Settings & Compliance | auth-session, integrations-sync, people-services-admin, scheduling-backoffice, shared-core | 27 | 3 |
 | `integrations-sync` | Integrations & Sync | auth-session, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 6 | 1 |
 | `api-v1` | REST API v1 | auth-session, integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 5 | 3 |
-| `shared-core` | Shared Core | None | 10 | 2 |
+| `shared-core` | Shared Core | None | 12 | 3 |
 | `platform-quality-tooling` | Platform, CI, Release Gates | api-v1, booking-public, dashboard-exports, installation-bootstrap, people-services-admin, settings-compliance, shared-core | 22 | 11 |
 
 ## Component Details
@@ -334,6 +334,8 @@ Dependencies:
 - None
 
 Path rules:
+- `application/controllers/Csp_report.php` (exact_file)
+- `application/core/Csp_report_only.php` (exact_file)
 - `application/views/components/jquery_compat_inline.php` (exact_file)
 - `application/libraries/Accounts.php` (exact_file)
 - `application/models/Users_model.php` (exact_file)
@@ -346,6 +348,7 @@ Path rules:
 - `application/libraries/Ics_calendar.php` (exact_file)
 
 Key files:
+- `application/core/Csp_report_only.php`
 - `application/libraries/Request_normalizer.php`
 - `application/libraries/Accounts.php`
 

@@ -324,9 +324,12 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
 - Manual approval required: yes
 - Ownership notes: Single human owner; duplicate handles preserve tooling compatibility and do not imply independent secondary coverage.
 - Key files:
+  - `application/core/Csp_report_only.php`
   - `application/libraries/Request_normalizer.php`
   - `application/libraries/Accounts.php`
 - Path rules:
+  - `application/controllers/Csp_report.php` (exact_file)
+  - `application/core/Csp_report_only.php` (exact_file)
   - `application/views/components/jquery_compat_inline.php` (exact_file)
   - `application/libraries/Accounts.php` (exact_file)
   - `application/models/Users_model.php` (exact_file)
