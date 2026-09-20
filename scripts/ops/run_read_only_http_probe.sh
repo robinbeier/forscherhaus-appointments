@@ -5,8 +5,12 @@ set +x
 # Read-only anonymous booking-download contract. Capabilities are generated
 # privately and are never printed, persisted, or included in the receipt.
 readonly PROBE='anonymous_booking_download_capabilities'
-readonly PROD_ORIGIN='https://dasforscherhaus-leg.de'
-BASE_URL="${READ_ONLY_PROBE_BASE_URL:-${PROD_ORIGIN}}"
+readonly PROD_ORIGIN='http://127.0.0.1'
+if [[ "${READ_ONLY_PROBE_BASE_URL+x}" == 'x' ]]; then
+    BASE_URL="${READ_ONLY_PROBE_BASE_URL}"
+else
+    BASE_URL="${PROD_ORIGIN}"
+fi
 TARGET_CLASS='unapproved'
 OUTCOME='unknown'
 EXIT_CODE=70
@@ -104,7 +108,7 @@ die_environment() { OUTCOME='environment_failed'; EXIT_CODE=21; exit 21; }
 die_application() { OUTCOME='application_failed'; EXIT_CODE=20; exit 20; }
 die_unknown() { OUTCOME='unknown'; EXIT_CODE=70; exit 70; }
 
-if [[ "${BASE_URL}" == "${PROD_ORIGIN}" ]]; then
+if [[ "${READ_ONLY_PROBE_BASE_URL+x}" != 'x' && "${BASE_URL}" == "${PROD_ORIGIN}" ]]; then
     TARGET_CLASS='production'
 elif [[ "${BASE_URL}" =~ ^http://127\.0\.0\.1:[1-9][0-9]*$ ]]; then
     TARGET_CLASS='local'
@@ -119,6 +123,8 @@ modern_capability="$(od -An -N32 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n' 2>/
 legacy_capability="$(od -An -N6 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n' 2>/dev/null)" || die_environment
 [[ "${modern_capability}" =~ ^[0-9a-f]{64}$ ]] || die_environment
 [[ "${legacy_capability}" =~ ^[0-9a-f]{12}$ ]] || die_environment
+COOKIE_JAR="$(mktemp 2>/dev/null)" || die_environment
+TEMP_FILES+=("${COOKIE_JAR}")
 
 request() {
     local route="$1"
@@ -129,7 +135,7 @@ request() {
     header_file="$(mktemp 2>/dev/null)" || die_environment
     TEMP_FILES+=("${header_file}")
     set +e
-    http_status="$(curl --disable --config /dev/null --request GET --retry 0 --max-redirs 0 --silent --show-error --max-time 15 --dump-header "${header_file}" --output /dev/null --write-out '%{http_code}' "${BASE_URL}/index.php/${route}" 2>/dev/null)"
+    http_status="$(curl --disable --config /dev/null --request GET --retry 0 --max-redirs 0 --silent --show-error --max-time 15 --cookie "${COOKIE_JAR}" --cookie-jar "${COOKIE_JAR}" --dump-header "${header_file}" --output /dev/null --write-out '%{http_code}' "${BASE_URL}/index.php/${route}" 2>/dev/null)"
     curl_status=$?
     set -e
     [[ "${curl_status}" == '0' ]] || die_environment

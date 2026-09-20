@@ -5,10 +5,65 @@ declare(strict_types=1);
 use Ops\ReadOnlyProbeReceiptV1;
 use PHPUnit\Framework\TestCase;
 
+defined('BASEPATH') || define('BASEPATH', dirname(__DIR__, 3) . '/system/');
 require_once __DIR__ . '/../../../scripts/ops/lib/ReadOnlyProbeReceiptV1.php';
+require_once __DIR__ . '/../../../application/core/Read_only_probe_request.php';
+require_once __DIR__ . '/../../../application/libraries/Session/drivers/Session_null_driver.php';
 
 final class ReadOnlyHttpProbeReceiptTest extends TestCase
 {
+    public function testProbeRequestClassifierIsLoopbackGetAndExactCapabilityBound(): void
+    {
+        self::assertTrue(
+            $this->classifyRequest([
+                'REQUEST_METHOD' => 'GET',
+                'REMOTE_ADDR' => '127.0.0.1',
+                'HTTP_HOST' => 'localhost:8123',
+                'REQUEST_URI' => '/index.php/booking_confirmation/of/' . str_repeat('a', 64),
+            ]),
+        );
+        self::assertTrue(
+            $this->classifyRequest([
+                'REQUEST_METHOD' => 'GET',
+                'REMOTE_ADDR' => '::1',
+                'HTTP_HOST' => '[::1]',
+                'REQUEST_URI' => '/appointments/ics/' . str_repeat('b', 12),
+            ]),
+        );
+
+        foreach (
+            [
+                ['HTTP_HOST' => 'dasforscherhaus-leg.de'],
+                ['REMOTE_ADDR' => '192.0.2.10'],
+                ['REQUEST_METHOD' => 'POST'],
+                ['REQUEST_URI' => '/booking_confirmation/of/' . str_repeat('A', 64)],
+                ['REQUEST_URI' => '/appointments/ics/' . str_repeat('c', 12) . '/suffix'],
+            ]
+            as $override
+        ) {
+            self::assertFalse($this->classifyRequest($override));
+        }
+    }
+
+    public function testNullSessionDriverNeverReadsOrPersistsState(): void
+    {
+        $driver = new Session_null_driver();
+
+        self::assertTrue($driver->open(sys_get_temp_dir(), 'ea_session'));
+        self::assertSame('', $driver->read('session-id'));
+        self::assertTrue($driver->write('session-id', 'private-state'));
+        self::assertSame('', $driver->read('session-id'));
+        self::assertTrue($driver->destroy('session-id'));
+        self::assertTrue($driver->close());
+    }
+
+    public function testProbe404LoggingSuppressionIsLimitedToClassifiedRequests(): void
+    {
+        $source = (string) file_get_contents(__DIR__ . '/../../../application/controllers/Appointments.php');
+
+        self::assertSame(3, substr_count($source, "show_404('', !Read_only_probe_request::is());"));
+    }
+
     public function testReceiptIsCanonicalAndContainsOnlyClosedSecurityProperties(): void
     {
         $checks = [
@@ -384,11 +439,7 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
 
     public function testReceiptOutputFailureRemovesAllTemporaryHeadersBeforeFailingClosed(): void
     {
-        [$status, $output, $stderr, $headerFiles] = $this->runWrapper(
-            'success',
-            'https://dasforscherhaus-leg.de',
-            'closed',
-        );
+        [$status, $output, $stderr, $headerFiles] = $this->runWrapper('success', 'http://127.0.0.1', 'closed');
 
         self::assertSame(70, $status);
         self::assertSame([], $output);
@@ -490,7 +541,7 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
     /** @return array{0:int,1:array<int,string>,2:string,3:array<int,string>} */
     private function runWrapper(
         string $scenario,
-        string $baseUrl = 'https://dasforscherhaus-leg.de',
+        string $baseUrl = 'http://127.0.0.1',
         ?string $stdoutTarget = null,
     ): array {
         $directory = sys_get_temp_dir() . '/read-only-probe-curl-' . bin2hex(random_bytes(8));
@@ -506,6 +557,8 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
             retry=''
             max_redirs=''
             config=''
+            cookie=''
+            cookie_jar=''
             [ "$1" = '--disable' ] || exit 8
             shift
             while [ "$#" -gt 0 ]; do
@@ -513,6 +566,8 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
                     -D|--dump-header) header="$2"; shift 2; continue ;;
                     --output|--write-out|--max-time) shift 2; continue ;;
                     --silent|--show-error) shift; continue ;;
+                    --cookie) cookie="$2"; shift 2; continue ;;
+                    --cookie-jar) cookie_jar="$2"; shift 2; continue ;;
                     --config) config="$2"; shift 2; continue ;;
                     --request) request_method="$2"; shift 2; continue ;;
                     --retry) retry="$2"; shift 2; continue ;;
@@ -529,6 +584,8 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
             [ "${request_method}" = 'GET' ] || exit 8
             [ "${retry}" = '0' ] || exit 8
             [ "${max_redirs}" = '0' ] || exit 8
+            [ -n "${cookie}" ] || exit 8
+            [ "${cookie}" = "${cookie_jar}" ] || exit 8
             if [ "${MOCK_CURL_SCENARIO}" != 'curl_nonzero' ] && [ "${MOCK_CURL_SCENARIO}" != 'malformed' ]; then
                 capability="${url##*/}"
                 case "${url}" in
@@ -557,7 +614,7 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
                         [ -n "${header}" ] && printf 'HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\n\r\n' >"${header}"
                         printf '404'
                     else
-                        [ -n "${header}" ] && printf 'HTTP/1.1 307 Temporary Redirect\r\nLocation: https://dasforscherhaus-leg.de/index.php/appointments\r\n\r\n' >"${header}"
+                        [ -n "${header}" ] && printf 'HTTP/1.1 307 Temporary Redirect\r\nLocation: http://127.0.0.1/index.php/appointments\r\n\r\n' >"${header}"
                         printf '307'
                     fi
                     exit 0
@@ -771,6 +828,8 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
             $stderrFile = $directory . '/stderr.log';
             $headerLog = $directory . '/headers.log';
             $path = $scenario === 'missing_rm' ? $directory : $directory . ':/usr/bin:/bin';
+            $baseUrlEnv =
+                $baseUrl === 'http://127.0.0.1' ? '' : ' READ_ONLY_PROBE_BASE_URL=' . escapeshellarg($baseUrl);
             $command =
                 'PATH=' .
                 escapeshellarg($path) .
@@ -778,8 +837,7 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
                 escapeshellarg($scenario) .
                 ' MOCK_CURL_HEADER_LOG=' .
                 escapeshellarg($headerLog) .
-                ' READ_ONLY_PROBE_BASE_URL=' .
-                escapeshellarg($baseUrl) .
+                $baseUrlEnv .
                 ' ';
             $wrapperPath = __DIR__ . '/../../../scripts/ops/run_read_only_http_probe.sh';
             if ($stdoutTarget === 'closed') {
@@ -828,6 +886,27 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
                 unlink($headerLog);
             }
             rmdir($directory);
+        }
+    }
+
+    /** @param array<string,string> $override */
+    private function classifyRequest(array $override): bool
+    {
+        $original = $_SERVER;
+        $_SERVER = array_merge(
+            [
+                'REQUEST_METHOD' => 'GET',
+                'REMOTE_ADDR' => '127.0.0.1',
+                'HTTP_HOST' => '127.0.0.1:8123',
+                'REQUEST_URI' => '/appointments/ics/' . str_repeat('a', 12),
+            ],
+            $override,
+        );
+
+        try {
+            return Read_only_probe_request::is();
+        } finally {
+            $_SERVER = $original;
         }
     }
 }

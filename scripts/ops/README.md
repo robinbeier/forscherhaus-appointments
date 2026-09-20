@@ -75,10 +75,15 @@ Script inventory:
 - `kuma_push_pdf_export.sh` runs the dashboard PDF release gate as a synthetic smoke
 - `lib/kuma_push_common.sh` provides shared env, curl, and log helpers
 - `prod_doctor.sh` prints redacted read-only production status
-- `run_read_only_http_probe.sh` performs four bounded anonymous GET checks for
-  modern and legacy booking-confirmation and ICS capability routes. It emits
-  one secret-free `read_only_probe.v1` terminal receipt, has no fixture or
-  cleanup phase, and must not be retried automatically.
+- `run_read_only_http_probe.sh` performs four bounded anonymous GET checks through
+  the fixed loopback ingress for modern and legacy booking-confirmation and ICS
+  capability routes. The application recognizes only those exact loopback GET
+  routes and switches to a non-persistent session driver; the existing loopback
+  rate-limit guard and probe-only ICS 404 logging suppression keep the run
+  state-free. The wrapper reuses one cookie context, removes its local jar, and
+  emits one secret-free `read_only_probe.v1` terminal receipt. It does not prove
+  public DNS/TLS routing and must not be retried automatically. The first
+  production run remains separately approved.
 - `prod_logs_summary.sh` prints redacted recent production log summaries
 - `prod_validate_after_change.sh` runs the standard post-change production gate
 - `provider_ui_smoke_principal.sh` is the server-local root-only bootstrap and
