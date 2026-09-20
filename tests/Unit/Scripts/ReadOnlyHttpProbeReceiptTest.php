@@ -307,6 +307,7 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
                 'whitespace_location',
                 'whitespace_content_type',
                 'whitespace_content_disposition',
+                'embedded_location_control',
             ]
             as $scenario
         ) {
@@ -692,6 +693,16 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
                         printf '404'
                     else
                         [ -n "${header}" ] && printf 'HTTP/1.1 307 Temporary Redirect\r\nLocation: /appointments\r\n\r\n' >"${header}"
+                        printf '307'
+                    fi
+                    exit 0
+                    ;;
+                embedded_location_control)
+                    if printf '%s' "${url}" | grep -q '/appointments/ics/'; then
+                        [ -n "${header}" ] && printf 'HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\n\r\n' >"${header}"
+                        printf '404'
+                    else
+                        [ -n "${header}" ] && printf 'HTTP/1.1 307 Temporary Redirect\r\nLocation: /appoint\rments\r\n\r\n' >"${header}"
                         printf '307'
                     fi
                     exit 0
