@@ -186,6 +186,9 @@ const boundedObservationMs = (value) => {
 };
 
 const sanitizeViolation = (violation, surface, selfOrigin, matomoOrigin = null) => {
+    if (violation?.disposition !== 'report') {
+        return null;
+    }
     const rawDirective = typeof violation?.effectiveDirective === 'string' ? violation.effectiveDirective : 'unknown';
     const normalizedDirective = DIRECTIVE_ALIASES.get(rawDirective) || rawDirective;
     const directive = ALLOWED_DIRECTIVES.has(normalizedDirective) ? normalizedDirective : 'unknown';
@@ -193,7 +196,7 @@ const sanitizeViolation = (violation, surface, selfOrigin, matomoOrigin = null) 
         surface: normalizeSurface(surface),
         directive,
         blocked_origin: blockedOriginClass(violation?.blockedURI, selfOrigin, matomoOrigin),
-        disposition: 'report',
+        disposition: violation.disposition,
     };
 };
 
@@ -280,6 +283,7 @@ const runProbe = async (input) => {
                 window.__CSP_COMPATIBILITY_VIOLATIONS__.push({
                     effectiveDirective: event.effectiveDirective,
                     blockedURI: event.blockedURI,
+                    disposition: event.disposition,
                 });
             });
         });
@@ -356,7 +360,10 @@ const runProbe = async (input) => {
         await page.waitForTimeout(observationMs);
         const pageViolations = await page.evaluate(() => window.__CSP_COMPATIBILITY_VIOLATIONS__ || []);
         for (const violation of pageViolations) {
-            violations.push(sanitizeViolation(violation, input.surface, target.origin, matomoOrigin));
+            const sanitizedViolation = sanitizeViolation(violation, input.surface, target.origin, matomoOrigin);
+            if (sanitizedViolation !== null) {
+                violations.push(sanitizedViolation);
+            }
         }
         await page.close({runBeforeUnload: false});
         page = undefined;

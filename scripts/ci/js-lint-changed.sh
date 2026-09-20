@@ -65,7 +65,7 @@ while IFS= read -r -d '' file; do
             ;;
     esac
     case "$file" in
-        scripts/ci/csp_compatibility_probe.js|tests/JavaScript/csp_compatibility_probe.test.js)
+        package.json|package-lock.json|scripts/ci/csp_compatibility_probe.js|scripts/ci/js-lint-changed.sh|tests/JavaScript/csp_compatibility_probe.test.js|.github/workflows/ci.yml)
             csp_probe_changed=true
             ;;
     esac

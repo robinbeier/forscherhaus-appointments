@@ -20,7 +20,7 @@ test('accepts loopback HTTP targets and rejects production or non-HTTP targets',
 test('sanitizes policy violations into fixed classes without raw locations', () => {
     const raw = 'https://example.test/booking/capability?token=secret';
     const violation = probe.sanitizeViolation(
-        {effectiveDirective: 'script-src', blockedURI: raw, sourceFile: raw, lineNumber: 12},
+        {effectiveDirective: 'script-src', blockedURI: raw, sourceFile: raw, lineNumber: 12, disposition: 'report'},
         'booking',
         'http://127.0.0.1:8080',
     );
@@ -117,7 +117,13 @@ test('receipt contains only aggregate classes and explicit non-production marker
     const raw = 'https://example.test/booking/capability?token=secret';
     const receipt = probe.makeReceipt(
         'booking',
-        [probe.sanitizeViolation({effectiveDirective: 'script-src', blockedURI: raw}, 'booking', 'http://localhost')],
+        [
+            probe.sanitizeViolation(
+                {effectiveDirective: 'script-src', blockedURI: raw, disposition: 'report'},
+                'booking',
+                'http://localhost',
+            ),
+        ],
         true,
     );
     const serialized = JSON.stringify(receipt);
@@ -128,6 +134,13 @@ test('receipt contains only aggregate classes and explicit non-production marker
     assert.equal(receipt.blocked_request_count, 0);
     assert.equal(serialized.includes(raw), false);
     assert.equal(serialized.includes('token=secret'), false);
+});
+
+test('only report dispositions enter the sanitized receipt', () => {
+    const blocked = {effectiveDirective: 'script-src', blockedURI: 'https://example.test', disposition: 'enforce'};
+    assert.equal(probe.sanitizeViolation(blocked, 'app', 'http://localhost'), null);
+    assert.equal(probe.sanitizeViolation({...blocked, disposition: 'unexpected'}, 'app', 'http://localhost'), null);
+    assert.equal(probe.sanitizeViolation({...blocked, disposition: undefined}, 'app', 'http://localhost'), null);
 });
 
 test('classifies loopback, browser-local, and external requests without retaining URLs', () => {
@@ -151,7 +164,7 @@ test('bounds the post-load observation window', () => {
 
 test('unknown surfaces fail closed and element directives normalize to policy classes', () => {
     const violation = probe.sanitizeViolation(
-        {effectiveDirective: 'script-src-elem', blockedURI: 'inline'},
+        {effectiveDirective: 'script-src-elem', blockedURI: 'inline', disposition: 'report'},
         'unrecognized',
     );
     assert.deepEqual(violation, {
@@ -255,10 +268,17 @@ const browser = {
           effectiveDirective: 'script-src',
           blockedURI: 'https://example.test/private/path?token=secret',
           sourceFile: 'https://example.test/private/path?token=secret',
+          disposition: 'report',
         }, {
           effectiveDirective: 'script-src',
           blockedURI: 'https://matomo.example.test/matomo.js?token=secret',
           sourceFile: 'https://matomo.example.test/matomo.js?token=secret',
+          disposition: 'enforce',
+        }, {
+          effectiveDirective: 'script-src',
+          blockedURI: 'https://matomo.example.test/matomo.js?token=secret',
+          sourceFile: 'https://matomo.example.test/matomo.js?token=secret',
+          disposition: 'report',
         }],
         close: async () => { record.pageClosed = true; save(); },
       }),
@@ -364,7 +384,10 @@ test(
         const executablePath = process.env.PLAYWRIGHT_MCP_EXECUTABLE_PATH || playwright.chromium.executablePath();
         const server = http.createServer((request, response) => {
             if (request.url === '/') {
-                response.writeHead(200, {'content-type': 'text/html'});
+                response.writeHead(200, {
+                    'content-type': 'text/html',
+                    'content-security-policy': "script-src 'self'",
+                });
                 response.end('<!doctype html><script src="https://example.invalid/intentional-csp.js"></script>');
                 return;
             }
@@ -382,7 +405,9 @@ test(
             });
             assert.equal(receipt.report_destination_intercepted, true);
             assert.equal(receipt.intercepted_report_count > 0, true);
-            assert.equal(receipt.violation_classes['app:script-src:unknown-external:report'] > 0, true);
+            assert.equal(receipt.violation_count, 1);
+            assert.deepEqual(Object.keys(receipt.violation_classes), ['app:script-src:unknown-external:report']);
+            assert.equal(receipt.violation_classes['app:script-src:unknown-external:report'], 1);
             assert.equal(receipt.production_changed, false);
         } finally {
             await new Promise((resolve) => server.close(resolve));

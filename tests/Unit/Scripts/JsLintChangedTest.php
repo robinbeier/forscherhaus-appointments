@@ -68,20 +68,53 @@ final class JsLintChangedTest extends TestCase
 
     public function testCspProbeChangesRequireSystemBrowserEvidence(): void
     {
-        $repository = $this->repository();
-        file_put_contents($repository . '/scripts/ci/csp_compatibility_probe.js', "initial\n");
-        $this->commit($repository, 'initial');
-        file_put_contents($repository . '/scripts/ci/csp_compatibility_probe.js', "changed\n");
-        $this->commit($repository, 'csp probe');
+        foreach (
+            ['scripts/ci/csp_compatibility_probe.js', 'scripts/ci/js-lint-changed.sh', '.github/workflows/ci.yml']
+            as $path
+        ) {
+            $repository = $this->repository();
+            $directory = dirname($repository . '/' . $path);
+            is_dir($directory) || mkdir($directory, 0777, true);
+            if ($path !== 'scripts/ci/js-lint-changed.sh') {
+                file_put_contents($repository . '/' . $path, "initial\n");
+            }
+            $this->commit($repository, 'initial');
+            if ($path === 'scripts/ci/js-lint-changed.sh') {
+                file_put_contents($repository . '/' . $path, "# selector regression\n", FILE_APPEND);
+            } else {
+                file_put_contents($repository . '/' . $path, "changed\n");
+            }
+            $this->commit($repository, 'csp probe control');
 
-        $result = $this->runLint($repository, ['--check-only']);
+            $result = $this->runLint($repository, ['--check-only']);
 
-        self::assertSame(0, $result['exit_code'], $result['stderr']);
-        self::assertSame(
-            "needs_node=true\ncsp_probe_changed=true\nhas_changes=false\n",
-            file_get_contents($result['output_file']),
-        );
-        self::assertFileDoesNotExist($result['eslint_log']);
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            self::assertSame(
+                "needs_node=true\ncsp_probe_changed=true\nhas_changes=false\n",
+                file_get_contents($result['output_file']),
+            );
+            self::assertFileDoesNotExist($result['eslint_log']);
+        }
+    }
+
+    public function testPlaywrightDependencyChangesRequireSystemBrowserEvidence(): void
+    {
+        foreach (['package.json', 'package-lock.json'] as $manifest) {
+            $repository = $this->repository();
+            file_put_contents($repository . '/' . $manifest, "initial\n");
+            $this->commit($repository, 'initial');
+            file_put_contents($repository . '/' . $manifest, "changed\n");
+            $this->commit($repository, 'playwright dependency');
+
+            $result = $this->runLint($repository, ['--check-only']);
+
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            self::assertSame(
+                "needs_node=true\ncsp_probe_changed=true\nhas_changes=false\n",
+                file_get_contents($result['output_file']),
+            );
+            self::assertFileDoesNotExist($result['eslint_log']);
+        }
     }
 
     public function testNormalModePassesChangedJsSubdirectoryAndRenameToEslint(): void
