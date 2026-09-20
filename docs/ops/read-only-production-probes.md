@@ -24,5 +24,7 @@ failure. The terminal outcomes are:
 
 The production target is fixed to the known App origin. Local tests may use
 only `127.0.0.1` with an explicit port. No outcome is retried automatically;
-a missing or malformed receipt remains an evidence gap. Production execution
+a missing or malformed receipt remains an evidence gap. The HTTP client
+explicitly disables user configuration, forces GET, sets retries and redirect
+following to zero, and does not follow redirects. Production execution
 requires a separate, explicit release decision.

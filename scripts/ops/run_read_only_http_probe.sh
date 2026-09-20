@@ -22,6 +22,8 @@ REDIRECT_MODERN='malformed'
 REDIRECT_LEGACY='malformed'
 ICS_HEADERS_MODERN='malformed'
 ICS_HEADERS_LEGACY='malformed'
+REDIRECT_RESULT='malformed'
+ICS_HEADER_RESULT='malformed'
 
 emit_receipt() {
     [[ "${RECEIPT_EMITTED}" == '1' ]] && return
@@ -39,10 +41,17 @@ finish() {
     local status=$?
     trap - EXIT HUP INT TERM
     if [[ "${RECEIPT_EMITTED}" == '0' ]]; then
-        if [[ "${status}" != '0' && "${EXIT_CODE}" == '0' ]]; then
-            OUTCOME='unknown'
-            EXIT_CODE=70
-        fi
+        case "${status}" in
+            21) OUTCOME='environment_failed'; EXIT_CODE=21 ;;
+            20) OUTCOME='application_failed'; EXIT_CODE=20 ;;
+            70) OUTCOME='unknown'; EXIT_CODE=70 ;;
+            *)
+                if [[ "${status}" != '0' && "${EXIT_CODE}" == '0' ]]; then
+                    OUTCOME='unknown'
+                    EXIT_CODE=70
+                fi
+                ;;
+        esac
         emit_receipt
     fi
     if ((${#TEMP_FILES[@]} > 0)); then
@@ -80,7 +89,7 @@ request() {
     header_file="$(mktemp)" || die_environment
     TEMP_FILES+=("${header_file}")
     set +e
-    http_status="$(curl --silent --show-error --max-time 15 --dump-header "${header_file}" --output /dev/null --write-out '%{http_code}' "${BASE_URL}/index.php/${route}" 2>/dev/null)"
+    http_status="$(curl --disable --config /dev/null --request GET --retry 0 --max-redirs 0 --silent --show-error --max-time 15 --dump-header "${header_file}" --output /dev/null --write-out '%{http_code}' "${BASE_URL}/index.php/${route}" 2>/dev/null)"
     curl_status=$?
     set -e
     [[ "${curl_status}" == '0' ]] || die_environment
@@ -94,18 +103,20 @@ redirect_class() {
     local location
     local status="$2"
     if [[ "${status}" != '307' ]]; then
-        printf 'unexpected'
+        REDIRECT_RESULT='unexpected'
         return
     fi
-    location="$(awk 'tolower($1)=="location:" {sub(/^[^:]*:[[:space:]]*/, ""); print; exit}' "${header_file}")" || die_environment
+    location="$(awk 'tolower($0) ~ /^location:[[:space:]]*/ {sub(/^[^:]*:[[:space:]]*/, ""); print; exit}' "${header_file}" 2>/dev/null)" || return 1
     location="${location//$'\r'/}"
-    if [[ "${location}" == */appointments || "${location}" == */appointments/ || "${location}" == */appointments\?* || "${location}" == */appointments#* ]]; then
-        printf 'appointments'
-    elif [[ -z "${location}" ]]; then
-        printf 'missing'
-    else
-        printf 'unexpected'
-    fi
+    case "${location}" in
+        /appointments|/appointments/|/index.php/appointments|/index.php/appointments/|\
+            "${BASE_URL}/appointments"|"${BASE_URL}/appointments/"|\
+            "${BASE_URL}/index.php/appointments"|"${BASE_URL}/index.php/appointments/")
+            REDIRECT_RESULT='appointments'
+            ;;
+        '') REDIRECT_RESULT='missing' ;;
+        *) REDIRECT_RESULT='unexpected' ;;
+    esac
 }
 
 ics_header_class() {
@@ -113,19 +124,23 @@ ics_header_class() {
     local status="$2"
     local has_calendar='false'
     local has_disposition='false'
-    [[ "${status}" == '404' ]] || { printf 'malformed'; return; }
-    if awk 'tolower($1)=="content-type:" && tolower($0) ~ /text\/calendar/ {found=1} END {exit !found}' "${header_file}"; then
+    [[ "${status}" == '404' ]] || { ICS_HEADER_RESULT='malformed'; return; }
+    local calendar_match
+    local disposition_match
+    calendar_match="$(awk 'tolower($0) ~ /^content-type:[[:space:]]*text\/calendar/ {found=1} END {print found ? "1" : "0"}' "${header_file}" 2>/dev/null)" || return 1
+    disposition_match="$(awk 'tolower($0) ~ /^content-disposition:/ {found=1} END {print found ? "1" : "0"}' "${header_file}" 2>/dev/null)" || return 1
+    if [[ "${calendar_match}" == '1' ]]; then
         has_calendar='true'
     fi
-    if awk 'tolower($1)=="content-disposition:" {found=1} END {exit !found}' "${header_file}"; then
+    if [[ "${disposition_match}" == '1' ]]; then
         has_disposition='true'
     fi
     if [[ "${has_calendar}" == 'false' && "${has_disposition}" == 'false' ]]; then
-        printf 'not_calendar_no_disposition'
+        ICS_HEADER_RESULT='not_calendar_no_disposition'
     elif [[ "${has_calendar}" == 'true' ]]; then
-        printf 'calendar'
+        ICS_HEADER_RESULT='calendar'
     else
-        printf 'disposition'
+        ICS_HEADER_RESULT='disposition'
     fi
 }
 
@@ -134,10 +149,14 @@ request "booking_confirmation/of/${legacy_capability}" legacy_confirmation
 request "appointments/ics/${modern_capability}" modern_ics
 request "appointments/ics/${legacy_capability}" legacy_ics
 
-REDIRECT_MODERN="$(redirect_class "${modern_confirmation_headers}" "${modern_confirmation_status}")"
-REDIRECT_LEGACY="$(redirect_class "${legacy_confirmation_headers}" "${legacy_confirmation_status}")"
-ICS_HEADERS_MODERN="$(ics_header_class "${modern_ics_headers}" "${modern_ics_status}")"
-ICS_HEADERS_LEGACY="$(ics_header_class "${legacy_ics_headers}" "${legacy_ics_status}")"
+redirect_class "${modern_confirmation_headers}" "${modern_confirmation_status}" || die_environment
+REDIRECT_MODERN="${REDIRECT_RESULT}"
+redirect_class "${legacy_confirmation_headers}" "${legacy_confirmation_status}" || die_environment
+REDIRECT_LEGACY="${REDIRECT_RESULT}"
+ics_header_class "${modern_ics_headers}" "${modern_ics_status}" || die_environment
+ICS_HEADERS_MODERN="${ICS_HEADER_RESULT}"
+ics_header_class "${legacy_ics_headers}" "${legacy_ics_status}" || die_environment
+ICS_HEADERS_LEGACY="${ICS_HEADER_RESULT}"
 
 [[ "${REDIRECT_MODERN}" == 'appointments' ]] && CHECK_MODERN_CONFIRMATION='true'
 [[ "${REDIRECT_LEGACY}" == 'appointments' ]] && CHECK_LEGACY_CONFIRMATION='true'

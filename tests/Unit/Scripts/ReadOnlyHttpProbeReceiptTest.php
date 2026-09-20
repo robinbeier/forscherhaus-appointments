@@ -82,10 +82,11 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
 
     public function testWrapperSuccessUsesBothCapabilityRoutesAndEmitsOneReceipt(): void
     {
-        [$status, $output] = $this->runWrapper('success');
+        [$status, $output, $stderr] = $this->runWrapper('success');
 
         self::assertSame(0, $status);
         self::assertCount(1, $output);
+        self::assertSame('', $stderr);
         $receipt = ReadOnlyProbeReceiptV1::decode($output[0] . "\n");
         self::assertSame('passed', $receipt['outcome']);
         self::assertSame(6, $receipt['check_count']);
@@ -93,27 +94,55 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
         self::assertStringNotContainsString('booking_confirmation', $output[0]);
     }
 
+    public function testWrapperAcceptsExpectedRelativeAndSameOriginAppRedirects(): void
+    {
+        foreach (['absolute_same_origin', 'app_relative'] as $scenario) {
+            [$status, $output, $stderr] = $this->runWrapper($scenario);
+
+            self::assertSame(0, $status, $scenario);
+            self::assertCount(1, $output, $scenario);
+            self::assertSame('', $stderr, $scenario);
+            self::assertSame('passed', ReadOnlyProbeReceiptV1::decode($output[0] . "\n")['outcome']);
+        }
+    }
+
     public function testWrapperClassifiesHttpHeaderAndRedirectFailuresAsApplicationFailure(): void
     {
-        foreach (['unexpected_http', 'unexpected_header', 'unexpected_redirect'] as $scenario) {
-            [$status, $output] = $this->runWrapper($scenario);
+        foreach (
+            ['unexpected_http', 'unexpected_header', 'unexpected_redirect', 'external_redirect', 'suffix_redirect']
+            as $scenario
+        ) {
+            [$status, $output, $stderr] = $this->runWrapper($scenario);
 
             self::assertSame(20, $status, $scenario);
             self::assertCount(1, $output, $scenario);
+            self::assertSame('', $stderr, $scenario);
             self::assertSame('application_failed', ReadOnlyProbeReceiptV1::decode($output[0] . "\n")['outcome']);
         }
     }
 
+    public function testWrapperClassifiesHeaderReadFailureAsEnvironmentFailure(): void
+    {
+        [$status, $output, $stderr] = $this->runWrapper('header_read_failure');
+
+        self::assertSame(21, $status);
+        self::assertCount(1, $output);
+        self::assertSame('', $stderr);
+        self::assertSame('environment_failed', ReadOnlyProbeReceiptV1::decode($output[0] . "\n")['outcome']);
+    }
+
     public function testWrapperSeparatesCurlFailureAndMalformedOutput(): void
     {
-        [$curlStatus, $curlOutput] = $this->runWrapper('curl_nonzero');
+        [$curlStatus, $curlOutput, $curlStderr] = $this->runWrapper('curl_nonzero');
         self::assertSame(21, $curlStatus);
         self::assertCount(1, $curlOutput);
+        self::assertSame('', $curlStderr);
         self::assertSame('environment_failed', ReadOnlyProbeReceiptV1::decode($curlOutput[0] . "\n")['outcome']);
 
-        [$malformedStatus, $malformedOutput] = $this->runWrapper('malformed');
+        [$malformedStatus, $malformedOutput, $malformedStderr] = $this->runWrapper('malformed');
         self::assertSame(70, $malformedStatus);
         self::assertCount(1, $malformedOutput);
+        self::assertSame('', $malformedStderr);
         self::assertSame('unknown', ReadOnlyProbeReceiptV1::decode($malformedOutput[0] . "\n")['outcome']);
     }
 
@@ -121,20 +150,25 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
     {
         $output = [];
         $status = 0;
+        $stderrFile = sys_get_temp_dir() . '/read-only-probe-invalid-' . bin2hex(random_bytes(8));
         exec(
             'READ_ONLY_PROBE_BASE_URL=https://unapproved.example bash ' .
-                escapeshellarg(__DIR__ . '/../../../scripts/ops/run_read_only_http_probe.sh'),
+                escapeshellarg(__DIR__ . '/../../../scripts/ops/run_read_only_http_probe.sh') .
+                ' 2>' .
+                escapeshellarg($stderrFile),
             $output,
             $status,
         );
 
         self::assertSame(70, $status);
         self::assertCount(1, $output);
+        self::assertSame('', (string) file_get_contents($stderrFile));
         self::assertSame('unknown', ReadOnlyProbeReceiptV1::decode($output[0] . "\n")['outcome']);
         self::assertStringNotContainsString('unapproved.example', $output[0]);
+        unlink($stderrFile);
     }
 
-    /** @return array{0:int,1:array<int,string>} */
+    /** @return array{0:int,1:array<int,string>,2:string} */
     private function runWrapper(string $scenario): array
     {
         $directory = sys_get_temp_dir() . '/read-only-probe-curl-' . bin2hex(random_bytes(8));
@@ -146,15 +180,30 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
             #!/bin/sh
             header=''
             url=''
+            request_method=''
+            retry=''
+            max_redirs=''
+            config=''
+            [ "$1" = '--disable' ] || exit 8
+            shift
             while [ "$#" -gt 0 ]; do
                 case "$1" in
                     -D|--dump-header) header="$2"; shift 2; continue ;;
                     --output|--write-out|--max-time) shift 2; continue ;;
                     --silent|--show-error) shift; continue ;;
+                    --config) config="$2"; shift 2; continue ;;
+                    --request) request_method="$2"; shift 2; continue ;;
+                    --retry) retry="$2"; shift 2; continue ;;
+                    --max-redirs) max_redirs="$2"; shift 2; continue ;;
+                    --location|--location-trusted) exit 8 ;;
                 esac
                 url="$1"
                 shift
             done
+            [ "${config}" = '/dev/null' ] || exit 8
+            [ "${request_method}" = 'GET' ] || exit 8
+            [ "${retry}" = '0' ] || exit 8
+            [ "${max_redirs}" = '0' ] || exit 8
             if [ "${MOCK_CURL_SCENARIO}" != 'curl_nonzero' ] && [ "${MOCK_CURL_SCENARIO}" != 'malformed' ]; then
                 capability="${url##*/}"
                 case "${url}" in
@@ -178,9 +227,44 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
                     printf '307'
                     exit 0
                     ;;
+                absolute_same_origin)
+                    if printf '%s' "${url}" | grep -q '/appointments/ics/'; then
+                        [ -n "${header}" ] && printf 'HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\n\r\n' >"${header}"
+                        printf '404'
+                    else
+                        [ -n "${header}" ] && printf 'HTTP/1.1 307 Temporary Redirect\r\nLocation: https://dasforscherhaus-leg.de/index.php/appointments\r\n\r\n' >"${header}"
+                        printf '307'
+                    fi
+                    exit 0
+                    ;;
+                app_relative)
+                    if printf '%s' "${url}" | grep -q '/appointments/ics/'; then
+                        [ -n "${header}" ] && printf 'HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\n\r\n' >"${header}"
+                        printf '404'
+                    else
+                        [ -n "${header}" ] && printf 'HTTP/1.1 307 Temporary Redirect\r\nLocation: /index.php/appointments\r\n\r\n' >"${header}"
+                        printf '307'
+                    fi
+                    exit 0
+                    ;;
+                external_redirect)
+                    [ -n "${header}" ] && printf 'HTTP/1.1 307 Temporary Redirect\r\nLocation: https://external.example/appointments\r\n\r\n' >"${header}"
+                    printf '307'
+                    exit 0
+                    ;;
+                suffix_redirect)
+                    [ -n "${header}" ] && printf 'HTTP/1.1 307 Temporary Redirect\r\nLocation: /other/appointments\r\n\r\n' >"${header}"
+                    printf '307'
+                    exit 0
+                    ;;
+                header_read_failure)
+                    rm -f -- "${header}"
+                    printf '307'
+                    exit 0
+                    ;;
                 unexpected_header)
                     if printf '%s' "${url}" | grep -q '/appointments/ics/'; then
-                        [ -n "${header}" ] && printf 'HTTP/1.1 404 Not Found\nContent-Type: text/calendar\nContent-Disposition: attachment\n\n' >"${header}"
+                        [ -n "${header}" ] && printf 'HTTP/1.1 404 Not Found\r\nContent-Type:text/calendar\r\nContent-Disposition:attachment\r\n\r\n' >"${header}"
                         printf '404'
                     else
                         [ -n "${header}" ] && printf 'HTTP/1.1 307 Temporary Redirect\nLocation: /appointments\n\n' >"${header}"
@@ -208,18 +292,24 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
         try {
             $output = [];
             $status = 0;
+            $stderrFile = $directory . '/stderr.log';
             $command =
                 'PATH=' .
                 escapeshellarg($directory . ':/usr/bin:/bin') .
                 ' MOCK_CURL_SCENARIO=' .
                 escapeshellarg($scenario) .
                 ' READ_ONLY_PROBE_BASE_URL=https://dasforscherhaus-leg.de bash ' .
-                escapeshellarg(__DIR__ . '/../../../scripts/ops/run_read_only_http_probe.sh');
+                escapeshellarg(__DIR__ . '/../../../scripts/ops/run_read_only_http_probe.sh') .
+                ' 2>' .
+                escapeshellarg($stderrFile);
             exec($command, $output, $status);
 
-            return [$status, $output];
+            return [$status, $output, (string) file_get_contents($stderrFile)];
         } finally {
             unlink($curl);
+            if (isset($stderrFile) && is_file($stderrFile)) {
+                unlink($stderrFile);
+            }
             rmdir($directory);
         }
     }
