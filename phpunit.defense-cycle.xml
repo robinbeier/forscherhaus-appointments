@@ -22,6 +22,7 @@
             <file>./tests/Integration/CustomerRoleBoundaryProbeTest.php</file>
             <file>./tests/Integration/CalendarResponsibilityRaceProbeTest.php</file>
             <file>./tests/Integration/Controllers/BookingDownloadHttpTest.php</file>
+            <file>./tests/Integration/Controllers/ReadOnlyProbeHttpTest.php</file>
             <file>./tests/Integration/DefenseVerificationFixtureTest.php</file>
             <file>./tests/Unit/Scripts/GateHttpClientTest.php</file>
             <file>./tests/Unit/Scripts/OrdinaryLiveProbeWrapperTest.php</file>

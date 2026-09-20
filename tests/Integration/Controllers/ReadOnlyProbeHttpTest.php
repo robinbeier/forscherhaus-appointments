@@ -31,19 +31,26 @@ final class ReadOnlyProbeHttpTest extends TestCase
     {
         $server = $this->server;
         self::assertNotNull($server);
-        $client = new GateHttpClient($server->baseUrl);
+        $client = new GateHttpClient($server->baseUrl, additionalHeaders: ['Accept' => 'text/html']);
         $root = dirname(__DIR__, 3);
+        $rootStat = stat($root);
+        self::assertIsArray($rootStat);
+        $expectedRootBinding = 'dev:' . $rootStat['dev'] . ':' . $rootStat['ino'];
         $before = $this->stateSnapshot($root, $server);
 
         foreach ([str_repeat('a', 64), str_repeat('b', 12)] as $capability) {
             $confirmation = $client->get('booking_confirmation/of/' . $capability);
             self::assertSame(307, $confirmation->statusCode);
             self::assertStringContainsString('/appointments', (string) $confirmation->header('location'));
+            self::assertSame($expectedRootBinding, $confirmation->header('x-fh-read-only-probe-root'));
+            self::assertSame('unreleased', $confirmation->header('x-fh-read-only-probe-release'));
 
             $ics = $client->get('appointments/ics/' . $capability);
             self::assertSame(404, $ics->statusCode);
             self::assertStringNotContainsString('text/calendar', strtolower((string) $ics->header('content-type')));
             self::assertNull($ics->header('content-disposition'));
+            self::assertSame($expectedRootBinding, $ics->header('x-fh-read-only-probe-root'));
+            self::assertSame('unreleased', $ics->header('x-fh-read-only-probe-release'));
         }
 
         $after = $this->stateSnapshot($root, $server);

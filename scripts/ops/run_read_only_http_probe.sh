@@ -17,6 +17,9 @@ TARGET_CLASS='unapproved'
 REDIRECT_ORIGIN=''
 EXPECTED_RELEASE="${READ_ONLY_PROBE_EXPECTED_RELEASE:-}"
 PROD_APP_IDENTITY=''
+EXPECTED_BINDING_ROOT=''
+EXPECTED_BINDING_RELEASE=''
+VERIFY_RESPONSE_BINDING=0
 OUTCOME='unknown'
 EXIT_CODE=70
 RECEIPT_EMITTED=0
@@ -101,6 +104,7 @@ finish() {
         if [[ "${cleanup_status}" != '0' ]]; then
             OUTCOME='environment_failed'
             EXIT_CODE=21
+            CLEANUP='not_verified'
             clear_observations
         fi
         if ! emit_receipt 2>/dev/null; then
@@ -158,11 +162,21 @@ if [[ "${READ_ONLY_PROBE_BASE_URL+x}" != 'x' && "${BASE_URL}" == "${PROD_ORIGIN}
     verify_production_context || die_unknown
     TARGET_CLASS='production'
     CLEANUP='not_verified'
+    EXPECTED_BINDING_ROOT="dev:${PROD_APP_IDENTITY}"
+    EXPECTED_BINDING_RELEASE="${EXPECTED_RELEASE}"
+    VERIFY_RESPONSE_BINDING=1
     STATE_BEFORE="$(snapshot_production_state)" || die_environment
     REDIRECT_ORIGIN="${PROD_REDIRECT_ORIGIN}"
 elif [[ "${BASE_URL}" =~ ^http://127\.0\.0\.1:[1-9][0-9]*$ ]]; then
     TARGET_CLASS='local'
     REDIRECT_ORIGIN="${BASE_URL}"
+    if [[ "${READ_ONLY_PROBE_EXPECTED_LOCAL_ROOT+x}" == 'x' || "${READ_ONLY_PROBE_EXPECTED_LOCAL_RELEASE+x}" == 'x' ]]; then
+        [[ "${READ_ONLY_PROBE_EXPECTED_LOCAL_ROOT:-}" =~ ^dev:[0-9]+:[0-9]+$ ]] || die_unknown
+        [[ "${READ_ONLY_PROBE_EXPECTED_LOCAL_RELEASE:-}" =~ ^(unreleased|ea_[A-Za-z0-9_]+)$ ]] || die_unknown
+        EXPECTED_BINDING_ROOT="${READ_ONLY_PROBE_EXPECTED_LOCAL_ROOT}"
+        EXPECTED_BINDING_RELEASE="${READ_ONLY_PROBE_EXPECTED_LOCAL_RELEASE}"
+        VERIFY_RESPONSE_BINDING=1
+    fi
 else
     die_unknown
 fi
@@ -186,13 +200,48 @@ request() {
     header_file="$(mktemp 2>/dev/null)" || die_environment
     TEMP_FILES+=("${header_file}")
     set +e
-    http_status="$(curl --disable --config /dev/null --request GET --retry 0 --max-redirs 0 --silent --show-error --max-time 15 --cookie "${COOKIE_JAR}" --cookie-jar "${COOKIE_JAR}" --dump-header "${header_file}" --output /dev/null --write-out '%{http_code}' "${BASE_URL}/index.php/${route}" 2>/dev/null)"
+    http_status="$(curl --disable --config /dev/null --noproxy '*' --request GET --retry 0 --max-redirs 0 --silent --show-error --max-time 15 --cookie "${COOKIE_JAR}" --cookie-jar "${COOKIE_JAR}" --dump-header "${header_file}" --output /dev/null --write-out '%{http_code}' "${BASE_URL}/index.php/${route}" 2>/dev/null)"
     curl_status=$?
     set -e
     [[ "${curl_status}" == '0' ]] || die_environment
     [[ "${http_status}" =~ ^[1-5][0-9]{2}$ ]] || die_unknown
+    if [[ "${VERIFY_RESPONSE_BINDING}" == '1' ]]; then
+        verify_response_binding "${header_file}" || die_environment
+    fi
     printf -v "${result_name}_status" '%s' "${http_status}"
     printf -v "${result_name}_headers" '%s' "${header_file}"
+}
+
+verify_response_binding() {
+    local header_file="$1"
+    local summary
+    local blocks
+    local roots
+    local releases
+    local folded
+    local malformed
+    local root_value
+    local release_value
+    summary="$(awk '
+        tolower($0) ~ /^http\/[0-9.]+[[:space:]]/ {blocks++; in_headers=1; roots=0; releases=0; folded=0; malformed=0; root=""; release=""; next}
+        blocks > 0 && in_headers && ($0 == "" || $0 == "\r") {in_headers=0; next}
+        blocks > 0 && in_headers && /^[ \t]/ {folded=1}
+        blocks > 0 && in_headers && tolower($0) ~ /^x-fh-read-only-probe-root[[:blank:]]*:/ {
+            if (tolower($0) !~ /^x-fh-read-only-probe-root:/) malformed=1
+            value=$0; sub(/\r$/, "", value); sub(/^[^:]*:[[:space:]]*/, "", value)
+            if (value ~ /[[:cntrl:]]/) malformed=1; roots++; root=value
+        }
+        blocks > 0 && in_headers && tolower($0) ~ /^x-fh-read-only-probe-release[[:blank:]]*:/ {
+            if (tolower($0) !~ /^x-fh-read-only-probe-release:/) malformed=1
+            value=$0; sub(/\r$/, "", value); sub(/^[^:]*:[[:space:]]*/, "", value)
+            if (value ~ /[[:cntrl:]]/) malformed=1; releases++; release=value
+        }
+        END {printf "%d|%d|%d|%d|%d|%s|%s", blocks, roots, releases, folded, malformed, root, release}
+    ' "${header_file}" 2>/dev/null)" || return 1
+    IFS='|' read -r blocks roots releases folded malformed root_value release_value <<< "${summary}"
+    [[ "${blocks}" == '1' && "${roots}" == '1' && "${releases}" == '1' ]] || return 1
+    [[ "${folded}" == '0' && "${malformed}" == '0' ]] || return 1
+    [[ "${root_value}" == "${EXPECTED_BINDING_ROOT}" && "${release_value}" == "${EXPECTED_BINDING_RELEASE}" ]]
 }
 
 redirect_class() {
@@ -245,6 +294,8 @@ redirect_class() {
     fi
     case "${location}" in
         /appointments|/appointments/|/index.php/appointments|/index.php/appointments/|\
+            "${PROD_ORIGIN}/appointments"|"${PROD_ORIGIN}/appointments/"|\
+            "${PROD_ORIGIN}/index.php/appointments"|"${PROD_ORIGIN}/index.php/appointments/"|\
             "${REDIRECT_ORIGIN}/appointments"|"${REDIRECT_ORIGIN}/appointments/"|\
             "${REDIRECT_ORIGIN}/index.php/appointments"|"${REDIRECT_ORIGIN}/index.php/appointments/")
             REDIRECT_RESULT='appointments'

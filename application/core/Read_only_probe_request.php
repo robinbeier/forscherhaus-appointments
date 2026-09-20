@@ -38,4 +38,29 @@ final class Read_only_probe_request
         return preg_match('#^/(?:booking_confirmation/of|appointments/ics)/(?:[0-9a-f]{12}|[0-9a-f]{64})$#', $route) ===
             1;
     }
+
+    /** @return array{root:string,release:string} */
+    public static function binding(): array
+    {
+        if (!self::is()) {
+            return ['root' => '', 'release' => ''];
+        }
+
+        $root = realpath(APPPATH . '..');
+        if ($root === false || is_link(APPPATH . '..')) {
+            return ['root' => '', 'release' => ''];
+        }
+        $stat = @stat($root);
+        $identity = is_array($stat) && isset($stat['dev'], $stat['ino']) ? $stat['dev'] . ':' . $stat['ino'] : '';
+        $release = 'unreleased';
+        $marker = $root . '/_RELEASE';
+        if (is_file($marker) && !is_link($marker)) {
+            $firstToken = explode(' ', trim((string) @file_get_contents($marker)), 2)[0] ?? '';
+            if (preg_match('/^ea_[A-Za-z0-9_]+$/', $firstToken) === 1) {
+                $release = $firstToken;
+            }
+        }
+
+        return ['root' => $identity === '' ? '' : 'dev:' . $identity, 'release' => $release];
+    }
 }

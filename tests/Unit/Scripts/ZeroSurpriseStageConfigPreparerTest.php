@@ -45,7 +45,7 @@ final class ZeroSurpriseStageConfigPreparerTest extends TestCase
                     '-r',
                     <<<'PHP'
                     define('BASEPATH', __DIR__);
-                    define('APPPATH', rtrim(dirname($argv[2]), '/\\') . DIRECTORY_SEPARATOR);
+                    define('APPPATH', rtrim(dirname(dirname($argv[2])), '/\\') . DIRECTORY_SEPARATOR);
                     function is_cli(): bool
                     {
                         return true;

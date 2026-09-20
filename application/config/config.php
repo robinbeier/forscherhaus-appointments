@@ -2,6 +2,14 @@
 
 require_once APPPATH . 'core/Read_only_probe_request.php';
 
+if (!is_cli() && Read_only_probe_request::is()) {
+    $probeBinding = Read_only_probe_request::binding();
+    if ($probeBinding['root'] !== '') {
+        header('X-FH-Read-Only-Probe-Root: ' . $probeBinding['root'], true);
+        header('X-FH-Read-Only-Probe-Release: ' . $probeBinding['release'], true);
+    }
+}
+
 /*
 |--------------------------------------------------------------------------
 | Base Site URL

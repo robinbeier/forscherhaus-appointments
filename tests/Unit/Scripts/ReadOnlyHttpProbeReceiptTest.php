@@ -502,6 +502,18 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
         }
     }
 
+    public function testCleanupFailureAfterLocalProbeCannotClaimCleanupNotApplicable(): void
+    {
+        [$status, $output, $stderr] = $this->runWrapper('cleanup_failure');
+
+        self::assertSame(21, $status);
+        self::assertCount(1, $output);
+        self::assertSame('', $stderr);
+        $receipt = ReadOnlyProbeReceiptV1::decode($output[0] . "\n");
+        self::assertSame('environment_failed', $receipt['outcome']);
+        self::assertSame('not_verified', $receipt['cleanup']);
+    }
+
     public function testLateHeaderFailureClearsEarlierObservations(): void
     {
         [$status, $output, $stderr] = $this->runWrapper('late_header_read_failure');
@@ -539,6 +551,31 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
         self::assertCount(1, $malformedOutput);
         self::assertSame('', $malformedStderr);
         self::assertSame('unknown', ReadOnlyProbeReceiptV1::decode($malformedOutput[0] . "\n")['outcome']);
+    }
+
+    public function testResponseBindingRejectsMissingAndMalformedHeaders(): void
+    {
+        [$status, $output] = $this->runWrapper('binding_success');
+        self::assertSame(0, $status);
+        self::assertSame('passed', ReadOnlyProbeReceiptV1::decode($output[0] . "\n")['outcome']);
+
+        foreach (
+            [
+                'binding_missing',
+                'binding_duplicate',
+                'binding_folded',
+                'binding_whitespace',
+                'binding_control',
+                'binding_mismatch',
+            ]
+            as $scenario
+        ) {
+            [$status, $output, $stderr] = $this->runWrapper($scenario);
+            self::assertSame(21, $status, $scenario);
+            self::assertCount(1, $output, $scenario);
+            self::assertSame('', $stderr, $scenario);
+            self::assertSame('environment_failed', ReadOnlyProbeReceiptV1::decode($output[0] . "\n")['outcome']);
+        }
     }
 
     public function testEntropyPipelineFailuresEmitOnlyEnvironmentReceipt(): void
@@ -637,6 +674,7 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
             request_method=''
             retry=''
             max_redirs=''
+            noproxy=''
             config=''
             cookie=''
             cookie_jar=''
@@ -653,6 +691,7 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
                     --request) request_method="$2"; shift 2; continue ;;
                     --retry) retry="$2"; shift 2; continue ;;
                     --max-redirs) max_redirs="$2"; shift 2; continue ;;
+                    --noproxy) noproxy="$2"; shift 2; continue ;;
                     --location|--location-trusted) exit 8 ;;
                 esac
                 url="$1"
@@ -665,6 +704,7 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
             [ "${request_method}" = 'GET' ] || exit 8
             [ "${retry}" = '0' ] || exit 8
             [ "${max_redirs}" = '0' ] || exit 8
+            [ "${noproxy}" = '*' ] || exit 8
             [ -n "${cookie}" ] || exit 8
             [ "${cookie}" = "${cookie_jar}" ] || exit 8
             if [ "${MOCK_CURL_SCENARIO}" != 'curl_nonzero' ] && [ "${MOCK_CURL_SCENARIO}" != 'malformed' ]; then
@@ -865,6 +905,31 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
                     fi
                     exit 0
                     ;;
+                binding_success|binding_missing|binding_duplicate|binding_folded|binding_whitespace|binding_control|binding_mismatch)
+                    if printf '%s' "${url}" | grep -q '/appointments/ics/'; then
+                        status='404'
+                        if [ "${MOCK_CURL_SCENARIO}" = 'binding_missing' ]; then
+                            [ -n "${header}" ] && printf 'HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\n\r\n' >"${header}"
+                        elif [ "${MOCK_CURL_SCENARIO}" = 'binding_duplicate' ]; then
+                            [ -n "${header}" ] && printf 'HTTP/1.1 404 Not Found\r\nX-FH-Read-Only-Probe-Root: dev:1:2\r\nX-FH-Read-Only-Probe-Root: dev:1:2\r\nX-FH-Read-Only-Probe-Release: ea_test\r\nContent-Type: text/html\r\n\r\n' >"${header}"
+                        elif [ "${MOCK_CURL_SCENARIO}" = 'binding_folded' ]; then
+                            [ -n "${header}" ] && printf 'HTTP/1.1 404 Not Found\r\nX-FH-Read-Only-Probe-Root: dev:1:2\r\n folded\r\nX-FH-Read-Only-Probe-Release: ea_test\r\nContent-Type: text/html\r\n\r\n' >"${header}"
+                        elif [ "${MOCK_CURL_SCENARIO}" = 'binding_whitespace' ]; then
+                            [ -n "${header}" ] && printf 'HTTP/1.1 404 Not Found\r\nX-FH-Read-Only-Probe-Root : dev:1:2\r\nX-FH-Read-Only-Probe-Release: ea_test\r\nContent-Type: text/html\r\n\r\n' >"${header}"
+                        elif [ "${MOCK_CURL_SCENARIO}" = 'binding_control' ]; then
+                            [ -n "${header}" ] && printf 'HTTP/1.1 404 Not Found\r\nX-FH-Read-Only-Probe-Root: dev:1:2\r\nX-FH-Read-Only-Probe-Release: ea_test\001\r\nContent-Type: text/html\r\n\r\n' >"${header}"
+                        elif [ "${MOCK_CURL_SCENARIO}" = 'binding_mismatch' ]; then
+                            [ -n "${header}" ] && printf 'HTTP/1.1 404 Not Found\r\nX-FH-Read-Only-Probe-Root: dev:9:9\r\nX-FH-Read-Only-Probe-Release: ea_test\r\nContent-Type: text/html\r\n\r\n' >"${header}"
+                        else
+                            [ -n "${header}" ] && printf 'HTTP/1.1 404 Not Found\r\nX-FH-Read-Only-Probe-Root: dev:1:2\r\nX-FH-Read-Only-Probe-Release: ea_test\r\nContent-Type: text/html\r\n\r\n' >"${header}"
+                        fi
+                    else
+                        status='307'
+                        [ -n "${header}" ] && printf 'HTTP/1.1 307 Temporary Redirect\r\nX-FH-Read-Only-Probe-Root: dev:1:2\r\nX-FH-Read-Only-Probe-Release: ea_test\r\nLocation: /appointments\r\n\r\n' >"${header}"
+                    fi
+                    printf '%s' "${status}"
+                    exit 0
+                    ;;
             esac
             exit 2
             SH
@@ -888,6 +953,7 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
 
         $od = $directory . '/od';
         $tr = $directory . '/tr';
+        $rm = null;
         if ($scenario === 'od_failure') {
             file_put_contents($od, "#!/bin/sh\nprintf 'od diagnostic' >&2\nexit 1\n");
             chmod($od, 0700);
@@ -895,6 +961,12 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
         if ($scenario === 'tr_failure') {
             file_put_contents($tr, "#!/bin/sh\nprintf 'tr diagnostic' >&2\nexit 1\n");
             chmod($tr, 0700);
+        }
+
+        if ($scenario === 'cleanup_failure') {
+            $rm = $directory . '/rm';
+            file_put_contents($rm, "#!/bin/sh\nexit 1\n");
+            chmod($rm, 0700);
         }
 
         if ($scenario === 'missing_rm') {
@@ -911,6 +983,10 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
             $path = $scenario === 'missing_rm' ? $directory : $directory . ':/usr/bin:/bin';
             $baseUrlEnv =
                 $baseUrl === 'http://127.0.0.1' ? '' : ' READ_ONLY_PROBE_BASE_URL=' . escapeshellarg($baseUrl);
+            if (str_starts_with($scenario, 'binding_')) {
+                $baseUrlEnv .=
+                    " READ_ONLY_PROBE_EXPECTED_LOCAL_ROOT='dev:1:2' READ_ONLY_PROBE_EXPECTED_LOCAL_RELEASE='ea_test'";
+            }
             $command =
                 'PATH=' .
                 escapeshellarg($path) .
@@ -952,6 +1028,9 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
             if (isset($tr) && is_file($tr)) {
                 unlink($tr);
             }
+            if ($rm !== null && is_file($rm)) {
+                unlink($rm);
+            }
             if ($scenario === 'missing_rm') {
                 foreach (['od', 'tr', 'awk'] as $command) {
                     $link = $directory . '/' . $command;
@@ -965,6 +1044,11 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
             }
             if (isset($headerLog) && is_file($headerLog)) {
                 unlink($headerLog);
+            }
+            foreach (glob($directory . '/*') ?: [] as $leftover) {
+                if (is_file($leftover) || is_link($leftover)) {
+                    unlink($leftover);
+                }
             }
             rmdir($directory);
         }
