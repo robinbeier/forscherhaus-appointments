@@ -69,6 +69,7 @@
 /application/libraries/Request_normalizer.php @robinbeier
 /application/libraries/Reschedule_authority.php @robinbeier
 /application/libraries/Session/EA_Session.php @robinbeier
+/application/libraries/Session/drivers/Session_null_driver.php @robinbeier
 /application/libraries/Timezones.php @robinbeier
 /application/libraries/Zero_surprise_canary_fixture.php @robinbeier
 /application/models/Admins_model.php @robinbeier
