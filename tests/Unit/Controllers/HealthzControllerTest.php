@@ -10,6 +10,23 @@ require_once APPPATH . 'controllers/Healthz.php';
 
 class HealthzControllerTest extends TestCase
 {
+    public function testCspWriteReadinessRouteHasAnExactCsrfExemption(): void
+    {
+        $excluded = config_item('csrf_exclude_uris');
+
+        self::assertIsArray($excluded);
+        self::assertContains('healthz/csp-report-only-write-readiness', $excluded);
+        self::assertSame(
+            1,
+            count(
+                array_filter(
+                    $excluded,
+                    static fn(mixed $uri): bool => $uri === 'healthz/csp-report-only-write-readiness',
+                ),
+            ),
+        );
+    }
+
     protected function tearDown(): void
     {
         unset($_SERVER['HTTP_X_HEALTH_TOKEN'], $_SERVER['REMOTE_ADDR']);

@@ -68,7 +68,10 @@ These five checks remain separate in every receipt:
 
 The write-readiness endpoint exposes only its schema, pass/fail, and a fixed
 result class. It accepts only POST from `127.0.0.1` or `::1` with the existing
-health token. It does not read or modify the aggregate or lock file, accept a
+health token. Its exact URI is exempt from the browser-oriented cookie CSRF
+check because the root client has no session; the health token, loopback source,
+numeric loopback destination, and verified peer form the authorization boundary.
+It does not read or modify the aggregate or lock file, accept a
 caller path, or return a path, token, payload, exception, or file content.
 The root-side client connects to numeric loopback, disables inherited proxy
 configuration, and rejects a response unless libcurl confirms a loopback peer.
@@ -335,6 +338,10 @@ hash recorded in that lease and succeeds only while the installed file is still
 the exact root-owned, single-link candidate. A mismatching file or lease is
 preserved for controlled recovery. The deployment guard treats any present or
 unresolved lease as a stop condition; it never removes pilot state itself.
+If installation fails, the lease is removed only after the activation path is
+confirmed absent before and after a directory sync. A present path or an
+unverifiable cleanup retains the lease and therefore continues to block release
+switches until controlled recovery.
 
 ## Stop conditions
 

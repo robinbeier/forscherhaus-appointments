@@ -323,6 +323,52 @@ function installActivation(string $target, string $bytes, string $hash): array
     return ['status' => 'failed', 'result_class' => 'activation_install_failed'];
 }
 
+function activationDirectoryEntryPresent(string $directory, string $entry): ?bool
+{
+    $entries = @scandir($directory, SCANDIR_SORT_NONE);
+
+    return is_array($entries) ? in_array($entry, $entries, true) : null;
+}
+
+/** @param null|callable(string,string):?bool $snapshot */
+function activationTargetDurablyAbsent(string $target, ?callable $snapshot = null): bool
+{
+    $directory = dirname($target);
+    $entry = basename($target);
+    $snapshot ??= activationDirectoryEntryPresent(...);
+    if (!validateRootDirectory($directory, 0755) || in_array($entry, ['', '.', '..'], true)) {
+        return false;
+    }
+    $presentBeforeSync = $snapshot($directory, $entry);
+    if ($presentBeforeSync !== false) {
+        return false;
+    }
+    $directoryHandle = @fopen($directory, 'rb');
+    if (!is_resource($directoryHandle)) {
+        return false;
+    }
+    $synced = !function_exists('fsync') || @fsync($directoryHandle);
+    $presentAfterSync = $synced ? $snapshot($directory, $entry) : null;
+    fclose($directoryHandle);
+
+    return $synced && $presentAfterSync === false;
+}
+
+/** @param array{status:string,result_class:string} $installResult @return array{status:string,result_class:string} */
+function cleanupFailedInstallState(string $target, string $statePath, array $installResult): array
+{
+    if (!activationTargetDurablyAbsent($target)) {
+        return ['status' => 'failed', 'result_class' => 'activation_install_cleanup_unverified'];
+    }
+    $state = readRunState($statePath);
+    if (!is_array($state)) {
+        return ['status' => 'failed', 'result_class' => 'run_state_identity_mismatch'];
+    }
+    $stateResult = removeRunState($statePath, $state);
+
+    return $stateResult['status'] === 'passed' ? $installResult : $stateResult;
+}
+
 /** @return array{status:string,result_class:string} */
 function removeActivation(string $target, string $hash): array
 {
@@ -589,13 +635,7 @@ function runActivation(array $argv): never
             if ($result['status'] === 'passed') {
                 $result = installActivation(CSP_ACTIVATION_TARGET, $candidate['bytes'], $candidate['sha256']);
                 if ($result['status'] !== 'passed') {
-                    $state = readRunState(CSP_ACTIVATION_STATE);
-                    if (is_array($state)) {
-                        $stateResult = removeRunState(CSP_ACTIVATION_STATE, $state);
-                        if ($stateResult['status'] !== 'passed') {
-                            $result = $stateResult;
-                        }
-                    }
+                    $result = cleanupFailedInstallState(CSP_ACTIVATION_TARGET, CSP_ACTIVATION_STATE, $result);
                 }
             }
         }

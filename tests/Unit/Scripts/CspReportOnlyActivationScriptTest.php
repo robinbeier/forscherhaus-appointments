@@ -101,6 +101,87 @@ final class CspReportOnlyActivationScriptTest extends TestCase
         }
     }
 
+    public function testFailedInstallKeepsLeaseUntilActivationAbsenceIsDurablyVerified(): void
+    {
+        if (!function_exists('posix_geteuid') || posix_geteuid() !== 0) {
+            self::markTestSkipped('Root-owned failed-install cleanup is verified in the CI container.');
+        }
+        $stateDirectory = '/var/lib/fh-csp-failed-install-state-' . bin2hex(random_bytes(6));
+        $targetDirectory = '/var/lib/fh-csp-failed-install-target-' . bin2hex(random_bytes(6));
+        foreach ([[$stateDirectory, 0700], [$targetDirectory, 0755]] as [$directory, $mode]) {
+            mkdir($directory, $mode, true);
+            chmod($directory, $mode);
+            chown($directory, 0);
+            chgrp($directory, 0);
+        }
+        $statePath = $stateDirectory . '/state.json';
+        $target = $targetDirectory . '/csp-report-only.json';
+        $runId = str_repeat('a', 32);
+        $binding = str_repeat('b', 64);
+        $candidateHash = str_repeat('c', 64);
+        $installFailure = ['status' => 'failed', 'result_class' => 'activation_install_failed'];
+
+        try {
+            self::assertSame(
+                ['status' => 'passed', 'result_class' => 'run_state_recorded'],
+                \writeRunState($statePath, $runId, $candidateHash, $binding),
+            );
+            file_put_contents($target, "partial activation\n");
+            chmod($target, 0644);
+            chown($target, 0);
+            chgrp($target, 0);
+
+            self::assertSame(
+                ['status' => 'failed', 'result_class' => 'activation_install_cleanup_unverified'],
+                \cleanupFailedInstallState($target, $statePath, $installFailure),
+            );
+            self::assertFileExists($target);
+            self::assertFileExists($statePath);
+
+            unlink($target);
+            self::assertSame($installFailure, \cleanupFailedInstallState($target, $statePath, $installFailure));
+            self::assertFileDoesNotExist($statePath);
+        } finally {
+            @unlink($target);
+            @unlink($statePath);
+            rmdir($targetDirectory);
+            rmdir($stateDirectory);
+        }
+    }
+
+    public function testFailedInstallKeepsLeaseWhenEitherDirectorySnapshotIsUnavailable(): void
+    {
+        if (!function_exists('posix_geteuid') || posix_geteuid() !== 0) {
+            self::markTestSkipped('Root-owned failed-install snapshot failures are verified in the CI container.');
+        }
+        $directory = '/var/lib/fh-csp-failed-install-snapshot-' . bin2hex(random_bytes(6));
+        mkdir($directory, 0755, true);
+        chmod($directory, 0755);
+        chown($directory, 0);
+        chgrp($directory, 0);
+        $target = $directory . '/csp-report-only.json';
+
+        try {
+            self::assertFalse(
+                \activationTargetDurablyAbsent($target, static fn(string $_directory, string $_entry): ?bool => null),
+            );
+
+            $calls = 0;
+            self::assertFalse(
+                \activationTargetDurablyAbsent($target, static function (string $_directory, string $_entry) use (
+                    &$calls,
+                ): ?bool {
+                    $calls++;
+
+                    return $calls === 1 ? false : null;
+                }),
+            );
+            self::assertSame(2, $calls);
+        } finally {
+            rmdir($directory);
+        }
+    }
+
     public function testRunIdAndReleaseBindingContractsAreClosed(): void
     {
         self::assertTrue(\validRunId(str_repeat('a', 32)));

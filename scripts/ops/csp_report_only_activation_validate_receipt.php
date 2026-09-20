@@ -12,6 +12,7 @@ const CSP_ACTIVATION_VALIDATOR_CLASSES = [
     'activation_already_present',
     'activation_create_failed',
     'activation_install_failed',
+    'activation_install_cleanup_unverified',
     'activation_identity_mismatch',
     'activation_remove_failed',
     'activation_remove_sync_failed',
