@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
 const Module = require('node:module');
@@ -114,6 +115,15 @@ test('runProbe rejects an unknown surface before loading a browser', async () =>
     }
 });
 
+test('runProbe rejects unsupported chrome and msedge aliases before launch', async () => {
+    for (const browser of ['chrome', 'msedge']) {
+        await assert.rejects(
+            probe.runProbe({url: 'http://127.0.0.1:8080/booking', surface: 'app', browser}),
+            /Unsupported Playwright browser/,
+        );
+    }
+});
+
 test('CLI emits a closed failure receipt without echoing a secret-bearing target', () => {
     const rawTarget = 'http://127.0.0.1:8080/booking/capability?token=secret-value';
     const result = spawnSync(process.execPath, [path.join(__dirname, '../../scripts/ci/csp_compatibility_probe.js')], {
@@ -140,7 +150,7 @@ test('runProbe injects the candidate header, sanitizes browser violations, and c
         path.join(moduleDirectory, 'index.js'),
         `const fs = require('node:fs');
 const recordPath = process.env.CSP_PROBE_RECORD;
-const record = {header: null, closed: false, launched: false, externalFetched: false, externalAborted: false, redirectLimit: null, serviceWorkers: null, socketClosed: false, socketConnected: false, waited: null, pageClosed: false};
+const record = {header: null, closed: false, launched: false, externalFetched: false, externalAborted: false, interceptedReports: 0, redirectLimit: null, serviceWorkers: null, socketClosed: false, socketConnected: false, waited: null, pageClosed: false};
 const save = () => fs.writeFileSync(recordPath, JSON.stringify(record));
 const browser = {
   newContext: async (options) => {
@@ -153,14 +163,18 @@ const browser = {
         goto: async () => {
           const response = { ok: () => true, status: () => 200, headers: () => ({'content-type': 'text/html'} ) };
           await context.routeHandler({
-            request: () => ({url: () => 'https://external.test/private?token=secret'}),
+            request: () => ({url: () => 'https://external.test/private?token=secret', method: () => 'GET'}),
             fetch: async () => { record.externalFetched = true; save(); return response; },
             abort: async () => { record.externalAborted = true; save(); },
           });
           await context.routeHandler({
-            request: () => ({url: () => 'http://127.0.0.1:8080/app.js'}),
+            request: () => ({url: () => 'http://127.0.0.1:8080/app.js', method: () => 'GET'}),
             fetch: async (options) => { record.redirectLimit = options.maxRedirects; save(); return response; },
             fulfill: async ({headers}) => { record.header = headers['content-security-policy-report-only']; save(); },
+          });
+          await context.routeHandler({
+            request: () => ({url: () => 'http://127.0.0.1:8080/__csp_report_intercepted__', method: () => 'POST'}),
+            fulfill: async ({status}) => { if (status === 204) record.interceptedReports += 1; save(); },
           });
           await context.socketHandler({
             url: () => 'wss://external.test/private?token=secret',
@@ -213,6 +227,7 @@ runProbe({url: 'http://127.0.0.1:8080/booking', surface: 'booking'})
         assert.equal(record.closed, true);
         assert.equal(record.externalFetched, false);
         assert.equal(record.externalAborted, true);
+        assert.equal(record.interceptedReports, 1);
         assert.equal(record.redirectLimit, 0);
         assert.equal(record.serviceWorkers, 'block');
         assert.equal(record.socketClosed, true);
@@ -223,6 +238,8 @@ runProbe({url: 'http://127.0.0.1:8080/booking', surface: 'booking'})
         assert.equal(receipt.violation_count, 1);
         assert.equal(receipt.blocked_request_count, 2);
         assert.deepEqual(receipt.blocked_request_classes, {external: 1, websocket_external: 1});
+        assert.equal(receipt.intercepted_report_count, 1);
+        assert.equal(receipt.report_destination_intercepted, true);
         assert.deepEqual(receipt.violation_classes, {'booking:script-src:unknown-external:report': 1});
         assert.equal(result.stdout.includes('external.test'), false);
         assert.equal(result.stdout.includes('private/path'), false);
@@ -231,6 +248,51 @@ runProbe({url: 'http://127.0.0.1:8080/booking', surface: 'booking'})
         fs.rmSync(tempDirectory, {recursive: true, force: true});
     }
 });
+
+test(
+    'real Chromium reports an intentional CSP violation through the intercepted local endpoint',
+    {
+        skip: (() => {
+            try {
+                const playwright = require('playwright');
+                const executablePath =
+                    process.env.PLAYWRIGHT_MCP_EXECUTABLE_PATH || playwright.chromium.executablePath();
+                return !fs.existsSync(executablePath);
+            } catch (_error) {
+                return true;
+            }
+        })(),
+    },
+    async () => {
+        const playwright = require('playwright');
+        const executablePath = process.env.PLAYWRIGHT_MCP_EXECUTABLE_PATH || playwright.chromium.executablePath();
+        const server = http.createServer((request, response) => {
+            if (request.url === '/') {
+                response.writeHead(200, {'content-type': 'text/html'});
+                response.end('<!doctype html><script src="https://example.invalid/intentional-csp.js"></script>');
+                return;
+            }
+            response.writeHead(404);
+            response.end();
+        });
+        await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+        const port = server.address().port;
+        try {
+            const receipt = await probe.runProbe({
+                url: `http://127.0.0.1:${port}/`,
+                surface: 'app',
+                executable_path: executablePath,
+                observation_ms: 1000,
+            });
+            assert.equal(receipt.report_destination_intercepted, true);
+            assert.equal(receipt.intercepted_report_count > 0, true);
+            assert.equal(receipt.violation_classes['app:script-src:unknown-external:report'] > 0, true);
+            assert.equal(receipt.production_changed, false);
+        } finally {
+            await new Promise((resolve) => server.close(resolve));
+        }
+    },
+);
 
 test('route failures are caught and emitted only as a fixed failure receipt', () => {
     const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'csp-probe-route-failure-'));

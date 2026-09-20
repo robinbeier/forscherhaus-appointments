@@ -13,7 +13,10 @@ const CANDIDATE_POLICY = [
     "img-src 'self' data:",
     "font-src 'self' data:",
     "connect-src 'self'",
+    'report-uri /__csp_report_intercepted__',
 ].join('; ');
+
+const LOCAL_REPORT_PATH = '/__csp_report_intercepted__';
 
 const ALLOWED_SURFACES = new Set(['app', 'www', 'booking', 'backoffice', 'account', 'export']);
 const ALLOWED_DIRECTIVES = new Set([
@@ -159,7 +162,7 @@ const sanitizeViolation = (violation, surface, selfOrigin) => {
     };
 };
 
-const makeReceipt = (surface, violations, pageLoaded, blockedRequests = []) => {
+const makeReceipt = (surface, violations, pageLoaded, blockedRequests = [], interceptedReportCount = 0) => {
     const counts = Object.create(null);
     for (const violation of violations) {
         const key = `${violation.surface}:${violation.directive}:${violation.blocked_origin}:${violation.disposition}`;
@@ -179,6 +182,8 @@ const makeReceipt = (surface, violations, pageLoaded, blockedRequests = []) => {
         violation_classes: counts,
         blocked_request_count: blockedRequests.length,
         blocked_request_classes: requestCounts,
+        intercepted_report_count: interceptedReportCount,
+        report_destination_intercepted: true,
         raw_reports_persisted: false,
         production_changed: false,
     };
@@ -195,6 +200,8 @@ const makeFailureReceipt = (errorClass = 'probe_failed') => ({
     violation_classes: {},
     blocked_request_count: 0,
     blocked_request_classes: {},
+    intercepted_report_count: 0,
+    report_destination_intercepted: false,
     raw_reports_persisted: false,
     production_changed: false,
 });
@@ -206,8 +213,6 @@ const runProbe = async (input) => {
     const playwright = require('playwright');
     const browserTypes = {
         chromium: playwright.chromium,
-        chrome: playwright.chromium,
-        msedge: playwright.chromium,
         firefox: playwright.firefox,
         webkit: playwright.webkit,
     };
@@ -216,12 +221,17 @@ const runProbe = async (input) => {
         throw new Error(`Unsupported Playwright browser: ${input.browser}`);
     }
 
-    const browser = await browserType.launch({
+    const launchOptions = {
         headless: !Boolean(input.headed),
         timeout: Number(input.launch_timeout) > 0 ? Number(input.launch_timeout) * 1000 : 30000,
-    });
+    };
+    if (typeof input.executable_path === 'string' && input.executable_path !== '') {
+        launchOptions.executablePath = input.executable_path;
+    }
+    const browser = await browserType.launch(launchOptions);
     const routeFailures = [];
     const pendingOperations = new Set();
+    let interceptedReportCount = 0;
     let context;
     let page;
     try {
@@ -241,6 +251,7 @@ const runProbe = async (input) => {
             const pending = (async () => {
                 try {
                     const requestUrl = typeof route.request === 'function' ? route.request().url() : '';
+                    const requestMethod = typeof route.request === 'function' ? route.request().method() : 'GET';
                     const classification = requestClass(requestUrl, target.origin);
                     if (classification === 'external' || classification === 'unknown') {
                         blockedRequests.push(classification);
@@ -249,6 +260,11 @@ const runProbe = async (input) => {
                     }
                     if (classification === 'browser-local') {
                         await route.continue();
+                        return;
+                    }
+                    if (requestMethod === 'POST' && new URL(requestUrl).pathname === LOCAL_REPORT_PATH) {
+                        interceptedReportCount += 1;
+                        await route.fulfill({status: 204, body: ''});
                         return;
                     }
                     const response = await route.fetch({maxRedirects: 0});
@@ -312,7 +328,13 @@ const runProbe = async (input) => {
         if (routeFailures.length > 0) {
             throw new Error('CSP compatibility route failed.');
         }
-        return makeReceipt(input.surface, violations, Boolean(response && response.ok()), blockedRequests);
+        return makeReceipt(
+            input.surface,
+            violations,
+            Boolean(response && response.ok()),
+            blockedRequests,
+            interceptedReportCount,
+        );
     } finally {
         if (page !== undefined) {
             try {

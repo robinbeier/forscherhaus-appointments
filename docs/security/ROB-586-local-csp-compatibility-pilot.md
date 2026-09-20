@@ -21,7 +21,10 @@ printf '%s\n' '{"url":"http://127.0.0.1:8080/booking","surface":"booking"}' \
 
 The URL guard accepts loopback HTTP targets only. The receipt contains no raw
 URLs, paths, query strings, fragments, source snippets, headers, bodies,
-tokens, cookies, or user-agent values. No browser CSP report is persisted.
+tokens, cookies, or user-agent values. The policy's `report-uri` points to a
+fixed local interception path; the harness answers that path in Playwright
+without forwarding or persisting the report body. No browser CSP report is
+persisted.
 Redirecting fixtures fail closed instead of bypassing the exact local-origin
 classifier or omitting the candidate header. Service workers are blocked, and
 WebSockets are either confined to that origin or denied. Each run waits for the
@@ -73,6 +76,7 @@ style-src 'self' 'unsafe-inline';
 img-src 'self' data:;
 font-src 'self' data:;
 connect-src 'self';
+report-uri /__csp_report_intercepted__;
 ```
 
 The WWW candidate intentionally matches App for this pilot:
@@ -88,6 +92,7 @@ style-src 'self' 'unsafe-inline';
 img-src 'self' data:;
 font-src 'self' data:;
 connect-src 'self';
+report-uri /__csp_report_intercepted__;
 ```
 
 Matching App and WWW keeps the local comparison interpretable while both
@@ -148,6 +153,12 @@ smokes for:
 - export/PDF renderer path;
 - analytics disabled and enabled states where a safe local fixture exists;
 - desktop and mobile-width core flows.
+
+The JavaScript regression suite includes a real Chromium test when a browser
+executable is available. It serves a local page with an intentional external
+script violation and verifies a class-only violation plus an intercepted local
+report. Environments without a browser skip that one test; the fake-browser
+tests still prove header injection, sanitization, interception, and cleanup.
 
 Record `not_tested` with a reason when a state requires secrets or real data.
 Do not interpret a clean local result as production evidence. Monitor remains
