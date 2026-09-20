@@ -300,7 +300,11 @@ test('route failures are caught and emitted only as a fixed failure receipt', ()
     fs.mkdirSync(moduleDirectory, {recursive: true});
     fs.writeFileSync(
         path.join(moduleDirectory, 'index.js'),
-        `const response = {ok: () => true};
+        `const fs = require('node:fs');
+const recordPath = process.env.CSP_PROBE_RECORD;
+const record = {fetchReached: false, abortCalled: false, fulfillCalled: false, closed: false};
+const save = () => fs.writeFileSync(recordPath, JSON.stringify(record));
+const response = {ok: () => true};
 const browser = {
   newContext: async () => {
     const context = {
@@ -310,8 +314,10 @@ const browser = {
       newPage: async () => ({
         goto: async () => {
           await context.routeHandler({
-            request: () => ({url: () => 'http://127.0.0.1:8080/private?token=secret-value'}),
+            request: () => ({url: () => 'http://127.0.0.1:8080/private?token=secret-value', method: () => 'GET'}),
             fetch: async () => {
+              record.fetchReached = true;
+              save();
               if (process.env.CSP_PROBE_ROUTE_SCENARIO === 'redirect') {
                 return {
                   ok: () => false,
@@ -321,7 +327,14 @@ const browser = {
               }
               throw new Error('http://127.0.0.1:8080/private?token=secret-value');
             },
-            abort: async () => {},
+            abort: async () => {
+              record.abortCalled = true;
+              save();
+            },
+            fulfill: async () => {
+              record.fulfillCalled = true;
+              save();
+            },
           });
           return response;
         },
@@ -332,7 +345,10 @@ const browser = {
     };
     return context;
   },
-  close: async () => {},
+  close: async () => {
+    record.closed = true;
+    save();
+  },
 };
 const chromium = {launch: async () => browser};
 module.exports = {chromium, firefox: chromium, webkit: chromium};`,
@@ -352,7 +368,11 @@ Module._load = (request, parent, isMain) => request === 'playwright'
             const result = spawnSync(process.execPath, ['--require', preloadPath, scriptPath], {
                 input: JSON.stringify({url: 'http://127.0.0.1:8080/private?token=secret-value', surface: 'app'}),
                 encoding: 'utf8',
-                env: {...process.env, CSP_PROBE_ROUTE_SCENARIO: scenario},
+                env: {
+                    ...process.env,
+                    CSP_PROBE_ROUTE_SCENARIO: scenario,
+                    CSP_PROBE_RECORD: path.join(tempDirectory, `${scenario}.json`),
+                },
             });
             assert.equal(result.status, 1, scenario);
             assert.equal(result.stderr, '', scenario);
@@ -360,6 +380,11 @@ Module._load = (request, parent, isMain) => request === 'playwright'
             assert.equal(receipt.error_class, 'probe_failed', scenario);
             assert.equal(result.stdout.includes('secret-value'), false, scenario);
             assert.equal(result.stdout.includes('external.test'), false, scenario);
+            const record = JSON.parse(fs.readFileSync(path.join(tempDirectory, `${scenario}.json`), 'utf8'));
+            assert.equal(record.fetchReached, true, scenario);
+            assert.equal(record.abortCalled, true, scenario);
+            assert.equal(record.fulfillCalled, false, scenario);
+            assert.equal(record.closed, true, scenario);
         }
     } finally {
         fs.rmSync(tempDirectory, {recursive: true, force: true});
