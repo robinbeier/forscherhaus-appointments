@@ -51,7 +51,7 @@ class Appointments extends EA_Controller
     public function ics(string $appointment_hash = ''): void
     {
         if ($appointment_hash === '') {
-            show_404();
+            show_404('', !Read_only_probe_request::is());
 
             return;
         }
@@ -59,7 +59,7 @@ class Appointments extends EA_Controller
         $occurrences = $this->appointments_model->get(['hash' => $appointment_hash]);
 
         if (!$occurrences) {
-            show_404();
+            show_404('', !Read_only_probe_request::is());
 
             return;
         }
@@ -77,7 +77,7 @@ class Appointments extends EA_Controller
         } catch (InvalidArgumentException $exception) {
             log_message('error', 'ICS download failed to resolve related entities: ' . $exception->getMessage());
 
-            show_404();
+            show_404('', !Read_only_probe_request::is());
 
             return;
         }
