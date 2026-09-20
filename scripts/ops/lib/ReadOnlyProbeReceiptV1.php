@@ -40,6 +40,19 @@ final class ReadOnlyProbeReceiptV1
     /** @var array<int,string> */
     private const ICS_HEADER_CLASSES = ['not_calendar_no_disposition', 'calendar', 'disposition', 'malformed'];
 
+    /** @var array<int,string> */
+    private const TOP_LEVEL_FIELDS = [
+        'schema',
+        'probe',
+        'outcome',
+        'exit_code',
+        'checks',
+        'redirect_class',
+        'ics_header_class',
+        'check_count',
+        'cleanup',
+    ];
+
     /**
      * @param array<string,bool> $checks
      * @param array{modern:string,legacy:string} $redirectClass
@@ -75,17 +88,7 @@ final class ReadOnlyProbeReceiptV1
             throw new RuntimeException('read-only probe receipt must be an object');
         }
         $actualKeys = array_keys($receipt);
-        $expectedKeys = [
-            'schema',
-            'probe',
-            'outcome',
-            'exit_code',
-            'checks',
-            'redirect_class',
-            'ics_header_class',
-            'check_count',
-            'cleanup',
-        ];
+        $expectedKeys = self::TOP_LEVEL_FIELDS;
         sort($actualKeys);
         sort($expectedKeys);
         if ($actualKeys !== $expectedKeys) {
@@ -106,6 +109,7 @@ final class ReadOnlyProbeReceiptV1
         self::validateChecks($receipt['checks']);
         self::validateClasses($receipt['redirect_class'], self::REDIRECT_CLASSES, 'redirect class');
         self::validateClasses($receipt['ics_header_class'], self::ICS_HEADER_CLASSES, 'ICS header class');
+        self::validateEvidenceConsistency($receipt['checks'], $receipt['redirect_class'], $receipt['ics_header_class']);
         if (
             in_array($receipt['outcome'], ['environment_failed', 'unknown'], true) &&
             (self::anyChecksPassed($receipt['checks']) ||
@@ -127,6 +131,9 @@ final class ReadOnlyProbeReceiptV1
                 ])
         ) {
             throw new RuntimeException('passed read-only probe contains a failed check');
+        }
+        if ($receipt['outcome'] === 'application_failed' && self::allChecksPassed($receipt['checks'])) {
+            throw new RuntimeException('application failure must contain a failed check');
         }
     }
 
@@ -156,6 +163,32 @@ final class ReadOnlyProbeReceiptV1
         }
     }
 
+    /**
+     * @param array<string,bool> $checks
+     * @param array{modern:string,legacy:string} $redirectClass
+     * @param array{modern:string,legacy:string} $icsHeaderClass
+     */
+    private static function validateEvidenceConsistency(
+        array $checks,
+        array $redirectClass,
+        array $icsHeaderClass,
+    ): void {
+        foreach (['modern', 'legacy'] as $version) {
+            if ($checks[$version . '_confirmation_redirect'] !== ($redirectClass[$version] === 'appointments')) {
+                throw new RuntimeException('confirmation check contradicts redirect class');
+            }
+            if (
+                $checks[$version . '_ics_headers_safe'] !==
+                ($icsHeaderClass[$version] === 'not_calendar_no_disposition')
+            ) {
+                throw new RuntimeException('ICS header check contradicts header class');
+            }
+            if (!$checks[$version . '_ics_missing'] && $icsHeaderClass[$version] !== 'malformed') {
+                throw new RuntimeException('ICS missing check contradicts header class');
+            }
+        }
+    }
+
     /** @param array<string,bool> $checks */
     private static function allChecksPassed(array $checks): bool
     {
@@ -172,8 +205,12 @@ final class ReadOnlyProbeReceiptV1
     public static function canonicalJson(array $receipt): string
     {
         self::validate($receipt);
+        $canonical = [];
+        foreach (self::TOP_LEVEL_FIELDS as $field) {
+            $canonical[$field] = $receipt[$field];
+        }
         try {
-            return json_encode($receipt, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n";
+            return json_encode($canonical, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n";
         } catch (JsonException $exception) {
             throw new RuntimeException('read-only probe receipt cannot be encoded', 0, $exception);
         }

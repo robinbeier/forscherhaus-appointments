@@ -37,13 +37,68 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
     {
         $receipt = ReadOnlyProbeReceiptV1::create(
             'application_failed',
-            [],
+            [
+                'legacy_confirmation_redirect' => true,
+                'modern_ics_missing' => true,
+                'legacy_ics_missing' => true,
+                'legacy_ics_headers_safe' => true,
+            ],
             ['modern' => 'unexpected', 'legacy' => 'appointments'],
             ['modern' => 'calendar', 'legacy' => 'not_calendar_no_disposition'],
         );
 
         self::assertSame(20, $receipt['exit_code']);
         self::assertSame($receipt, ReadOnlyProbeReceiptV1::decode(ReadOnlyProbeReceiptV1::canonicalJson($receipt)));
+    }
+
+    public function testCanonicalJsonUsesFixedTopLevelFieldOrder(): void
+    {
+        $receipt = ReadOnlyProbeReceiptV1::create('environment_failed');
+        $reordered = array_reverse($receipt, true);
+
+        self::assertSame(
+            ReadOnlyProbeReceiptV1::canonicalJson($receipt),
+            ReadOnlyProbeReceiptV1::canonicalJson($reordered),
+        );
+
+        $this->expectException(RuntimeException::class);
+        ReadOnlyProbeReceiptV1::decode((string) json_encode($reordered, JSON_UNESCAPED_SLASHES) . "\n");
+    }
+
+    public function testApplicationFailureRejectsContradictoryOrFullyPassingEvidence(): void
+    {
+        $passingChecks = [
+            'modern_confirmation_redirect' => true,
+            'legacy_confirmation_redirect' => true,
+            'modern_ics_missing' => true,
+            'legacy_ics_missing' => true,
+            'modern_ics_headers_safe' => true,
+            'legacy_ics_headers_safe' => true,
+        ];
+
+        foreach (
+            [
+                [
+                    $passingChecks,
+                    ['modern' => 'unexpected', 'legacy' => 'appointments'],
+                    ['modern' => 'not_calendar_no_disposition', 'legacy' => 'not_calendar_no_disposition'],
+                ],
+                [
+                    $passingChecks,
+                    ['modern' => 'appointments', 'legacy' => 'appointments'],
+                    ['modern' => 'not_calendar_no_disposition', 'legacy' => 'not_calendar_no_disposition'],
+                ],
+            ]
+            as [$checks, $redirectClass, $icsHeaderClass]
+        ) {
+            $thrown = false;
+            try {
+                ReadOnlyProbeReceiptV1::create('application_failed', $checks, $redirectClass, $icsHeaderClass);
+            } catch (RuntimeException) {
+                $thrown = true;
+            }
+            self::assertTrue($thrown);
+        }
     }
 
     public function testEnvironmentAndUnknownOutcomesCannotClaimProperties(): void
