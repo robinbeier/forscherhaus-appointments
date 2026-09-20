@@ -417,6 +417,32 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
         self::assertSame('unknown', ReadOnlyProbeReceiptV1::decode($malformedOutput[0] . "\n")['outcome']);
     }
 
+    public function testEntropyPipelineFailuresEmitOnlyEnvironmentReceipt(): void
+    {
+        foreach (['od_failure', 'tr_failure'] as $scenario) {
+            [$status, $output, $stderr, $headerFiles] = $this->runWrapper($scenario);
+
+            self::assertSame(21, $status, $scenario);
+            self::assertCount(1, $output, $scenario);
+            self::assertSame('', $stderr, $scenario);
+            self::assertSame([], $headerFiles, $scenario);
+            $receipt = ReadOnlyProbeReceiptV1::decode($output[0] . "\n");
+            self::assertSame('environment_failed', $receipt['outcome'], $scenario);
+            self::assertSame(
+                [
+                    'modern_confirmation_redirect' => false,
+                    'legacy_confirmation_redirect' => false,
+                    'modern_ics_missing' => false,
+                    'legacy_ics_missing' => false,
+                    'modern_ics_headers_safe' => false,
+                    'legacy_ics_headers_safe' => false,
+                ],
+                $receipt['checks'],
+                $scenario,
+            );
+        }
+    }
+
     public function testWrapperRejectsAnUnapprovedTargetWithoutLeakingIt(): void
     {
         $output = [];
@@ -661,6 +687,17 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
         );
         chmod($mktemp, 0700);
 
+        $od = $directory . '/od';
+        $tr = $directory . '/tr';
+        if ($scenario === 'od_failure') {
+            file_put_contents($od, "#!/bin/sh\nprintf 'od diagnostic' >&2\nexit 1\n");
+            chmod($od, 0700);
+        }
+        if ($scenario === 'tr_failure') {
+            file_put_contents($tr, "#!/bin/sh\nprintf 'tr diagnostic' >&2\nexit 1\n");
+            chmod($tr, 0700);
+        }
+
         if ($scenario === 'missing_rm') {
             foreach (['od', 'tr', 'awk'] as $command) {
                 symlink('/usr/bin/' . $command, $directory . '/' . $command);
@@ -709,6 +746,12 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
         } finally {
             unlink($curl);
             unlink($mktemp);
+            if (isset($od) && is_file($od)) {
+                unlink($od);
+            }
+            if (isset($tr) && is_file($tr)) {
+                unlink($tr);
+            }
             if ($scenario === 'missing_rm') {
                 foreach (['od', 'tr', 'awk'] as $command) {
                     $link = $directory . '/' . $command;

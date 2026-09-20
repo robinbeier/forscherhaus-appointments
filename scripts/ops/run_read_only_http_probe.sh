@@ -115,8 +115,8 @@ for command_name in curl od tr mktemp awk rm; do
     command -v "${command_name}" >/dev/null 2>&1 || die_environment
 done
 
-modern_capability="$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')" || die_environment
-legacy_capability="$(od -An -N6 -tx1 /dev/urandom | tr -d ' \n')" || die_environment
+modern_capability="$(od -An -N32 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n' 2>/dev/null)" || die_environment
+legacy_capability="$(od -An -N6 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n' 2>/dev/null)" || die_environment
 [[ "${modern_capability}" =~ ^[0-9a-f]{64}$ ]] || die_environment
 [[ "${legacy_capability}" =~ ^[0-9a-f]{12}$ ]] || die_environment
 
