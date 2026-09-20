@@ -96,6 +96,66 @@ prod_posture_ufw_status() {
     fi
 }
 
+prod_posture_address_host() {
+    local local_addr="$1"
+
+    if [[ "$local_addr" =~ ^\[([^]]+)\]:[0-9]+$ ]]; then
+        printf '%s' "${BASH_REMATCH[1]%%\%*}"
+    elif [[ "$local_addr" =~ ^(.+):[0-9]+$ ]]; then
+        printf '%s' "${BASH_REMATCH[1]}"
+    fi
+}
+
+prod_posture_address_interface() {
+    local local_addr="$1"
+    local host
+    local address_inventory
+    local interface_name
+
+    host="$(prod_posture_address_host "$local_addr")"
+    [[ -n "$host" ]] || return 0
+    command -v ip >/dev/null 2>&1 || return 0
+
+    if ! address_inventory="$(ip -o addr show 2>/dev/null)"; then
+        return 0
+    fi
+
+    interface_name="$(awk -v expected="$host" '
+            {
+                split($4, address_parts, "/")
+                if (address_parts[1] == expected) {
+                    print $2
+                    exit
+                }
+            }
+        ' <<<"$address_inventory")"
+
+    printf '%s' "$interface_name"
+}
+
+prod_posture_address_class() {
+    local local_addr="$1"
+    local interface_name
+
+    case "$local_addr" in
+        127.*:*|localhost:*|[[]::1[]]:*|[[]::1%*[]]:*)
+            printf 'loopback'
+            return
+            ;;
+        0.0.0.0:*|[[]::*[]]:*|\*:*)
+            printf 'wildcard'
+            return
+            ;;
+    esac
+
+    interface_name="$(prod_posture_address_interface "$local_addr")"
+    if [[ "$interface_name" == "tailscale0" ]]; then
+        printf 'overlay'
+    else
+        printf 'public'
+    fi
+}
+
 prod_posture_listen_class() {
     local port="$1"
     local lines
@@ -103,7 +163,9 @@ prod_posture_listen_class() {
     local local_addr
     local public=0
     local loopback=0
+    local overlay=0
     local wildcard=0
+    local address_class
 
     lines="$(ss -H -ltn "sport = :${port}" 2>/dev/null || true)"
     if [[ -z "$lines" ]]; then
@@ -114,14 +176,18 @@ prod_posture_listen_class() {
     while IFS= read -r line; do
         [[ -n "$line" ]] || continue
         local_addr="$(awk '{print $4}' <<<"$line")"
-        case "$local_addr" in
-            127.*:*|localhost:*|[[]::1[]]:*|[[]::1%*[]]:*)
+        address_class="$(prod_posture_address_class "$local_addr")"
+        case "$address_class" in
+            loopback)
                 loopback=1
                 ;;
-            0.0.0.0:*|[[]::*[]]:*|\*:*)
+            overlay)
+                overlay=1
+                ;;
+            wildcard)
                 wildcard=1
                 ;;
-            *)
+            public)
                 public=1
                 ;;
         esac
@@ -131,6 +197,8 @@ prod_posture_listen_class() {
         printf 'wildcard'
     elif (( public == 1 )); then
         printf 'public'
+    elif (( overlay == 1 )); then
+        printf 'overlay'
     elif (( loopback == 1 )); then
         printf 'loopback'
     else
@@ -151,6 +219,7 @@ prod_posture_check_firewall_and_ports() {
     local class
     local expected_public=0
     local unexpected_public=0
+    local overlay=0
 
     printf 'posture_ufw.status=%s\n' "$(prod_posture_ufw_status)"
 
@@ -168,9 +237,13 @@ prod_posture_check_firewall_and_ports() {
             *:wildcard|*:public)
                 unexpected_public=$((unexpected_public + 1))
                 ;;
+            *:overlay)
+                overlay=$((overlay + 1))
+                ;;
         esac
     done < <(prod_posture_ss_listening_ports)
 
     printf 'posture_tcp.expected_public_listener_classes=%s\n' "$expected_public"
     printf 'posture_tcp.unexpected_public_listener_count=%s\n' "$unexpected_public"
+    printf 'posture_tcp.overlay_listener_count=%s\n' "$overlay"
 }
