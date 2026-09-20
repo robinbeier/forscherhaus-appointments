@@ -254,7 +254,8 @@ Security posture reporting:
 - SSH posture uses selected effective `sshd -T` policy flags only and never
   prints keys, users, or raw sshd config.
 - Firewall and port posture reports UFW status, expected port classes,
-  loopback-only internal service classes, and unexpected public listener count;
+  loopback-only internal service classes, Tailscale-overlay listener count, and
+  unexpected public listener count;
   it does not print raw listener addresses.
 - Missing headers, `PasswordAuthentication=yes`, forwarding enabled, or
   `UFW inactive` are hardening hints for follow-up gates. They are not

@@ -55,6 +55,7 @@ final class ProdPostureScriptTest extends TestCase
         try {
             $this->writeSshdStub($stubBin);
             $this->writeUfwStub($stubBin);
+            $this->writeIpStub($stubBin);
             $this->writeSsStub($stubBin);
 
             $result = $this->runCommand(
@@ -81,8 +82,72 @@ final class ProdPostureScriptTest extends TestCase
             self::assertStringContainsString('posture_tcp.3306.listen_class=loopback', $result['stdout']);
             self::assertStringContainsString('posture_tcp.expected_public_listener_classes=3', $result['stdout']);
             self::assertStringContainsString('posture_tcp.unexpected_public_listener_count=0', $result['stdout']);
+            self::assertStringContainsString('posture_tcp.overlay_listener_count=2', $result['stdout']);
             self::assertStringNotContainsString('0.0.0.0', $result['stdout'] . $result['stderr']);
             self::assertStringNotContainsString('127.0.0.1', $result['stdout'] . $result['stderr']);
+            self::assertStringNotContainsString('100.64.0.1', $result['stdout'] . $result['stderr']);
+            self::assertStringNotContainsString('fd7a:115c:a1e0::1', $result['stdout'] . $result['stderr']);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testPostureHelperKeepsHostNetworkListenersUnexpected(): void
+    {
+        $workspace = sys_get_temp_dir() . '/prod-posture-' . bin2hex(random_bytes(8));
+        $stubBin = $workspace . '/bin';
+
+        mkdir($stubBin, 0777, true);
+
+        try {
+            $this->writeUfwStub($stubBin);
+            $this->writeIpStub($stubBin);
+            $this->writeSsStub($stubBin);
+
+            $result = $this->runCommand(
+                ['bash', '-c', 'source scripts/ops/lib/prod_posture.sh; prod_posture_check_firewall_and_ports'],
+                $this->repoRoot(),
+                [
+                    'PATH' => $stubBin . PATH_SEPARATOR . (getenv('PATH') ?: ''),
+                    'SS_EXTRA_LINES' => 'LISTEN 0 4096 10.0.0.1:8443 0.0.0.0:*',
+                ],
+            );
+
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            self::assertStringContainsString('posture_tcp.unexpected_public_listener_count=1', $result['stdout']);
+            self::assertStringContainsString('posture_tcp.overlay_listener_count=2', $result['stdout']);
+            self::assertStringNotContainsString('10.0.0.1', $result['stdout'] . $result['stderr']);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testPostureHelperFailsClosedWhenInterfaceLookupReturnsPartialOutputThenFails(): void
+    {
+        $workspace = sys_get_temp_dir() . '/prod-posture-' . bin2hex(random_bytes(8));
+        $stubBin = $workspace . '/bin';
+
+        mkdir($stubBin, 0777, true);
+
+        try {
+            $this->writeUfwStub($stubBin);
+            $this->writeIpStub($stubBin);
+            $this->writeSsStub($stubBin);
+
+            $result = $this->runCommand(
+                ['bash', '-c', 'source scripts/ops/lib/prod_posture.sh; prod_posture_check_firewall_and_ports'],
+                $this->repoRoot(),
+                [
+                    'PATH' => $stubBin . PATH_SEPARATOR . (getenv('PATH') ?: ''),
+                    'IP_EXIT_STATUS' => '1',
+                ],
+            );
+
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            self::assertStringContainsString('posture_tcp.unexpected_public_listener_count=2', $result['stdout']);
+            self::assertStringContainsString('posture_tcp.overlay_listener_count=0', $result['stdout']);
+            self::assertStringNotContainsString('100.64.0.1', $result['stdout'] . $result['stderr']);
+            self::assertStringNotContainsString('fd7a:115c:a1e0::1', $result['stdout'] . $result['stderr']);
         } finally {
             $this->removeDirectory($workspace);
         }
@@ -166,6 +231,26 @@ final class ProdPostureScriptTest extends TestCase
         chmod($stubBin . '/ufw', 0755);
     }
 
+    private function writeIpStub(string $stubBin): void
+    {
+        file_put_contents(
+            $stubBin . '/ip',
+            <<<'BASH'
+            #!/usr/bin/env bash
+            set -euo pipefail
+
+            printf '%s\n' \
+                '2: eth0    inet 10.0.0.1/24 scope global eth0' \
+                '7: tailscale0    inet 100.64.0.1/32 scope global tailscale0' \
+                '7: tailscale0    inet6 fd7a:115c:a1e0::1/128 scope global tailscale0'
+
+            exit "${IP_EXIT_STATUS:-0}"
+            BASH
+            ,
+        );
+        chmod($stubBin . '/ip', 0755);
+    }
+
     private function writeSsStub(string $stubBin): void
     {
         file_put_contents(
@@ -181,7 +266,13 @@ final class ProdPostureScriptTest extends TestCase
                     'LISTEN 0 4096 10.0.0.1:443 0.0.0.0:*' \
                     'LISTEN 0 4096 127.0.0.1:3001 0.0.0.0:*' \
                     'LISTEN 0 4096 127.0.0.1:3003 0.0.0.0:*' \
-                    'LISTEN 0 4096 [::1]:3306 [::]:*'
+                    'LISTEN 0 4096 [::1]:3306 [::]:*' \
+                    'LISTEN 0 4096 100.64.0.1:47175 0.0.0.0:*' \
+                    'LISTEN 0 4096 [fd7a:115c:a1e0::1]:44842 [::]:*'
+
+                if [[ -n "${SS_EXTRA_LINES:-}" ]]; then
+                    printf '%s\n' "$SS_EXTRA_LINES"
+                fi
             }
 
             if [[ "$*" =~ sport[[:space:]]*=[[:space:]]*:([0-9]+) ]]; then

@@ -92,7 +92,9 @@ bash scripts/ops/prod_doctor.sh
 classes. These facts are read-only and redacted: header presence, selected SSH
 effective policy flags, UFW status, expected listener classes, loopback-only
 internal service classes, and unexpected public listener count. Missing headers
-or inactive UFW are hardening hints, not doctor failures.
+or inactive UFW are hardening hints, not doctor failures. Addresses bound only
+to the local Tailscale overlay are reported as a separate aggregate listener
+class; raw overlay addresses and dynamic ports remain suppressed.
 
 Redacted recent logs:
 
