@@ -37,7 +37,7 @@ ICS_HEADER_RESULT='malformed'
 STATE_SESSION='unknown'
 STATE_RATE_LIMIT='unknown'
 STATE_APP_LOG='unknown'
-CLEANUP='not_applicable'
+CLEANUP='not_verified'
 
 clear_observations() {
     CHECK_MODERN_CONFIRMATION='false'
@@ -52,9 +52,9 @@ clear_observations() {
     ICS_HEADERS_LEGACY='malformed'
     REDIRECT_RESULT='malformed'
     ICS_HEADER_RESULT='malformed'
-    STATE_SESSION='unknown'
-    STATE_RATE_LIMIT='unknown'
-    STATE_APP_LOG='unknown'
+    [[ "${STATE_SESSION}" == 'changed' ]] || STATE_SESSION='unknown'
+    [[ "${STATE_RATE_LIMIT}" == 'changed' ]] || STATE_RATE_LIMIT='unknown'
+    [[ "${STATE_APP_LOG}" == 'changed' ]] || STATE_APP_LOG='unknown'
 }
 
 emit_receipt() {
@@ -156,9 +156,9 @@ snapshot_production_state() {
 
 if [[ "${READ_ONLY_PROBE_BASE_URL+x}" != 'x' && "${BASE_URL}" == "${PROD_ORIGIN}" ]]; then
     verify_production_context || die_unknown
-    STATE_BEFORE="$(snapshot_production_state)" || die_environment
-    CLEANUP='not_verified'
     TARGET_CLASS='production'
+    CLEANUP='not_verified'
+    STATE_BEFORE="$(snapshot_production_state)" || die_environment
     REDIRECT_ORIGIN="${PROD_REDIRECT_ORIGIN}"
 elif [[ "${BASE_URL}" =~ ^http://127\.0\.0\.1:[1-9][0-9]*$ ]]; then
     TARGET_CLASS='local'
@@ -341,6 +341,7 @@ else
     STATE_SESSION='not_applicable'
     STATE_RATE_LIMIT='not_applicable'
     STATE_APP_LOG='not_applicable'
+    CLEANUP='not_applicable'
 fi
 
 [[ "${REDIRECT_MODERN}" == 'appointments' ]] && CHECK_MODERN_CONFIRMATION='true'

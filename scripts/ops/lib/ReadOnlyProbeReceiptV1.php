@@ -75,7 +75,16 @@ final class ReadOnlyProbeReceiptV1
         array $icsHeaderClass = ['modern' => 'malformed', 'legacy' => 'malformed'],
         array $state = [],
     ): array {
-        $defaultState = $outcome === 'passed' ? ($targetClass === 'local' ? 'not_applicable' : 'unchanged') : 'unknown';
+        $defaultState = in_array($outcome, ['passed', 'application_failed'], true)
+            ? ($targetClass === 'local'
+                ? 'not_applicable'
+                : 'unchanged')
+            : 'unknown';
+        $defaultCleanup =
+            $targetClass === 'unapproved' ||
+            ($targetClass === 'production' && in_array($outcome, ['environment_failed', 'unknown'], true))
+                ? 'not_verified'
+                : 'not_applicable';
         $receipt = [
             'schema' => self::SCHEMA,
             'probe' => self::PROBE,
@@ -90,7 +99,7 @@ final class ReadOnlyProbeReceiptV1
                 ['session' => $defaultState, 'rate_limit' => $defaultState, 'app_log' => $defaultState],
                 $state,
             ),
-            'cleanup' => 'not_applicable',
+            'cleanup' => $defaultCleanup,
         ];
         self::validate($receipt);
 
@@ -136,7 +145,9 @@ final class ReadOnlyProbeReceiptV1
                 $receipt['exit_code'] !== self::OUTCOME_EXIT_CODES['unknown'] ||
                 self::anyChecksPassed($receipt['checks']) ||
                 $receipt['redirect_class'] !== ['modern' => 'malformed', 'legacy' => 'malformed'] ||
-                $receipt['ics_header_class'] !== ['modern' => 'malformed', 'legacy' => 'malformed'])
+                $receipt['ics_header_class'] !== ['modern' => 'malformed', 'legacy' => 'malformed'] ||
+                $receipt['state'] !== ['session' => 'unknown', 'rate_limit' => 'unknown', 'app_log' => 'unknown'] ||
+                $receipt['cleanup'] !== 'not_verified')
         ) {
             throw new RuntimeException('unapproved target requires an unknown neutral receipt');
         }
@@ -150,6 +161,13 @@ final class ReadOnlyProbeReceiptV1
         }
         if (!in_array($receipt['cleanup'], ['not_applicable', 'not_verified'], true)) {
             throw new RuntimeException('read-only probe cleanup value is invalid');
+        }
+        if (
+            $receipt['target_class'] === 'production' &&
+            in_array($receipt['outcome'], ['environment_failed', 'unknown'], true) &&
+            $receipt['cleanup'] !== 'not_verified'
+        ) {
+            throw new RuntimeException('production uncertainty requires unverified cleanup');
         }
         if (
             $receipt['outcome'] === 'passed' &&
@@ -176,6 +194,19 @@ final class ReadOnlyProbeReceiptV1
         }
         if ($receipt['outcome'] === 'passed' && $receipt['cleanup'] !== 'not_applicable') {
             throw new RuntimeException('passed read-only probe cleanup is not applicable');
+        }
+        if ($receipt['outcome'] === 'application_failed') {
+            $expectedState = $receipt['target_class'] === 'local' ? 'not_applicable' : 'unchanged';
+            if (
+                $receipt['state'] !== [
+                    'session' => $expectedState,
+                    'rate_limit' => $expectedState,
+                    'app_log' => $expectedState,
+                ] ||
+                $receipt['cleanup'] !== 'not_applicable'
+            ) {
+                throw new RuntimeException('application failure contains unverified state');
+            }
         }
         if ($receipt['outcome'] === 'application_failed' && self::allChecksPassed($receipt['checks'])) {
             throw new RuntimeException('application failure must contain a failed check');

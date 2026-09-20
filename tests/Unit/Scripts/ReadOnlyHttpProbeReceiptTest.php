@@ -368,18 +368,18 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
         self::assertStringNotContainsString('booking_confirmation', $output[0]);
     }
 
-    public function testReceiptBindsEvidenceToProductionOrLocalTargetClass(): void
+    public function testLocalReceiptCarriesExplicitlyUnverifiedProductionStateBoundary(): void
     {
-        [$productionStatus, $productionOutput] = $this->runWrapper('success');
-        [$localStatus, $localOutput] = $this->runWrapper('success', 'http://127.0.0.1:8123');
+        [$status, $output] = $this->runWrapper('success', 'http://127.0.0.1:8123');
 
-        self::assertSame(0, $productionStatus);
-        self::assertSame(0, $localStatus);
-        $productionReceipt = ReadOnlyProbeReceiptV1::decode($productionOutput[0] . "\n");
-        $localReceipt = ReadOnlyProbeReceiptV1::decode($localOutput[0] . "\n");
-        self::assertSame('local', $productionReceipt['target_class']);
-        self::assertSame('local', $localReceipt['target_class']);
-        self::assertSame($productionOutput[0], $localOutput[0]);
+        self::assertSame(0, $status);
+        $receipt = ReadOnlyProbeReceiptV1::decode($output[0] . "\n");
+        self::assertSame('local', $receipt['target_class']);
+        self::assertSame(
+            ['session' => 'not_applicable', 'rate_limit' => 'not_applicable', 'app_log' => 'not_applicable'],
+            $receipt['state'],
+        );
+        self::assertSame('not_applicable', $receipt['cleanup']);
     }
 
     public function testWrapperAcceptsExpectedRelativeAndSameOriginAppRedirects(): void
@@ -586,6 +586,7 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
         self::assertSame('', (string) file_get_contents($stderrFile));
         self::assertSame('unknown', ReadOnlyProbeReceiptV1::decode($output[0] . "\n")['outcome']);
         self::assertSame('unapproved', ReadOnlyProbeReceiptV1::decode($output[0] . "\n")['target_class']);
+        self::assertSame('not_verified', ReadOnlyProbeReceiptV1::decode($output[0] . "\n")['cleanup']);
         self::assertStringNotContainsString('unapproved.example', $output[0]);
         unlink($stderrFile);
     }
@@ -610,6 +611,11 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
         $receipt = ReadOnlyProbeReceiptV1::decode($output[0] . "\n");
         self::assertSame('unapproved', $receipt['target_class']);
         self::assertSame('unknown', $receipt['outcome']);
+        self::assertSame(
+            ['session' => 'unknown', 'rate_limit' => 'unknown', 'app_log' => 'unknown'],
+            $receipt['state'],
+        );
+        self::assertSame('not_verified', $receipt['cleanup']);
         unlink($stderrFile);
     }
 
