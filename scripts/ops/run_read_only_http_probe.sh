@@ -53,8 +53,19 @@ emit_receipt() {
         "${ICS_HEADERS_MODERN}" "${ICS_HEADERS_LEGACY}"
 }
 
+cleanup_temp_files() {
+    local cleanup_status=0
+    if ((${#TEMP_FILES[@]} > 0)); then
+        for file in "${TEMP_FILES[@]}"; do
+            rm -f -- "${file}" 2>/dev/null || cleanup_status=1
+        done
+    fi
+    return "${cleanup_status}"
+}
+
 finish() {
     local status=$?
+    local cleanup_status=0
     trap - EXIT HUP INT TERM
     if [[ "${RECEIPT_EMITTED}" == '0' ]]; then
         case "${status}" in
@@ -69,12 +80,20 @@ finish() {
                 fi
                 ;;
         esac
-        emit_receipt
-    fi
-    if ((${#TEMP_FILES[@]} > 0)); then
-        for file in "${TEMP_FILES[@]}"; do
-            rm -f -- "${file}" 2>/dev/null || true
-        done
+        cleanup_temp_files || cleanup_status=$?
+        if [[ "${cleanup_status}" != '0' ]]; then
+            OUTCOME='environment_failed'
+            EXIT_CODE=21
+            clear_observations
+        fi
+        if ! emit_receipt 2>/dev/null; then
+            # A closed/unwritable stdout cannot carry a valid receipt. The
+            # temporary evidence is already removed; fail closed without a
+            # second write attempt that could obscure the original failure.
+            EXIT_CODE=70
+        fi
+    else
+        cleanup_temp_files || true
     fi
     exit "${EXIT_CODE}"
 }

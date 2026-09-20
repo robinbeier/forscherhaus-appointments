@@ -235,6 +235,23 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
         self::assertSame('environment_failed', ReadOnlyProbeReceiptV1::decode($output[0] . "\n")['outcome']);
     }
 
+    public function testReceiptOutputFailureRemovesAllTemporaryHeadersBeforeFailingClosed(): void
+    {
+        [$status, $output, $stderr, $headerFiles] = $this->runWrapper(
+            'success',
+            'https://dasforscherhaus-leg.de',
+            'closed',
+        );
+
+        self::assertSame(70, $status);
+        self::assertSame([], $output);
+        self::assertSame('', $stderr);
+        self::assertCount(4, $headerFiles);
+        foreach ($headerFiles as $headerFile) {
+            self::assertFalse(is_file($headerFile), $headerFile . ' must be removed before receipt output');
+        }
+    }
+
     public function testLateHeaderFailureClearsEarlierObservations(): void
     {
         [$status, $output, $stderr] = $this->runWrapper('late_header_read_failure');
@@ -297,9 +314,12 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
         unlink($stderrFile);
     }
 
-    /** @return array{0:int,1:array<int,string>,2:string} */
-    private function runWrapper(string $scenario, string $baseUrl = 'https://dasforscherhaus-leg.de'): array
-    {
+    /** @return array{0:int,1:array<int,string>,2:string,3:array<int,string>} */
+    private function runWrapper(
+        string $scenario,
+        string $baseUrl = 'https://dasforscherhaus-leg.de',
+        ?string $stdoutTarget = null,
+    ): array {
         $directory = sys_get_temp_dir() . '/read-only-probe-curl-' . bin2hex(random_bytes(8));
         mkdir($directory, 0700, true);
         $curl = $directory . '/curl';
@@ -329,6 +349,9 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
                 url="$1"
                 shift
             done
+            if [ -n "${MOCK_CURL_HEADER_LOG}" ]; then
+                printf '%s\n' "${header}" >>"${MOCK_CURL_HEADER_LOG}"
+            fi
             [ "${config}" = '/dev/null' ] || exit 8
             [ "${request_method}" = 'GET' ] || exit 8
             [ "${retry}" = '0' ] || exit 8
@@ -471,20 +494,39 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
             $output = [];
             $status = 0;
             $stderrFile = $directory . '/stderr.log';
+            $headerLog = $directory . '/headers.log';
             $command =
                 'PATH=' .
                 escapeshellarg($directory . ':/usr/bin:/bin') .
                 ' MOCK_CURL_SCENARIO=' .
                 escapeshellarg($scenario) .
+                ' MOCK_CURL_HEADER_LOG=' .
+                escapeshellarg($headerLog) .
                 ' READ_ONLY_PROBE_BASE_URL=' .
                 escapeshellarg($baseUrl) .
-                ' bash ' .
-                escapeshellarg(__DIR__ . '/../../../scripts/ops/run_read_only_http_probe.sh') .
-                ' 2>' .
-                escapeshellarg($stderrFile);
+                ' ';
+            $wrapperPath = __DIR__ . '/../../../scripts/ops/run_read_only_http_probe.sh';
+            if ($stdoutTarget === 'closed') {
+                $command .= 'bash -c ' . escapeshellarg('exec 1>&-; exec bash ' . escapeshellarg($wrapperPath));
+            } else {
+                $command .= 'bash ' . escapeshellarg($wrapperPath);
+            }
+            $command .= ' 2>' . escapeshellarg($stderrFile);
+            if ($stdoutTarget !== null && $stdoutTarget !== 'closed') {
+                $command .= ' >' . escapeshellarg($stdoutTarget);
+            }
             exec($command, $output, $status);
 
-            return [$status, $output, (string) file_get_contents($stderrFile)];
+            $headerFiles = is_file($headerLog)
+                ? array_values(
+                    array_filter(
+                        file($headerLog, FILE_IGNORE_NEW_LINES) ?: [],
+                        static fn(string $path): bool => $path !== '',
+                    ),
+                )
+                : [];
+
+            return [$status, $output, (string) file_get_contents($stderrFile), $headerFiles];
         } finally {
             unlink($curl);
             unlink($mktemp);
