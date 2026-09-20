@@ -152,7 +152,7 @@ redirect_class() {
     local folded
     summary="$(awk '
         tolower($0) ~ /^http\/[0-9.]+[[:space:]]/ {blocks++; in_headers=1; locations=0; folded=0; location=""; next}
-        blocks > 0 && in_headers && /^[[:space:]]*$/ {in_headers=0; next}
+        blocks > 0 && in_headers && ($0 == "" || $0 == "\r") {in_headers=0; next}
         blocks > 0 && in_headers && /^[ \t]/ {folded=1}
         blocks > 0 && in_headers && tolower($0) ~ /^location:[[:space:]]*/ {locations++; location=$0; sub(/^[^:]*:[[:space:]]*/, "", location)}
         END {printf "%d|%d|%d|%s", blocks, locations, folded, location}
@@ -198,7 +198,7 @@ ics_header_class() {
     local folded
     summary="$(awk '
         tolower($0) ~ /^http\/[0-9.]+[[:space:]]/ {blocks++; in_headers=1; calendar=0; disposition=0; folded=0; next}
-        blocks > 0 && in_headers && /^[[:space:]]*$/ {in_headers=0; next}
+        blocks > 0 && in_headers && ($0 == "" || $0 == "\r") {in_headers=0; next}
         blocks > 0 && in_headers && /^[ \t]/ {folded=1}
         blocks > 0 && in_headers && tolower($0) ~ /^content-type:[[:space:]]*text\/calendar/ {calendar=1}
         blocks > 0 && in_headers && tolower($0) ~ /^content-disposition:/ {disposition=1}
