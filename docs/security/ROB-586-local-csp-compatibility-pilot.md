@@ -153,12 +153,13 @@ Implemented in ROB-586 now:
   network boundaries;
 - the local policy and target guard.
 
-Still required before a production decision:
+Continued by the production-preparation slice:
 
 - execute the matrix against local App/WWW-equivalent fixtures for each flow;
 - combine receipts with existing browser smokes and classify expected versus
   actionable violations;
-- decide whether a privacy-safe reporting target and owner exist;
+- use the implemented same-origin class-only target and its bounded owner
+  contract;
 - obtain separate production approval and complete the ROB-410 live gate.
 
 The required local matrix combines the probe receipt with existing browser
@@ -195,6 +196,8 @@ and an explicit removal path. CSP enforcement remains a later decision.
 
 ## Result and follow-up
 
-The next implementation slice should compare class counts across the matrix,
-classify expected versus actionable violations, and update ROB-410/its
-successor only after a privacy-safe reporting target and owner exist.
+The next implementation slice is specified in
+[the production Report-Only preparation](ROB-586-production-csp-report-only-plan.md).
+It owns the privacy-safe same-origin collector, exact App/WWW matrix, separate
+Monitor decision, observation limits, and rollback contract. Its merge still
+does not activate a production header or run a production probe.

@@ -1,0 +1,10 @@
+{
+    "schema": "csp_report_only_config.v1",
+    "enabled": true,
+    "app_host": "dasforscherhaus-leg.de",
+    "www_host": "www.dasforscherhaus-leg.de",
+    "google_analytics_enabled": false,
+    "matomo_origin": null,
+    "max_reports_per_minute": 120,
+    "retention_hours": 48
+}

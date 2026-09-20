@@ -11,5 +11,24 @@
 |
 */
 
+require_once APPPATH . 'core/Csp_report_only.php';
+
+$hook['post_controller'] = static function (): void {
+    $CI = get_instance();
+    if (!isset($CI->output)) {
+        return;
+    }
+
+    $config = Csp_report_only::load();
+    if (!is_array($config)) {
+        return;
+    }
+
+    $policy = Csp_report_only::policyForRequest($_SERVER, $config, $CI->output->get_content_type());
+    if (is_array($policy)) {
+        $CI->output->set_header($policy['header']);
+    }
+};
+
 /* End of file hooks.php */
 /* Location: ./application/config/hooks.php */

@@ -1,6 +1,9 @@
 # ROB-410 CSP Report-Only Live-Gate
 
-Status: prepared gate, live activation stopped pending ROB-414.
+Status: historical prepared gate. The concrete collector, matrix, Monitor
+boundary, and current production procedure continue in
+[ROB-586 production CSP preparation](ROB-586-production-csp-report-only-plan.md).
+No live activation has occurred.
 
 Scope: evaluate whether the ROB-409 `Content-Security-Policy-Report-Only`
 pilot can safely go live on App and `www`. This document records the gate

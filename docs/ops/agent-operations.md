@@ -96,6 +96,18 @@ or inactive UFW are hardening hints, not doctor failures. Addresses bound only
 to the local Tailscale overlay are reported as a separate aggregate listener
 class; raw overlay addresses and dynamic ports remain suppressed.
 
+For an approved ROB-586 CSP phase, combine those header classes with the
+class-only collector state:
+
+```bash
+bash scripts/ops/prod_csp_report_only_status.sh --expect inactive
+bash scripts/ops/prod_csp_report_only_status.sh --expect active
+```
+
+The command never sends a CSP report. Its first production invocation and the
+first productive collector run remain separate approvals; see the
+[ROB-586 production plan](../security/ROB-586-production-csp-report-only-plan.md).
+
 Redacted recent logs:
 
 ```bash

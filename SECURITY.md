@@ -60,6 +60,16 @@ The product supports `services.attendants_number = 1`, enforced by
 supported product behavior; this application rule is not a claim of a database
 constraint.
 
+Browser security-policy reports are untrusted public input and can contain
+complete document, referrer, source, and blocked-resource URLs. Classify them
+before persistence and retain only fixed surface, directive, blocked-origin,
+disposition, and count classes. Never persist or forward a raw report, URL,
+path, query, fragment, source sample, user agent, cookie, authorization value,
+or capability token. App and `www` may share a reviewed Report-Only measurement
+policy, but the Uptime Kuma monitor is a separate vendor surface and requires
+its own compatibility evidence and rollout decision. A Report-Only observation
+does not authorize CSP enforcement.
+
 ## Findings, scope, and evidence limits
 
 A report should explain the affected boundary, realistic reachability, impact,

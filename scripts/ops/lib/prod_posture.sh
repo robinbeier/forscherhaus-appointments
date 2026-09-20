@@ -12,6 +12,7 @@ prod_posture_header_names() {
     cat <<'HEADERS'
 hsts|strict-transport-security
 csp|content-security-policy
+csp_report_only|content-security-policy-report-only
 x_frame_options|x-frame-options
 referrer_policy|referrer-policy
 permissions_policy|permissions-policy

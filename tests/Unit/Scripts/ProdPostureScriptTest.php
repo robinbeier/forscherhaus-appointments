@@ -34,6 +34,7 @@ final class ProdPostureScriptTest extends TestCase
             self::assertStringContainsString('posture_header.app_https.hsts=present', $result['stdout']);
             self::assertStringContainsString('posture_header.app_https.x_frame_options=present', $result['stdout']);
             self::assertStringContainsString('posture_header.app_https.csp=missing', $result['stdout']);
+            self::assertStringContainsString('posture_header.app_https.csp_report_only=missing', $result['stdout']);
             self::assertStringNotContainsString('max-age=1', $result['stdout'] . $result['stderr']);
             self::assertStringNotContainsString(
                 'https://dasforscherhaus-leg.de',
