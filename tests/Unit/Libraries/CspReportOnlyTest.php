@@ -141,9 +141,15 @@ final class CspReportOnlyTest extends TestCase
             {
                 return 'text/html';
             }
+
+            public function get_output(): string
+            {
+                return '';
+            }
         };
         self::assertNull(Csp_report_only::responseContentType($api, ['REQUEST_URI' => '/api/v1/customers']));
         self::assertNull(Csp_report_only::responseContentType($api, ['REQUEST_URI' => '/index.php/api/v1/customers']));
+        self::assertNull(Csp_report_only::responseContentType($api, ['REQUEST_URI' => '/booking']));
     }
 
     public function testAppWwwAnalyticsAndExcludedSurfaceMatrix(): void
@@ -343,7 +349,9 @@ final class CspReportOnlyTest extends TestCase
             'disposition' => 'report',
         ];
         self::assertSame('accepted', Csp_report_only::record($report, $config, $path, 1700000000)['status']);
+        $beforeRateLimit = (string) file_get_contents($path);
         self::assertSame('rate_limited', Csp_report_only::record($report, $config, $path, 1700000001)['status']);
+        self::assertSame($beforeRateLimit, (string) file_get_contents($path));
         $state = json_decode((string) file_get_contents($path), true);
         self::assertSame(Csp_report_only::AGGREGATE_SCHEMA, $state['schema']);
         self::assertArrayHasKey('rate_window', $state);

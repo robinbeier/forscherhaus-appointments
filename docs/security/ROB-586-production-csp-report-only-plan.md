@@ -125,8 +125,10 @@ The aggregate file is an observation aid. Before the first accepted report, a
 missing aggregate is an explicit zero-observation state and the read-only
 status check may pass with `aggregate.status=missing` only after the full path
 and create permissions have been verified for the fixed PHP-FPM runtime user
-`www-data`. An invalid or unavailable file, a storage error, a rate-limit drop,
-or an unknown class remains a visible gap; it is not a clean result.
+`www-data`. An invalid or unavailable file, a storage error, or an unknown
+class remains a visible gap; it is not a clean result. Over-limit reports are
+rejected transiently with `429` and do not create a durable rate-limit drop or
+rewrite the aggregate.
 
 ## Local App and WWW matrix
 
@@ -224,7 +226,7 @@ After activation, roll back when:
 - App, `www`, Monitor, renderer, deep health, Kuma, or a required smoke regresses;
 - a raw value reaches durable storage, logs, chat, Linear, or a third party;
 - the aggregate is invalid, unavailable, unbounded, or unexpectedly noisy;
-- rate-limit drops occur without an understood benign cause;
+- sustained unexpected `429` rate-limit responses occur without an understood benign cause;
 - a new actionable log/error class appears;
 - the installed activation file no longer matches the recorded identity.
 

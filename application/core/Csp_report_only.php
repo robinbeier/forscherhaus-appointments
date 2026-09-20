@@ -301,6 +301,10 @@ final class Csp_report_only
             return null;
         }
 
+        if (method_exists($output, 'get_output') && trim((string) $output->get_output()) === '') {
+            return null;
+        }
+
         if (method_exists($output, 'get_content_type')) {
             return strtolower(trim((string) $output->get_content_type()));
         }
@@ -496,10 +500,6 @@ final class Csp_report_only
                 $state['rate_window'] = ['started_at_utc' => gmdate('Y-m-d\TH:i:00\Z', $now), 'count' => 0];
             }
             if ($state['rate_window']['count'] >= $config['max_reports_per_minute']) {
-                $state['dropped']['rate_limited']++;
-                if (!self::writeState($handle, $state)) {
-                    return ['status' => 'error', 'reason' => 'storage_failed'];
-                }
                 return ['status' => 'rate_limited', 'reason' => 'rate_limit'];
             }
 
