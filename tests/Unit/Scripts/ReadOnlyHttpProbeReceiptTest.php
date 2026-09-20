@@ -60,6 +60,100 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
         ReadOnlyProbeReceiptV1::create('environment_failed', 'other');
     }
 
+    public function testUnapprovedTargetCreateAllowsOnlyNeutralUnknown(): void
+    {
+        $unknown = ReadOnlyProbeReceiptV1::create('unknown', 'unapproved');
+        self::assertSame($unknown, ReadOnlyProbeReceiptV1::decode(ReadOnlyProbeReceiptV1::canonicalJson($unknown)));
+
+        $fixtures = [
+            [
+                'passed',
+                [
+                    'modern_confirmation_redirect' => true,
+                    'legacy_confirmation_redirect' => true,
+                    'modern_ics_missing' => true,
+                    'legacy_ics_missing' => true,
+                    'modern_ics_headers_safe' => true,
+                    'legacy_ics_headers_safe' => true,
+                ],
+                ['modern' => 'appointments', 'legacy' => 'appointments'],
+                ['modern' => 'not_calendar_no_disposition', 'legacy' => 'not_calendar_no_disposition'],
+            ],
+            [
+                'application_failed',
+                [
+                    'legacy_confirmation_redirect' => true,
+                    'modern_ics_missing' => true,
+                    'legacy_ics_missing' => true,
+                    'legacy_ics_headers_safe' => true,
+                ],
+                ['modern' => 'unexpected', 'legacy' => 'appointments'],
+                ['modern' => 'calendar', 'legacy' => 'not_calendar_no_disposition'],
+            ],
+            [
+                'environment_failed',
+                [],
+                ['modern' => 'malformed', 'legacy' => 'malformed'],
+                ['modern' => 'malformed', 'legacy' => 'malformed'],
+            ],
+        ];
+
+        foreach ($fixtures as [$outcome, $checks, $redirectClass, $icsHeaderClass]) {
+            $thrown = false;
+            try {
+                ReadOnlyProbeReceiptV1::create($outcome, 'unapproved', $checks, $redirectClass, $icsHeaderClass);
+            } catch (RuntimeException) {
+                $thrown = true;
+            }
+            self::assertTrue($thrown, $outcome . ' must reject an unapproved target');
+        }
+    }
+
+    public function testDecodeRejectsNonUnknownUnapprovedReceipts(): void
+    {
+        $fixtures = [
+            ReadOnlyProbeReceiptV1::create(
+                'passed',
+                'production',
+                [
+                    'modern_confirmation_redirect' => true,
+                    'legacy_confirmation_redirect' => true,
+                    'modern_ics_missing' => true,
+                    'legacy_ics_missing' => true,
+                    'modern_ics_headers_safe' => true,
+                    'legacy_ics_headers_safe' => true,
+                ],
+                ['modern' => 'appointments', 'legacy' => 'appointments'],
+                ['modern' => 'not_calendar_no_disposition', 'legacy' => 'not_calendar_no_disposition'],
+            ),
+            ReadOnlyProbeReceiptV1::create(
+                'application_failed',
+                'production',
+                [
+                    'legacy_confirmation_redirect' => true,
+                    'modern_ics_missing' => true,
+                    'legacy_ics_missing' => true,
+                    'legacy_ics_headers_safe' => true,
+                ],
+                ['modern' => 'unexpected', 'legacy' => 'appointments'],
+                ['modern' => 'calendar', 'legacy' => 'not_calendar_no_disposition'],
+            ),
+            ReadOnlyProbeReceiptV1::create('environment_failed', 'production'),
+        ];
+
+        foreach ($fixtures as $receipt) {
+            $receipt['target_class'] = 'unapproved';
+            $encoded = json_encode($receipt, JSON_UNESCAPED_SLASHES) . "\n";
+            $thrown = false;
+            try {
+                ReadOnlyProbeReceiptV1::decode($encoded);
+            } catch (RuntimeException) {
+                $thrown = true;
+            }
+            self::assertTrue($thrown, $receipt['outcome'] . ' must reject an unapproved target');
+        }
+    }
+
     public function testCanonicalJsonUsesFixedTopLevelFieldOrder(): void
     {
         $receipt = ReadOnlyProbeReceiptV1::create('environment_failed', 'production');

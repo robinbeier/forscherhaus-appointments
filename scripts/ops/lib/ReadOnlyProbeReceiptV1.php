@@ -120,6 +120,16 @@ final class ReadOnlyProbeReceiptV1
         self::validateClasses($receipt['ics_header_class'], self::ICS_HEADER_CLASSES, 'ICS header class');
         self::validateEvidenceConsistency($receipt['checks'], $receipt['redirect_class'], $receipt['ics_header_class']);
         if (
+            $receipt['target_class'] === 'unapproved' &&
+            ($receipt['outcome'] !== 'unknown' ||
+                $receipt['exit_code'] !== self::OUTCOME_EXIT_CODES['unknown'] ||
+                self::anyChecksPassed($receipt['checks']) ||
+                $receipt['redirect_class'] !== ['modern' => 'malformed', 'legacy' => 'malformed'] ||
+                $receipt['ics_header_class'] !== ['modern' => 'malformed', 'legacy' => 'malformed'])
+        ) {
+            throw new RuntimeException('unapproved target requires an unknown neutral receipt');
+        }
+        if (
             in_array($receipt['outcome'], ['environment_failed', 'unknown'], true) &&
             (self::anyChecksPassed($receipt['checks']) ||
                 $receipt['redirect_class'] !== ['modern' => 'malformed', 'legacy' => 'malformed'] ||
