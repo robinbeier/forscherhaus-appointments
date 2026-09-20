@@ -466,6 +466,63 @@ final class CspReportOnlyStatusScriptTest extends TestCase
         }
     }
 
+    public function testWrapperRejectsActiveReceiptWithUnboundConfigHash(): void
+    {
+        $receipt = json_decode($this->validActiveReceipt(), true, 8, JSON_THROW_ON_ERROR);
+        $receipt['config']['sha256'] = str_repeat('a', 64);
+        $fixture = $this->createWrapperFixture(false, json_encode($receipt, JSON_THROW_ON_ERROR), 0);
+
+        try {
+            $result = $this->runCommand(
+                [
+                    'bash',
+                    'scripts/ops/prod_csp_report_only_status.sh',
+                    '--expect',
+                    'active',
+                    '--prod-ssh-target',
+                    'root@example.test',
+                ],
+                [
+                    'PATH' => $fixture . '/bin' . PATH_SEPARATOR . (getenv('PATH') ?: ''),
+                    'CSP_REPORT_ONLY_DOCTOR_SCRIPT' => $fixture . '/doctor.sh',
+                ],
+            );
+
+            self::assertSame(1, $result['exit_code']);
+            self::assertStringContainsString('"status":"runtime_failed"', $result['stdout']);
+        } finally {
+            $this->removeDirectory($fixture);
+        }
+    }
+
+    public function testReceiptValidatorFailsClosedWhenCandidateBindingIsUnavailable(): void
+    {
+        $directory = sys_get_temp_dir() . '/csp-receipt-validator-' . bin2hex(random_bytes(6));
+        mkdir($directory, 0700, true);
+        $validator = $directory . '/validator.php';
+        copy($this->repoRoot() . '/scripts/ops/csp_report_only_validate_receipt.php', $validator);
+        $process = proc_open(
+            [PHP_BINARY, $validator, '--expect=active'],
+            [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            $pipes,
+        );
+        self::assertIsResource($process);
+        fwrite($pipes[0], $this->validActiveReceipt());
+        fclose($pipes[0]);
+        $stdout = stream_get_contents($pipes[1]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $exitCode = proc_close($process);
+
+        try {
+            self::assertSame(1, $exitCode);
+            self::assertSame('', $stdout);
+        } finally {
+            unlink($validator);
+            rmdir($directory);
+        }
+    }
+
     private function createWrapperFixture(
         bool $enforcementPresent,
         ?string $remoteOutput = null,
@@ -515,7 +572,10 @@ final class CspReportOnlyStatusScriptTest extends TestCase
                 'status' => 'passed',
                 'config' => [
                     'status' => 'active',
-                    'sha256' => str_repeat('a', 64),
+                    'sha256' => hash_file(
+                        'sha256',
+                        $this->repoRoot() . '/scripts/ops/config/csp_report_only.production.v1.json',
+                    ),
                 ],
                 'aggregate' => [
                     'status' => 'valid',
@@ -548,7 +608,10 @@ final class CspReportOnlyStatusScriptTest extends TestCase
                 'status' => 'passed',
                 'config' => [
                     'status' => 'active',
-                    'sha256' => str_repeat('a', 64),
+                    'sha256' => hash_file(
+                        'sha256',
+                        $this->repoRoot() . '/scripts/ops/config/csp_report_only.production.v1.json',
+                    ),
                 ],
                 'aggregate' => [
                     'status' => 'missing',

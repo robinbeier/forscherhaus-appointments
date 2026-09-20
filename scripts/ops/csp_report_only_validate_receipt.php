@@ -44,6 +44,13 @@ const CSP_RECEIPT_ORIGIN_CLASSES = [
     'none',
 ];
 
+function expectedActiveConfigHash(): ?string
+{
+    $path = __DIR__ . '/config/csp_report_only.production.v1.json';
+    $hash = @hash_file('sha256', $path);
+    return is_string($hash) && preg_match('/\A[a-f0-9]{64}\z/', $hash) === 1 ? $hash : null;
+}
+
 /** @param array<mixed> $value */
 function hasExactKeys(array $value, array $keys): bool
 {
@@ -163,10 +170,13 @@ function validateReceipt(array $receipt, string $expectation): bool
     }
 
     if ($expectation === 'active') {
+        $expectedHash = expectedActiveConfigHash();
         if (
             ($config['status'] ?? null) !== 'active' ||
             !is_string($config['sha256'] ?? null) ||
-            preg_match('/\A[a-f0-9]{64}\z/', $config['sha256']) !== 1
+            preg_match('/\A[a-f0-9]{64}\z/', $config['sha256']) !== 1 ||
+            !is_string($expectedHash) ||
+            !hash_equals($expectedHash, $config['sha256'])
         ) {
             return false;
         }

@@ -65,6 +65,9 @@ host, credentials, a path/query/fragment in the optional Matomo origin, an
 unsafe file identity, or an unsafe ancestor. A missing or invalid file means
 disabled. The file contains no secret and does not make production evidence
 public.
+For an active receipt, the local validator must compare the observed production
+hash with the SHA-256 of the versioned candidate file in the reviewed release;
+drift or a missing candidate binding fails closed.
 
 The header is eligible only when all of these are true:
 
