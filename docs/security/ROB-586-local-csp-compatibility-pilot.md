@@ -19,6 +19,21 @@ printf '%s\n' '{"url":"http://127.0.0.1:8080/booking","surface":"booking"}' \
   | node scripts/ci/csp_compatibility_probe.js
 ```
 
+For an analytics-enabled local fixture, an optional Matomo origin may be
+supplied without a path or credentials:
+
+```bash
+printf '%s\n' '{"url":"http://127.0.0.1:8080/booking","surface":"booking","matomo_origin":"https://analytics.example.test"}' \
+  | node scripts/ci/csp_compatibility_probe.js
+```
+
+`matomo_origin` accepts one complete HTTP or HTTPS origin only. Credentials,
+paths, queries, fragments, surrounding whitespace, and non-HTTP schemes fail
+closed. Only an exact origin match is classified as `matomo-configured`;
+subdomains, different ports, lookalikes, and omitted configuration remain
+`unknown-external`. The configured origin is used only during in-memory
+classification and is never included in the receipt or an error message.
+
 The URL guard accepts loopback HTTP targets only. The receipt contains no raw
 URLs, paths, query strings, fragments, source snippets, headers, bodies,
 tokens, cookies, or user-agent values. The policy's `report-uri` points to a
@@ -48,8 +63,11 @@ Apache or a production response.
 App and WWW share the candidate application policy during this local pilot:
 same-origin scripts, styles, images, fonts, and connections are measured, with
 the current inline and data allowances retained as compatibility compromises.
-Analytics origins remain excluded from this first fixed policy; a future
-fixture must measure them explicitly before any allowlist is considered.
+Analytics origins remain excluded from this first fixed policy. Google
+Analytics traffic is assigned its fixed aggregate class, while an optional
+validated Matomo origin can be assigned `matomo-configured` during a safe local
+fixture run. These classes measure compatibility only and do not add an
+allowlist or permit an external request.
 
 Monitor/Uptime Kuma is a separate surface with a separate policy boundary.
 This pilot does not apply a policy to it and does not modify its configuration.
