@@ -66,6 +66,9 @@ run_remote() {
         declare -f prod_posture_check_headers
         declare -f prod_posture_check_ssh
         declare -f prod_posture_ufw_status
+        declare -f prod_posture_address_host
+        declare -f prod_posture_address_interface
+        declare -f prod_posture_address_class
         declare -f prod_posture_listen_class
         declare -f prod_posture_ss_listening_ports
         declare -f prod_posture_check_firewall_and_ports
