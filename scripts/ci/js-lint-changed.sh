@@ -46,6 +46,7 @@ fi
 
 changed_files=()
 build_tools_changed=false
+csp_probe_changed=false
 changed_file_list="$(mktemp "${TMPDIR:-/tmp}/js-lint-changed.XXXXXX")"
 trap 'rm -f -- "$changed_file_list"' EXIT
 
@@ -63,6 +64,11 @@ while IFS= read -r -d '' file; do
             build_tools_changed=true
             ;;
     esac
+    case "$file" in
+        scripts/ci/csp_compatibility_probe.js|tests/JavaScript/csp_compatibility_probe.test.js)
+            csp_probe_changed=true
+            ;;
+    esac
 done <"$changed_file_list"
 
 # The compiler regression uses the same Node installation as ESLint. Keep
@@ -73,6 +79,9 @@ if [[ "$mode" == "check" ]]; then
         printf 'needs_node=true\n' >>"$GITHUB_OUTPUT"
     else
         printf 'needs_node=false\n' >>"$GITHUB_OUTPUT"
+    fi
+    if [[ "$csp_probe_changed" == "true" ]]; then
+        printf 'csp_probe_changed=true\n' >>"$GITHUB_OUTPUT"
     fi
 fi
 

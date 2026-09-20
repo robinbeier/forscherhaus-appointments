@@ -66,6 +66,24 @@ final class JsLintChangedTest extends TestCase
         self::assertFileDoesNotExist($lint['eslint_log']);
     }
 
+    public function testCspProbeChangesRequireSystemBrowserEvidence(): void
+    {
+        $repository = $this->repository();
+        file_put_contents($repository . '/scripts/ci/csp_compatibility_probe.js', "initial\n");
+        $this->commit($repository, 'initial');
+        file_put_contents($repository . '/scripts/ci/csp_compatibility_probe.js', "changed\n");
+        $this->commit($repository, 'csp probe');
+
+        $result = $this->runLint($repository, ['--check-only']);
+
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+        self::assertSame(
+            "needs_node=true\ncsp_probe_changed=true\nhas_changes=false\n",
+            file_get_contents($result['output_file']),
+        );
+        self::assertFileDoesNotExist($result['eslint_log']);
+    }
+
     public function testNormalModePassesChangedJsSubdirectoryAndRenameToEslint(): void
     {
         $repository = $this->repository();

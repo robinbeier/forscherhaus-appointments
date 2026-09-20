@@ -508,6 +508,15 @@ jobs:
           python3 -B scripts/ci/run_gate_with_summary.py --label js-lint-changed-3 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           ./scripts/ci/js-lint-changed.sh
           ROB557_GATE_COMMAND
+      - name: Resolve system Chrome for CSP probe
+        if: steps.js_changes.outputs.csp_probe_changed == 'true'
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label js-lint-changed-5 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          chrome_path="$(command -v google-chrome || true)"
+          test -n "$chrome_path"
+          test -x "$chrome_path"
+          echo "PLAYWRIGHT_MCP_EXECUTABLE_PATH=$chrome_path" >> "$GITHUB_ENV"
+          ROB557_GATE_COMMAND
       - name: Frontend compiler regression tests
         if: steps.js_changes.outputs.needs_node == 'true'
         run: |
