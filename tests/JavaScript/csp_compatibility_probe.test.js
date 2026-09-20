@@ -44,6 +44,14 @@ test('sanitizes policy violations into fixed classes without raw locations', () 
         probe.blockedOriginClass('https://www.google-analytics.com/collect', 'http://localhost'),
         'google-analytics',
     );
+    assert.equal(
+        probe.blockedOriginClass('http://www.google-analytics.com/collect', 'http://localhost'),
+        'google-analytics',
+    );
+    assert.equal(
+        probe.blockedOriginClass('http://www.googletagmanager.com/gtag.js', 'http://localhost'),
+        'google-analytics',
+    );
 });
 
 test('receipt contains only aggregate classes and explicit non-production markers', () => {

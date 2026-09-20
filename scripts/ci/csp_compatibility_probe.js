@@ -87,7 +87,7 @@ const blockedOriginClass = (blockedUri, selfOrigin) => {
             return 'self';
         }
         if (
-            parsed.protocol === 'https:' &&
+            ['http:', 'https:'].includes(parsed.protocol) &&
             ['www.googletagmanager.com', 'www.google-analytics.com'].includes(parsed.hostname)
         ) {
             return 'google-analytics';
