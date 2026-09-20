@@ -25,6 +25,21 @@ ICS_HEADERS_LEGACY='malformed'
 REDIRECT_RESULT='malformed'
 ICS_HEADER_RESULT='malformed'
 
+clear_observations() {
+    CHECK_MODERN_CONFIRMATION='false'
+    CHECK_LEGACY_CONFIRMATION='false'
+    CHECK_MODERN_ICS_MISSING='false'
+    CHECK_LEGACY_ICS_MISSING='false'
+    CHECK_MODERN_ICS_HEADERS='false'
+    CHECK_LEGACY_ICS_HEADERS='false'
+    REDIRECT_MODERN='malformed'
+    REDIRECT_LEGACY='malformed'
+    ICS_HEADERS_MODERN='malformed'
+    ICS_HEADERS_LEGACY='malformed'
+    REDIRECT_RESULT='malformed'
+    ICS_HEADER_RESULT='malformed'
+}
+
 emit_receipt() {
     [[ "${RECEIPT_EMITTED}" == '1' ]] && return
     RECEIPT_EMITTED=1
@@ -42,13 +57,14 @@ finish() {
     trap - EXIT HUP INT TERM
     if [[ "${RECEIPT_EMITTED}" == '0' ]]; then
         case "${status}" in
-            21) OUTCOME='environment_failed'; EXIT_CODE=21 ;;
+            21) OUTCOME='environment_failed'; EXIT_CODE=21; clear_observations ;;
             20) OUTCOME='application_failed'; EXIT_CODE=20 ;;
-            70) OUTCOME='unknown'; EXIT_CODE=70 ;;
+            70) OUTCOME='unknown'; EXIT_CODE=70; clear_observations ;;
             *)
                 if [[ "${status}" != '0' && "${EXIT_CODE}" == '0' ]]; then
                     OUTCOME='unknown'
                     EXIT_CODE=70
+                    clear_observations
                 fi
                 ;;
         esac
@@ -106,8 +122,19 @@ redirect_class() {
         REDIRECT_RESULT='unexpected'
         return
     fi
-    location="$(awk 'tolower($0) ~ /^location:[[:space:]]*/ {sub(/^[^:]*:[[:space:]]*/, ""); print; exit}' "${header_file}" 2>/dev/null)" || return 1
+    local summary
+    local blocks
+    summary="$(awk '
+        tolower($0) ~ /^http\/[0-9.]+[[:space:]]/ {blocks++; location=""; next}
+        blocks > 0 && tolower($0) ~ /^location:[[:space:]]*/ {location=$0; sub(/^[^:]*:[[:space:]]*/, "", location)}
+        END {printf "%d|%s", blocks, location}
+    ' "${header_file}" 2>/dev/null)" || return 1
+    IFS='|' read -r blocks location <<< "${summary}"
     location="${location//$'\r'/}"
+    if [[ "${blocks}" == '0' ]]; then
+        REDIRECT_RESULT='malformed'
+        return
+    fi
     case "${location}" in
         /appointments|/appointments/|/index.php/appointments|/index.php/appointments/|\
             "${BASE_URL}/appointments"|"${BASE_URL}/appointments/"|\
@@ -125,10 +152,18 @@ ics_header_class() {
     local has_calendar='false'
     local has_disposition='false'
     [[ "${status}" == '404' ]] || { ICS_HEADER_RESULT='malformed'; return; }
+    local summary
+    local blocks
     local calendar_match
     local disposition_match
-    calendar_match="$(awk 'tolower($0) ~ /^content-type:[[:space:]]*text\/calendar/ {found=1} END {print found ? "1" : "0"}' "${header_file}" 2>/dev/null)" || return 1
-    disposition_match="$(awk 'tolower($0) ~ /^content-disposition:/ {found=1} END {print found ? "1" : "0"}' "${header_file}" 2>/dev/null)" || return 1
+    summary="$(awk '
+        tolower($0) ~ /^http\/[0-9.]+[[:space:]]/ {blocks++; calendar=0; disposition=0; next}
+        blocks > 0 && tolower($0) ~ /^content-type:[[:space:]]*text\/calendar/ {calendar=1}
+        blocks > 0 && tolower($0) ~ /^content-disposition:/ {disposition=1}
+        END {printf "%d|%d|%d", blocks, calendar, disposition}
+    ' "${header_file}" 2>/dev/null)" || return 1
+    IFS='|' read -r blocks calendar_match disposition_match <<< "${summary}"
+    [[ "${blocks}" != '0' ]] || { ICS_HEADER_RESULT='malformed'; return; }
     if [[ "${calendar_match}" == '1' ]]; then
         has_calendar='true'
     fi

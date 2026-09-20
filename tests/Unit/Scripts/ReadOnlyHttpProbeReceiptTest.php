@@ -96,7 +96,7 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
 
     public function testWrapperAcceptsExpectedRelativeAndSameOriginAppRedirects(): void
     {
-        foreach (['absolute_same_origin', 'app_relative'] as $scenario) {
+        foreach (['absolute_same_origin', 'app_relative', 'intermediate_unsafe_final_safe'] as $scenario) {
             [$status, $output, $stderr] = $this->runWrapper($scenario);
 
             self::assertSame(0, $status, $scenario);
@@ -129,6 +129,30 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
         self::assertCount(1, $output);
         self::assertSame('', $stderr);
         self::assertSame('environment_failed', ReadOnlyProbeReceiptV1::decode($output[0] . "\n")['outcome']);
+    }
+
+    public function testLateHeaderFailureClearsEarlierObservations(): void
+    {
+        [$status, $output, $stderr] = $this->runWrapper('late_header_read_failure');
+
+        self::assertSame(21, $status);
+        self::assertCount(1, $output);
+        self::assertSame('', $stderr);
+        $receipt = ReadOnlyProbeReceiptV1::decode($output[0] . "\n");
+        self::assertSame('environment_failed', $receipt['outcome']);
+        self::assertSame(
+            [
+                'modern_confirmation_redirect' => false,
+                'legacy_confirmation_redirect' => false,
+                'modern_ics_missing' => false,
+                'legacy_ics_missing' => false,
+                'modern_ics_headers_safe' => false,
+                'legacy_ics_headers_safe' => false,
+            ],
+            $receipt['checks'],
+        );
+        self::assertSame(['modern' => 'malformed', 'legacy' => 'malformed'], $receipt['redirect_class']);
+        self::assertSame(['modern' => 'malformed', 'legacy' => 'malformed'], $receipt['ics_header_class']);
     }
 
     public function testWrapperSeparatesCurlFailureAndMalformedOutput(): void
@@ -243,6 +267,31 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
                         printf '404'
                     else
                         [ -n "${header}" ] && printf 'HTTP/1.1 307 Temporary Redirect\r\nLocation: /index.php/appointments\r\n\r\n' >"${header}"
+                        printf '307'
+                    fi
+                    exit 0
+                    ;;
+                intermediate_unsafe_final_safe)
+                    if printf '%s' "${url}" | grep -q '/appointments/ics/'; then
+                        [ -n "${header}" ] && printf 'HTTP/1.1 404 Not Found\r\nContent-Type: text/calendar\r\nContent-Disposition: attachment\r\n\r\nHTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\n\r\n' >"${header}"
+                        printf '404'
+                    else
+                        [ -n "${header}" ] && printf 'HTTP/1.1 100 Continue\r\nLocation: https://external.example/appointments\r\n\r\nHTTP/1.1 307 Temporary Redirect\r\nLocation: /appointments\r\n\r\n' >"${header}"
+                        printf '307'
+                    fi
+                    exit 0
+                    ;;
+                late_header_read_failure)
+                    if printf '%s' "${url}" | grep -q '/appointments/ics/'; then
+                        capability="${url##*/}"
+                        if [ "${#capability}" -eq 12 ]; then
+                            rm -f -- "${header}"
+                        else
+                            [ -n "${header}" ] && printf 'HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\n\r\n' >"${header}"
+                        fi
+                        printf '404'
+                    else
+                        [ -n "${header}" ] && printf 'HTTP/1.1 307 Temporary Redirect\r\nLocation: /appointments\r\n\r\n' >"${header}"
                         printf '307'
                     fi
                     exit 0
