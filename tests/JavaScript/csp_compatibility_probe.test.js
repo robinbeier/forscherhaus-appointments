@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const Module = require('node:module');
 const {spawnSync} = require('node:child_process');
 
 const probe = require('../../scripts/ci/csp_compatibility_probe.js');
@@ -91,6 +92,26 @@ test('unknown surfaces fail closed and element directives normalize to policy cl
         blocked_origin: 'inline',
         disposition: 'report',
     });
+});
+
+test('runProbe rejects an unknown surface before loading a browser', async () => {
+    const originalLoad = Module._load;
+    let browserLoaded = false;
+    Module._load = (request, parent, isMain) => {
+        if (request === 'playwright') {
+            browserLoaded = true;
+        }
+        return originalLoad(request, parent, isMain);
+    };
+    try {
+        await assert.rejects(
+            probe.runProbe({url: 'http://127.0.0.1:8080/booking', surface: 'unrecognized'}),
+            /supported surface/,
+        );
+        assert.equal(browserLoaded, false);
+    } finally {
+        Module._load = originalLoad;
+    }
 });
 
 test('CLI emits a closed failure receipt without echoing a secret-bearing target', () => {

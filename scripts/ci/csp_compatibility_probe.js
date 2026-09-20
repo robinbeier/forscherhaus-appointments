@@ -39,6 +39,13 @@ const DIRECTIVE_ALIASES = new Map([
 
 const normalizeSurface = (surface) => (ALLOWED_SURFACES.has(surface) ? surface : 'unknown');
 
+const validateSurface = (surface) => {
+    if (!ALLOWED_SURFACES.has(surface)) {
+        throw new Error('CSP compatibility probe requires a supported surface.');
+    }
+    return surface;
+};
+
 const validateLocalTarget = (value) => {
     if (typeof value !== 'string' || value.length === 0 || value.length > 2048) {
         throw new Error('CSP compatibility probe requires a local HTTP URL.');
@@ -194,6 +201,7 @@ const makeFailureReceipt = (errorClass = 'probe_failed') => ({
 
 const runProbe = async (input) => {
     const target = validateLocalTarget(input.url);
+    validateSurface(input.surface);
     const observationMs = boundedObservationMs(input.observation_ms);
     const playwright = require('playwright');
     const browserTypes = {
@@ -352,6 +360,7 @@ module.exports = {
     requestClass,
     runProbe,
     sanitizeViolation,
+    validateSurface,
     validateLocalTarget,
     webSocketClass,
     boundedObservationMs,
