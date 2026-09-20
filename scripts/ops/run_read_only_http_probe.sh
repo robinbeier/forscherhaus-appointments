@@ -6,12 +6,17 @@ set +x
 # privately and are never printed, persisted, or included in the receipt.
 readonly PROBE='anonymous_booking_download_capabilities'
 readonly PROD_ORIGIN='http://127.0.0.1'
+readonly PROD_REDIRECT_ORIGIN='https://dasforscherhaus-leg.de'
+readonly PROD_APP_ROOT='/var/www/html/easyappointments'
 if [[ "${READ_ONLY_PROBE_BASE_URL+x}" == 'x' ]]; then
     BASE_URL="${READ_ONLY_PROBE_BASE_URL}"
 else
     BASE_URL="${PROD_ORIGIN}"
 fi
 TARGET_CLASS='unapproved'
+REDIRECT_ORIGIN=''
+EXPECTED_RELEASE="${READ_ONLY_PROBE_EXPECTED_RELEASE:-}"
+PROD_APP_IDENTITY=''
 OUTCOME='unknown'
 EXIT_CODE=70
 RECEIPT_EMITTED=0
@@ -29,6 +34,10 @@ ICS_HEADERS_MODERN='malformed'
 ICS_HEADERS_LEGACY='malformed'
 REDIRECT_RESULT='malformed'
 ICS_HEADER_RESULT='malformed'
+STATE_SESSION='unknown'
+STATE_RATE_LIMIT='unknown'
+STATE_APP_LOG='unknown'
+CLEANUP='not_applicable'
 
 clear_observations() {
     CHECK_MODERN_CONFIRMATION='false'
@@ -43,18 +52,22 @@ clear_observations() {
     ICS_HEADERS_LEGACY='malformed'
     REDIRECT_RESULT='malformed'
     ICS_HEADER_RESULT='malformed'
+    STATE_SESSION='unknown'
+    STATE_RATE_LIMIT='unknown'
+    STATE_APP_LOG='unknown'
 }
 
 emit_receipt() {
     [[ "${RECEIPT_EMITTED}" == '1' ]] && return
     RECEIPT_EMITTED=1
-    printf '{"schema":"read_only_probe.v1","probe":"%s","target_class":"%s","outcome":"%s","exit_code":%s,"checks":{"modern_confirmation_redirect":%s,"legacy_confirmation_redirect":%s,"modern_ics_missing":%s,"legacy_ics_missing":%s,"modern_ics_headers_safe":%s,"legacy_ics_headers_safe":%s},"redirect_class":{"modern":"%s","legacy":"%s"},"ics_header_class":{"modern":"%s","legacy":"%s"},"check_count":6,"cleanup":"not_applicable"}\n' \
+    printf '{"schema":"read_only_probe.v1","probe":"%s","target_class":"%s","outcome":"%s","exit_code":%s,"checks":{"modern_confirmation_redirect":%s,"legacy_confirmation_redirect":%s,"modern_ics_missing":%s,"legacy_ics_missing":%s,"modern_ics_headers_safe":%s,"legacy_ics_headers_safe":%s},"redirect_class":{"modern":"%s","legacy":"%s"},"ics_header_class":{"modern":"%s","legacy":"%s"},"check_count":6,"state":{"session":"%s","rate_limit":"%s","app_log":"%s"},"cleanup":"%s"}\n' \
         "${PROBE}" "${TARGET_CLASS}" "${OUTCOME}" "${EXIT_CODE}" \
         "${CHECK_MODERN_CONFIRMATION}" "${CHECK_LEGACY_CONFIRMATION}" \
         "${CHECK_MODERN_ICS_MISSING}" "${CHECK_LEGACY_ICS_MISSING}" \
         "${CHECK_MODERN_ICS_HEADERS}" "${CHECK_LEGACY_ICS_HEADERS}" \
         "${REDIRECT_MODERN}" "${REDIRECT_LEGACY}" \
-        "${ICS_HEADERS_MODERN}" "${ICS_HEADERS_LEGACY}"
+        "${ICS_HEADERS_MODERN}" "${ICS_HEADERS_LEGACY}" \
+        "${STATE_SESSION}" "${STATE_RATE_LIMIT}" "${STATE_APP_LOG}" "${CLEANUP}"
 }
 
 cleanup_temp_files() {
@@ -108,10 +121,48 @@ die_environment() { OUTCOME='environment_failed'; EXIT_CODE=21; exit 21; }
 die_application() { OUTCOME='application_failed'; EXIT_CODE=20; exit 20; }
 die_unknown() { OUTCOME='unknown'; EXIT_CODE=70; exit 70; }
 
+verify_production_context() {
+    local canonical_root
+    local release_id
+    local root_mode
+    [[ "${EXPECTED_RELEASE}" =~ ^ea_[a-zA-Z0-9_]+$ ]] || return 1
+    command -v realpath >/dev/null 2>&1 || return 1
+    command -v stat >/dev/null 2>&1 || return 1
+    command -v awk >/dev/null 2>&1 || return 1
+    [[ -d "${PROD_APP_ROOT}" && ! -L "${PROD_APP_ROOT}" ]] || return 1
+    canonical_root="$(realpath -e -- "${PROD_APP_ROOT}" 2>/dev/null)" || return 1
+    [[ "${canonical_root}" == "${PROD_APP_ROOT}" ]] || return 1
+    [[ "$(stat -c '%u' -- "${PROD_APP_ROOT}" 2>/dev/null)" == '0' ]] || return 1
+    root_mode="$(stat -c '%a' -- "${PROD_APP_ROOT}" 2>/dev/null)" || return 1
+    (( (8#${root_mode} & 8#022) == 0 )) || return 1
+    [[ -z "${PROD_APP_IDENTITY}" ]] || [[ "$(stat -c '%d:%i' -- "${PROD_APP_ROOT}" 2>/dev/null)" == "${PROD_APP_IDENTITY}" ]] || return 1
+    [[ -f "${PROD_APP_ROOT}/_RELEASE" && ! -L "${PROD_APP_ROOT}/_RELEASE" ]] || return 1
+    [[ "$(stat -c '%u' -- "${PROD_APP_ROOT}/_RELEASE" 2>/dev/null)" == '0' ]] || return 1
+    release_id="$(awk '{print $1; exit}' "${PROD_APP_ROOT}/_RELEASE" 2>/dev/null)" || return 1
+    [[ "${release_id}" == "${EXPECTED_RELEASE}" ]] || return 1
+    PROD_APP_IDENTITY="$(stat -c '%d:%i' -- "${PROD_APP_ROOT}" 2>/dev/null)" || return 1
+}
+
+snapshot_production_state() {
+    local rate_limits
+    local logs
+    command -v find >/dev/null 2>&1 || return 1
+    command -v sort >/dev/null 2>&1 || return 1
+    command -v sha256sum >/dev/null 2>&1 || return 1
+    rate_limits="$(find "${PROD_APP_ROOT}/storage/cache" -maxdepth 1 -type f \( -name 'rate_limit_key_127.0.0.1' -o -name 'rate_limit_tmp_127.0.0.1' \) -printf '%f:%s:%T@\n' 2>/dev/null | sort | sha256sum | awk '{print $1}')" || return 1
+    logs="$(find "${PROD_APP_ROOT}/storage/logs" -maxdepth 1 -type f -name 'log-*.php' -printf '%f:%s:%T@\n' 2>/dev/null | sort | sha256sum | awk '{print $1}')" || return 1
+    printf '%s|%s' "${rate_limits}" "${logs}"
+}
+
 if [[ "${READ_ONLY_PROBE_BASE_URL+x}" != 'x' && "${BASE_URL}" == "${PROD_ORIGIN}" ]]; then
+    verify_production_context || die_unknown
+    STATE_BEFORE="$(snapshot_production_state)" || die_environment
+    CLEANUP='not_verified'
     TARGET_CLASS='production'
+    REDIRECT_ORIGIN="${PROD_REDIRECT_ORIGIN}"
 elif [[ "${BASE_URL}" =~ ^http://127\.0\.0\.1:[1-9][0-9]*$ ]]; then
     TARGET_CLASS='local'
+    REDIRECT_ORIGIN="${BASE_URL}"
 else
     die_unknown
 fi
@@ -194,8 +245,8 @@ redirect_class() {
     fi
     case "${location}" in
         /appointments|/appointments/|/index.php/appointments|/index.php/appointments/|\
-            "${BASE_URL}/appointments"|"${BASE_URL}/appointments/"|\
-            "${BASE_URL}/index.php/appointments"|"${BASE_URL}/index.php/appointments/")
+            "${REDIRECT_ORIGIN}/appointments"|"${REDIRECT_ORIGIN}/appointments/"|\
+            "${REDIRECT_ORIGIN}/index.php/appointments"|"${REDIRECT_ORIGIN}/index.php/appointments/")
             REDIRECT_RESULT='appointments'
             ;;
         *) REDIRECT_RESULT='unexpected' ;;
@@ -267,6 +318,30 @@ ics_header_class "${modern_ics_headers}" "${modern_ics_status}" || die_environme
 ICS_HEADERS_MODERN="${ICS_HEADER_RESULT}"
 ics_header_class "${legacy_ics_headers}" "${legacy_ics_status}" || die_environment
 ICS_HEADERS_LEGACY="${ICS_HEADER_RESULT}"
+
+if [[ "${TARGET_CLASS}" == 'production' ]]; then
+    verify_production_context || { CLEANUP='not_verified'; die_environment; }
+    STATE_AFTER="$(snapshot_production_state)" || { CLEANUP='not_verified'; die_environment; }
+    before_rate="${STATE_BEFORE%%|*}"
+    before_log="${STATE_BEFORE#*|}"
+    after_rate="${STATE_AFTER%%|*}"
+    after_log="${STATE_AFTER#*|}"
+    [[ "${before_rate}" == "${after_rate}" ]] && STATE_RATE_LIMIT='unchanged' || STATE_RATE_LIMIT='changed'
+    [[ "${before_log}" == "${after_log}" ]] && STATE_APP_LOG='unchanged' || STATE_APP_LOG='changed'
+    probe_session_id="$(awk '$6 == "ea_session" {print $7; exit}' "${COOKIE_JAR}" 2>/dev/null)" || { CLEANUP='not_verified'; die_environment; }
+    [[ "${probe_session_id}" =~ ^[0-9a-zA-Z,-]+$ ]] || { CLEANUP='not_verified'; die_environment; }
+    probe_session_file="$(find "${PROD_APP_ROOT}/storage/sessions" -maxdepth 1 -type f -name "ea_session${probe_session_id}" -print -quit 2>/dev/null)" || { CLEANUP='not_verified'; die_environment; }
+    [[ -z "${probe_session_file}" ]] && STATE_SESSION='unchanged' || STATE_SESSION='changed'
+    [[ "${STATE_SESSION}" == 'unchanged' && "${STATE_RATE_LIMIT}" == 'unchanged' && "${STATE_APP_LOG}" == 'unchanged' ]] || {
+        CLEANUP='not_verified'
+        die_environment
+    }
+    CLEANUP='not_applicable'
+else
+    STATE_SESSION='not_applicable'
+    STATE_RATE_LIMIT='not_applicable'
+    STATE_APP_LOG='not_applicable'
+fi
 
 [[ "${REDIRECT_MODERN}" == 'appointments' ]] && CHECK_MODERN_CONFIRMATION='true'
 [[ "${REDIRECT_LEGACY}" == 'appointments' ]] && CHECK_LEGACY_CONFIRMATION='true'

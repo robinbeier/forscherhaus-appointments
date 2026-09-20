@@ -64,6 +64,58 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
         self::assertSame(3, substr_count($source, "show_404('', !Read_only_probe_request::is());"));
     }
 
+    public function testCodeIgniterLoaderUsesNullSessionDriverWithoutFiles(): void
+    {
+        $directory = sys_get_temp_dir() . '/read-only-probe-session-' . bin2hex(random_bytes(8));
+        mkdir($directory, 0700, true);
+        $script = $directory . '/loader.php';
+        $basePath = dirname(__DIR__, 3) . '/system/';
+        $appPath = dirname(__DIR__, 3) . '/application/';
+        file_put_contents(
+            $script,
+            sprintf(
+                <<<'PHP'
+                <?php
+                define('BASEPATH', %s);
+                define('APPPATH', %s);
+                function is_cli(): bool { return false; }
+                function config_item(string $key): mixed {
+                    return [
+                        'sess_driver' => 'null', 'sess_cookie_name' => 'ea_session',
+                        'sess_expiration' => 7200, 'sess_match_ip' => false,
+                        'sess_time_to_update' => 0, 'cookie_path' => '/',
+                        'cookie_domain' => '', 'cookie_secure' => false,
+                    ][$key] ?? null;
+                }
+                function log_message(string $level, string $message): void {}
+                $_SERVER['REQUEST_METHOD'] = 'GET';
+                $_SERVER['REMOTE_ADDR'] = '127.0.0.1';
+                $_SERVER['HTTP_HOST'] = '127.0.0.1';
+                require BASEPATH . 'libraries/Session/Session.php';
+                $session = new CI_Session(['driver' => 'null', 'save_path' => %s]);
+                $_SESSION['probe'] = 'synthetic';
+                session_write_close();
+                echo json_encode(['driver_loaded' => class_exists('Session_null_driver')]);
+                PHP
+                ,
+                var_export($basePath, true),
+                var_export($appPath, true),
+                var_export($directory, true),
+            ),
+        );
+
+        $output = [];
+        $status = 0;
+        exec('php ' . escapeshellarg($script), $output, $status);
+
+        self::assertSame(0, $status);
+        self::assertSame(['{"driver_loaded":true}'], $output);
+        self::assertSame([], array_values(array_diff(scandir($directory) ?: [], ['.', '..', 'loader.php'])));
+
+        unlink($script);
+        rmdir($directory);
+    }
+
     public function testReceiptIsCanonicalAndContainsOnlyClosedSecurityProperties(): void
     {
         $checks = [
@@ -310,7 +362,7 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
         self::assertSame('', $stderr);
         $receipt = ReadOnlyProbeReceiptV1::decode($output[0] . "\n");
         self::assertSame('passed', $receipt['outcome']);
-        self::assertSame('production', $receipt['target_class']);
+        self::assertSame('local', $receipt['target_class']);
         self::assertSame(6, $receipt['check_count']);
         self::assertStringNotContainsString('dasforscherhaus', $output[0]);
         self::assertStringNotContainsString('booking_confirmation', $output[0]);
@@ -325,9 +377,9 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
         self::assertSame(0, $localStatus);
         $productionReceipt = ReadOnlyProbeReceiptV1::decode($productionOutput[0] . "\n");
         $localReceipt = ReadOnlyProbeReceiptV1::decode($localOutput[0] . "\n");
-        self::assertSame('production', $productionReceipt['target_class']);
+        self::assertSame('local', $productionReceipt['target_class']);
         self::assertSame('local', $localReceipt['target_class']);
-        self::assertNotSame($productionOutput[0], $localOutput[0]);
+        self::assertSame($productionOutput[0], $localOutput[0]);
     }
 
     public function testWrapperAcceptsExpectedRelativeAndSameOriginAppRedirects(): void
@@ -439,7 +491,7 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
 
     public function testReceiptOutputFailureRemovesAllTemporaryHeadersBeforeFailingClosed(): void
     {
-        [$status, $output, $stderr, $headerFiles] = $this->runWrapper('success', 'http://127.0.0.1', 'closed');
+        [$status, $output, $stderr, $headerFiles] = $this->runWrapper('success', 'http://127.0.0.1:8123', 'closed');
 
         self::assertSame(70, $status);
         self::assertSame([], $output);
@@ -538,10 +590,33 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
         unlink($stderrFile);
     }
 
+    public function testProductionModeFailsClosedWithoutExpectedReleaseAndActiveRoot(): void
+    {
+        $output = [];
+        $status = 0;
+        $stderrFile = sys_get_temp_dir() . '/read-only-probe-production-' . bin2hex(random_bytes(8));
+        exec(
+            'env -u READ_ONLY_PROBE_BASE_URL -u READ_ONLY_PROBE_EXPECTED_RELEASE bash ' .
+                escapeshellarg(__DIR__ . '/../../../scripts/ops/run_read_only_http_probe.sh') .
+                ' 2>' .
+                escapeshellarg($stderrFile),
+            $output,
+            $status,
+        );
+
+        self::assertSame(70, $status);
+        self::assertCount(1, $output);
+        self::assertSame('', (string) file_get_contents($stderrFile));
+        $receipt = ReadOnlyProbeReceiptV1::decode($output[0] . "\n");
+        self::assertSame('unapproved', $receipt['target_class']);
+        self::assertSame('unknown', $receipt['outcome']);
+        unlink($stderrFile);
+    }
+
     /** @return array{0:int,1:array<int,string>,2:string,3:array<int,string>} */
     private function runWrapper(
         string $scenario,
-        string $baseUrl = 'http://127.0.0.1',
+        string $baseUrl = 'http://127.0.0.1:8123',
         ?string $stdoutTarget = null,
     ): array {
         $directory = sys_get_temp_dir() . '/read-only-probe-curl-' . bin2hex(random_bytes(8));
@@ -614,7 +689,7 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
                         [ -n "${header}" ] && printf 'HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\n\r\n' >"${header}"
                         printf '404'
                     else
-                        [ -n "${header}" ] && printf 'HTTP/1.1 307 Temporary Redirect\r\nLocation: http://127.0.0.1/index.php/appointments\r\n\r\n' >"${header}"
+                        [ -n "${header}" ] && printf 'HTTP/1.1 307 Temporary Redirect\r\nLocation: http://127.0.0.1:8123/index.php/appointments\r\n\r\n' >"${header}"
                         printf '307'
                     fi
                     exit 0

@@ -44,6 +44,9 @@ final class ReadOnlyProbeReceiptV1
     private const ICS_HEADER_CLASSES = ['not_calendar_no_disposition', 'calendar', 'disposition', 'malformed'];
 
     /** @var array<int,string> */
+    private const STATE_CLASSES = ['unchanged', 'changed', 'unknown', 'not_applicable'];
+
+    /** @var array<int,string> */
     private const TOP_LEVEL_FIELDS = [
         'schema',
         'probe',
@@ -54,6 +57,7 @@ final class ReadOnlyProbeReceiptV1
         'redirect_class',
         'ics_header_class',
         'check_count',
+        'state',
         'cleanup',
     ];
 
@@ -69,7 +73,9 @@ final class ReadOnlyProbeReceiptV1
         array $checks = [],
         array $redirectClass = ['modern' => 'malformed', 'legacy' => 'malformed'],
         array $icsHeaderClass = ['modern' => 'malformed', 'legacy' => 'malformed'],
+        array $state = [],
     ): array {
+        $defaultState = $outcome === 'passed' ? ($targetClass === 'local' ? 'not_applicable' : 'unchanged') : 'unknown';
         $receipt = [
             'schema' => self::SCHEMA,
             'probe' => self::PROBE,
@@ -80,6 +86,10 @@ final class ReadOnlyProbeReceiptV1
             'redirect_class' => $redirectClass,
             'ics_header_class' => $icsHeaderClass,
             'check_count' => count(self::CHECK_DEFAULTS),
+            'state' => array_merge(
+                ['session' => $defaultState, 'rate_limit' => $defaultState, 'app_log' => $defaultState],
+                $state,
+            ),
             'cleanup' => 'not_applicable',
         ];
         self::validate($receipt);
@@ -118,6 +128,7 @@ final class ReadOnlyProbeReceiptV1
         self::validateChecks($receipt['checks']);
         self::validateClasses($receipt['redirect_class'], self::REDIRECT_CLASSES, 'redirect class');
         self::validateClasses($receipt['ics_header_class'], self::ICS_HEADER_CLASSES, 'ICS header class');
+        self::validateState($receipt['state']);
         self::validateEvidenceConsistency($receipt['checks'], $receipt['redirect_class'], $receipt['ics_header_class']);
         if (
             $receipt['target_class'] === 'unapproved' &&
@@ -137,7 +148,7 @@ final class ReadOnlyProbeReceiptV1
         ) {
             throw new RuntimeException('unclassified read-only probe cannot claim a security property');
         }
-        if ($receipt['cleanup'] !== 'not_applicable') {
+        if (!in_array($receipt['cleanup'], ['not_applicable', 'not_verified'], true)) {
             throw new RuntimeException('read-only probe cleanup value is invalid');
         }
         if (
@@ -150,6 +161,21 @@ final class ReadOnlyProbeReceiptV1
                 ])
         ) {
             throw new RuntimeException('passed read-only probe contains a failed check');
+        }
+        if ($receipt['outcome'] === 'passed') {
+            $expectedState = $receipt['target_class'] === 'local' ? 'not_applicable' : 'unchanged';
+            if (
+                $receipt['state'] !== [
+                    'session' => $expectedState,
+                    'rate_limit' => $expectedState,
+                    'app_log' => $expectedState,
+                ]
+            ) {
+                throw new RuntimeException('passed read-only probe contains unverified state');
+            }
+        }
+        if ($receipt['outcome'] === 'passed' && $receipt['cleanup'] !== 'not_applicable') {
+            throw new RuntimeException('passed read-only probe cleanup is not applicable');
         }
         if ($receipt['outcome'] === 'application_failed' && self::allChecksPassed($receipt['checks'])) {
             throw new RuntimeException('application failure must contain a failed check');
@@ -178,6 +204,19 @@ final class ReadOnlyProbeReceiptV1
         foreach ($classes as $value) {
             if (!is_string($value) || !in_array($value, $allowed, true)) {
                 throw new RuntimeException($label . ' value is invalid');
+            }
+        }
+    }
+
+    /** @param mixed $state */
+    private static function validateState(mixed $state): void
+    {
+        if (!is_array($state) || array_keys($state) !== ['session', 'rate_limit', 'app_log']) {
+            throw new RuntimeException('read-only probe state shape is invalid');
+        }
+        foreach ($state as $value) {
+            if (!is_string($value) || !in_array($value, self::STATE_CLASSES, true)) {
+                throw new RuntimeException('read-only probe state value is invalid');
             }
         }
     }

@@ -83,7 +83,9 @@ Script inventory:
   state-free. The wrapper reuses one cookie context, removes its local jar, and
   emits one secret-free `read_only_probe.v1` terminal receipt. It does not prove
   public DNS/TLS routing and must not be retried automatically. The first
-  production run remains separately approved.
+  production run remains separately approved. See
+  [`docs/ops/read-only-production-probes.md`](../../docs/ops/read-only-production-probes.md)
+  for the release/root binding and evidence boundary.
 - `prod_logs_summary.sh` prints redacted recent production log summaries
 - `prod_validate_after_change.sh` runs the standard post-change production gate
 - `provider_ui_smoke_principal.sh` is the server-local root-only bootstrap and

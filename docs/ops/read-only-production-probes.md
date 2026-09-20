@@ -1,32 +1,42 @@
-# Read-only production probe receipt
+# Read-only production probes
 
-`run_read_only_http_probe.sh` performs four anonymous `GET` requests against
-the known App origin: `booking_confirmation/of/<capability>` and
-`appointments/ics/<capability>` for one internally generated modern
-capability (64 hex characters) and one legacy capability (12 hex characters).
-It does not create fixtures or write application state.
+`run_read_only_http_probe.sh` checks the existing anonymous booking-confirmation
+and ICS controller routes through the fixed local ingress `http://127.0.0.1`.
+It never sends the probe to the public DNS origin. In production mode, the
+wrapper first verifies the fixed, non-symlinked app root
+`/var/www/html/easyappointments`, its root-owned `_RELEASE` marker, and the
+caller-supplied `READ_ONLY_PROBE_EXPECTED_RELEASE` expectation. The marker and app-root device/inode
+are checked again after the requests. The expected release is an expectation;
+the active root and marker remain the authority.
 
-The confirmation checks require HTTP `307` with a redirect classified only as
-`appointments`. The ICS checks require HTTP `404`, no `Content-Disposition`,
-and a `Content-Type` that is not `text/calendar`. URLs, capabilities,
-redirect targets, header values, and response bodies never appear in output or
-the receipt. The receipt includes a closed `target_class` (`production`,
-`local`, or `unapproved`) so local test evidence cannot be mistaken for a
-production result. All other details are six fixed boolean checks and closed
-classes. Ambiguous responses with more than one `Location` header fail closed.
+The application classifies only `GET` requests from loopback clients to the
+exact 12- or 64-character lowercase capability routes. Those requests use a
+non-persistent session driver, pass the existing loopback rate-limit guard, and
+silence only the empty ICS 404 log path. Public requests keep the normal file
+session driver, rate limiting, and error logging.
 
-The command emits exactly one canonical JSON line using
-`read_only_probe.v1`, including on a controlled curl, assertion, or runtime
-failure. The terminal outcomes are:
+The wrapper reuses one cookie context and removes its local cookie jar and
+header files. The receipt is secret-free and contains only closed security
+classes. It proves the active release's application behavior through the local
+ingress and the application-side state-free design. It does not prove public
+DNS, TLS, proxy routing, or behavior outside the exact classified routes.
 
-- `passed` / exit `0`: all six properties hold for both capability formats.
-- `application_failed` / exit `20`: HTTP or header/redirect assertions fail.
-- `environment_failed` / exit `21`: curl or required local runtime failed.
-- `unknown` / exit `70`: the result could not be classified safely.
+The first production run remains separately approved. Unknown, mismatched, or
+changed release/root state is a fail-closed result and must not be retried
+automatically.
 
-The production target is fixed to the known App origin. Local tests may use
-only `127.0.0.1` with an explicit port. No outcome is retried automatically;
-a missing or malformed receipt remains an evidence gap. The HTTP client
-explicitly disables user configuration, forces GET, sets retries and redirect
-following to zero, and does not follow redirects. Production execution
-requires a separate, explicit release decision.
+The `read_only_probe.v1` terminal receipt remains the closed contract. A
+successful receipt has this shape (values are fixed classes or booleans; no
+URL, capability, release ID, header value, or path is emitted):
+
+```json
+{"schema":"read_only_probe.v1","probe":"anonymous_booking_download_capabilities","target_class":"production","outcome":"passed","exit_code":0,"checks":{"modern_confirmation_redirect":true,"legacy_confirmation_redirect":true,"modern_ics_missing":true,"legacy_ics_missing":true,"modern_ics_headers_safe":true,"legacy_ics_headers_safe":true},"redirect_class":{"modern":"appointments","legacy":"appointments"},"ics_header_class":{"modern":"not_calendar_no_disposition","legacy":"not_calendar_no_disposition"},"check_count":6,"state":{"session":"unchanged","rate_limit":"unchanged","app_log":"unchanged"},"cleanup":"not_applicable"}
+```
+
+`state.session`, `state.rate_limit`, and `state.app_log` are `unchanged` only
+after the production pre/post inventory and probe-session check agree. Local
+synthetic runs use `not_applicable` because they do not inspect a production
+filesystem. `unknown` or `changed` state produces a non-passing receipt;
+`cleanup` remains `not_verified` until the production post-measurement has
+completed, then becomes `not_applicable`. Parallel application activity can
+make the conservative log comparison fail closed.
