@@ -8,6 +8,8 @@ use Csp_report_only;
 use PHPUnit\Framework\TestCase;
 
 require_once APPPATH . 'core/Csp_report_only.php';
+defined('CSP_STATUS_LOAD_ONLY') || define('CSP_STATUS_LOAD_ONLY', true);
+require_once dirname(__DIR__, 3) . '/scripts/ops/csp_report_only_status.php';
 
 final class CspReportOnlyStatusScriptTest extends TestCase
 {
@@ -213,6 +215,7 @@ final class CspReportOnlyStatusScriptTest extends TestCase
         $rootOnlyDirectory = $directory . '/root-only';
         copy($this->repoRoot() . '/scripts/ops/config/csp_report_only.production.v1.json', $configPath);
         chmod($configPath, 0644);
+        $fpm = $this->startIsolatedFpm();
 
         try {
             $config = Csp_report_only::load($configPath);
@@ -282,7 +285,7 @@ final class CspReportOnlyStatusScriptTest extends TestCase
                 '--config-path=' . $configPath,
                 '--aggregate-path=' . $aggregatePath,
             ]);
-            self::assertSame(0, $missingResult['exit_code'], $missingResult['stderr']);
+            self::assertSame(0, $missingResult['exit_code'], $missingResult['stdout'] . $missingResult['stderr']);
             $missingReceipt = json_decode($missingResult['stdout'], true, 8, JSON_THROW_ON_ERROR);
             self::assertSame('passed', $missingReceipt['status']);
             self::assertSame('missing', $missingReceipt['aggregate']['status']);
@@ -311,7 +314,9 @@ final class CspReportOnlyStatusScriptTest extends TestCase
             $missingParentReceipt = json_decode($missingParentResult['stdout'], true, 8, JSON_THROW_ON_ERROR);
             self::assertSame('failed', $missingParentReceipt['status']);
             self::assertSame('unavailable', $missingParentReceipt['aggregate']['status']);
+            self::assertFileDoesNotExist('/run/fh-csp-report-only-status');
         } finally {
+            $this->stopIsolatedFpm($fpm);
             if (is_file($aggregatePath)) {
                 unlink($aggregatePath);
             }
@@ -328,6 +333,99 @@ final class CspReportOnlyStatusScriptTest extends TestCase
                 rmdir($aggregateDirectory);
             }
             rmdir($directory);
+        }
+    }
+
+    public function testFpmProbeRejectsAnUnauthorisedDirectRequest(): void
+    {
+        if (!function_exists('posix_geteuid') || posix_geteuid() !== 0) {
+            self::markTestSkipped('The FPM socket boundary requires a root-owned local harness.');
+        }
+        $fpm = $this->startIsolatedFpm();
+        try {
+            $runtime = \runtimeIdentity('www-data');
+            self::assertIsArray($runtime);
+            self::assertNull(
+                \fastCgiProbe(
+                    '/run/fh-csp-report-only-status/op-' . str_repeat('0', 32) . '/manifest.json',
+                    str_repeat('a', 64),
+                    $runtime,
+                ),
+            );
+            self::assertFileDoesNotExist('/run/fh-csp-report-only-status');
+        } finally {
+            $this->stopIsolatedFpm($fpm);
+        }
+    }
+
+    public function testFpmAuthorizationIsSingleUseAndExpiresClosed(): void
+    {
+        if (!function_exists('posix_geteuid') || posix_geteuid() !== 0) {
+            self::markTestSkipped('The FPM authorization boundary requires a root-owned local harness.');
+        }
+        $fpm = $this->startIsolatedFpm();
+        $configDirectory = '/var/lib/fh-csp-auth-test-' . bin2hex(random_bytes(6));
+        $aggregateDirectory = '/tmp/fh-csp-auth-test-' . bin2hex(random_bytes(6));
+        mkdir($configDirectory, 0755, true);
+        mkdir($aggregateDirectory, 0777, true);
+        chmod($aggregateDirectory, 0777);
+        $configPath = $configDirectory . '/config.json';
+        $aggregatePath = $aggregateDirectory . '/aggregate.json';
+        copy($this->repoRoot() . '/scripts/ops/config/csp_report_only.production.v1.json', $configPath);
+        chmod($configPath, 0644);
+        $runtime = \runtimeIdentity('www-data');
+        self::assertIsArray($runtime);
+
+        try {
+            $authorization = \createFpmAuthorization($configPath, $aggregatePath, $runtime);
+            self::assertIsArray($authorization);
+            try {
+                $first = \fastCgiProbe($authorization['manifest_path'], $authorization['token'], $runtime);
+                self::assertIsString($first);
+                self::assertSame('missing', json_decode($first, true, 8, JSON_THROW_ON_ERROR)['status']);
+                self::assertNull(
+                    \fastCgiProbe($authorization['manifest_path'], $authorization['token'], $runtime),
+                    'A consumed authorization must not be replayable.',
+                );
+            } finally {
+                self::assertTrue(\cleanupFpmAuthorization($authorization, $runtime));
+            }
+
+            $expired = \createFpmAuthorization($configPath, $aggregatePath, $runtime);
+            self::assertIsArray($expired);
+            try {
+                $manifest = json_decode(
+                    (string) file_get_contents($expired['manifest_path']),
+                    true,
+                    8,
+                    JSON_THROW_ON_ERROR,
+                );
+                $manifest['issued_at'] = time() - 30;
+                $manifest['expires_at'] = $manifest['issued_at'] + 15;
+                self::assertNotFalse(
+                    file_put_contents(
+                        $expired['manifest_path'],
+                        json_encode($manifest, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
+                    ),
+                );
+                self::assertNull(\fastCgiProbe($expired['manifest_path'], $expired['token'], $runtime));
+            } finally {
+                self::assertTrue(\cleanupFpmAuthorization($expired, $runtime));
+            }
+            self::assertFileDoesNotExist('/run/fh-csp-report-only-status');
+        } finally {
+            $this->stopIsolatedFpm($fpm);
+            if (is_file($configPath)) {
+                unlink($configPath);
+            }
+            if (is_file($aggregatePath)) {
+                unlink($aggregatePath);
+            }
+            if (is_file($aggregatePath . '.lock')) {
+                unlink($aggregatePath . '.lock');
+            }
+            rmdir($aggregateDirectory);
+            rmdir($configDirectory);
         }
     }
 
@@ -520,6 +618,119 @@ final class CspReportOnlyStatusScriptTest extends TestCase
         } finally {
             unlink($validator);
             rmdir($directory);
+        }
+    }
+
+    /** @return array{process:resource,directory:string,created_run_php:bool} */
+    private function startIsolatedFpm(): array
+    {
+        $runtime = function_exists('posix_getpwnam') ? posix_getpwnam('www-data') : false;
+        if (!is_array($runtime)) {
+            self::markTestSkipped('The www-data runtime identity is unavailable.');
+        }
+        $binary = null;
+        foreach (['/usr/local/sbin/php-fpm', '/usr/sbin/php-fpm8.5'] as $candidate) {
+            if (is_executable($candidate)) {
+                $binary = $candidate;
+                break;
+            }
+        }
+        if ($binary === null) {
+            self::markTestSkipped('A PHP-FPM binary is unavailable.');
+        }
+        $socket = '/run/php/php8.5-fpm.sock';
+        if (@lstat($socket) !== false) {
+            self::fail('The isolated test refuses to reuse an existing production-style FPM socket.');
+        }
+        $createdRunPhp = false;
+        if (!is_dir('/run/php')) {
+            self::assertTrue(mkdir('/run/php', 0755));
+            $createdRunPhp = true;
+        } else {
+            $runPhp = lstat('/run/php');
+            self::assertIsArray($runPhp);
+            self::assertSame(0040000, ($runPhp['mode'] ?? 0) & 0170000);
+            self::assertSame(0, $runPhp['uid'] ?? -1);
+            self::assertSame(0, $runPhp['gid'] ?? -1);
+            self::assertSame(0755, ($runPhp['mode'] ?? 0) & 0777);
+        }
+        self::assertSame(0, posix_geteuid());
+        if ($createdRunPhp) {
+            self::assertTrue(chown('/run/php', 0));
+            self::assertTrue(chgrp('/run/php', 0));
+            self::assertTrue(chmod('/run/php', 0755));
+        }
+
+        $directory = '/tmp/csp-fpm-' . bin2hex(random_bytes(6));
+        self::assertTrue(mkdir($directory, 0700));
+        $config =
+            implode("\n", [
+                '[global]',
+                'daemonize = no',
+                'pid = ' . $directory . '/php-fpm.pid',
+                'error_log = ' . $directory . '/php-fpm.log',
+                '[www]',
+                'user = www-data',
+                'group = www-data',
+                'listen = ' . $socket,
+                'listen.owner = www-data',
+                'listen.group = www-data',
+                'listen.mode = 0660',
+                'pm = static',
+                'pm.max_children = 1',
+                'pm.max_requests = 20',
+                'catch_workers_output = yes',
+                'clear_env = no',
+                'security.limit_extensions = .php',
+            ]) . "\n";
+        self::assertNotFalse(file_put_contents($directory . '/php-fpm.conf', $config));
+        $process = proc_open(
+            [$binary, '-F', '-y', $directory . '/php-fpm.conf'],
+            [['file', '/dev/null', 'r'], ['file', '/dev/null', 'w'], ['file', '/dev/null', 'w']],
+            $pipes,
+        );
+        self::assertIsResource($process);
+        for ($attempt = 0; $attempt < 50 && @lstat($socket) === false; $attempt++) {
+            usleep(100000);
+        }
+        if (@lstat($socket) === false) {
+            proc_terminate($process);
+            proc_close($process);
+            self::fail('The isolated PHP-FPM socket did not become ready.');
+        }
+        return ['process' => $process, 'directory' => $directory, 'created_run_php' => $createdRunPhp];
+    }
+
+    /** @param array{process:resource,directory:string,created_run_php:bool} $fpm */
+    private function stopIsolatedFpm(array $fpm): void
+    {
+        proc_terminate($fpm['process']);
+        for ($attempt = 0; $attempt < 20; $attempt++) {
+            $status = proc_get_status($fpm['process']);
+            if (!is_array($status) || !$status['running']) {
+                break;
+            }
+            usleep(50000);
+        }
+        proc_close($fpm['process']);
+        foreach (['php8.5-fpm.sock', 'php-fpm.pid'] as $leaf) {
+            $path = $leaf === 'php8.5-fpm.sock' ? '/run/php/' . $leaf : $fpm['directory'] . '/' . $leaf;
+            if (
+                is_file($path) ||
+                (($identity = @lstat($path)) !== false && (($identity['mode'] ?? 0) & 0170000) === 0140000)
+            ) {
+                unlink($path);
+            }
+        }
+        foreach (['php-fpm.conf', 'php-fpm.log'] as $leaf) {
+            $path = $fpm['directory'] . '/' . $leaf;
+            if (is_file($path)) {
+                unlink($path);
+            }
+        }
+        rmdir($fpm['directory']);
+        if ($fpm['created_run_php']) {
+            rmdir('/run/php');
         }
     }
 

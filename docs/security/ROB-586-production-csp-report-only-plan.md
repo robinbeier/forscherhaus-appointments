@@ -2,10 +2,22 @@
 
 Status: local implementation and production plan. Nothing in this document
 activates a production header, installs a production configuration, runs the new
-production status probe, or changes Uptime Kuma. The active status probe
-includes one bounded readiness mutation under the effective `www-data`
-identity: it creates, flushes, fsyncs, closes, and immediately unlinks a
-random same-directory probe file. The inactive probe remains mutation-free.
+production status probe, or changes Uptime Kuma. The active status probe runs
+the fixed status script in an actual PHP-FPM worker through the validated
+`/run/php/php8.5-fpm.sock`. The worker performs one bounded readiness mutation
+under the effective `www-data` identity: it creates, flushes, fsyncs, closes,
+and immediately unlinks a random same-directory probe file before opening the
+real aggregate and its sidecar lock. The inactive probe remains mutation-free
+and does not create authorization state or connect to PHP-FPM.
+
+Root authorizes an active check with a short-lived, random, single-use manifest
+under `/run/fh-csp-report-only-status`. The worker validates and atomically
+consumes that manifest before any storage access. Root then removes only the
+identity-matching manifest, consumed marker, operation directory, and newly
+created authorization root. Missing, expired, replayed, ambiguous, or
+cleanup-failed authorization; unexpected FastCGI output; PHP-FPM socket or
+script identity drift; and protocol errors all fail closed. An unknown result
+must not be retried automatically.
 
 ## Decision
 
@@ -213,9 +225,13 @@ This section is a future operation requiring the separate production approval.
    and Monitor exposes neither.
 5. Run the approved existing synthetic browser smokes with their normal cleanup
    receipts, plus the new class-only status probe. When `--expect=active` is
-   used, this includes the bounded `www-data` same-directory write-readiness
-   probe; an unknown or failed probe is fail-closed. The inactive status probe
-   remains read-only.
+   used, root creates the short-lived authorization manifest and calls the
+   fixed script through the validated PHP-FPM Unix socket. The actual
+   `www-data` worker performs the bounded same-directory write-readiness probe
+   and reads the aggregate and lock. Missing, expired, replayed, unknown,
+   contradictory, or cleanup-failed results are fail-closed and are not
+   retried. The inactive status probe remains read-only and does not contact
+   PHP-FPM.
 6. Observe for 60 minutes, with class-only snapshots at activation, 15 minutes,
    and 60 minutes. Do not repeat an unknown or contradictory run
    automatically.

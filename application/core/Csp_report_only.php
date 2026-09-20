@@ -921,11 +921,33 @@ final class Csp_report_only
             @unlink($temporary);
             return false;
         }
-        if (!@rename($temporary, $path)) {
+        $parentPath = dirname($path);
+        $parentIdentity = @lstat($parentPath);
+        $parentHandle = @fopen($parentPath, 'rb');
+        $parentOpened = is_resource($parentHandle) ? @fstat($parentHandle) : false;
+        if (
+            !is_array($parentIdentity) ||
+            !is_resource($parentHandle) ||
+            !is_array($parentOpened) ||
+            (($parentIdentity['mode'] ?? 0) & 0170000) !== 0040000 ||
+            (($parentOpened['mode'] ?? 0) & 0170000) !== 0040000 ||
+            (int) ($parentIdentity['ino'] ?? -1) !== (int) ($parentOpened['ino'] ?? -2) ||
+            (int) ($parentIdentity['dev'] ?? -1) !== (int) ($parentOpened['dev'] ?? -2)
+        ) {
+            if (is_resource($parentHandle)) {
+                fclose($parentHandle);
+            }
             @unlink($temporary);
             return false;
         }
-        return true;
+        if (!@rename($temporary, $path)) {
+            fclose($parentHandle);
+            @unlink($temporary);
+            return false;
+        }
+        $synced = function_exists('fsync') && @fsync($parentHandle);
+        fclose($parentHandle);
+        return $synced;
     }
 
     private static function isSecureConfigPath(string $path): bool

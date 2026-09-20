@@ -72,6 +72,14 @@ final class CspReportOnlyTest extends TestCase
         self::assertSame(48, $config['retention_hours']);
     }
 
+    public function testAggregateReplacementSynchronizesTheParentDirectoryAfterRename(): void
+    {
+        $source = (string) file_get_contents(APPPATH . 'core/Csp_report_only.php');
+        self::assertStringContainsString('$parentHandle = @fopen($parentPath, \'rb\');', $source);
+        self::assertStringContainsString('if (!@rename($temporary, $path))', $source);
+        self::assertStringContainsString('$synced = function_exists(\'fsync\') && @fsync($parentHandle);', $source);
+    }
+
     public function testPolicyRequiresExactHttpsHtmlHostAndNeverTargetsCollector(): void
     {
         $config = $this->config(['matomo_origin' => 'https://matomo.example.test']);
