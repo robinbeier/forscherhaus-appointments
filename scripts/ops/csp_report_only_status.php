@@ -64,22 +64,21 @@ function parseOptions(array $argv): array
 /** @return string|null */
 function readRegularFileSafely(string $path, int $maxBytes): ?string
 {
-    clearstatcache(true, $path);
-    $identity = @lstat($path);
-    if (!is_array($identity)) {
-        if (!isSafeAggregateDirectory(dirname($path))) {
-            throw new RuntimeException('Aggregate directory is unavailable.');
-        }
+    if (!isSafeAggregateDirectory(dirname($path))) {
+        throw new RuntimeException('Aggregate directory is unavailable.');
+    }
+    $lockPath = $path . '.lock';
+    $initialAggregate = @lstat($path);
+    $lockIdentity = @lstat($lockPath);
+    if (!is_array($initialAggregate) && !is_array($lockIdentity)) {
         return null;
     }
-
     if (
-        (($identity['mode'] ?? 0) & 0170000) !== 0100000 ||
-        (int) ($identity['nlink'] ?? 0) !== 1 ||
-        (int) ($identity['size'] ?? -1) < 0 ||
-        (int) ($identity['size'] ?? 0) > $maxBytes
+        !is_array($lockIdentity) ||
+        (($lockIdentity['mode'] ?? 0) & 0170000) !== 0100000 ||
+        (int) ($lockIdentity['nlink'] ?? 0) !== 1
     ) {
-        throw new RuntimeException('Aggregate identity is invalid.');
+        throw new RuntimeException('Aggregate lock identity is invalid.');
     }
 
     $cursor = dirname($path);
@@ -94,32 +93,62 @@ function readRegularFileSafely(string $path, int $maxBytes): ?string
         $cursor = $next;
     }
 
-    $stream = @fopen($path, 'rb');
-    if (!is_resource($stream)) {
-        throw new RuntimeException('Aggregate cannot be opened.');
+    $lock = @fopen($lockPath, 'rb');
+    if (!is_resource($lock)) {
+        throw new RuntimeException('Aggregate lock cannot be opened.');
     }
 
     try {
-        if (!flock($stream, LOCK_SH)) {
-            throw new RuntimeException('Aggregate cannot be locked.');
+        if (!flock($lock, LOCK_SH)) {
+            throw new RuntimeException('Aggregate lock cannot be acquired.');
         }
-        $opened = fstat($stream);
+        $openedLock = fstat($lock);
         if (
-            !is_array($opened) ||
-            (int) ($opened['dev'] ?? -1) !== (int) ($identity['dev'] ?? -2) ||
-            (int) ($opened['ino'] ?? -1) !== (int) ($identity['ino'] ?? -2) ||
-            (int) ($opened['nlink'] ?? 0) !== 1
+            !is_array($openedLock) ||
+            (int) ($openedLock['dev'] ?? -1) !== (int) ($lockIdentity['dev'] ?? -2) ||
+            (int) ($openedLock['ino'] ?? -1) !== (int) ($lockIdentity['ino'] ?? -2) ||
+            (int) ($openedLock['nlink'] ?? 0) !== 1
         ) {
-            throw new RuntimeException('Aggregate identity changed.');
+            throw new RuntimeException('Aggregate lock identity changed.');
         }
-        $bytes = stream_get_contents($stream, $maxBytes + 1);
+        clearstatcache(true, $path);
+        $identity = @lstat($path);
+        if (!is_array($identity)) {
+            return null;
+        }
+        if (
+            (($identity['mode'] ?? 0) & 0170000) !== 0100000 ||
+            (int) ($identity['nlink'] ?? 0) !== 1 ||
+            (int) ($identity['size'] ?? -1) < 0 ||
+            (int) ($identity['size'] ?? 0) > $maxBytes
+        ) {
+            throw new RuntimeException('Aggregate identity is invalid.');
+        }
+        $stream = @fopen($path, 'rb');
+        if (!is_resource($stream)) {
+            throw new RuntimeException('Aggregate cannot be opened.');
+        }
+        try {
+            $opened = fstat($stream);
+            if (
+                !is_array($opened) ||
+                (int) ($opened['dev'] ?? -1) !== (int) ($identity['dev'] ?? -2) ||
+                (int) ($opened['ino'] ?? -1) !== (int) ($identity['ino'] ?? -2) ||
+                (int) ($opened['nlink'] ?? 0) !== 1
+            ) {
+                throw new RuntimeException('Aggregate identity changed.');
+            }
+            $bytes = stream_get_contents($stream, $maxBytes + 1);
+        } finally {
+            fclose($stream);
+        }
         if (!is_string($bytes) || strlen($bytes) > $maxBytes) {
             throw new RuntimeException('Aggregate exceeds the status limit.');
         }
         return $bytes;
     } finally {
-        flock($stream, LOCK_UN);
-        fclose($stream);
+        flock($lock, LOCK_UN);
+        fclose($lock);
     }
 }
 
@@ -213,12 +242,22 @@ function isAggregateStorageUsableByRuntime(string $path, string $username): bool
 
     $leaf = @lstat($path);
     if (!is_array($leaf)) {
-        return true;
+        $lock = @lstat($path . '.lock');
+        return (!is_array($lock) && !is_link($path . '.lock')) ||
+            (is_array($lock) &&
+                (($lock['mode'] ?? 0) & 0170000) === 0100000 &&
+                (int) ($lock['nlink'] ?? 0) === 1 &&
+                runtimeModeAllows($lock, $identity, 6));
     }
 
+    $lock = @lstat($path . '.lock');
     return (($leaf['mode'] ?? 0) & 0170000) === 0100000 &&
         (int) ($leaf['nlink'] ?? 0) === 1 &&
-        runtimeModeAllows($leaf, $identity, 6);
+        runtimeModeAllows($leaf, $identity, 6) &&
+        is_array($lock) &&
+        (($lock['mode'] ?? 0) & 0170000) === 0100000 &&
+        (int) ($lock['nlink'] ?? 0) === 1 &&
+        runtimeModeAllows($lock, $identity, 6);
 }
 
 /** @param array<string,mixed> $receipt */

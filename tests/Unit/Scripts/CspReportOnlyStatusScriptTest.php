@@ -83,6 +83,12 @@ final class CspReportOnlyStatusScriptTest extends TestCase
             if (is_file($aggregatePath)) {
                 unlink($aggregatePath);
             }
+            if (is_file($aggregatePath . '.lock')) {
+                unlink($aggregatePath . '.lock');
+            }
+            if (isset($lockHardlink) && is_file($lockHardlink)) {
+                unlink($lockHardlink);
+            }
             rmdir($directory);
         }
     }
@@ -178,6 +184,7 @@ final class CspReportOnlyStatusScriptTest extends TestCase
             );
             self::assertSame('accepted', $result['status']);
             chmod($aggregatePath, 0666);
+            chmod($aggregatePath . '.lock', 0666);
 
             $receiptResult = $this->runCommand([
                 PHP_BINARY,
@@ -196,7 +203,31 @@ final class CspReportOnlyStatusScriptTest extends TestCase
             self::assertSame(1, $receipt['aggregate']['summary']['classes']['blocked_origin']['unknown-external']);
             self::assertStringNotContainsString($directory, $receiptResult['stdout'] . $receiptResult['stderr']);
 
+            chmod($aggregatePath . '.lock', 0000);
+            $wrongLockMode = $this->runCommand([
+                PHP_BINARY,
+                'scripts/ops/csp_report_only_status.php',
+                '--expect=active',
+                '--config-path=' . $configPath,
+                '--aggregate-path=' . $aggregatePath,
+            ]);
+            self::assertSame(1, $wrongLockMode['exit_code'], $wrongLockMode['stderr']);
+            chmod($aggregatePath . '.lock', 0666);
+
+            $lockHardlink = $aggregatePath . '.lock-hardlink';
+            link($aggregatePath . '.lock', $lockHardlink);
+            $wrongLockIdentity = $this->runCommand([
+                PHP_BINARY,
+                'scripts/ops/csp_report_only_status.php',
+                '--expect=active',
+                '--config-path=' . $configPath,
+                '--aggregate-path=' . $aggregatePath,
+            ]);
+            self::assertSame(1, $wrongLockIdentity['exit_code'], $wrongLockIdentity['stderr']);
+            unlink($lockHardlink);
+
             unlink($aggregatePath);
+            unlink($aggregatePath . '.lock');
             $missingResult = $this->runCommand([
                 PHP_BINARY,
                 'scripts/ops/csp_report_only_status.php',
@@ -236,6 +267,9 @@ final class CspReportOnlyStatusScriptTest extends TestCase
         } finally {
             if (is_file($aggregatePath)) {
                 unlink($aggregatePath);
+            }
+            if (is_file($aggregatePath . '.lock')) {
+                unlink($aggregatePath . '.lock');
             }
             if (is_file($configPath)) {
                 unlink($configPath);

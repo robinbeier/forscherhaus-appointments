@@ -475,20 +475,18 @@ final class Csp_report_only
         }
         $path = $path ?? self::aggregatePath();
         $now = $now ?? time();
-        $handle = self::openAggregate($path);
+        $handle = self::openAggregateLock($path);
         if (!is_resource($handle)) {
             return ['status' => 'error', 'reason' => 'storage_unavailable'];
         }
 
         try {
-            $stat = fstat($handle);
-            if (!is_array($stat) || (($stat['mode'] ?? 0) & 0170000) !== 0100000 || (int) ($stat['nlink'] ?? 0) !== 1) {
+            $raw = self::readAggregate($path);
+            if ($raw === false) {
                 return ['status' => 'error', 'reason' => 'storage_unavailable'];
             }
-
-            $raw = stream_get_contents($handle);
-            $state = $raw !== false && trim($raw) !== '' ? json_decode($raw, true) : null;
-            if ($raw !== false && trim($raw) !== '' && (!is_array($state) || !self::validAggregateShape($state))) {
+            $state = trim($raw) === '' ? null : json_decode($raw, true);
+            if (trim($raw) !== '' && (!is_array($state) || !self::validAggregateShape($state))) {
                 return ['status' => 'error', 'reason' => 'storage_invalid'];
             }
             if (!is_array($state)) {
@@ -512,7 +510,7 @@ final class Csp_report_only
             $bucket['counts'][$report['surface']][$report['directive']][$report['blocked_origin']]++;
             $state['rate_window']['count']++;
             $state['updated_at_utc'] = gmdate('c', $now);
-            if (!self::writeState($handle, $state)) {
+            if (!self::writeState($path, $state)) {
                 return ['status' => 'error', 'reason' => 'storage_failed'];
             }
             return ['status' => 'accepted', 'reason' => 'stored'];
@@ -560,7 +558,7 @@ final class Csp_report_only
     }
 
     /** @return resource|null */
-    private static function openAggregate(string $path)
+    private static function openAggregateLock(string $path)
     {
         $dir = dirname($path);
         if (!is_dir($dir) || !is_writable($dir)) {
@@ -576,11 +574,12 @@ final class Csp_report_only
         if (is_link($path)) {
             return null;
         }
-        $before = file_exists($path) ? @lstat($path) : null;
-        if (is_array($before) && ((int) ($before['mode'] ?? 0) & 0170000) !== 0100000) {
+        $lockPath = $path . '.lock';
+        if (is_link($lockPath)) {
             return null;
         }
-        $handle = @fopen($path, 'c+');
+        $before = @lstat($lockPath);
+        $handle = @fopen($lockPath, 'c+');
         if (!is_resource($handle)) {
             return null;
         }
@@ -588,23 +587,65 @@ final class Csp_report_only
             fclose($handle);
             return null;
         }
-        $after = @fstat($handle);
-        $identity = @lstat($path);
+        $opened = @fstat($handle);
+        $after = @lstat($lockPath);
         if (
+            !is_array($opened) ||
             !is_array($after) ||
-            !is_array($identity) ||
+            (($opened['mode'] ?? 0) & 0170000) !== 0100000 ||
+            (($after['mode'] ?? 0) & 0170000) !== 0100000 ||
+            (int) ($opened['nlink'] ?? 0) !== 1 ||
             (int) ($after['nlink'] ?? 0) !== 1 ||
-            (int) ($identity['nlink'] ?? 0) !== 1 ||
-            (int) ($after['size'] ?? -1) < 0 ||
-            (int) ($after['size'] ?? 0) > self::MAX_AGGREGATE_BYTES ||
-            (int) ($after['ino'] ?? -1) !== (int) ($identity['ino'] ?? -2) ||
-            (int) ($after['dev'] ?? -1) !== (int) ($identity['dev'] ?? -2)
+            (int) ($opened['ino'] ?? -1) !== (int) ($after['ino'] ?? -2) ||
+            (int) ($opened['dev'] ?? -1) !== (int) ($after['dev'] ?? -2) ||
+            (is_array($before) &&
+                ((int) ($before['ino'] ?? -1) !== (int) ($after['ino'] ?? -2) ||
+                    (int) ($before['dev'] ?? -1) !== (int) ($after['dev'] ?? -2)))
         ) {
             flock($handle, LOCK_UN);
             fclose($handle);
             return null;
         }
         return $handle;
+    }
+
+    private static function readAggregate(string $path): string|false
+    {
+        $initial = @lstat($path);
+        if (!is_array($initial)) {
+            return '';
+        }
+        if ((($initial['mode'] ?? 0) & 0170000) === 0120000) {
+            return false;
+        }
+        $identity = @lstat($path);
+        if (
+            !is_array($identity) ||
+            (($identity['mode'] ?? 0) & 0170000) !== 0100000 ||
+            (int) ($identity['nlink'] ?? 0) !== 1 ||
+            (int) ($identity['size'] ?? -1) > self::MAX_AGGREGATE_BYTES
+        ) {
+            return false;
+        }
+        $stream = @fopen($path, 'rb');
+        if (!is_resource($stream)) {
+            return false;
+        }
+        try {
+            $opened = fstat($stream);
+            if (
+                !is_array($opened) ||
+                (int) ($opened['ino'] ?? -1) !== (int) ($identity['ino'] ?? -2) ||
+                (int) ($opened['dev'] ?? -1) !== (int) ($identity['dev'] ?? -2) ||
+                (int) ($opened['nlink'] ?? 0) !== 1
+            ) {
+                return false;
+            }
+            $raw = stream_get_contents($stream, self::MAX_AGGREGATE_BYTES + 1);
+            return is_string($raw) && strlen($raw) <= self::MAX_AGGREGATE_BYTES ? $raw : false;
+        } finally {
+            fclose($stream);
+        }
     }
 
     private static function validAggregateShape(array $state): bool
@@ -823,22 +864,65 @@ final class Csp_report_only
         return $fresh;
     }
 
-    private static function writeState($handle, array $state): bool
+    private static function writeState(string $path, array $state): bool
     {
         try {
             $encoded = json_encode($state, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
         } catch (Throwable $exception) {
             return false;
         }
-        if (strlen($encoded) > self::MAX_AGGREGATE_BYTES || !ftruncate($handle, 0)) {
+        if (strlen($encoded) > self::MAX_AGGREGATE_BYTES) {
             return false;
         }
-        rewind($handle);
-        $written = fwrite($handle, $encoded);
-        if ($written !== strlen($encoded) || !fflush($handle)) {
+        $temporary = null;
+        $handle = null;
+        for ($attempt = 0; $attempt < 5; $attempt++) {
+            try {
+                $candidate = dirname($path) . '/' . basename($path) . '.tmp-' . bin2hex(random_bytes(16));
+            } catch (Throwable $exception) {
+                return false;
+            }
+            $candidateHandle = @fopen($candidate, 'x+b');
+            if (is_resource($candidateHandle)) {
+                $temporary = $candidate;
+                $handle = $candidateHandle;
+                break;
+            }
+        }
+        if (!is_resource($handle)) {
             return false;
         }
-        if (function_exists('fsync') && !@fsync($handle)) {
+        $identity = @lstat($temporary);
+        $opened = @fstat($handle);
+        if (
+            !is_array($identity) ||
+            !is_array($opened) ||
+            (($identity['mode'] ?? 0) & 0170000) !== 0100000 ||
+            (($opened['mode'] ?? 0) & 0170000) !== 0100000 ||
+            (int) ($identity['nlink'] ?? 0) !== 1 ||
+            (int) ($opened['nlink'] ?? 0) !== 1 ||
+            (int) ($identity['ino'] ?? -1) !== (int) ($opened['ino'] ?? -2) ||
+            (int) ($identity['dev'] ?? -1) !== (int) ($opened['dev'] ?? -2)
+        ) {
+            fclose($handle);
+            @unlink($temporary);
+            return false;
+        }
+        $ok = true;
+        try {
+            $written = fwrite($handle, $encoded);
+            if ($written !== strlen($encoded) || !fflush($handle) || (function_exists('fsync') && !@fsync($handle))) {
+                $ok = false;
+            }
+        } finally {
+            fclose($handle);
+        }
+        if (!$ok) {
+            @unlink($temporary);
+            return false;
+        }
+        if (!@rename($temporary, $path)) {
+            @unlink($temporary);
             return false;
         }
         return true;

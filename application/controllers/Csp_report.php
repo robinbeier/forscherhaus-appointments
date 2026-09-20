@@ -48,7 +48,6 @@ class Csp_report extends CI_Controller
             return;
         }
 
-        $status = 204;
         foreach ($classified as $report) {
             $result = Csp_report_only::record($report, $config);
             if ($result['status'] === 'error') {
@@ -56,10 +55,11 @@ class Csp_report extends CI_Controller
                 return;
             }
             if ($result['status'] === 'rate_limited') {
-                $status = 429;
+                $this->output->set_status_header(429)->set_output('');
+                return;
             }
         }
 
-        $this->output->set_status_header($status)->set_output('');
+        $this->output->set_status_header(204)->set_output('');
     }
 }

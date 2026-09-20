@@ -152,6 +152,21 @@ final class CspReportOnlyTest extends TestCase
         self::assertNull(Csp_report_only::responseContentType($api, ['REQUEST_URI' => '/booking']));
     }
 
+    public function testMalformedPayloadPathHasNoPersistentInvalidAccountingWrite(): void
+    {
+        $source = (string) file_get_contents(APPPATH . 'controllers/Csp_report.php');
+        self::assertStringNotContainsString('recordDropped', $source);
+    }
+
+    public function testReportingBatchStopsAfterFirstRateLimitedResult(): void
+    {
+        $source = (string) file_get_contents(APPPATH . 'controllers/Csp_report.php');
+        $rateLimit = strpos($source, "if (\$result['status'] === 'rate_limited')");
+        self::assertIsInt($rateLimit);
+        self::assertStringContainsString("set_status_header(429)->set_output('');", substr($source, $rateLimit, 240));
+        self::assertStringContainsString('return;', substr($source, $rateLimit, 300));
+    }
+
     public function testAppWwwAnalyticsAndExcludedSurfaceMatrix(): void
     {
         $states = [
@@ -349,6 +364,7 @@ final class CspReportOnlyTest extends TestCase
             'disposition' => 'report',
         ];
         self::assertSame('accepted', Csp_report_only::record($report, $config, $path, 1700000000)['status']);
+        self::assertSame([], glob($path . '.tmp-*') ?: []);
         $beforeRateLimit = (string) file_get_contents($path);
         self::assertSame('rate_limited', Csp_report_only::record($report, $config, $path, 1700000001)['status']);
         self::assertSame($beforeRateLimit, (string) file_get_contents($path));
@@ -382,6 +398,9 @@ final class CspReportOnlyTest extends TestCase
             )['reason'],
         );
         unlink($path);
+        if (is_file($path . '.lock')) {
+            unlink($path . '.lock');
+        }
         rmdir($directory);
     }
 
@@ -427,6 +446,12 @@ final class CspReportOnlyTest extends TestCase
             if (is_file($realPath)) {
                 unlink($realPath);
             }
+            if (is_file($realPath . '.lock')) {
+                unlink($realPath . '.lock');
+            }
+            if (is_file($hardlinkPath . '.lock')) {
+                unlink($hardlinkPath . '.lock');
+            }
             rmdir($directory);
         }
     }
@@ -469,6 +494,9 @@ final class CspReportOnlyTest extends TestCase
         } finally {
             if (is_file($path)) {
                 unlink($path);
+            }
+            if (is_file($path . '.lock')) {
+                unlink($path . '.lock');
             }
             rmdir($directory);
         }
