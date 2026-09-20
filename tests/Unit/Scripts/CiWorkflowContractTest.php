@@ -123,7 +123,7 @@ class CiWorkflowContractTest extends TestCase
         );
         self::assertSame("steps.js_changes.outputs.has_changes == 'true'", $steps['ESLint changed JS files']['if']);
         self::assertSame(
-            'node --test tests/JavaScript/gulp_build.test.js tests/JavaScript/dashboard_date_range.test.js tests/JavaScript/dashboard_zero_target.test.js tests/JavaScript/blocked_periods.test.js',
+            'node --test tests/JavaScript/gulp_build.test.js tests/JavaScript/dashboard_date_range.test.js tests/JavaScript/dashboard_zero_target.test.js tests/JavaScript/blocked_periods.test.js tests/JavaScript/csp_compatibility_probe.test.js',
             $this->gateBody($steps, 'Frontend compiler regression tests', 'js-lint-changed-4'),
         );
     }
