@@ -46,7 +46,12 @@ const validateMatomoOrigin = (value) => {
     if (value === undefined || value === null || value === '') {
         return null;
     }
-    if (typeof value !== 'string' || value.trim() !== value) {
+    if (
+        typeof value !== 'string' ||
+        value.trim() !== value ||
+        /[\\\u0000-\u001f\u007f-\u009f\u2028\u2029]/u.test(value) ||
+        !/^https?:\/\/[^/?#]+$/u.test(value)
+    ) {
         throw new Error('Invalid Matomo origin configuration.');
     }
     let parsed;

@@ -88,6 +88,13 @@ test('validates Matomo as a credential-free HTTP or HTTPS origin only', () => {
         'https://matomo.example.test/path',
         'https://matomo.example.test?token=secret',
         'https://matomo.example.test#fragment',
+        'https://matomo.example.test/discarded/..',
+        'https://matomo.example.test?',
+        'https://matomo.example.test#',
+        'https:\\matomo.example.test',
+        'https:matomo.example.test',
+        'https://matomo.example.test\t',
+        'https://matomo.\texample.test',
         ' https://matomo.example.test',
     ]) {
         assert.throws(() => probe.validateMatomoOrigin(invalid), /Invalid Matomo origin configuration/);
