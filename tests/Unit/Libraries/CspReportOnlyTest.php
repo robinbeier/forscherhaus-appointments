@@ -9,6 +9,11 @@ require_once APPPATH . 'core/Csp_report_only.php';
 
 final class CspReportOnlyTest extends TestCase
 {
+    private function temporaryRoot(): string
+    {
+        return realpath(sys_get_temp_dir()) ?: sys_get_temp_dir();
+    }
+
     private function config(array $overrides = []): array
     {
         return array_merge(
@@ -289,7 +294,7 @@ final class CspReportOnlyTest extends TestCase
 
     public function testAggregateIsBoundedRateLimitedAndContainsNoRawReport(): void
     {
-        $directory = '/private/tmp/csp-report-only-' . bin2hex(random_bytes(4));
+        $directory = $this->temporaryRoot() . '/csp-report-only-' . bin2hex(random_bytes(4));
         mkdir($directory, 0700, true);
         $path = $directory . '/aggregate.json';
         $config = $this->config(['max_reports_per_minute' => 1]);
@@ -336,7 +341,7 @@ final class CspReportOnlyTest extends TestCase
 
     public function testAggregateWriterRejectsSymlinksHardlinksAndOversizedState(): void
     {
-        $directory = '/private/tmp/csp-report-only-identity-' . bin2hex(random_bytes(4));
+        $directory = $this->temporaryRoot() . '/csp-report-only-identity-' . bin2hex(random_bytes(4));
         mkdir($directory, 0700, true);
         $realPath = $directory . '/real.json';
         $symlinkPath = $directory . '/symlink.json';
@@ -382,7 +387,7 @@ final class CspReportOnlyTest extends TestCase
 
     public function testAggregateRetentionUsesElapsedHoursAcrossSparseAndConsecutiveReports(): void
     {
-        $directory = '/private/tmp/csp-report-only-retention-' . bin2hex(random_bytes(4));
+        $directory = $this->temporaryRoot() . '/csp-report-only-retention-' . bin2hex(random_bytes(4));
         mkdir($directory, 0700, true);
         $path = $directory . '/aggregate.json';
         $config = $this->config(['max_reports_per_minute' => 100, 'retention_hours' => 2]);
