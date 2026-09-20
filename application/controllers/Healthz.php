@@ -1,5 +1,7 @@
 <?php defined('BASEPATH') or exit('No direct script access allowed');
 
+require_once APPPATH . 'core/Csp_report_only.php';
+
 /* ----------------------------------------------------------------------------
  * Easy!Appointments - Online Appointment Scheduler
  *
@@ -24,6 +26,7 @@ class Healthz extends EA_Controller
     private const PDF_REQUEST_TIMEOUT_SECONDS = 2;
     private const PDF_LOOPBACK_CONNECT_TIMEOUT_MS = 250;
     private const PDF_LOOPBACK_REQUEST_TIMEOUT_MS = 500;
+    private const CSP_READINESS_SCHEMA = 'csp_report_only_runtime_readiness.v1';
 
     /**
      * Return a deep health payload.
@@ -86,6 +89,90 @@ class Healthz extends EA_Controller
             ],
             $statusCode,
             $this->cacheControlHeaders(),
+        );
+    }
+
+    /**
+     * Verify CSP aggregate write readiness in the real web runtime.
+     *
+     * This endpoint is intentionally host-local, token-protected, POST-only,
+     * and limited to a create/sync/delete probe that never touches the
+     * aggregate or its lock file.
+     */
+    public function csp_report_only_write_readiness(): void
+    {
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+            $this->cspReadinessResponse('failed', 'method_not_allowed', 405, ['Allow: POST']);
+            return;
+        }
+
+        if (!$this->hasValidHealthToken()) {
+            $this->cspReadinessResponse('failed', 'unauthorized', 401);
+            return;
+        }
+
+        if (!$this->isLoopbackRequest()) {
+            $this->cspReadinessResponse('failed', 'non_loopback', 403);
+            return;
+        }
+
+        try {
+            $result = $this->probeCspAggregateStorage();
+        } catch (Throwable $exception) {
+            log_message('error', 'CSP runtime readiness probe failed unexpectedly.');
+            $this->cspReadinessResponse('failed', 'internal_error', 503);
+            return;
+        }
+
+        $status = $result['status'] ?? null;
+        $resultClass = $result['result_class'] ?? null;
+        if (
+            !is_string($status) ||
+            !in_array($status, ['passed', 'failed'], true) ||
+            !is_string($resultClass) ||
+            !in_array($resultClass, Csp_report_only::AGGREGATE_PROBE_RESULT_CLASSES, true)
+        ) {
+            $this->cspReadinessResponse('failed', 'internal_error', 503);
+            return;
+        }
+
+        $this->cspReadinessResponse($status, $resultClass, $status === 'passed' ? 200 : 503);
+    }
+
+    protected function hasValidHealthToken(): bool
+    {
+        $expectedToken = trim((string) env('HEALTHZ_TOKEN', ''));
+        $providedToken = trim((string) $this->input->get_request_header('X-Health-Token'));
+
+        return $expectedToken !== '' && $providedToken !== '' && hash_equals($expectedToken, $providedToken);
+    }
+
+    /** @return array{status:string,result_class:string} */
+    protected function probeCspAggregateStorage(): array
+    {
+        return Csp_report_only::probeAggregateStorage();
+    }
+
+    protected function isLoopbackRequest(): bool
+    {
+        return in_array((string) ($_SERVER['REMOTE_ADDR'] ?? ''), ['127.0.0.1', '::1'], true);
+    }
+
+    /** @param list<string> $extraHeaders */
+    protected function cspReadinessResponse(
+        string $status,
+        string $resultClass,
+        int $statusCode,
+        array $extraHeaders = [],
+    ): void {
+        json_response(
+            [
+                'schema' => self::CSP_READINESS_SCHEMA,
+                'status' => $status,
+                'result_class' => $resultClass,
+            ],
+            $statusCode,
+            [...$this->cacheControlHeaders(), ...$extraHeaders],
         );
     }
 

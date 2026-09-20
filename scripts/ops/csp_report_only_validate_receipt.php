@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-const CSP_RECEIPT_SCHEMA = 'csp_report_only_status.v1';
+const CSP_RECEIPT_SCHEMA = 'csp_report_only_state.v2';
 const CSP_AGGREGATE_SCHEMA = 'csp_report_only_aggregate.v1';
 const CSP_RECEIPT_MAX_BYTES = 131072;
 const CSP_RECEIPT_MAX_COUNTER = 1_000_000_000;
@@ -42,6 +42,28 @@ const CSP_RECEIPT_ORIGIN_CLASSES = [
     'matomo',
     'unknown-external',
     'none',
+];
+const CSP_RECEIPT_FAILURE_CLASSES = [
+    'activation_invalid',
+    'activation_disabled',
+    'activation_identity_unavailable',
+    'activation_missing',
+    'activation_unexpected',
+    'aggregate_directory_unavailable',
+    'aggregate_lock_missing',
+    'aggregate_lock_invalid',
+    'aggregate_missing_with_lock',
+    'aggregate_identity_invalid',
+    'aggregate_lock_unreadable',
+    'aggregate_lock_unavailable',
+    'aggregate_lock_changed',
+    'aggregate_identity_changed',
+    'aggregate_unreadable',
+    'aggregate_oversized',
+    'aggregate_invalid',
+    'aggregate_unavailable',
+    'release_identity_unavailable',
+    'internal_error',
 ];
 
 function expectedActiveConfigHash(): ?string
@@ -148,66 +170,133 @@ function validateAggregateSummary(array $summary): bool
 }
 
 /** @param array<mixed> $receipt */
-function validateReceipt(array $receipt, string $expectation): bool
+function validateReceipt(array $receipt, string $expectation, ?string $expectedReleaseBinding = null): bool
 {
-    if (!hasExactKeys($receipt, ['schema', 'expectation', 'status', 'config', 'aggregate'])) {
+    if (
+        !hasExactKeys($receipt, [
+            'schema',
+            'expectation',
+            'status',
+            'result_class',
+            'release_binding',
+            'activation',
+            'aggregate',
+        ])
+    ) {
         return false;
     }
     if (
         ($receipt['schema'] ?? null) !== CSP_RECEIPT_SCHEMA ||
         ($receipt['expectation'] ?? null) !== $expectation ||
-        ($receipt['status'] ?? null) !== 'passed' ||
-        !is_array($receipt['config'] ?? null) ||
+        !in_array($receipt['status'] ?? null, ['passed', 'failed'], true) ||
+        !is_string($receipt['result_class'] ?? null) ||
+        !is_array($receipt['activation'] ?? null) ||
         !is_array($receipt['aggregate'] ?? null)
     ) {
         return false;
     }
 
-    $config = $receipt['config'];
+    $releaseBinding = $receipt['release_binding'] ?? null;
+    if (
+        $releaseBinding !== null &&
+        (!is_string($releaseBinding) || preg_match('/\A[a-f0-9]{64}\z/', $releaseBinding) !== 1)
+    ) {
+        return false;
+    }
+    if (
+        $expectedReleaseBinding !== null &&
+        (!is_string($releaseBinding) || !hash_equals($expectedReleaseBinding, $releaseBinding))
+    ) {
+        return false;
+    }
+
+    $activation = $receipt['activation'];
     $aggregate = $receipt['aggregate'];
-    if (!hasExactKeys($config, ['status', 'sha256']) || !hasExactKeys($aggregate, ['status', 'summary'])) {
+    if (!hasExactKeys($activation, ['status', 'sha256']) || !hasExactKeys($aggregate, ['status', 'summary'])) {
+        return false;
+    }
+
+    if (!in_array($activation['status'] ?? null, ['active', 'inactive', 'invalid', 'disabled', 'unknown'], true)) {
+        return false;
+    }
+    if (($activation['status'] ?? null) === 'active') {
+        if (
+            !is_string($activation['sha256'] ?? null) ||
+            preg_match('/\A[a-f0-9]{64}\z/', $activation['sha256']) !== 1
+        ) {
+            return false;
+        }
+    } elseif (($activation['sha256'] ?? null) !== null) {
+        return false;
+    }
+    if (!in_array($aggregate['status'] ?? null, ['valid', 'missing', 'failed', 'not_checked'], true)) {
+        return false;
+    }
+    if (($aggregate['status'] ?? null) === 'valid') {
+        if (!is_array($aggregate['summary'] ?? null) || !validateAggregateSummary($aggregate['summary'])) {
+            return false;
+        }
+    } elseif (($aggregate['summary'] ?? null) !== null) {
+        return false;
+    }
+
+    if (($receipt['status'] ?? null) === 'failed') {
+        if (!in_array($receipt['result_class'], CSP_RECEIPT_FAILURE_CLASSES, true)) {
+            return false;
+        }
+        return $releaseBinding !== null ||
+            in_array($receipt['result_class'], ['release_identity_unavailable', 'internal_error'], true);
+    }
+
+    if (
+        !is_string($releaseBinding) ||
+        ($receipt['result_class'] ?? null) !== 'state_verified' ||
+        !in_array($aggregate['status'], ['valid', 'missing'], true)
+    ) {
         return false;
     }
 
     if ($expectation === 'active') {
         $expectedHash = expectedActiveConfigHash();
         if (
-            ($config['status'] ?? null) !== 'active' ||
-            !is_string($config['sha256'] ?? null) ||
-            preg_match('/\A[a-f0-9]{64}\z/', $config['sha256']) !== 1 ||
+            ($activation['status'] ?? null) !== 'active' ||
             !is_string($expectedHash) ||
-            !hash_equals($expectedHash, $config['sha256'])
+            !hash_equals($expectedHash, $activation['sha256'])
         ) {
             return false;
         }
-        if (($aggregate['status'] ?? null) === 'missing') {
-            return ($aggregate['summary'] ?? null) === null;
-        }
-        return ($aggregate['status'] ?? null) === 'valid' &&
-            is_array($aggregate['summary'] ?? null) &&
-            validateAggregateSummary($aggregate['summary']);
+        return true;
     }
 
-    if (($config['status'] ?? null) !== 'missing' || ($config['sha256'] ?? null) !== null) {
-        return false;
-    }
-    if (($aggregate['status'] ?? null) === 'missing') {
-        return ($aggregate['summary'] ?? null) === null;
-    }
-    return ($aggregate['status'] ?? null) === 'valid' &&
-        is_array($aggregate['summary'] ?? null) &&
-        validateAggregateSummary($aggregate['summary']);
+    return ($activation['status'] ?? null) === 'inactive' && ($activation['sha256'] ?? null) === null;
 }
 
 $expectation = '';
+$expectedReleaseBinding = null;
+$seen = [];
 foreach (array_slice($argv, 1) as $argument) {
     if (str_starts_with($argument, '--expect=')) {
+        if (isset($seen['expect'])) {
+            exit(2);
+        }
+        $seen['expect'] = true;
         $expectation = substr($argument, strlen('--expect='));
+        continue;
+    }
+    if (str_starts_with($argument, '--expected-release-binding=')) {
+        if (isset($seen['expected_release_binding'])) {
+            exit(2);
+        }
+        $seen['expected_release_binding'] = true;
+        $expectedReleaseBinding = substr($argument, strlen('--expected-release-binding='));
         continue;
     }
     exit(2);
 }
 if (!in_array($expectation, ['inactive', 'active'], true)) {
+    exit(2);
+}
+if ($expectedReleaseBinding !== null && preg_match('/\A[a-f0-9]{64}\z/', $expectedReleaseBinding) !== 1) {
     exit(2);
 }
 
@@ -222,9 +311,9 @@ try {
     exit(1);
 }
 
-if (!is_array($receipt) || !validateReceipt($receipt, $expectation)) {
+if (!is_array($receipt) || !validateReceipt($receipt, $expectation, $expectedReleaseBinding)) {
     exit(1);
 }
 
 echo json_encode($receipt, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES), PHP_EOL;
-exit(0);
+exit(($receipt['status'] ?? null) === 'passed' ? 0 : 3);

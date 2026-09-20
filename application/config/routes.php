@@ -172,6 +172,7 @@ $route['dashboard/export/provider-parent-appointments.pdf']['get'] =
     'dashboard_export/provider_parent_appointments_pdf';
 $route['dashboard/export/provider-preparation.pdf']['get'] = 'dashboard_export/provider_preparation_pdf';
 $route['healthz']['get'] = 'healthz/index';
+$route['healthz/csp-report-only-write-readiness']['post'] = 'healthz/csp_report_only_write_readiness';
 $route['csp-report']['post'] = 'csp_report/index';
 
 /* End of file routes.php */

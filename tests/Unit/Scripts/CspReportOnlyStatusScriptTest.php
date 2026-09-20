@@ -10,13 +10,14 @@ use PHPUnit\Framework\TestCase;
 require_once APPPATH . 'core/Csp_report_only.php';
 defined('CSP_STATUS_LOAD_ONLY') || define('CSP_STATUS_LOAD_ONLY', true);
 require_once dirname(__DIR__, 3) . '/scripts/ops/csp_report_only_status.php';
+defined('CSP_RUNTIME_PROBE_LOAD_ONLY') || define('CSP_RUNTIME_PROBE_LOAD_ONLY', true);
+require_once dirname(__DIR__, 3) . '/scripts/ops/csp_report_only_runtime_probe.php';
 
 final class CspReportOnlyStatusScriptTest extends TestCase
 {
-    public function testInactiveCliReceiptUsesOnlyFixedStatusClasses(): void
+    public function testInactiveCliReceiptIsReadOnlyAndUsesFixedClasses(): void
     {
-        $directory = sys_get_temp_dir() . '/csp-status-' . bin2hex(random_bytes(6));
-        mkdir($directory, 0700, true);
+        $directory = $this->createReleaseRoot('inactive');
 
         try {
             $result = $this->runCommand([
@@ -25,31 +26,39 @@ final class CspReportOnlyStatusScriptTest extends TestCase
                 '--expect=inactive',
                 '--config-path=' . $directory . '/missing-config.json',
                 '--aggregate-path=' . $directory . '/missing-aggregate.json',
+                '--release-root=' . $directory,
             ]);
 
             self::assertSame(0, $result['exit_code'], $result['stderr']);
             $receipt = json_decode($result['stdout'], true, 8, JSON_THROW_ON_ERROR);
-            self::assertSame('csp_report_only_status.v1', $receipt['schema']);
+            self::assertSame('csp_report_only_state.v2', $receipt['schema']);
             self::assertSame('passed', $receipt['status']);
-            self::assertSame('missing', $receipt['config']['status']);
+            self::assertSame('state_verified', $receipt['result_class']);
+            self::assertMatchesRegularExpression('/\A[a-f0-9]{64}\z/', $receipt['release_binding']);
+            self::assertSame('inactive', $receipt['activation']['status']);
             self::assertSame('missing', $receipt['aggregate']['status']);
+            self::assertSame([], glob($directory . '/.csp-runtime-readiness-*'));
+            self::assertFileDoesNotExist($directory . '/missing-aggregate.json');
+            self::assertFileDoesNotExist($directory . '/missing-aggregate.json.lock');
             self::assertStringNotContainsString($directory, $result['stdout'] . $result['stderr']);
         } finally {
+            unlink($directory . '/_RELEASE');
             rmdir($directory);
         }
     }
 
-    public function testInactiveExpectationNeverRunsWriteProbeWhenConfigUnexpectedlyActive(): void
+    public function testInactiveExpectationClassifiesUnexpectedActivationWithoutWriting(): void
     {
         if (!function_exists('posix_geteuid') || posix_geteuid() !== 0) {
-            self::markTestSkipped('The root-controlled active config contract is verified in the CI container.');
+            self::markTestSkipped('The root-controlled activation identity is verified in the CI container.');
         }
-        $directory = '/var/lib/fh-csp-status-active-config-' . bin2hex(random_bytes(6));
+        $directory = '/var/lib/fh-csp-status-' . bin2hex(random_bytes(6));
         mkdir($directory, 0755, true);
+        file_put_contents($directory . '/_RELEASE', "ea_test_unexpected\n");
+        chmod($directory . '/_RELEASE', 0644);
         $configPath = $directory . '/config.json';
         copy($this->repoRoot() . '/scripts/ops/config/csp_report_only.production.v1.json', $configPath);
         chmod($configPath, 0644);
-        $aggregatePath = $directory . '/aggregate.json';
 
         try {
             $result = $this->runCommand([
@@ -57,808 +66,422 @@ final class CspReportOnlyStatusScriptTest extends TestCase
                 'scripts/ops/csp_report_only_status.php',
                 '--expect=inactive',
                 '--config-path=' . $configPath,
-                '--aggregate-path=' . $aggregatePath,
+                '--aggregate-path=' . $directory . '/aggregate.json',
+                '--release-root=' . $directory,
             ]);
 
             self::assertSame(1, $result['exit_code'], $result['stderr']);
-            self::assertStringContainsString('"status":"failed"', $result['stdout']);
             $receipt = json_decode($result['stdout'], true, 8, JSON_THROW_ON_ERROR);
-            self::assertSame('active', $receipt['config']['status']);
+            self::assertSame('activation_unexpected', $receipt['result_class']);
+            self::assertSame('active', $receipt['activation']['status']);
             self::assertSame('missing', $receipt['aggregate']['status']);
-            self::assertSame([], glob($directory . '/.csp-status-probe-*'));
-            self::assertFileDoesNotExist($aggregatePath);
-            self::assertFileDoesNotExist($aggregatePath . '.lock');
+            self::assertFileDoesNotExist($directory . '/aggregate.json');
+            self::assertFileDoesNotExist($directory . '/aggregate.json.lock');
         } finally {
-            if (is_file($configPath)) {
-                unlink($configPath);
-            }
-            if (is_file($aggregatePath)) {
-                unlink($aggregatePath);
-            }
-            if (is_file($aggregatePath . '.lock')) {
-                unlink($aggregatePath . '.lock');
-            }
-            foreach (glob($directory . '/.csp-status-probe-*') ?: [] as $probe) {
-                unlink($probe);
-            }
+            unlink($configPath);
+            unlink($directory . '/_RELEASE');
             rmdir($directory);
         }
     }
 
-    public function testInactiveCliCanSummarizeThePreservedAggregateWithoutActivationConfig(): void
+    public function testReadOnlyStateSummarizesAClassifiedAggregate(): void
     {
-        $temporaryRoot = realpath(sys_get_temp_dir()) ?: sys_get_temp_dir();
-        $directory = $temporaryRoot . '/csp-status-preserved-' . bin2hex(random_bytes(6));
-        mkdir($directory, 0700, true);
+        $directory = $this->createReleaseRoot('aggregate');
         $aggregatePath = $directory . '/aggregate.json';
-        $config = [
-            'max_reports_per_minute' => 2,
-            'retention_hours' => 48,
-        ];
         $now = time();
 
         try {
-            self::assertSame(
-                'accepted',
-                Csp_report_only::record(
-                    [
-                        'surface' => 'www',
-                        'directive' => 'img-src',
-                        'blocked_origin' => 'self',
-                        'disposition' => 'report',
-                    ],
-                    $config,
-                    $aggregatePath,
-                    $now,
-                )['status'],
+            $recorded = Csp_report_only::record(
+                [
+                    'surface' => 'www',
+                    'directive' => 'img-src',
+                    'blocked_origin' => 'self',
+                    'disposition' => 'report',
+                ],
+                ['max_reports_per_minute' => 2, 'retention_hours' => 48],
+                $aggregatePath,
+                $now,
             );
+            self::assertSame('accepted', $recorded['status']);
+
             $result = $this->runCommand([
                 PHP_BINARY,
                 'scripts/ops/csp_report_only_status.php',
                 '--expect=inactive',
                 '--config-path=' . $directory . '/missing-config.json',
                 '--aggregate-path=' . $aggregatePath,
+                '--release-root=' . $directory,
             ]);
-
             self::assertSame(0, $result['exit_code'], $result['stderr']);
             $receipt = json_decode($result['stdout'], true, 8, JSON_THROW_ON_ERROR);
-            self::assertSame('missing', $receipt['config']['status']);
             self::assertSame('valid', $receipt['aggregate']['status']);
             self::assertSame(1, $receipt['aggregate']['summary']['accepted']);
             self::assertSame(1, $receipt['aggregate']['summary']['classes']['surface']['www']);
-            self::assertStringNotContainsString($directory, $result['stdout'] . $result['stderr']);
         } finally {
-            if (is_file($aggregatePath)) {
-                unlink($aggregatePath);
-            }
-            if (is_file($aggregatePath . '.lock')) {
-                unlink($aggregatePath . '.lock');
-            }
-            if (isset($lockHardlink) && is_file($lockHardlink)) {
-                unlink($lockHardlink);
-            }
+            @unlink($aggregatePath);
+            @unlink($aggregatePath . '.lock');
+            unlink($directory . '/_RELEASE');
             rmdir($directory);
         }
     }
 
-    public function testWrapperAcceptsOnlyTheExpectedActiveHeaderBoundary(): void
+    public function testReadOnlyStateClassifiesMissingLock(): void
     {
-        $fixture = $this->createWrapperFixture(false);
+        $directory = $this->createReleaseRoot('lock');
+        $aggregatePath = $directory . '/aggregate.json';
+        file_put_contents($aggregatePath, '{}');
 
         try {
-            $result = $this->runCommand(
-                [
-                    'bash',
-                    'scripts/ops/prod_csp_report_only_status.sh',
-                    '--expect',
-                    'active',
-                    '--prod-ssh-target',
-                    'root@example.test',
-                ],
-                [
-                    'PATH' => $fixture . '/bin' . PATH_SEPARATOR . (getenv('PATH') ?: ''),
-                    'CSP_REPORT_ONLY_DOCTOR_SCRIPT' => $fixture . '/doctor.sh',
-                ],
-            );
+            $result = $this->runCommand([
+                PHP_BINARY,
+                'scripts/ops/csp_report_only_status.php',
+                '--expect=inactive',
+                '--config-path=' . $directory . '/missing-config.json',
+                '--aggregate-path=' . $aggregatePath,
+                '--release-root=' . $directory,
+            ]);
+            self::assertSame(1, $result['exit_code']);
+            $receipt = json_decode($result['stdout'], true, 8, JSON_THROW_ON_ERROR);
+            self::assertSame('aggregate_lock_missing', $receipt['result_class']);
+            self::assertSame('failed', $receipt['aggregate']['status']);
+        } finally {
+            unlink($aggregatePath);
+            unlink($directory . '/_RELEASE');
+            rmdir($directory);
+        }
+    }
 
+    public function testAggregateSnapshotIsTakenAfterTheWriterLock(): void
+    {
+        $directory = sys_get_temp_dir() . '/csp-status-race-' . bin2hex(random_bytes(6));
+        mkdir($directory, 0700, true);
+        $aggregatePath = $directory . '/aggregate.json';
+        $replacementPath = $directory . '/replacement.json';
+        $markerPath = $directory . '/writer-ready';
+        $recorded = Csp_report_only::record(
+            [
+                'surface' => 'app',
+                'directive' => 'script-src',
+                'blocked_origin' => 'self',
+                'disposition' => 'report',
+            ],
+            ['max_reports_per_minute' => 2, 'retention_hours' => 48],
+            $aggregatePath,
+            time(),
+        );
+        self::assertSame('accepted', $recorded['status']);
+        copy($aggregatePath, $replacementPath);
+
+        $child = proc_open(
+            [
+                PHP_BINARY,
+                '-r',
+                <<<'PHP'
+                $lock = fopen($argv[1] . '.lock', 'r+b');
+                flock($lock, LOCK_EX);
+                file_put_contents($argv[2], 'ready');
+                usleep(200000);
+                rename($argv[3], $argv[1]);
+                flock($lock, LOCK_UN);
+                fclose($lock);
+                PHP
+                ,
+                $aggregatePath,
+                $markerPath,
+                $replacementPath,
+            ],
+            [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            $pipes,
+        );
+        self::assertIsResource($child);
+        fclose($pipes[0]);
+        try {
+            $deadline = microtime(true) + 2;
+            while (!is_file($markerPath) && microtime(true) < $deadline) {
+                usleep(10000);
+            }
+            self::assertFileExists($markerPath);
+            $result = \inspectAggregate($aggregatePath, null);
+            self::assertSame('valid', $result['status']);
+            self::assertNull($result['result_class']);
+        } finally {
+            stream_get_contents($pipes[1]);
+            stream_get_contents($pipes[2]);
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+            self::assertSame(0, proc_close($child));
+            @unlink($aggregatePath);
+            @unlink($replacementPath);
+            @unlink($aggregatePath . '.lock');
+            @unlink($markerPath);
+            rmdir($directory);
+        }
+    }
+
+    public function testPreflightKeepsRuntimeProbeNotRunAndSeparatesEvidence(): void
+    {
+        $fixture = $this->createWrapperFixture('preflight');
+        try {
+            $result = $this->runWrapper($fixture, 'preflight');
             self::assertSame(0, $result['exit_code'], $result['stderr']);
-            self::assertStringContainsString('csp_headers.status=passed', $result['stdout']);
-            self::assertStringContainsString('"status":"passed"', $result['stdout']);
-            self::assertStringNotContainsString('Content-Security-Policy-Report-Only:', $result['stdout']);
+            self::assertStringContainsString('csp_evidence.public_headers.status=passed', $result['stdout']);
+            self::assertStringContainsString('csp_evidence.functional_health.status=passed', $result['stdout']);
+            self::assertStringContainsString('csp_evidence.activation.status=passed', $result['stdout']);
+            self::assertStringContainsString('csp_evidence.activation_prerequisites.status=passed', $result['stdout']);
+            self::assertStringContainsString('csp_evidence.aggregate.status=passed', $result['stdout']);
+            self::assertStringContainsString('csp_evidence.runtime_write_readiness.status=not_run', $result['stdout']);
+            self::assertStringContainsString('csp_evidence.status=passed', $result['stdout']);
+            self::assertSame('2', trim((string) file_get_contents($fixture . '/ssh-count')));
+        } finally {
+            $this->removeDirectory($fixture);
+        }
+    }
+
+    public function testActiveEvidenceUsesTheHostLocalWebRuntimeProbe(): void
+    {
+        $fixture = $this->createWrapperFixture('active');
+        try {
+            $result = $this->runWrapper($fixture, 'active');
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            self::assertStringContainsString('csp_evidence.runtime_write_readiness.status=passed', $result['stdout']);
+            self::assertStringContainsString('"schema":"csp_report_only_runtime_readiness.v1"', $result['stdout']);
+            self::assertSame('2', trim((string) file_get_contents($fixture . '/ssh-count')));
+            self::assertStringNotContainsString('/run/php', $result['stdout'] . $result['stderr']);
             self::assertStringNotContainsString('secret', strtolower($result['stdout'] . $result['stderr']));
         } finally {
             $this->removeDirectory($fixture);
         }
     }
 
-    public function testWrapperAcceptsActiveConfigBeforeTheFirstAggregateExists(): void
+    public function testWrapperUsesDistinctHeaderFailureClass(): void
     {
-        $fixture = $this->createWrapperFixture(false, $this->validActiveMissingAggregateReceipt());
-
+        $fixture = $this->createWrapperFixture('active', true);
         try {
-            $result = $this->runCommand(
-                [
-                    'bash',
-                    'scripts/ops/prod_csp_report_only_status.sh',
-                    '--expect',
-                    'active',
-                    '--prod-ssh-target',
-                    'root@example.test',
-                ],
-                [
-                    'PATH' => $fixture . '/bin' . PATH_SEPARATOR . (getenv('PATH') ?: ''),
-                    'CSP_REPORT_ONLY_DOCTOR_SCRIPT' => $fixture . '/doctor.sh',
-                ],
-            );
-
-            self::assertSame(0, $result['exit_code'], $result['stderr']);
-            self::assertStringContainsString('"status":"passed"', $result['stdout']);
-            self::assertStringContainsString('"aggregate":{"status":"missing","summary":null}', $result['stdout']);
-        } finally {
-            $this->removeDirectory($fixture);
-        }
-    }
-
-    public function testActiveCliReceiptSummarizesOnlyFixedClasses(): void
-    {
-        if (!function_exists('posix_geteuid') || posix_geteuid() !== 0) {
-            self::markTestSkipped('The root-owned activation-path contract is verified in the CI container.');
-        }
-
-        $directory = '/var/lib/fh-csp-status-test-' . bin2hex(random_bytes(6));
-        mkdir($directory, 0755, true);
-        $configPath = $directory . '/config.json';
-        $aggregateDirectory = '/tmp/fh-csp-status-runtime-' . bin2hex(random_bytes(6));
-        mkdir($aggregateDirectory, 0777, true);
-        chmod($aggregateDirectory, 0777);
-        $aggregatePath = $aggregateDirectory . '/aggregate.json';
-        $rootOnlyDirectory = $directory . '/root-only';
-        copy($this->repoRoot() . '/scripts/ops/config/csp_report_only.production.v1.json', $configPath);
-        chmod($configPath, 0644);
-        $fpm = $this->startIsolatedFpm();
-
-        try {
-            $config = Csp_report_only::load($configPath);
-            self::assertIsArray($config);
-            $result = Csp_report_only::record(
-                [
-                    'surface' => 'app',
-                    'directive' => 'script-src',
-                    'blocked_origin' => 'unknown-external',
-                    'disposition' => 'report',
-                ],
-                $config,
-                $aggregatePath,
-                time(),
-            );
-            self::assertSame('accepted', $result['status']);
-            chmod($aggregatePath, 0666);
-            chmod($aggregatePath . '.lock', 0666);
-
-            $receiptResult = $this->runCommand([
-                PHP_BINARY,
-                'scripts/ops/csp_report_only_status.php',
-                '--expect=active',
-                '--config-path=' . $configPath,
-                '--aggregate-path=' . $aggregatePath,
-            ]);
-
-            self::assertSame(0, $receiptResult['exit_code'], $receiptResult['stderr']);
-            $receipt = json_decode($receiptResult['stdout'], true, 8, JSON_THROW_ON_ERROR);
-            self::assertSame('passed', $receipt['status']);
-            self::assertSame('active', $receipt['config']['status']);
-            self::assertMatchesRegularExpression('/\A[a-f0-9]{64}\z/', $receipt['config']['sha256']);
-            self::assertSame(1, $receipt['aggregate']['summary']['accepted']);
-            self::assertSame(1, $receipt['aggregate']['summary']['classes']['blocked_origin']['unknown-external']);
-            self::assertStringNotContainsString($directory, $receiptResult['stdout'] . $receiptResult['stderr']);
-            self::assertSame([], glob($aggregateDirectory . '/.csp-status-probe-*'));
-
-            chmod($aggregatePath . '.lock', 0000);
-            $wrongLockMode = $this->runCommand([
-                PHP_BINARY,
-                'scripts/ops/csp_report_only_status.php',
-                '--expect=active',
-                '--config-path=' . $configPath,
-                '--aggregate-path=' . $aggregatePath,
-            ]);
-            self::assertSame(1, $wrongLockMode['exit_code'], $wrongLockMode['stderr']);
-            chmod($aggregatePath . '.lock', 0666);
-
-            $lockHardlink = $aggregatePath . '.lock-hardlink';
-            link($aggregatePath . '.lock', $lockHardlink);
-            $wrongLockIdentity = $this->runCommand([
-                PHP_BINARY,
-                'scripts/ops/csp_report_only_status.php',
-                '--expect=active',
-                '--config-path=' . $configPath,
-                '--aggregate-path=' . $aggregatePath,
-            ]);
-            self::assertSame(1, $wrongLockIdentity['exit_code'], $wrongLockIdentity['stderr']);
-            unlink($lockHardlink);
-
-            unlink($aggregatePath);
-            unlink($aggregatePath . '.lock');
-            $missingResult = $this->runCommand([
-                PHP_BINARY,
-                'scripts/ops/csp_report_only_status.php',
-                '--expect=active',
-                '--config-path=' . $configPath,
-                '--aggregate-path=' . $aggregatePath,
-            ]);
-            self::assertSame(0, $missingResult['exit_code'], $missingResult['stdout'] . $missingResult['stderr']);
-            $missingReceipt = json_decode($missingResult['stdout'], true, 8, JSON_THROW_ON_ERROR);
-            self::assertSame('passed', $missingReceipt['status']);
-            self::assertSame('missing', $missingReceipt['aggregate']['status']);
-
-            mkdir($rootOnlyDirectory, 0755);
-            $wrongRuntimeResult = $this->runCommand([
-                PHP_BINARY,
-                'scripts/ops/csp_report_only_status.php',
-                '--expect=active',
-                '--config-path=' . $configPath,
-                '--aggregate-path=' . $rootOnlyDirectory . '/aggregate.json',
-            ]);
-            self::assertSame(1, $wrongRuntimeResult['exit_code'], $wrongRuntimeResult['stderr']);
-            $wrongRuntimeReceipt = json_decode($wrongRuntimeResult['stdout'], true, 8, JSON_THROW_ON_ERROR);
-            self::assertSame('failed', $wrongRuntimeReceipt['status']);
-            self::assertSame('unavailable', $wrongRuntimeReceipt['aggregate']['status']);
-
-            $missingParentResult = $this->runCommand([
-                PHP_BINARY,
-                'scripts/ops/csp_report_only_status.php',
-                '--expect=active',
-                '--config-path=' . $configPath,
-                '--aggregate-path=' . $directory . '/missing-parent/aggregate.json',
-            ]);
-            self::assertSame(1, $missingParentResult['exit_code'], $missingParentResult['stderr']);
-            $missingParentReceipt = json_decode($missingParentResult['stdout'], true, 8, JSON_THROW_ON_ERROR);
-            self::assertSame('failed', $missingParentReceipt['status']);
-            self::assertSame('unavailable', $missingParentReceipt['aggregate']['status']);
-            self::assertFileDoesNotExist('/run/fh-csp-report-only-status');
-        } finally {
-            $this->stopIsolatedFpm($fpm);
-            if (is_file($aggregatePath)) {
-                unlink($aggregatePath);
-            }
-            if (is_file($aggregatePath . '.lock')) {
-                unlink($aggregatePath . '.lock');
-            }
-            if (is_file($configPath)) {
-                unlink($configPath);
-            }
-            if (is_dir($rootOnlyDirectory)) {
-                rmdir($rootOnlyDirectory);
-            }
-            if (is_dir($aggregateDirectory)) {
-                rmdir($aggregateDirectory);
-            }
-            rmdir($directory);
-        }
-    }
-
-    public function testFpmProbeRejectsAnUnauthorisedDirectRequest(): void
-    {
-        if (!function_exists('posix_geteuid') || posix_geteuid() !== 0) {
-            self::markTestSkipped('The FPM socket boundary requires a root-owned local harness.');
-        }
-        $fpm = $this->startIsolatedFpm();
-        try {
-            $runtime = \runtimeIdentity('www-data');
-            self::assertIsArray($runtime);
-            self::assertNull(
-                \fastCgiProbe(
-                    '/run/fh-csp-report-only-status/op-' . str_repeat('0', 32) . '/manifest.json',
-                    str_repeat('a', 64),
-                    $runtime,
-                ),
-            );
-            self::assertFileDoesNotExist('/run/fh-csp-report-only-status');
-        } finally {
-            $this->stopIsolatedFpm($fpm);
-        }
-    }
-
-    public function testFpmAuthorizationIsSingleUseAndExpiresClosed(): void
-    {
-        if (!function_exists('posix_geteuid') || posix_geteuid() !== 0) {
-            self::markTestSkipped('The FPM authorization boundary requires a root-owned local harness.');
-        }
-        $fpm = $this->startIsolatedFpm();
-        $configDirectory = '/var/lib/fh-csp-auth-test-' . bin2hex(random_bytes(6));
-        $aggregateDirectory = '/tmp/fh-csp-auth-test-' . bin2hex(random_bytes(6));
-        mkdir($configDirectory, 0755, true);
-        mkdir($aggregateDirectory, 0777, true);
-        chmod($aggregateDirectory, 0777);
-        $configPath = $configDirectory . '/config.json';
-        $aggregatePath = $aggregateDirectory . '/aggregate.json';
-        copy($this->repoRoot() . '/scripts/ops/config/csp_report_only.production.v1.json', $configPath);
-        chmod($configPath, 0644);
-        $runtime = \runtimeIdentity('www-data');
-        self::assertIsArray($runtime);
-
-        try {
-            $authorization = \createFpmAuthorization($configPath, $aggregatePath, $runtime);
-            self::assertIsArray($authorization);
-            try {
-                $first = \fastCgiProbe($authorization['manifest_path'], $authorization['token'], $runtime);
-                self::assertIsString($first);
-                self::assertSame('missing', json_decode($first, true, 8, JSON_THROW_ON_ERROR)['status']);
-                self::assertNull(
-                    \fastCgiProbe($authorization['manifest_path'], $authorization['token'], $runtime),
-                    'A consumed authorization must not be replayable.',
-                );
-            } finally {
-                self::assertTrue(\cleanupFpmAuthorization($authorization, $runtime));
-            }
-
-            $expired = \createFpmAuthorization($configPath, $aggregatePath, $runtime);
-            self::assertIsArray($expired);
-            try {
-                $manifest = json_decode(
-                    (string) file_get_contents($expired['manifest_path']),
-                    true,
-                    8,
-                    JSON_THROW_ON_ERROR,
-                );
-                $manifest['issued_at'] = time() - 30;
-                $manifest['expires_at'] = $manifest['issued_at'] + 15;
-                self::assertNotFalse(
-                    file_put_contents(
-                        $expired['manifest_path'],
-                        json_encode($manifest, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
-                    ),
-                );
-                self::assertNull(\fastCgiProbe($expired['manifest_path'], $expired['token'], $runtime));
-            } finally {
-                self::assertTrue(\cleanupFpmAuthorization($expired, $runtime));
-            }
-            self::assertFileDoesNotExist('/run/fh-csp-report-only-status');
-        } finally {
-            $this->stopIsolatedFpm($fpm);
-            if (is_file($configPath)) {
-                unlink($configPath);
-            }
-            if (is_file($aggregatePath)) {
-                unlink($aggregatePath);
-            }
-            if (is_file($aggregatePath . '.lock')) {
-                unlink($aggregatePath . '.lock');
-            }
-            rmdir($aggregateDirectory);
-            rmdir($configDirectory);
-        }
-    }
-
-    public function testWrapperFailsWhenEnforcementAppears(): void
-    {
-        $fixture = $this->createWrapperFixture(true);
-
-        try {
-            $result = $this->runCommand(
-                [
-                    'bash',
-                    'scripts/ops/prod_csp_report_only_status.sh',
-                    '--expect',
-                    'active',
-                    '--prod-ssh-target',
-                    'root@example.test',
-                ],
-                [
-                    'PATH' => $fixture . '/bin' . PATH_SEPARATOR . (getenv('PATH') ?: ''),
-                    'CSP_REPORT_ONLY_DOCTOR_SCRIPT' => $fixture . '/doctor.sh',
-                ],
-            );
-
+            $result = $this->runWrapper($fixture, 'active');
             self::assertSame(1, $result['exit_code']);
-            self::assertStringContainsString('csp_headers.status=failed', $result['stdout']);
+            self::assertStringContainsString(
+                'csp_evidence.public_headers.result_class=header_posture_mismatch',
+                $result['stdout'],
+            );
+            self::assertStringContainsString('csp_evidence.result_class=evidence_incomplete', $result['stdout']);
         } finally {
             $this->removeDirectory($fixture);
         }
     }
 
-    public function testWrapperFailsClosedOnEmptySuccessfulSshOutput(): void
+    public function testWrapperRejectsPassedReceiptWithNonzeroRemoteExit(): void
     {
-        $fixture = $this->createWrapperFixture(false, '', 0);
-
+        $fixture = $this->createWrapperFixture('active', false, 1);
         try {
-            $result = $this->runCommand(
-                [
-                    'bash',
-                    'scripts/ops/prod_csp_report_only_status.sh',
-                    '--expect',
-                    'active',
-                    '--prod-ssh-target',
-                    'root@example.test',
-                ],
-                [
-                    'PATH' => $fixture . '/bin' . PATH_SEPARATOR . (getenv('PATH') ?: ''),
-                    'CSP_REPORT_ONLY_DOCTOR_SCRIPT' => $fixture . '/doctor.sh',
-                ],
-            );
-
+            $result = $this->runWrapper($fixture, 'active');
             self::assertSame(1, $result['exit_code']);
-            self::assertStringContainsString('"status":"runtime_failed"', $result['stdout']);
-            self::assertStringNotContainsString('"status":"passed"', $result['stdout']);
-        } finally {
-            $this->removeDirectory($fixture);
-        }
-    }
-
-    public function testWrapperDoesNotRelayMalformedOrContradictoryReceipts(): void
-    {
-        $outputs = [
-            'not-json private-token=never-relay',
-            json_encode(
-                [
-                    'schema' => 'csp_report_only_status.v1',
-                    'expectation' => 'inactive',
-                    'status' => 'passed',
-                    'config' => ['status' => 'missing', 'sha256' => null],
-                    'aggregate' => ['status' => 'missing', 'summary' => null],
-                    'private-token' => 'never-relay',
-                ],
-                JSON_THROW_ON_ERROR,
-            ),
-        ];
-
-        foreach ($outputs as $output) {
-            $fixture = $this->createWrapperFixture(false, $output, 0);
-            try {
-                $result = $this->runCommand(
-                    [
-                        'bash',
-                        'scripts/ops/prod_csp_report_only_status.sh',
-                        '--expect',
-                        'active',
-                        '--prod-ssh-target',
-                        'root@example.test',
-                    ],
-                    [
-                        'PATH' => $fixture . '/bin' . PATH_SEPARATOR . (getenv('PATH') ?: ''),
-                        'CSP_REPORT_ONLY_DOCTOR_SCRIPT' => $fixture . '/doctor.sh',
-                    ],
-                );
-
-                self::assertSame(1, $result['exit_code']);
-                self::assertStringContainsString('"status":"runtime_failed"', $result['stdout']);
-                self::assertStringNotContainsString('never-relay', $result['stdout'] . $result['stderr']);
-            } finally {
-                $this->removeDirectory($fixture);
-            }
-        }
-    }
-
-    public function testWrapperCanonicalizesDuplicateKeysWithoutRelayingDiscardedValues(): void
-    {
-        $duplicateSchema = preg_replace(
-            '/\A\{/',
-            '{"schema":"private-token=never-relay",',
-            $this->validActiveReceipt(),
-            1,
-        );
-        self::assertIsString($duplicateSchema);
-        $fixture = $this->createWrapperFixture(false, $duplicateSchema, 0);
-
-        try {
-            $result = $this->runCommand(
-                [
-                    'bash',
-                    'scripts/ops/prod_csp_report_only_status.sh',
-                    '--expect',
-                    'active',
-                    '--prod-ssh-target',
-                    'root@example.test',
-                ],
-                [
-                    'PATH' => $fixture . '/bin' . PATH_SEPARATOR . (getenv('PATH') ?: ''),
-                    'CSP_REPORT_ONLY_DOCTOR_SCRIPT' => $fixture . '/doctor.sh',
-                ],
+            self::assertStringContainsString(
+                'csp_evidence.activation.result_class=state_receipt_contradictory',
+                $result['stdout'],
             );
-
-            self::assertSame(0, $result['exit_code'], $result['stderr']);
-            self::assertStringContainsString('"status":"passed"', $result['stdout']);
-            self::assertStringNotContainsString('never-relay', $result['stdout'] . $result['stderr']);
-            self::assertSame(1, substr_count($result['stdout'], '"schema":"csp_report_only_status.v1"'));
+            self::assertStringContainsString('csp_evidence.status=failed', $result['stdout']);
         } finally {
             $this->removeDirectory($fixture);
         }
     }
 
-    public function testWrapperRejectsActiveReceiptWithUnboundConfigHash(): void
+    public function testValidatorsRejectUnclassifiedOrAdditionalData(): void
     {
-        $receipt = json_decode($this->validActiveReceipt(), true, 8, JSON_THROW_ON_ERROR);
-        $receipt['config']['sha256'] = str_repeat('a', 64);
-        $fixture = $this->createWrapperFixture(false, json_encode($receipt, JSON_THROW_ON_ERROR), 0);
-
-        try {
-            $result = $this->runCommand(
-                [
-                    'bash',
-                    'scripts/ops/prod_csp_report_only_status.sh',
-                    '--expect',
-                    'active',
-                    '--prod-ssh-target',
-                    'root@example.test',
-                ],
-                [
-                    'PATH' => $fixture . '/bin' . PATH_SEPARATOR . (getenv('PATH') ?: ''),
-                    'CSP_REPORT_ONLY_DOCTOR_SCRIPT' => $fixture . '/doctor.sh',
-                ],
-            );
-
-            self::assertSame(1, $result['exit_code']);
-            self::assertStringContainsString('"status":"runtime_failed"', $result['stdout']);
-        } finally {
-            $this->removeDirectory($fixture);
-        }
-    }
-
-    public function testReceiptValidatorFailsClosedWhenCandidateBindingIsUnavailable(): void
-    {
-        $directory = sys_get_temp_dir() . '/csp-receipt-validator-' . bin2hex(random_bytes(6));
-        mkdir($directory, 0700, true);
-        $validator = $directory . '/validator.php';
-        copy($this->repoRoot() . '/scripts/ops/csp_report_only_validate_receipt.php', $validator);
-        $process = proc_open(
-            [PHP_BINARY, $validator, '--expect=active'],
-            [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
-            $pipes,
+        $receipt = json_decode($this->validStateReceipt('active'), true, 8, JSON_THROW_ON_ERROR);
+        $receipt['private'] = 'must-not-pass';
+        $state = $this->runCommand(
+            [PHP_BINARY, 'scripts/ops/csp_report_only_validate_receipt.php', '--expect=active'],
+            [],
+            json_encode($receipt, JSON_THROW_ON_ERROR),
         );
-        self::assertIsResource($process);
-        fwrite($pipes[0], $this->validActiveReceipt());
-        fclose($pipes[0]);
-        $stdout = stream_get_contents($pipes[1]);
-        fclose($pipes[1]);
-        fclose($pipes[2]);
-        $exitCode = proc_close($process);
+        self::assertSame(1, $state['exit_code']);
+        self::assertSame('', $state['stdout']);
 
-        try {
-            self::assertSame(1, $exitCode);
-            self::assertSame('', $stdout);
-        } finally {
-            unlink($validator);
-            rmdir($directory);
-        }
-    }
-
-    /** @return array{process:resource,directory:string,created_run_php:bool} */
-    private function startIsolatedFpm(): array
-    {
-        $runtime = function_exists('posix_getpwnam') ? posix_getpwnam('www-data') : false;
-        if (!is_array($runtime)) {
-            self::markTestSkipped('The www-data runtime identity is unavailable.');
-        }
-        $binary = null;
-        foreach (['/usr/local/sbin/php-fpm', '/usr/sbin/php-fpm8.5'] as $candidate) {
-            if (is_executable($candidate)) {
-                $binary = $candidate;
-                break;
-            }
-        }
-        if ($binary === null) {
-            self::markTestSkipped('A PHP-FPM binary is unavailable.');
-        }
-        $socket = '/run/php/php8.5-fpm.sock';
-        if (@lstat($socket) !== false) {
-            self::fail('The isolated test refuses to reuse an existing production-style FPM socket.');
-        }
-        $createdRunPhp = false;
-        if (!is_dir('/run/php')) {
-            self::assertTrue(mkdir('/run/php', 0755));
-            $createdRunPhp = true;
-        } else {
-            $runPhp = lstat('/run/php');
-            self::assertIsArray($runPhp);
-            self::assertSame(0040000, ($runPhp['mode'] ?? 0) & 0170000);
-            self::assertSame(0, $runPhp['uid'] ?? -1);
-            self::assertSame(0, $runPhp['gid'] ?? -1);
-            self::assertSame(0755, ($runPhp['mode'] ?? 0) & 0777);
-        }
-        self::assertSame(0, posix_geteuid());
-        if ($createdRunPhp) {
-            self::assertTrue(chown('/run/php', 0));
-            self::assertTrue(chgrp('/run/php', 0));
-            self::assertTrue(chmod('/run/php', 0755));
-        }
-
-        $directory = '/tmp/csp-fpm-' . bin2hex(random_bytes(6));
-        self::assertTrue(mkdir($directory, 0700));
-        $config =
-            implode("\n", [
-                '[global]',
-                'daemonize = no',
-                'pid = ' . $directory . '/php-fpm.pid',
-                'error_log = ' . $directory . '/php-fpm.log',
-                '[www]',
-                'user = www-data',
-                'group = www-data',
-                'listen = ' . $socket,
-                'listen.owner = www-data',
-                'listen.group = www-data',
-                'listen.mode = 0660',
-                'pm = static',
-                'pm.max_children = 1',
-                'pm.max_requests = 20',
-                'catch_workers_output = yes',
-                'clear_env = no',
-                'security.limit_extensions = .php',
-            ]) . "\n";
-        self::assertNotFalse(file_put_contents($directory . '/php-fpm.conf', $config));
-        $process = proc_open(
-            [$binary, '-F', '-y', $directory . '/php-fpm.conf'],
-            [['file', '/dev/null', 'r'], ['file', '/dev/null', 'w'], ['file', '/dev/null', 'w']],
-            $pipes,
+        $bindingMismatch = $this->runCommand(
+            [
+                PHP_BINARY,
+                'scripts/ops/csp_report_only_validate_receipt.php',
+                '--expect=active',
+                '--expected-release-binding=' . str_repeat('b', 64),
+            ],
+            [],
+            $this->validStateReceipt('active'),
         );
-        self::assertIsResource($process);
-        for ($attempt = 0; $attempt < 50 && @lstat($socket) === false; $attempt++) {
-            usleep(100000);
-        }
-        if (@lstat($socket) === false) {
-            proc_terminate($process);
-            proc_close($process);
-            self::fail('The isolated PHP-FPM socket did not become ready.');
-        }
-        return ['process' => $process, 'directory' => $directory, 'created_run_php' => $createdRunPhp];
+        self::assertSame(1, $bindingMismatch['exit_code']);
+        self::assertSame('', $bindingMismatch['stdout']);
+
+        $runtime = $this->runCommand(
+            [PHP_BINARY, 'scripts/ops/csp_report_only_runtime_validate_receipt.php'],
+            [],
+            '{"schema":"csp_report_only_runtime_readiness.v1","status":"failed","result_class":"raw_error"}',
+        );
+        self::assertSame(1, $runtime['exit_code']);
+        self::assertSame('', $runtime['stdout']);
     }
 
-    /** @param array{process:resource,directory:string,created_run_php:bool} $fpm */
-    private function stopIsolatedFpm(array $fpm): void
+    public function testRuntimePayloadContractAcceptsOnlyFixedClasses(): void
     {
-        proc_terminate($fpm['process']);
-        for ($attempt = 0; $attempt < 20; $attempt++) {
-            $status = proc_get_status($fpm['process']);
-            if (!is_array($status) || !$status['running']) {
-                break;
-            }
-            usleep(50000);
-        }
-        proc_close($fpm['process']);
-        foreach (['php8.5-fpm.sock', 'php-fpm.pid'] as $leaf) {
-            $path = $leaf === 'php8.5-fpm.sock' ? '/run/php/' . $leaf : $fpm['directory'] . '/' . $leaf;
-            if (
-                is_file($path) ||
-                (($identity = @lstat($path)) !== false && (($identity['mode'] ?? 0) & 0170000) === 0140000)
-            ) {
-                unlink($path);
-            }
-        }
-        foreach (['php-fpm.conf', 'php-fpm.log'] as $leaf) {
-            $path = $fpm['directory'] . '/' . $leaf;
-            if (is_file($path)) {
-                unlink($path);
-            }
-        }
-        rmdir($fpm['directory']);
-        if ($fpm['created_run_php']) {
-            rmdir('/run/php');
-        }
+        self::assertTrue(
+            \validRuntimePayload([
+                'schema' => 'csp_report_only_runtime_readiness.v1',
+                'status' => 'passed',
+                'result_class' => 'write_ready',
+            ]),
+        );
+        self::assertFalse(
+            \validRuntimePayload([
+                'schema' => 'csp_report_only_runtime_readiness.v1',
+                'status' => 'passed',
+                'result_class' => 'probe_write_failed',
+            ]),
+        );
     }
 
-    private function createWrapperFixture(
-        bool $enforcementPresent,
-        ?string $remoteOutput = null,
-        int $remoteExit = 0,
-    ): string {
+    public function testRuntimeClientPinsNumericLoopbackAndDisablesProxies(): void
+    {
+        self::assertSame('http://127.0.0.1/index.php/healthz/csp-report-only-write-readiness', CSP_RUNTIME_URL);
+        $options = \runtimeCurlOptions('test-token-value');
+        self::assertSame('', $options[CURLOPT_PROXY]);
+        self::assertSame('*', $options[CURLOPT_NOPROXY]);
+        self::assertFalse($options[CURLOPT_FOLLOWLOCATION]);
+    }
+
+    private function createWrapperFixture(string $phase, bool $headerMismatch = false, int $stateExit = 0): string
+    {
         $fixture = sys_get_temp_dir() . '/csp-wrapper-' . bin2hex(random_bytes(6));
         mkdir($fixture . '/bin', 0700, true);
-
-        $enforcement = $enforcementPresent ? 'present' : 'missing';
+        $reportOnly = $phase === 'active' ? 'present' : 'missing';
+        $appCsp = $headerMismatch ? 'present' : 'missing';
         file_put_contents(
             $fixture . '/doctor.sh',
             "#!/usr/bin/env bash\n" .
                 "printf '%s\\n' \\\n" .
-                "  'posture_header.app_https.csp={$enforcement}' \\\n" .
-                "  'posture_header.app_https.csp_report_only=present' \\\n" .
-                "  'posture_header.www_https.csp=missing' \\\n" .
-                "  'posture_header.www_https.csp_report_only=present' \\\n" .
-                "  'posture_header.monitor_https.csp=missing' \\\n" .
-                "  'posture_header.monitor_https.csp_report_only=missing'\n",
+                "  'app_https=200' 'www_https=200' 'monitor_https=302' 'renderer_http=200' 'deep_health_http=200' \\\n" .
+                "  'posture_header.app_https.csp={$appCsp}' 'posture_header.app_https.csp_report_only={$reportOnly}' \\\n" .
+                "  'posture_header.www_https.csp=missing' 'posture_header.www_https.csp_report_only={$reportOnly}' \\\n" .
+                "  'posture_header.monitor_https.csp=missing' 'posture_header.monitor_https.csp_report_only=missing'\n",
         );
-
-        $remoteOutput ??= $this->validActiveReceipt();
-        file_put_contents($fixture . '/ssh-output', $remoteOutput);
-        file_put_contents($fixture . '/ssh-exit', (string) $remoteExit);
+        chmod($fixture . '/doctor.sh', 0755);
+        file_put_contents($fixture . '/phase', $phase);
+        file_put_contents($fixture . '/state-exit', (string) $stateExit);
+        file_put_contents(
+            $fixture . '/state-output',
+            $this->validStateReceipt($phase === 'active' ? 'active' : 'inactive'),
+        );
+        file_put_contents(
+            $fixture . '/activation-output',
+            json_encode(
+                [
+                    'schema' => 'csp_report_only_activation.v2',
+                    'action' => 'preflight',
+                    'status' => 'passed',
+                    'result_class' => 'preflight_ready',
+                    'candidate_sha256' => hash_file(
+                        'sha256',
+                        $this->repoRoot() . '/scripts/ops/config/csp_report_only.production.v1.json',
+                    ),
+                    'release_binding' => str_repeat('a', 64),
+                    'run_id' => null,
+                ],
+                JSON_THROW_ON_ERROR,
+            ),
+        );
+        file_put_contents(
+            $fixture . '/runtime-output',
+            json_encode(
+                [
+                    'schema' => 'csp_report_only_runtime_readiness.v1',
+                    'status' => 'passed',
+                    'result_class' => 'write_ready',
+                ],
+                JSON_THROW_ON_ERROR,
+            ),
+        );
+        file_put_contents($fixture . '/ssh-count', '0');
         file_put_contents(
             $fixture . '/bin/ssh',
             <<<'BASH'
             #!/usr/bin/env bash
             set -euo pipefail
             fixture="$(cd "$(dirname "$0")/.." && pwd)"
-            cat "$fixture/ssh-output"
-            exit "$(cat "$fixture/ssh-exit")"
+            count="$(cat "$fixture/ssh-count")"
+            count=$((count + 1))
+            printf '%s' "$count" >"$fixture/ssh-count"
+            if [[ "$count" == '1' ]]; then
+                cat "$fixture/state-output"
+                exit "$(cat "$fixture/state-exit")"
+            elif [[ "$(cat "$fixture/phase")" == 'preflight' ]]; then
+                cat "$fixture/activation-output"
+            else
+                cat "$fixture/runtime-output"
+            fi
             BASH
             ,
         );
         chmod($fixture . '/bin/ssh', 0755);
-
         return $fixture;
     }
 
-    private function validActiveReceipt(): string
+    private function validStateReceipt(string $expectation): string
     {
+        $active = $expectation === 'active';
         return json_encode(
             [
-                'schema' => 'csp_report_only_status.v1',
-                'expectation' => 'active',
+                'schema' => 'csp_report_only_state.v2',
+                'expectation' => $expectation,
                 'status' => 'passed',
-                'config' => [
-                    'status' => 'active',
-                    'sha256' => hash_file(
-                        'sha256',
-                        $this->repoRoot() . '/scripts/ops/config/csp_report_only.production.v1.json',
-                    ),
+                'result_class' => 'state_verified',
+                'release_binding' => str_repeat('a', 64),
+                'activation' => [
+                    'status' => $active ? 'active' : 'inactive',
+                    'sha256' => $active
+                        ? hash_file(
+                            'sha256',
+                            $this->repoRoot() . '/scripts/ops/config/csp_report_only.production.v1.json',
+                        )
+                        : null,
                 ],
-                'aggregate' => [
-                    'status' => 'valid',
-                    'summary' => [
-                        'schema' => 'csp_report_only_aggregate.v1',
-                        'status' => 'ok',
-                        'updated_at_utc' => '2026-09-20T14:00:00+00:00',
-                        'age_seconds' => 0,
-                        'bucket_count' => 1,
-                        'accepted' => 1,
-                        'dropped' => ['invalid' => 0, 'rate_limited' => 0, 'storage_failed' => 0],
-                        'classes' => [
-                            'surface' => ['app' => 1, 'www' => 0],
-                            'directive' => ['script-src' => 1],
-                            'blocked_origin' => ['self' => 1],
-                        ],
-                    ],
-                ],
+                'aggregate' => ['status' => 'missing', 'summary' => null],
             ],
             JSON_THROW_ON_ERROR,
         );
     }
 
-    private function validActiveMissingAggregateReceipt(): string
+    private function runWrapper(string $fixture, string $phase): array
     {
-        return json_encode(
+        return $this->runCommand(
             [
-                'schema' => 'csp_report_only_status.v1',
-                'expectation' => 'active',
-                'status' => 'passed',
-                'config' => [
-                    'status' => 'active',
-                    'sha256' => hash_file(
-                        'sha256',
-                        $this->repoRoot() . '/scripts/ops/config/csp_report_only.production.v1.json',
-                    ),
-                ],
-                'aggregate' => [
-                    'status' => 'missing',
-                    'summary' => null,
-                ],
+                'bash',
+                'scripts/ops/prod_csp_report_only_status.sh',
+                '--phase',
+                $phase,
+                '--prod-ssh-target',
+                'root@example.test',
             ],
-            JSON_THROW_ON_ERROR,
+            [
+                'PATH' => $fixture . '/bin' . PATH_SEPARATOR . (getenv('PATH') ?: ''),
+                'CSP_REPORT_ONLY_DOCTOR_SCRIPT' => $fixture . '/doctor.sh',
+            ],
         );
     }
 
-    /**
-     * @param list<string> $command
-     * @param array<string,string> $env
-     * @return array{exit_code:int,stdout:string,stderr:string}
-     */
-    private function runCommand(array $command, array $env = []): array
+    /** @param list<string> $command @param array<string,string> $env */
+    private function runCommand(array $command, array $env = [], string $stdin = ''): array
     {
         $process = proc_open(
             $command,
-            [
-                0 => ['pipe', 'r'],
-                1 => ['pipe', 'w'],
-                2 => ['pipe', 'w'],
-            ],
+            [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
             $pipes,
             $this->repoRoot(),
             array_merge($_ENV, $env),
         );
         self::assertIsResource($process);
-
+        fwrite($pipes[0], $stdin);
         fclose($pipes[0]);
         $stdout = stream_get_contents($pipes[1]);
         $stderr = stream_get_contents($pipes[2]);
         fclose($pipes[1]);
         fclose($pipes[2]);
-
         return [
             'exit_code' => proc_close($process),
             'stdout' => is_string($stdout) ? $stdout : '',
@@ -869,6 +492,18 @@ final class CspReportOnlyStatusScriptTest extends TestCase
     private function repoRoot(): string
     {
         return dirname(__DIR__, 3);
+    }
+
+    private function createReleaseRoot(string $suffix): string
+    {
+        if (!function_exists('posix_geteuid') || posix_geteuid() !== 0) {
+            self::markTestSkipped('Root-owned release identity is verified in the CI container.');
+        }
+        $directory = '/var/lib/fh-csp-status-' . $suffix . '-' . bin2hex(random_bytes(6));
+        mkdir($directory, 0755, true);
+        file_put_contents($directory . '/_RELEASE', 'ea_test_' . $suffix . "\n");
+        chmod($directory . '/_RELEASE', 0644);
+        return $directory;
     }
 
     private function removeDirectory(string $path): void

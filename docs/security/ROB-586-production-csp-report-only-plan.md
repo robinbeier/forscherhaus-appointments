@@ -1,23 +1,17 @@
 # ROB-586 Production CSP Report-Only Preparation
 
-Status: local implementation and production plan. Nothing in this document
-activates a production header, installs a production configuration, runs the new
-production status probe, or changes Uptime Kuma. The active status probe runs
-the fixed status script in an actual PHP-FPM worker through the validated
-`/run/php/php8.5-fpm.sock`. The worker performs one bounded readiness mutation
-under the effective `www-data` identity: it creates, flushes, fsyncs, closes,
-and immediately unlinks a random same-directory probe file before opening the
-real aggregate and its sidecar lock. The inactive probe remains mutation-free
-and does not create authorization state or connect to PHP-FPM.
+Status: the Report-Only implementation is deployed but inactive after the
+first pilot was stopped and rolled back. This revision prepares the corrected
+evidence path; it does not deploy it, install the activation file, execute the
+new web-runtime write probe, or change Uptime Kuma.
 
-Root authorizes an active check with a short-lived, random, single-use manifest
-under `/run/fh-csp-report-only-status`. The worker validates and atomically
-consumes that manifest before any storage access. Root then removes only the
-identity-matching manifest, consumed marker, operation directory, and newly
-created authorization root. Missing, expired, replayed, ambiguous, or
-cleanup-failed authorization; unexpected FastCGI output; PHP-FPM socket or
-script identity drift; and protocol errors all fail closed. An unknown result
-must not be retried automatically.
+The first pilot showed why the evidence path must follow the application rather
+than a guessed process topology. Production used a valid PHP-FPM layout that
+did not match the checker's fixed `/run/php` ownership assumption. The checker
+therefore collapsed a topology mismatch into `runtime_failed`, while the
+independent public-header observation remained a separate unresolved fact. A
+checker that creates its own FastCGI client, temporary authorization tree, and
+socket trust model adds machinery without proving more application behavior.
 
 ## Decision
 
@@ -29,11 +23,86 @@ before durable storage. `Content-Security-Policy` enforcement remains disabled.
 Uptime Kuma remains outside this pilot. Its UI, WebSocket, worker, and vendor
 release requirements require a separate policy and evidence set.
 
+## Five-step evidence redesign
+
+The production proof was rebuilt with the five-step design process:
+
+1. **Make the requirements less wrong.** The proof must answer five independent
+   questions: Is the exact activation candidate installed? Do App and `www`
+   actually deliver Report-Only while enforcement and Monitor stay unchanged?
+   Can the real web process create, sync, and remove a file in the aggregate
+   directory? Is the retained aggregate valid and class-only? Are the required
+   application surfaces still healthy?
+2. **Delete parts and assumptions.** The direct FastCGI protocol client, the
+   temporary `/run/fh-csp-report-only-status` authorization tree, the fixed
+   PHP-FPM socket, and ownership assumptions about `/run/php` are removed. They
+   were properties of one deployment layout, not CSP safety requirements.
+3. **Simplify the remaining proof.** Activation identity and the classified
+   aggregate are read by a root-side, read-only state checker. Public headers
+   and functional health come from the existing redacted doctor. Only runtime
+   write readiness crosses the application boundary, through a dedicated
+   POST-only, loopback-only, health-token-protected endpoint.
+4. **Accelerate safely.** `--phase preflight` evaluates every condition that can
+   be known before activation and is completely read-only. It verifies the
+   deployed release identity, reviewed candidate, canonical pre-existing
+   production lock, activation and run-state directories, absence of an active
+   candidate or pilot lease, strict health-token identity, and HTTP-client
+   readiness. It must pass before installation. Each component returns a stable
+   result class instead of the former catch-all `runtime_failed`.
+5. **Automate last.** The pilot runner performs one preflight, one activation,
+   observations at 0, 15, and 60 minutes, and one identity-bound removal. The
+   first failed, unknown, or contradictory result stops the sequence and invokes
+   the same removal path once. It never retries activation or evidence. A
+   root-owned mode-`0600` server-side lease binds removal to the pilot's random
+   run ID, reviewed candidate hash, and initial release binding.
+
+These five checks remain separate in every receipt:
+
+| Check | Evidence source | Mutation |
+| --- | --- | --- |
+| Activation file | root-side identity, schema, and candidate-hash check | none |
+| Public headers | external App/WWW/Monitor header classes | none |
+| Runtime write readiness | actual web request creates, syncs, and immediately removes one exclusive probe file | bounded, active phase only |
+| Classified aggregate | shared-lock read and finite class summary | none |
+| Functional health | App, WWW, Monitor, renderer, and token-protected deep health | none |
+
+The write-readiness endpoint exposes only its schema, pass/fail, and a fixed
+result class. It accepts only POST from `127.0.0.1` or `::1` with the existing
+health token. It does not read or modify the aggregate or lock file, accept a
+caller path, or return a path, token, payload, exception, or file content.
+The root-side client connects to numeric loopback, disables inherited proxy
+configuration, and rejects a response unless libcurl confirms a loopback peer.
+
+The outer evidence receipt uses `header_posture_verified|mismatch`,
+`functional_health_verified|mismatch`, `activation_state_verified`,
+`aggregate_state_verified`, `preactivation_read_only`, `write_ready`, and fixed
+receipt/remote failure classes. The read-only state receipt further separates
+activation failures such as `activation_missing`, `activation_unexpected`, or
+`activation_invalid` from aggregate failures such as
+`aggregate_lock_missing`, `aggregate_identity_changed`, or
+`aggregate_invalid`. The web-runtime receipt distinguishes directory, create,
+identity, write, cleanup, and parent-sync failures. These enums are closed by
+local validators before output is accepted; raw remote output is never relayed.
+Validator success is accepted only with remote exit `0`; classified remote
+failure is accepted only with a corresponding failure exit. A valid-looking
+receipt paired with a contradictory SSH exit is an unknown result and stops the
+pilot.
+
+Every root-side state receipt also carries a release binding derived from the
+root-controlled `_RELEASE` marker, its file identity, and its contents. The
+pilot records the first binding and requires the same value at 0, 15, and
+60 minutes and after cleanup. While the root-owned pilot lease exists, the
+normal deployment entry point refuses every application switch under the same
+production lock. The reviewed removal helper therefore remains available for
+the whole supported pilot path. Observed release drift means an unsupported
+external change: evidence collection stops, the original release helper makes
+the single lease-bound removal attempt, and no automatic retry follows.
+
 ## Bound identities and baseline
 
-The implementation starts from merged source commit
-`4291b838fda87b0e8ccc6be0bdb262e18efb0e74`. A read-only production snapshot
-captured at `2026-09-20T14:02:06Z` reported:
+The deployed inactive baseline is release `ea_csp_20260920_2033_a4e846ae` on
+commit `a4e846aea3a990bb4e1c251fe3a1fdd292ce14ac`. A read-only production
+snapshot after the stopped first pilot reported:
 
 - App HTTPS `200`, `www` HTTPS `200`, Monitor HTTPS expected redirect;
 - enforcement CSP and Report-Only CSP missing on all three surfaces;
@@ -139,14 +208,18 @@ source sample, path, query, fragment, appointment capability, analytics code,
 Matomo URL, IP address, user agent, cookie, authorization value, or request
 header.
 
-The aggregate file is an observation aid. Before the first accepted report, a
-missing aggregate is an explicit zero-observation state and the read-only
-status check may pass with `aggregate.status=missing` only after the full path
-and create permissions have been verified for the fixed PHP-FPM runtime user
-`www-data`. An invalid or unavailable file, a storage error, or an unknown
-class remains a visible gap; it is not a clean result. Over-limit reports are
-rejected transiently with `429` and do not create a durable rate-limit drop or
-rewrite the aggregate.
+The aggregate file is an observation aid. Its identity is sampled only after
+the shared aggregate lock is held, so a legitimate collector replacement while
+the reader waits cannot be misclassified as an identity attack. Before the
+first accepted report, a
+missing aggregate is an explicit zero-observation state. The root-side state
+check remains read-only and reports that state without inferring write access.
+During an active observation, the separate web-runtime probe must additionally
+return `write_ready`; only that real request proves the effective application
+process can create, sync, and remove a sibling file. An invalid or unavailable
+aggregate, a failed cleanup, a storage error, or an unknown class remains a
+visible gap. Over-limit reports are rejected transiently with `429` and do not
+create a durable rate-limit drop or rewrite the aggregate.
 
 ## Local App and WWW matrix
 
@@ -215,28 +288,53 @@ missing on Monitor.
 
 This section is a future operation requiring the separate production approval.
 
-1. Deploy the reviewed application release with the feature still disabled.
-2. Bind the deployed release SHA and run the existing read-only doctor,
-   validation, and redacted log summary.
-3. Under the shared production-change lock, install the exact root-controlled
-   activation file with no-clobber semantics. Record its SHA-256 and identity
-   without printing its contents.
-4. Confirm App and `www` expose Report-Only only, enforcement stays missing,
-   and Monitor exposes neither.
-5. Run the approved existing synthetic browser smokes with their normal cleanup
-   receipts, plus the new class-only status probe. When `--expect=active` is
-   used, root creates the short-lived authorization manifest and calls the
-   fixed script through the validated PHP-FPM Unix socket. The actual
-   `www-data` worker performs the bounded same-directory write-readiness probe
-   and reads the aggregate and lock. Missing, expired, replayed, unknown,
-   contradictory, or cleanup-failed results are fail-closed and are not
-   retried. The inactive status probe remains read-only and does not contact
-   PHP-FPM.
-6. Observe for 60 minutes, with class-only snapshots at activation, 15 minutes,
-   and 60 minutes. Do not repeat an unknown or contradictory run
-   automatically.
-7. Remove the activation file at the end of the pilot even when the observations
-   are clean. A later enforcement or longer pilot is another decision.
+1. Deploy the reviewed application release with the activation file absent.
+2. Run the fully read-only gate. It checks inactive candidate state, public
+   headers, any preserved class-only aggregate, functional health, the bound
+   release, reviewed candidate, canonical production lock, activation and lease
+   paths, and token/client readiness; runtime write readiness is explicitly
+   `not_run`:
+
+   ```bash
+   bash scripts/ops/prod_csp_report_only_pilot.sh --phase preflight
+   ```
+
+3. After a separate approval bound to the deployed commit and candidate hash,
+   run the pilot. The fixed remote helper acquires the shared production-change
+   lock and installs only the candidate contained in the deployed release with
+   no-clobber semantics. From that point through verified removal, the normal
+   deployment entry point refuses a release switch while the pilot lease exists:
+
+   ```bash
+   bash scripts/ops/prod_csp_report_only_pilot.sh --phase pilot
+   ```
+
+4. The runner gathers the five independent evidence components at activation,
+   15 minutes, and 60 minutes. The active phase alone makes one host-local HTTP
+   request to the write-readiness endpoint per observation. Each request creates
+   and immediately removes one exclusive sibling probe; it never touches the
+   aggregate or its lock.
+5. Run the separately approved synthetic App/WWW browser smokes in the pilot
+   window with their existing cleanup receipts. Their results remain distinct
+   from header delivery and aggregate evidence.
+6. The first failed, unknown, release-drifted, contradictory, or cleanup-failed
+   result stops the sequence. The runner makes no retry and invokes the run-,
+   release-, identity-, and hash-bound removal action once.
+7. After a clean 60-minute observation, the same removal action runs under the
+   production lock and the runner repeats the read-only inactive preflight. A
+   later enforcement or longer pilot is another decision.
+
+The activation helper accepts no caller path, content, token, or arbitrary
+release identifier. The caller supplies only the release binding observed by
+the read-only gate and a random run ID; both are assertions, not authority.
+Installation authority still comes from the fixed candidate, root-controlled
+release identity, canonical pre-existing production lock, and root execution.
+Before creating the activation file, the helper durably creates the root-owned
+pilot lease. Removal requires the same run ID, release binding, and candidate
+hash recorded in that lease and succeeds only while the installed file is still
+the exact root-owned, single-link candidate. A mismatching file or lease is
+preserved for controlled recovery. The deployment guard treats any present or
+unresolved lease as a stop condition; it never removes pilot state itself.
 
 ## Stop conditions
 

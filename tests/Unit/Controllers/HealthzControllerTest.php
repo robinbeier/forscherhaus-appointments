@@ -10,6 +10,16 @@ require_once APPPATH . 'controllers/Healthz.php';
 
 class HealthzControllerTest extends TestCase
 {
+    protected function tearDown(): void
+    {
+        unset($_SERVER['HTTP_X_HEALTH_TOKEN'], $_SERVER['REMOTE_ADDR']);
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+        unset($_ENV['HEALTHZ_TOKEN']);
+        get_instance()->output->set_output('');
+
+        parent::tearDown();
+    }
+
     public function testResolvePdfRendererEndpointsKeepsConfiguredEndpointFirstAndUnique(): void
     {
         $hadOriginal = array_key_exists('PDF_RENDERER_URL', $_ENV);
@@ -272,6 +282,139 @@ class HealthzControllerTest extends TestCase
             ],
             $result,
         );
+    }
+
+    public function testCspWriteReadinessRequiresPost(): void
+    {
+        $_ENV['HEALTHZ_TOKEN'] = 'health-token';
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+        $_SERVER['REMOTE_ADDR'] = '127.0.0.1';
+        $_SERVER['HTTP_X_HEALTH_TOKEN'] = 'health-token';
+        $controller = $this->createCspReadinessController(
+            ['status' => 'passed', 'result_class' => 'write_ready'],
+            true,
+        );
+
+        $controller->csp_report_only_write_readiness();
+
+        $this->assertSame(
+            [
+                'schema' => 'csp_report_only_runtime_readiness.v1',
+                'status' => 'failed',
+                'result_class' => 'method_not_allowed',
+            ],
+            json_decode(get_instance()->output->get_output(), true, 8, JSON_THROW_ON_ERROR),
+        );
+        $this->assertFalse($controller->probeCalled);
+    }
+
+    public function testCspWriteReadinessRejectsMissingToken(): void
+    {
+        $_ENV['HEALTHZ_TOKEN'] = 'health-token';
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+        $_SERVER['REMOTE_ADDR'] = '127.0.0.1';
+        $controller = $this->createCspReadinessController(
+            ['status' => 'passed', 'result_class' => 'write_ready'],
+            false,
+        );
+
+        $controller->csp_report_only_write_readiness();
+
+        $payload = json_decode(get_instance()->output->get_output(), true, 8, JSON_THROW_ON_ERROR);
+        $this->assertSame('unauthorized', $payload['result_class']);
+        $this->assertFalse($controller->probeCalled);
+    }
+
+    public function testCspWriteReadinessRejectsNonLoopbackCaller(): void
+    {
+        $_ENV['HEALTHZ_TOKEN'] = 'health-token';
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+        $_SERVER['REMOTE_ADDR'] = '192.0.2.10';
+        $_SERVER['HTTP_X_HEALTH_TOKEN'] = 'health-token';
+        $controller = $this->createCspReadinessController(
+            ['status' => 'passed', 'result_class' => 'write_ready'],
+            true,
+        );
+
+        $controller->csp_report_only_write_readiness();
+
+        $payload = json_decode(get_instance()->output->get_output(), true, 8, JSON_THROW_ON_ERROR);
+        $this->assertSame('non_loopback', $payload['result_class']);
+        $this->assertFalse($controller->probeCalled);
+    }
+
+    public function testCspWriteReadinessReturnsOnlyTheFixedProbeClass(): void
+    {
+        $_ENV['HEALTHZ_TOKEN'] = 'health-token';
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+        $_SERVER['REMOTE_ADDR'] = '::1';
+        $_SERVER['HTTP_X_HEALTH_TOKEN'] = 'health-token';
+        $controller = $this->createCspReadinessController(
+            ['status' => 'passed', 'result_class' => 'write_ready'],
+            true,
+        );
+
+        $controller->csp_report_only_write_readiness();
+
+        $this->assertSame(
+            [
+                'schema' => 'csp_report_only_runtime_readiness.v1',
+                'status' => 'passed',
+                'result_class' => 'write_ready',
+            ],
+            json_decode(get_instance()->output->get_output(), true, 8, JSON_THROW_ON_ERROR),
+        );
+        $this->assertTrue($controller->probeCalled);
+    }
+
+    public function testCspWriteReadinessRejectsAnUnclassifiedProbeResult(): void
+    {
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+        $_SERVER['REMOTE_ADDR'] = '127.0.0.1';
+        $controller = $this->createCspReadinessController(
+            ['status' => 'failed', 'result_class' => 'raw_runtime_error'],
+            true,
+        );
+
+        $controller->csp_report_only_write_readiness();
+
+        $this->assertSame(
+            [
+                'schema' => 'csp_report_only_runtime_readiness.v1',
+                'status' => 'failed',
+                'result_class' => 'internal_error',
+            ],
+            json_decode(get_instance()->output->get_output(), true, 8, JSON_THROW_ON_ERROR),
+        );
+        $this->assertTrue($controller->probeCalled);
+    }
+
+    private function createCspReadinessController(array $probeResult, bool $authorized): object
+    {
+        return new class ($probeResult, $authorized) extends Healthz {
+            public object $input;
+            public bool $probeCalled = false;
+            private array $probeResult;
+            private bool $authorized;
+
+            public function __construct(array $probeResult, bool $authorized)
+            {
+                $this->probeResult = $probeResult;
+                $this->authorized = $authorized;
+                $this->input = get_instance()->input;
+            }
+
+            protected function hasValidHealthToken(): bool
+            {
+                return $this->authorized;
+            }
+
+            protected function probeCspAggregateStorage(): array
+            {
+                $this->probeCalled = true;
+                return $this->probeResult;
+            }
+        };
     }
 
     private function createController(

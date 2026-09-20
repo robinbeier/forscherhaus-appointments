@@ -111,8 +111,11 @@ because an application rollout failed.
 The host deploy script acquires the existing trusted production-change lock for
 the entire normal deployment, including storage copying, atomic switching and
 rollback. It refuses a pending ordinary synthetic-probe recovery state before any
-storage copy. Keep the lock file and root ownership intact; retry conflicting work
-after the probe and verified cleanup finish. See
+storage copy. It also refuses every application switch while a CSP Report-Only
+pilot lease exists, preserving the release-local cleanup helper until the pilot
+has verified removal. The deployment path does not remove either state. Keep the
+lock file and root ownership intact; retry conflicting work after the probe or
+pilot and verified cleanup finish. See
 [ordinary live verification](release-gate-defense-cycle.md) for the persistent
 interruption marker and recovery boundary. Dry runs do not acquire this lock.
 An operator holding the same lock across an approved migration and deployment can

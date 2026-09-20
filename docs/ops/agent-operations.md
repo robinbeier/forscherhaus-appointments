@@ -100,12 +100,23 @@ For an approved ROB-586 CSP phase, combine those header classes with the
 class-only collector state:
 
 ```bash
-bash scripts/ops/prod_csp_report_only_status.sh --expect inactive
-bash scripts/ops/prod_csp_report_only_status.sh --expect active
+bash scripts/ops/prod_csp_report_only_status.sh --phase preflight
+bash scripts/ops/prod_csp_report_only_status.sh --phase active
+bash scripts/ops/prod_csp_report_only_pilot.sh --phase preflight
 ```
 
-The command never sends a CSP report. Its first production invocation and the
-first productive collector run remain separate approvals; see the
+The preflight commands are fully read-only. They verify the root-controlled
+release binding, reviewed candidate, pre-existing production lock, activation
+and run-state paths, health token, and HTTP client before installation. The
+active status command adds one bounded, immediately removed write-readiness
+probe through the actual web process. The pilot's productive mode remains a
+separate approval and performs one activation, release-bound 0/15/60-minute
+evidence, and run-owned removal without automatic retry. While its server-side
+lease exists, the normal deployment entry point refuses a release switch under
+the shared production lock, so the reviewed cleanup helper remains available.
+The general production doctor and post-change gate also call token-protected
+deep health only over numeric loopback with proxy use disabled and require a
+loopback peer. None of these commands sends a CSP report; see the
 [ROB-586 production plan](../security/ROB-586-production-csp-report-only-plan.md).
 
 Redacted recent logs:
