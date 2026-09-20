@@ -150,14 +150,16 @@ redirect_class() {
     local blocks
     local locations
     local folded
+    local malformed
     summary="$(awk '
-        tolower($0) ~ /^http\/[0-9.]+[[:space:]]/ {blocks++; in_headers=1; locations=0; folded=0; location=""; next}
+        tolower($0) ~ /^http\/[0-9.]+[[:space:]]/ {blocks++; in_headers=1; locations=0; folded=0; malformed=0; location=""; next}
         blocks > 0 && in_headers && ($0 == "" || $0 == "\r") {in_headers=0; next}
         blocks > 0 && in_headers && /^[ \t]/ {folded=1}
+        blocks > 0 && in_headers && tolower($0) ~ /^location[ \t]+:/ {malformed=1}
         blocks > 0 && in_headers && tolower($0) ~ /^location:[[:space:]]*/ {locations++; location=$0; sub(/^[^:]*:[[:space:]]*/, "", location)}
-        END {printf "%d|%d|%d|%s", blocks, locations, folded, location}
+        END {printf "%d|%d|%d|%d|%s", blocks, locations, folded, malformed, location}
     ' "${header_file}" 2>/dev/null)" || return 1
-    IFS='|' read -r blocks locations folded location <<< "${summary}"
+    IFS='|' read -r blocks locations folded malformed location <<< "${summary}"
     location="${location//$'\r'/}"
     if [[ "${blocks}" == '0' ]]; then
         REDIRECT_RESULT='malformed'
@@ -171,7 +173,7 @@ redirect_class() {
         REDIRECT_RESULT='malformed'
         return
     fi
-    if [[ "${folded}" == '1' ]]; then
+    if [[ "${folded}" == '1' || "${malformed}" == '1' ]]; then
         REDIRECT_RESULT='malformed'
         return
     fi
@@ -196,17 +198,20 @@ ics_header_class() {
     local calendar_match
     local disposition_match
     local folded
+    local malformed
     summary="$(awk '
-        tolower($0) ~ /^http\/[0-9.]+[[:space:]]/ {blocks++; in_headers=1; calendar=0; disposition=0; folded=0; next}
+        tolower($0) ~ /^http\/[0-9.]+[[:space:]]/ {blocks++; in_headers=1; calendar=0; disposition=0; folded=0; malformed=0; next}
         blocks > 0 && in_headers && ($0 == "" || $0 == "\r") {in_headers=0; next}
         blocks > 0 && in_headers && /^[ \t]/ {folded=1}
+        blocks > 0 && in_headers && tolower($0) ~ /^content-type[ \t]+:/ {malformed=1}
+        blocks > 0 && in_headers && tolower($0) ~ /^content-disposition[ \t]+:/ {malformed=1}
         blocks > 0 && in_headers && tolower($0) ~ /^content-type:[[:space:]]*text\/calendar/ {calendar=1}
         blocks > 0 && in_headers && tolower($0) ~ /^content-disposition:/ {disposition=1}
-        END {printf "%d|%d|%d|%d", blocks, calendar, disposition, folded}
+        END {printf "%d|%d|%d|%d|%d", blocks, calendar, disposition, folded, malformed}
     ' "${header_file}" 2>/dev/null)" || return 1
-    IFS='|' read -r blocks calendar_match disposition_match folded <<< "${summary}"
+    IFS='|' read -r blocks calendar_match disposition_match folded malformed <<< "${summary}"
     [[ "${blocks}" != '0' ]] || { ICS_HEADER_RESULT='malformed'; return; }
-    [[ "${folded}" == '1' ]] && { ICS_HEADER_RESULT='malformed'; return; }
+    [[ "${folded}" == '1' || "${malformed}" == '1' ]] && { ICS_HEADER_RESULT='malformed'; return; }
     if [[ "${calendar_match}" == '1' ]]; then
         has_calendar='true'
     fi
