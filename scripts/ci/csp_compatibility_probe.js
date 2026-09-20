@@ -42,6 +42,33 @@ const DIRECTIVE_ALIASES = new Map([
 
 const normalizeSurface = (surface) => (ALLOWED_SURFACES.has(surface) ? surface : 'unknown');
 
+const validateMatomoOrigin = (value) => {
+    if (value === undefined || value === null || value === '') {
+        return null;
+    }
+    if (typeof value !== 'string' || value.trim() !== value) {
+        throw new Error('Invalid Matomo origin configuration.');
+    }
+    let parsed;
+    try {
+        parsed = new URL(value);
+    } catch (_error) {
+        throw new Error('Invalid Matomo origin configuration.');
+    }
+    if (
+        !['http:', 'https:'].includes(parsed.protocol) ||
+        parsed.username !== '' ||
+        parsed.password !== '' ||
+        parsed.pathname !== '/' ||
+        parsed.search !== '' ||
+        parsed.hash !== '' ||
+        parsed.hostname === ''
+    ) {
+        throw new Error('Invalid Matomo origin configuration.');
+    }
+    return parsed.origin;
+};
+
 const validateSurface = (surface) => {
     if (!ALLOWED_SURFACES.has(surface)) {
         throw new Error('CSP compatibility probe requires a supported surface.');
@@ -68,7 +95,7 @@ const validateLocalTarget = (value) => {
     return parsed;
 };
 
-const blockedOriginClass = (blockedUri, selfOrigin) => {
+const blockedOriginClass = (blockedUri, selfOrigin, matomoOrigin = null) => {
     if (typeof blockedUri !== 'string' || blockedUri === '') {
         return 'unknown';
     }
@@ -85,6 +112,9 @@ const blockedOriginClass = (blockedUri, selfOrigin) => {
         const parsed = new URL(blockedUri);
         if (typeof selfOrigin === 'string' && parsed.origin === selfOrigin) {
             return 'self';
+        }
+        if (typeof matomoOrigin === 'string' && parsed.origin === matomoOrigin) {
+            return 'matomo-configured';
         }
         if (
             ['http:', 'https:'].includes(parsed.protocol) &&
@@ -150,14 +180,14 @@ const boundedObservationMs = (value) => {
     return parsed;
 };
 
-const sanitizeViolation = (violation, surface, selfOrigin) => {
+const sanitizeViolation = (violation, surface, selfOrigin, matomoOrigin = null) => {
     const rawDirective = typeof violation?.effectiveDirective === 'string' ? violation.effectiveDirective : 'unknown';
     const normalizedDirective = DIRECTIVE_ALIASES.get(rawDirective) || rawDirective;
     const directive = ALLOWED_DIRECTIVES.has(normalizedDirective) ? normalizedDirective : 'unknown';
     return {
         surface: normalizeSurface(surface),
         directive,
-        blocked_origin: blockedOriginClass(violation?.blockedURI, selfOrigin),
+        blocked_origin: blockedOriginClass(violation?.blockedURI, selfOrigin, matomoOrigin),
         disposition: 'report',
     };
 };
@@ -209,6 +239,7 @@ const makeFailureReceipt = (errorClass = 'probe_failed') => ({
 const runProbe = async (input) => {
     const target = validateLocalTarget(input.url);
     validateSurface(input.surface);
+    const matomoOrigin = validateMatomoOrigin(input.matomo_origin);
     const observationMs = boundedObservationMs(input.observation_ms);
     const playwright = require('playwright');
     const browserTypes = {
@@ -320,7 +351,7 @@ const runProbe = async (input) => {
         await page.waitForTimeout(observationMs);
         const pageViolations = await page.evaluate(() => window.__CSP_COMPATIBILITY_VIOLATIONS__ || []);
         for (const violation of pageViolations) {
-            violations.push(sanitizeViolation(violation, input.surface, target.origin));
+            violations.push(sanitizeViolation(violation, input.surface, target.origin, matomoOrigin));
         }
         await page.close({runBeforeUnload: false});
         page = undefined;
@@ -384,6 +415,7 @@ module.exports = {
     sanitizeViolation,
     validateSurface,
     validateLocalTarget,
+    validateMatomoOrigin,
     webSocketClass,
     boundedObservationMs,
 };

@@ -52,6 +52,58 @@ test('sanitizes policy violations into fixed classes without raw locations', () 
         probe.blockedOriginClass('http://www.googletagmanager.com/gtag.js', 'http://localhost'),
         'google-analytics',
     );
+    assert.equal(
+        probe.blockedOriginClass(
+            'https://matomo.example.test/matomo.js?token=secret',
+            'http://localhost',
+            'https://matomo.example.test',
+        ),
+        'matomo-configured',
+    );
+    assert.equal(
+        probe.blockedOriginClass(
+            'https://matomo.example.test:8443/matomo.js',
+            'http://localhost',
+            'https://matomo.example.test',
+        ),
+        'unknown-external',
+    );
+    assert.equal(
+        probe.blockedOriginClass(
+            'https://sub.matomo.example.test/matomo.js',
+            'http://localhost',
+            'https://matomo.example.test',
+        ),
+        'unknown-external',
+    );
+});
+
+test('validates Matomo as a credential-free HTTP or HTTPS origin only', () => {
+    assert.equal(probe.validateMatomoOrigin(undefined), null);
+    assert.equal(probe.validateMatomoOrigin('https://matomo.example.test'), 'https://matomo.example.test');
+    assert.equal(probe.validateMatomoOrigin('http://matomo.example.test:8080'), 'http://matomo.example.test:8080');
+    for (const invalid of [
+        'ftp://matomo.example.test',
+        'https://user:pass@matomo.example.test',
+        'https://matomo.example.test/path',
+        'https://matomo.example.test?token=secret',
+        'https://matomo.example.test#fragment',
+        ' https://matomo.example.test',
+    ]) {
+        assert.throws(() => probe.validateMatomoOrigin(invalid), /Invalid Matomo origin configuration/);
+    }
+});
+
+test('invalid Matomo configuration never leaks the configured origin', () => {
+    const rawOrigin = 'https://user:pass@matomo.example.test/path?token=secret';
+    assert.throws(
+        () => probe.validateMatomoOrigin(rawOrigin),
+        (error) => {
+            assert.equal(error.message.includes(rawOrigin), false);
+            assert.equal(error.message.includes('secret'), false);
+            return true;
+        },
+    );
 });
 
 test('receipt contains only aggregate classes and explicit non-production markers', () => {
@@ -196,6 +248,10 @@ const browser = {
           effectiveDirective: 'script-src',
           blockedURI: 'https://example.test/private/path?token=secret',
           sourceFile: 'https://example.test/private/path?token=secret',
+        }, {
+          effectiveDirective: 'script-src',
+          blockedURI: 'https://matomo.example.test/matomo.js?token=secret',
+          sourceFile: 'https://matomo.example.test/matomo.js?token=secret',
         }],
         close: async () => { record.pageClosed = true; save(); },
       }),
@@ -218,7 +274,7 @@ Module._load = (request, parent, isMain) => request === 'playwright'
   ? originalLoad(${JSON.stringify(fakePlaywrightPath)}, parent, isMain)
   : originalLoad(request, parent, isMain);
 const {runProbe} = require(${JSON.stringify(path.join(__dirname, '../../scripts/ci/csp_compatibility_probe.js'))});
-runProbe({url: 'http://127.0.0.1:8080/booking', surface: 'booking'})
+runProbe({url: 'http://127.0.0.1:8080/booking', surface: 'booking', matomo_origin: 'https://matomo.example.test'})
   .then((receipt) => process.stdout.write(JSON.stringify(receipt)))
   .catch((error) => { process.stderr.write(String(error)); process.exitCode = 1; });
 `,
@@ -243,18 +299,43 @@ runProbe({url: 'http://127.0.0.1:8080/booking', surface: 'booking'})
         assert.equal(record.waited, 500);
         assert.equal(record.pageClosed, true);
         assert.equal(record.header, probe.CANDIDATE_POLICY);
-        assert.equal(receipt.violation_count, 1);
+        assert.equal(receipt.violation_count, 2);
         assert.equal(receipt.blocked_request_count, 2);
         assert.deepEqual(receipt.blocked_request_classes, {external: 1, websocket_external: 1});
         assert.equal(receipt.intercepted_report_count, 1);
         assert.equal(receipt.report_destination_intercepted, true);
-        assert.deepEqual(receipt.violation_classes, {'booking:script-src:unknown-external:report': 1});
+        assert.deepEqual(receipt.violation_classes, {
+            'booking:script-src:unknown-external:report': 1,
+            'booking:script-src:matomo-configured:report': 1,
+        });
         assert.equal(result.stdout.includes('external.test'), false);
+        assert.equal(result.stdout.includes('matomo.example.test'), false);
         assert.equal(result.stdout.includes('private/path'), false);
         assert.equal(result.stdout.includes('secret'), false);
     } finally {
         fs.rmSync(tempDirectory, {recursive: true, force: true});
     }
+});
+
+test('CLI emits a closed failure receipt without echoing invalid Matomo configuration', () => {
+    const rawOrigin = 'https://user:pass@matomo.example.test/path?token=secret';
+    const result = spawnSync(process.execPath, [path.join(__dirname, '../../scripts/ci/csp_compatibility_probe.js')], {
+        input: JSON.stringify({
+            url: 'http://127.0.0.1:8080/booking',
+            surface: 'booking',
+            matomo_origin: rawOrigin,
+        }),
+        encoding: 'utf8',
+        env: process.env,
+    });
+    assert.equal(result.status, 1);
+    assert.equal(result.stderr, '');
+    const receipt = JSON.parse(result.stdout);
+    assert.equal(receipt.outcome, 'environment_failed');
+    assert.equal(receipt.error_class, 'probe_failed');
+    assert.equal(result.stdout.includes(rawOrigin), false);
+    assert.equal(result.stdout.includes('matomo.example.test'), false);
+    assert.equal(result.stdout.includes('secret'), false);
 });
 
 test(
