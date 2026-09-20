@@ -111,7 +111,7 @@ elif [[ "${BASE_URL}" =~ ^http://127\.0\.0\.1:[1-9][0-9]*$ ]]; then
 else
     die_unknown
 fi
-for command_name in curl od tr mktemp awk; do
+for command_name in curl od tr mktemp awk rm; do
     command -v "${command_name}" >/dev/null 2>&1 || die_environment
 done
 

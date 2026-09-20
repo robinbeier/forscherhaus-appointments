@@ -329,6 +329,31 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
         self::assertSame('environment_failed', ReadOnlyProbeReceiptV1::decode($output[0] . "\n")['outcome']);
     }
 
+    public function testMissingRmFailsBeforeCapabilityGenerationOrRequests(): void
+    {
+        [$status, $output, $stderr, $headerFiles] = $this->runWrapper('missing_rm');
+
+        self::assertSame(21, $status);
+        self::assertCount(1, $output);
+        self::assertSame('', $stderr);
+        self::assertSame([], $headerFiles);
+        $receipt = ReadOnlyProbeReceiptV1::decode($output[0] . "\n");
+        self::assertSame('environment_failed', $receipt['outcome']);
+        self::assertSame(
+            [
+                'modern_confirmation_redirect' => false,
+                'legacy_confirmation_redirect' => false,
+                'modern_ics_missing' => false,
+                'legacy_ics_missing' => false,
+                'modern_ics_headers_safe' => false,
+                'legacy_ics_headers_safe' => false,
+            ],
+            $receipt['checks'],
+        );
+        self::assertSame(['modern' => 'malformed', 'legacy' => 'malformed'], $receipt['redirect_class']);
+        self::assertSame(['modern' => 'malformed', 'legacy' => 'malformed'], $receipt['ics_header_class']);
+    }
+
     public function testReceiptOutputFailureRemovesAllTemporaryHeadersBeforeFailingClosed(): void
     {
         [$status, $output, $stderr, $headerFiles] = $this->runWrapper(
@@ -584,14 +609,21 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
         );
         chmod($mktemp, 0700);
 
+        if ($scenario === 'missing_rm') {
+            foreach (['od', 'tr', 'awk'] as $command) {
+                symlink('/usr/bin/' . $command, $directory . '/' . $command);
+            }
+        }
+
         try {
             $output = [];
             $status = 0;
             $stderrFile = $directory . '/stderr.log';
             $headerLog = $directory . '/headers.log';
+            $path = $scenario === 'missing_rm' ? $directory : $directory . ':/usr/bin:/bin';
             $command =
                 'PATH=' .
-                escapeshellarg($directory . ':/usr/bin:/bin') .
+                escapeshellarg($path) .
                 ' MOCK_CURL_SCENARIO=' .
                 escapeshellarg($scenario) .
                 ' MOCK_CURL_HEADER_LOG=' .
@@ -601,9 +633,10 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
                 ' ';
             $wrapperPath = __DIR__ . '/../../../scripts/ops/run_read_only_http_probe.sh';
             if ($stdoutTarget === 'closed') {
-                $command .= 'bash -c ' . escapeshellarg('exec 1>&-; exec bash ' . escapeshellarg($wrapperPath));
+                $command .=
+                    '/bin/bash -c ' . escapeshellarg('exec 1>&-; exec /bin/bash ' . escapeshellarg($wrapperPath));
             } else {
-                $command .= 'bash ' . escapeshellarg($wrapperPath);
+                $command .= '/bin/bash ' . escapeshellarg($wrapperPath);
             }
             $command .= ' 2>' . escapeshellarg($stderrFile);
             if ($stdoutTarget !== null && $stdoutTarget !== 'closed') {
