@@ -297,6 +297,8 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
                 'external_redirect',
                 'suffix_redirect',
                 'duplicate_location',
+                'folded_content_type',
+                'folded_content_disposition',
             ]
             as $scenario
         ) {
@@ -566,6 +568,26 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
                 header_read_failure)
                     rm -f -- "${header}"
                     printf '307'
+                    exit 0
+                    ;;
+                folded_content_type)
+                    if printf '%s' "${url}" | grep -q '/appointments/ics/'; then
+                        [ -n "${header}" ] && printf 'HTTP/1.1 404 Not Found\r\nContent-Type:\r\n text/calendar\r\n\r\n' >"${header}"
+                        printf '404'
+                    else
+                        [ -n "${header}" ] && printf 'HTTP/1.1 307 Temporary Redirect\r\nLocation: /appointments\r\n\r\n' >"${header}"
+                        printf '307'
+                    fi
+                    exit 0
+                    ;;
+                folded_content_disposition)
+                    if printf '%s' "${url}" | grep -q '/appointments/ics/'; then
+                        [ -n "${header}" ] && printf 'HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\nContent-Disposition:\r\n attachment\r\n\r\n' >"${header}"
+                        printf '404'
+                    else
+                        [ -n "${header}" ] && printf 'HTTP/1.1 307 Temporary Redirect\r\nLocation: /appointments\r\n\r\n' >"${header}"
+                        printf '307'
+                    fi
                     exit 0
                     ;;
                 unexpected_header)
