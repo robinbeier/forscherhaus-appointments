@@ -213,9 +213,9 @@ final class Csp_report_only
     }
 
     /** @return array{header:string,host:string}|null */
-    public static function policyForRequest(array $server, array $config, string $contentType = 'text/html'): ?array
+    public static function policyForRequest(array $server, array $config, ?string $contentType = 'text/html'): ?array
     {
-        $contentType = strtolower(trim(explode(';', $contentType, 2)[0]));
+        $contentType = $contentType === null ? null : strtolower(trim(explode(';', $contentType, 2)[0]));
         if (($config['enabled'] ?? false) !== true || $contentType !== 'text/html') {
             return null;
         }
@@ -284,6 +284,28 @@ final class Csp_report_only
         return $loopback && strtolower((string) ($server['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https'
             ? 'https'
             : 'http';
+    }
+
+    /** Resolve the final response MIME type, including raw headers added by controllers. */
+    public static function responseContentType(object $output, array $server = []): ?string
+    {
+        if (method_exists($output, 'get_header')) {
+            $header = $output->get_header('Content-Type');
+            if (is_string($header) && preg_match('/\A([^;\s]+)/', trim($header), $match) === 1) {
+                return strtolower($match[1]);
+            }
+        }
+
+        $path = parse_url((string) ($server['REQUEST_URI'] ?? ''), PHP_URL_PATH);
+        if (is_string($path) && preg_match('#\A(?:/index\.php)?/api(?:/|\z)#', $path) === 1) {
+            return null;
+        }
+
+        if (method_exists($output, 'get_content_type')) {
+            return strtolower(trim((string) $output->get_content_type()));
+        }
+
+        return null;
     }
 
     /** @return list<array{surface:string,directive:string,blocked_origin:string,disposition:string}>|null */
@@ -494,36 +516,6 @@ final class Csp_report_only
                 return ['status' => 'error', 'reason' => 'storage_failed'];
             }
             return ['status' => 'accepted', 'reason' => 'stored'];
-        } finally {
-            flock($handle, LOCK_UN);
-            fclose($handle);
-        }
-    }
-
-    /** Record a fixed rejection counter without retaining any input. */
-    public static function recordDropped(string $kind, array $config, ?string $path = null, ?int $now = null): void
-    {
-        if (!in_array($kind, ['invalid', 'rate_limited', 'storage_failed'], true)) {
-            return;
-        }
-        $path = $path ?? self::aggregatePath();
-        $now = $now ?? time();
-        $handle = self::openAggregate($path);
-        if (!is_resource($handle)) {
-            return;
-        }
-        try {
-            $raw = stream_get_contents($handle);
-            $decoded = $raw !== false && trim($raw) !== '' ? json_decode($raw, true) : null;
-            if ($raw !== false && trim($raw) !== '' && (!is_array($decoded) || !self::validAggregateShape($decoded))) {
-                return;
-            }
-            $state = self::normalizeAggregate(is_array($decoded) ? $decoded : [], $config, $now);
-            $state['dropped'][$kind]++;
-            $state['updated_at_utc'] = gmdate('c', $now);
-            self::writeState($handle, $state);
-        } catch (Throwable $exception) {
-            // Rejection accounting is best effort and never exposes input.
         } finally {
             flock($handle, LOCK_UN);
             fclose($handle);

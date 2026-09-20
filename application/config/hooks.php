@@ -24,7 +24,11 @@ $hook['post_controller'] = static function (): void {
         return;
     }
 
-    $policy = Csp_report_only::policyForRequest($_SERVER, $config, $CI->output->get_content_type());
+    $policy = Csp_report_only::policyForRequest(
+        $_SERVER,
+        $config,
+        Csp_report_only::responseContentType($CI->output, $_SERVER),
+    );
     if (is_array($policy)) {
         $CI->output->set_header($policy['header']);
     }

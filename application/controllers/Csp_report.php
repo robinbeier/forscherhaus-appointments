@@ -44,7 +44,6 @@ class Csp_report extends CI_Controller
 
         $classified = Csp_report_only::classifyReports(json_decode($body, true), $config);
         if ($classified === null) {
-            Csp_report_only::recordDropped('invalid', $config);
             $this->output->set_status_header(204)->set_output('');
             return;
         }

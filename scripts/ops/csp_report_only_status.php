@@ -11,6 +11,7 @@ require_once APPPATH . 'core/Csp_report_only.php';
 
 const CSP_STATUS_SCHEMA = 'csp_report_only_status.v1';
 const CSP_STATUS_MAX_AGGREGATE_BYTES = Csp_report_only::MAX_AGGREGATE_BYTES;
+const CSP_STATUS_RUNTIME_USER = 'www-data';
 
 /** @return array{expect:string,config_path:string,aggregate_path:string} */
 function parseOptions(array $argv): array
@@ -66,6 +67,9 @@ function readRegularFileSafely(string $path, int $maxBytes): ?string
     clearstatcache(true, $path);
     $identity = @lstat($path);
     if (!is_array($identity)) {
+        if (!isSafeAggregateDirectory(dirname($path))) {
+            throw new RuntimeException('Aggregate directory is unavailable.');
+        }
         return null;
     }
 
@@ -119,6 +123,104 @@ function readRegularFileSafely(string $path, int $maxBytes): ?string
     }
 }
 
+function isSafeAggregateDirectory(string $directory): bool
+{
+    $cursor = '';
+    foreach (explode('/', trim($directory, '/')) as $part) {
+        $cursor .= '/' . $part;
+        $identity = @lstat($cursor);
+        if (
+            !is_array($identity) ||
+            (($identity['mode'] ?? 0) & 0170000) !== 0040000 ||
+            (($identity['mode'] ?? 0) & 0111) === 0
+        ) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/** @return array{uid:int,gids:list<int>}|null */
+function runtimeIdentity(string $username): ?array
+{
+    if (!function_exists('posix_getpwnam')) {
+        return null;
+    }
+    $account = posix_getpwnam($username);
+    if (!is_array($account) || !is_int($account['uid'] ?? null) || !is_int($account['gid'] ?? null)) {
+        return null;
+    }
+
+    $gids = [$account['gid']];
+    $groups = @file('/etc/group', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    if (is_array($groups)) {
+        foreach ($groups as $group) {
+            $fields = explode(':', $group, 4);
+            if (count($fields) !== 4 || preg_match('/\A[0-9]+\z/', $fields[2]) !== 1) {
+                continue;
+            }
+            $members = $fields[3] === '' ? [] : explode(',', $fields[3]);
+            if (in_array($username, $members, true)) {
+                $gids[] = (int) $fields[2];
+            }
+        }
+    }
+
+    return ['uid' => $account['uid'], 'gids' => array_values(array_unique($gids))];
+}
+
+/** @param array<string,mixed> $stat @param array{uid:int,gids:list<int>} $identity */
+function runtimeModeAllows(array $stat, array $identity, int $required): bool
+{
+    $mode = (int) ($stat['mode'] ?? 0) & 0777;
+    if ((int) ($stat['uid'] ?? -1) === $identity['uid']) {
+        $available = ($mode >> 6) & 7;
+    } elseif (in_array((int) ($stat['gid'] ?? -1), $identity['gids'], true)) {
+        $available = ($mode >> 3) & 7;
+    } else {
+        $available = $mode & 7;
+    }
+
+    return ($available & $required) === $required;
+}
+
+function isAggregateStorageUsableByRuntime(string $path, string $username): bool
+{
+    $identity = runtimeIdentity($username);
+    if ($identity === null) {
+        return false;
+    }
+
+    $directory = dirname($path);
+    $cursor = '';
+    foreach (explode('/', trim($directory, '/')) as $part) {
+        $cursor .= '/' . $part;
+        $stat = @lstat($cursor);
+        if (
+            !is_array($stat) ||
+            (($stat['mode'] ?? 0) & 0170000) !== 0040000 ||
+            !runtimeModeAllows($stat, $identity, 1)
+        ) {
+            return false;
+        }
+    }
+
+    $parent = @lstat($directory);
+    if (!is_array($parent) || !runtimeModeAllows($parent, $identity, 3)) {
+        return false;
+    }
+
+    $leaf = @lstat($path);
+    if (!is_array($leaf)) {
+        return true;
+    }
+
+    return (($leaf['mode'] ?? 0) & 0170000) === 0100000 &&
+        (int) ($leaf['nlink'] ?? 0) === 1 &&
+        runtimeModeAllows($leaf, $identity, 6);
+}
+
 /** @param array<string,mixed> $receipt */
 function emitReceipt(array $receipt, int $exitCode): never
 {
@@ -138,8 +240,20 @@ try {
                 ? 'active'
                 : 'disabled'));
 
-    $aggregateBytes = readRegularFileSafely($options['aggregate_path'], CSP_STATUS_MAX_AGGREGATE_BYTES);
-    $aggregateStatus = $aggregateBytes === null ? 'missing' : 'invalid';
+    $aggregateExists = @lstat($options['aggregate_path']) !== false;
+    $aggregateBytes = null;
+    $aggregateStatus = $aggregateExists ? 'invalid' : 'missing';
+    $runtimeStorageUsable =
+        $configStatus !== 'active' ||
+        isAggregateStorageUsableByRuntime($options['aggregate_path'], CSP_STATUS_RUNTIME_USER);
+    try {
+        if (!$runtimeStorageUsable) {
+            throw new RuntimeException('Aggregate storage is unavailable to the runtime user.');
+        }
+        $aggregateBytes = readRegularFileSafely($options['aggregate_path'], CSP_STATUS_MAX_AGGREGATE_BYTES);
+    } catch (Throwable) {
+        $aggregateStatus = 'unavailable';
+    }
     $aggregateSummary = null;
 
     if (is_string($aggregateBytes)) {
@@ -150,11 +264,7 @@ try {
     }
 
     $expectedConfigStatus = $options['expect'] === 'active' ? 'active' : 'missing';
-    $passed =
-        $configStatus === $expectedConfigStatus &&
-        ($options['expect'] === 'active'
-            ? $aggregateStatus === 'valid'
-            : in_array($aggregateStatus, ['missing', 'valid'], true));
+    $passed = $configStatus === $expectedConfigStatus && in_array($aggregateStatus, ['missing', 'valid'], true);
 
     $configHash = null;
     if ($configStatus === 'active') {

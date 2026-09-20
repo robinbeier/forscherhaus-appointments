@@ -111,14 +111,22 @@ needed. Only `disposition=report` and exact configured document origins are
 eligible. The bounded aggregate contains at most the configured hourly
 retention window and uses a global per-minute acceptance limit.
 
+Malformed or ineligible payloads receive the fixed empty response without
+durable rejection accounting. They therefore cannot force an unauthenticated
+per-request aggregate lock, rewrite, flush, or `fsync`. Only a successfully
+classified report reaches the bounded aggregate and its acceptance limit.
+
 Never retain or forward a raw payload, document URL, referrer, source file,
 source sample, path, query, fragment, appointment capability, analytics code,
 Matomo URL, IP address, user agent, cookie, authorization value, or request
 header.
 
-The aggregate file is an observation aid. A missing or invalid file, a storage
-error, a rate-limit drop, or an unknown class remains a visible gap; it is not a
-clean result.
+The aggregate file is an observation aid. Before the first accepted report, a
+missing aggregate is an explicit zero-observation state and the read-only
+status check may pass with `aggregate.status=missing` only after the full path
+and create permissions have been verified for the fixed PHP-FPM runtime user
+`www-data`. An invalid or unavailable file, a storage error, a rate-limit drop,
+or an unknown class remains a visible gap; it is not a clean result.
 
 ## Local App and WWW matrix
 

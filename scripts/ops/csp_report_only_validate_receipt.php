@@ -166,13 +166,16 @@ function validateReceipt(array $receipt, string $expectation): bool
         if (
             ($config['status'] ?? null) !== 'active' ||
             !is_string($config['sha256'] ?? null) ||
-            preg_match('/\A[a-f0-9]{64}\z/', $config['sha256']) !== 1 ||
-            ($aggregate['status'] ?? null) !== 'valid' ||
-            !is_array($aggregate['summary'] ?? null)
+            preg_match('/\A[a-f0-9]{64}\z/', $config['sha256']) !== 1
         ) {
             return false;
         }
-        return validateAggregateSummary($aggregate['summary']);
+        if (($aggregate['status'] ?? null) === 'missing') {
+            return ($aggregate['summary'] ?? null) === null;
+        }
+        return ($aggregate['status'] ?? null) === 'valid' &&
+            is_array($aggregate['summary'] ?? null) &&
+            validateAggregateSummary($aggregate['summary']);
     }
 
     if (($config['status'] ?? null) !== 'missing' || ($config['sha256'] ?? null) !== null) {

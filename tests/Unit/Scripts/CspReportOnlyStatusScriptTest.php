@@ -117,6 +117,34 @@ final class CspReportOnlyStatusScriptTest extends TestCase
         }
     }
 
+    public function testWrapperAcceptsActiveConfigBeforeTheFirstAggregateExists(): void
+    {
+        $fixture = $this->createWrapperFixture(false, $this->validActiveMissingAggregateReceipt());
+
+        try {
+            $result = $this->runCommand(
+                [
+                    'bash',
+                    'scripts/ops/prod_csp_report_only_status.sh',
+                    '--expect',
+                    'active',
+                    '--prod-ssh-target',
+                    'root@example.test',
+                ],
+                [
+                    'PATH' => $fixture . '/bin' . PATH_SEPARATOR . (getenv('PATH') ?: ''),
+                    'CSP_REPORT_ONLY_DOCTOR_SCRIPT' => $fixture . '/doctor.sh',
+                ],
+            );
+
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            self::assertStringContainsString('"status":"passed"', $result['stdout']);
+            self::assertStringContainsString('"aggregate":{"status":"missing","summary":null}', $result['stdout']);
+        } finally {
+            $this->removeDirectory($fixture);
+        }
+    }
+
     public function testActiveCliReceiptSummarizesOnlyFixedClasses(): void
     {
         if (!function_exists('posix_geteuid') || posix_geteuid() !== 0) {
@@ -126,7 +154,11 @@ final class CspReportOnlyStatusScriptTest extends TestCase
         $directory = '/var/lib/fh-csp-status-test-' . bin2hex(random_bytes(6));
         mkdir($directory, 0755, true);
         $configPath = $directory . '/config.json';
-        $aggregatePath = $directory . '/aggregate.json';
+        $aggregateDirectory = '/tmp/fh-csp-status-runtime-' . bin2hex(random_bytes(6));
+        mkdir($aggregateDirectory, 0777, true);
+        chmod($aggregateDirectory, 0777);
+        $aggregatePath = $aggregateDirectory . '/aggregate.json';
+        $rootOnlyDirectory = $directory . '/root-only';
         copy($this->repoRoot() . '/scripts/ops/config/csp_report_only.production.v1.json', $configPath);
         chmod($configPath, 0644);
 
@@ -145,6 +177,7 @@ final class CspReportOnlyStatusScriptTest extends TestCase
                 time(),
             );
             self::assertSame('accepted', $result['status']);
+            chmod($aggregatePath, 0666);
 
             $receiptResult = $this->runCommand([
                 PHP_BINARY,
@@ -162,12 +195,56 @@ final class CspReportOnlyStatusScriptTest extends TestCase
             self::assertSame(1, $receipt['aggregate']['summary']['accepted']);
             self::assertSame(1, $receipt['aggregate']['summary']['classes']['blocked_origin']['unknown-external']);
             self::assertStringNotContainsString($directory, $receiptResult['stdout'] . $receiptResult['stderr']);
+
+            unlink($aggregatePath);
+            $missingResult = $this->runCommand([
+                PHP_BINARY,
+                'scripts/ops/csp_report_only_status.php',
+                '--expect=active',
+                '--config-path=' . $configPath,
+                '--aggregate-path=' . $aggregatePath,
+            ]);
+            self::assertSame(0, $missingResult['exit_code'], $missingResult['stderr']);
+            $missingReceipt = json_decode($missingResult['stdout'], true, 8, JSON_THROW_ON_ERROR);
+            self::assertSame('passed', $missingReceipt['status']);
+            self::assertSame('missing', $missingReceipt['aggregate']['status']);
+
+            mkdir($rootOnlyDirectory, 0755);
+            $wrongRuntimeResult = $this->runCommand([
+                PHP_BINARY,
+                'scripts/ops/csp_report_only_status.php',
+                '--expect=active',
+                '--config-path=' . $configPath,
+                '--aggregate-path=' . $rootOnlyDirectory . '/aggregate.json',
+            ]);
+            self::assertSame(1, $wrongRuntimeResult['exit_code'], $wrongRuntimeResult['stderr']);
+            $wrongRuntimeReceipt = json_decode($wrongRuntimeResult['stdout'], true, 8, JSON_THROW_ON_ERROR);
+            self::assertSame('failed', $wrongRuntimeReceipt['status']);
+            self::assertSame('unavailable', $wrongRuntimeReceipt['aggregate']['status']);
+
+            $missingParentResult = $this->runCommand([
+                PHP_BINARY,
+                'scripts/ops/csp_report_only_status.php',
+                '--expect=active',
+                '--config-path=' . $configPath,
+                '--aggregate-path=' . $directory . '/missing-parent/aggregate.json',
+            ]);
+            self::assertSame(1, $missingParentResult['exit_code'], $missingParentResult['stderr']);
+            $missingParentReceipt = json_decode($missingParentResult['stdout'], true, 8, JSON_THROW_ON_ERROR);
+            self::assertSame('failed', $missingParentReceipt['status']);
+            self::assertSame('unavailable', $missingParentReceipt['aggregate']['status']);
         } finally {
             if (is_file($aggregatePath)) {
                 unlink($aggregatePath);
             }
             if (is_file($configPath)) {
                 unlink($configPath);
+            }
+            if (is_dir($rootOnlyDirectory)) {
+                rmdir($rootOnlyDirectory);
+            }
+            if (is_dir($aggregateDirectory)) {
+                rmdir($aggregateDirectory);
             }
             rmdir($directory);
         }
@@ -375,6 +452,26 @@ final class CspReportOnlyStatusScriptTest extends TestCase
                             'blocked_origin' => ['self' => 1],
                         ],
                     ],
+                ],
+            ],
+            JSON_THROW_ON_ERROR,
+        );
+    }
+
+    private function validActiveMissingAggregateReceipt(): string
+    {
+        return json_encode(
+            [
+                'schema' => 'csp_report_only_status.v1',
+                'expectation' => 'active',
+                'status' => 'passed',
+                'config' => [
+                    'status' => 'active',
+                    'sha256' => str_repeat('a', 64),
+                ],
+                'aggregate' => [
+                    'status' => 'missing',
+                    'summary' => null,
                 ],
             ],
             JSON_THROW_ON_ERROR,

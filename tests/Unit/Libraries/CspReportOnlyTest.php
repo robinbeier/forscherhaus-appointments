@@ -108,6 +108,44 @@ final class CspReportOnlyTest extends TestCase
         self::assertFalse(Csp_report_only::isCollectorRequest(['REQUEST_URI' => '/csp-report/']));
     }
 
+    public function testResponseContentTypeReadsRawCaseInsensitiveHeadersBeforeDefaultHtml(): void
+    {
+        $output = new class {
+            public function get_header(string $name): string
+            {
+                return 'application/json; charset=UTF-8';
+            }
+
+            public function get_content_type(): string
+            {
+                return 'text/html';
+            }
+        };
+        self::assertSame('application/json', Csp_report_only::responseContentType($output));
+
+        $image = new class {
+            public function get_header(string $name): string
+            {
+                return 'image/png';
+            }
+        };
+        self::assertSame('image/png', Csp_report_only::responseContentType($image));
+
+        $api = new class {
+            public function get_header(string $name): ?string
+            {
+                return null;
+            }
+
+            public function get_content_type(): string
+            {
+                return 'text/html';
+            }
+        };
+        self::assertNull(Csp_report_only::responseContentType($api, ['REQUEST_URI' => '/api/v1/customers']));
+        self::assertNull(Csp_report_only::responseContentType($api, ['REQUEST_URI' => '/index.php/api/v1/customers']));
+    }
+
     public function testAppWwwAnalyticsAndExcludedSurfaceMatrix(): void
     {
         $states = [
