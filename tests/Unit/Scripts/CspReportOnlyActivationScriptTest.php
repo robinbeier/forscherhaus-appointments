@@ -298,6 +298,29 @@ final class CspReportOnlyActivationScriptTest extends TestCase
         }
     }
 
+    public function testPreflightCliEmitsAReceiptBeforeProductionPrerequisitesAreAvailable(): void
+    {
+        if (!function_exists('posix_geteuid') || posix_geteuid() !== 0) {
+            self::markTestSkipped('The production CLI preflight requires root identity.');
+        }
+
+        $result = $this->runCommand([
+            PHP_BINARY,
+            $this->repoRoot() . '/scripts/ops/csp_report_only_activation.php',
+            '--action=preflight',
+            '--expected-release-binding=' . str_repeat('a', 64),
+        ]);
+
+        self::assertSame(1, $result['exit_code'], $result['stderr']);
+        self::assertSame('', $result['stderr']);
+        $receipt = json_decode(trim($result['stdout']), true);
+        self::assertIsArray($receipt);
+        self::assertSame('csp_report_only_activation.v2', $receipt['schema'] ?? null);
+        self::assertSame('preflight', $receipt['action'] ?? null);
+        self::assertSame('failed', $receipt['status'] ?? null);
+        self::assertNotSame('unknown', $receipt['result_class'] ?? null);
+    }
+
     private function createPilotFixture(
         bool $failFirstActive,
         bool $failRemove = false,
