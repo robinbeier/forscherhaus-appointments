@@ -427,6 +427,7 @@ function preflightActivation(string $target, string $statePath): array
 
 function runActivation(array $argv): never
 {
+    $repoRoot = dirname(__DIR__, 2);
     $action = '';
     $actionSeen = false;
     $runId = null;
