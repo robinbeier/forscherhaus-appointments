@@ -15,7 +15,19 @@ require_once APPPATH . 'core/Csp_report_only.php';
 
 $hook['post_controller'] = static function (): void {
     $CI = get_instance();
-    if (!isset($CI->output)) {
+    if (!is_object($CI)) {
+        return;
+    }
+
+    // CI_Controller exposes services through __get() without implementing
+    // __isset(). Read the magic property explicitly and validate the API
+    // before passing it to the policy helpers.
+    try {
+        $output = $CI->output;
+    } catch (Throwable) {
+        return;
+    }
+    if (!is_object($output) || !is_callable([$output, 'set_header'])) {
         return;
     }
 
@@ -27,10 +39,10 @@ $hook['post_controller'] = static function (): void {
     $policy = Csp_report_only::policyForRequest(
         $_SERVER,
         $config,
-        Csp_report_only::responseContentType($CI->output, $_SERVER),
+        Csp_report_only::responseContentType($output, $_SERVER),
     );
     if (is_array($policy)) {
-        $CI->output->set_header($policy['header']);
+        $output->set_header($policy['header']);
     }
 };
 
