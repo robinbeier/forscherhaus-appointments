@@ -411,7 +411,35 @@ final class Csp_report_only
     /** Resolve the final response MIME type, including raw headers added by controllers. */
     public static function responseContentType(object $output, array $server = []): ?string
     {
-        if (method_exists($output, 'get_header')) {
+        // CI_Output::get_header() currently uses array_map('array_shift', ...).
+        // PHP 8.5 warns because array_shift() requires a reference while the
+        // callback receives a value. Read CI's public header buffer directly
+        // and keep the framework's last-header-wins behavior without touching
+        // system/core/Output.php.
+        $publicProperties = get_object_vars($output);
+        $hasHeaderBuffer = array_key_exists('headers', $publicProperties) && is_array($publicProperties['headers']);
+        if ($hasHeaderBuffer) {
+            $rawHeaders = [];
+            foreach ($publicProperties['headers'] as $entry) {
+                $rawHeaders[] = is_array($entry) ? $entry[0] ?? null : $entry;
+            }
+            // CI_Output::get_header() appends headers_list() after its
+            // buffered headers, so native PHP headers win when scanning back.
+            if (function_exists('headers_list')) {
+                $rawHeaders = array_merge($rawHeaders, headers_list());
+            }
+            for ($index = count($rawHeaders) - 1; $index >= 0; $index--) {
+                $rawHeader = $rawHeaders[$index];
+                if (!is_string($rawHeader) || preg_match('/\AContent-Type\s*:\s*(.+)\z/i', $rawHeader, $match) !== 1) {
+                    continue;
+                }
+                if (preg_match('/\A([^;\s]+)/', trim($match[1]), $mime) === 1) {
+                    return strtolower($mime[1]);
+                }
+            }
+        } elseif (method_exists($output, 'get_header')) {
+            // Keep compatibility with output implementations that do not
+            // expose CI_Output's public header buffer.
             $header = $output->get_header('Content-Type');
             if (is_string($header) && preg_match('/\A([^;\s]+)/', trim($header), $match) === 1) {
                 return strtolower($match[1]);

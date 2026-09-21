@@ -217,6 +217,38 @@ final class CspReportOnlyTest extends TestCase
         self::assertNull(Csp_report_only::responseContentType($api, ['REQUEST_URI' => '/booking']));
     }
 
+    public function testResponseContentTypeReadsCiOutputHeaderBufferWithoutCallingWarningProneGetter(): void
+    {
+        $output = new class {
+            /** @var list<array{0:string,1:bool}> */
+            public array $headers = [
+                ['Content-Type: text/plain; charset=UTF-8', true],
+                ['Content-Type: application/json; charset=UTF-8', true],
+            ];
+
+            public function get_header(string $name): string
+            {
+                throw new RuntimeException('CI_Output::get_header() must not be called');
+            }
+        };
+
+        self::assertSame('application/json', Csp_report_only::responseContentType($output));
+    }
+
+    public function testResponseContentTypeFallsBackWhenHeadersPropertyIsNotPubliclyReadable(): void
+    {
+        $output = new class {
+            private array $headers;
+
+            public function get_header(string $name): string
+            {
+                return 'text/html; charset=UTF-8';
+            }
+        };
+
+        self::assertSame('text/html', Csp_report_only::responseContentType($output));
+    }
+
     public function testMalformedPayloadPathHasNoPersistentInvalidAccountingWrite(): void
     {
         $source = (string) file_get_contents(APPPATH . 'controllers/Csp_report.php');
