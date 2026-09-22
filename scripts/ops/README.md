@@ -93,7 +93,7 @@ Script inventory:
   contradictory result. Its productive mode requires the separate
   approval defined in
   [`docs/security/ROB-586-production-csp-report-only-plan.md`](../../docs/security/ROB-586-production-csp-report-only-plan.md).
-  It also keeps an atomic, release- and run-bound checkpoint journal at
+  It also keeps an atomic, release-, production-target- and run-bound checkpoint journal at
   `/var/tmp/fh-csp-report-only-pilot.state.json` (override with
   `CSP_PILOT_STATE_FILE`). Completed checkpoints survive loss of the controlling
   SSH/process; an in-flight checkpoint is classified as unknown and is never

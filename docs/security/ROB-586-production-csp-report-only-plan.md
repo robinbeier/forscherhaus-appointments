@@ -60,14 +60,14 @@ The production proof was rebuilt with the five-step design process:
 
 The operator-side runner writes an atomic, private checkpoint journal
 before and after every mutating or observational step. The journal binds the
-run ID and release binding and records completed checkpoints (`activation`,
+run ID, exact production-target binding, and release binding and records completed checkpoints (`activation`,
 `0m`, `15m`, `60m`, `remove`, and `postflight`) together with their closed
 top-level result classes. A second invocation reads the
 exact journal before doing work. A completed checkpoint is skipped; a checkpoint
 whose outcome was in flight is classified as `checkpoint_outcome_unknown` and
 is never repeated automatically. If the controlling SSH session or process is
-lost after activation began, the exit cleanup uses the same run and release
-binding to remove the activation once and records the cleanup result. An
+lost after activation began, the exit cleanup uses the same production target,
+run, and release binding to remove the activation once and records the cleanup result. An
 unknown or contradictory journal is a stop condition. The journal is removed
 only after the complete pilot and postflight verification succeed.
 

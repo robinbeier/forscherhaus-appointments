@@ -26,6 +26,7 @@ STATE_COMPLETED=''
 STATE_CHECKPOINT=''
 STATE_TERMINAL=''
 STATE_RELEASE_BINDING=''
+STATE_PRODUCTION_TARGET_BINDING=''
 STATE_ACTIVATION_AT=''
 STATE_RESULTS=''
 LAST_RESULT_CLASS=''
@@ -43,7 +44,7 @@ retries activation or evidence automatically.
 
 Production execution of `pilot` requires a separate, concrete approval.
 
-The pilot persists a release- and run-bound checkpoint journal in
+The pilot persists a release-, production-target- and run-bound checkpoint journal in
 `CSP_PILOT_STATE_FILE` (default `/var/tmp/fh-csp-report-only-pilot.state.json`).
 An interrupted or in-flight checkpoint is never repeated automatically.
 
@@ -69,8 +70,14 @@ state_write() {
         return 1
     }
     umask 077
-    printf '{"schema":"%s","run_id":"%s","release_binding":"%s","activation_at":"%s","completed":"%s","checkpoint":"%s","results":"%s","terminal":"%s"}\n' \
-        "$STATE_SCHEMA" "$RUN_ID" "$EXPECTED_RELEASE_BINDING" "$STATE_ACTIVATION_AT" "$completed" "$checkpoint" "$STATE_RESULTS" "$terminal" >"$temporary"
+    local production_target_binding
+    production_target_binding="$(php -r 'echo hash("sha256", $argv[1]);' "$PROD_SSH_TARGET")" || {
+        printf 'csp_pilot.state.status=failed\n'
+        printf 'csp_pilot.result_class=production_target_binding_failed\n'
+        return 1
+    }
+    printf '{"schema":"%s","run_id":"%s","release_binding":"%s","production_target_binding":"%s","activation_at":"%s","completed":"%s","checkpoint":"%s","results":"%s","terminal":"%s"}\n' \
+        "$STATE_SCHEMA" "$RUN_ID" "$EXPECTED_RELEASE_BINDING" "$production_target_binding" "$STATE_ACTIVATION_AT" "$completed" "$checkpoint" "$STATE_RESULTS" "$terminal" >"$temporary"
     chmod 0600 "$temporary"
     mv -f "$temporary" "$STATE_PATH"
 }
@@ -100,19 +107,20 @@ state_read() {
     fields="$(php -r '
         $state = json_decode(stream_get_contents(STDIN), true);
         if (!is_array($state) || ($state["schema"] ?? null) !== "csp_report_only_pilot.v2") exit(2);
-        foreach (["run_id", "release_binding", "activation_at", "completed", "checkpoint", "results", "terminal"] as $key) {
+        foreach (["run_id", "release_binding", "production_target_binding", "activation_at", "completed", "checkpoint", "results", "terminal"] as $key) {
             if (!isset($state[$key]) || !is_string($state[$key])) exit(3);
         }
         if (!preg_match("/\\A[a-f0-9]{32}\\z/", $state["run_id"]) ||
             !preg_match("/\\A[a-f0-9]{64}\\z/", $state["release_binding"]) ||
+            !preg_match("/\\A[a-f0-9]{64}\\z/", $state["production_target_binding"]) ||
             preg_match("/[^a-z0-9_,]/", $state["completed"]) ||
             preg_match("/[^a-z0-9_]/", $state["checkpoint"]) ||
             ($state["activation_at"] !== "" && preg_match("/[^0-9]/", $state["activation_at"])) ||
             preg_match("/[^a-z0-9_=,]/", $state["results"]) ||
             preg_match("/[^a-z0-9_]/", $state["terminal"])) exit(4);
-        echo $state["run_id"]."|".$state["release_binding"]."|".$state["activation_at"]."|".$state["completed"]."|".$state["checkpoint"]."|".$state["results"]."|".$state["terminal"];
+        echo $state["run_id"]."|".$state["release_binding"]."|".$state["production_target_binding"]."|".$state["activation_at"]."|".$state["completed"]."|".$state["checkpoint"]."|".$state["results"]."|".$state["terminal"];
     ' <"$STATE_PATH")" || return 2
-    IFS='|' read -r RUN_ID STATE_RELEASE_BINDING STATE_ACTIVATION_AT STATE_COMPLETED STATE_CHECKPOINT STATE_RESULTS STATE_TERMINAL <<<"$fields"
+    IFS='|' read -r RUN_ID STATE_RELEASE_BINDING STATE_PRODUCTION_TARGET_BINDING STATE_ACTIVATION_AT STATE_COMPLETED STATE_CHECKPOINT STATE_RESULTS STATE_TERMINAL <<<"$fields"
     return 0
 }
 
@@ -397,6 +405,7 @@ on_exit() {
 
 run_pilot() {
     local resume_expectation='inactive'
+    local current_target_binding=''
     printf 'csp_pilot.schema=csp_report_only_pilot.v1\n'
     printf 'csp_pilot.phase=%s\n' "$PHASE"
     if [[ "$PHASE" == 'preflight' ]]; then
@@ -423,6 +432,12 @@ run_pilot() {
             printf 'csp_pilot.result_class=state_semantics_invalid\n'
             return 1
         fi
+        current_target_binding="$(php -r 'echo hash("sha256", $argv[1]);' "$PROD_SSH_TARGET")"
+        if [[ "$STATE_PRODUCTION_TARGET_BINDING" != "$current_target_binding" ]]; then
+            printf 'csp_pilot.status=stopped\n'
+            printf 'csp_pilot.result_class=resume_production_target_changed\n'
+            return 1
+        fi
         if [[ -n "$STATE_TERMINAL" ]]; then
             printf 'csp_pilot.status=stopped\n'
             printf 'csp_pilot.result_class=%s\n' "$STATE_TERMINAL"
@@ -435,19 +450,16 @@ run_pilot() {
         if state_completed remove || [[ "$STATE_CHECKPOINT" == 'remove' ]]; then
             resume_expectation='inactive'
         fi
-        if state_completed remove; then
-            ACTIVATION_MAY_BE_PRESENT=0
-        fi
         if state_completed postflight; then
             resume_expectation='inactive'
         fi
-        if [[ "$resume_expectation" == 'active' ]]; then
-            ACTIVATION_MAY_BE_PRESENT=1
-        else
-            ACTIVATION_MAY_BE_PRESENT=0
-        fi
+        # A resumed journal never proves cleanup by itself. Keep the
+        # conservative assumption until the current read-only state confirms
+        # that activation is inactive.
+        ACTIVATION_MAY_BE_PRESENT=1
         if [[ "$STATE_CHECKPOINT" == 'activation' ]]; then
             if run_read_only_state inactive "$STATE_RELEASE_BINDING"; then
+                ACTIVATION_MAY_BE_PRESENT=0
                 STATE_TERMINAL='checkpoint_outcome_unknown_cleanup_verified'
                 state_write "$STATE_COMPLETED" "$STATE_CHECKPOINT" "$STATE_TERMINAL" || true
                 printf 'csp_pilot.status=stopped\n'
@@ -476,9 +488,25 @@ run_pilot() {
             return 1
         fi
         if ! run_read_only_state "$resume_expectation" "$STATE_RELEASE_BINDING"; then
+            if [[ "$resume_expectation" == 'inactive' ]]; then
+                trap on_exit EXIT
+                rollback_once 1 || true
+                if (( ACTIVATION_MAY_BE_PRESENT == 0 )); then
+                    STATE_TERMINAL='checkpoint_outcome_unknown_cleanup_verified'
+                else
+                    STATE_TERMINAL='checkpoint_outcome_unknown_cleanup_unverified'
+                fi
+                state_write "$STATE_COMPLETED" "$STATE_CHECKPOINT" "$STATE_TERMINAL" || true
+                printf 'csp_pilot.status=stopped\n'
+                printf 'csp_pilot.result_class=%s\n' "$STATE_TERMINAL"
+                return 1
+            fi
             printf 'csp_pilot.status=stopped\n'
             printf 'csp_pilot.result_class=state_release_or_activation_mismatch\n'
             return 1
+        fi
+        if [[ "$resume_expectation" == 'inactive' ]]; then
+            ACTIVATION_MAY_BE_PRESENT=0
         fi
         if state_completed postflight; then
             rm -f "$STATE_PATH"

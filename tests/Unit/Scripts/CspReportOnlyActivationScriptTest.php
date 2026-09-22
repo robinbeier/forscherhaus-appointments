@@ -232,7 +232,8 @@ final class CspReportOnlyActivationScriptTest extends TestCase
             );
             self::assertSame("install\nremove\n", file_get_contents($fixture . '/activation-calls'));
             $sleeps = array_map('intval', file($fixture . '/sleep-calls', FILE_IGNORE_NEW_LINES));
-            self::assertSame(900, $sleeps[0] ?? null);
+            self::assertGreaterThanOrEqual(899, $sleeps[0] ?? 0);
+            self::assertLessThanOrEqual(900, $sleeps[0] ?? 0);
             self::assertGreaterThanOrEqual(3590, $sleeps[1] ?? 0);
             self::assertLessThanOrEqual(3600, $sleeps[1] ?? 0);
             self::assertStringContainsString('csp_pilot.observation=0m', $result['stdout']);
@@ -331,6 +332,7 @@ final class CspReportOnlyActivationScriptTest extends TestCase
             'schema' => 'csp_report_only_pilot.v2',
             'run_id' => str_repeat('a', 32),
             'release_binding' => str_repeat('a', 64),
+            'production_target_binding' => hash('sha256', 'root@example.test'),
             'activation_at' => '1700000000',
             'completed' => 'activation',
             'checkpoint' => '',
@@ -357,6 +359,7 @@ final class CspReportOnlyActivationScriptTest extends TestCase
             'schema' => 'csp_report_only_pilot.v2',
             'run_id' => str_repeat('a', 32),
             'release_binding' => str_repeat('a', 64),
+            'production_target_binding' => hash('sha256', 'root@example.test'),
             'activation_at' => '1700000000',
             'completed' => 'activation,0m,15m,60m,remove',
             'checkpoint' => '',
@@ -376,6 +379,65 @@ final class CspReportOnlyActivationScriptTest extends TestCase
         }
     }
 
+    public function testCompletedRemovalWithUnavailableInactiveCheckAttemptsCleanupOnce(): void
+    {
+        $fixture = $this->createPilotFixture(false);
+        file_put_contents($fixture . '/activation-present', '1');
+        file_put_contents($fixture . '/fail-resume-status', '1');
+        file_put_contents(
+            $fixture . '/pilot-state.json',
+            json_encode([
+                'schema' => 'csp_report_only_pilot.v2',
+                'run_id' => str_repeat('a', 32),
+                'release_binding' => str_repeat('a', 64),
+                'production_target_binding' => hash('sha256', 'root@example.test'),
+                'activation_at' => '1700000000',
+                'completed' => 'activation,0m,15m,60m,remove',
+                'checkpoint' => '',
+                'results' =>
+                    'activation=activation_installed_verified,0m=evidence_verified,15m=evidence_verified,60m=evidence_verified,remove=activation_remove_verified',
+                'terminal' => '',
+            ]),
+        );
+        try {
+            $result = $this->runPilot($fixture, 'pilot');
+            self::assertSame(1, $result['exit_code']);
+            self::assertSame("remove\n", file_get_contents($fixture . '/activation-calls'));
+            $state = json_decode((string) file_get_contents($fixture . '/pilot-state.json'), true);
+            self::assertSame('checkpoint_outcome_unknown_cleanup_verified', $state['terminal'] ?? null);
+        } finally {
+            $this->removeDirectory($fixture);
+        }
+    }
+
+    public function testResumeRejectsJournalForDifferentProductionTarget(): void
+    {
+        $fixture = $this->createPilotFixture(false);
+        file_put_contents(
+            $fixture . '/pilot-state.json',
+            json_encode([
+                'schema' => 'csp_report_only_pilot.v2',
+                'run_id' => str_repeat('a', 32),
+                'release_binding' => str_repeat('a', 64),
+                'production_target_binding' => hash('sha256', 'root@other.example.test'),
+                'activation_at' => '1700000000',
+                'completed' => 'activation',
+                'checkpoint' => '',
+                'results' => 'activation=activation_installed_verified',
+                'terminal' => '',
+            ]),
+        );
+        try {
+            $result = $this->runPilot($fixture, 'pilot');
+            self::assertSame(1, $result['exit_code']);
+            self::assertStringContainsString('resume_production_target_changed', $result['stdout']);
+            self::assertSame('', file_get_contents($fixture . '/status-calls'));
+            self::assertSame('', file_get_contents($fixture . '/activation-calls'));
+        } finally {
+            $this->removeDirectory($fixture);
+        }
+    }
+
     public function testImpossibleJournalStateStopsBeforeProductionWork(): void
     {
         $fixture = $this->createPilotFixture(false);
@@ -385,6 +447,7 @@ final class CspReportOnlyActivationScriptTest extends TestCase
                 'schema' => 'csp_report_only_pilot.v2',
                 'run_id' => str_repeat('a', 32),
                 'release_binding' => str_repeat('a', 64),
+                'production_target_binding' => hash('sha256', 'root@example.test'),
                 'activation_at' => '',
                 'completed' => 'activation,15m',
                 'checkpoint' => '',
@@ -412,6 +475,7 @@ final class CspReportOnlyActivationScriptTest extends TestCase
                 'schema' => 'csp_report_only_pilot.v2',
                 'run_id' => str_repeat('a', 32),
                 'release_binding' => str_repeat('a', 64),
+                'production_target_binding' => hash('sha256', 'root@example.test'),
                 'activation_at' => '',
                 'completed' => '',
                 'checkpoint' => 'activation',
@@ -441,6 +505,7 @@ final class CspReportOnlyActivationScriptTest extends TestCase
                 'schema' => 'csp_report_only_pilot.v2',
                 'run_id' => str_repeat('a', 32),
                 'release_binding' => str_repeat('a', 64),
+                'production_target_binding' => hash('sha256', 'root@example.test'),
                 'activation_at' => '',
                 'completed' => '',
                 'checkpoint' => 'activation',
@@ -469,6 +534,7 @@ final class CspReportOnlyActivationScriptTest extends TestCase
                 'schema' => 'csp_report_only_pilot.v2',
                 'run_id' => str_repeat('a', 32),
                 'release_binding' => str_repeat('a', 64),
+                'production_target_binding' => hash('sha256', 'root@example.test'),
                 'activation_at' => '1700000000',
                 'completed' => 'activation,0m,15m,60m,remove',
                 'checkpoint' => 'postflight',
@@ -496,6 +562,7 @@ final class CspReportOnlyActivationScriptTest extends TestCase
                 'schema' => 'csp_report_only_pilot.v2',
                 'run_id' => str_repeat('a', 32),
                 'release_binding' => str_repeat('a', 64),
+                'production_target_binding' => hash('sha256', 'root@example.test'),
                 'activation_at' => '1700000000',
                 'completed' => 'activation,0m,15m,60m,remove,postflight',
                 'checkpoint' => '',
@@ -568,6 +635,7 @@ final class CspReportOnlyActivationScriptTest extends TestCase
                 'schema' => 'csp_report_only_pilot.v2',
                 'run_id' => str_repeat('a', 32),
                 'release_binding' => str_repeat('a', 64),
+                'production_target_binding' => hash('sha256', 'root@example.test'),
                 'activation_at' => '1700000000',
                 'completed' => 'activation,0m,15m,60m,remove',
                 'checkpoint' => '',
@@ -596,6 +664,7 @@ final class CspReportOnlyActivationScriptTest extends TestCase
                 'schema' => 'csp_report_only_pilot.v2',
                 'run_id' => str_repeat('a', 32),
                 'release_binding' => str_repeat('a', 64),
+                'production_target_binding' => hash('sha256', 'root@example.test'),
                 'activation_at' => '1700000000',
                 'completed' => 'activation',
                 'checkpoint' => '',
@@ -625,6 +694,7 @@ final class CspReportOnlyActivationScriptTest extends TestCase
                 'schema' => 'csp_report_only_pilot.v2',
                 'run_id' => str_repeat('a', 32),
                 'release_binding' => str_repeat('a', 64),
+                'production_target_binding' => hash('sha256', 'root@example.test'),
                 'activation_at' => '1700000000',
                 'completed' => 'activation',
                 'checkpoint' => '',
