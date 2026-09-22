@@ -33,6 +33,10 @@ MAX_DELETE_ENTRIES = 1_000_000
 MAX_RESTORE_BYTES = 16 * 1024 * 1024 * 1024
 RESTORE_MULTIPLIER = 3
 IMPORT_TIMEOUT = 3600
+# The deployment contract uses the exact run-bound observation as its primary
+# policy.  The legacy policy remains readable for historical v1 journals.
+DEPLOYMENT_DUMP_POLICY = 'run_bound_verified_restore_under_60m'
+LEGACY_DEPLOYMENT_DUMP_POLICY = 'fresh_verified_under_240m'
 IBTMP_MAX_BYTES = 256 * 1024 * 1024
 REDO_MAX_BYTES = 128 * 1024 * 1024
 MAX_ATTESTATION = 4096
@@ -1037,7 +1041,7 @@ def validate_run_journal(events, run_id):
             first.get('record_type') != 'intent' or first.get('run_id') != run_id or first.get('sequence') != 1 or
             first.get('state') != 'planned' or first.get('deploy_invocation_count') != 0 or
             first.get('exit_code') != 0 or first.get('reason') != 'ok' or
-            first.get('dump_policy') != 'fresh_verified_under_240m' or
+            first.get('dump_policy') not in {DEPLOYMENT_DUMP_POLICY, LEGACY_DEPLOYMENT_DUMP_POLICY} or
             first.get('artifact_expectation') != 'build_from_expected_commit' or
             not isinstance(first.get('expected_commit'), str) or re.fullmatch(r'[0-9a-f]{40}', first['expected_commit']) is None or
             not isinstance(first.get('release_id'), str) or re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,127}', first['release_id']) is None):

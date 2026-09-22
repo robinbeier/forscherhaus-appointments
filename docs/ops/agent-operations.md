@@ -30,6 +30,33 @@ a pre-change result does not prove the post-change state. For application logs,
 the doctor counts all error-like entries in recently modified files, while
 validation distinguishes new actionable errors from historical entries.
 
+### Verify production facts before designing production tooling
+
+Before implementation relies on a production path, runtime, service, identity,
+permission, or configuration, capture a small read-only production-facts record.
+Compose it from the existing commands instead of adding another broad doctor:
+
+- start with `prod_doctor.sh` for the redacted host, service, runtime, release,
+  listener, and health classes;
+- add only the narrow read-only preflight for the affected operation, such as
+  the CSP preflight below or `prod_cleanup_inventory.sh` for protected storage;
+- record the observed release binding, capture time, source command, redacted
+  result class, and the boundary that invalidates the observation.
+
+Classify every fact consumed by the design as:
+
+- `confirmed`: directly observed from the named source and still inside its
+  stated release, configuration, and time boundary;
+- `stale`: previously observed, but a relevant release/configuration change or
+  the recorded time boundary has passed;
+- `open`: not observed, contradictory, or unavailable.
+
+Keep the compact record in the existing private run evidence or Linear Workpad;
+do not add raw production output or a second changing status ledger. A fact
+without an explicit invalidation boundary is `open`. If implementation or a
+production check contradicts the record, return to preparation, refresh the
+affected facts, and reassess the design before another production attempt.
+
 Doctor, validation, and the log summary send their needed log-classification
 functions from the reviewed local `scripts/ops/lib/app_log_classification.sh`
 over SSH. They do not load those rules from the installed application or

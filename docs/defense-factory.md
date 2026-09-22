@@ -68,7 +68,11 @@ name. A different model does not itself make a review independent.
    Bind the source version, bounded scope, owner, current action grants, available
    roles, acceptance criteria, and existing local checks. Define feasible release
    acceptance evidence before implementation; do not defer testability or cleanup
-   questions until production. Do not start broad discovery merely to fill a phase.
+   questions until production. Before designing production-specific tooling,
+   compose the redacted read-only production-facts record defined in the
+   [operations harness](ops/agent-operations.md#verify-production-facts-before-designing-production-tooling).
+   Bind each consumed fact as `confirmed`, `stale`, or `open` with its source and
+   invalidation boundary. Do not start broad discovery merely to fill a phase.
 2. **Assess before assigning a fix.** Record each candidate as an observation with
    supporting source/evidence, duplicate status, uncertainty, and a proposed narrow
    remediation. Model agreement alone does not confirm a finding. Keep unsupported
@@ -122,6 +126,8 @@ Use the existing private cycle report and, where applicable, its single Codex
 Workpad; do not create a second changing status ledger. Each transition records:
 
 - cycle identifier, bounded scope, source/test/review versions;
+- production-facts record version and capture time, plus confirmed, stale, and
+  open assumptions consumed by the next step;
 - current phase, sending role and actual model, next role and bounded task;
 - applicable action grant and excluded actions;
 - acceptance criteria, evidence locations, actual results, and unresolved gaps;
@@ -131,6 +137,15 @@ Workpad; do not create a second changing status ledger. Each transition records:
 Keep per-run approvals and observations here in the run record, not in SECURITY.md
 or a permanent default. Skills consume this contract through WORKFLOW and this
 guide; runtime role registration remains in `.codex/config.toml` and its role files.
+
+For a security or production harness, define the small evidence contract before
+implementation: required property, observable result, actual runtime, resource
+bound, result classes, identity binding, cleanup/rollback, and changes that must
+rerun the evidence. Review that contract and the affected execution path on one
+stable local diff before first publication. Group related findings by root cause
+into one correction pass where practical. A production-fact mismatch invalidates
+the affected design assumptions and returns the cycle to preparation; it is not
+only an implementation correction.
 
 ## Improve the next round from observed results
 

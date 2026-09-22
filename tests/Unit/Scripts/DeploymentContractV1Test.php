@@ -1413,14 +1413,72 @@ final class DeploymentContractV1Test extends TestCase
         yield 'rollback failed terminal' => ['failed_post_switch_rollback_failed', 31, 'rollback_failed', 31, 'failed'];
     }
 
-    public function testDumpAgeAtExactly240MinutesIsRejected(): void
+    public function testCanonicalDumpAgeAtExactlyOneHourIsRejected(): void
     {
         $evidence = $this->validEvidence($this->successfulRunLines());
-        $evidence['dump']['age_seconds'] = 14400;
+        $evidence['dump']['age_seconds'] = DeploymentContractV1::DUMP_MAX_AGE_SECONDS;
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('dump status is inconsistent');
         DeploymentContractV1::validateEvidence($evidence);
+    }
+
+    public function testCanonicalDumpAgeAt3599SecondsIsAccepted(): void
+    {
+        $evidence = $this->validEvidence($this->successfulRunLines());
+        $evidence['dump']['age_seconds'] = DeploymentContractV1::DUMP_MAX_AGE_SECONDS - 1;
+
+        DeploymentContractV1::validateEvidence($evidence);
+        self::assertSame(DeploymentContractV1::DUMP_POLICY, $evidence['dump']['policy']);
+        self::assertSame(DeploymentContractV1::DUMP_MAX_AGE_SECONDS, $evidence['dump']['max_age_seconds']);
+    }
+
+    public function testCanonicalIntentEmitsRunBoundRestorePolicy(): void
+    {
+        self::assertSame(DeploymentContractV1::DUMP_POLICY, $this->intent()['dump_policy']);
+        self::assertSame('run_bound_verified_restore_under_60m', DeploymentContractV1::DUMP_POLICY);
+    }
+
+    public function testNewIntentCannotSelectHistoricalDumpPolicy(): void
+    {
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('canonical dump policy');
+
+        DeploymentContractV1::createIntentRecord(
+            self::RUN_ID,
+            '2026-08-10T04:00:00Z',
+            self::COMMIT,
+            'ea_contract',
+            DeploymentContractV1::LEGACY_DUMP_POLICY,
+        );
+    }
+
+    public function testHistorical240MinuteBundleRemainsReadable(): void
+    {
+        $fixtureRoot = dirname(__DIR__, 2) . '/Fixtures/deployment-contract-v1';
+        $runBytes = file_get_contents($fixtureRoot . '/failed-before-write.jsonl');
+        $evidenceBytes = file_get_contents($fixtureRoot . '/failed-before-write-evidence.json');
+        self::assertIsString($runBytes);
+        self::assertIsString($evidenceBytes);
+
+        $result = DeploymentContractV1::validateBundle(
+            explode("\n", rtrim($runBytes, "\n")),
+            json_decode(rtrim($evidenceBytes, "\n"), true, 64, JSON_THROW_ON_ERROR),
+        );
+
+        self::assertSame('failed_before_write', $result['state']);
+    }
+
+    public function testLegacyEvidenceCannotBeBoundToCanonicalIntent(): void
+    {
+        $lines = $this->successfulRunLines();
+        $evidence = $this->validEvidence($lines);
+        $evidence['dump']['policy'] = DeploymentContractV1::LEGACY_DUMP_POLICY;
+        $evidence['dump']['max_age_seconds'] = DeploymentContractV1::LEGACY_DUMP_MAX_AGE_SECONDS;
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('bound dump policy');
+        DeploymentContractV1::validateBundle($lines, $evidence);
     }
 
     public function testFailedDumpCanRepresentUnverifiedSha(): void
@@ -2153,7 +2211,7 @@ final class DeploymentContractV1Test extends TestCase
                 'status' => 'passed',
                 'policy' => DeploymentContractV1::DUMP_POLICY,
                 'age_seconds' => 60,
-                'max_age_seconds' => 14400,
+                'max_age_seconds' => DeploymentContractV1::DUMP_MAX_AGE_SECONDS,
                 'sha256' => self::SHA,
                 'sha256_verified' => true,
                 'gzip_verified' => true,
@@ -2228,7 +2286,7 @@ final class DeploymentContractV1Test extends TestCase
 
         if ($reason === 'dump_verification_failed') {
             $evidence['dump'] = $this->validEvidence($lines)['dump'];
-            $evidence['dump']['age_seconds'] = 14400;
+            $evidence['dump']['age_seconds'] = DeploymentContractV1::DUMP_MAX_AGE_SECONDS;
             $evidence['dump']['status'] = 'failed';
         }
         if (in_array($reason, ['capacity_gate_failed', 'artifact_verification_failed'], true)) {
@@ -2378,7 +2436,7 @@ final class DeploymentContractV1Test extends TestCase
         $section = $this->notObservedSection($section);
         $section['status'] = 'invalid';
         $section['policy'] = DeploymentContractV1::DUMP_POLICY;
-        $section['max_age_seconds'] = 14400;
+        $section['max_age_seconds'] = DeploymentContractV1::DUMP_MAX_AGE_SECONDS;
 
         return $section;
     }

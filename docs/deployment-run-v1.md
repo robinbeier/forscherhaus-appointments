@@ -19,10 +19,16 @@ The immutable intent contains:
 
 - the full expected 40-hex commit;
 - a bounded release ID;
-- `fresh_verified_under_240m` dump policy;
+- `run_bound_verified_restore_under_60m` dump policy. This is the canonical
+  deployment admission policy: the exact restored dump attestation must be
+  bound to this Run-ID and observed less than 3,600 seconds after creation.
+  `fresh_verified_under_240m` remains accepted only when reading historical v1
+  journals and evidence;
 - `build_from_expected_commit` artifact expectation.
 
 `intent_sha256` is the SHA-256 of their recursively key-sorted compact JSON.
+The separate `deploy_ea.sh --zero-surprise-max-age-minutes` replay-report
+setting does not grant dump admission and does not widen this one-hour bound.
 The Run-ID is kept alongside that hash rather than folded into it. Reattaching
 to an existing Run-ID is permitted only when the candidate intent independently
 validates and has the same hash. Same Run-ID plus changed intent is exit `75`
@@ -200,7 +206,8 @@ normalized to `manual_recovery_required`/`contract_invalid` exit `70`; neither
 case permits a second invocation. An observed `interrupted_pre_switch` receipt instead binds the
 known `failed_pre_switch` terminal, exit `143`, and rollback `not_run`. A
 missing, unreadable, or pre-digest dump failure uses `invalid`:
-the known policy and 14,400-second ceiling remain fixed, observed values keep
+the selected policy's ceiling remains fixed (3,600 seconds for the canonical
+policy, 14,400 seconds for legacy v1 evidence), observed values keep
 their strict types, unavailable measurements stay `null`, and at least one
 measurement must remain unavailable. A terminal failure with exit `22` through
 `25` requires the claimed gate's failed evidence plus passed evidence for every

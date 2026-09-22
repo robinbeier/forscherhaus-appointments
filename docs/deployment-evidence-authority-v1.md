@@ -52,8 +52,14 @@ successful MariaDB 10.11 restore observation, including the allocated datadir
 bytes and inode count measured after that restore. The attestation has no deployment
 Run-ID. The runner pins its exact SHA and creates a separate
 `deployment_run_dump_observation.v1` binding it to the deployment Run-ID and
-intent. Compressed dumps are capped at 16 GiB, uncompressed data at 64 GiB and
-the expansion ratio at 100:1. Age must remain below 14,400 seconds.
+intent. That run-bound observation is the primary deployment proof. The
+canonical deployment admission policy is
+`run_bound_verified_restore_under_60m`, with a strict 3,600-second secondary
+freshness ceiling. Historical `fresh_verified_under_240m` journals and evidence
+remain readable under their original 14,400-second ceiling. The four-hour
+window is retained for pending-restore recovery and is not the normal
+deployment admission limit. Compressed dumps are capped at 16 GiB,
+uncompressed data at 64 GiB and the expansion ratio at 100:1.
 The root-only producer `scripts/ops/verify_deployment_dump_v1.php` accepts
 either the backup-set ID `20YYMMDDTHHMMSSZ` or exactly one of the two literal
 selectors `--latest-handoff` and `--continuity-state`. The ID form derives the fixed
