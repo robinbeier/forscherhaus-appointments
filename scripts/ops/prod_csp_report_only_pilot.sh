@@ -391,7 +391,7 @@ on_exit() {
     local status=$?
     trap - EXIT
     rollback_once "$status" || status=$?
-    if (( status != 0 )) && [[ -n "$RUN_ID" && -n "$EXPECTED_RELEASE_BINDING" ]]; then
+    if (( status != 0 )) && [[ -n "$RUN_ID" && -n "$EXPECTED_RELEASE_BINDING" ]] && ! state_completed postflight; then
         if (( ACTIVATION_MAY_BE_PRESENT == 0 )); then
             STATE_TERMINAL='checkpoint_outcome_unknown_cleanup_verified'
         else
@@ -489,13 +489,11 @@ run_pilot() {
         fi
         if ! run_read_only_state "$resume_expectation" "$STATE_RELEASE_BINDING"; then
             if [[ "$resume_expectation" == 'inactive' ]]; then
-                trap on_exit EXIT
-                rollback_once 1 || true
-                if (( ACTIVATION_MAY_BE_PRESENT == 0 )); then
-                    STATE_TERMINAL='checkpoint_outcome_unknown_cleanup_verified'
-                else
-                    STATE_TERMINAL='checkpoint_outcome_unknown_cleanup_unverified'
-                fi
+                # Removal was already completed or was in flight. An
+                # unavailable/contradictory inactive check must never repeat
+                # that mutation against an unverified target.
+                ROLLBACK_ATTEMPTED=1
+                STATE_TERMINAL='checkpoint_outcome_unknown_cleanup_unverified'
                 state_write "$STATE_COMPLETED" "$STATE_CHECKPOINT" "$STATE_TERMINAL" || true
                 printf 'csp_pilot.status=stopped\n'
                 printf 'csp_pilot.result_class=%s\n' "$STATE_TERMINAL"
@@ -614,8 +612,8 @@ run_pilot() {
     state_checkpoint_start postflight
     run_preflight
     state_checkpoint_pass postflight "$LAST_RESULT_CLASS"
-    rm -f "$STATE_PATH"
     printf 'csp_pilot.status=passed\n'
+    rm -f "$STATE_PATH"
 }
 
 main() {

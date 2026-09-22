@@ -379,7 +379,7 @@ final class CspReportOnlyActivationScriptTest extends TestCase
         }
     }
 
-    public function testCompletedRemovalWithUnavailableInactiveCheckAttemptsCleanupOnce(): void
+    public function testCompletedRemovalWithUnavailableInactiveCheckStopsWithoutRepeatingCleanup(): void
     {
         $fixture = $this->createPilotFixture(false);
         file_put_contents($fixture . '/activation-present', '1');
@@ -402,9 +402,9 @@ final class CspReportOnlyActivationScriptTest extends TestCase
         try {
             $result = $this->runPilot($fixture, 'pilot');
             self::assertSame(1, $result['exit_code']);
-            self::assertSame("remove\n", file_get_contents($fixture . '/activation-calls'));
+            self::assertSame('', file_get_contents($fixture . '/activation-calls'));
             $state = json_decode((string) file_get_contents($fixture . '/pilot-state.json'), true);
-            self::assertSame('checkpoint_outcome_unknown_cleanup_verified', $state['terminal'] ?? null);
+            self::assertSame('checkpoint_outcome_unknown_cleanup_unverified', $state['terminal'] ?? null);
         } finally {
             $this->removeDirectory($fixture);
         }
@@ -433,6 +433,68 @@ final class CspReportOnlyActivationScriptTest extends TestCase
             self::assertStringContainsString('resume_production_target_changed', $result['stdout']);
             self::assertSame('', file_get_contents($fixture . '/status-calls'));
             self::assertSame('', file_get_contents($fixture . '/activation-calls'));
+        } finally {
+            $this->removeDirectory($fixture);
+        }
+    }
+
+    public function testRemovalCheckpointWithUnavailableInactiveCheckStopsWithoutMutation(): void
+    {
+        $fixture = $this->createPilotFixture(false);
+        file_put_contents($fixture . '/activation-present', '1');
+        file_put_contents($fixture . '/fail-resume-status', '1');
+        file_put_contents(
+            $fixture . '/pilot-state.json',
+            json_encode([
+                'schema' => 'csp_report_only_pilot.v2',
+                'run_id' => str_repeat('a', 32),
+                'release_binding' => str_repeat('a', 64),
+                'production_target_binding' => hash('sha256', 'root@example.test'),
+                'activation_at' => '1700000000',
+                'completed' => 'activation,0m,15m,60m',
+                'checkpoint' => 'remove',
+                'results' =>
+                    'activation=activation_installed_verified,0m=evidence_verified,15m=evidence_verified,60m=evidence_verified',
+                'terminal' => '',
+            ]),
+        );
+        try {
+            $result = $this->runPilot($fixture, 'pilot');
+            self::assertSame(1, $result['exit_code']);
+            self::assertSame('', file_get_contents($fixture . '/activation-calls'));
+            $state = json_decode((string) file_get_contents($fixture . '/pilot-state.json'), true);
+            self::assertSame('checkpoint_outcome_unknown_cleanup_unverified', $state['terminal'] ?? null);
+        } finally {
+            $this->removeDirectory($fixture);
+        }
+    }
+
+    public function testFinalOutputFailurePreservesCompletedJournalAndReleasesPilotLock(): void
+    {
+        $fixture = $this->createPilotFixture(false);
+        file_put_contents(
+            $fixture . '/fail-final-output.sh',
+            <<<'BASH'
+            printf() {
+                if [[ "${1-}" == 'csp_pilot.status=passed\n' ]] &&
+                    [[ -n "${CSP_PILOT_STATE_FILE:-}" ]] &&
+                    grep -q '"completed":"activation,0m,15m,60m,remove,postflight"' "$CSP_PILOT_STATE_FILE" 2>/dev/null; then
+                    return 1
+                fi
+                builtin printf "$@"
+            }
+            BASH
+            ,
+        );
+        try {
+            $result = $this->runPilot($fixture, 'pilot', ['BASH_ENV' => $fixture . '/fail-final-output.sh']);
+            self::assertSame(1, $result['exit_code']);
+            self::assertFileExists($fixture . '/pilot-state.json');
+            self::assertDirectoryDoesNotExist($fixture . '/pilot-lock');
+            $state = json_decode((string) file_get_contents($fixture . '/pilot-state.json'), true);
+            self::assertSame('activation,0m,15m,60m,remove,postflight', $state['completed'] ?? null);
+            self::assertSame('', $state['checkpoint'] ?? null);
+            self::assertSame('', $state['terminal'] ?? null);
         } finally {
             $this->removeDirectory($fixture);
         }
@@ -890,7 +952,8 @@ final class CspReportOnlyActivationScriptTest extends TestCase
         return $fixture;
     }
 
-    private function runPilot(string $fixture, string $phase): array
+    /** @param array<string,string> $extraEnvironment */
+    private function runPilot(string $fixture, string $phase, array $extraEnvironment = []): array
     {
         return $this->runCommand(
             [
@@ -901,12 +964,15 @@ final class CspReportOnlyActivationScriptTest extends TestCase
                 '--prod-ssh-target',
                 'root@example.test',
             ],
-            [
-                'PATH' => $fixture . '/bin' . PATH_SEPARATOR . (getenv('PATH') ?: ''),
-                'CSP_PILOT_STATUS_SCRIPT' => $fixture . '/status.sh',
-                'CSP_PILOT_STATE_FILE' => $fixture . '/pilot-state.json',
-                'CSP_PILOT_LOCK_PATH' => $fixture . '/pilot-lock',
-            ],
+            array_merge(
+                [
+                    'PATH' => $fixture . '/bin' . PATH_SEPARATOR . (getenv('PATH') ?: ''),
+                    'CSP_PILOT_STATUS_SCRIPT' => $fixture . '/status.sh',
+                    'CSP_PILOT_STATE_FILE' => $fixture . '/pilot-state.json',
+                    'CSP_PILOT_LOCK_PATH' => $fixture . '/pilot-lock',
+                ],
+                $extraEnvironment,
+            ),
         );
     }
 
