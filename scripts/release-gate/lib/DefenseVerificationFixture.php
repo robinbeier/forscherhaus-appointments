@@ -12,7 +12,8 @@ use Throwable;
  * Root-only, disposable supplemental fixture for the ordinary-live run.
  *
  * This deliberately has its own journal: the ordinary fixture remains the
- * owner of its actor and this class never changes application settings.
+ * owner of its actor. A temporary empty API token is the only application
+ * setting this class may change, with exact crash recovery in this journal.
  */
 final class DefenseVerificationFixture
 {
@@ -144,6 +145,112 @@ final class DefenseVerificationFixture
             $this->writeState($state);
             return $state;
         });
+    }
+
+    /** Return the existing Bearer token, or temporarily fill one exact empty setting. */
+    public function prepareAppointmentsApiBearerToken(): string
+    {
+        return $this->withLock(function (): string {
+            $state = $this->readState();
+            $this->validateState($state);
+            if ($state['phase'] !== 'active' || $state['profile'] !== 'calendar_race') {
+                throw new RuntimeException('Appointments API verification requires the active calendar-race graph.');
+            }
+            $this->assertOwnership($state);
+            if (isset($state['intents']['api_token'])) {
+                throw new RuntimeException('Appointments API bearer prerequisite is already prepared.');
+            }
+            if (!$this->db->trans_begin()) {
+                throw new RuntimeException('Appointments API bearer prerequisite transaction could not start.');
+            }
+            try {
+                $rows = $this->lockApiTokenRows();
+                if (count($rows) !== 1 || (int) ($rows[0]['id'] ?? 0) < 1) {
+                    throw new RuntimeException('Appointments API bearer prerequisite is missing or ambiguous.');
+                }
+                $value = $rows[0]['value'] ?? null;
+                if (is_string($value) && $value !== '' && $value !== '0') {
+                    if ($this->db->trans_status() === false || !$this->db->trans_commit()) {
+                        throw new RuntimeException(
+                            'Appointments API bearer prerequisite transaction could not commit.',
+                        );
+                    }
+                    return $value;
+                }
+                if ($value !== '') {
+                    throw new RuntimeException('Appointments API bearer prerequisite is not safely replaceable.');
+                }
+
+                $candidate = bin2hex(random_bytes(32));
+                $settingId = (int) $rows[0]['id'];
+                $state['intents']['api_token'] = [
+                    'setting_id' => $settingId,
+                    'initial_state' => 'empty',
+                    'candidate_digest' => hash('sha256', $candidate),
+                ];
+                // The fsync-backed intent must be durable before the setting changes.
+                $this->writeState($state);
+                $this->applyTemporaryApiToken($settingId, $candidate);
+                $current = $this->lockApiTokenRows();
+                if (
+                    count($current) !== 1 ||
+                    (int) ($current[0]['id'] ?? 0) !== $settingId ||
+                    !is_string($current[0]['value'] ?? null) ||
+                    !hash_equals(
+                        $state['intents']['api_token']['candidate_digest'],
+                        hash('sha256', $current[0]['value']),
+                    )
+                ) {
+                    throw new RuntimeException('Appointments API bearer prerequisite could not be verified.');
+                }
+                if ($this->db->trans_status() === false || !$this->db->trans_commit()) {
+                    throw new RuntimeException('Appointments API bearer prerequisite transaction could not commit.');
+                }
+                return $candidate;
+            } catch (Throwable $error) {
+                $this->db->trans_rollback();
+                throw $error;
+            }
+        });
+    }
+
+    /** Keep the candidate out of CI-rendered SQL, its query cache and application DB errors. */
+    private function applyTemporaryApiToken(int $settingId, string $candidate): void
+    {
+        if (
+            ($this->db->dbdriver ?? null) !== 'mysqli' ||
+            !property_exists($this->db, 'conn_id') ||
+            !($this->db->conn_id instanceof \mysqli)
+        ) {
+            throw new RuntimeException('Appointments API bearer prerequisite requires a native mysqli connection.');
+        }
+        $statement = null;
+        try {
+            $sql =
+                'UPDATE `' .
+                $this->db->dbprefix('settings') .
+                '` SET value = ? WHERE id = ? AND name = ? AND value = ?';
+            $statement = $this->db->conn_id->prepare($sql);
+            if (!($statement instanceof \mysqli_stmt)) {
+                throw new RuntimeException('prepare failed');
+            }
+            $name = 'api_token';
+            $empty = '';
+            if (
+                !$statement->bind_param('siss', $candidate, $settingId, $name, $empty) ||
+                !$statement->execute() ||
+                $statement->affected_rows !== 1
+            ) {
+                throw new RuntimeException('execute failed');
+            }
+        } catch (Throwable) {
+            // Do not retain the driver exception: it may contain statement data.
+            throw new RuntimeException('Appointments API bearer prerequisite could not be applied.');
+        } finally {
+            if ($statement instanceof \mysqli_stmt) {
+                $statement->close();
+            }
+        }
     }
 
     /** Journal the exact recoverable identity before one API POST. */
@@ -422,6 +529,7 @@ final class DefenseVerificationFixture
                             ['prepared', 'settings_prepared'],
                             true,
                         ),
+                        isset($state['intents']['api_token']),
                     );
                 } else {
                     $this->assertPreparedOwnership($state);
@@ -657,8 +765,12 @@ final class DefenseVerificationFixture
     }
 
     /** @param array<string,mixed> $state */
-    private function assertOwnership(array $state, bool $allowIncompleteApiAdmin = false): void
-    {
+    private function assertOwnership(
+        array $state,
+        bool $allowIncompleteApiAdmin = false,
+        bool $allowRecoverableApiToken = false,
+    ): void {
+        $this->assertApiTokenOwnership($state, $allowRecoverableApiToken);
         $apiAdminStage = $state['intents']['users']['api_admin']['stage'] ?? null;
         if (in_array($apiAdminStage, ['prepared', 'settings_prepared'], true) && !$allowIncompleteApiAdmin) {
             throw new RuntimeException('Appointments API principal creation is incomplete.');
@@ -872,6 +984,7 @@ final class DefenseVerificationFixture
     private function deleteOwned(array $state, bool $alreadyCleaning, bool $wasPrepared): void
     {
         $ids = $state['ids'];
+        $this->restoreTemporaryApiToken($state);
         $this->lockFixtureUsers($state, $alreadyCleaning);
         $this->assertRecoverableApiAdminSettings($state);
         $this->assertServiceDependencies($state, $alreadyCleaning, $wasPrepared);
@@ -973,6 +1086,97 @@ final class DefenseVerificationFixture
             $this->db->delete('user_settings', ['id_users' => $id, 'username' => $state['usernames'][$key] ?? '']);
             $this->db->delete('users', ['id' => $id, 'notes' => $state['marker']]);
         }
+    }
+
+    private function assertApiTokenOwnership(array $state, bool $allowEmpty): void
+    {
+        $intent = $this->apiTokenIntent($state);
+        if ($intent === null) {
+            return;
+        }
+        $rows = $this->db
+            ->query('SELECT id, value FROM `' . $this->db->dbprefix('settings') . '` WHERE name = ? ORDER BY id ASC', [
+                'api_token',
+            ])
+            ->result_array();
+        if (count($rows) !== 1 || (int) ($rows[0]['id'] ?? 0) !== $intent['setting_id']) {
+            throw new RuntimeException('Temporary Appointments API bearer prerequisite drift detected.');
+        }
+        $value = $rows[0]['value'] ?? null;
+        if ($allowEmpty && $value === '') {
+            return;
+        }
+        if (!is_string($value) || !hash_equals($intent['candidate_digest'], hash('sha256', $value))) {
+            throw new RuntimeException('Temporary Appointments API bearer prerequisite drift detected.');
+        }
+    }
+
+    /** Restore only the exact empty row journaled before the temporary token mutation. */
+    private function restoreTemporaryApiToken(array $state): void
+    {
+        $intent = $this->apiTokenIntent($state);
+        if ($intent === null) {
+            return;
+        }
+        $rows = $this->lockApiTokenRows();
+        if (count($rows) !== 1 || (int) ($rows[0]['id'] ?? 0) !== $intent['setting_id']) {
+            throw new RuntimeException('Temporary Appointments API bearer prerequisite drift detected.');
+        }
+        $value = $rows[0]['value'] ?? null;
+        if ($value === '') {
+            return;
+        }
+        if (!is_string($value) || !hash_equals($intent['candidate_digest'], hash('sha256', $value))) {
+            throw new RuntimeException('Temporary Appointments API bearer prerequisite drift detected.');
+        }
+        if (
+            !$this->db->update('settings', ['value' => ''], ['id' => $intent['setting_id'], 'name' => 'api_token']) ||
+            $this->db->affected_rows() !== 1
+        ) {
+            throw new RuntimeException('Temporary Appointments API bearer prerequisite could not be restored.');
+        }
+        $restored = $this->lockApiTokenRows();
+        if (
+            count($restored) !== 1 ||
+            (int) ($restored[0]['id'] ?? 0) !== $intent['setting_id'] ||
+            ($restored[0]['value'] ?? null) !== ''
+        ) {
+            throw new RuntimeException('Temporary Appointments API bearer prerequisite could not be restored.');
+        }
+    }
+
+    /** @return array{setting_id:int,initial_state:string,candidate_digest:string}|null */
+    private function apiTokenIntent(array $state): ?array
+    {
+        $intent = $state['intents']['api_token'] ?? null;
+        if ($intent === null) {
+            return null;
+        }
+        if (
+            !is_array($intent) ||
+            count($intent) !== 3 ||
+            !is_int($intent['setting_id'] ?? null) ||
+            $intent['setting_id'] < 1 ||
+            ($intent['initial_state'] ?? null) !== 'empty' ||
+            !is_string($intent['candidate_digest'] ?? null) ||
+            preg_match('/^[a-f0-9]{64}$/D', $intent['candidate_digest']) !== 1
+        ) {
+            throw new RuntimeException('Temporary Appointments API bearer prerequisite journal is invalid.');
+        }
+        return $intent;
+    }
+
+    /** @return list<array<string,mixed>> */
+    private function lockApiTokenRows(): array
+    {
+        return $this->db
+            ->query(
+                'SELECT id, value FROM `' .
+                    $this->db->dbprefix('settings') .
+                    '` WHERE name = ? ORDER BY id ASC FOR UPDATE',
+                ['api_token'],
+            )
+            ->result_array();
     }
 
     /** Lock every synthetic user parent before service and relationship children. */

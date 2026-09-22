@@ -302,8 +302,17 @@ procedure.
 `appointments-api` reuses the owned `calendar-race` provider, customer,
 service and unchanged direct-model appointment as its sentinel. It adds one
 synthetic administrator for Basic authentication and exactly one durably
-journaled API-created appointment for each of Basic and the already configured
-Bearer token. An empty Bearer token stops before this supplemental activation.
+journaled API-created appointment for each of Basic and Bearer authentication.
+An existing nonempty global Bearer token remains memory-only and unchanged. If
+the single `api_token` setting is exactly empty, the fixture first journals only
+its row ID, the empty starting state and a SHA-256 digest of a random candidate,
+then sets the candidate under a row lock through a native `mysqli` prepared
+statement so it never enters CodeIgniter-rendered SQL or its query cache. This
+path requires the configured native `mysqli` connection and stops after the
+durable intent but before mutation for any other driver or connection shape.
+Cleanup accepts only the same empty row or the digest-identical candidate and restores the empty value under lock;
+missing, duplicate or drifted rows stop fail-closed. Token values never enter the
+journal or probe evidence.
 Each API row has exact create, update and delete intent before the corresponding
 localhost HTTP mutation. The probe checks persistence, URI target binding,
 server-generated hash continuity and repeated DELETE. Before each first DELETE,

@@ -92,6 +92,365 @@ final class DefenseVerificationFixtureTest extends TestCase
         self::assertSame(0, $db->get_where('services_providers', ['id_services' => $state['service_id']])->num_rows());
     }
 
+    public function testAppointmentsApiBearerReusesExistingTokenOnlyInMemory(): void
+    {
+        $db = &get_instance()->db;
+        $row = $this->singleApiTokenRow();
+        $existing = bin2hex(random_bytes(32));
+        self::assertTrue($db->update('settings', ['value' => $existing], ['id' => (int) $row['id']]));
+        try {
+            $actor = $this->ordinary->activate();
+            $this->fixture->activate('calendar_race', $actor);
+            $returned = $this->fixture->prepareAppointmentsApiBearerToken();
+            self::assertTrue(hash_equals($existing, $returned));
+
+            $journalText = (string) file_get_contents($this->stateDirectory . '/defense-verification.json');
+            $journal = json_decode($journalText, true, 512, JSON_THROW_ON_ERROR);
+            self::assertArrayNotHasKey('api_token', $journal['intents']);
+            self::assertFalse(str_contains($journalText, $existing));
+
+            $this->fixture->deactivate();
+            $current = $db->get_where('settings', ['id' => (int) $row['id'], 'name' => 'api_token'])->row_array();
+            self::assertTrue(is_array($current) && hash_equals($existing, (string) ($current['value'] ?? '')));
+        } finally {
+            if (is_file($this->stateDirectory . '/defense-verification.json')) {
+                $this->fixture->deactivate();
+            }
+            $db->update('settings', ['value' => $row['value']], ['id' => (int) $row['id'], 'name' => 'api_token']);
+        }
+    }
+
+    public function testAppointmentsApiBearerRejectsUnsupportedDriverAfterIntentBeforeUpdate(): void
+    {
+        $db = &get_instance()->db;
+        $row = $this->singleApiTokenRow();
+        self::assertTrue($db->update('settings', ['value' => ''], ['id' => (int) $row['id']]));
+        try {
+            $actor = $this->ordinary->activate();
+            $this->fixture->activate('calendar_race', $actor);
+            $proxy = new class ($db) {
+                public string $dbdriver = 'unsupported';
+                public object $conn_id;
+
+                public function __construct(private readonly object $database)
+                {
+                    $this->conn_id = $database->conn_id;
+                }
+
+                public function __call(string $name, array $arguments): mixed
+                {
+                    return $this->database->$name(...$arguments);
+                }
+            };
+            $databaseProperty = new ReflectionProperty(DefenseVerificationFixture::class, 'db');
+            $databaseProperty->setValue($this->fixture, $proxy);
+            try {
+                $this->fixture->prepareAppointmentsApiBearerToken();
+                self::fail('Bearer preparation must reject a non-mysqli fixture connection.');
+            } catch (RuntimeException $error) {
+                self::assertStringContainsString('native mysqli connection', $error->getMessage());
+            } finally {
+                $databaseProperty->setValue($this->fixture, $db);
+            }
+
+            $journal = json_decode(
+                (string) file_get_contents($this->stateDirectory . '/defense-verification.json'),
+                true,
+                512,
+                JSON_THROW_ON_ERROR,
+            );
+            self::assertSame(
+                ['setting_id', 'initial_state', 'candidate_digest'],
+                array_keys($journal['intents']['api_token']),
+            );
+            self::assertSame((int) $row['id'], $journal['intents']['api_token']['setting_id']);
+            self::assertSame('empty', $journal['intents']['api_token']['initial_state']);
+            self::assertMatchesRegularExpression(
+                '/^[a-f0-9]{64}$/D',
+                $journal['intents']['api_token']['candidate_digest'],
+            );
+            $current = $db->get_where('settings', ['id' => (int) $row['id'], 'name' => 'api_token'])->row_array();
+            self::assertTrue(is_array($current) && ($current['value'] ?? null) === '');
+            self::assertSame('cleanup_pending', $this->fixture->verify());
+
+            $this->fixture->deactivate();
+            $restored = $db->get_where('settings', ['id' => (int) $row['id'], 'name' => 'api_token'])->row_array();
+            self::assertTrue(is_array($restored) && ($restored['value'] ?? null) === '');
+        } finally {
+            if (is_file($this->stateDirectory . '/defense-verification.json')) {
+                $this->fixture->deactivate();
+            }
+            $db->update('settings', ['value' => $row['value']], ['id' => (int) $row['id'], 'name' => 'api_token']);
+        }
+    }
+
+    public function testAppointmentsApiBearerRecoversFailureAfterCommittedUpdateWithoutLeak(): void
+    {
+        $db = &get_instance()->db;
+        $row = $this->singleApiTokenRow();
+        self::assertTrue($db->update('settings', ['value' => ''], ['id' => (int) $row['id']]));
+        try {
+            $actor = $this->ordinary->activate();
+            $this->fixture->activate('calendar_race', $actor);
+            $proxy = new class ($db) {
+                public string $dbdriver;
+                public object $conn_id;
+                public bool $updated = false;
+                public bool $failed = false;
+
+                public function __construct(private readonly object $database)
+                {
+                    $this->dbdriver = $database->dbdriver;
+                    $this->conn_id = $database->conn_id;
+                }
+
+                public function trans_commit(): bool
+                {
+                    $row = $this->database->get_where('settings', ['name' => 'api_token'])->row_array();
+                    $this->updated = is_array($row) && is_string($row['value'] ?? null) && $row['value'] !== '';
+                    $result = $this->database->trans_commit();
+                    if ($this->updated && !$this->failed) {
+                        $this->failed = true;
+                        throw new RuntimeException('Injected failure after temporary bearer commit.');
+                    }
+                    return $result;
+                }
+
+                public function __call(string $name, array $arguments): mixed
+                {
+                    return $this->database->$name(...$arguments);
+                }
+            };
+            $databaseProperty = new ReflectionProperty(DefenseVerificationFixture::class, 'db');
+            $databaseProperty->setValue($this->fixture, $proxy);
+            $errorMessage = '';
+            try {
+                $this->fixture->prepareAppointmentsApiBearerToken();
+                self::fail('Bearer preparation must surface the injected post-commit failure.');
+            } catch (RuntimeException $error) {
+                $errorMessage = $error->getMessage();
+                self::assertStringContainsString('after temporary bearer commit', $errorMessage);
+            } finally {
+                $databaseProperty->setValue($this->fixture, $db);
+            }
+            self::assertTrue($proxy->updated);
+            self::assertTrue($proxy->failed);
+
+            $journalText = (string) file_get_contents($this->stateDirectory . '/defense-verification.json');
+            $journal = json_decode($journalText, true, 512, JSON_THROW_ON_ERROR);
+            $current = $db->get_where('settings', ['id' => (int) $row['id'], 'name' => 'api_token'])->row_array();
+            self::assertTrue(is_array($current) && is_string($current['value'] ?? null) && $current['value'] !== '');
+            self::assertTrue(
+                hash_equals($journal['intents']['api_token']['candidate_digest'], hash('sha256', $current['value'])),
+            );
+            self::assertFalse(str_contains($journalText, $current['value']));
+            self::assertFalse(str_contains($errorMessage, $current['value']));
+
+            $this->fixture->deactivate();
+            $restored = $db->get_where('settings', ['id' => (int) $row['id'], 'name' => 'api_token'])->row_array();
+            self::assertTrue(is_array($restored) && ($restored['value'] ?? null) === '');
+        } finally {
+            if (is_file($this->stateDirectory . '/defense-verification.json')) {
+                $this->fixture->deactivate();
+            }
+            $db->update('settings', ['value' => $row['value']], ['id' => (int) $row['id'], 'name' => 'api_token']);
+        }
+    }
+
+    public function testAppointmentsApiBearerRollsBackFailureAfterUpdateBeforeCommitWithoutLeak(): void
+    {
+        $db = &get_instance()->db;
+        $row = $this->singleApiTokenRow();
+        self::assertTrue($db->update('settings', ['value' => ''], ['id' => (int) $row['id']]));
+        try {
+            $actor = $this->ordinary->activate();
+            $this->fixture->activate('calendar_race', $actor);
+            $proxy = new class ($db) {
+                public string $dbdriver;
+                public object $conn_id;
+                public bool $commitAttempted = false;
+                public bool $queryCacheLeaked = false;
+                public bool $lastQueryLeaked = false;
+                public ?string $candidateDigest = null;
+                private string $candidate = '';
+
+                public function __construct(private readonly object $database)
+                {
+                    $this->dbdriver = $database->dbdriver;
+                    $this->conn_id = $database->conn_id;
+                }
+
+                public function trans_commit(): bool
+                {
+                    $row = $this->database->get_where('settings', ['name' => 'api_token'])->row_array();
+                    if (!is_array($row) || !is_string($row['value'] ?? null) || $row['value'] === '') {
+                        throw new RuntimeException('Temporary bearer update was not visible before commit.');
+                    }
+                    $this->candidate = $row['value'];
+                    $this->candidateDigest = hash('sha256', $this->candidate);
+                    $this->queryCacheLeaked = str_contains(
+                        json_encode($this->database->queries, JSON_THROW_ON_ERROR),
+                        $this->candidate,
+                    );
+                    $this->lastQueryLeaked = str_contains((string) $this->database->last_query(), $this->candidate);
+                    $this->commitAttempted = true;
+                    throw new RuntimeException('Injected failure before temporary bearer commit.');
+                }
+
+                public function containsCandidate(string $surface): bool
+                {
+                    return $this->candidate !== '' && str_contains($surface, $this->candidate);
+                }
+
+                public function __call(string $name, array $arguments): mixed
+                {
+                    return $this->database->$name(...$arguments);
+                }
+            };
+            $databaseProperty = new ReflectionProperty(DefenseVerificationFixture::class, 'db');
+            $databaseProperty->setValue($this->fixture, $proxy);
+            $errorMessage = '';
+            try {
+                $this->fixture->prepareAppointmentsApiBearerToken();
+                self::fail('Bearer preparation must surface the injected pre-commit failure.');
+            } catch (RuntimeException $error) {
+                $errorMessage = $error->getMessage();
+                self::assertStringContainsString('before temporary bearer commit', $errorMessage);
+            } finally {
+                $databaseProperty->setValue($this->fixture, $db);
+            }
+            self::assertTrue($proxy->commitAttempted);
+            self::assertNotNull($proxy->candidateDigest);
+            self::assertFalse($proxy->queryCacheLeaked);
+            self::assertFalse($proxy->lastQueryLeaked);
+
+            $journalText = (string) file_get_contents($this->stateDirectory . '/defense-verification.json');
+            $journal = json_decode($journalText, true, 512, JSON_THROW_ON_ERROR);
+            self::assertTrue(
+                hash_equals($journal['intents']['api_token']['candidate_digest'], $proxy->candidateDigest),
+            );
+            self::assertFalse($proxy->containsCandidate($journalText));
+            self::assertFalse($proxy->containsCandidate($errorMessage));
+            $current = $db->get_where('settings', ['id' => (int) $row['id'], 'name' => 'api_token'])->row_array();
+            self::assertTrue(is_array($current) && ($current['value'] ?? null) === '');
+            self::assertSame('cleanup_pending', $this->fixture->verify());
+
+            $this->fixture->deactivate();
+            $restored = $db->get_where('settings', ['id' => (int) $row['id'], 'name' => 'api_token'])->row_array();
+            self::assertTrue(is_array($restored) && ($restored['value'] ?? null) === '');
+        } finally {
+            if (is_file($this->stateDirectory . '/defense-verification.json')) {
+                $this->fixture->deactivate();
+            }
+            $db->update('settings', ['value' => $row['value']], ['id' => (int) $row['id'], 'name' => 'api_token']);
+        }
+    }
+
+    public function testAppointmentsApiBearerCleanupRejectsDriftAndDuplicateThenResumes(): void
+    {
+        $db = &get_instance()->db;
+        $row = $this->singleApiTokenRow();
+        self::assertTrue($db->update('settings', ['value' => ''], ['id' => (int) $row['id']]));
+        $duplicateId = 0;
+        try {
+            $actor = $this->ordinary->activate();
+            $this->fixture->activate('calendar_race', $actor);
+            $candidate = $this->fixture->prepareAppointmentsApiBearerToken();
+            $foreign = bin2hex(random_bytes(32));
+            self::assertTrue($db->update('settings', ['value' => $foreign], ['id' => (int) $row['id']]));
+            try {
+                $this->fixture->deactivate();
+                self::fail('Cleanup must reject a drifted temporary bearer token.');
+            } catch (RuntimeException $error) {
+                self::assertStringContainsString('drift', strtolower($error->getMessage()));
+                self::assertFalse(str_contains($error->getMessage(), $foreign));
+                self::assertFalse(str_contains($error->getMessage(), $candidate));
+            }
+            $current = $db->get_where('settings', ['id' => (int) $row['id'], 'name' => 'api_token'])->row_array();
+            self::assertTrue(is_array($current) && hash_equals($foreign, (string) ($current['value'] ?? '')));
+
+            self::assertTrue($db->update('settings', ['value' => $candidate], ['id' => (int) $row['id']]));
+            $secondary = get_instance()->load->database('', true);
+            $proxy = new class ($db, $secondary) {
+                public bool $injected = false;
+                public int $duplicateId = 0;
+
+                public function __construct(private readonly object $database, private readonly object $secondary) {}
+
+                public function query(string $sql, mixed ...$arguments): mixed
+                {
+                    if (
+                        !$this->injected &&
+                        str_contains($sql, $this->database->dbprefix('settings')) &&
+                        str_contains($sql, 'FOR UPDATE')
+                    ) {
+                        if (
+                            !$this->secondary->insert('settings', [
+                                'name' => 'api_token',
+                                'value' => bin2hex(random_bytes(32)),
+                            ])
+                        ) {
+                            throw new RuntimeException('Could not inject duplicate API token setting.');
+                        }
+                        $this->duplicateId = (int) $this->secondary->insert_id();
+                        $this->injected = true;
+                    }
+                    return $this->database->query($sql, ...$arguments);
+                }
+
+                public function __call(string $name, array $arguments): mixed
+                {
+                    return $this->database->$name(...$arguments);
+                }
+            };
+            $databaseProperty = new ReflectionProperty(DefenseVerificationFixture::class, 'db');
+            $databaseProperty->setValue($this->fixture, $proxy);
+            try {
+                $this->fixture->deactivate();
+                self::fail('Cleanup must reject an API token duplicate inserted before its locked recheck.');
+            } catch (RuntimeException $error) {
+                self::assertStringContainsString('drift', strtolower($error->getMessage()));
+            } finally {
+                $databaseProperty->setValue($this->fixture, $db);
+                $secondary->close();
+            }
+            self::assertTrue($proxy->injected);
+            $duplicateId = $proxy->duplicateId;
+            self::assertGreaterThan(0, $duplicateId);
+            self::assertSame(2, $db->get_where('settings', ['name' => 'api_token'])->num_rows());
+
+            self::assertTrue($db->delete('settings', ['id' => $duplicateId, 'name' => 'api_token']));
+            $duplicateId = 0;
+            $this->fixture->deactivate();
+            $restored = $db->get_where('settings', ['id' => (int) $row['id'], 'name' => 'api_token'])->row_array();
+            self::assertTrue(is_array($restored) && ($restored['value'] ?? null) === '');
+        } finally {
+            if ($duplicateId > 0) {
+                $db->delete('settings', ['id' => $duplicateId, 'name' => 'api_token']);
+            }
+            if (is_file($this->stateDirectory . '/defense-verification.json')) {
+                $current = $db->get_where('settings', ['id' => (int) $row['id'], 'name' => 'api_token'])->row_array();
+                if (is_array($current) && ($current['value'] ?? null) !== '') {
+                    $journal = json_decode(
+                        (string) file_get_contents($this->stateDirectory . '/defense-verification.json'),
+                        true,
+                        512,
+                        JSON_THROW_ON_ERROR,
+                    );
+                    if (
+                        isset($candidate) &&
+                        is_string($journal['intents']['api_token']['candidate_digest'] ?? null) &&
+                        hash_equals($journal['intents']['api_token']['candidate_digest'], hash('sha256', $candidate))
+                    ) {
+                        $db->update('settings', ['value' => $candidate], ['id' => (int) $row['id']]);
+                    }
+                }
+                $this->fixture->deactivate();
+            }
+            $db->update('settings', ['value' => $row['value']], ['id' => (int) $row['id'], 'name' => 'api_token']);
+        }
+    }
+
     public function testAppointmentsApiIntentRecoversInsertWhenResponseWasNotJournaled(): void
     {
         $actor = $this->ordinary->activate();
@@ -594,6 +953,23 @@ final class DefenseVerificationFixtureTest extends TestCase
         self::assertTrue($ci->db->update('appointments', ['hash' => $originalHash], ['id' => $id]));
         $this->fixture->deactivate();
         self::assertSame('clean', $this->fixture->verify());
+    }
+
+    /** @return array<string,mixed> */
+    private function singleApiTokenRow(): array
+    {
+        $rows = get_instance()
+            ->db->get_where('settings', ['name' => 'api_token'])
+            ->result_array();
+        if (
+            count($rows) !== 1 ||
+            (int) ($rows[0]['id'] ?? 0) < 1 ||
+            !array_key_exists('value', $rows[0]) ||
+            !is_string($rows[0]['value'])
+        ) {
+            self::fail('The isolated stack must contain exactly one string-valued API token setting.');
+        }
+        return $rows[0];
     }
 
     private function decodeApiPayload(array $payload): array
