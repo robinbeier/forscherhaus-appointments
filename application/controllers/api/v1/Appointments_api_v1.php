@@ -235,8 +235,12 @@ class Appointments_api_v1 extends EA_Controller
      */
     public function store(): void
     {
+        if (!$this->enforceWriteMethod('POST')) {
+            return;
+        }
+
         try {
-            $appointment = $this->apiRequestDtoFactory()->buildEntityWritePayloadDto()->payload;
+            $appointment = $this->apiRequestDtoFactory()->buildAppointmentsWritePayloadDto()->payload;
 
             $this->appointments_model->api_decode($appointment);
 
@@ -256,6 +260,10 @@ class Appointments_api_v1 extends EA_Controller
 
             json_response($created_appointment, 201);
         } catch (Throwable $e) {
+            if ($this->respondToWriteValidationError($e)) {
+                return;
+            }
+
             json_exception($e);
         }
     }
@@ -267,6 +275,10 @@ class Appointments_api_v1 extends EA_Controller
      */
     public function update(int $id): void
     {
+        if (!$this->enforceWriteMethod('PUT')) {
+            return;
+        }
+
         try {
             $occurrences = $this->appointments_model->get(['id' => $id]);
 
@@ -278,9 +290,11 @@ class Appointments_api_v1 extends EA_Controller
 
             $original_appointment = $occurrences[0];
 
-            $appointment = $this->apiRequestDtoFactory()->buildEntityWritePayloadDto()->payload;
+            $appointment = $this->apiRequestDtoFactory()->buildAppointmentsWritePayloadDto()->payload;
 
             $this->appointments_model->api_decode($appointment, $original_appointment);
+            // The URI is the sole update target; keep it authoritative after decoding.
+            $appointment['id'] = $id;
 
             $appointment_id = $this->appointments_model->save($appointment);
 
@@ -290,6 +304,10 @@ class Appointments_api_v1 extends EA_Controller
 
             json_response($updated_appointment);
         } catch (Throwable $e) {
+            if ($this->respondToWriteValidationError($e)) {
+                return;
+            }
+
             json_exception($e);
         }
     }
@@ -301,6 +319,10 @@ class Appointments_api_v1 extends EA_Controller
      */
     public function destroy(int $id): void
     {
+        if (!$this->enforceWriteMethod('DELETE')) {
+            return;
+        }
+
         try {
             $occurrences = $this->appointments_model->get(['id' => $id]);
 
@@ -337,5 +359,29 @@ class Appointments_api_v1 extends EA_Controller
         $this->api_request_dto_factory = $CI->api_request_dto_factory;
 
         return $this->api_request_dto_factory;
+    }
+
+    private function enforceWriteMethod(string $expected): bool
+    {
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) === $expected) {
+            return true;
+        }
+
+        response('', 405, ['Allow: ' . $expected]);
+
+        return false;
+    }
+
+    private function respondToWriteValidationError(Throwable $exception): bool
+    {
+        $status = (int) $exception->getCode();
+
+        if (!in_array($status, [400, 415], true)) {
+            return false;
+        }
+
+        json_response(['success' => false], $status);
+
+        return true;
     }
 }

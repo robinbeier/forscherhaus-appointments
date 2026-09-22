@@ -229,8 +229,20 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/AppointmentRecord'
+                '400':
+                    description: Invalid JSON object or unsupported appointment field
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
                 '401':
                     description: Unauthorized
+                '415':
+                    description: Unsupported Media Type
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
                 '500':
                     description: Internal Server Error
                     content:
@@ -300,10 +312,22 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/AppointmentRecord'
+                '400':
+                    description: Invalid JSON object or unsupported appointment field
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
                 '401':
                     description: Unauthorized
                 '404':
                     description: Not Found
+                '415':
+                    description: Unsupported Media Type
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
                 '500':
                     description: Internal Server Error
                     content:
@@ -1897,6 +1921,8 @@ components:
                 bufferBlocks: []
         AppointmentPayload:
             type: object
+            minProperties: 1
+            additionalProperties: false
             properties:
                 start:
                     type: string

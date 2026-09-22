@@ -35,14 +35,12 @@ class ApiRequestDtoFactoryWriteTest extends TestCase
     {
         $payload = (object) ['name' => 'Service C', 'is_private' => false];
         $dto = $this->factory->createEntityWritePayloadDto($payload);
-
         $this->assertSame(['name' => 'Service C', 'is_private' => false], $dto->payload);
     }
 
     public function testCreateDateFilterDtoNormalizesDateAndCompatFallbackValues(): void
     {
         $dto = $this->factory->createDateFilterDto('2026-03-20', 'next week', null);
-
         $this->assertSame('2026-03-20', $dto->date);
         $this->assertSame('next week', $dto->from);
         $this->assertNull($dto->till);
@@ -51,7 +49,43 @@ class ApiRequestDtoFactoryWriteTest extends TestCase
     public function testCreateSettingsUpdateDtoPreservesRawValueForCompatibility(): void
     {
         $dto = $this->factory->createSettingsUpdateDto(['enabled' => true]);
-
         $this->assertSame(['enabled' => true], $dto->value);
+    }
+
+    public function testAppointmentsPayloadAcceptsOnlyTheOpenApiWriteAllowlist(): void
+    {
+        $payload = $this->factory->createAppointmentsWritePayloadDto(
+            json_encode(
+                [
+                    'start' => '2026-10-01 10:00:00',
+                    'end' => '2026-10-01 10:30:00',
+                    'location' => 'Synthetic',
+                    'color' => '#fff',
+                    'status' => 'Booked',
+                    'notes' => 'notes',
+                    'customerId' => 1,
+                    'providerId' => 2,
+                    'serviceId' => 3,
+                ],
+                JSON_THROW_ON_ERROR,
+            ),
+        );
+
+        self::assertSame(
+            ['start', 'end', 'location', 'color', 'status', 'notes', 'customerId', 'providerId', 'serviceId'],
+            array_keys($payload->payload),
+        );
+    }
+
+    public function testAppointmentsPayloadRejectsEmptyMalformedScalarListAndProtectedFields(): void
+    {
+        foreach (['', '{}', '[]', '1', '{bad}', '{"id":1}', '{"hash":"secret"}', '{"book":"date"}'] as $raw) {
+            try {
+                $this->factory->createAppointmentsWritePayloadDto($raw);
+                self::fail('Payload should be rejected: ' . $raw);
+            } catch (\InvalidArgumentException $exception) {
+                self::assertSame(400, $exception->getCode(), $raw);
+            }
+        }
     }
 }
