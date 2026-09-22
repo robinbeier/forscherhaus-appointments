@@ -415,7 +415,10 @@ final class DefenseVerificationFixture
             }
             if (!$wasCleaning) {
                 if ($state['phase'] === 'active') {
-                    $this->assertOwnership($state);
+                    $this->assertOwnership(
+                        $state,
+                        ($state['intents']['users']['api_admin']['stage'] ?? null) === 'prepared',
+                    );
                 } else {
                     $this->assertPreparedOwnership($state);
                 }
@@ -529,6 +532,7 @@ final class DefenseVerificationFixture
         $username = 'defense_verify_' . $state['run_id'] . '_' . $key;
         $email = $username . '@synthetic.invalid';
         $state['intents']['users'][$key] = [
+            'stage' => 'prepared',
             'email' => $email,
             'username' => $username,
             'role_id' => $role,
@@ -561,6 +565,7 @@ final class DefenseVerificationFixture
         ]);
         $state['ids'][$key] = $id;
         $state['usernames'][$key] = $username;
+        $state['intents']['users'][$key]['stage'] = 'complete';
         $this->journal($state);
         return $id;
     }
@@ -634,8 +639,12 @@ final class DefenseVerificationFixture
     }
 
     /** @param array<string,mixed> $state */
-    private function assertOwnership(array $state): void
+    private function assertOwnership(array $state, bool $allowPreparedApiAdmin = false): void
     {
+        $apiAdminStage = $state['intents']['users']['api_admin']['stage'] ?? null;
+        if ($apiAdminStage === 'prepared' && !$allowPreparedApiAdmin) {
+            throw new RuntimeException('Appointments API principal creation is incomplete.');
+        }
         foreach ($state['ids'] as $key => $id) {
             if (str_starts_with($key, 'api_appointment_')) {
                 continue;
@@ -681,8 +690,16 @@ final class DefenseVerificationFixture
                     throw new RuntimeException('Fixture role drift detected.');
                 }
                 if (isset($state['usernames'][$key])) {
-                    $settings = $this->db->get_where('user_settings', ['id_users' => $state['ids'][$key]])->row_array();
-                    if (($settings['username'] ?? null) !== $state['usernames'][$key]) {
+                    $settings = $this->db
+                        ->get_where('user_settings', ['id_users' => $state['ids'][$key]])
+                        ->result_array();
+                    if ($allowPreparedApiAdmin && $key === 'api_admin' && $apiAdminStage === 'prepared') {
+                        if ($settings !== []) {
+                            throw new RuntimeException('Prepared Appointments API principal has unexpected settings.');
+                        }
+                        continue;
+                    }
+                    if (count($settings) !== 1 || ($settings[0]['username'] ?? null) !== $state['usernames'][$key]) {
                         throw new RuntimeException('Fixture username drift detected.');
                     }
                 } elseif (
@@ -825,6 +842,7 @@ final class DefenseVerificationFixture
     {
         $ids = $state['ids'];
         $this->lockFixtureUsers($state, $alreadyCleaning);
+        $this->assertPreparedApiAdminSettingsAbsent($state);
         $this->assertServiceDependencies($state, $alreadyCleaning, $wasPrepared);
         foreach (['basic', 'bearer'] as $case) {
             $key = 'api_appointment_' . $case;
@@ -963,6 +981,38 @@ final class DefenseVerificationFixture
         $actual = array_map(static fn(array $row): int => (int) $row['id'], $rows);
         if (!$alreadyCleaning && $actual !== $ids) {
             throw new RuntimeException('Synthetic fixture user disappeared before cleanup.');
+        }
+    }
+
+    /** The locked parent prevents a new settings FK while this range is checked and cleanup completes. */
+    private function assertPreparedApiAdminSettingsAbsent(array $state): void
+    {
+        $intent = $state['intents']['users']['api_admin'] ?? null;
+        if (!is_array($intent) || ($intent['stage'] ?? null) !== 'prepared') {
+            return;
+        }
+        $userId = (int) ($state['ids']['api_admin'] ?? 0);
+        if ($userId < 1) {
+            $email = $intent['email'] ?? null;
+            if (!is_string($email) || $email === '') {
+                throw new RuntimeException('Prepared Appointments API principal identity is unavailable.');
+            }
+            $unresolvedUsers = $this->db
+                ->query('SELECT id FROM `' . $this->db->dbprefix('users') . '` WHERE email = ? FOR UPDATE', [$email])
+                ->result_array();
+            if ($unresolvedUsers === []) {
+                return;
+            }
+            throw new RuntimeException('Prepared Appointments API principal user could not be resolved exactly.');
+        }
+        $settings = $this->db
+            ->query(
+                'SELECT id_users FROM `' . $this->db->dbprefix('user_settings') . '` WHERE id_users = ? FOR UPDATE',
+                [$userId],
+            )
+            ->result_array();
+        if ($settings !== []) {
+            throw new RuntimeException('Prepared Appointments API principal has unexpected settings.');
         }
     }
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use ReleaseGate\GateHttpClient;
 use ReleaseGate\AccountSecurityMatrixProbe;
+use ReleaseGate\AppointmentsApiWriteProbe;
 use ReleaseGate\CalendarResponsibilityRaceProbe;
 use ReleaseGate\CustomerRoleBoundaryProbe;
 use ReleaseGate\DefenseVerificationFixture;
@@ -316,25 +317,16 @@ try {
                 fn(): array => $verificationFixture->activate('calendar_race', $context),
             );
             $supplemental = $verificationFixture->prepareAppointmentsApi();
-            $apiClient = static fn(string $authorization): GateHttpClient => new GateHttpClient(
+            $result['evidence'] = AppointmentsApiWriteProbe::forApp(
                 'http://localhost',
+                (string) $supplemental['api_credentials']['username'],
+                (string) $supplemental['api_credentials']['password'],
+                $apiToken,
+                $verificationFixture,
                 indexPage: (string) config_item('index_page'),
                 csrfCookieName: (string) config_item('csrf_cookie_name'),
                 csrfTokenName: (string) config_item('csrf_token_name'),
-                additionalHeaders: ['X-FH-Ordinary-Probe' => '1', 'Authorization' => $authorization],
-            );
-            $result['evidence'] = (new AppointmentsApiWriteProbe(
-                $apiClient(
-                    'Basic ' .
-                        base64_encode(
-                            (string) $supplemental['api_credentials']['username'] .
-                                ':' .
-                                (string) $supplemental['api_credentials']['password'],
-                        ),
-                ),
-                $apiClient('Bearer ' . $apiToken),
-                $verificationFixture,
-            ))->run($evidence->step(...));
+            )->run($evidence->step(...));
         } else {
             $result['evidence'] = $evidence->run(
                 'session',

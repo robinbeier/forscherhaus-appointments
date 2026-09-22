@@ -15,6 +15,33 @@ final class AppointmentsApiWriteProbe
         private readonly DefenseVerificationFixture $fixture,
     ) {}
 
+    public static function forApp(
+        string $baseUrl,
+        string $basicUsername,
+        string $basicPassword,
+        string $bearerToken,
+        DefenseVerificationFixture $fixture,
+        string $indexPage = 'index.php',
+        string $csrfCookieName = 'csrf_cookie',
+        string $csrfTokenName = 'csrf_token',
+    ): self {
+        if ($basicUsername === '' || $basicPassword === '' || $bearerToken === '') {
+            throw new RuntimeException('Appointments API probe credentials are unavailable.');
+        }
+        $client = static fn(string $authorization): GateHttpClient => new GateHttpClient(
+            $baseUrl,
+            indexPage: $indexPage,
+            csrfCookieName: $csrfCookieName,
+            csrfTokenName: $csrfTokenName,
+            additionalHeaders: ['X-FH-Ordinary-Probe' => '1', 'Authorization' => $authorization],
+        );
+        return new self(
+            $client('Basic ' . base64_encode($basicUsername . ':' . $basicPassword)),
+            $client('Bearer ' . $bearerToken),
+            $fixture,
+        );
+    }
+
     public function run(?callable $observe = null): array
     {
         $observe ??= static function (string $phase, string $outcome): void {};

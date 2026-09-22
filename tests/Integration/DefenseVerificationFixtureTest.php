@@ -119,6 +119,275 @@ final class DefenseVerificationFixtureTest extends TestCase
         self::assertSame(0, $ci->db->get_where('appointments', ['id' => $id])->num_rows());
     }
 
+    public function testAppointmentsApiPrincipalRecoversFailureBetweenUserAndSettingsInsert(): void
+    {
+        $actor = $this->ordinary->activate();
+        $state = $this->fixture->activate('calendar_race', $actor);
+        $ci = &get_instance();
+        $database = $ci->db;
+        $proxy = new class ($database) {
+            public bool $failed = false;
+
+            public function __construct(private readonly object $database) {}
+
+            public function insert(string $table, array $row): bool
+            {
+                if (
+                    !$this->failed &&
+                    $table === 'user_settings' &&
+                    str_ends_with((string) ($row['username'] ?? ''), '_api_admin')
+                ) {
+                    $this->failed = true;
+                    return false;
+                }
+                return $this->database->insert($table, $row);
+            }
+
+            public function __call(string $name, array $arguments): mixed
+            {
+                return $this->database->$name(...$arguments);
+            }
+        };
+        $databaseProperty = new ReflectionProperty(DefenseVerificationFixture::class, 'db');
+        $databaseProperty->setValue($this->fixture, $proxy);
+        try {
+            $this->fixture->prepareAppointmentsApi();
+            self::fail('Supplemental principal creation must surface the injected settings failure.');
+        } catch (RuntimeException $error) {
+            self::assertStringContainsString('user_settings', $error->getMessage());
+        } finally {
+            $databaseProperty->setValue($this->fixture, $database);
+        }
+        self::assertTrue($proxy->failed);
+
+        $journal = json_decode(
+            (string) file_get_contents($this->stateDirectory . '/defense-verification.json'),
+            true,
+            512,
+            JSON_THROW_ON_ERROR,
+        );
+        self::assertSame('prepared', $journal['intents']['users']['api_admin']['stage']);
+        self::assertArrayNotHasKey('api_admin', $journal['ids']);
+        self::assertSame('cleanup_pending', $this->fixture->verify());
+
+        $email = 'defense_verify_' . $state['run_id'] . '_api_admin@synthetic.invalid';
+        $user = $ci->db
+            ->get_where('users', [
+                'email' => $email,
+                'notes' => $state['marker'],
+                'id_roles' => $journal['intents']['users']['api_admin']['role_id'],
+            ])
+            ->row_array();
+        self::assertIsArray($user);
+        $userId = (int) $user['id'];
+        self::assertSame(0, $ci->db->get_where('user_settings', ['id_users' => $userId])->num_rows());
+
+        $salt = generate_salt();
+        $preparedUsername = $journal['intents']['users']['api_admin']['username'];
+        self::assertTrue(
+            $ci->db->insert('user_settings', [
+                'id_users' => $userId,
+                'username' => $preparedUsername,
+                'password' => hash_password($salt, bin2hex(random_bytes(16))),
+                'salt' => $salt,
+                'working_plan' => '{}',
+                'working_plan_exceptions' => '{}',
+                'notifications' => 0,
+                'google_sync' => 0,
+                'caldav_sync' => 0,
+            ]),
+        );
+        try {
+            $this->fixture->deactivate();
+            self::fail('Cleanup must reject any settings for the prepared principal.');
+        } catch (RuntimeException $error) {
+            self::assertStringContainsString('unexpected settings', $error->getMessage());
+        }
+        self::assertSame(1, $ci->db->get_where('users', ['id' => $userId])->num_rows());
+        self::assertSame(1, $ci->db->get_where('user_settings', ['id_users' => $userId])->num_rows());
+
+        self::assertTrue($ci->db->delete('user_settings', ['id_users' => $userId, 'username' => $preparedUsername]));
+        $this->fixture->deactivate();
+        self::assertSame('clean', $this->fixture->verify());
+        self::assertSame(0, $ci->db->get_where('users', ['id' => $userId])->num_rows());
+    }
+
+    public function testAppointmentsApiPrincipalRecoversFailureBeforeUserInsert(): void
+    {
+        $actor = $this->ordinary->activate();
+        $state = $this->fixture->activate('calendar_race', $actor);
+        $ci = &get_instance();
+        $database = $ci->db;
+        $proxy = new class ($database) {
+            public bool $failed = false;
+
+            public function __construct(private readonly object $database) {}
+
+            public function insert(string $table, array $row): bool
+            {
+                if (
+                    !$this->failed &&
+                    $table === 'users' &&
+                    str_ends_with((string) ($row['email'] ?? ''), '_api_admin@synthetic.invalid')
+                ) {
+                    $this->failed = true;
+                    return false;
+                }
+                return $this->database->insert($table, $row);
+            }
+
+            public function __call(string $name, array $arguments): mixed
+            {
+                return $this->database->$name(...$arguments);
+            }
+        };
+        $databaseProperty = new ReflectionProperty(DefenseVerificationFixture::class, 'db');
+        $databaseProperty->setValue($this->fixture, $proxy);
+        try {
+            $this->fixture->prepareAppointmentsApi();
+            self::fail('Supplemental principal creation must surface the injected user failure.');
+        } catch (RuntimeException $error) {
+            self::assertStringContainsString('users', $error->getMessage());
+        } finally {
+            $databaseProperty->setValue($this->fixture, $database);
+        }
+        self::assertTrue($proxy->failed);
+
+        $journal = json_decode(
+            (string) file_get_contents($this->stateDirectory . '/defense-verification.json'),
+            true,
+            512,
+            JSON_THROW_ON_ERROR,
+        );
+        self::assertSame('prepared', $journal['intents']['users']['api_admin']['stage']);
+        self::assertArrayNotHasKey('api_admin', $journal['ids']);
+        self::assertSame('cleanup_pending', $this->fixture->verify());
+
+        $email = 'defense_verify_' . $state['run_id'] . '_api_admin@synthetic.invalid';
+        $username = 'defense_verify_' . $state['run_id'] . '_api_admin';
+        self::assertSame(0, $ci->db->get_where('users', ['email' => $email])->num_rows());
+        self::assertSame(0, $ci->db->get_where('user_settings', ['username' => $username])->num_rows());
+
+        self::assertTrue(
+            $ci->db->insert('users', [
+                'first_name' => 'Foreign partial',
+                'last_name' => 'API admin',
+                'email' => $email,
+                'phone_number' => '000000000',
+                'notes' => 'foreign-prepared-api-admin',
+                'timezone' => 'UTC',
+                'language' => 'english',
+                'id_roles' => $journal['intents']['users']['api_admin']['role_id'],
+                'is_private' => 1,
+            ]),
+        );
+        $foreignUserId = (int) $ci->db->insert_id();
+        try {
+            $this->fixture->deactivate();
+            self::fail('Cleanup must retain an unresolved user with the prepared email.');
+        } catch (RuntimeException $error) {
+            self::assertStringContainsString('could not be resolved exactly', $error->getMessage());
+        }
+        self::assertFileExists($this->stateDirectory . '/defense-verification.json');
+        self::assertSame(1, $ci->db->get_where('users', ['id' => $foreignUserId, 'email' => $email])->num_rows());
+
+        self::assertTrue(
+            $ci->db->delete('users', [
+                'id' => $foreignUserId,
+                'email' => $email,
+                'notes' => 'foreign-prepared-api-admin',
+            ]),
+        );
+
+        $this->fixture->deactivate();
+        self::assertSame('clean', $this->fixture->verify());
+        self::assertSame(0, $ci->db->get_where('users', ['email' => $email])->num_rows());
+        self::assertSame(0, $ci->db->get_where('user_settings', ['username' => $username])->num_rows());
+    }
+
+    public function testPreparedAppointmentsApiPrincipalRejectsSettingsInsertedBeforeUserLock(): void
+    {
+        $actor = $this->ordinary->activate();
+        $this->fixture->activate('calendar_race', $actor);
+        $state = $this->fixture->prepareAppointmentsApi();
+        $ci = &get_instance();
+        $userId = (int) $state['ids']['api_admin'];
+        $username = (string) $state['usernames']['api_admin'];
+        self::assertTrue($ci->db->delete('user_settings', ['id_users' => $userId, 'username' => $username]));
+
+        $journalPath = $this->stateDirectory . '/defense-verification.json';
+        $journal = json_decode((string) file_get_contents($journalPath), true, 512, JSON_THROW_ON_ERROR);
+        $journal['intents']['users']['api_admin']['stage'] = 'prepared';
+        unset($journal['ids']['api_admin'], $journal['usernames']['api_admin'], $journal['api_credentials']);
+        self::assertNotFalse(
+            file_put_contents($journalPath, json_encode($journal, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n"),
+        );
+        self::assertSame('cleanup_pending', $this->fixture->verify());
+
+        $salt = generate_salt();
+        $settings = [
+            'id_users' => $userId,
+            'username' => $username,
+            'password' => hash_password($salt, bin2hex(random_bytes(16))),
+            'salt' => $salt,
+            'working_plan' => '{}',
+            'working_plan_exceptions' => '{}',
+            'notifications' => 0,
+            'google_sync' => 0,
+            'caldav_sync' => 0,
+        ];
+        $database = $ci->db;
+        $secondary = $ci->load->database('', true);
+        $proxy = new class ($database, $secondary, $settings) {
+            public bool $injected = false;
+
+            public function __construct(
+                private readonly object $database,
+                private readonly object $secondary,
+                private readonly array $settings,
+            ) {}
+
+            public function query(string $sql, mixed ...$arguments): mixed
+            {
+                if (
+                    !$this->injected &&
+                    str_contains($sql, $this->database->dbprefix('users')) &&
+                    str_contains($sql, 'FOR UPDATE')
+                ) {
+                    if (!$this->secondary->insert('user_settings', $this->settings)) {
+                        throw new RuntimeException('Could not inject prepared principal settings.');
+                    }
+                    $this->injected = true;
+                }
+                return $this->database->query($sql, ...$arguments);
+            }
+
+            public function __call(string $name, array $arguments): mixed
+            {
+                return $this->database->$name(...$arguments);
+            }
+        };
+        $databaseProperty = new ReflectionProperty(DefenseVerificationFixture::class, 'db');
+        $databaseProperty->setValue($this->fixture, $proxy);
+        try {
+            $this->fixture->deactivate();
+            self::fail('Cleanup must reject settings inserted between its precheck and user lock.');
+        } catch (RuntimeException $error) {
+            self::assertStringContainsString('unexpected settings', $error->getMessage());
+        } finally {
+            $databaseProperty->setValue($this->fixture, $database);
+            $secondary->close();
+        }
+        self::assertTrue($proxy->injected);
+        self::assertSame(1, $ci->db->get_where('users', ['id' => $userId])->num_rows());
+        self::assertSame(1, $ci->db->get_where('user_settings', ['id_users' => $userId])->num_rows());
+
+        self::assertTrue($ci->db->delete('user_settings', ['id_users' => $userId, 'username' => $username]));
+        $this->fixture->deactivate();
+        self::assertSame('clean', $this->fixture->verify());
+        self::assertSame(0, $ci->db->get_where('users', ['id' => $userId])->num_rows());
+    }
+
     public function testAppointmentsApiDeleteGuardRefusesChildBeforeCallbackAndCleanupCanResume(): void
     {
         $actor = $this->ordinary->activate();

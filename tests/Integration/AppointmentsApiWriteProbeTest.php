@@ -5,7 +5,6 @@ declare(strict_types=1);
 use PHPUnit\Framework\TestCase;
 use ReleaseGate\AppointmentsApiWriteProbe;
 use ReleaseGate\DefenseVerificationFixture;
-use ReleaseGate\GateHttpClient;
 use ReleaseGate\OrdinaryLiveFixture;
 use Tests\Integration\Support\DefenseCycleHttpServer;
 
@@ -36,20 +35,15 @@ final class AppointmentsApiWriteProbeTest extends TestCase
             $state = $fixture->prepareAppointmentsApi();
             self::assertTrue($db->update('settings', ['value' => $token], ['name' => 'api_token']));
             $server = new DefenseCycleHttpServer();
-            $client = static fn(string $authorization): GateHttpClient => new GateHttpClient(
+            $probe = AppointmentsApiWriteProbe::forApp(
                 $server->baseUrl,
-                additionalHeaders: ['X-FH-Ordinary-Probe' => '1', 'Authorization' => $authorization],
-            );
-            $result = (new AppointmentsApiWriteProbe(
-                $client(
-                    'Basic ' .
-                        base64_encode(
-                            $state['api_credentials']['username'] . ':' . $state['api_credentials']['password'],
-                        ),
-                ),
-                $client('Bearer ' . $token),
+                $state['api_credentials']['username'],
+                $state['api_credentials']['password'],
+                $token,
                 $fixture,
-            ))->run();
+            );
+            self::assertInstanceOf(AppointmentsApiWriteProbe::class, $probe);
+            $result = $probe->run();
             self::assertSame('verified', $result['status']);
             self::assertSame(21, $result['denial_cases']);
             self::assertSame(
