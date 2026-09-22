@@ -16,6 +16,8 @@
  *
  * @package Models
  */
+final class AppointmentApiUpdateException extends RuntimeException {}
+
 class Appointments_model extends EA_Model
 {
     public function __construct()
@@ -77,6 +79,166 @@ class Appointments_model extends EA_Model
             return $this->insert($appointment);
         } else {
             return $this->update($appointment);
+        }
+    }
+
+    /**
+     * Apply a sparse authenticated API update to an ordinary appointment.
+     *
+     * Discovery happens inside the transaction. Parent snapshots are used only
+     * to establish the canonical parent-first lock set; the write is rebased on
+     * the appointment row read under FOR UPDATE.
+     *
+     * @param array<string, mixed> $changes Sparse database-field changes.
+     */
+    public function update_api(int $appointment_id, array $changes): int
+    {
+        $allowed_fields = [
+            'start_datetime',
+            'end_datetime',
+            'location',
+            'color',
+            'status',
+            'notes',
+            'id_users_customer',
+            'id_users_provider',
+            'id_services',
+        ];
+
+        if ($appointment_id <= 0) {
+            throw new AppointmentApiUpdateException('The appointment was not found.', 404);
+        }
+
+        if ($changes === [] || array_diff(array_keys($changes), $allowed_fields) !== []) {
+            throw new AppointmentApiUpdateException('The appointment update payload is invalid.', 400);
+        }
+
+        $owns_transaction = false;
+
+        if (!$this->db->trans_active()) {
+            if (!$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start appointment API update transaction.');
+            }
+
+            $owns_transaction = true;
+        }
+
+        try {
+            $snapshot = $this->snapshot_api_update_appointment($appointment_id);
+
+            if ($snapshot === []) {
+                throw new AppointmentApiUpdateException('The appointment was not found.', 404);
+            }
+
+            $this->cast($snapshot);
+            $requested = array_replace($snapshot, $changes);
+            $requested['id'] = $appointment_id;
+            $requested['is_unavailability'] = false;
+
+            $user_role_expectations = $this->api_update_user_role_expectations($snapshot, $requested);
+            $user_ids = $this->sorted_parent_ids(array_keys($user_role_expectations));
+            $service_ids = $this->sorted_parent_ids([
+                $snapshot['id_services'] ?? null,
+                $requested['id_services'] ?? null,
+            ]);
+            $role_ids = $this->api_update_role_ids();
+            $user_snapshot = $this->snapshot_api_update_users($user_ids);
+            $service_snapshot = $this->snapshot_api_update_services($service_ids);
+
+            $this->assert_static_api_update_relationships(
+                $user_role_expectations,
+                $role_ids,
+                $user_snapshot,
+                $service_ids,
+                $service_snapshot,
+            );
+
+            try {
+                $this->validate($requested);
+            } catch (InvalidArgumentException $exception) {
+                throw new AppointmentApiUpdateException($exception->getMessage(), 400, $exception);
+            }
+
+            $locked_users = $this->lock_api_update_users($user_ids);
+
+            if ($this->api_update_parent_rows_changed($user_snapshot, $locked_users, ['id_roles'])) {
+                throw new AppointmentApiUpdateException('Appointment user roles changed during the update.', 409);
+            }
+
+            $this->assert_locked_api_update_roles($user_role_expectations, $role_ids, $locked_users);
+
+            $locked_services = $this->lock_api_update_services($service_ids);
+
+            if ($this->api_update_parent_rows_changed($service_snapshot, $locked_services)) {
+                throw new AppointmentApiUpdateException('Appointment services changed during the update.', 409);
+            }
+
+            $locked_appointment = $this->lock_api_update_appointment($appointment_id);
+
+            if ($locked_appointment === []) {
+                throw new AppointmentApiUpdateException('The appointment was not found.', 404);
+            }
+
+            $this->cast($locked_appointment);
+
+            foreach (['id_users_customer', 'id_users_provider', 'id_services', 'is_unavailability'] as $field) {
+                if (($snapshot[$field] ?? null) !== ($locked_appointment[$field] ?? null)) {
+                    throw new AppointmentApiUpdateException('Appointment parents changed during the update.', 409);
+                }
+            }
+
+            foreach (array_keys($changes) as $field) {
+                if (in_array($field, ['id_users_customer', 'id_users_provider', 'id_services'], true)) {
+                    continue;
+                }
+
+                if (($snapshot[$field] ?? null) !== ($locked_appointment[$field] ?? null)) {
+                    throw new AppointmentApiUpdateException('Appointment fields changed during the update.', 409);
+                }
+            }
+
+            $updated_appointment = array_replace($locked_appointment, $changes);
+            $updated_appointment['id'] = $appointment_id;
+            $updated_appointment['is_unavailability'] = false;
+
+            try {
+                $this->validate($updated_appointment);
+            } catch (InvalidArgumentException $exception) {
+                throw new AppointmentApiUpdateException(
+                    'Appointment fields changed during the update.',
+                    409,
+                    $exception,
+                );
+            }
+
+            $write = $changes;
+            $write['update_datetime'] = date('Y-m-d H:i:s');
+
+            if (!$this->db->update('appointments', $write, ['id' => $appointment_id])) {
+                throw new RuntimeException('Could not update appointment record.');
+            }
+
+            $updated_appointment = array_replace($updated_appointment, $write);
+
+            if ($this->should_sync_buffer_unavailabilities($locked_appointment, $updated_appointment)) {
+                $this->sync_buffer_unavailabilities($updated_appointment);
+            }
+
+            if ($this->db->trans_status() === false) {
+                throw new RuntimeException('Could not save appointment API update transaction.');
+            }
+
+            if ($owns_transaction && !$this->db->trans_commit()) {
+                throw new RuntimeException('Could not commit appointment transaction.');
+            }
+
+            return $appointment_id;
+        } catch (Throwable $exception) {
+            if ($owns_transaction) {
+                $this->db->trans_rollback();
+            }
+
+            throw $exception;
         }
     }
 
@@ -322,6 +484,250 @@ class Appointments_model extends EA_Model
 
         $this->lock_parent_rows('users', 'id', $user_ids);
         $this->lock_parent_rows('services', 'id', $service_ids);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function snapshot_api_update_appointment(int $appointment_id): array
+    {
+        return $this->db
+            ->query(
+                'SELECT * FROM `' .
+                    $this->db->dbprefix('appointments') .
+                    '` WHERE `id` = ? AND `is_unavailability` = 0',
+                [$appointment_id],
+            )
+            ->row_array() ?:
+            [];
+    }
+
+    /**
+     * @param list<int> $user_ids
+     * @return list<array<string, mixed>>
+     */
+    protected function snapshot_api_update_users(array $user_ids): array
+    {
+        return $this->select_api_update_parent_rows('users', ['id', 'id_roles'], $user_ids, false);
+    }
+
+    /**
+     * @param list<int> $service_ids
+     * @return list<array<string, mixed>>
+     */
+    protected function snapshot_api_update_services(array $service_ids): array
+    {
+        return $this->select_api_update_parent_rows('services', ['id'], $service_ids, false);
+    }
+
+    /**
+     * @param list<int> $user_ids
+     * @return list<array<string, mixed>>
+     */
+    protected function lock_api_update_users(array $user_ids): array
+    {
+        return $this->select_api_update_parent_rows('users', ['id', 'id_roles'], $user_ids, true);
+    }
+
+    /**
+     * @param list<int> $service_ids
+     * @return list<array<string, mixed>>
+     */
+    protected function lock_api_update_services(array $service_ids): array
+    {
+        return $this->select_api_update_parent_rows('services', ['id'], $service_ids, true);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function lock_api_update_appointment(int $appointment_id): array
+    {
+        return $this->db
+            ->query('SELECT * FROM `' . $this->db->dbprefix('appointments') . '` WHERE `id` = ? FOR UPDATE', [
+                $appointment_id,
+            ])
+            ->row_array() ?:
+            [];
+    }
+
+    /**
+     * @param list<string> $fields
+     * @param list<int> $ids
+     * @return list<array<string, mixed>>
+     */
+    private function select_api_update_parent_rows(string $table, array $fields, array $ids, bool $lock): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+
+        $selected_fields = implode(', ', array_map(static fn(string $field): string => '`' . $field . '`', $fields));
+        $placeholders = implode(', ', array_fill(0, count($ids), '?'));
+        $sql =
+            'SELECT ' .
+            $selected_fields .
+            ' FROM `' .
+            $this->db->dbprefix($table) .
+            '` WHERE `id` IN (' .
+            $placeholders .
+            ') ORDER BY `id` ASC';
+
+        if ($lock) {
+            $sql .= ' FOR UPDATE';
+        }
+
+        return $this->db->query($sql, $ids)->result_array();
+    }
+
+    /**
+     * @param array<string, mixed> $snapshot
+     * @param array<string, mixed> $requested
+     * @return array<int, string>
+     */
+    private function api_update_user_role_expectations(array $snapshot, array $requested): array
+    {
+        $expectations = [];
+
+        foreach (
+            [
+                [(int) ($snapshot['id_users_customer'] ?? 0), DB_SLUG_CUSTOMER],
+                [(int) ($snapshot['id_users_provider'] ?? 0), DB_SLUG_PROVIDER],
+                [(int) ($requested['id_users_customer'] ?? 0), DB_SLUG_CUSTOMER],
+                [(int) ($requested['id_users_provider'] ?? 0), DB_SLUG_PROVIDER],
+            ]
+            as [$user_id, $role_slug]
+        ) {
+            if ($user_id <= 0 || (isset($expectations[$user_id]) && $expectations[$user_id] !== $role_slug)) {
+                throw new AppointmentApiUpdateException('Appointment user relationship is invalid.', 400);
+            }
+
+            $expectations[$user_id] = $role_slug;
+        }
+
+        return $expectations;
+    }
+
+    /**
+     * @return array<string, int>
+     */
+    private function api_update_role_ids(): array
+    {
+        $rows = $this->db
+            ->query('SELECT `id`, `slug` FROM `' . $this->db->dbprefix('roles') . '` WHERE `slug` IN (?, ?)', [
+                DB_SLUG_CUSTOMER,
+                DB_SLUG_PROVIDER,
+            ])
+            ->result_array();
+        $role_ids = [];
+
+        foreach ($rows as $row) {
+            $role_ids[(string) ($row['slug'] ?? '')] = (int) ($row['id'] ?? 0);
+        }
+
+        if (empty($role_ids[DB_SLUG_CUSTOMER]) || empty($role_ids[DB_SLUG_PROVIDER])) {
+            throw new RuntimeException('Appointment role definitions were not found.');
+        }
+
+        return $role_ids;
+    }
+
+    /**
+     * @param array<int, string> $user_role_expectations
+     * @param array<string, int> $role_ids
+     * @param list<array<string, mixed>> $users
+     * @param list<int> $service_ids
+     * @param list<array<string, mixed>> $services
+     */
+    private function assert_static_api_update_relationships(
+        array $user_role_expectations,
+        array $role_ids,
+        array $users,
+        array $service_ids,
+        array $services,
+    ): void {
+        $users_by_id = $this->api_update_rows_by_id($users);
+
+        foreach ($user_role_expectations as $user_id => $role_slug) {
+            if (
+                !isset($users_by_id[$user_id]) ||
+                (int) ($users_by_id[$user_id]['id_roles'] ?? 0) !== (int) ($role_ids[$role_slug] ?? 0)
+            ) {
+                throw new AppointmentApiUpdateException('Appointment user relationship is invalid.', 400);
+            }
+        }
+
+        if (count($this->api_update_rows_by_id($services)) !== count($service_ids)) {
+            throw new AppointmentApiUpdateException('Appointment service relationship is invalid.', 400);
+        }
+    }
+
+    /**
+     * @param array<int, string> $user_role_expectations
+     * @param array<string, int> $role_ids
+     * @param list<array<string, mixed>> $locked_users
+     */
+    private function assert_locked_api_update_roles(
+        array $user_role_expectations,
+        array $role_ids,
+        array $locked_users,
+    ): void {
+        $users_by_id = $this->api_update_rows_by_id($locked_users);
+
+        foreach ($user_role_expectations as $user_id => $role_slug) {
+            if (
+                !isset($users_by_id[$user_id]) ||
+                (int) ($users_by_id[$user_id]['id_roles'] ?? 0) !== (int) ($role_ids[$role_slug] ?? 0)
+            ) {
+                throw new AppointmentApiUpdateException('Appointment user roles changed during the update.', 409);
+            }
+        }
+    }
+
+    /**
+     * @param list<array<string, mixed>> $snapshot
+     * @param list<array<string, mixed>> $locked
+     * @param list<string> $compared_fields
+     */
+    private function api_update_parent_rows_changed(array $snapshot, array $locked, array $compared_fields = []): bool
+    {
+        $snapshot_by_id = $this->api_update_rows_by_id($snapshot);
+        $locked_by_id = $this->api_update_rows_by_id($locked);
+
+        if (array_keys($snapshot_by_id) !== array_keys($locked_by_id)) {
+            return true;
+        }
+
+        foreach ($snapshot_by_id as $id => $snapshot_row) {
+            foreach ($compared_fields as $field) {
+                if (($snapshot_row[$field] ?? null) !== ($locked_by_id[$id][$field] ?? null)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $rows
+     * @return array<int, array<string, mixed>>
+     */
+    private function api_update_rows_by_id(array $rows): array
+    {
+        $by_id = [];
+
+        foreach ($rows as $row) {
+            $id = (int) ($row['id'] ?? 0);
+
+            if ($id > 0) {
+                $by_id[$id] = $row;
+            }
+        }
+
+        ksort($by_id, SORT_NUMERIC);
+
+        return $by_id;
     }
 
     /**
@@ -1026,6 +1432,17 @@ class Appointments_model extends EA_Model
         $decoded_request['is_unavailability'] = false;
 
         $appointment = $decoded_request;
+    }
+
+    /**
+     * Convert only the fields supplied by an API update request.
+     *
+     * @param array<string, mixed> $appointment
+     */
+    public function api_decode_sparse(array &$appointment): void
+    {
+        $this->api_decode($appointment);
+        unset($appointment['is_unavailability']);
     }
 
     /**

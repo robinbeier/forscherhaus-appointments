@@ -92,6 +92,342 @@ final class TwoConnectionWriteContractTest extends TestCase
         $this->calendarScenario(false);
     }
 
+    public function testSparseApiUpdateRebasesOnLockedRowWithoutLosingOmittedPeerChange(): void
+    {
+        $scenario = $this->createApiUpdateScenario();
+        $shared = get_instance()->db;
+        $harness = new TwoConnectionHarness();
+
+        $harness->run(function ($primary, $peer, $checkpoint) use ($scenario, $harness): void {
+            $this->assertNotSame($primary->conn_id->thread_id, $peer->conn_id->thread_id);
+            $checkpoint(TwoConnectionHarness::BEFORE_AUTHORITY);
+            $model = new class extends \Appointments_model {
+                public $afterSnapshot;
+                public function __construct() {}
+                protected function snapshot_api_update_appointment(int $appointment_id): array
+                {
+                    $snapshot = parent::snapshot_api_update_appointment($appointment_id);
+                    ($this->afterSnapshot)();
+                    return $snapshot;
+                }
+            };
+            $model->afterSnapshot = function () use ($peer, $scenario, $checkpoint): void {
+                $checkpoint(TwoConnectionHarness::AFTER_AUTHORITY);
+                $this->assertTrue($peer->trans_begin());
+                $this->assertTrue(
+                    $peer->update('appointments', ['notes' => 'peer notes'], ['id' => $scenario['appointment_id']]),
+                );
+                $this->assertTrue($peer->trans_commit());
+            };
+
+            $this->assertSame(
+                $scenario['appointment_id'],
+                $model->update_api($scenario['appointment_id'], ['location' => 'API location']),
+            );
+            $harness->markBranch('api_sparse_rebase');
+        }, 'api_sparse_rebase');
+
+        $this->assertSame($shared, get_instance()->db);
+        $stored = $this->fixtures->findAppointmentById($scenario['appointment_id']);
+        $this->assertSame('peer notes', $stored['notes']);
+        $this->assertSame('API location', $stored['location']);
+        $harness->assertTrace([TwoConnectionHarness::BEFORE_AUTHORITY, TwoConnectionHarness::AFTER_AUTHORITY]);
+    }
+
+    public function testSparseApiUpdateRejectsRequestedScalarDriftWithoutOverwritingPeer(): void
+    {
+        $scenario = $this->createApiUpdateScenario();
+        $harness = new TwoConnectionHarness();
+
+        $harness->run(function ($primary, $peer, $checkpoint) use ($scenario, $harness): void {
+            $checkpoint(TwoConnectionHarness::BEFORE_AUTHORITY);
+            $model = new class extends \Appointments_model {
+                public $afterSnapshot;
+                public function __construct() {}
+                protected function snapshot_api_update_appointment(int $appointment_id): array
+                {
+                    $snapshot = parent::snapshot_api_update_appointment($appointment_id);
+                    ($this->afterSnapshot)();
+                    return $snapshot;
+                }
+            };
+            $model->afterSnapshot = function () use ($peer, $scenario, $checkpoint): void {
+                $checkpoint(TwoConnectionHarness::AFTER_AUTHORITY);
+                $this->assertTrue(
+                    $peer->update('appointments', ['notes' => 'peer wins'], ['id' => $scenario['appointment_id']]),
+                );
+            };
+
+            try {
+                $model->update_api($scenario['appointment_id'], ['notes' => 'API notes']);
+                $this->fail('Expected requested scalar drift to be rejected.');
+            } catch (\AppointmentApiUpdateException $exception) {
+                $this->assertSame(409, $exception->getCode());
+            }
+            $harness->markBranch('api_requested_scalar_drift');
+        }, 'api_requested_scalar_drift');
+
+        $stored = $this->fixtures->findAppointmentById($scenario['appointment_id']);
+        $this->assertSame('peer wins', $stored['notes']);
+    }
+
+    public function testSparseApiUpdateRejectsParentDriftWithoutMutation(): void
+    {
+        $scenario = $this->createApiUpdateScenario();
+        $replacement = $this->createProvider($scenario['provider_id'], $scenario['service_id']);
+        $harness = new TwoConnectionHarness();
+
+        $harness->run(function ($primary, $peer, $checkpoint) use ($scenario, $replacement, $harness): void {
+            $checkpoint(TwoConnectionHarness::BEFORE_AUTHORITY);
+            $model = new class extends \Appointments_model {
+                public $afterSnapshot;
+                public function __construct() {}
+                protected function snapshot_api_update_appointment(int $appointment_id): array
+                {
+                    $snapshot = parent::snapshot_api_update_appointment($appointment_id);
+                    ($this->afterSnapshot)();
+                    return $snapshot;
+                }
+            };
+            $model->afterSnapshot = function () use ($peer, $scenario, $replacement, $checkpoint): void {
+                $checkpoint(TwoConnectionHarness::AFTER_AUTHORITY);
+                $this->assertTrue($peer->trans_begin());
+                $this->assertTrue(
+                    $peer->update(
+                        'appointments',
+                        ['id_users_provider' => $replacement],
+                        ['id' => $scenario['appointment_id']],
+                    ),
+                );
+                $this->assertTrue($peer->trans_commit());
+            };
+
+            try {
+                $model->update_api($scenario['appointment_id'], ['notes' => 'API notes']);
+                $this->fail('Expected the parent drift to be rejected.');
+            } catch (\AppointmentApiUpdateException $exception) {
+                $this->assertSame(409, $exception->getCode());
+            }
+            $harness->markBranch('api_parent_drift');
+        }, 'api_parent_drift');
+
+        $stored = $this->fixtures->findAppointmentById($scenario['appointment_id']);
+        $this->assertSame($replacement, (int) $stored['id_users_provider']);
+        $this->assertSame('initial notes', $stored['notes']);
+    }
+
+    public function testSparseApiUpdateMapsConcurrentTargetDeleteToNotFound(): void
+    {
+        $scenario = $this->createApiUpdateScenario();
+        $harness = new TwoConnectionHarness();
+
+        $harness->run(function ($primary, $peer, $checkpoint) use ($scenario, $harness): void {
+            $checkpoint(TwoConnectionHarness::BEFORE_AUTHORITY);
+            $model = new class extends \Appointments_model {
+                public $afterSnapshot;
+                public function __construct() {}
+                protected function snapshot_api_update_appointment(int $appointment_id): array
+                {
+                    $snapshot = parent::snapshot_api_update_appointment($appointment_id);
+                    ($this->afterSnapshot)();
+                    return $snapshot;
+                }
+            };
+            $model->afterSnapshot = function () use ($peer, $scenario, $checkpoint): void {
+                $checkpoint(TwoConnectionHarness::AFTER_AUTHORITY);
+                $this->assertTrue($peer->delete('appointments', ['id' => $scenario['appointment_id']]));
+            };
+
+            try {
+                $model->update_api($scenario['appointment_id'], ['notes' => 'API notes']);
+                $this->fail('Expected the deleted target to be reported as missing.');
+            } catch (\AppointmentApiUpdateException $exception) {
+                $this->assertSame(404, $exception->getCode());
+            }
+            $harness->markBranch('api_target_deleted');
+        }, 'api_target_deleted');
+
+        $this->assertNull($this->fixtures->findAppointmentById($scenario['appointment_id']));
+    }
+
+    public function testSparseApiUpdateRejectsProviderRoleDrift(): void
+    {
+        $scenario = $this->createApiUpdateScenario(true);
+        $role = get_instance()
+            ->db->get_where('roles', ['slug' => DB_SLUG_CUSTOMER])
+            ->row_array();
+        $this->assertNotEmpty($role['id']);
+        $harness = new TwoConnectionHarness();
+
+        try {
+            $harness->run(function ($primary, $peer, $checkpoint) use ($scenario, $role, $harness): void {
+                $checkpoint(TwoConnectionHarness::BEFORE_AUTHORITY);
+                $model = new class extends \Appointments_model {
+                    public $afterUserSnapshot;
+                    public function __construct() {}
+                    protected function snapshot_api_update_users(array $user_ids): array
+                    {
+                        $snapshot = parent::snapshot_api_update_users($user_ids);
+                        ($this->afterUserSnapshot)();
+                        return $snapshot;
+                    }
+                };
+                $model->afterUserSnapshot = function () use ($peer, $scenario, $role, $checkpoint): void {
+                    $checkpoint(TwoConnectionHarness::AFTER_AUTHORITY);
+                    $this->assertTrue(
+                        $peer->update('users', ['id_roles' => (int) $role['id']], ['id' => $scenario['provider_id']]),
+                    );
+                };
+
+                try {
+                    $model->update_api($scenario['appointment_id'], ['notes' => 'API notes']);
+                    $this->fail('Expected the provider role drift to be rejected.');
+                } catch (\AppointmentApiUpdateException $exception) {
+                    $this->assertSame(409, $exception->getCode());
+                }
+                $harness->markBranch('api_provider_role_drift');
+            }, 'api_provider_role_drift');
+        } finally {
+            get_instance()->db->update(
+                'users',
+                ['id_roles' => $scenario['provider_role_id']],
+                ['id' => $scenario['provider_id']],
+            );
+        }
+
+        $stored = $this->fixtures->findAppointmentById($scenario['appointment_id']);
+        $this->assertSame('initial notes', $stored['notes']);
+    }
+
+    public function testSparseApiUpdateRejectsCustomerRoleDrift(): void
+    {
+        $scenario = $this->createApiUpdateScenario();
+        $role = get_instance()
+            ->db->get_where('roles', ['slug' => DB_SLUG_PROVIDER])
+            ->row_array();
+        $this->assertNotEmpty($role['id']);
+        $harness = new TwoConnectionHarness();
+
+        $harness->run(function ($primary, $peer, $checkpoint) use ($scenario, $role, $harness): void {
+            $checkpoint(TwoConnectionHarness::BEFORE_AUTHORITY);
+            $model = new class extends \Appointments_model {
+                public $afterUserSnapshot;
+                public function __construct() {}
+                protected function snapshot_api_update_users(array $user_ids): array
+                {
+                    $snapshot = parent::snapshot_api_update_users($user_ids);
+                    ($this->afterUserSnapshot)();
+                    return $snapshot;
+                }
+            };
+            $model->afterUserSnapshot = function () use ($peer, $scenario, $role, $checkpoint): void {
+                $checkpoint(TwoConnectionHarness::AFTER_AUTHORITY);
+                $this->assertTrue(
+                    $peer->update('users', ['id_roles' => (int) $role['id']], ['id' => $scenario['customer_id']]),
+                );
+            };
+
+            try {
+                $model->update_api($scenario['appointment_id'], ['notes' => 'API notes']);
+                $this->fail('Expected the customer role drift to be rejected.');
+            } catch (\AppointmentApiUpdateException $exception) {
+                $this->assertSame(409, $exception->getCode());
+            }
+            $harness->markBranch('api_customer_role_drift');
+        }, 'api_customer_role_drift');
+
+        $stored = $this->fixtures->findAppointmentById($scenario['appointment_id']);
+        $this->assertSame('initial notes', $stored['notes']);
+    }
+
+    public function testSparseApiUpdateMapsInvalidRebaseAfterOmittedScalarDriftToConflict(): void
+    {
+        $scenario = $this->createApiUpdateScenario();
+        $harness = new TwoConnectionHarness();
+
+        $harness->run(function ($primary, $peer, $checkpoint) use ($scenario, $harness): void {
+            $checkpoint(TwoConnectionHarness::BEFORE_AUTHORITY);
+            $model = new class extends \Appointments_model {
+                public $afterSnapshot;
+                public function __construct() {}
+                protected function snapshot_api_update_appointment(int $appointment_id): array
+                {
+                    $snapshot = parent::snapshot_api_update_appointment($appointment_id);
+                    ($this->afterSnapshot)();
+                    return $snapshot;
+                }
+            };
+            $model->afterSnapshot = function () use ($peer, $scenario, $checkpoint): void {
+                $checkpoint(TwoConnectionHarness::AFTER_AUTHORITY);
+                $this->assertTrue(
+                    $peer->update(
+                        'appointments',
+                        ['start_datetime' => '2035-05-07 10:30:00'],
+                        ['id' => $scenario['appointment_id']],
+                    ),
+                );
+            };
+
+            try {
+                $model->update_api($scenario['appointment_id'], ['end_datetime' => '2035-05-07 10:00:00']);
+                $this->fail('Expected the invalid rebased scalar combination to be rejected.');
+            } catch (\AppointmentApiUpdateException $exception) {
+                $this->assertSame(409, $exception->getCode());
+            }
+            $harness->markBranch('api_scalar_rebase_conflict');
+        }, 'api_scalar_rebase_conflict');
+
+        $stored = $this->fixtures->findAppointmentById($scenario['appointment_id']);
+        $this->assertSame('2035-05-07 10:30:00', $stored['start_datetime']);
+        $this->assertSame('2035-05-07 09:30:00', $stored['end_datetime']);
+    }
+
+    public function testSparseApiUpdateRollsBackAppointmentAndBufferCleanupTogether(): void
+    {
+        $scenario = $this->createApiUpdateScenario();
+        $db = get_instance()->db;
+        $now = date('Y-m-d H:i:s');
+        $this->assertTrue(
+            $db->insert('appointments', [
+                'book_datetime' => $now,
+                'start_datetime' => '2035-05-07 08:55:00',
+                'end_datetime' => '2035-05-07 09:00:00',
+                'notes' => 'existing buffer',
+                'hash' => 'buffer-' . bin2hex(random_bytes(6)),
+                'is_unavailability' => true,
+                'id_users_provider' => $scenario['provider_id'],
+                'id_parent_appointment' => $scenario['appointment_id'],
+                'create_datetime' => $now,
+                'update_datetime' => $now,
+            ]),
+        );
+        $bufferId = (int) $db->insert_id();
+        $beforeAppointment = $this->fixtures->findAppointmentById($scenario['appointment_id']);
+        $beforeBuffer = $db->get_where('appointments', ['id' => $bufferId])->row_array();
+        $model = new class extends \Appointments_model {
+            public function __construct() {}
+            protected function sync_buffer_unavailabilities(array $appointment): void
+            {
+                parent::sync_buffer_unavailabilities($appointment);
+                throw new \RuntimeException('Injected failure after API buffer cleanup.');
+            }
+        };
+
+        try {
+            $model->update_api($scenario['appointment_id'], [
+                'start_datetime' => '2035-05-07 10:00:00',
+                'end_datetime' => '2035-05-07 10:30:00',
+            ]);
+            $this->fail('Expected API update and buffer cleanup to roll back.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('Injected failure after API buffer cleanup.', $exception->getMessage());
+        }
+
+        $this->assertFalse($db->trans_active());
+        $this->assertSame($beforeAppointment, $this->fixtures->findAppointmentById($scenario['appointment_id']));
+        $this->assertSame($beforeBuffer, $db->get_where('appointments', ['id' => $bufferId])->row_array());
+    }
+
     private function calendarScenario(bool $reassign): void
     {
         $pair = $this->fixtures->resolveProviderServicePair();
@@ -325,6 +661,36 @@ final class TwoConnectionWriteContractTest extends TestCase
             $shared->delete('services_providers', ['id_services' => $service]);
             $shared->delete('services', ['id' => $service]);
         }
+    }
+
+    /** @return array{appointment_id:int,customer_id:int,provider_id:int,provider_role_id:int,service_id:int} */
+    private function createApiUpdateScenario(bool $useSyntheticProvider = false): array
+    {
+        $pair = $this->fixtures->resolveProviderServicePair();
+        $provider = $useSyntheticProvider
+            ? $this->createProvider($pair['provider_id'], $pair['service_id'])
+            : $pair['provider_id'];
+        $customer = $this->fixtures->createCustomer();
+        $appointment = $this->fixtures->createAppointment(
+            $provider,
+            $customer,
+            $pair['service_id'],
+            new DateTimeImmutable('2035-05-07 09:00:00'),
+            new DateTimeImmutable('2035-05-07 09:30:00'),
+            'initial notes',
+        );
+        $this->createdAppointments[] = $appointment;
+        $providerRow = get_instance()
+            ->db->get_where('users', ['id' => $provider])
+            ->row_array();
+
+        return [
+            'appointment_id' => $appointment,
+            'customer_id' => $customer,
+            'provider_id' => $provider,
+            'provider_role_id' => (int) $providerRow['id_roles'],
+            'service_id' => $pair['service_id'],
+        ];
     }
 
     private function createProvider(int $sourceId, int $serviceId): int

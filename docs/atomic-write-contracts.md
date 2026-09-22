@@ -26,7 +26,7 @@ uncertain commit result.
 | --- | --- | --- |
 | `Calendar::save_appointment`: create or edit based on appointment ID; optional customer write | Provider/customer access is checked before the transaction. Editing locks current and requested parents and the appointment, then rechecks authority and parent drift before any mutation. Customer/appointment add/edit permissions and field allowlists still apply. | Calendar owns the transaction around customer save, appointment save and generated buffers. Begin, transaction status and commit must succeed; any failure rolls back before the success response. |
 | `Booking::register`: public create or reschedule | Booking/reschedule authority and availability are checked against locked targets through `Reschedule_authority` before mutation. | The controller owns customer, consent, appointment and buffer writes. Model transactions join it; the controller checks commit and rolls back errors before returning. |
-| `Appointments_api_v1::store/update/destroy`: authenticated API CRUD | Constructor API authentication, DTO decoding and model validation; public booking authority is a separate route contract. | `Appointments_model::save` dispatches to insert/update; these lock foreign-key parents and couple appointment and buffer changes. Delete locks the appointment and removes its buffers before the parent. Standalone model commits are checked before the API response. |
+| `Appointments_api_v1::store/update/destroy`: authenticated API CRUD | Constructor API authentication and strict DTO decoding; public booking authority is a separate route contract. Sparse update validation runs inside `Appointments_model::update_api()`, first against the discovered candidate and then against the final locked rebase. | Create uses `Appointments_model::save`. Sparse update discovers and locks current/requested user parents, service parents, and the target in canonical order, revalidates provider/customer roles, applies only supplied fields, and couples any buffer replacement to the same transaction. Static invalid relationships/scalars return 400, a vanished target returns 404, relevant drift returns 409, and database failures return 500. Delete locks the appointment and removes its buffers before the parent. |
 | `Customers::store/update/destroy` and `Customers_api_v1` | Backoffice checks customer add/edit/delete permissions and access for update/delete; API authenticates. Model updates/deletes retain role-scoped conditions. | Customer insert/update write a single `users` row and need no dependent follow-up. In booking/calendar they participate in the outer transaction. `Customers_model::delete` owns or nests a transaction around parent locks, buffer cleanup and role-scoped deletion, checks affected rows and commit, and propagates errors. |
 | `Services::store` / API store | Backoffice add permission or API authentication, DTO fields and validation. | New service insert is one row and has no dependent appointment buffers. |
 | `Services::update` / API update | Backoffice edit permission or API authentication; the original buffer values are passed as expectations, not an authoritative change flag. | Both call `Services_model::save` directly. Its update owns a transaction when none exists. Buffer changes lock provider users, service and appointment parents; current locked buffer values and provider membership are checked before writing. Service and regenerated buffers commit together. No separate caller resync is required or permitted by the contract. |
@@ -121,6 +121,12 @@ Appointment writes keep buffer creation, replacement and removal inside the
 model operation. Calendar/booking own their broader authority and multi-model
 transactions. Do not replace their locked authority checks with a stale full
 record.
+
+Authenticated appointment PUT is deliberately sparse and has no ETag contract.
+Its pre-lock candidate must be valid. After the canonical parent and appointment
+locks, omitted values come from the locked row. A concurrent change to an omitted
+field is retained when the rebased result remains valid; requested-field, parent,
+role, or invalid-rebase drift returns 409 without mutation.
 
 ## Evidence and limits
 

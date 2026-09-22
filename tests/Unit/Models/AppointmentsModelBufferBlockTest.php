@@ -46,6 +46,15 @@ class AppointmentsModelBufferBlockTest extends TestCase
         $this->assertFalse($payload['is_unavailability']);
     }
 
+    public function test_api_decode_sparse_keeps_only_supplied_update_fields(): void
+    {
+        $payload = ['notes' => 'x'];
+
+        $this->appointmentsModel->api_decode_sparse($payload);
+
+        $this->assertSame(['notes' => 'x'], $payload);
+    }
+
     public function test_sync_service_buffer_unavailabilities_regenerates_future_blocks(): void
     {
         $provider_id = $this->findProviderId();

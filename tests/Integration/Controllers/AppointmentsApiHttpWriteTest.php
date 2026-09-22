@@ -63,6 +63,16 @@ final class AppointmentsApiHttpWriteTest extends TestCase
             self::assertSame($id, (int) ($result['id'] ?? 0));
             $this->assertWritableFields($updated, $result);
 
+            $sparseNotes = $this->fixture->run . '_sparse';
+            $result = $this->json(
+                $client->requestJsonApp('PUT', 'api/v1/appointments/' . $id, ['notes' => $sparseNotes]),
+                200,
+            );
+            self::assertSame($sparseNotes, $result['notes'] ?? null);
+            self::assertSame($updated['location'], $result['location'] ?? null);
+            self::assertSame($updated['start'], $result['start'] ?? null);
+            self::assertSame($updated['end'], $result['end'] ?? null);
+
             self::assertSame(204, $client->requestApp('DELETE', 'api/v1/appointments/' . $id)->statusCode);
             self::assertSame(404, $client->requestApp('DELETE', 'api/v1/appointments/' . $id)->statusCode);
         }
@@ -154,6 +164,18 @@ final class AppointmentsApiHttpWriteTest extends TestCase
         $formResponse = $admin->requestApp('POST', 'api/v1/appointments', $this->payload('form'));
         self::assertSame(415, $formResponse->statusCode);
         self::assertSame($beforeInvalid, $this->tableSnapshot());
+
+        $wrongRoleResponse = $admin->requestJsonApp('PUT', 'api/v1/appointments/' . $targetId, [
+            'customerId' => $this->fixture->providerId,
+        ]);
+        self::assertSame(400, $wrongRoleResponse->statusCode);
+        self::assertSame($before, $this->snapshot($targetId));
+
+        $invalidScalarResponse = $admin->requestJsonApp('PUT', 'api/v1/appointments/' . $targetId, [
+            'end' => '2000-01-01 00:00:00',
+        ]);
+        self::assertSame(400, $invalidScalarResponse->statusCode);
+        self::assertSame($before, $this->snapshot($targetId));
 
         foreach (['id', 'hash', 'book', 'googleCalendarId', 'caldavCalendarId', 'parentAppointmentId'] as $field) {
             $payload = $this->payload('protected');

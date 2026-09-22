@@ -179,7 +179,7 @@ You can also try the GET requests with your browser by navigating to the respect
 
 - `GET /api/v1/appointments[/:id]` Get all the appointments or a specific one by providing the ID in the URI.
 - `POST /api/v1/appointments` Provide the new appointment JSON in the request body to insert a new record.
-- `PUT /api/v1/appointments/:id` Provide the updated appointment JSON in the request body to update an existing record. The ID in the URI is required.
+- `PUT /api/v1/appointments/:id` Provide one or more writable appointment fields to update an existing record. The ID in the URI is required. This is a sparse update: omitted fields are rebased from the current appointment row after it is locked, so an unrelated concurrent change is preserved. The endpoint does not use ETags. It returns `409 Conflict` when a requested field, parent relationship, or provider/customer role changes while the update is being established; retry only after reading the current appointment state.
 - `DELETE /api/v1/appointments/:id` Remove an existing appointment record.
 
 ### Unavailabilities

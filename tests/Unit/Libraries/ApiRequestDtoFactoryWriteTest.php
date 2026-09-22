@@ -77,6 +77,13 @@ class ApiRequestDtoFactoryWriteTest extends TestCase
         );
     }
 
+    public function testAppointmentsPayloadKeepsSparseUpdateExactlySparse(): void
+    {
+        $payload = $this->factory->createAppointmentsWritePayloadDto('{"notes":"x"}');
+
+        self::assertSame(['notes' => 'x'], $payload->payload);
+    }
+
     public function testAppointmentsPayloadRejectsEmptyMalformedScalarListAndProtectedFields(): void
     {
         foreach (['', '{}', '[]', '1', '{bad}', '{"id":1}', '{"hash":"secret"}', '{"book":"date"}'] as $raw) {
