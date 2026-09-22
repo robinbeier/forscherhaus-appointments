@@ -261,9 +261,7 @@ def activity_count(proc_root='/proc', trusted_uid=0):
         except OSError:
             reject()
             return False
-        if len(status) > 4096:
-            reject()
-            return False
+        oversized = len(status) > 4096
         uid_rows = [line for line in status.splitlines() if line.startswith(b'Uid:')]
         if len(uid_rows) != 1:
             reject()
@@ -277,7 +275,11 @@ def activity_count(proc_root='/proc', trusted_uid=0):
         except ValueError:
             reject()
             return False
-        return all(uid == trusted_uid for uid in uids)
+        trusted = all(uid == trusted_uid for uid in uids)
+        if oversized and trusted_uid in uids:
+            reject()
+            return False
+        return trusted
 
     count = 0
     parent = os.getppid()

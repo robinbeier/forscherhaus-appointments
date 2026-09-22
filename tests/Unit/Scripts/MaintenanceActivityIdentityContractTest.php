@@ -42,6 +42,8 @@ final class MaintenanceActivityIdentityContractTest extends TestCase
             self::assertStringContainsString('os.O_DIRECTORY', $source, $relative);
             self::assertStringContainsString('os.O_NOFOLLOW', $source, $relative);
             self::assertStringContainsString("line.startswith(b'Uid:')", $source, $relative);
+            self::assertStringContainsString('oversized = len(status) > 4096', $source, $relative);
+            self::assertStringContainsString('if oversized and trusted_uid in uids:', $source, $relative);
             self::assertStringNotContainsString('st_uid != trusted_uid', $source, $relative);
         }
     }
@@ -58,6 +60,8 @@ final class MaintenanceActivityIdentityContractTest extends TestCase
         self::assertStringContainsString('os.O_DIRECTORY', $source);
         self::assertStringContainsString('os.O_NOFOLLOW', $source);
         self::assertStringContainsString("line.startswith(b'Uid:')", $source);
+        self::assertStringContainsString('oversized = len(status) > 4096', $source);
+        self::assertStringContainsString('if oversized and trusted_uid in uids:', $source);
         self::assertStringNotContainsString('st_uid != trusted_uid', $source);
         self::assertStringContainsString('print(activity_count())', $source);
     }
@@ -90,6 +94,30 @@ final class MaintenanceActivityIdentityContractTest extends TestCase
         file_put_contents($malformedStatus . '/status', "Name:\ttest\nUid:\t{$trustedUid}\tbroken\n");
         file_put_contents($malformedStatus . '/cmdline', "/usr/local/bin/deploy_ea.sh\0");
 
+        $longNonRootStatus = $fixtureRoot . '/long-non-root-status/123';
+        mkdir($longNonRootStatus, 0777, true);
+        file_put_contents(
+            $longNonRootStatus . '/status',
+            "Name:\ttest\nUid:\t65534\t65534\t65534\t65534\nGroups:\t" . str_repeat('1 ', 3000),
+        );
+        file_put_contents($longNonRootStatus . '/cmdline', "/usr/local/bin/deploy_ea.sh\0");
+
+        $longRootStatus = $fixtureRoot . '/long-root-status/123';
+        mkdir($longRootStatus, 0777, true);
+        file_put_contents(
+            $longRootStatus . '/status',
+            "Name:\ttest\nUid:\t{$trustedUid}\t{$trustedUid}\t{$trustedUid}\t{$trustedUid}\nGroups:\t" . str_repeat('1 ', 3000),
+        );
+        file_put_contents($longRootStatus . '/cmdline', "/usr/local/bin/deploy_ea.sh\0");
+
+        $mixedRootStatus = $fixtureRoot . '/mixed-root-status/123';
+        mkdir($mixedRootStatus, 0777, true);
+        file_put_contents(
+            $mixedRootStatus . '/status',
+            "Name:\ttest\nUid:\t65534\t{$trustedUid}\t65534\t65534\nGroups:\t" . str_repeat('1 ', 3000),
+        );
+        file_put_contents($mixedRootStatus . '/cmdline', "/usr/local/bin/deploy_ea.sh\0");
+
         foreach ($this->scannerSources() as $relative => $source) {
             self::assertSame(0, $this->runHarness($source, $fixtureRoot . '/trusted', $trustedUid, 1), $relative);
             self::assertSame(2, $this->runHarness($source, $fixtureRoot . '/oversized', $trustedUid, 1), $relative);
@@ -102,6 +130,21 @@ final class MaintenanceActivityIdentityContractTest extends TestCase
             self::assertSame(
                 2,
                 $this->runHarness($source, $fixtureRoot . '/malformed-status', $trustedUid, 1),
+                $relative,
+            );
+            self::assertSame(
+                0,
+                $this->runHarness($source, $fixtureRoot . '/long-non-root-status', $trustedUid, 0),
+                $relative,
+            );
+            self::assertSame(
+                2,
+                $this->runHarness($source, $fixtureRoot . '/long-root-status', $trustedUid, 1),
+                $relative,
+            );
+            self::assertSame(
+                2,
+                $this->runHarness($source, $fixtureRoot . '/mixed-root-status', $trustedUid, 1),
                 $relative,
             );
         }

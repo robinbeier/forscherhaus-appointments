@@ -159,8 +159,7 @@ def activity_count(proc_root='/proc', trusted_uid=0):
             return None
         except OSError:
             raise SystemExit(2)
-        if len(status) > 4096:
-            raise SystemExit(2)
+        oversized = len(status) > 4096
         uid_rows = [line for line in status.splitlines() if line.startswith(b'Uid:')]
         if len(uid_rows) != 1:
             raise SystemExit(2)
@@ -171,7 +170,10 @@ def activity_count(proc_root='/proc', trusted_uid=0):
             uids = [int(value) for value in fields[1:]]
         except ValueError:
             raise SystemExit(2)
-        return all(uid == trusted_uid for uid in uids)
+        trusted = all(uid == trusted_uid for uid in uids)
+        if oversized and trusted_uid in uids:
+            raise SystemExit(2)
+        return trusted
 
     try:
         entries = os.scandir(proc_root)
