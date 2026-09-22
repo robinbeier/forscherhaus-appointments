@@ -164,7 +164,7 @@ root-only lifecycle journal binds the exact username, email, role, marker and us
 ID before any request; credential or role drift is rejected before login.
 
 The reviewed operator bundle includes `deploy_ea.sh`, `scripts/ops/run_ordinary_live_probe.sh`,
-`scripts/ops/ordinary_live_probe.php` and their ten release-gate libraries. Run them only from a root-controlled copy
+`scripts/ops/ordinary_live_probe.php` and their eleven release-gate libraries. Run them only from a root-controlled copy
 of the reviewed tools outside the replaceable application release, against the
 verified installed release. The wrapper pins the tool inode and resolves the
 original application directory by inode before each call and independent cleanup.
@@ -200,6 +200,7 @@ bash scripts/ops/run_ordinary_live_probe.sh account EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh methods EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh customer-boundary EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh calendar-race EXPECTED_RELEASE
+bash scripts/ops/run_ordinary_live_probe.sh appointments-api EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh session EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh cleanup EXPECTED_RELEASE
 ```
@@ -297,6 +298,28 @@ continues blocking deployments and probes. No ordinary command clears either
 state. An operator must first establish externally that the request has ended,
 document the remaining exact synthetic rows, and approve a separate recovery
 procedure.
+
+`appointments-api` reuses the owned `calendar-race` provider, customer,
+service and unchanged direct-model appointment as its sentinel. It adds one
+synthetic administrator for Basic authentication and exactly one durably
+journaled API-created appointment for each of Basic and the already configured
+Bearer token. An empty Bearer token stops before this supplemental activation.
+Each API row has exact create, update and delete intent before the corresponding
+localhost HTTP mutation. The probe checks persistence, URI target binding,
+server-generated hash continuity and repeated DELETE. Before each first DELETE,
+one fixture transaction locks the synthetic users in ascending order, then the
+service. It then re-reads the exact target payload and hash before locking the
+empty child range while the independent localhost request runs; the target
+appointment itself remains unlocked. Target drift, any child present before the
+request, or any child inserted before the transaction commits fails closed. The
+complete redacted sentinel row is captured before the first POST and must remain
+exactly equal after every successful POST, PUT and DELETE and at the final
+postcondition.
+The probe also covers the bounded invalid method, natural-route alias,
+content-type, JSON-shape and unsupported-field matrix. Negative payload checks
+use the owned PUT target, so a failed contract cannot create an unjournaled row.
+Cleanup removes the API rows before the sentinel and then removes relationships
+and parents; any foreign relationship or generated child fails closed.
 
 `session` first runs the account probe, then logs in afresh and waits for the
 configured inactivity duration plus two seconds without requests or session

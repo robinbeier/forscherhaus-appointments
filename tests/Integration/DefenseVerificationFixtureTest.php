@@ -92,6 +92,185 @@ final class DefenseVerificationFixtureTest extends TestCase
         self::assertSame(0, $db->get_where('services_providers', ['id_services' => $state['service_id']])->num_rows());
     }
 
+    public function testAppointmentsApiIntentRecoversInsertWhenResponseWasNotJournaled(): void
+    {
+        $actor = $this->ordinary->activate();
+        $this->fixture->activate('calendar_race', $actor);
+        $this->fixture->prepareAppointmentsApi();
+        $payload = $this->fixture->prepareApiAppointment('basic');
+        $ci = &get_instance();
+        $ci->load->model('appointments_model');
+        $id = $ci->appointments_model->save([
+            'start_datetime' => $payload['start'],
+            'end_datetime' => $payload['end'],
+            'location' => $payload['location'],
+            'color' => $payload['color'],
+            'status' => $payload['status'],
+            'notes' => $payload['notes'],
+            'is_unavailability' => 0,
+            'id_users_customer' => $payload['customerId'],
+            'id_users_provider' => $payload['providerId'],
+            'id_services' => $payload['serviceId'],
+        ]);
+        self::assertGreaterThan(0, $id);
+
+        $this->fixture->deactivate();
+        self::assertSame('clean', $this->fixture->verify());
+        self::assertSame(0, $ci->db->get_where('appointments', ['id' => $id])->num_rows());
+    }
+
+    public function testAppointmentsApiDeleteGuardRefusesChildBeforeCallbackAndCleanupCanResume(): void
+    {
+        $actor = $this->ordinary->activate();
+        $this->fixture->activate('calendar_race', $actor);
+        $this->fixture->prepareAppointmentsApi();
+        $ci = &get_instance();
+        $ci->load->model('appointments_model');
+        $payload = $this->fixture->prepareApiAppointment('basic');
+        $id = $ci->appointments_model->save($this->decodeApiPayload($payload));
+        $this->fixture->confirmApiAppointmentCreated('basic', $id);
+        $update = $this->fixture->prepareApiAppointmentUpdate('basic');
+        $ci->appointments_model->save(['id' => $id] + $this->decodeApiPayload($update));
+        $this->fixture->confirmApiAppointmentUpdated('basic');
+        $this->fixture->prepareApiAppointmentDelete('basic');
+
+        $ci->db->insert('appointments', [
+            'create_datetime' => date('Y-m-d H:i:s'),
+            'update_datetime' => date('Y-m-d H:i:s'),
+            'book_datetime' => date('Y-m-d H:i:s'),
+            'start_datetime' => $update['start'],
+            'end_datetime' => $update['end'],
+            'location' => null,
+            'color' => '#6c757d',
+            'status' => 'Booked',
+            'notes' => 'foreign-api-delete-child',
+            'hash' => bin2hex(random_bytes(32)),
+            'is_unavailability' => 1,
+            'id_users_provider' => $update['providerId'],
+            'id_users_customer' => null,
+            'id_services' => null,
+            'id_parent_appointment' => $id,
+            'id_google_calendar' => null,
+            'id_caldav_calendar' => null,
+        ]);
+        $childId = (int) $ci->db->insert_id();
+        $called = false;
+        try {
+            $this->fixture->guardApiAppointmentDelete('basic', static function () use (&$called): void {
+                $called = true;
+            });
+            self::fail('Delete guard must reject an unexpected child.');
+        } catch (RuntimeException $error) {
+            self::assertStringContainsString('unexpected child', $error->getMessage());
+        }
+        self::assertFalse($called);
+        self::assertSame(1, $ci->db->get_where('appointments', ['id' => $id])->num_rows());
+
+        try {
+            $this->fixture->deactivate();
+            self::fail('Cleanup must remain fail-closed while the child exists.');
+        } catch (RuntimeException $error) {
+            self::assertStringContainsString('generated appointment child', $error->getMessage());
+        }
+        $ci->db->delete('appointments', ['id' => $childId, 'notes' => 'foreign-api-delete-child']);
+        $this->fixture->deactivate();
+        self::assertSame('clean', $this->fixture->verify());
+    }
+
+    public function testAppointmentsApiDeleteGuardRevalidatesTargetAfterParentLocks(): void
+    {
+        $actor = $this->ordinary->activate();
+        $this->fixture->activate('calendar_race', $actor);
+        $this->fixture->prepareAppointmentsApi();
+        $ci = &get_instance();
+        $ci->load->model('appointments_model');
+        $payload = $this->fixture->prepareApiAppointment('basic');
+        $id = $ci->appointments_model->save($this->decodeApiPayload($payload));
+        $this->fixture->confirmApiAppointmentCreated('basic', $id);
+        $update = $this->fixture->prepareApiAppointmentUpdate('basic');
+        $ci->appointments_model->save(['id' => $id] + $this->decodeApiPayload($update));
+        $this->fixture->confirmApiAppointmentUpdated('basic');
+        $this->fixture->prepareApiAppointmentDelete('basic');
+
+        $originalHash = (string) $ci->db->get_where('appointments', ['id' => $id])->row_array()['hash'];
+        $driftedHash = str_repeat($originalHash[0] === 'a' ? 'b' : 'a', 64);
+        $secondary = $ci->load->database('', true);
+        $database = $ci->db;
+        $proxy = new class ($database, $secondary, $id, $driftedHash) {
+            public bool $injected = false;
+
+            public function __construct(
+                private readonly object $database,
+                private readonly object $secondary,
+                private readonly int $appointmentId,
+                private readonly string $driftedHash,
+            ) {}
+
+            public function query(string $sql, mixed ...$arguments): mixed
+            {
+                if (
+                    !$this->injected &&
+                    str_contains($sql, $this->database->dbprefix('users')) &&
+                    str_contains($sql, 'FOR UPDATE')
+                ) {
+                    if (
+                        !$this->secondary->update(
+                            'appointments',
+                            ['hash' => $this->driftedHash],
+                            ['id' => $this->appointmentId],
+                        )
+                    ) {
+                        throw new RuntimeException('Could not inject appointment drift.');
+                    }
+                    $this->injected = true;
+                }
+                return $this->database->query($sql, ...$arguments);
+            }
+
+            public function __call(string $name, array $arguments): mixed
+            {
+                return $this->database->$name(...$arguments);
+            }
+        };
+        $databaseProperty = new ReflectionProperty(DefenseVerificationFixture::class, 'db');
+        $databaseProperty->setValue($this->fixture, $proxy);
+        $called = false;
+        try {
+            $this->fixture->guardApiAppointmentDelete('basic', static function () use (&$called): void {
+                $called = true;
+            });
+            self::fail('Delete guard must reject target drift after acquiring parent locks.');
+        } catch (RuntimeException $error) {
+            self::assertStringContainsString('hash drift', $error->getMessage());
+        } finally {
+            $databaseProperty->setValue($this->fixture, $database);
+            $secondary->close();
+        }
+        self::assertTrue($proxy->injected);
+        self::assertFalse($called);
+        self::assertSame($driftedHash, $ci->db->get_where('appointments', ['id' => $id])->row_array()['hash']);
+
+        self::assertTrue($ci->db->update('appointments', ['hash' => $originalHash], ['id' => $id]));
+        $this->fixture->deactivate();
+        self::assertSame('clean', $this->fixture->verify());
+    }
+
+    private function decodeApiPayload(array $payload): array
+    {
+        return [
+            'start_datetime' => $payload['start'],
+            'end_datetime' => $payload['end'],
+            'location' => $payload['location'],
+            'color' => $payload['color'],
+            'status' => $payload['status'],
+            'notes' => $payload['notes'],
+            'is_unavailability' => 0,
+            'id_users_customer' => $payload['customerId'],
+            'id_users_provider' => $payload['providerId'],
+            'id_services' => $payload['serviceId'],
+        ];
+    }
+
     public function testCleanupRefusesForeignProviderLinkWithoutDeletingService(): void
     {
         $actor = $this->ordinary->activate();

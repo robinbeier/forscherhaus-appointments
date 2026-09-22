@@ -43,6 +43,7 @@ if (
             'methods',
             'customer-boundary',
             'calendar-race',
+            'appointments-api',
             'session',
             'deactivate',
             'verify',
@@ -150,6 +151,7 @@ try {
     require_once dirname(__DIR__) . '/release-gate/lib/AccountSecurityMatrixProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/CustomerRoleBoundaryProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/CalendarResponsibilityRaceProbe.php';
+    require_once dirname(__DIR__) . '/release-gate/lib/AppointmentsApiWriteProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/DefenseVerificationFixture.php';
     if (
         !in_array($action, ['deactivate', 'verify'], true) &&
@@ -304,6 +306,35 @@ try {
                 }
                 throw $error;
             }
+        } elseif ($action === 'appointments-api') {
+            $apiToken = (string) setting('api_token');
+            if ($apiToken === '') {
+                throw new RuntimeException('Appointments API bearer prerequisite is unavailable.');
+            }
+            $supplemental = $evidence->run(
+                'supplemental_activate',
+                fn(): array => $verificationFixture->activate('calendar_race', $context),
+            );
+            $supplemental = $verificationFixture->prepareAppointmentsApi();
+            $apiClient = static fn(string $authorization): GateHttpClient => new GateHttpClient(
+                'http://localhost',
+                indexPage: (string) config_item('index_page'),
+                csrfCookieName: (string) config_item('csrf_cookie_name'),
+                csrfTokenName: (string) config_item('csrf_token_name'),
+                additionalHeaders: ['X-FH-Ordinary-Probe' => '1', 'Authorization' => $authorization],
+            );
+            $result['evidence'] = (new AppointmentsApiWriteProbe(
+                $apiClient(
+                    'Basic ' .
+                        base64_encode(
+                            (string) $supplemental['api_credentials']['username'] .
+                                ':' .
+                                (string) $supplemental['api_credentials']['password'],
+                        ),
+                ),
+                $apiClient('Bearer ' . $apiToken),
+                $verificationFixture,
+            ))->run($evidence->step(...));
         } else {
             $result['evidence'] = $evidence->run(
                 'session',
@@ -325,7 +356,7 @@ try {
             }
         });
         if (
-            in_array($action, ['customer-boundary', 'calendar-race'], true) &&
+            in_array($action, ['customer-boundary', 'calendar-race', 'appointments-api'], true) &&
             $verificationFixture->verify() !== 'active'
         ) {
             throw new RuntimeException('Defense verification fixture changed before wrapper cleanup.');

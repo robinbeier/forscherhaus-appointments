@@ -121,6 +121,239 @@ final class DefenseVerificationFixture
         return $state;
     }
 
+    /** Add only the Basic-auth principal needed by the Appointments API probe. */
+    public function prepareAppointmentsApi(): array
+    {
+        return $this->withLock(function (): array {
+            $state = $this->readState();
+            $this->validateState($state);
+            if ($state['phase'] !== 'active' || $state['profile'] !== 'calendar_race') {
+                throw new RuntimeException('Appointments API verification requires the active calendar-race graph.');
+            }
+            $this->assertOwnership($state);
+            if (isset($state['ids']['api_admin']) || isset($state['api_credentials'])) {
+                throw new RuntimeException('Appointments API verification principal already exists.');
+            }
+            $password = bin2hex(random_bytes(32));
+            $state['roles']['admin'] = $this->role('admin');
+            $this->insertUser($state, 'api_admin', $state['roles']['admin'], 'api-admin', $password);
+            $state['api_credentials'] = [
+                'username' => $state['usernames']['api_admin'],
+                'password' => $password,
+            ];
+            $this->writeState($state);
+            return $state;
+        });
+    }
+
+    /** Journal the exact recoverable identity before one API POST. */
+    public function prepareApiAppointment(string $case): array
+    {
+        $this->assertApiCase($case);
+        return $this->withLock(function () use ($case): array {
+            $state = $this->readState();
+            $this->validateState($state);
+            $this->assertApiReady($state);
+            $this->assertOwnership($state);
+            if (isset($state['intents']['api_appointments'][$case])) {
+                throw new RuntimeException('Appointments API intent already exists.');
+            }
+            $offset = $case === 'basic' ? 35 : 36;
+            $payload = [
+                'start' => gmdate('Y-m-d 11:00:00', $state['created_at'] + 86400 * $offset),
+                'end' => gmdate('Y-m-d 11:30:00', $state['created_at'] + 86400 * $offset),
+                'location' => 'Synthetic API ' . ucfirst($case),
+                'color' => '#6c757d',
+                'status' => 'Booked',
+                'notes' => $state['marker'] . ':api:' . $case,
+                'customerId' => (int) $state['customer_id'],
+                'providerId' => (int) $state['actor_id'],
+                'serviceId' => (int) $state['service_id'],
+            ];
+            $state['intents']['api_appointments'][$case] = ['stage' => 'create_prepared', 'create' => $payload];
+            $this->writeState($state);
+            return $payload;
+        });
+    }
+
+    public function confirmApiAppointmentCreated(string $case, int $id): void
+    {
+        $this->assertApiCase($case);
+        $this->withLock(function () use ($case, $id): void {
+            $state = $this->readState();
+            $this->validateState($state);
+            $intent = $this->apiIntent($state, $case, 'create_prepared');
+            $row = $this->apiAppointmentRow($id);
+            $this->assertApiAppointment($row, $intent['create']);
+            $hash = $this->assertApiHash($row);
+            $state['ids']['api_appointment_' . $case] = $id;
+            $state['intents']['api_appointments'][$case]['hash_digest'] = hash('sha256', $hash);
+            $state['intents']['api_appointments'][$case]['stage'] = 'created';
+            $this->writeState($state);
+        });
+    }
+
+    public function prepareApiAppointmentUpdate(string $case): array
+    {
+        $this->assertApiCase($case);
+        return $this->withLock(function () use ($case): array {
+            $state = $this->readState();
+            $this->validateState($state);
+            $this->assertOwnership($state);
+            $intent = $this->apiIntent($state, $case, 'created');
+            $payload = $intent['create'];
+            $payload['location'] = 'Updated Synthetic API ' . ucfirst($case);
+            $payload['color'] = $case === 'basic' ? '#123456' : '#654321';
+            $payload['status'] = 'Confirmed';
+            $payload['notes'] = $state['marker'] . ':api:' . $case . ':updated';
+            $state['intents']['api_appointments'][$case]['update'] = $payload;
+            $state['intents']['api_appointments'][$case]['stage'] = 'update_prepared';
+            $this->writeState($state);
+            return $payload;
+        });
+    }
+
+    public function confirmApiAppointmentUpdated(string $case): void
+    {
+        $this->assertApiCase($case);
+        $this->withLock(function () use ($case): void {
+            $state = $this->readState();
+            $this->validateState($state);
+            $intent = $this->apiIntent($state, $case, 'update_prepared');
+            $row = $this->apiAppointmentRow((int) $state['ids']['api_appointment_' . $case]);
+            $this->assertApiAppointment($row, $intent['update']);
+            $this->assertApiHashDigest($row, $intent['hash_digest']);
+            $state['intents']['api_appointments'][$case]['stage'] = 'updated';
+            $this->writeState($state);
+        });
+    }
+
+    public function prepareApiAppointmentDelete(string $case): int
+    {
+        $this->assertApiCase($case);
+        return $this->withLock(function () use ($case): int {
+            $state = $this->readState();
+            $this->validateState($state);
+            $this->assertOwnership($state);
+            $this->apiIntent($state, $case, 'updated');
+            $state['intents']['api_appointments'][$case]['stage'] = 'delete_prepared';
+            $this->writeState($state);
+            return (int) $state['ids']['api_appointment_' . $case];
+        });
+    }
+
+    /**
+     * Hold only the canonical parents and empty child range while an
+     * independent HTTP connection performs the first positive DELETE.
+     * The target appointment itself deliberately remains unlocked here.
+     */
+    public function guardApiAppointmentDelete(string $case, callable $delete): mixed
+    {
+        $this->assertApiCase($case);
+        return $this->withLock(function () use ($case, $delete): mixed {
+            $state = $this->readState();
+            $this->validateState($state);
+            $intent = $this->apiIntent($state, $case, 'delete_prepared');
+            $targetId = (int) ($state['ids']['api_appointment_' . $case] ?? 0);
+            $target = $this->apiAppointmentRow($targetId);
+            $this->assertApiAppointment($target, $intent['update']);
+            $this->assertApiHashDigest($target, $intent['hash_digest']);
+
+            if (!$this->db->trans_begin()) {
+                throw new RuntimeException('Appointments API delete guard transaction could not start.');
+            }
+            try {
+                $userIds = [(int) $state['actor_id'], (int) $state['customer_id']];
+                sort($userIds, SORT_NUMERIC);
+                $userRows = $this->db
+                    ->query(
+                        'SELECT id FROM `' .
+                            $this->db->dbprefix('users') .
+                            '` WHERE id IN (?, ?) ORDER BY id ASC FOR UPDATE',
+                        $userIds,
+                    )
+                    ->result_array();
+                if (array_map(static fn(array $row): int => (int) $row['id'], $userRows) !== $userIds) {
+                    throw new RuntimeException('Appointments API delete parent lock set is incomplete.');
+                }
+                $serviceRows = $this->db
+                    ->query('SELECT id FROM `' . $this->db->dbprefix('services') . '` WHERE id = ? FOR UPDATE', [
+                        (int) $state['service_id'],
+                    ])
+                    ->result_array();
+                if (count($serviceRows) !== 1) {
+                    throw new RuntimeException('Appointments API delete service parent lock is unavailable.');
+                }
+                // A compliant concurrent writer acquires these same parents
+                // before changing the appointment. Re-read after the waits so
+                // a row changed between the initial check and our locks can
+                // never be passed to the HTTP DELETE.
+                $target = $this->apiAppointmentRow($targetId);
+                $this->assertApiAppointment($target, $intent['update']);
+                $this->assertApiHashDigest($target, $intent['hash_digest']);
+                $childrenSql =
+                    'SELECT id FROM `' .
+                    $this->db->dbprefix('appointments') .
+                    '` WHERE id_parent_appointment = ? ORDER BY id ASC FOR UPDATE';
+                if ($this->db->query($childrenSql, [$targetId])->result_array() !== []) {
+                    throw new RuntimeException('Appointments API delete target has an unexpected child.');
+                }
+
+                $result = $delete();
+
+                if ($this->db->query($childrenSql, [$targetId])->result_array() !== []) {
+                    throw new RuntimeException('Appointments API delete target gained an unexpected child.');
+                }
+                if ($this->db->trans_status() === false || !$this->db->trans_commit()) {
+                    throw new RuntimeException('Appointments API delete guard transaction could not commit.');
+                }
+                return $result;
+            } catch (Throwable $error) {
+                $this->db->trans_rollback();
+                throw $error;
+            }
+        });
+    }
+
+    public function confirmApiAppointmentDeleted(string $case): void
+    {
+        $this->assertApiCase($case);
+        $this->withLock(function () use ($case): void {
+            $state = $this->readState();
+            $this->validateState($state);
+            $this->apiIntent($state, $case, 'delete_prepared');
+            $id = (int) $state['ids']['api_appointment_' . $case];
+            if ($this->db->get_where('appointments', ['id' => $id])->num_rows() !== 0) {
+                throw new RuntimeException('Appointments API delete did not remove the owned row.');
+            }
+            $state['intents']['api_appointments'][$case]['stage'] = 'deleted';
+            $this->writeState($state);
+        });
+    }
+
+    /** Non-secret snapshot for mutation-free and URI-binding assertions. */
+    public function apiSnapshot(): array
+    {
+        return $this->withLock(function (): array {
+            $state = $this->readState();
+            $this->validateState($state);
+            $this->assertOwnership($state);
+            $rows = [];
+            foreach (
+                ['sentinel' => 'appointment', 'basic' => 'api_appointment_basic', 'bearer' => 'api_appointment_bearer']
+                as $case => $key
+            ) {
+                $id = (int) ($state['ids'][$key] ?? 0);
+                $row = $id > 0 ? $this->db->get_where('appointments', ['id' => $id])->row_array() : [];
+                if ($row) {
+                    $row['hash'] = hash('sha256', (string) ($row['hash'] ?? ''));
+                }
+                $rows[$case] = $row ?: [];
+            }
+            return $rows;
+        });
+    }
+
     public function verify(): string
     {
         if (!file_exists($this->stateFile)) {
@@ -291,7 +524,7 @@ final class DefenseVerificationFixture
     }
 
     /** @param array<string,mixed> $state */
-    private function insertUser(array &$state, string $key, int $role, string $label): int
+    private function insertUser(array &$state, string $key, int $role, string $label, ?string $password = null): int
     {
         $username = 'defense_verify_' . $state['run_id'] . '_' . $key;
         $email = $username . '@synthetic.invalid';
@@ -318,7 +551,7 @@ final class DefenseVerificationFixture
         $this->insertExact('user_settings', [
             'id_users' => $id,
             'username' => $username,
-            'password' => \hash_password($salt, bin2hex(random_bytes(32))),
+            'password' => \hash_password($salt, $password ?? bin2hex(random_bytes(32))),
             'salt' => $salt,
             'working_plan' => '{}',
             'working_plan_exceptions' => '{}',
@@ -404,6 +637,9 @@ final class DefenseVerificationFixture
     private function assertOwnership(array $state): void
     {
         foreach ($state['ids'] as $key => $id) {
+            if (str_starts_with($key, 'api_appointment_')) {
+                continue;
+            }
             $id = (int) $id;
             if ($id < 1) {
                 throw new RuntimeException('Invalid journaled fixture ID.');
@@ -412,7 +648,7 @@ final class DefenseVerificationFixture
                 ? 'services_providers'
                 : ($key === 'service'
                     ? 'services'
-                    : ($key === 'appointment'
+                    : ($key === 'appointment' || str_starts_with($key, 'api_appointment_')
                         ? 'appointments'
                         : 'users'));
             if ($this->db->get_where($table, ['id' => $id])->num_rows() !== 1) {
@@ -424,6 +660,7 @@ final class DefenseVerificationFixture
                 'provider_target',
                 'admin_target',
                 'foreign_provider',
+                'api_admin',
                 'customer_find_update',
                 'customer_destroy',
                 'calendar_customer',
@@ -437,7 +674,7 @@ final class DefenseVerificationFixture
                 }
                 $roleKey = in_array($key, ['provider_target', 'foreign_provider'], true)
                     ? 'provider'
-                    : (in_array($key, ['admin_target'], true)
+                    : (in_array($key, ['admin_target', 'api_admin'], true)
                         ? 'admin'
                         : 'customer');
                 if ((int) ($user['id_roles'] ?? 0) !== (int) $state['roles'][$roleKey]) {
@@ -468,6 +705,36 @@ final class DefenseVerificationFixture
                 'id_users_customer' => $state['ids']['calendar_customer'],
                 'id_services' => $state['ids']['service'],
             ]);
+        }
+        foreach (['basic', 'bearer'] as $case) {
+            $intent = $state['intents']['api_appointments'][$case] ?? null;
+            if (!is_array($intent)) {
+                continue;
+            }
+            $id = (int) ($state['ids']['api_appointment_' . $case] ?? 0);
+            $stage = $intent['stage'] ?? null;
+            $row = $id > 0 ? $this->db->get_where('appointments', ['id' => $id])->row_array() : [];
+            if ($id === 0 && $stage === 'create_prepared') {
+                continue;
+            }
+            if (in_array($stage, ['delete_prepared', 'deleted'], true) && !$row) {
+                continue;
+            }
+            if (!$row) {
+                throw new RuntimeException('Appointments API fixture row disappeared.');
+            }
+            if ($stage === 'update_prepared') {
+                try {
+                    $this->assertApiAppointment($row, $intent['create']);
+                } catch (Throwable) {
+                    $this->assertApiAppointment($row, $intent['update']);
+                }
+            } elseif (in_array($stage, ['updated', 'delete_prepared'], true)) {
+                $this->assertApiAppointment($row, $intent['update']);
+            } else {
+                $this->assertApiAppointment($row, $intent['create']);
+            }
+            $this->assertApiHashDigest($row, $intent['hash_digest']);
         }
         foreach ($state['links'] ?? [] as $link) {
             if (
@@ -559,6 +826,39 @@ final class DefenseVerificationFixture
         $ids = $state['ids'];
         $this->lockFixtureUsers($state, $alreadyCleaning);
         $this->assertServiceDependencies($state, $alreadyCleaning, $wasPrepared);
+        foreach (['basic', 'bearer'] as $case) {
+            $key = 'api_appointment_' . $case;
+            if (!isset($ids[$key])) {
+                continue;
+            }
+            $id = (int) $ids[$key];
+            $row = $this->db->get_where('appointments', ['id' => $id])->row_array();
+            if (!$row) {
+                continue;
+            }
+            $intent = $state['intents']['api_appointments'][$case] ?? null;
+            if (!is_array($intent)) {
+                throw new RuntimeException('Appointments API cleanup intent is missing.');
+            }
+            $stage = $intent['stage'] ?? null;
+            if ($stage === 'update_prepared') {
+                try {
+                    $this->assertApiAppointment($row, $intent['create']);
+                } catch (Throwable) {
+                    $this->assertApiAppointment($row, $intent['update']);
+                }
+            } elseif (in_array($stage, ['updated', 'delete_prepared', 'deleted'], true)) {
+                $this->assertApiAppointment($row, $intent['update']);
+            } else {
+                $this->assertApiAppointment($row, $intent['create']);
+            }
+            if (isset($intent['hash_digest'])) {
+                $this->assertApiHashDigest($row, $intent['hash_digest']);
+            } else {
+                $this->assertApiHash($row);
+            }
+            $this->db->delete('appointments', ['id' => $id]);
+        }
         if (isset($ids['appointment'])) {
             $exists = $this->db->get_where('appointments', ['id' => (int) $ids['appointment']])->num_rows() !== 0;
             if ($exists || !$alreadyCleaning) {
@@ -598,6 +898,7 @@ final class DefenseVerificationFixture
                         'provider_target',
                         'admin_target',
                         'foreign_provider',
+                        'api_admin',
                         'customer_find_update',
                         'customer_destroy',
                         'calendar_customer',
@@ -634,6 +935,7 @@ final class DefenseVerificationFixture
                 'provider_target',
                 'admin_target',
                 'foreign_provider',
+                'api_admin',
                 'customer_find_update',
                 'customer_destroy',
                 'calendar_customer',
@@ -699,6 +1001,23 @@ final class DefenseVerificationFixture
                 ->result_array();
             if ($generatedChildren !== []) {
                 throw new RuntimeException('Unexpected generated appointment child; refusing cleanup.');
+            }
+            foreach (['basic', 'bearer'] as $case) {
+                $apiParentId = (int) ($state['ids']['api_appointment_' . $case] ?? 0);
+                if ($apiParentId < 1) {
+                    continue;
+                }
+                $apiChildren = $this->db
+                    ->query(
+                        'SELECT id FROM ' .
+                            $this->db->dbprefix('appointments') .
+                            ' WHERE id_parent_appointment = ? ORDER BY id FOR UPDATE',
+                        [$apiParentId],
+                    )
+                    ->result_array();
+                if ($apiChildren !== []) {
+                    throw new RuntimeException('Unexpected generated appointment child; refusing cleanup.');
+                }
             }
         } elseif (isset($state['actor_id'])) {
             // Production buffer blocks have NULL customer/service references.
@@ -775,6 +1094,15 @@ final class DefenseVerificationFixture
             $expectedAppointment = (int) $state['ids']['appointment'];
             $expectedAppointmentIds = $serviceRows === [] && $alreadyCleaning ? [] : [$expectedAppointment];
         }
+        if (!($serviceRows === [] && $alreadyCleaning)) {
+            foreach (['basic', 'bearer'] as $case) {
+                $id = (int) ($state['ids']['api_appointment_' . $case] ?? 0);
+                if ($id > 0 && $this->db->get_where('appointments', ['id' => $id])->num_rows() !== 0) {
+                    $expectedAppointmentIds[] = $id;
+                }
+            }
+            sort($expectedAppointmentIds, SORT_NUMERIC);
+        }
         if ($actualAppointmentIds !== $expectedAppointmentIds) {
             throw new RuntimeException('Synthetic service appointment relationship drifted; refusing cleanup.');
         }
@@ -845,7 +1173,114 @@ final class DefenseVerificationFixture
                 $state['ids']['appointment'] = (int) $rows[0]['id'];
             }
         }
+        foreach (['basic', 'bearer'] as $case) {
+            $key = 'api_appointment_' . $case;
+            $intent = $state['intents']['api_appointments'][$case] ?? null;
+            if (isset($state['ids'][$key]) || !is_array($intent)) {
+                continue;
+            }
+            $payload = $intent['create'];
+            $rows = $this->db
+                ->where('notes', $payload['notes'])
+                ->where('id_users_provider', (int) $payload['providerId'])
+                ->where('id_users_customer', (int) $payload['customerId'])
+                ->where('id_services', (int) $payload['serviceId'])
+                ->where('start_datetime', $payload['start'])
+                ->where('end_datetime', $payload['end'])
+                ->get('appointments')
+                ->result_array();
+            if (count($rows) > 1) {
+                throw new RuntimeException('Appointments API fixture identity is ambiguous; refusing cleanup.');
+            }
+            if (count($rows) === 1) {
+                $state['ids'][$key] = (int) $rows[0]['id'];
+                $state['intents']['api_appointments'][$case]['hash_digest'] = hash(
+                    'sha256',
+                    $this->assertApiHash($rows[0]),
+                );
+            }
+        }
         return $state;
+    }
+
+    private function assertApiCase(string $case): void
+    {
+        if (!in_array($case, ['basic', 'bearer'], true)) {
+            throw new InvalidArgumentException('Unsupported Appointments API verification case.');
+        }
+    }
+
+    private function assertApiReady(array $state): void
+    {
+        if (
+            $state['phase'] !== 'active' ||
+            $state['profile'] !== 'calendar_race' ||
+            !isset($state['api_credentials'], $state['ids']['api_admin'])
+        ) {
+            throw new RuntimeException('Appointments API verification fixture is incomplete.');
+        }
+    }
+
+    private function apiIntent(array $state, string $case, string $stage): array
+    {
+        $intent = $state['intents']['api_appointments'][$case] ?? null;
+        if (!is_array($intent) || ($intent['stage'] ?? null) !== $stage) {
+            throw new RuntimeException('Appointments API fixture stage is invalid.');
+        }
+        return $intent;
+    }
+
+    private function apiAppointmentRow(int $id): array
+    {
+        if ($id < 1) {
+            throw new RuntimeException('Appointments API fixture ID is invalid.');
+        }
+        $row = $this->db->get_where('appointments', ['id' => $id])->row_array();
+        if (!is_array($row) || $row === []) {
+            throw new RuntimeException('Appointments API fixture row is unavailable.');
+        }
+        return $row;
+    }
+
+    private function assertApiAppointment(array $row, array $payload): void
+    {
+        $expected = [
+            'start_datetime' => $payload['start'],
+            'end_datetime' => $payload['end'],
+            'location' => $payload['location'],
+            'color' => $payload['color'],
+            'status' => $payload['status'],
+            'notes' => $payload['notes'],
+            'id_users_customer' => (int) $payload['customerId'],
+            'id_users_provider' => (int) $payload['providerId'],
+            'id_services' => (int) $payload['serviceId'],
+            'is_unavailability' => 0,
+            'id_parent_appointment' => null,
+            'id_google_calendar' => null,
+            'id_caldav_calendar' => null,
+        ];
+        foreach ($expected as $field => $value) {
+            if (($row[$field] ?? null) != $value) {
+                throw new RuntimeException('Appointments API fixture row drift detected.');
+            }
+        }
+    }
+
+    private function assertApiHash(array $row): string
+    {
+        $hash = $row['hash'] ?? null;
+        if (!is_string($hash) || !preg_match('/^[a-f0-9]{64}$/D', $hash)) {
+            throw new RuntimeException('Appointments API row has no server-generated hash.');
+        }
+        return $hash;
+    }
+
+    private function assertApiHashDigest(array $row, mixed $digest): void
+    {
+        $hash = $this->assertApiHash($row);
+        if (!is_string($digest) || $digest === '' || !hash_equals($digest, hash('sha256', $hash))) {
+            throw new RuntimeException('Appointments API row hash drift detected.');
+        }
     }
 
     /** @return list<string> */
@@ -857,7 +1292,7 @@ final class DefenseVerificationFixture
                 ? 'services_providers'
                 : ($key === 'service'
                     ? 'services'
-                    : ($key === 'appointment'
+                    : ($key === 'appointment' || str_starts_with($key, 'api_appointment_')
                         ? 'appointments'
                         : 'users'));
             if ($this->db->get_where($table, ['id' => (int) $id])->num_rows() !== 0) {
@@ -877,7 +1312,7 @@ final class DefenseVerificationFixture
                 $remaining[] = 'link:' . $key;
             }
         }
-        foreach (['provider_target', 'admin_target', 'foreign_provider'] as $key) {
+        foreach (['provider_target', 'admin_target', 'foreign_provider', 'api_admin'] as $key) {
             if (
                 isset($state['ids'][$key]) &&
                 $this->db->get_where('user_settings', ['id_users' => (int) $state['ids'][$key]])->num_rows() !== 0
