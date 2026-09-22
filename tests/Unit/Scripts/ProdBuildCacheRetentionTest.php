@@ -148,15 +148,16 @@ final class ProdBuildCacheRetentionTest extends TestCase
 
     public function testActiveProductionWorkFailsClosedBeforeMutation(): void
     {
+        if (PHP_OS_FAMILY !== 'Linux' || $this->trustedUid() !== 0) {
+            self::markTestSkipped('A Linux root test process is required for /proc activity coverage.');
+        }
         $workspace = $this->workspace();
+        $process = null;
 
         try {
-            $procRoot = $workspace . '/proc';
-            mkdir($procRoot . '/123', 0777, true);
-            file_put_contents($procRoot . '/123/cmdline', "docker\0compose\0up\0");
-            $environment = $this->prepareStubs($workspace, [
-                'BUILD_CACHE_RETENTION_PROC_ROOT' => $procRoot,
-            ]);
+            $process = $this->startActivityProcess($workspace, 'docker', ['compose', 'up']);
+            usleep(100000);
+            $environment = $this->prepareStubs($workspace);
             $result = $this->runScript(['--execute', '--confirm-live-write', 'ROB-450'], $environment);
 
             self::assertSame(75, $result['exit_code']);
@@ -168,53 +169,47 @@ final class ProdBuildCacheRetentionTest extends TestCase
                 (string) file_get_contents($environment['DOCKER_LOG']),
             );
         } finally {
+            if (is_resource($process)) {
+                proc_terminate($process);
+                proc_close($process);
+            }
             $this->removeDirectory($workspace);
         }
     }
 
     public function testIdleBuildkitDaemonIsIgnoredButActiveBuildctlIsBlocked(): void
     {
+        if (PHP_OS_FAMILY !== 'Linux' || $this->trustedUid() !== 0) {
+            self::markTestSkipped('A Linux root test process is required for /proc activity coverage.');
+        }
         $workspace = $this->workspace();
+        $idleProcess = null;
+        $activeProcess = null;
 
         try {
-            $procRoot = $workspace . '/proc';
-            mkdir($procRoot . '/123', 0777, true);
-            file_put_contents($procRoot . '/123/cmdline', "buildkitd\0--root\0/run/buildkit\0");
-            $environment = $this->prepareStubs($workspace, [
-                'BUILD_CACHE_RETENTION_PROC_ROOT' => $procRoot,
-            ]);
+            $idleProcess = $this->startActivityProcess($workspace, 'buildkitd', ['--root', '/run/buildkit']);
+            usleep(100000);
+            $environment = $this->prepareStubs($workspace);
 
             $idle = $this->runScript([], $environment);
             self::assertSame(0, $idle['exit_code'], $idle['stderr']);
             self::assertStringContainsString('activity_state=clear', $idle['stdout']);
 
-            file_put_contents($procRoot . '/123/cmdline', "buildctl\0build\0--frontend\0dockerfile.v0\0");
+            proc_terminate($idleProcess);
+            proc_close($idleProcess);
+            $idleProcess = null;
+            $activeProcess = $this->startActivityProcess($workspace, '/usr/local/bin/buildctl', ['build']);
+            usleep(100000);
             $active = $this->runScript([], $environment);
             self::assertSame(75, $active['exit_code']);
             self::assertStringContainsString('reason=active_production_work', $active['stdout']);
         } finally {
-            $this->removeDirectory($workspace);
-        }
-    }
-
-    public function testUnknownActivityStateFailsClosedBeforeInventoryOrMutation(): void
-    {
-        $workspace = $this->workspace();
-
-        try {
-            $environment = $this->prepareStubs($workspace, [
-                'BUILD_CACHE_RETENTION_PROC_ROOT' => $workspace . '/missing-proc',
-            ]);
-            $result = $this->runScript([], $environment);
-
-            self::assertSame(2, $result['exit_code']);
-            self::assertStringContainsString('reason=activity_unknown', $result['stdout']);
-            self::assertStringContainsString('deletion_performed=no', $result['stdout']);
-            self::assertDoesNotMatchRegularExpression(
-                '/builder prune .*--force/',
-                (string) file_get_contents($environment['DOCKER_LOG']),
-            );
-        } finally {
+            foreach ([$idleProcess, $activeProcess] as $process) {
+                if (is_resource($process)) {
+                    proc_terminate($process);
+                    proc_close($process);
+                }
+            }
             $this->removeDirectory($workspace);
         }
     }
@@ -731,6 +726,45 @@ final class ProdBuildCacheRetentionTest extends TestCase
         self::assertTrue(mkdir($workspace, 0777, true));
 
         return $workspace;
+    }
+
+    private function trustedUid(): int
+    {
+        return function_exists('posix_geteuid') ? posix_geteuid() : getmyuid();
+    }
+
+    /** @param list<string> $arguments @return resource */
+    private function startActivityProcess(string $workspace, string $name, array $arguments)
+    {
+        $command = array_merge(
+            [
+                'bash',
+                '-c',
+                'sleep 30 & child=$!; trap \'kill "$child" 2>/dev/null; wait "$child"; exit 0\' TERM INT; wait "$child"',
+                $name,
+            ],
+            $arguments,
+        );
+        $process = proc_open($command, [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']], $pipes);
+        self::assertIsResource($process);
+        fclose($pipes[0]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $status = proc_get_status($process);
+        $pid = is_array($status) ? (int) ($status['pid'] ?? 0) : 0;
+        $expected = implode(' ', array_merge([$name], $arguments));
+        for ($attempt = 0; $attempt < 20; $attempt++) {
+            $cmdline = $pid > 0 ? (string) @file_get_contents('/proc/' . $pid . '/cmdline') : '';
+            $cmdline = str_replace("\0", ' ', $cmdline);
+            if (str_contains($cmdline, $expected)) {
+                return $process;
+            }
+            usleep(25_000);
+        }
+        proc_terminate($process);
+        proc_close($process);
+        self::fail('Activity fixture did not expose the expected process argv: ' . $expected);
+        return $process;
     }
 
     private function repoRoot(): string

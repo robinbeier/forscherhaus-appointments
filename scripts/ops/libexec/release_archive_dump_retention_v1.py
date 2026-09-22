@@ -1130,16 +1130,51 @@ def open_global_lock():
         os.close(locks)
 
 
-def activity_count():
+def activity_count(proc_root='/proc', trusted_uid=0):
     patterns = (
         re.compile(r'(^|/)(?:deploy_ea\.sh|deployment_host_runner_v1\.php|zero_surprise_replay\.php)(?:\s|$)'),
         re.compile(r'(^|/)prod_(?:customers|provider)_ui_smoke\.sh(?:\s|$)'),
         re.compile(r'(^|/)(?:mysqldump|mariadb-dump|backup_easyappointments\.sh|backup_ea\.sh|ea_restore_verify_latest\.sh|backup_set_producer_v1\.py|fh-backup-set-producer-v1|fh-backup-set-producer-supervisor-v1|prod_backup_set_producer\.sh|import_prod_backup\.sh)(?:\s|$)'),
         re.compile(r'(^|/)(?:prod_(?:session|build_cache|release_archive_dump)_retention\.sh)(?:\s|$)'),
     )
+    proc_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW
+
+    def trusted_process(process_descriptor):
+        try:
+            status_descriptor = os.open('status', os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                                       dir_fd=process_descriptor)
+            try:
+                status = os.read(status_descriptor, 4097)
+            finally:
+                os.close(status_descriptor)
+        except (FileNotFoundError, ProcessLookupError):
+            return None
+        except OSError:
+            reject('activity_unknown')
+            return False
+        oversized = len(status) > 4096
+        uid_rows = [line for line in status.splitlines() if line.startswith(b'Uid:')]
+        if len(uid_rows) != 1:
+            reject('activity_unknown')
+            return False
+        fields = uid_rows[0].split()
+        if len(fields) != 5 or fields[0] != b'Uid:':
+            reject('activity_unknown')
+            return False
+        try:
+            uids = [int(value) for value in fields[1:]]
+        except ValueError:
+            reject('activity_unknown')
+            return False
+        trusted = all(uid == trusted_uid for uid in uids)
+        if oversized and trusted_uid in uids:
+            reject('activity_unknown')
+            return False
+        return trusted
+
     count = 0
     try:
-        entries = os.scandir('/proc')
+        entries = os.scandir(proc_root)
     except OSError:
         reject('activity_unknown')
     with entries:
@@ -1147,11 +1182,21 @@ def activity_count():
             if not entry.name.isdigit() or int(entry.name) == os.getpid():
                 continue
             try:
-                with open(os.path.join('/proc', entry.name, 'cmdline'), 'rb') as handle:
-                    raw = handle.read(131_073)
+                process_descriptor = os.open(os.path.join(proc_root, entry.name), proc_flags)
+                try:
+                    if trusted_process(process_descriptor) is not True:
+                        continue
+                    descriptor = os.open('cmdline', os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                                         dir_fd=process_descriptor)
+                    try:
+                        raw = os.read(descriptor, 131_073)
+                    finally:
+                        os.close(descriptor)
+                finally:
+                    os.close(process_descriptor)
             except (FileNotFoundError, ProcessLookupError):
                 continue
-            except PermissionError:
+            except (PermissionError, OSError):
                 reject('activity_unknown')
             if len(raw) > 131_072:
                 reject('activity_unknown')

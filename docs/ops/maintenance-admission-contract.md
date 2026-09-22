@@ -13,6 +13,19 @@ mode-0600, single-link regular file. Peers validate identity across opening and
 acquire a nonblocking exclusive flock. A supplied descriptor number, PID,
 operation name, command line or claimed run ID is never authority.
 
+Until the pending-state protocol below is complete, the conservative activity
+veto remains enabled. Every current scanner may use a process name only after
+opening that PID directory through an `O_NOFOLLOW|O_DIRECTORY` descriptor,
+reading a bounded `status` record and requiring its real, effective, saved and
+filesystem UIDs to be root, then reading `cmdline` relative to that same
+descriptor. The `cmdline` inode owner is not authority: an unprivileged
+dumpable-disabled process can otherwise expose a root-owned proc inode while
+retaining an unprivileged kernel identity. Unprivileged same-name processes
+are ignored; a read or identity error for a root candidate remains fail-closed.
+The production trust uid and proc root are fixed to root and `/proc`; neither
+can be supplied by an operator or environment variable. Synthetic `Uid:` rows
+are used only by the local AST-based test harness.
+
 The following source paths define the enrollment inventory. Before rollout,
 bind each installed tool and unit to its verified version and enumerate its
 scheduler, operator and recovery entrypoints, including direct supported calls.
