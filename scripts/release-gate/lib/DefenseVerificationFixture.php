@@ -417,7 +417,11 @@ final class DefenseVerificationFixture
                 if ($state['phase'] === 'active') {
                     $this->assertOwnership(
                         $state,
-                        ($state['intents']['users']['api_admin']['stage'] ?? null) === 'prepared',
+                        in_array(
+                            $state['intents']['users']['api_admin']['stage'] ?? null,
+                            ['prepared', 'settings_prepared'],
+                            true,
+                        ),
                     );
                 } else {
                     $this->assertPreparedOwnership($state);
@@ -552,7 +556,7 @@ final class DefenseVerificationFixture
         ]);
         $id = (int) $this->db->insert_id();
         $salt = \generate_salt();
-        $this->insertExact('user_settings', [
+        $settings = [
             'id_users' => $id,
             'username' => $username,
             'password' => \hash_password($salt, $password ?? bin2hex(random_bytes(32))),
@@ -561,10 +565,24 @@ final class DefenseVerificationFixture
             'working_plan_exceptions' => '{}',
             'notifications' => 0,
             'google_sync' => 0,
+            'google_token' => null,
+            'google_calendar' => null,
+            'sync_past_days' => 30,
+            'sync_future_days' => 90,
+            'calendar_view' => 'default',
             'caldav_sync' => 0,
-        ]);
+            'caldav_url' => null,
+            'caldav_username' => null,
+            'caldav_password' => null,
+            'dashboard_range_start' => null,
+            'dashboard_range_end' => null,
+        ];
         $state['ids'][$key] = $id;
         $state['usernames'][$key] = $username;
+        $state['intents']['users'][$key]['settings_digest'] = $this->userSettingsDigest($settings);
+        $state['intents']['users'][$key]['stage'] = 'settings_prepared';
+        $this->journal($state);
+        $this->insertExact('user_settings', $settings);
         $state['intents']['users'][$key]['stage'] = 'complete';
         $this->journal($state);
         return $id;
@@ -639,10 +657,10 @@ final class DefenseVerificationFixture
     }
 
     /** @param array<string,mixed> $state */
-    private function assertOwnership(array $state, bool $allowPreparedApiAdmin = false): void
+    private function assertOwnership(array $state, bool $allowIncompleteApiAdmin = false): void
     {
         $apiAdminStage = $state['intents']['users']['api_admin']['stage'] ?? null;
-        if ($apiAdminStage === 'prepared' && !$allowPreparedApiAdmin) {
+        if (in_array($apiAdminStage, ['prepared', 'settings_prepared'], true) && !$allowIncompleteApiAdmin) {
             throw new RuntimeException('Appointments API principal creation is incomplete.');
         }
         foreach ($state['ids'] as $key => $id) {
@@ -693,9 +711,22 @@ final class DefenseVerificationFixture
                     $settings = $this->db
                         ->get_where('user_settings', ['id_users' => $state['ids'][$key]])
                         ->result_array();
-                    if ($allowPreparedApiAdmin && $key === 'api_admin' && $apiAdminStage === 'prepared') {
+                    if ($allowIncompleteApiAdmin && $key === 'api_admin' && $apiAdminStage === 'prepared') {
                         if ($settings !== []) {
                             throw new RuntimeException('Prepared Appointments API principal has unexpected settings.');
+                        }
+                        continue;
+                    }
+                    if ($allowIncompleteApiAdmin && $key === 'api_admin' && $apiAdminStage === 'settings_prepared') {
+                        if (
+                            count($settings) > 1 ||
+                            (count($settings) === 1 &&
+                                !$this->settingsMatchDigest(
+                                    $settings[0],
+                                    $state['intents']['users']['api_admin']['settings_digest'] ?? null,
+                                ))
+                        ) {
+                            throw new RuntimeException('Prepared Appointments API principal settings drifted.');
                         }
                         continue;
                     }
@@ -842,7 +873,7 @@ final class DefenseVerificationFixture
     {
         $ids = $state['ids'];
         $this->lockFixtureUsers($state, $alreadyCleaning);
-        $this->assertPreparedApiAdminSettingsAbsent($state);
+        $this->assertRecoverableApiAdminSettings($state);
         $this->assertServiceDependencies($state, $alreadyCleaning, $wasPrepared);
         foreach (['basic', 'bearer'] as $case) {
             $key = 'api_appointment_' . $case;
@@ -984,15 +1015,19 @@ final class DefenseVerificationFixture
         }
     }
 
-    /** The locked parent prevents a new settings FK while this range is checked and cleanup completes. */
-    private function assertPreparedApiAdminSettingsAbsent(array $state): void
+    /** The locked parent prevents a new settings FK while recovery is checked and cleanup completes. */
+    private function assertRecoverableApiAdminSettings(array $state): void
     {
         $intent = $state['intents']['users']['api_admin'] ?? null;
-        if (!is_array($intent) || ($intent['stage'] ?? null) !== 'prepared') {
+        $stage = is_array($intent) ? $intent['stage'] ?? null : null;
+        if (!in_array($stage, ['prepared', 'settings_prepared'], true)) {
             return;
         }
         $userId = (int) ($state['ids']['api_admin'] ?? 0);
         if ($userId < 1) {
+            if ($stage === 'settings_prepared') {
+                throw new RuntimeException('Prepared Appointments API principal ID is unavailable.');
+            }
             $email = $intent['email'] ?? null;
             if (!is_string($email) || $email === '') {
                 throw new RuntimeException('Prepared Appointments API principal identity is unavailable.');
@@ -1006,14 +1041,82 @@ final class DefenseVerificationFixture
             throw new RuntimeException('Prepared Appointments API principal user could not be resolved exactly.');
         }
         $settings = $this->db
-            ->query(
-                'SELECT id_users FROM `' . $this->db->dbprefix('user_settings') . '` WHERE id_users = ? FOR UPDATE',
-                [$userId],
-            )
+            ->query('SELECT * FROM `' . $this->db->dbprefix('user_settings') . '` WHERE id_users = ? FOR UPDATE', [
+                $userId,
+            ])
             ->result_array();
-        if ($settings !== []) {
+        if ($stage === 'prepared' && $settings !== []) {
             throw new RuntimeException('Prepared Appointments API principal has unexpected settings.');
         }
+        if (
+            $stage === 'settings_prepared' &&
+            (count($settings) > 1 ||
+                (count($settings) === 1 &&
+                    !$this->settingsMatchDigest($settings[0], $intent['settings_digest'] ?? null)))
+        ) {
+            throw new RuntimeException('Prepared Appointments API principal settings drifted.');
+        }
+    }
+
+    private function settingsMatchDigest(array $settings, mixed $expectedDigest): bool
+    {
+        return is_string($expectedDigest) &&
+            preg_match('/^[a-f0-9]{64}$/D', $expectedDigest) === 1 &&
+            hash_equals($expectedDigest, $this->userSettingsDigest($settings));
+    }
+
+    /** Canonical secret-free proof of every field inserted for one synthetic principal. */
+    private function userSettingsDigest(array $settings): string
+    {
+        $fields = [
+            'id_users',
+            'username',
+            'password',
+            'salt',
+            'working_plan',
+            'working_plan_exceptions',
+            'notifications',
+            'google_sync',
+            'google_token',
+            'google_calendar',
+            'sync_past_days',
+            'sync_future_days',
+            'calendar_view',
+            'caldav_sync',
+            'caldav_url',
+            'caldav_username',
+            'caldav_password',
+            'dashboard_range_start',
+            'dashboard_range_end',
+        ];
+        foreach ($fields as $field) {
+            if (!array_key_exists($field, $settings)) {
+                throw new RuntimeException('Appointments API principal settings proof is incomplete.');
+            }
+        }
+        $nullableString = static fn(mixed $value): ?string => $value === null ? null : (string) $value;
+        $canonical = [
+            'id_users' => (int) $settings['id_users'],
+            'username' => (string) $settings['username'],
+            'password' => (string) $settings['password'],
+            'salt' => (string) $settings['salt'],
+            'working_plan' => (string) $settings['working_plan'],
+            'working_plan_exceptions' => (string) $settings['working_plan_exceptions'],
+            'notifications' => (int) $settings['notifications'],
+            'google_sync' => (int) $settings['google_sync'],
+            'google_token' => $nullableString($settings['google_token']),
+            'google_calendar' => $nullableString($settings['google_calendar']),
+            'sync_past_days' => (int) $settings['sync_past_days'],
+            'sync_future_days' => (int) $settings['sync_future_days'],
+            'calendar_view' => (string) $settings['calendar_view'],
+            'caldav_sync' => (int) $settings['caldav_sync'],
+            'caldav_url' => $nullableString($settings['caldav_url']),
+            'caldav_username' => $nullableString($settings['caldav_username']),
+            'caldav_password' => $nullableString($settings['caldav_password']),
+            'dashboard_range_start' => $nullableString($settings['dashboard_range_start']),
+            'dashboard_range_end' => $nullableString($settings['dashboard_range_end']),
+        ];
+        return hash('sha256', json_encode($canonical, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES));
     }
 
     /** Lock and compare every child before deleting the synthetic service. */

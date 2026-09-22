@@ -166,8 +166,12 @@ final class DefenseVerificationFixtureTest extends TestCase
             512,
             JSON_THROW_ON_ERROR,
         );
-        self::assertSame('prepared', $journal['intents']['users']['api_admin']['stage']);
-        self::assertArrayNotHasKey('api_admin', $journal['ids']);
+        self::assertSame('settings_prepared', $journal['intents']['users']['api_admin']['stage']);
+        self::assertMatchesRegularExpression(
+            '/^[a-f0-9]{64}$/D',
+            $journal['intents']['users']['api_admin']['settings_digest'],
+        );
+        self::assertArrayHasKey('api_admin', $journal['ids']);
         self::assertSame('cleanup_pending', $this->fixture->verify());
 
         $email = 'defense_verify_' . $state['run_id'] . '_api_admin@synthetic.invalid';
@@ -199,9 +203,9 @@ final class DefenseVerificationFixtureTest extends TestCase
         );
         try {
             $this->fixture->deactivate();
-            self::fail('Cleanup must reject any settings for the prepared principal.');
+            self::fail('Cleanup must reject settings that differ from the prepared digest.');
         } catch (RuntimeException $error) {
-            self::assertStringContainsString('unexpected settings', $error->getMessage());
+            self::assertStringContainsString('settings drifted', $error->getMessage());
         }
         self::assertSame(1, $ci->db->get_where('users', ['id' => $userId])->num_rows());
         self::assertSame(1, $ci->db->get_where('user_settings', ['id_users' => $userId])->num_rows());
@@ -210,6 +214,74 @@ final class DefenseVerificationFixtureTest extends TestCase
         $this->fixture->deactivate();
         self::assertSame('clean', $this->fixture->verify());
         self::assertSame(0, $ci->db->get_where('users', ['id' => $userId])->num_rows());
+    }
+
+    public function testAppointmentsApiPrincipalRecoversFailureAfterSettingsInsertBeforeCompleteJournal(): void
+    {
+        $actor = $this->ordinary->activate();
+        $state = $this->fixture->activate('calendar_race', $actor);
+        $ci = &get_instance();
+        $database = $ci->db;
+        $proxy = new class ($database) {
+            public bool $inserted = false;
+
+            public function __construct(private readonly object $database) {}
+
+            public function insert(string $table, array $row): bool
+            {
+                if (
+                    !$this->inserted &&
+                    $table === 'user_settings' &&
+                    str_ends_with((string) ($row['username'] ?? ''), '_api_admin')
+                ) {
+                    if (!$this->database->insert($table, $row)) {
+                        return false;
+                    }
+                    $this->inserted = true;
+                    throw new RuntimeException('Injected failure after Appointments API settings insert.');
+                }
+                return $this->database->insert($table, $row);
+            }
+
+            public function __call(string $name, array $arguments): mixed
+            {
+                return $this->database->$name(...$arguments);
+            }
+        };
+        $databaseProperty = new ReflectionProperty(DefenseVerificationFixture::class, 'db');
+        $databaseProperty->setValue($this->fixture, $proxy);
+        try {
+            $this->fixture->prepareAppointmentsApi();
+            self::fail('Supplemental principal creation must surface the post-settings failure.');
+        } catch (RuntimeException $error) {
+            self::assertStringContainsString('after Appointments API settings insert', $error->getMessage());
+        } finally {
+            $databaseProperty->setValue($this->fixture, $database);
+        }
+        self::assertTrue($proxy->inserted);
+
+        $journalText = (string) file_get_contents($this->stateDirectory . '/defense-verification.json');
+        $journal = json_decode($journalText, true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame('settings_prepared', $journal['intents']['users']['api_admin']['stage']);
+        self::assertMatchesRegularExpression(
+            '/^[a-f0-9]{64}$/D',
+            $journal['intents']['users']['api_admin']['settings_digest'],
+        );
+        self::assertArrayHasKey('api_admin', $journal['ids']);
+        self::assertArrayNotHasKey('api_credentials', $journal);
+        self::assertSame('cleanup_pending', $this->fixture->verify());
+
+        $userId = (int) $journal['ids']['api_admin'];
+        $settings = $ci->db->get_where('user_settings', ['id_users' => $userId])->row_array();
+        self::assertIsArray($settings);
+        self::assertStringNotContainsString((string) $settings['password'], $journalText);
+        self::assertStringNotContainsString((string) $settings['salt'], $journalText);
+        self::assertSame(1, $ci->db->get_where('users', ['id' => $userId, 'notes' => $state['marker']])->num_rows());
+
+        $this->fixture->deactivate();
+        self::assertSame('clean', $this->fixture->verify());
+        self::assertSame(0, $ci->db->get_where('users', ['id' => $userId])->num_rows());
+        self::assertSame(0, $ci->db->get_where('user_settings', ['id_users' => $userId])->num_rows());
     }
 
     public function testAppointmentsApiPrincipalRecoversFailureBeforeUserInsert(): void
