@@ -239,17 +239,50 @@ def open_lock(parent, leaf, create=False):
     return descriptor
 
 
-def activity_count():
+def activity_count(proc_root='/proc', trusted_uid=0):
     patterns = (
         re.compile(r'(^|/)(?:deploy_ea\.sh|deployment_host_runner_v1\.php|zero_surprise_replay\.php)(?:\s|$)'),
         re.compile(r'(^|/)prod_(?:customers|provider)_ui_smoke\.sh(?:\s|$)'),
         re.compile(r'(^|/)(?:mysqldump|mariadb-dump|backup_easyappointments\.sh|backup_ea\.sh|ea_restore_verify_latest\.sh|fh-backup-set-producer-supervisor-v1|import_prod_backup\.sh)(?:\s|$)'),
         re.compile(r'(^|/)(?:prod_(?:session|build_cache|release_archive_dump)_retention\.sh)(?:\s|$)'),
     )
+    proc_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW
+
+    def trusted_process(process_descriptor):
+        try:
+            status_descriptor = os.open('status', os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                                       dir_fd=process_descriptor)
+            try:
+                status = os.read(status_descriptor, 4097)
+            finally:
+                os.close(status_descriptor)
+        except (FileNotFoundError, ProcessLookupError):
+            return None
+        except OSError:
+            reject()
+            return False
+        if len(status) > 4096:
+            reject()
+            return False
+        uid_rows = [line for line in status.splitlines() if line.startswith(b'Uid:')]
+        if len(uid_rows) != 1:
+            reject()
+            return False
+        fields = uid_rows[0].split()
+        if len(fields) != 5 or fields[0] != b'Uid:':
+            reject()
+            return False
+        try:
+            uids = [int(value) for value in fields[1:]]
+        except ValueError:
+            reject()
+            return False
+        return all(uid == trusted_uid for uid in uids)
+
     count = 0
     parent = os.getppid()
     try:
-        entries = os.scandir('/proc')
+        entries = os.scandir(proc_root)
     except OSError:
         reject()
     with entries:
@@ -257,11 +290,18 @@ def activity_count():
             if not entry.name.isdigit() or int(entry.name) == os.getpid():
                 continue
             try:
-                descriptor = os.open('/proc/' + entry.name + '/cmdline', os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+                process_descriptor = os.open(os.path.join(proc_root, entry.name), proc_flags)
                 try:
-                    raw = os.read(descriptor, 131_073)
+                    if trusted_process(process_descriptor) is not True:
+                        continue
+                    descriptor = os.open('cmdline', os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                                         dir_fd=process_descriptor)
+                    try:
+                        raw = os.read(descriptor, 131_073)
+                    finally:
+                        os.close(descriptor)
                 finally:
-                    os.close(descriptor)
+                    os.close(process_descriptor)
             except (FileNotFoundError, ProcessLookupError):
                 continue
             except (PermissionError, OSError):

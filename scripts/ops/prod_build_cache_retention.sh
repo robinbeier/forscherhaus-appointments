@@ -134,37 +134,80 @@ activity_count() {
 import os
 import re
 
-proc_root = os.environ.get('BUILD_CACHE_RETENTION_PROC_ROOT', '/proc')
-patterns = (
-    re.compile(r'(^|\s)docker(?:-compose)?\s+(?:build|builder\s+prune|buildx\s+(?:build|bake|prune))(?:\s|$)'),
-    re.compile(r'(^|\s)docker\s+compose\b.*(?:\s--build(?:\s|$)|\s(?:build|run|up)(?:\s|$))'),
-    re.compile(r'(^|\s)docker-compose\b.*(?:\s--build(?:\s|$)|\s(?:build|run|up)(?:\s|$))'),
-    re.compile(r'(^|/)buildctl(?:\s|$)'),
-    re.compile(r'(^|/)(?:deploy_ea\.sh|deployment_host_runner_v1\.php|zero_surprise_replay\.php)(?:\s|$)'),
-    re.compile(r'(^|/)prod_(?:customers|provider)_ui_smoke\.sh(?:\s|$)'),
-    re.compile(r'(^|/)(?:mysqldump|mariadb-dump|backup_easyappointments\.sh|backup_ea\.sh|ea_restore_verify_latest\.sh|backup_set_producer_v1\.py|fh-backup-set-producer-v1|fh-backup-set-producer-supervisor-v1|prod_backup_set_producer\.sh)(?:\s|$)'),
-)
+def activity_count(proc_root='/proc', trusted_uid=0):
+    patterns = (
+        re.compile(r'(^|\s)docker(?:-compose)?\s+(?:build|builder\s+prune|buildx\s+(?:build|bake|prune))(?:\s|$)'),
+        re.compile(r'(^|\s)docker\s+compose\b.*(?:\s--build(?:\s|$)|\s(?:build|run|up)(?:\s|$))'),
+        re.compile(r'(^|\s)docker-compose\b.*(?:\s--build(?:\s|$)|\s(?:build|run|up)(?:\s|$))'),
+        re.compile(r'(^|/)buildctl(?:\s|$)'),
+        re.compile(r'(^|/)(?:deploy_ea\.sh|deployment_host_runner_v1\.php|zero_surprise_replay\.php)(?:\s|$)'),
+        re.compile(r'(^|/)prod_(?:customers|provider)_ui_smoke\.sh(?:\s|$)'),
+        re.compile(r'(^|/)(?:mysqldump|mariadb-dump|backup_easyappointments\.sh|backup_ea\.sh|ea_restore_verify_latest\.sh|backup_set_producer_v1.py|fh-backup-set-producer-v1|fh-backup-set-producer-supervisor-v1|prod_backup_set_producer\.sh)(?:\s|$)'),
+    )
+    proc_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW
+    count = 0
 
-count = 0
-for entry in os.scandir(proc_root):
-    if not entry.name.isdigit() or int(entry.name) == os.getpid():
-        continue
+    def trusted_process(process_descriptor):
+        try:
+            status_descriptor = os.open('status', os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                                       dir_fd=process_descriptor)
+            try:
+                status = os.read(status_descriptor, 4097)
+            finally:
+                os.close(status_descriptor)
+        except (FileNotFoundError, ProcessLookupError):
+            return None
+        except OSError:
+            raise SystemExit(2)
+        if len(status) > 4096:
+            raise SystemExit(2)
+        uid_rows = [line for line in status.splitlines() if line.startswith(b'Uid:')]
+        if len(uid_rows) != 1:
+            raise SystemExit(2)
+        fields = uid_rows[0].split()
+        if len(fields) != 5 or fields[0] != b'Uid:':
+            raise SystemExit(2)
+        try:
+            uids = [int(value) for value in fields[1:]]
+        except ValueError:
+            raise SystemExit(2)
+        return all(uid == trusted_uid for uid in uids)
+
     try:
-        with open(os.path.join(proc_root, entry.name, 'cmdline'), 'rb') as handle:
-            raw = handle.read(131073)
-    except (FileNotFoundError, ProcessLookupError):
-        continue
-    except PermissionError:
+        entries = os.scandir(proc_root)
+    except OSError:
         raise SystemExit(2)
-    if len(raw) > 131072:
-        raise SystemExit(2)
-    if not raw:
-        continue
-    command = raw.replace(b'\0', b' ').decode('utf-8', 'replace').strip()
-    if any(pattern.search(command) for pattern in patterns):
-        count += 1
+    with entries:
+        for entry in entries:
+            if not entry.name.isdigit() or int(entry.name) == os.getpid():
+                continue
+            try:
+                process_descriptor = os.open(os.path.join(proc_root, entry.name), proc_flags)
+                try:
+                    if trusted_process(process_descriptor) is not True:
+                        continue
+                    descriptor = os.open('cmdline', os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                                         dir_fd=process_descriptor)
+                    try:
+                        raw = os.read(descriptor, 131073)
+                    finally:
+                        os.close(descriptor)
+                finally:
+                    os.close(process_descriptor)
+            except (FileNotFoundError, ProcessLookupError):
+                continue
+            except OSError:
+                raise SystemExit(2)
+            if len(raw) > 131072:
+                raise SystemExit(2)
+            if not raw:
+                continue
+            command = raw.replace(b'\0', b' ').decode('utf-8', 'replace').strip()
+            if any(pattern.search(command) for pattern in patterns):
+                count += 1
+    return count
 
-print(count)
+print(activity_count())
 PY
 }
 

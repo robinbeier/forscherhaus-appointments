@@ -57,9 +57,9 @@ final class BackupSetProducerContractTest extends TestCase
         self::assertStringNotContainsString("'mysqldump'", $this->helper);
         $activity = substr(
             $this->helper,
-            (int) strpos($this->helper, 'def activity_count():'),
+            (int) strpos($this->helper, 'def activity_count('),
             (int) strpos($this->helper, 'def assert_activity_gate') -
-                (int) strpos($this->helper, 'def activity_count():'),
+                (int) strpos($this->helper, 'def activity_count('),
         );
         self::assertStringContainsString(
             "SUPERVISOR_COMMAND = '/usr/bin/bash /usr/local/libexec/fh-backup-set-producer-supervisor-v1'",
