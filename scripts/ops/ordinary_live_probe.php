@@ -308,14 +308,11 @@ try {
                 throw $error;
             }
         } elseif ($action === 'appointments-api') {
-            $apiToken = (string) setting('api_token');
-            if ($apiToken === '') {
-                throw new RuntimeException('Appointments API bearer prerequisite is unavailable.');
-            }
             $supplemental = $evidence->run(
                 'supplemental_activate',
                 fn(): array => $verificationFixture->activate('calendar_race', $context),
             );
+            $apiToken = $verificationFixture->prepareAppointmentsApiBearerToken();
             $supplemental = $verificationFixture->prepareAppointmentsApi();
             $result['evidence'] = AppointmentsApiWriteProbe::forApp(
                 'http://localhost',

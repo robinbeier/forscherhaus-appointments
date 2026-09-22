@@ -26,14 +26,28 @@ final class AppointmentsApiWriteProbeTest extends TestCase
         $fixture = new DefenseVerificationFixture($directory);
         $server = null;
         $db = get_instance()->db;
-        $tokenRow = $db->get_where('settings', ['name' => 'api_token'])->row_array();
-        self::assertIsArray($tokenRow);
-        $token = bin2hex(random_bytes(32));
+        $tokenRows = $db->get_where('settings', ['name' => 'api_token'])->result_array();
+        if (count($tokenRows) !== 1 || (int) ($tokenRows[0]['id'] ?? 0) < 1) {
+            self::fail('The isolated stack must contain exactly one API token setting.');
+        }
+        $tokenRow = $tokenRows[0];
+        self::assertTrue(
+            $db->update('settings', ['value' => ''], ['id' => (int) $tokenRow['id'], 'name' => 'api_token']),
+        );
         try {
             $actor = $ordinary->activate();
             $fixture->activate('calendar_race', $actor);
+            $queryCount = count($db->queries);
+            $token = $fixture->prepareAppointmentsApiBearerToken();
+            self::assertFalse(
+                str_contains(json_encode(array_slice($db->queries, $queryCount), JSON_THROW_ON_ERROR), $token),
+            );
+            self::assertFalse(str_contains((string) $db->last_query(), $token));
             $state = $fixture->prepareAppointmentsApi();
-            self::assertTrue($db->update('settings', ['value' => $token], ['name' => 'api_token']));
+            $journalText = (string) file_get_contents($directory . '/defense-verification.json');
+            $journal = json_decode($journalText, true, 512, JSON_THROW_ON_ERROR);
+            self::assertTrue(hash_equals(hash('sha256', $token), $journal['intents']['api_token']['candidate_digest']));
+            self::assertFalse(str_contains($journalText, $token));
             $server = new DefenseCycleHttpServer();
             $probe = AppointmentsApiWriteProbe::forApp(
                 $server->baseUrl,
@@ -53,13 +67,21 @@ final class AppointmentsApiWriteProbeTest extends TestCase
                 ],
                 $result['auth_statuses'],
             );
+            self::assertFalse(str_contains(json_encode($result, JSON_THROW_ON_ERROR), $token));
             self::assertNotEmpty($fixture->apiSnapshot()['sentinel']);
+            $fixture->deactivate();
+            $restored = $db->get_where('settings', ['id' => (int) $tokenRow['id'], 'name' => 'api_token'])->row_array();
+            self::assertTrue(is_array($restored) && ($restored['value'] ?? null) === '');
         } finally {
             $server?->close();
-            $db->update('settings', ['value' => $tokenRow['value']], ['name' => 'api_token']);
             if (is_file($directory . '/defense-verification.json')) {
                 $fixture->deactivate();
             }
+            $db->update(
+                'settings',
+                ['value' => $tokenRow['value']],
+                ['id' => (int) $tokenRow['id'], 'name' => 'api_token'],
+            );
             if (is_file($directory . '/state.json')) {
                 $ordinary->deactivate();
             }
