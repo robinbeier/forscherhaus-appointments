@@ -271,6 +271,53 @@ final class AppointmentsModelLockOrderTest extends TestCase
         $this->assertSame([['appointments.id', 'ASC']], $database->orderBy);
     }
 
+    public function testSparseApiUpdateLocksSortedUsersThenServiceThenAppointment(): void
+    {
+        $database = new AppointmentsApiUpdateLockOrderFakeDatabase();
+        $CI = &get_instance();
+        $originalDb = $CI->db;
+        $CI->db = $database;
+
+        try {
+            $model = new class extends Appointments_model {
+                public function __construct() {}
+
+                public function validate(array $appointment): void {}
+
+                protected function should_sync_buffer_unavailabilities(array $original, array $updated): bool
+                {
+                    return false;
+                }
+            };
+
+            $this->assertSame(99, $model->update_api(99, ['id_users_customer' => 40, 'notes' => 'changed']));
+        } finally {
+            $CI->db = $originalDb;
+        }
+
+        $this->assertSame(
+            [
+                'begin',
+                'appointment_snapshot',
+                'role_snapshot',
+                'user_snapshot',
+                'service_snapshot',
+                'users_lock',
+                'services_lock',
+                'appointment_lock',
+                'appointment_update',
+                'commit',
+            ],
+            $database->events,
+        );
+        $this->assertSame([20, 30, 40], $database->queries[4]['bindings']);
+        $this->assertStringContainsString('ORDER BY `id` ASC FOR UPDATE', $database->queries[4]['sql']);
+        $this->assertSame([50], $database->queries[5]['bindings']);
+        $this->assertStringContainsString('ORDER BY `id` ASC FOR UPDATE', $database->queries[5]['sql']);
+        $this->assertSame([99], $database->queries[6]['bindings']);
+        $this->assertStringContainsString('FOR UPDATE', $database->queries[6]['sql']);
+    }
+
     private function createModel(): Appointments_model
     {
         $reflection = new ReflectionClass(Appointments_model::class);
@@ -473,5 +520,124 @@ final class AppointmentsModelLockOrderFakeQuery
     public function result_array(): array
     {
         return $this->row === [] ? [] : [$this->row];
+    }
+}
+
+final class AppointmentsApiUpdateLockOrderFakeDatabase
+{
+    /** @var list<string> */
+    public array $events = [];
+
+    /** @var list<array{sql:string,bindings:list<mixed>}> */
+    public array $queries = [];
+
+    private bool $transactionActive = false;
+
+    public function dbprefix(string $table): string
+    {
+        return 'ea_' . $table;
+    }
+
+    /** @param list<mixed> $bindings */
+    public function query(string $sql, array $bindings = []): AppointmentsApiUpdateLockOrderFakeQuery
+    {
+        $this->queries[] = ['sql' => $sql, 'bindings' => $bindings];
+        $locked = str_contains($sql, 'FOR UPDATE');
+
+        if (str_contains($sql, 'ea_appointments')) {
+            $this->events[] = $locked ? 'appointment_lock' : 'appointment_snapshot';
+
+            return new AppointmentsApiUpdateLockOrderFakeQuery([
+                [
+                    'id' => 99,
+                    'id_users_customer' => 30,
+                    'id_users_provider' => 20,
+                    'id_services' => 50,
+                    'is_unavailability' => false,
+                    'start_datetime' => '2035-02-17 09:00:00',
+                    'end_datetime' => '2035-02-17 09:30:00',
+                    'notes' => 'before',
+                ],
+            ]);
+        }
+
+        if (str_contains($sql, 'ea_roles')) {
+            $this->events[] = 'role_snapshot';
+
+            return new AppointmentsApiUpdateLockOrderFakeQuery([
+                ['id' => 3, 'slug' => DB_SLUG_CUSTOMER],
+                ['id' => 2, 'slug' => DB_SLUG_PROVIDER],
+            ]);
+        }
+
+        if (str_contains($sql, 'ea_users')) {
+            $this->events[] = $locked ? 'users_lock' : 'user_snapshot';
+
+            return new AppointmentsApiUpdateLockOrderFakeQuery([
+                ['id' => 20, 'id_roles' => 2],
+                ['id' => 30, 'id_roles' => 3],
+                ['id' => 40, 'id_roles' => 3],
+            ]);
+        }
+
+        $this->events[] = $locked ? 'services_lock' : 'service_snapshot';
+
+        return new AppointmentsApiUpdateLockOrderFakeQuery([['id' => 50]]);
+    }
+
+    public function trans_active(): bool
+    {
+        return $this->transactionActive;
+    }
+
+    public function trans_begin(): bool
+    {
+        $this->events[] = 'begin';
+        $this->transactionActive = true;
+        return true;
+    }
+
+    public function trans_commit(): bool
+    {
+        $this->events[] = 'commit';
+        $this->transactionActive = false;
+        return true;
+    }
+
+    public function trans_rollback(): bool
+    {
+        $this->events[] = 'rollback';
+        $this->transactionActive = false;
+        return true;
+    }
+
+    public function trans_status(): bool
+    {
+        return true;
+    }
+
+    /** @param array<string, mixed> $data @param array<string, mixed> $where */
+    public function update(string $table, array $data, array $where): bool
+    {
+        $this->events[] = 'appointment_update';
+        return true;
+    }
+}
+
+final class AppointmentsApiUpdateLockOrderFakeQuery
+{
+    /** @param list<array<string, mixed>> $rows */
+    public function __construct(private readonly array $rows) {}
+
+    /** @return array<string, mixed> */
+    public function row_array(): array
+    {
+        return $this->rows[0] ?? [];
+    }
+
+    /** @return list<array<string, mixed>> */
+    public function result_array(): array
+    {
+        return $this->rows;
     }
 }

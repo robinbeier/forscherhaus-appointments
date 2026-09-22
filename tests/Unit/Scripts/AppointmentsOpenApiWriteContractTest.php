@@ -28,5 +28,11 @@ final class AppointmentsOpenApiWriteContractTest extends TestCase
             self::assertArrayHasKey('400', $responses);
             self::assertArrayHasKey('415', $responses);
         }
+
+        $update = $spec['paths']['/appointments/{appointmentId}']['put'] ?? null;
+        self::assertIsArray($update);
+        self::assertArrayHasKey('409', $update['responses'] ?? []);
+        self::assertStringContainsString('sparse update', strtolower((string) ($update['description'] ?? '')));
+        self::assertStringContainsString('does not use etags', strtolower((string) ($update['description'] ?? '')));
     }
 }

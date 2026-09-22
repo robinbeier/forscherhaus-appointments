@@ -293,6 +293,10 @@ paths:
             tags:
                 - appointments
             summary: Update an appointment
+            description: >-
+                Applies a sparse update. Omitted fields are preserved from the appointment row locked by the
+                update transaction. This endpoint does not use ETags; concurrent changes to requested fields,
+                parent relationships, or provider/customer roles return 409 Conflict.
             parameters:
                 - name: appointmentId
                   in: path
@@ -322,6 +326,12 @@ paths:
                     description: Unauthorized
                 '404':
                     description: Not Found
+                '409':
+                    description: Concurrent appointment, relationship, or role change
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
                 '415':
                     description: Unsupported Media Type
                     content:

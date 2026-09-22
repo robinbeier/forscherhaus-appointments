@@ -280,23 +280,10 @@ class Appointments_api_v1 extends EA_Controller
         }
 
         try {
-            $occurrences = $this->appointments_model->get(['id' => $id]);
-
-            if (empty($occurrences)) {
-                response('', 404);
-
-                return;
-            }
-
-            $original_appointment = $occurrences[0];
-
             $appointment = $this->apiRequestDtoFactory()->buildAppointmentsWritePayloadDto()->payload;
 
-            $this->appointments_model->api_decode($appointment, $original_appointment);
-            // The URI is the sole update target; keep it authoritative after decoding.
-            $appointment['id'] = $id;
-
-            $appointment_id = $this->appointments_model->save($appointment);
+            $this->appointments_model->api_decode_sparse($appointment);
+            $appointment_id = $this->appointments_model->update_api($id, $appointment);
 
             $updated_appointment = $this->appointments_model->find($appointment_id);
 
@@ -376,7 +363,10 @@ class Appointments_api_v1 extends EA_Controller
     {
         $status = (int) $exception->getCode();
 
-        if (!in_array($status, [400, 415], true)) {
+        $is_api_update_outcome =
+            $exception instanceof AppointmentApiUpdateException && in_array($status, [400, 404, 409], true);
+
+        if (!$is_api_update_outcome && !in_array($status, [400, 415], true)) {
             return false;
         }
 
