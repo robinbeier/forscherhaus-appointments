@@ -6,7 +6,7 @@ action=${1:-preflight}
 release=${2:-}
 app_root=${APP_ROOT:-/var/www/html/easyappointments}
 case "$action" in
-    preflight|account|methods|customer-boundary|calendar-race|session|cleanup|verify) ;;
+    preflight|account|methods|customer-boundary|calendar-race|appointments-api|session|cleanup|verify) ;;
     *) echo 'unsupported action' >&2; exit 64 ;;
 esac
 [[ $# == 2 && "$release" =~ ^ea_[a-zA-Z0-9_]+$ ]] || { echo 'action and expected release required' >&2; exit 64; }
@@ -25,6 +25,7 @@ for path in "$probe" "$script_dir/../release-gate/lib/OrdinaryLiveFixture.php" \
     "$script_dir/../release-gate/lib/AccountSecurityMatrixProbe.php" \
     "$script_dir/../release-gate/lib/CustomerRoleBoundaryProbe.php" \
     "$script_dir/../release-gate/lib/CalendarResponsibilityRaceProbe.php" \
+    "$script_dir/../release-gate/lib/AppointmentsApiWriteProbe.php" \
     "$script_dir/../release-gate/lib/DefenseVerificationFixture.php" \
     "$script_dir/../release-gate/lib/GateHttpClient.php" \
     "$script_dir/../../deploy_ea.sh" /root/deploy_ea.sh; do
@@ -181,6 +182,9 @@ case "$action" in
         ;;
     calendar-race)
         invoke calendar-race
+        ;;
+    appointments-api)
+        invoke appointments-api
         ;;
     session)
         invoke account

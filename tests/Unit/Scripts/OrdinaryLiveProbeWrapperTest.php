@@ -57,6 +57,7 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
                 'AccountSecurityMatrixProbe.php',
                 'CustomerRoleBoundaryProbe.php',
                 'CalendarResponsibilityRaceProbe.php',
+                'AppointmentsApiWriteProbe.php',
                 'DefenseVerificationFixture.php',
             ]
             as $file
@@ -203,6 +204,7 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
                 'methods' => 'provider',
                 'customer-boundary' => 'admin',
                 'calendar-race' => 'provider',
+                'appointments-api' => 'provider',
             ]
             as $action => $role
         ) {

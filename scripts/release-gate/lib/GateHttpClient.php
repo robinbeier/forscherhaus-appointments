@@ -135,6 +135,36 @@ final class GateHttpClient
         );
     }
 
+    /**
+     * Send an exact request body to an app-relative path. This is limited to
+     * the ordinary write verbs so release gates can verify malformed JSON and
+     * content-type rejection without inventing a second HTTP client.
+     */
+    public function requestRawApp(
+        string $method,
+        string $path,
+        string $body,
+        ?string $contentType,
+        ?int $timeoutSeconds = null,
+    ): GateHttpResponse {
+        $normalizedMethod = strtoupper(trim($method));
+        if (!in_array($normalizedMethod, ['POST', 'PUT'], true)) {
+            throw new RuntimeException('Unsupported raw app request method: "' . $method . '".');
+        }
+
+        return $this->request(
+            $normalizedMethod,
+            $this->buildAppUrl($path),
+            $body,
+            $timeoutSeconds ?? $this->defaultTimeoutSeconds,
+            true,
+            true,
+            false,
+            false,
+            $contentType,
+        );
+    }
+
     public function getAbsolute(string $url, ?int $timeoutSeconds = null): GateHttpResponse
     {
         return $this->request('GET', $url, null, $timeoutSeconds ?? $this->defaultTimeoutSeconds, false, false);
@@ -174,17 +204,18 @@ final class GateHttpClient
     }
 
     /**
-     * @param array<string, mixed>|null $form
+     * @param array<string, mixed>|string|null $form
      */
     private function request(
         string $method,
         string $url,
-        ?array $form,
+        array|string|null $form,
         int $timeoutSeconds,
         bool $useCookieJar = true,
         bool $consumeResponseCookies = true,
         bool $noBody = false,
         bool $jsonBody = false,
+        ?string $contentType = null,
     ): GateHttpResponse {
         if (!function_exists('curl_init')) {
             throw new RuntimeException('ext-curl is required for the release gate.');
@@ -253,6 +284,8 @@ final class GateHttpClient
         $requestHeaders = ['Accept: */*'];
         if ($jsonBody) {
             $requestHeaders[] = 'Content-Type: application/json';
+        } elseif ($contentType !== null) {
+            $requestHeaders[] = 'Content-Type: ' . $contentType;
         }
         if ($this->isSameOrigin($url, $this->baseUrl)) {
             foreach ($this->additionalHeaders as $name => $value) {
@@ -287,9 +320,11 @@ final class GateHttpClient
         ]);
 
         if ($form !== null) {
-            $body = $jsonBody
-                ? json_encode($form, JSON_THROW_ON_ERROR)
-                : http_build_query($form, '', '&', PHP_QUERY_RFC3986);
+            $body = is_string($form)
+                ? $form
+                : ($jsonBody
+                    ? json_encode($form, JSON_THROW_ON_ERROR)
+                    : http_build_query($form, '', '&', PHP_QUERY_RFC3986));
             curl_setopt($curl, CURLOPT_POSTFIELDS, $body);
         }
 
