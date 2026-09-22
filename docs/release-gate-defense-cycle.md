@@ -311,8 +311,15 @@ statement so it never enters CodeIgniter-rendered SQL or its query cache. This
 path requires the configured native `mysqli` connection and stops after the
 durable intent but before mutation for any other driver or connection shape.
 Cleanup accepts only the same empty row or the digest-identical candidate and restores the empty value under lock;
-missing, duplicate or drifted rows stop fail-closed. Token values never enter the
-journal or probe evidence.
+after the journal enters `cleaning`, this restore commits and is re-read before
+the remaining fixture cleanup starts in a separate transaction. A later fixture
+guard failure therefore leaves the token empty while preserving the journal and
+remaining rows for retry. Missing, duplicate or drifted rows stop fail-closed.
+Preparation, guarded API deletion and deactivation also stop before waiting for
+the lifecycle lock or changing journal/database state when the shared connection
+already has an active transaction. The same check repeats under the lock, so
+every token change and restore remains independently commit-visible. Token
+values never enter the journal or probe evidence.
 Each API row has exact create, update and delete intent before the corresponding
 localhost HTTP mutation. The probe checks persistence, URI target binding,
 server-generated hash continuity and repeated DELETE. Before each first DELETE,

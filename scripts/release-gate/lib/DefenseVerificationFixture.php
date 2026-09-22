@@ -20,6 +20,7 @@ final class DefenseVerificationFixture
     private const SCHEMA = 'defense-verification-fixture.v1';
     private const MAX_TTL = 600;
     private const PROFILES = ['customer_boundary', 'calendar_race'];
+    private const ACTIVE_TRANSACTION_ERROR = 'Defense verification fixture cannot run inside an active database transaction.';
 
     private object $db;
     private string $directory;
@@ -150,7 +151,9 @@ final class DefenseVerificationFixture
     /** Return the existing Bearer token, or temporarily fill one exact empty setting. */
     public function prepareAppointmentsApiBearerToken(): string
     {
+        $this->assertNoActiveDatabaseTransaction();
         return $this->withLock(function (): string {
+            $this->assertNoActiveDatabaseTransaction();
             $state = $this->readState();
             $this->validateState($state);
             if ($state['phase'] !== 'active' || $state['profile'] !== 'calendar_race') {
@@ -357,7 +360,9 @@ final class DefenseVerificationFixture
     public function guardApiAppointmentDelete(string $case, callable $delete): mixed
     {
         $this->assertApiCase($case);
+        $this->assertNoActiveDatabaseTransaction();
         return $this->withLock(function () use ($case, $delete): mixed {
+            $this->assertNoActiveDatabaseTransaction();
             $state = $this->readState();
             $this->validateState($state);
             $intent = $this->apiIntent($state, $case, 'delete_prepared');
@@ -505,10 +510,12 @@ final class DefenseVerificationFixture
 
     public function deactivate(): void
     {
+        $this->assertNoActiveDatabaseTransaction();
         $this->withLock(function (): void {
             if (!file_exists($this->stateFile)) {
                 return;
             }
+            $this->assertNoActiveDatabaseTransaction();
             $state = $this->readState();
             $this->validateState($state);
             if ($state['phase'] === 'recovery_required') {
@@ -540,6 +547,8 @@ final class DefenseVerificationFixture
                 $state['phase'] = 'cleaning';
                 $this->writeState($state);
             }
+            $this->restoreTemporaryApiTokenCommitted($state);
+            $this->assertNoActiveDatabaseTransaction();
             if (!$this->db->trans_begin()) {
                 throw new RuntimeException('Defense verification cleanup transaction could not start.');
             }
@@ -984,7 +993,6 @@ final class DefenseVerificationFixture
     private function deleteOwned(array $state, bool $alreadyCleaning, bool $wasPrepared): void
     {
         $ids = $state['ids'];
-        $this->restoreTemporaryApiToken($state);
         $this->lockFixtureUsers($state, $alreadyCleaning);
         $this->assertRecoverableApiAdminSettings($state);
         $this->assertServiceDependencies($state, $alreadyCleaning, $wasPrepared);
@@ -1142,6 +1150,57 @@ final class DefenseVerificationFixture
             ($restored[0]['value'] ?? null) !== ''
         ) {
             throw new RuntimeException('Temporary Appointments API bearer prerequisite could not be restored.');
+        }
+    }
+
+    /** Commit token recovery before any later fixture guard or mutation can roll back. */
+    private function restoreTemporaryApiTokenCommitted(array $state): void
+    {
+        if ($this->apiTokenIntent($state) === null) {
+            return;
+        }
+        $this->assertNoActiveDatabaseTransaction();
+        if (!$this->db->trans_begin()) {
+            throw new RuntimeException('Temporary Appointments API bearer recovery transaction could not start.');
+        }
+        try {
+            $this->restoreTemporaryApiToken($state);
+            if ($this->db->trans_status() === false || !$this->db->trans_commit()) {
+                throw new RuntimeException('Temporary Appointments API bearer recovery transaction could not commit.');
+            }
+        } catch (Throwable $error) {
+            $this->db->trans_rollback();
+            throw $error;
+        }
+        $this->assertTemporaryApiTokenRestored($state);
+    }
+
+    /** Every fixture-owned commit must remain independent from caller state. */
+    private function assertNoActiveDatabaseTransaction(): void
+    {
+        if ($this->db->trans_active()) {
+            throw new RuntimeException(self::ACTIVE_TRANSACTION_ERROR);
+        }
+    }
+
+    /** Verify the committed recovery without accepting a missing, duplicate or changed row. */
+    private function assertTemporaryApiTokenRestored(array $state): void
+    {
+        $intent = $this->apiTokenIntent($state);
+        if ($intent === null) {
+            return;
+        }
+        $rows = $this->db
+            ->query('SELECT id, value FROM `' . $this->db->dbprefix('settings') . '` WHERE name = ? ORDER BY id ASC', [
+                'api_token',
+            ])
+            ->result_array();
+        if (
+            count($rows) !== 1 ||
+            (int) ($rows[0]['id'] ?? 0) !== $intent['setting_id'] ||
+            ($rows[0]['value'] ?? null) !== ''
+        ) {
+            throw new RuntimeException('Temporary Appointments API bearer recovery commit could not be verified.');
         }
     }
 
