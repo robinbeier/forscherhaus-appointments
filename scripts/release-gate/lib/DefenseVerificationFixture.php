@@ -257,10 +257,11 @@ final class DefenseVerificationFixture
     }
 
     /** Journal the exact recoverable identity before one API POST. */
-    public function prepareApiAppointment(string $case): array
+    public function prepareApiAppointment(string $case, array $window = []): array
     {
         $this->assertApiCase($case);
-        return $this->withLock(function () use ($case): array {
+        $this->assertApiWindow($window);
+        return $this->withLock(function () use ($case, $window): array {
             $state = $this->readState();
             $this->validateState($state);
             $this->assertApiReady($state);
@@ -280,6 +281,7 @@ final class DefenseVerificationFixture
                 'providerId' => (int) $state['actor_id'],
                 'serviceId' => (int) $state['service_id'],
             ];
+            $payload = array_replace($payload, $window);
             $state['intents']['api_appointments'][$case] = ['stage' => 'create_prepared', 'create' => $payload];
             $this->writeState($state);
             return $payload;
@@ -303,10 +305,11 @@ final class DefenseVerificationFixture
         });
     }
 
-    public function prepareApiAppointmentUpdate(string $case): array
+    public function prepareApiAppointmentUpdate(string $case, array $window = []): array
     {
         $this->assertApiCase($case);
-        return $this->withLock(function () use ($case): array {
+        $this->assertApiWindow($window);
+        return $this->withLock(function () use ($case, $window): array {
             $state = $this->readState();
             $this->validateState($state);
             $this->assertOwnership($state);
@@ -316,6 +319,7 @@ final class DefenseVerificationFixture
             $payload['color'] = $case === 'basic' ? '#123456' : '#654321';
             $payload['status'] = 'Confirmed';
             $payload['notes'] = $state['marker'] . ':api:' . $case . ':updated';
+            $payload = array_replace($payload, $window);
             $state['intents']['api_appointments'][$case]['update'] = $payload;
             $state['intents']['api_appointments'][$case]['stage'] = 'update_prepared';
             $this->writeState($state);
@@ -334,6 +338,22 @@ final class DefenseVerificationFixture
             $this->assertApiAppointment($row, $intent['update']);
             $this->assertApiHashDigest($row, $intent['hash_digest']);
             $state['intents']['api_appointments'][$case]['stage'] = 'updated';
+            $this->writeState($state);
+        });
+    }
+
+    public function confirmApiAppointmentUnchanged(string $case): void
+    {
+        $this->assertApiCase($case);
+        $this->withLock(function () use ($case): void {
+            $state = $this->readState();
+            $this->validateState($state);
+            $intent = $this->apiIntent($state, $case, 'update_prepared');
+            $row = $this->apiAppointmentRow((int) $state['ids']['api_appointment_' . $case]);
+            $this->assertApiAppointment($row, $intent['create']);
+            $this->assertApiHashDigest($row, $intent['hash_digest']);
+            unset($state['intents']['api_appointments'][$case]['update']);
+            $state['intents']['api_appointments'][$case]['stage'] = 'created';
             $this->writeState($state);
         });
     }
@@ -1623,6 +1643,24 @@ final class DefenseVerificationFixture
     {
         if (!in_array($case, ['basic', 'bearer'], true)) {
             throw new InvalidArgumentException('Unsupported Appointments API verification case.');
+        }
+    }
+
+    /** @param array<string,mixed> $window */
+    private function assertApiWindow(array $window): void
+    {
+        if ($window === []) {
+            return;
+        }
+        if (
+            array_keys($window) !== ['start', 'end'] ||
+            !is_string($window['start']) ||
+            !is_string($window['end']) ||
+            !\validate_datetime($window['start']) ||
+            !\validate_datetime($window['end']) ||
+            $window['start'] >= $window['end']
+        ) {
+            throw new InvalidArgumentException('Invalid Appointments API verification window.');
         }
     }
 

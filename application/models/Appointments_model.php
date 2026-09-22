@@ -16,7 +16,11 @@
  *
  * @package Models
  */
-final class AppointmentApiUpdateException extends RuntimeException {}
+class AppointmentApiWriteException extends RuntimeException {}
+
+final class AppointmentApiUpdateException extends AppointmentApiWriteException {}
+
+final class AppointmentApiOverlapException extends AppointmentApiWriteException {}
 
 class Appointments_model extends EA_Model
 {
@@ -79,6 +83,103 @@ class Appointments_model extends EA_Model
             return $this->insert($appointment);
         } else {
             return $this->update($appointment);
+        }
+    }
+
+    /**
+     * Create an ordinary appointment through the authenticated API.
+     *
+     * This path owns the API-only primary-overlap rule. Generic model writes
+     * remain unchanged for backoffice and public-booking callers.
+     *
+     * @param array<string, mixed> $appointment
+     */
+    public function create_api(array $appointment): int
+    {
+        if (!empty($appointment['id'])) {
+            throw new AppointmentApiWriteException('The appointment create payload is invalid.', 400);
+        }
+
+        $appointment['is_unavailability'] = false;
+        $owns_transaction = false;
+
+        if (!$this->db->trans_active()) {
+            if (!$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start appointment API create transaction.');
+            }
+
+            $owns_transaction = true;
+        }
+
+        try {
+            $user_role_expectations = $this->api_update_user_role_expectations($appointment, $appointment);
+            $user_ids = $this->sorted_parent_ids(array_keys($user_role_expectations));
+            $service_ids = $this->sorted_parent_ids([$appointment['id_services'] ?? null]);
+            $role_ids = $this->api_update_role_ids();
+            $user_snapshot = $this->snapshot_api_update_users($user_ids);
+            $service_snapshot = $this->snapshot_api_update_services($service_ids);
+
+            $this->assert_static_api_update_relationships(
+                $user_role_expectations,
+                $role_ids,
+                $user_snapshot,
+                $service_ids,
+                $service_snapshot,
+            );
+
+            try {
+                $this->validate($appointment);
+            } catch (InvalidArgumentException $exception) {
+                throw new AppointmentApiWriteException($exception->getMessage(), 400, $exception);
+            }
+
+            // The provider-user lock is the per-provider serialization point.
+            // It precedes services and appointments in the canonical order.
+            $locked_users = $this->lock_api_update_users($user_ids);
+
+            if ($this->api_update_parent_rows_changed($user_snapshot, $locked_users, ['id_roles'])) {
+                throw new AppointmentApiWriteException('Appointment user roles changed during the create.', 409);
+            }
+
+            $this->assert_locked_api_update_roles($user_role_expectations, $role_ids, $locked_users);
+
+            $locked_services = $this->lock_api_update_services($service_ids);
+
+            if ($this->api_update_parent_rows_changed($service_snapshot, $locked_services)) {
+                throw new AppointmentApiWriteException('Appointment services changed during the create.', 409);
+            }
+
+            $locked_appointments = $this->lock_api_primary_appointment_scope([(int) $appointment['id_users_provider']]);
+            $this->assert_no_api_primary_overlap($appointment, $locked_appointments);
+
+            $appointment['book_datetime'] = date('Y-m-d H:i:s');
+            $appointment['create_datetime'] = date('Y-m-d H:i:s');
+            $appointment['update_datetime'] = date('Y-m-d H:i:s');
+            $appointment['hash'] = bin2hex(random_bytes(32));
+
+            if (!$this->db->insert('appointments', $appointment)) {
+                throw new RuntimeException('Could not insert appointment.');
+            }
+
+            $appointment_id = (int) $this->db->insert_id();
+            $created_appointment = $this->find($appointment_id);
+            $this->sync_buffer_unavailabilities($created_appointment);
+
+            if ($this->db->trans_status() === false) {
+                throw new RuntimeException('Could not save appointment API create transaction.');
+            }
+
+            if ($owns_transaction && !$this->commit_api_write_transaction()) {
+                throw new RuntimeException('Could not commit appointment transaction.');
+            }
+
+            return $appointment_id;
+        } catch (Throwable $exception) {
+            if ($owns_transaction) {
+                $this->db->trans_rollback();
+            }
+
+            throw $exception;
         }
     }
 
@@ -173,7 +274,18 @@ class Appointments_model extends EA_Model
                 throw new AppointmentApiUpdateException('Appointment services changed during the update.', 409);
             }
 
-            $locked_appointment = $this->lock_api_update_appointment($appointment_id);
+            $locked_appointments = $this->lock_api_primary_appointment_scope(
+                [(int) ($snapshot['id_users_provider'] ?? 0), (int) ($requested['id_users_provider'] ?? 0)],
+                $appointment_id,
+            );
+            $locked_appointment = [];
+
+            foreach ($locked_appointments as $candidate) {
+                if ((int) ($candidate['id'] ?? 0) === $appointment_id) {
+                    $locked_appointment = $candidate;
+                    break;
+                }
+            }
 
             if ($locked_appointment === []) {
                 throw new AppointmentApiUpdateException('The appointment was not found.', 404);
@@ -211,6 +323,8 @@ class Appointments_model extends EA_Model
                 );
             }
 
+            $this->assert_no_api_primary_overlap($updated_appointment, $locked_appointments);
+
             $write = $changes;
             $write['update_datetime'] = date('Y-m-d H:i:s');
 
@@ -228,7 +342,7 @@ class Appointments_model extends EA_Model
                 throw new RuntimeException('Could not save appointment API update transaction.');
             }
 
-            if ($owns_transaction && !$this->db->trans_commit()) {
+            if ($owns_transaction && !$this->commit_api_write_transaction()) {
                 throw new RuntimeException('Could not commit appointment transaction.');
             }
 
@@ -240,6 +354,116 @@ class Appointments_model extends EA_Model
 
             throw $exception;
         }
+    }
+
+    /**
+     * Enforce the API v1 primary-appointment overlap rule while the provider
+     * user and relevant appointment scope are locked by the current
+     * transaction.
+     *
+     * @param array<string, mixed> $appointment
+     * @param list<array<string, mixed>> $locked_appointments
+     */
+    protected function assert_no_api_primary_overlap(array $appointment, array $locked_appointments): void
+    {
+        if (
+            filter_var($appointment['is_unavailability'] ?? false, FILTER_VALIDATE_BOOLEAN) ||
+            ($appointment['id_parent_appointment'] ?? null) !== null
+        ) {
+            return;
+        }
+
+        $provider_id = (int) ($appointment['id_users_provider'] ?? 0);
+        $start_value = $appointment['start_datetime'] ?? null;
+        $end_value = $appointment['end_datetime'] ?? null;
+
+        if ($provider_id <= 0 || !is_string($start_value) || !is_string($end_value)) {
+            throw new AppointmentApiWriteException('The appointment overlap input is invalid.', 400);
+        }
+
+        $start = $this->canonicalize_api_overlap_datetime($start_value);
+        $end = $this->canonicalize_api_overlap_datetime($end_value);
+        $appointment_id = (int) ($appointment['id'] ?? 0);
+
+        foreach ($locked_appointments as $candidate) {
+            if (
+                (int) ($candidate['id'] ?? 0) === $appointment_id ||
+                (int) ($candidate['id_users_provider'] ?? 0) !== $provider_id ||
+                filter_var($candidate['is_unavailability'] ?? false, FILTER_VALIDATE_BOOLEAN) ||
+                ($candidate['id_parent_appointment'] ?? null) !== null
+            ) {
+                continue;
+            }
+
+            $candidate_start = $this->canonicalize_api_overlap_datetime($candidate['start_datetime'] ?? null);
+            $candidate_end = $this->canonicalize_api_overlap_datetime($candidate['end_datetime'] ?? null);
+
+            if ($candidate_start < $end && $candidate_end > $start) {
+                throw new AppointmentApiOverlapException('The appointment overlaps another primary appointment.', 409);
+            }
+        }
+    }
+
+    protected function canonicalize_api_overlap_datetime(mixed $value): string
+    {
+        if (!is_string($value) || !preg_match('/\A\d{4}-\d{1,2}-\d{1,2} \d{1,2}:\d{2}:\d{2}\z/D', $value)) {
+            throw new AppointmentApiWriteException('The appointment overlap input is invalid.', 400);
+        }
+
+        $date_time = DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $value, new DateTimeZone('UTC'));
+
+        if ($date_time === false) {
+            throw new AppointmentApiWriteException('The appointment overlap input is invalid.', 400);
+        }
+
+        return $date_time->format('Y-m-d H:i:s');
+    }
+
+    /**
+     * Lock the complete primary-appointment scope for the old/requested
+     * providers, plus the update target when present. A locking read is
+     * required here because update_api() has already established a repeatable
+     * read snapshot before it can wait for the provider-user lock.
+     *
+     * @param array<int, mixed> $provider_ids
+     * @return list<array<string, mixed>>
+     */
+    protected function lock_api_primary_appointment_scope(array $provider_ids, ?int $target_id = null): array
+    {
+        $provider_ids = $this->sorted_parent_ids($provider_ids);
+
+        if ($provider_ids === []) {
+            throw new AppointmentApiWriteException('The appointment provider relationship is invalid.', 400);
+        }
+
+        $placeholders = implode(', ', array_fill(0, count($provider_ids), '?'));
+        $scope =
+            '`id_users_provider` IN (' .
+            $placeholders .
+            ') AND `is_unavailability` = 0 AND `id_parent_appointment` IS NULL';
+        $bindings = $provider_ids;
+
+        if ($target_id !== null && $target_id > 0) {
+            $scope = '(`id` = ? OR (' . $scope . '))';
+            array_unshift($bindings, $target_id);
+        }
+
+        return $this->db
+            ->query(
+                'SELECT * FROM `' .
+                    $this->db->dbprefix('appointments') .
+                    '` WHERE ' .
+                    $scope .
+                    ' ORDER BY `id` ASC FOR UPDATE',
+                $bindings,
+            )
+            ->result_array();
+    }
+
+    /** Fault-injection seam for proving rollback when an API commit fails. */
+    protected function commit_api_write_transaction(): bool
+    {
+        return $this->db->trans_commit();
     }
 
     /**

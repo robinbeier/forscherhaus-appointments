@@ -26,13 +26,20 @@ final class AppointmentsOpenApiWriteContractTest extends TestCase
             $responses = $spec['paths'][$path][$method]['responses'] ?? null;
             self::assertIsArray($responses);
             self::assertArrayHasKey('400', $responses);
+            self::assertArrayHasKey('409', $responses);
             self::assertArrayHasKey('415', $responses);
         }
+
+        $create = $spec['paths']['/appointments']['post'] ?? null;
+        self::assertIsArray($create);
+        self::assertStringContainsString('half-open', strtolower((string) ($create['description'] ?? '')));
+        self::assertStringContainsString('adjacent', strtolower((string) ($create['description'] ?? '')));
 
         $update = $spec['paths']['/appointments/{appointmentId}']['put'] ?? null;
         self::assertIsArray($update);
         self::assertArrayHasKey('409', $update['responses'] ?? []);
         self::assertStringContainsString('sparse update', strtolower((string) ($update['description'] ?? '')));
         self::assertStringContainsString('does not use etags', strtolower((string) ($update['description'] ?? '')));
+        self::assertStringContainsString('overlap', strtolower((string) ($update['description'] ?? '')));
     }
 }

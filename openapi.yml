@@ -216,6 +216,9 @@ paths:
             tags:
                 - appointments
             summary: Create an appointment
+            description: >-
+                Creates a primary ordinary appointment. Another primary ordinary appointment for the same provider
+                may be directly adjacent, but a half-open interval overlap returns 409 Conflict.
             requestBody:
                 content:
                     application/json:
@@ -237,6 +240,12 @@ paths:
                                 $ref: '#/components/schemas/ErrorResponse'
                 '401':
                     description: Unauthorized
+                '409':
+                    description: Primary appointment overlaps another primary appointment for the provider
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
                 '415':
                     description: Unsupported Media Type
                     content:
@@ -296,7 +305,8 @@ paths:
             description: >-
                 Applies a sparse update. Omitted fields are preserved from the appointment row locked by the
                 update transaction. This endpoint does not use ETags; concurrent changes to requested fields,
-                parent relationships, or provider/customer roles return 409 Conflict.
+                parent relationships, provider/customer roles, or a half-open primary appointment overlap for the
+                provider return 409 Conflict. Direct adjacency is allowed.
             parameters:
                 - name: appointmentId
                   in: path
@@ -327,7 +337,7 @@ paths:
                 '404':
                     description: Not Found
                 '409':
-                    description: Concurrent appointment, relationship, or role change
+                    description: Primary overlap or concurrent appointment, relationship, or role change
                     content:
                         application/json:
                             schema:

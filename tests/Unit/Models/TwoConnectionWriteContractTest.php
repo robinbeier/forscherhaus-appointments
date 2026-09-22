@@ -428,6 +428,208 @@ final class TwoConnectionWriteContractTest extends TestCase
         $this->assertSame($beforeBuffer, $db->get_where('appointments', ['id' => $bufferId])->row_array());
     }
 
+    public function testApiOverlapLockingReadSeesPeerCommitAfterRepeatableReadSnapshot(): void
+    {
+        $scenario = $this->createApiUpdateScenario(true);
+        $harness = new TwoConnectionHarness();
+        $peerAppointmentId = 0;
+
+        $harness->run(function ($primary, $peer, $checkpoint) use ($scenario, $harness, &$peerAppointmentId): void {
+            $checkpoint(TwoConnectionHarness::BEFORE_AUTHORITY);
+            $model = new class extends \Appointments_model {
+                public $afterSnapshot;
+                public function __construct() {}
+                protected function snapshot_api_update_appointment(int $appointment_id): array
+                {
+                    $snapshot = parent::snapshot_api_update_appointment($appointment_id);
+                    ($this->afterSnapshot)();
+                    return $snapshot;
+                }
+            };
+            $model->afterSnapshot = function () use (
+                $primary,
+                $peer,
+                $scenario,
+                $checkpoint,
+                &$peerAppointmentId,
+            ): void {
+                $checkpoint(TwoConnectionHarness::AFTER_AUTHORITY);
+                $ci = &get_instance();
+                $ci->db = $peer;
+                try {
+                    $peerModel = new class extends \Appointments_model {
+                        public function __construct() {}
+                    };
+                    $peerAppointmentId = $peerModel->save([
+                        'start_datetime' => '2035-05-07 10:00:00',
+                        'end_datetime' => '2035-05-07 10:30:00',
+                        'notes' => 'peer overlap after snapshot',
+                        'is_unavailability' => false,
+                        'id_users_provider' => $scenario['provider_id'],
+                        'id_users_customer' => $scenario['customer_id'],
+                        'id_services' => $scenario['service_id'],
+                    ]);
+                } finally {
+                    $ci->db = $primary;
+                }
+            };
+
+            try {
+                $model->update_api($scenario['appointment_id'], [
+                    'start_datetime' => '2035-05-07 10:00:00',
+                    'end_datetime' => '2035-05-07 10:30:00',
+                ]);
+                $this->fail('Expected the current locking read to detect the peer overlap.');
+            } catch (\AppointmentApiOverlapException $exception) {
+                $this->assertSame(409, $exception->getCode());
+            }
+            $harness->markBranch('api_overlap_current_locking_read');
+        }, 'api_overlap_current_locking_read');
+
+        $this->assertGreaterThan(0, $peerAppointmentId);
+        $this->createdAppointments[] = $peerAppointmentId;
+        $stored = $this->fixtures->findAppointmentById($scenario['appointment_id']);
+        $this->assertSame('2035-05-07 09:00:00', $stored['start_datetime']);
+        $this->assertSame('2035-05-07 09:30:00', $stored['end_datetime']);
+        $this->assertSame(
+            'peer overlap after snapshot',
+            $this->fixtures->findAppointmentById($peerAppointmentId)['notes'],
+        );
+        $harness->assertTrace([TwoConnectionHarness::BEFORE_AUTHORITY, TwoConnectionHarness::AFTER_AUTHORITY]);
+    }
+
+    public function testApiCreateFaultsRollBackParentBufferAndCommitPathsWithoutOrphans(): void
+    {
+        foreach (['parent', 'buffer', 'commit'] as $fault) {
+            $scenario = $this->createApiCreateScenario();
+            $db = get_instance()->db;
+            $model = match ($fault) {
+                'parent' => new class extends \Appointments_model {
+                    public function __construct() {}
+                    protected function lock_api_update_users(array $user_ids): array
+                    {
+                        $rows = parent::lock_api_update_users($user_ids);
+                        throw new \RuntimeException('Injected API parent failure.');
+                    }
+                },
+                'buffer' => new class extends \Appointments_model {
+                    public function __construct() {}
+                    protected function sync_buffer_unavailabilities(array $appointment): void
+                    {
+                        parent::sync_buffer_unavailabilities($appointment);
+                        throw new \RuntimeException('Injected API buffer failure.');
+                    }
+                },
+                'commit' => new class extends \Appointments_model {
+                    public function __construct() {}
+                    protected function commit_api_write_transaction(): bool
+                    {
+                        return false;
+                    }
+                },
+            };
+
+            try {
+                $model->create_api($scenario['appointment']);
+                $this->fail('Expected injected API ' . $fault . ' failure.');
+            } catch (\RuntimeException $exception) {
+                $this->assertStringContainsString($fault, strtolower($exception->getMessage()));
+            }
+
+            $this->assertFalse($db->trans_active());
+            $rows = $db
+                ->where('id_users_provider', $scenario['provider_id'])
+                ->where('start_datetime >=', '2035-06-03 08:55:00')
+                ->where('end_datetime <=', '2035-06-03 09:35:00')
+                ->get('appointments')
+                ->result_array();
+            $this->assertSame([], $rows, $fault . ' failure left a parent or generated child row.');
+        }
+    }
+
+    public function testApiCreateRejectsRoleAndServiceDriftAfterRelationshipSnapshots(): void
+    {
+        foreach (['role', 'service'] as $drift) {
+            $scenario = $this->createApiCreateScenario();
+            $db = get_instance()->db;
+            $provider = $db->get_where('users', ['id' => $scenario['provider_id']])->row_array();
+            $customerRole = $db->get_where('roles', ['slug' => DB_SLUG_CUSTOMER])->row_array();
+            $this->assertNotEmpty($provider);
+            $this->assertNotEmpty($customerRole);
+            $harness = new TwoConnectionHarness();
+
+            try {
+                $harness->run(function ($primary, $peer, $checkpoint) use ($scenario, $drift, $harness): void {
+                    $checkpoint(TwoConnectionHarness::BEFORE_AUTHORITY);
+                    if ($drift === 'role') {
+                        $model = new class extends \Appointments_model {
+                            public $afterSnapshot;
+                            public function __construct() {}
+                            protected function snapshot_api_update_users(array $user_ids): array
+                            {
+                                $snapshot = parent::snapshot_api_update_users($user_ids);
+                                ($this->afterSnapshot)();
+                                return $snapshot;
+                            }
+                        };
+                        $model->afterSnapshot = function () use ($peer, $scenario, $checkpoint): void {
+                            $checkpoint(TwoConnectionHarness::AFTER_AUTHORITY);
+                            $role = $peer->get_where('roles', ['slug' => DB_SLUG_CUSTOMER])->row_array();
+                            $this->assertTrue(
+                                $peer->update(
+                                    'users',
+                                    ['id_roles' => (int) $role['id']],
+                                    ['id' => $scenario['provider_id']],
+                                ),
+                            );
+                        };
+                    } else {
+                        $model = new class extends \Appointments_model {
+                            public $afterSnapshot;
+                            public function __construct() {}
+                            protected function snapshot_api_update_services(array $service_ids): array
+                            {
+                                $snapshot = parent::snapshot_api_update_services($service_ids);
+                                ($this->afterSnapshot)();
+                                return $snapshot;
+                            }
+                        };
+                        $model->afterSnapshot = function () use ($peer, $scenario, $checkpoint): void {
+                            $checkpoint(TwoConnectionHarness::AFTER_AUTHORITY);
+                            $serviceId = (int) $scenario['appointment']['id_services'];
+                            $this->assertTrue($peer->delete('services_providers', ['id_services' => $serviceId]));
+                            $this->assertTrue($peer->delete('services', ['id' => $serviceId]));
+                        };
+                    }
+
+                    try {
+                        $model->create_api($scenario['appointment']);
+                        $this->fail('Expected API create ' . $drift . ' drift to be rejected.');
+                    } catch (\AppointmentApiWriteException $exception) {
+                        $this->assertSame(409, $exception->getCode());
+                    }
+                    $harness->markBranch('api_create_' . $drift . '_drift');
+                }, 'api_create_' . $drift . '_drift');
+            } finally {
+                if ($drift === 'role') {
+                    $db->update(
+                        'users',
+                        ['id_roles' => (int) $provider['id_roles']],
+                        ['id' => $scenario['provider_id']],
+                    );
+                }
+            }
+
+            $rows = $db
+                ->where('id_users_provider', $scenario['provider_id'])
+                ->where('start_datetime', $scenario['appointment']['start_datetime'])
+                ->get('appointments')
+                ->result_array();
+            $this->assertSame([], $rows);
+            $harness->assertTrace([TwoConnectionHarness::BEFORE_AUTHORITY, TwoConnectionHarness::AFTER_AUTHORITY]);
+        }
+    }
+
     private function calendarScenario(bool $reassign): void
     {
         $pair = $this->fixtures->resolveProviderServicePair();
@@ -690,6 +892,49 @@ final class TwoConnectionWriteContractTest extends TestCase
             'provider_id' => $provider,
             'provider_role_id' => (int) $providerRow['id_roles'],
             'service_id' => $pair['service_id'],
+        ];
+    }
+
+    private function createApiCreateScenario(): array
+    {
+        $pair = $this->fixtures->resolveProviderServicePair();
+        $provider = $this->createProvider($pair['provider_id'], $pair['service_id']);
+        $customer = $this->fixtures->createCustomer();
+        $db = get_instance()->db;
+        $workingPlan = array_fill_keys(
+            ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'],
+            ['start' => '08:00', 'end' => '18:00', 'breaks' => []],
+        );
+        $this->assertTrue(
+            $db->update(
+                'user_settings',
+                ['working_plan' => json_encode($workingPlan, JSON_THROW_ON_ERROR)],
+                ['id_users' => $provider],
+            ),
+        );
+        $service = $db->get_where('services', ['id' => $pair['service_id']])->row_array();
+        unset($service['id']);
+        $service['name'] = 'api-overlap-' . bin2hex(random_bytes(5));
+        $service['description'] = $service['name'];
+        $service['attendants_number'] = 1;
+        $service['buffer_before'] = 5;
+        $service['buffer_after'] = 5;
+        $this->assertTrue($db->insert('services', $service));
+        $serviceId = (int) $db->insert_id();
+        $this->createdServices[] = $serviceId;
+        $this->assertTrue($db->insert('services_providers', ['id_users' => $provider, 'id_services' => $serviceId]));
+
+        return [
+            'provider_id' => $provider,
+            'appointment' => [
+                'start_datetime' => '2035-06-03 09:00:00',
+                'end_datetime' => '2035-06-03 09:30:00',
+                'notes' => 'api create ' . bin2hex(random_bytes(5)),
+                'is_unavailability' => false,
+                'id_users_provider' => $provider,
+                'id_users_customer' => $customer,
+                'id_services' => $serviceId,
+            ],
         ];
     }
 

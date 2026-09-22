@@ -127,8 +127,10 @@ Script inventory:
   smoke with no customer fixture and independent ten-minute cleanup
 - `run_ordinary_live_probe.sh` runs the root-controlled, release-pinned synthetic
   Defense Factory verification actions. Besides the original account/session
-  probes, `methods`, `customer-boundary`, and `calendar-race` collect direct,
-  bounded evidence for ROB-552, ROB-551, and one ROB-550 concurrency schedule.
+  probes, `methods`, `customer-boundary`, `calendar-race`, and
+  `appointments-api-overlap` collect direct, bounded evidence for ROB-552,
+  ROB-551, one ROB-550 concurrency schedule, and the Appointments API primary
+  overlap rule.
   See `docs/release-gate-defense-cycle.md`; repository delivery does not install
   the operator bundle or execute any production action.
 

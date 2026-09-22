@@ -45,6 +45,7 @@ if (
             'customer-boundary',
             'calendar-race',
             'appointments-api',
+            'appointments-api-overlap',
             'session',
             'deactivate',
             'verify',
@@ -307,14 +308,14 @@ try {
                 }
                 throw $error;
             }
-        } elseif ($action === 'appointments-api') {
+        } elseif (in_array($action, ['appointments-api', 'appointments-api-overlap'], true)) {
             $supplemental = $evidence->run(
                 'supplemental_activate',
                 fn(): array => $verificationFixture->activate('calendar_race', $context),
             );
             $apiToken = $verificationFixture->prepareAppointmentsApiBearerToken();
             $supplemental = $verificationFixture->prepareAppointmentsApi();
-            $result['evidence'] = AppointmentsApiWriteProbe::forApp(
+            $probe = AppointmentsApiWriteProbe::forApp(
                 'http://localhost',
                 (string) $supplemental['api_credentials']['username'],
                 (string) $supplemental['api_credentials']['password'],
@@ -323,7 +324,11 @@ try {
                 indexPage: (string) config_item('index_page'),
                 csrfCookieName: (string) config_item('csrf_cookie_name'),
                 csrfTokenName: (string) config_item('csrf_token_name'),
-            )->run($evidence->step(...));
+            );
+            $result['evidence'] =
+                $action === 'appointments-api-overlap'
+                    ? $probe->runOverlap($evidence->step(...))
+                    : $probe->run($evidence->step(...));
         } else {
             $result['evidence'] = $evidence->run(
                 'session',
@@ -345,7 +350,11 @@ try {
             }
         });
         if (
-            in_array($action, ['customer-boundary', 'calendar-race', 'appointments-api'], true) &&
+            in_array(
+                $action,
+                ['customer-boundary', 'calendar-race', 'appointments-api', 'appointments-api-overlap'],
+                true,
+            ) &&
             $verificationFixture->verify() !== 'active'
         ) {
             throw new RuntimeException('Defense verification fixture changed before wrapper cleanup.');

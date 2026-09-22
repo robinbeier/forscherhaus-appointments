@@ -205,6 +205,7 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
                 'customer-boundary' => 'admin',
                 'calendar-race' => 'provider',
                 'appointments-api' => 'provider',
+                'appointments-api-overlap' => 'provider',
             ]
             as $action => $role
         ) {
