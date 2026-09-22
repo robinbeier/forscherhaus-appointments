@@ -28,8 +28,7 @@ final class ApiCollectionQueryDto
         public readonly ?string $orderBy,
         public readonly ?array $fields,
         public readonly ?array $with,
-    ) {
-    }
+    ) {}
 }
 
 /**
@@ -47,8 +46,7 @@ final class ApiAppointmentsReadRequestDto
         public readonly string|int|null $serviceId,
         public readonly string|int|null $providerId,
         public readonly string|int|null $customerId,
-    ) {
-    }
+    ) {}
 }
 
 /**
@@ -64,8 +62,7 @@ final class ApiAppointmentsShowRequestDto
         public readonly bool $includeBufferBlocks,
         public readonly ?array $fields,
         public readonly ?array $with,
-    ) {
-    }
+    ) {}
 }
 
 /**
@@ -77,8 +74,7 @@ final class ApiAvailabilitiesRequestDto
         public readonly ?int $providerId,
         public readonly ?int $serviceId,
         public readonly string $date,
-    ) {
-    }
+    ) {}
 }
 
 /**
@@ -89,9 +85,7 @@ final class ApiEntityWritePayloadDto
     /**
      * @param array<string, mixed> $payload
      */
-    public function __construct(public readonly array $payload)
-    {
-    }
+    public function __construct(public readonly array $payload) {}
 }
 
 /**
@@ -103,8 +97,7 @@ final class ApiDateFilterDto
         public readonly ?string $date,
         public readonly ?string $from,
         public readonly ?string $till,
-    ) {
-    }
+    ) {}
 }
 
 /**
@@ -112,9 +105,7 @@ final class ApiDateFilterDto
  */
 final class ApiSettingsUpdateDto
 {
-    public function __construct(public readonly mixed $value)
-    {
-    }
+    public function __construct(public readonly mixed $value) {}
 }
 
 /**
@@ -189,6 +180,26 @@ class Api_request_dto_factory
     public function buildEntityWritePayloadDto(): ApiEntityWritePayloadDto
     {
         return $this->createEntityWritePayloadDto(request());
+    }
+
+    /**
+     * Build the strict JSON payload used by the appointments write API.
+     *
+     * Appointment writes deliberately do not use request(), because that
+     * helper accepts query/form input and normalizes malformed JSON to an
+     * empty array. The API contract requires a non-empty JSON object.
+     */
+    public function buildAppointmentsWritePayloadDto(): ApiEntityWritePayloadDto
+    {
+        /** @var EA_Controller|CI_Controller $CI */
+        $CI = &get_instance();
+        $content_type = strtolower(trim((string) ($_SERVER['CONTENT_TYPE'] ?? '')));
+
+        if ($content_type === '' || !preg_match('/^application\/json(?:\s*;|$)/', $content_type)) {
+            throw new InvalidArgumentException('Appointment writes require application/json.', 415);
+        }
+
+        return $this->createAppointmentsWritePayloadDto((string) $CI->input->raw_input_stream);
     }
 
     public function buildDateFilterDto(): ApiDateFilterDto
@@ -285,6 +296,36 @@ class Api_request_dto_factory
         return new ApiEntityWritePayloadDto($this->request_normalizer->normalizeAssocArray($payload));
     }
 
+    /**
+     * @param string $raw_payload
+     */
+    public function createAppointmentsWritePayloadDto(string $raw_payload): ApiEntityWritePayloadDto
+    {
+        if (trim($raw_payload) === '') {
+            throw new InvalidArgumentException('Appointment write payload must be a non-empty JSON object.', 400);
+        }
+
+        try {
+            $decoded = json_decode($raw_payload, true, 512, JSON_THROW_ON_ERROR);
+        } catch (JsonException) {
+            throw new InvalidArgumentException('Appointment write payload must be valid JSON.', 400);
+        }
+
+        if (!is_array($decoded) || !$this->isAssociativeArray($decoded) || $decoded === []) {
+            throw new InvalidArgumentException('Appointment write payload must be a non-empty JSON object.', 400);
+        }
+
+        $allowed = ['start', 'end', 'location', 'color', 'status', 'notes', 'customerId', 'providerId', 'serviceId'];
+
+        $unsupported = array_diff(array_keys($decoded), $allowed);
+
+        if ($unsupported !== []) {
+            throw new InvalidArgumentException('Appointment write payload contains unsupported fields.', 400);
+        }
+
+        return new ApiEntityWritePayloadDto($decoded);
+    }
+
     public function createDateFilterDto(mixed $date, mixed $from, mixed $till): ApiDateFilterDto
     {
         return new ApiDateFilterDto(
@@ -359,5 +400,13 @@ class Api_request_dto_factory
         }
 
         return $normalized_int;
+    }
+
+    /**
+     * @param array<mixed> $value
+     */
+    private function isAssociativeArray(array $value): bool
+    {
+        return array_keys($value) !== range(0, count($value) - 1);
     }
 }

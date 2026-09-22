@@ -991,6 +991,10 @@ class Appointments_model extends EA_Model
             $decoded_request['location'] = $appointment['location'];
         }
 
+        if (array_key_exists('color', $appointment)) {
+            $decoded_request['color'] = $appointment['color'];
+        }
+
         if (array_key_exists('status', $appointment)) {
             $decoded_request['status'] = $appointment['status'];
         }
