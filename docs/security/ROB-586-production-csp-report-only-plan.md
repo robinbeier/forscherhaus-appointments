@@ -56,6 +56,48 @@ The production proof was rebuilt with the five-step design process:
    root-owned mode-`0600` server-side lease binds removal to the pilot's random
    run ID, reviewed candidate hash, and initial release binding.
 
+### Transport-resilient checkpoint journal
+
+The operator-side runner writes an atomic, private checkpoint journal
+before and after every mutating or observational step. The journal binds the
+run ID, exact production-target binding, and release binding and records completed checkpoints (`activation`,
+`0m`, `15m`, `60m`, `remove`, and `postflight`) together with their closed
+top-level result classes. A second invocation reads the
+exact journal before doing work. A completed checkpoint is skipped; a checkpoint
+whose outcome was in flight is classified as `checkpoint_outcome_unknown` and
+is never repeated automatically. If the controlling SSH session or process is
+lost after activation began, the exit cleanup uses the same production target,
+run, and release binding to remove the activation once and records the cleanup result. An
+unknown or contradictory journal is a stop condition. The journal is removed
+only after the complete pilot and postflight verification succeed.
+
+The path is configurable with `CSP_PILOT_STATE_FILE` and defaults to
+`/var/tmp/fh-csp-report-only-pilot.state.json`. A transport interruption during
+the wait before a checkpoint leaves that checkpoint unstarted, so a resumed
+run may perform the wait and start it once. An interruption after the
+checkpoint-start record leaves an explicit unknown outcome and stops instead of
+guessing or repeating the evidence request.
+
+The pilot also holds a portable mkdir-based local lock for its full lifecycle.
+The lock path is configurable with `CSP_PILOT_LOCK_PATH` and defaults to
+`/var/tmp/fh-csp-report-only-pilot.lock`. A busy lock is a distinct stop class.
+If the controlling process dies without running exit cleanup, the stale lock is
+left in place as a deliberate manual-stop boundary and must be investigated
+before an operator removes it.
+
+The journal also records the activation completion time. The 15-minute and
+60-minute waits are calculated from that durable timestamp, so a reconnect
+sleeps only the remaining interval and never restarts a completed observation
+window. The result-class sequence and timestamp are part of the closed journal
+semantic validation.
+
+On restart, the journal is classified before the ordinary inactive preflight.
+If activation is already recorded, the runner performs only a read-only active
+state check against the journal's release binding; it does not repeat the
+runtime write probe. A completed removal is checked read-only as inactive and
+is never executed a second time. An in-flight removal is never guessed or
+repeated: an active or contradictory result remains a stop condition.
+
 These five checks remain separate in every receipt:
 
 | Check | Evidence source | Mutation |

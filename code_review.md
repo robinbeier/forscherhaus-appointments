@@ -94,6 +94,14 @@ Then review the diff through these lenses:
 3. validation adequacy
 4. maintainability and architectural fit
 
+For a security-sensitive or production harness, also check its compact evidence
+contract against the implementation: required property, observable result,
+actual runtime, resource bound, result classes, identity binding,
+cleanup/rollback, and evidence rerun triggers. Production facts must name a
+read-only source and remain inside their recorded release, configuration, and
+time boundary. A stale, open, or contradicted fact is a preparation gap, not a
+verified implementation assumption.
+
 Use the reviewer roles with this split:
 
 - `reviewer_correctness` is the deep reviewer for correctness, regressions, and security-sensitive risk.

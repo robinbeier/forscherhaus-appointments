@@ -721,9 +721,9 @@ final class DeploymentEvidenceAuthorityV1Test extends TestCase
         $attestationBytes = DeploymentEvidenceAuthorityV1::encodeFile($this->dumpAttestation());
         $dumpFailure = [
             'status' => $invalid ? 'invalid' : 'failed',
-            'policy' => 'fresh_verified_under_240m',
+            'policy' => DeploymentContractV1::DUMP_POLICY,
             'age_seconds' => 60,
-            'max_age_seconds' => 14400,
+            'max_age_seconds' => DeploymentContractV1::DUMP_MAX_AGE_SECONDS,
             'sha256' => self::SHA,
             'sha256_verified' => true,
             'gzip_verified' => true,

@@ -10,6 +10,8 @@ use JsonException;
 use RuntimeException;
 use WeakMap;
 
+require_once __DIR__ . '/DeploymentContractV1.php';
+
 final class DeploymentEvidenceAuthorityV1
 {
     /** @var WeakMap<VerifiedPredeployGateV1,string>|null */
@@ -184,7 +186,10 @@ final class DeploymentEvidenceAuthorityV1
         self::assertSame($record['dump']['sha256'], $dumpSha256, 'dump attestation stable bytes');
         self::assertSame($record['dump']['size_bytes'], $dumpSizeBytes, 'dump attestation stable size');
         $age = self::utcEpoch($observedAtUtc) - self::utcEpoch($record['dump']['created_at_utc']);
-        if ($age >= 14_400) {
+        // The attestation producer retains its four-hour recovery freshness
+        // window. Deployment admission applies the shorter policy below when
+        // the attestation is bound to a concrete Run-ID.
+        if ($age >= DeploymentContractV1::LEGACY_DUMP_MAX_AGE_SECONDS) {
             throw new RuntimeException('dump attestation is stale');
         }
         return $record;
@@ -291,6 +296,10 @@ final class DeploymentEvidenceAuthorityV1
             $dumpSizeBytes,
             $observedAtUtc,
         );
+        $age = self::utcEpoch($observedAtUtc) - self::utcEpoch($attestation['dump']['created_at_utc']);
+        if ($age >= DeploymentContractV1::DUMP_MAX_AGE_SECONDS) {
+            throw new RuntimeException('run-bound dump attestation is stale for deployment admission');
+        }
         return [
             'schema' => self::RUN_DUMP_OBSERVATION_SCHEMA,
             'run_id' => $runId,
@@ -667,9 +676,9 @@ final class DeploymentEvidenceAuthorityV1
             self::utcEpoch($attestation['dump']['created_at_utc']);
         $section = [
             'status' => 'passed',
-            'policy' => 'fresh_verified_under_240m',
+            'policy' => DeploymentContractV1::DUMP_POLICY,
             'age_seconds' => $age,
-            'max_age_seconds' => 14_400,
+            'max_age_seconds' => DeploymentContractV1::DUMP_MAX_AGE_SECONDS,
             'sha256' => $boundDumpObservation['dump_sha256'],
             'sha256_verified' => true,
             'gzip_verified' => true,
@@ -698,7 +707,7 @@ final class DeploymentEvidenceAuthorityV1
             throw new RuntimeException('stable dump size contradicts its digest');
         }
         $age = self::utcEpoch($observedAtUtc) - self::utcEpoch($attestation['dump']['created_at_utc']);
-        if (!$digestMatches || !$sizeMatches || $age >= 14_400) {
+        if (!$digestMatches || !$sizeMatches || $age >= DeploymentContractV1::DUMP_MAX_AGE_SECONDS) {
             return self::observeDumpFailureFromCollector(
                 $expectedRunId,
                 $expectedIntentSha256,
@@ -711,9 +720,9 @@ final class DeploymentEvidenceAuthorityV1
         }
         return self::issueGate('dump', $expectedRunId, $expectedIntentSha256, [
             'status' => 'passed',
-            'policy' => 'fresh_verified_under_240m',
+            'policy' => DeploymentContractV1::DUMP_POLICY,
             'age_seconds' => $age,
-            'max_age_seconds' => 14_400,
+            'max_age_seconds' => DeploymentContractV1::DUMP_MAX_AGE_SECONDS,
             'sha256' => $stableDumpSha256,
             'sha256_verified' => true,
             'gzip_verified' => true,
@@ -993,9 +1002,9 @@ final class DeploymentEvidenceAuthorityV1
         );
         $section = [
             'status' => $measurementComplete ? 'failed' : 'invalid',
-            'policy' => 'fresh_verified_under_240m',
+            'policy' => DeploymentContractV1::DUMP_POLICY,
             'age_seconds' => $stableDumpObservation['age_seconds'],
-            'max_age_seconds' => 14_400,
+            'max_age_seconds' => DeploymentContractV1::DUMP_MAX_AGE_SECONDS,
             'sha256' => $stableDumpObservation['sha256'],
             'sha256_verified' => $stableDumpObservation['sha256_verified'],
             'gzip_verified' => $stableDumpObservation['gzip_verified'],

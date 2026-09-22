@@ -13,7 +13,12 @@ final class DeploymentContractV1
 {
     public const RUN_SCHEMA = 'deployment_run.v1';
     public const EVIDENCE_SCHEMA = 'deployment_evidence.v1';
-    public const DUMP_POLICY = 'fresh_verified_under_240m';
+    /** Canonical deployment admission: a run-bound, restored dump observed within one hour. */
+    public const DUMP_POLICY = 'run_bound_verified_restore_under_60m';
+    /** Historical policy retained solely so already persisted v1 bundles remain readable. */
+    public const LEGACY_DUMP_POLICY = 'fresh_verified_under_240m';
+    public const DUMP_MAX_AGE_SECONDS = 3_600;
+    public const LEGACY_DUMP_MAX_AGE_SECONDS = 14_400;
     public const ARTIFACT_EXPECTATION = 'build_from_expected_commit';
     public const MAX_CAPACITY_USED_PERCENT = 85;
 
@@ -113,6 +118,9 @@ final class DeploymentContractV1
         string $dumpPolicy = self::DUMP_POLICY,
         string $artifactExpectation = self::ARTIFACT_EXPECTATION,
     ): array {
+        if ($dumpPolicy !== self::DUMP_POLICY) {
+            throw new RuntimeException('new deployment intent must use the canonical dump policy');
+        }
         $fields = [
             'expected_commit' => $expectedCommit,
             'release_id' => $releaseId,
@@ -151,7 +159,7 @@ final class DeploymentContractV1
         self::assertSame($record['deploy_invocation_count'], 0, 'intent deploy_invocation_count');
         self::assertCommit($record['expected_commit'], 'expected_commit');
         self::assertReleaseId($record['release_id']);
-        self::assertSame($record['dump_policy'], self::DUMP_POLICY, 'dump_policy');
+        self::assertSupportedDumpPolicy($record['dump_policy']);
         self::assertSame($record['artifact_expectation'], self::ARTIFACT_EXPECTATION, 'artifact_expectation');
         self::assertSha256($record['intent_sha256'], 'intent_sha256');
         self::assertSame($record['exit_code'], 0, 'intent exit_code');
@@ -849,8 +857,12 @@ final class DeploymentContractV1
             self::assertAllNullExcept($section, ['status'], 'dump');
             return;
         }
-        self::assertSame($section['policy'], self::DUMP_POLICY, 'dump.policy');
-        self::assertSame($section['max_age_seconds'], 14400, 'dump.max_age_seconds');
+        self::assertSupportedDumpPolicy($section['policy']);
+        self::assertSame(
+            $section['max_age_seconds'],
+            self::dumpPolicyMaxAge($section['policy']),
+            'dump.max_age_seconds',
+        );
         if ($section['status'] === 'invalid') {
             if ($section['age_seconds'] !== null) {
                 self::assertNonNegativeInteger($section['age_seconds'], 'dump.age_seconds');
@@ -885,6 +897,22 @@ final class DeploymentContractV1
             $section['restore_verified'];
         if (($section['status'] === 'passed') !== $passed) {
             throw new RuntimeException('dump status is inconsistent');
+        }
+    }
+
+    public static function dumpPolicyMaxAge(string $policy): int
+    {
+        return match ($policy) {
+            self::DUMP_POLICY => self::DUMP_MAX_AGE_SECONDS,
+            self::LEGACY_DUMP_POLICY => self::LEGACY_DUMP_MAX_AGE_SECONDS,
+            default => throw new RuntimeException('unsupported dump policy'),
+        };
+    }
+
+    private static function assertSupportedDumpPolicy(mixed $policy): void
+    {
+        if (!is_string($policy) || !in_array($policy, [self::DUMP_POLICY, self::LEGACY_DUMP_POLICY], true)) {
+            throw new RuntimeException('unsupported dump policy');
         }
     }
 

@@ -26,6 +26,13 @@ Record separately:
 - requested scope, agreed coverage limits, existing findings/duplicates, and ownership;
 - observed runtime, access, model/tool availability, and action grants.
 
+When the next step depends on production structure or behavior, compose the
+read-only production-facts record from the existing operations harness before
+designing new tooling. Record its release binding and capture time, then mark
+each consumed fact `confirmed`, `stale`, or `open` with the source and the event
+or time boundary that invalidates it. Keep redacted result classes rather than
+raw command output. An unbounded or contradictory observation is `open`.
+
 Do not call one of these identities “current” for the others. Recheck any
 provenance that can affect the requested observation. Reuse an old observation
 only when the release requirement, method, scope, and relevant code/configuration
@@ -41,6 +48,9 @@ coverage; an older open-items list alone does not justify repeating completed wo
 
 Before proposing a harness PR, name one concrete evidence gap, the smallest
 feasible permitted method, its expected observation, owner, and cleanup receipt.
+For security or production harnesses, also record the compact evidence contract:
+required property, actual runtime, resource bound, result classes, identity
+binding, cleanup/rollback, and changes that require the evidence to run again.
 Use the existing checks; do not rerun an unchanged result already supplied by
 the applicable gate. Follow [reviewer preflight](../../../docs/reviewer-runtime-preflight.md)
 when launch capability is unknown; a no-diff handshake is not a review.
@@ -61,7 +71,7 @@ Continue unaffected permitted work after a blocked method or external write;
 preserve pending text privately and reread the persisted target before retrying.
 
 Keep the handoff bounded: context, scope, evidence gap, feasible method, runtime
-result, and next decision. Do not claim the first cycle is permanently current
+result, production-facts record, and next decision. Do not claim the first cycle is permanently current
 or that all findings are complete.
 
 Route durable learning by kind: system knowledge to [SECURITY.md](../../../SECURITY.md),

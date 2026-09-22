@@ -227,6 +227,13 @@ Rules:
   verified checkout SHA. Record the deployed SHA and historical report SHAs
   separately; a stale checkout or historical report cannot establish the
   current gate state.
+- Before production-specific tooling depends on a runtime path, service,
+  permission, identity, or configuration, compose the redacted read-only
+  production-facts record from
+  [the existing operations harness](docs/ops/agent-operations.md#verify-production-facts-before-designing-production-tooling).
+  Record each consumed fact as `confirmed`, `stale`, or `open`, including its
+  source and invalidation boundary. A mismatch returns the task to preparation
+  and invalidates the affected design evidence.
 - For authority-, secret-, identity-, transaction-, or concurrency-sensitive
   writes, record the complete path before editing:
   `route -> request classification -> server-side authority -> locks and
@@ -286,6 +293,14 @@ against their canonical sources.
 
 Docs/process validation does not replace blocking CI, independent final-head
 review, or explicit authorization.
+
+For security-sensitive or production harness changes, write the compact evidence
+contract before the first publication: required property, observable result,
+actual runtime, resource bound, result classes, identity binding,
+cleanup/rollback, and CI or source changes that rerun the evidence. Give the
+independent reviewer one stable local diff plus the affected execution path and
+tests. Group related findings by root cause into one correction pass where
+practical; do not publish a new head after each individual observation.
 
 The two agent contract tests above can run without application bootstrap:
 
