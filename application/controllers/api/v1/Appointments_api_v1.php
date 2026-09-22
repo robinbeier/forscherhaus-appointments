@@ -252,7 +252,7 @@ class Appointments_api_v1 extends EA_Controller
                 $appointment['end_datetime'] = $this->appointments_model->calculate_end_datetime($appointment);
             }
 
-            $appointment_id = $this->appointments_model->save($appointment);
+            $appointment_id = $this->appointments_model->create_api($appointment);
 
             $created_appointment = $this->appointments_model->find($appointment_id);
 
@@ -363,10 +363,10 @@ class Appointments_api_v1 extends EA_Controller
     {
         $status = (int) $exception->getCode();
 
-        $is_api_update_outcome =
-            $exception instanceof AppointmentApiUpdateException && in_array($status, [400, 404, 409], true);
+        $is_api_write_outcome =
+            $exception instanceof AppointmentApiWriteException && in_array($status, [400, 404, 409], true);
 
-        if (!$is_api_update_outcome && !in_array($status, [400, 415], true)) {
+        if (!$is_api_write_outcome && !in_array($status, [400, 415], true)) {
             return false;
         }
 

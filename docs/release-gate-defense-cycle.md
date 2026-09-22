@@ -201,6 +201,7 @@ bash scripts/ops/run_ordinary_live_probe.sh methods EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh customer-boundary EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh calendar-race EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh appointments-api EXPECTED_RELEASE
+bash scripts/ops/run_ordinary_live_probe.sh appointments-api-overlap EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh session EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh cleanup EXPECTED_RELEASE
 ```
@@ -336,6 +337,24 @@ content-type, JSON-shape and unsupported-field matrix. Negative payload checks
 use the owned PUT target, so a failed contract cannot create an unjournaled row.
 Cleanup removes the API rows before the sentinel and then removes relationships
 and parents; any foreign relationship or generated child fails closed.
+
+`appointments-api-overlap` uses the same root-controlled fixture and recovery
+boundary as `appointments-api`, but leaves both API-created rows for wrapper
+cleanup instead of deleting them in the probe. Basic creates the first row and
+Bearer creates a directly adjacent row. Each authentication mode then attempts
+an overlapping update of the other owned row and must receive `409` without
+changing it. Finally, two localhost PUT requests are dispatched in parallel from the
+client to move the two owned rows to the same unused interval; exactly one must
+return `200` and persist, while the other returns `409`. Every possible target
+is durably journaled before the request, the unchanged and winning outcomes are
+verified against the exact owned rows, and the complete redacted sentinel
+remains equal. The action touches no non-fixture appointment and does not
+broaden cleanup authority. This production result proves the Basic/Bearer and
+adjacency contract plus one parallel client-dispatch outcome. It does not claim
+that both server-side database sessions overlapped. The deterministic local
+HTTP regression separately observes an API request waiting on the provider
+`FOR UPDATE` lock before the peer overlap commits; neither result proves every
+database interleaving.
 
 `session` first runs the account probe, then logs in afresh and waits for the
 configured inactivity duration plus two seconds without requests or session

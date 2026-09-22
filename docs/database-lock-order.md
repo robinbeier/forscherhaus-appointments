@@ -57,7 +57,7 @@ transaction; a nested call joins the caller's transaction depth.
 | --- | --- |
 | Calendar save/update (`Calendar::save_appointment`) | Outer transaction; existing appointment path locks user parents, service parents, then the appointment before rechecking authorization. Customer and appointment model saves then join that transaction. New appointment creation delegates parent locking to `Appointments_model::insert()`. |
 | Public booking and reschedule (`Booking::register`) | Outer booking transaction begins after authority preparation. `Reschedule_authority` locks sorted users, services, provider settings/assignments, then the appointment for reschedule; creation locks provider/customer users, service, settings, and assignments. Appointment save then locks its parents and creates buffers in the same transaction. |
-| Appointment insert/update | `Appointments_model::insert()` and `update()` start/join the appointment transaction, lock user parents, then service parents, mutate the ordinary appointment, and synchronize buffers before commit. The authenticated API's sparse `update_api()` discovers current and requested parents inside the transaction, locks their deduplicated numeric user IDs, then service IDs, then the target appointment. It revalidates roles from the locked user rows and rebases supplied fields on the locked appointment before the appointment/buffer write. Parent, requested-field, role, or invalid-rebase drift fails before mutation. |
+| Appointment insert/update | `Appointments_model::insert()` and `update()` start/join the appointment transaction, lock user parents, then service parents, mutate the ordinary appointment, and synchronize buffers before commit. Authenticated API creation uses its own model transaction, locks customer/provider users and the service, then locks the provider's primary ordinary appointment scope with `ORDER BY id ASC FOR UPDATE` before evaluating the API-only overlap rule. The sparse `update_api()` discovers current and requested parents inside the transaction, locks their deduplicated numeric user IDs, then service IDs, then locks the target plus the old/requested providers' complete primary ordinary appointment scopes in one ID-ordered `FOR UPDATE` read. It revalidates roles from the locked user rows, rebases supplied fields on the locked target, and evaluates overlap from that current locked scope before the appointment/buffer write. Parent, requested-field, role, invalid-rebase, or overlap conflict fails before mutation. |
 | Public cancellation (`Booking_cancellation::of`) | Outer controller transaction; lock and reread the ordinary appointment after the initial hash lookup, then recheck the current hash/type and configured advance cutoff. Model deletion joins this transaction and deletes generated children before the parent. Denials roll back before returning, and only the outer successful commit permits the success view. No new user/service parent locks are acquired. |
 | Appointment delete | The method starts or joins a transaction and locks the ordinary appointment row, deletes generated children, then deletes the parent appointment. The current implementation does not lock the user or service parents first; callers must not infer the full hierarchy for this path. |
 | Customer delete cascade | Own transaction; locks the customer user row, then ordinary customer appointments ordered by ID, deletes generated children, then deletes the customer. Provider/service parents are not locked by this path. |
@@ -75,8 +75,12 @@ transaction; a nested call joins the caller's transaction depth.
   transaction-scoped `FOR UPDATE` reads.
 - The API update's initial reads establish its parent lock set and distinguish
   a statically invalid request from later drift. Only its locked parent and
-  appointment reads authorize the mutation. Omitted fields use the locked
-  appointment values; they are not stale compare-and-swap expectations.
+  appointment-scope reads authorize the mutation. Omitted fields use the
+  locked appointment values; they are not stale compare-and-swap expectations.
+  The appointment-scope query is a locking read so it observes commits made
+  after the earlier repeatable-read snapshot while waiting for a provider
+  lock. Target and candidate rows are acquired together in ascending ID order;
+  no later target-to-conflict lock inversion is permitted.
 - The code does not establish one universal order for every write in the
   application: appointment delete and the customer/service delete cascades
   intentionally use narrower subsets. Any new cross-resource path must be

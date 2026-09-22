@@ -304,7 +304,7 @@ final class AppointmentsModelLockOrderTest extends TestCase
                 'service_snapshot',
                 'users_lock',
                 'services_lock',
-                'appointment_lock',
+                'appointment_scope_lock',
                 'appointment_update',
                 'commit',
             ],
@@ -314,7 +314,8 @@ final class AppointmentsModelLockOrderTest extends TestCase
         $this->assertStringContainsString('ORDER BY `id` ASC FOR UPDATE', $database->queries[4]['sql']);
         $this->assertSame([50], $database->queries[5]['bindings']);
         $this->assertStringContainsString('ORDER BY `id` ASC FOR UPDATE', $database->queries[5]['sql']);
-        $this->assertSame([99], $database->queries[6]['bindings']);
+        $this->assertSame([99, 20], $database->queries[6]['bindings']);
+        $this->assertStringContainsString('ORDER BY `id` ASC FOR UPDATE', $database->queries[6]['sql']);
         $this->assertStringContainsString('FOR UPDATE', $database->queries[6]['sql']);
     }
 
@@ -545,7 +546,12 @@ final class AppointmentsApiUpdateLockOrderFakeDatabase
         $locked = str_contains($sql, 'FOR UPDATE');
 
         if (str_contains($sql, 'ea_appointments')) {
-            $this->events[] = $locked ? 'appointment_lock' : 'appointment_snapshot';
+            $scope = str_contains($sql, 'id_parent_appointment` IS NULL');
+            $this->events[] = $locked
+                ? ($scope
+                    ? 'appointment_scope_lock'
+                    : 'appointment_lock')
+                : 'appointment_snapshot';
 
             return new AppointmentsApiUpdateLockOrderFakeQuery([
                 [

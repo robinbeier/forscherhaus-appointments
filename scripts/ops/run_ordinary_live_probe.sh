@@ -6,7 +6,7 @@ action=${1:-preflight}
 release=${2:-}
 app_root=${APP_ROOT:-/var/www/html/easyappointments}
 case "$action" in
-    preflight|account|methods|customer-boundary|calendar-race|appointments-api|session|cleanup|verify) ;;
+    preflight|account|methods|customer-boundary|calendar-race|appointments-api|appointments-api-overlap|session|cleanup|verify) ;;
     *) echo 'unsupported action' >&2; exit 64 ;;
 esac
 [[ $# == 2 && "$release" =~ ^ea_[a-zA-Z0-9_]+$ ]] || { echo 'action and expected release required' >&2; exit 64; }
@@ -185,6 +185,9 @@ case "$action" in
         ;;
     appointments-api)
         invoke appointments-api
+        ;;
+    appointments-api-overlap)
+        invoke appointments-api-overlap
         ;;
     session)
         invoke account
