@@ -19,7 +19,13 @@ final class DefenseVerificationFixture
 {
     private const SCHEMA = 'defense-verification-fixture.v1';
     private const MAX_TTL = 600;
-    private const PROFILES = ['customer_boundary', 'calendar_race', 'services_api', 'unavailabilities_api'];
+    private const PROFILES = [
+        'customer_boundary',
+        'calendar_race',
+        'services_api',
+        'unavailabilities_api',
+        'blocked_periods_api',
+    ];
     private const ACTIVE_TRANSACTION_ERROR = 'Defense verification fixture cannot run inside an active database transaction.';
 
     private object $db;
@@ -73,7 +79,11 @@ final class DefenseVerificationFixture
             }
             $actor = $this->assertActor(
                 $actorContext,
-                in_array($profile, ['customer_boundary', 'services_api', 'unavailabilities_api'], true)
+                in_array(
+                    $profile,
+                    ['customer_boundary', 'services_api', 'unavailabilities_api', 'blocked_periods_api'],
+                    true,
+                )
                     ? 'admin'
                     : 'provider',
             );
@@ -108,7 +118,9 @@ final class DefenseVerificationFixture
                             ? $this->activateServicesApi($state)
                             : ($profile === 'unavailabilities_api'
                                 ? $this->activateUnavailabilitiesApi($state)
-                                : $this->activateCalendarRace($state)));
+                                : ($profile === 'blocked_periods_api'
+                                    ? $this->activateBlockedPeriodsApi($state)
+                                    : $this->activateCalendarRace($state))));
                 $state['phase'] = 'active';
                 $this->writeState($state);
                 return $state;
@@ -224,6 +236,41 @@ final class DefenseVerificationFixture
                     : [];
             if (count($rows['buffers']) !== 2) {
                 throw new RuntimeException('Synthetic appointment must have exactly two generated buffers.');
+            }
+            return $rows;
+        });
+    }
+
+    /** Non-secret snapshots for the bounded Blocked Periods API probe. */
+    public function blockedPeriodsApiSnapshot(): array
+    {
+        return $this->withLock(function (): array {
+            $state = $this->readState();
+            $this->validateState($state);
+            $this->assertOwnership($state);
+            $rows = [];
+            foreach (['a' => 'blocked_period_a', 'b' => 'blocked_period_b'] as $label => $key) {
+                $id = (int) ($state['ids'][$key] ?? 0);
+                $row = $id > 0 ? $this->db->get_where('blocked_periods', ['id' => $id])->row_array() : [];
+                $intent = $state['intents']['blocked_periods'][$label] ?? null;
+                if (!is_array($intent) || $row === []) {
+                    throw new RuntimeException('Blocked period snapshot is missing an owned row.');
+                }
+                $allowedTimes = [[$intent['start'], $intent['end']]];
+                if ($label === 'a') {
+                    $allowedTimes[] = [
+                        date('Y-m-d H:i:s', strtotime((string) $intent['start']) + 600),
+                        date('Y-m-d H:i:s', strtotime((string) $intent['end']) + 600),
+                    ];
+                }
+                if (
+                    ($row['name'] ?? null) !== $intent['name'] ||
+                    ($row['notes'] ?? null) !== $intent['notes'] ||
+                    !in_array([$row['start_datetime'] ?? null, $row['end_datetime'] ?? null], $allowedTimes, true)
+                ) {
+                    throw new RuntimeException('Blocked period identity drift detected.');
+                }
+                $rows[$label] = $row ?: [];
             }
             return $rows;
         });
@@ -816,6 +863,41 @@ final class DefenseVerificationFixture
         return $state;
     }
 
+    /** Prepare exactly two owned global blocked periods for the API probe. */
+    private function activateBlockedPeriodsApi(array $state): array
+    {
+        foreach (['a', 'b'] as $key) {
+            // Global blocked periods affect every provider. Keep the synthetic
+            // windows unambiguously in the past so the live probe cannot close
+            // a current or future booking slot.
+            $base = time() - 86400 * 40 + ($key === 'b' ? 7200 : 0);
+            $start = gmdate('Y-m-d H:i:s', $base);
+            $end = gmdate('Y-m-d H:i:s', $base + 1800);
+            $state['intents']['blocked_periods'][$key] = [
+                'name' => $state['marker'] . ':blocked:' . $key,
+                'start' => $start,
+                'end' => $end,
+                'notes' => $state['marker'] . ':blocked:' . $key,
+            ];
+            $this->journal($state);
+            if (
+                !$this->db->insert('blocked_periods', [
+                    'name' => $state['intents']['blocked_periods'][$key]['name'],
+                    'start_datetime' => $start,
+                    'end_datetime' => $end,
+                    'notes' => $state['intents']['blocked_periods'][$key]['notes'],
+                    'create_datetime' => date('Y-m-d H:i:s'),
+                    'update_datetime' => date('Y-m-d H:i:s'),
+                ])
+            ) {
+                throw new RuntimeException('Could not insert synthetic blocked period.');
+            }
+            $state['ids']['blocked_period_' . $key] = (int) $this->db->insert_id();
+            $this->journal($state);
+        }
+        return $state;
+    }
+
     /** @param array<string,mixed> $state @return array<string,mixed> */
     private function activateCalendarRace(array $state): array
     {
@@ -1021,15 +1103,17 @@ final class DefenseVerificationFixture
             if ($id < 1) {
                 throw new RuntimeException('Invalid journaled fixture ID.');
             }
-            $table = str_contains($key, 'service_link')
-                ? 'services_providers'
-                : (in_array($key, ['service', 'service_a', 'service_b'], true)
-                    ? 'services'
-                    : ($key === 'appointment' ||
-                    str_starts_with($key, 'api_appointment_') ||
-                    str_starts_with($key, 'unavailability_')
-                        ? 'appointments'
-                        : 'users'));
+            $table = str_starts_with($key, 'blocked_period_')
+                ? 'blocked_periods'
+                : (str_contains($key, 'service_link')
+                    ? 'services_providers'
+                    : (in_array($key, ['service', 'service_a', 'service_b'], true)
+                        ? 'services'
+                        : ($key === 'appointment' ||
+                        str_starts_with($key, 'api_appointment_') ||
+                        str_starts_with($key, 'unavailability_')
+                            ? 'appointments'
+                            : 'users')));
             if ($this->db->get_where($table, ['id' => $id])->num_rows() !== 1) {
                 throw new RuntimeException('Fixture ownership is missing or ambiguous.');
             }
@@ -1228,6 +1312,22 @@ final class DefenseVerificationFixture
                 'end_datetime' => $intent['end'],
             ]);
         }
+        foreach ($state['ids'] as $key => $id) {
+            if (!str_starts_with($key, 'blocked_period_')) {
+                continue;
+            }
+            $shortKey = substr($key, strlen('blocked_period_'));
+            $intent = $state['intents']['blocked_periods'][$shortKey] ?? null;
+            if (!is_array($intent)) {
+                throw new RuntimeException('Prepared blocked period intent is missing.');
+            }
+            $this->assertExactRow('blocked_periods', (int) $id, [
+                'name' => $intent['name'],
+                'notes' => $intent['notes'],
+                'start_datetime' => $intent['start'],
+                'end_datetime' => $intent['end'],
+            ]);
+        }
         foreach ($state['links'] ?? [] as $link) {
             if (!is_array($link)) {
                 throw new RuntimeException('Prepared fixture service relationship is invalid.');
@@ -1251,6 +1351,95 @@ final class DefenseVerificationFixture
         $this->lockFixtureUsers($state, $alreadyCleaning);
         $this->assertRecoverableApiAdminSettings($state);
         $this->assertServiceDependencies($state, $alreadyCleaning, $wasPrepared);
+        if (($state['profile'] ?? null) === 'blocked_periods_api') {
+            $blockedIds = [];
+            foreach (['a', 'b'] as $key) {
+                $id = (int) ($ids['blocked_period_' . $key] ?? 0);
+                if ($id < 1) {
+                    if ($wasPrepared) {
+                        continue;
+                    }
+                    throw new RuntimeException('Blocked period cleanup identity is missing.');
+                }
+                $blockedIds[] = $id;
+            }
+            $journaledA = (int) ($ids['blocked_period_a'] ?? 0);
+            $journaledB = (int) ($ids['blocked_period_b'] ?? 0);
+            if ($journaledA > 0 && $journaledB > 0 && $journaledA === $journaledB) {
+                throw new RuntimeException('Blocked period cleanup IDs are ambiguous.');
+            }
+            $blockedIds = array_values(array_unique($blockedIds));
+            sort($blockedIds, SORT_NUMERIC);
+            if ($blockedIds === []) {
+                if (!$wasPrepared) {
+                    throw new RuntimeException('Blocked period cleanup IDs are missing.');
+                }
+            } elseif (count($blockedIds) > 2) {
+                throw new RuntimeException('Blocked period cleanup IDs are ambiguous.');
+            }
+            $lockedBlockedPeriods =
+                $blockedIds === []
+                    ? []
+                    : $this->db
+                        ->query(
+                            'SELECT * FROM `' .
+                                $this->db->dbprefix('blocked_periods') .
+                                '` WHERE id IN (' .
+                                implode(',', array_fill(0, count($blockedIds), '?')) .
+                                ') ORDER BY id ASC FOR UPDATE',
+                            $blockedIds,
+                        )
+                        ->result_array();
+            $lockedById = [];
+            foreach ($lockedBlockedPeriods as $row) {
+                $lockedId = (int) ($row['id'] ?? 0);
+                if ($lockedId < 1 || isset($lockedById[$lockedId])) {
+                    throw new RuntimeException('Blocked period cleanup lock set is invalid.');
+                }
+                $lockedById[$lockedId] = $row;
+            }
+            foreach (['a', 'b'] as $key) {
+                $id = (int) ($ids['blocked_period_' . $key] ?? 0);
+                $intent = $state['intents']['blocked_periods'][$key] ?? null;
+                if ($id < 1 && $wasPrepared) {
+                    continue;
+                }
+                if ($id < 1 || !is_array($intent)) {
+                    throw new RuntimeException('Blocked period cleanup identity is missing.');
+                }
+                $row = $lockedById[$id] ?? null;
+                if (!is_array($row)) {
+                    if (!$alreadyCleaning) {
+                        throw new RuntimeException('Synthetic blocked period disappeared; refusing cleanup.');
+                    }
+                    continue;
+                }
+                $allowedTimes = [[$intent['start'], $intent['end']]];
+                if ($key === 'a') {
+                    $allowedTimes[] = [
+                        date('Y-m-d H:i:s', strtotime((string) $intent['start']) + 600),
+                        date('Y-m-d H:i:s', strtotime((string) $intent['end']) + 600),
+                    ];
+                }
+                if (
+                    ($row['name'] ?? null) !== $intent['name'] ||
+                    ($row['notes'] ?? null) !== $intent['notes'] ||
+                    !in_array([$row['start_datetime'] ?? null, $row['end_datetime'] ?? null], $allowedTimes, true)
+                ) {
+                    throw new RuntimeException('Blocked period identity drift detected.');
+                }
+            }
+            foreach (['a', 'b'] as $key) {
+                $id = (int) ($ids['blocked_period_' . $key] ?? 0);
+                if ($id < 1) {
+                    continue;
+                }
+                $intent = $state['intents']['blocked_periods'][$key];
+                if (!$this->db->delete('blocked_periods', ['id' => $id, 'name' => $intent['name']])) {
+                    throw new RuntimeException('Blocked period cleanup delete failed.');
+                }
+            }
+        }
         $lockedUnavailabilities = $this->lockUnavailabilityRowsForCleanup($state);
         foreach (['a', 'b'] as $key) {
             $id = (int) ($ids['unavailability_' . $key] ?? 0);
@@ -2064,6 +2253,32 @@ final class DefenseVerificationFixture
                 $state['ids'][$idKey] = (int) $rows[0]['id'];
             }
         }
+        foreach ($state['intents']['blocked_periods'] ?? [] as $key => $intent) {
+            $idKey = 'blocked_period_' . $key;
+            if (isset($state['ids'][$idKey]) || !is_array($intent)) {
+                continue;
+            }
+            $rows = $this->db
+                ->query('SELECT * FROM `' . $this->db->dbprefix('blocked_periods') . '` WHERE name = ? OR notes = ?', [
+                    $intent['name'],
+                    $intent['notes'],
+                ])
+                ->result_array();
+            if (count($rows) > 1) {
+                throw new RuntimeException('Blocked period identity is ambiguous; refusing cleanup.');
+            }
+            if (count($rows) === 1) {
+                if (
+                    ($rows[0]['name'] ?? null) !== $intent['name'] ||
+                    ($rows[0]['notes'] ?? null) !== $intent['notes'] ||
+                    ($rows[0]['start_datetime'] ?? null) !== $intent['start'] ||
+                    ($rows[0]['end_datetime'] ?? null) !== $intent['end']
+                ) {
+                    throw new RuntimeException('Blocked period identity drift detected; refusing cleanup.');
+                }
+                $state['ids'][$idKey] = (int) $rows[0]['id'];
+            }
+        }
         foreach (['basic', 'bearer'] as $case) {
             $key = 'api_appointment_' . $case;
             $intent = $state['intents']['api_appointments'][$case] ?? null;
@@ -2197,15 +2412,17 @@ final class DefenseVerificationFixture
     {
         $remaining = [];
         foreach ($state['ids'] as $key => $id) {
-            $table = str_contains($key, 'service_link')
-                ? 'services_providers'
-                : (in_array($key, ['service', 'service_a', 'service_b'], true)
-                    ? 'services'
-                    : ($key === 'appointment' ||
-                    str_starts_with($key, 'api_appointment_') ||
-                    str_starts_with($key, 'unavailability_')
-                        ? 'appointments'
-                        : 'users'));
+            $table = str_starts_with($key, 'blocked_period_')
+                ? 'blocked_periods'
+                : (str_contains($key, 'service_link')
+                    ? 'services_providers'
+                    : (in_array($key, ['service', 'service_a', 'service_b'], true)
+                        ? 'services'
+                        : ($key === 'appointment' ||
+                        str_starts_with($key, 'api_appointment_') ||
+                        str_starts_with($key, 'unavailability_')
+                            ? 'appointments'
+                            : 'users')));
             if ($this->db->get_where($table, ['id' => (int) $id])->num_rows() !== 0) {
                 $remaining[] = $key;
             }
@@ -2448,7 +2665,8 @@ final class DefenseVerificationFixture
         return $this->db->like('notes', 'defense-verification:', 'after')->count_all_results('users') > 0 ||
             $this->db->like('username', 'defense_verify_', 'after')->count_all_results('user_settings') > 0 ||
             $this->db->like('description', 'defense-verification:', 'after')->count_all_results('services') > 0 ||
-            $this->db->like('notes', 'defense-verification:', 'after')->count_all_results('appointments') > 0;
+            $this->db->like('notes', 'defense-verification:', 'after')->count_all_results('appointments') > 0 ||
+            $this->db->like('notes', 'defense-verification:', 'after')->count_all_results('blocked_periods') > 0;
     }
 
     /** @return mixed */

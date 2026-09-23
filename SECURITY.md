@@ -55,6 +55,12 @@ path-specific limits; the general parent ordering is not proof about every
 maintenance or delete path. API response projections must not disclose stored
 integration secrets.
 
+For global blocked periods, an authenticated API write must address only the
+URL-selected record and use the declared HTTP method even through a direct
+controller alias. A changed blocked period affects booking availability, so a
+rejected request must leave the complete period row unchanged. The precise
+contract and evidence boundary live in [CI write contracts](docs/ci-write-contracts.md#blocked-periods-api-v1).
+
 The product supports `services.attendants_number = 1`, enforced by
 [Services_model](application/models/Services_model.php). Other values are not
 supported product behavior; this application rule is not a claim of a database

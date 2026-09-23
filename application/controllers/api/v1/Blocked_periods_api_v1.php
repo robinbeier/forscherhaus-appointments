@@ -144,6 +144,10 @@ class Blocked_periods_api_v1 extends EA_Controller
      */
     public function store(): void
     {
+        if (!$this->enforceWriteMethod('POST')) {
+            return;
+        }
+
         try {
             $blocked_period = $this->apiRequestDtoFactory()->buildEntityWritePayloadDto()->payload;
 
@@ -172,6 +176,10 @@ class Blocked_periods_api_v1 extends EA_Controller
      */
     public function update(int $id): void
     {
+        if (!$this->enforceWriteMethod('PUT')) {
+            return;
+        }
+
         try {
             $occurrences = $this->blocked_periods_model->get(['id' => $id]);
 
@@ -185,7 +193,20 @@ class Blocked_periods_api_v1 extends EA_Controller
 
             $blocked_period = $this->apiRequestDtoFactory()->buildEntityWritePayloadDto()->payload;
 
+            // The route identifies the only blocked period this request may update.
+            if (array_key_exists('id', $blocked_period)) {
+                if (!is_int($blocked_period['id']) || $blocked_period['id'] !== $id) {
+                    response('', 400);
+
+                    return;
+                }
+
+                unset($blocked_period['id']);
+            }
+
             $this->blocked_periods_model->api_decode($blocked_period, $original_blocked_period);
+
+            $blocked_period['id'] = $id;
 
             $blocked_period_id = $this->blocked_periods_model->save($blocked_period);
 
@@ -206,6 +227,10 @@ class Blocked_periods_api_v1 extends EA_Controller
      */
     public function destroy(int $id): void
     {
+        if (!$this->enforceWriteMethod('DELETE')) {
+            return;
+        }
+
         try {
             $occurrences = $this->blocked_periods_model->get(['id' => $id]);
 
@@ -244,5 +269,16 @@ class Blocked_periods_api_v1 extends EA_Controller
         $this->api_request_dto_factory = $CI->api_request_dto_factory;
 
         return $this->api_request_dto_factory;
+    }
+
+    private function enforceWriteMethod(string $expected): bool
+    {
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) === $expected) {
+            return true;
+        }
+
+        response('', 405, ['Allow: ' . $expected]);
+
+        return false;
     }
 }
