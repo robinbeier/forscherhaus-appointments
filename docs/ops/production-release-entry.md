@@ -88,10 +88,14 @@ authority. A missing, stale, contradictory, or unknown fact blocks the entry.
    migration plan requires a fresh database backup, use the existing
    `scripts/ops/prod_backup_set_producer.sh` path under the explicit ROB-466
    write and ROB-461 restore confirmations. That wrapper runs both the producer
-   and its bound isolated restore verification. Record the selected set identity, dump digest/size, attestation and
-   restore-success marker from the same set. A stale, unbound, missing, or
-   unknown backup/restore result blocks; application rollback does not undo a
-   database migration. See [backup producer](production-backup-set-producer.md)
+   and its bound isolated restore verification. Require the producer's closed
+   `published` status with exactly one new set and the verifier's successful
+   closed status and exit code. The installed helpers validate the protected
+   handoff, dump digest/size, attestation, and restore marker internally; their
+   set identifier, paths, and digests must not be extracted into operator output.
+   A stale, unbound, missing, or unknown backup/restore result blocks;
+   application rollback does not undo a database migration. See
+   [backup producer](production-backup-set-producer.md)
    and [deployment evidence authority](../deployment-evidence-authority-v1.md).
 
 ## Controlled execution and bounded verification
