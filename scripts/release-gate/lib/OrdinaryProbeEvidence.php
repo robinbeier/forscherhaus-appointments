@@ -79,6 +79,8 @@ final class OrdinaryProbeEvidence
                     'boundary_customer_find',
                     'boundary_customer_update',
                     'boundary_logout',
+                    'customers_api_conflict_put',
+                    'customers_api_matching_put',
                     'race_parent_lock',
                     'race_request_wait',
                     'race_reassignment',

@@ -59,48 +59,58 @@ final class CustomersApiWriteProbe
         $beforeB = $this->userSnapshot($customerB, (string) $state['marker']);
 
         $observe('customers_api_conflict_put', 'started');
-        $conflictPayload = $this->apiPayload($beforeB);
-        $conflictPayload['id'] = $customerB;
-        $conflictPayload['firstName'] = 'Conflict Must Not Persist';
-        $conflict = $this->client->requestJsonApp('PUT', 'api/v1/customers/' . $customerA, $conflictPayload);
-        if ($conflict->statusCode !== 400) {
-            throw new RuntimeException('Customers API conflicting body ID was not rejected.');
+        try {
+            $conflictPayload = $this->apiPayload($beforeB);
+            $conflictPayload['id'] = $customerB;
+            $conflictPayload['firstName'] = 'Conflict Must Not Persist';
+            $conflict = $this->client->requestJsonApp('PUT', 'api/v1/customers/' . $customerA, $conflictPayload);
+            if ($conflict->statusCode !== 400) {
+                throw new RuntimeException('Customers API conflicting body ID was not rejected.');
+            }
+            if ($this->userSnapshot($customerA, (string) $state['marker']) !== $beforeA) {
+                throw new RuntimeException('Customers API conflict changed customer A.');
+            }
+            if ($this->userSnapshot($customerB, (string) $state['marker']) !== $beforeB) {
+                throw new RuntimeException('Customers API conflict changed customer B.');
+            }
+            $observe('customers_api_conflict_put', 'passed');
+        } catch (\Throwable $error) {
+            $observe('customers_api_conflict_put', 'failed');
+            throw $error;
         }
-        if ($this->userSnapshot($customerA, (string) $state['marker']) !== $beforeA) {
-            throw new RuntimeException('Customers API conflict changed customer A.');
-        }
-        if ($this->userSnapshot($customerB, (string) $state['marker']) !== $beforeB) {
-            throw new RuntimeException('Customers API conflict changed customer B.');
-        }
-        $observe('customers_api_conflict_put', 'passed');
 
         $observe('customers_api_matching_put', 'started');
-        $positivePayload = $this->apiPayload($beforeA);
-        $positivePayload['id'] = $customerA;
-        $positivePayload['firstName'] = 'Customers API Verified';
-        $positive = $this->client->requestJsonApp('PUT', 'api/v1/customers/' . $customerA, $positivePayload);
-        if ($positive->statusCode !== 200) {
-            throw new RuntimeException('Customers API matching body ID was not accepted.');
+        try {
+            $positivePayload = $this->apiPayload($beforeA);
+            $positivePayload['id'] = $customerA;
+            $positivePayload['firstName'] = 'Customers API Verified';
+            $positive = $this->client->requestJsonApp('PUT', 'api/v1/customers/' . $customerA, $positivePayload);
+            if ($positive->statusCode !== 200) {
+                throw new RuntimeException('Customers API matching body ID was not accepted.');
+            }
+            $response = $this->decodeObject($positive->body);
+            if ((int) ($response['id'] ?? 0) !== $customerA) {
+                throw new RuntimeException('Customers API positive PUT returned another customer.');
+            }
+            if (($response['firstName'] ?? null) !== 'Customers API Verified') {
+                throw new RuntimeException('Customers API positive PUT returned the wrong field.');
+            }
+            $afterA = $this->userSnapshot($customerA, (string) $state['marker']);
+            $afterB = $this->userSnapshot($customerB, (string) $state['marker']);
+            $expectedA = $beforeA;
+            $expectedA['first_name'] = 'Customers API Verified';
+            $expectedA['update_datetime'] = $afterA['update_datetime'];
+            if ($afterA !== $expectedA) {
+                throw new RuntimeException('Customers API positive PUT changed unexpected customer A fields.');
+            }
+            if ($afterB !== $beforeB) {
+                throw new RuntimeException('Customers API positive PUT changed customer B.');
+            }
+            $observe('customers_api_matching_put', 'passed');
+        } catch (\Throwable $error) {
+            $observe('customers_api_matching_put', 'failed');
+            throw $error;
         }
-        $response = $this->decodeObject($positive->body);
-        if ((int) ($response['id'] ?? 0) !== $customerA) {
-            throw new RuntimeException('Customers API positive PUT returned another customer.');
-        }
-        if (($response['firstName'] ?? null) !== 'Customers API Verified') {
-            throw new RuntimeException('Customers API positive PUT returned the wrong field.');
-        }
-        $afterA = $this->userSnapshot($customerA, (string) $state['marker']);
-        $afterB = $this->userSnapshot($customerB, (string) $state['marker']);
-        $expectedA = $beforeA;
-        $expectedA['first_name'] = 'Customers API Verified';
-        $expectedA['update_datetime'] = $afterA['update_datetime'];
-        if ($afterA !== $expectedA) {
-            throw new RuntimeException('Customers API positive PUT changed unexpected customer A fields.');
-        }
-        if ($afterB !== $beforeB) {
-            throw new RuntimeException('Customers API positive PUT changed customer B.');
-        }
-        $observe('customers_api_matching_put', 'passed');
 
         return [
             'status' => 'verified',
