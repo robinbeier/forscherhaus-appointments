@@ -798,6 +798,8 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ServiceRecord'
+                '400':
+                    description: Invalid service payload
                 '401':
                     description: Unauthorized
                 '500':
@@ -864,6 +866,8 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ServiceRecord'
+                '400':
+                    description: Invalid service payload or conflicting body ID
                 '401':
                     description: Unauthorized
                 '404':
@@ -2184,6 +2188,8 @@ components:
                     type: string
                 duration:
                     type: integer
+                    minimum: 5
+                    maximum: 2147483647
                 price:
                     type: number
                 currency:
@@ -2196,6 +2202,7 @@ components:
                     type: string
                 attendantsNumber:
                     type: integer
+                    enum: [1]
                 bufferBefore:
                     type: integer
                 bufferAfter:

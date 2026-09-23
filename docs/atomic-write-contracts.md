@@ -28,12 +28,19 @@ uncertain commit result.
 | `Booking::register`: public create or reschedule | Booking/reschedule authority and availability are checked against locked targets through `Reschedule_authority` before mutation. | The controller owns customer, consent, appointment and buffer writes. Model transactions join it; the controller checks commit and rolls back errors before returning. |
 | `Appointments_api_v1::store/update/destroy`: authenticated API CRUD | Constructor API authentication and strict DTO decoding; public booking authority is a separate route contract. Sparse update validation runs inside `Appointments_model::update_api()`, first against the discovered candidate and then against the final locked rebase. | Create uses `Appointments_model::save`. Sparse update discovers and locks current/requested user parents, service parents, and the target in canonical order, revalidates provider/customer roles, applies only supplied fields, and couples any buffer replacement to the same transaction. Static invalid relationships/scalars return 400, a vanished target returns 404, relevant drift returns 409, and database failures return 500. Delete locks the appointment and removes its buffers before the parent. |
 | `Customers::store/update/destroy` and `Customers_api_v1` | Backoffice checks customer add/edit/delete permissions and access for update/delete; API authenticates. Model updates/deletes retain role-scoped conditions. | Customer insert/update write a single `users` row and need no dependent follow-up. In booking/calendar they participate in the outer transaction. `Customers_model::delete` owns or nests a transaction around parent locks, buffer cleanup and role-scoped deletion, checks affected rows and commit, and propagates errors. |
-| `Services::store` / API store | Backoffice add permission or API authentication, DTO fields and validation. | New service insert is one row and has no dependent appointment buffers. |
-| `Services::update` / API update | Backoffice edit permission or API authentication; the original buffer values are passed as expectations, not an authoritative change flag. | Both call `Services_model::save` directly. Its update owns a transaction when none exists. Buffer changes lock provider users, service and appointment parents; current locked buffer values and provider membership are checked before writing. Service and regenerated buffers commit together. No separate caller resync is required or permitted by the contract. |
-| `Services_model::delete` | Route permission/authentication precedes this operation. | Locks service and ordinary appointment parents, removes generated children and deletes the service inside one transaction; checked commit and propagated errors. |
+| `Services::store` / API store | Backoffice add permission or API authentication, DTO fields and validation. API write methods check their HTTP verb even when invoked through a direct controller alias. | New service insert is one row and has no dependent appointment buffers. |
+| `Services::update` / API update | Backoffice edit permission or API authentication. The API URL selects the service; a body ID may only repeat it. The original buffer values are passed as expectations, not an authoritative change flag. | Both call `Services_model::save` directly. Its update owns a transaction when none exists. Buffer changes lock provider users, service and appointment parents; current locked buffer values and provider membership are checked before writing. Service and regenerated buffers commit together. No separate caller resync is required or permitted by the contract. |
+| `Services_model::delete` | Route permission/authentication precedes this operation; the API requires DELETE even through a direct alias. | Locks service and ordinary appointment parents, removes generated children and deletes the service inside one transaction; checked commit and propagated errors. |
 | `Appointments_model::sync_service_buffer_unavailabilities` | Dependent internal model work, not a separate user authorization endpoint. | Opens/nests a transaction and locks provider/service/appointment parents before replacing children. Service save calls it before committing. Direct calls finish their own transaction. |
 | `Account::save` -> `Users_model::save` | POST-only, user-settings edit permission, session-bound user ID and field allowlist. | User row and all settings form one model operation. Standalone save owns begin/commit/rollback; an outer caller retains ownership when present. A settings failure propagates. Account session updates follow successful save. |
 | `Secretaries::store/update` and `Secretaries_api_v1::store/update` -> `Secretaries_model::save` | Backoffice users permission or API authentication; existing targets must remain secretary users and assignments must reference existing providers. Integer IDs and the UI's positive decimal strings are normalized as a set; malformed or out-of-range IDs fail before mutation. | The model locks the secretary and requested provider users in ascending order before user/settings/assignment writes. Standalone save owns the transaction; an outer caller retains it. Settings and assignment writes, transaction status and commit are checked. The public `set_provider_ids` operation has the same standalone/outer ownership and parent validation for direct use. |
+
+Service duration must be a whole number of minutes within the signed database
+integer range and at least `EVENT_MINIMUM_DURATION`; attendant count remains exactly
+one. The API rejects decoded floating-point values for these integer JSON fields
+before a rounded value could pass validation; backoffice decimal and scientific
+text is evaluated exactly. The Services API maps model input-validation failures to 400. Unexpected
+current-state or post-write failures retain the server-error path.
 
 ### Admin account persistence
 
@@ -131,7 +138,11 @@ role, or invalid-rebase drift returns 409 without mutation.
 ## Evidence and limits
 
 - `ServicesModelUpdateTest`: standalone updates, omitted values, normalization,
-  missing expectations and stale expected values with no unrelated persisted change.
+  missing expectations and stale expected values with no unrelated persisted change;
+  service duration and fixed attendant validation.
+- `ServicesApiHttpWriteTest`: isolated synthetic HTTP/DB evidence for URI/body
+  target binding, wrong-verb aliases, authentication, ordinary create/update/delete,
+  invalid duration and fractional attendants with no unrelated mutation.
 - `ServicesModelLockOrderTest`: narrow neutral path, ordered parent locks, drift
   before mutation and standalone commit after synchronization.
 - `AppointmentsModelBufferBlockTest`: real buffer generation and injected failure

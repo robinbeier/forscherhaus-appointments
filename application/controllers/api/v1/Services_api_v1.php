@@ -107,8 +107,16 @@ class Services_api_v1 extends EA_Controller
      */
     public function store(): void
     {
+        if (!$this->enforceWriteMethod('POST')) {
+            return;
+        }
+
         try {
             $service = $this->apiRequestDtoFactory()->buildEntityWritePayloadDto()->payload;
+
+            if ($this->hasDecodedFloatingPointInteger($service)) {
+                throw new ServiceValidationException('Service integer fields must use integer JSON values.');
+            }
 
             $this->services_model->api_decode($service);
 
@@ -123,6 +131,8 @@ class Services_api_v1 extends EA_Controller
             $this->services_model->api_encode($created_service);
 
             json_response($created_service, 201);
+        } catch (ServiceValidationException $e) {
+            json_response(['success' => false], 400);
         } catch (Throwable $e) {
             json_exception($e);
         }
@@ -135,6 +145,10 @@ class Services_api_v1 extends EA_Controller
      */
     public function update(int $id): void
     {
+        if (!$this->enforceWriteMethod('PUT')) {
+            return;
+        }
+
         try {
             $occurrences = $this->services_model->get(['id' => $id]);
 
@@ -148,6 +162,21 @@ class Services_api_v1 extends EA_Controller
 
             $service = $this->apiRequestDtoFactory()->buildEntityWritePayloadDto()->payload;
 
+            if ($this->hasDecodedFloatingPointInteger($service)) {
+                throw new ServiceValidationException('Service integer fields must use integer JSON values.');
+            }
+
+            // The URL selects the service. A body ID may only repeat that target.
+            if (array_key_exists('id', $service)) {
+                if (!is_int($service['id']) || $service['id'] !== $id) {
+                    response('', 400);
+
+                    return;
+                }
+
+                unset($service['id']);
+            }
+
             $this->services_model->api_decode($service, $original_service);
 
             $service_id = $this->services_model->save($service, $original_service);
@@ -157,6 +186,8 @@ class Services_api_v1 extends EA_Controller
             $this->services_model->api_encode($updated_service);
 
             json_response($updated_service);
+        } catch (ServiceValidationException $e) {
+            json_response(['success' => false], 400);
         } catch (Throwable $e) {
             json_exception($e);
         }
@@ -169,6 +200,10 @@ class Services_api_v1 extends EA_Controller
      */
     public function destroy(int $id): void
     {
+        if (!$this->enforceWriteMethod('DELETE')) {
+            return;
+        }
+
         try {
             $occurrences = $this->services_model->get(['id' => $id]);
 
@@ -207,5 +242,27 @@ class Services_api_v1 extends EA_Controller
         $this->api_request_dto_factory = $CI->api_request_dto_factory;
 
         return $this->api_request_dto_factory;
+    }
+
+    private function enforceWriteMethod(string $expected): bool
+    {
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) === $expected) {
+            return true;
+        }
+
+        response('', 405, ['Allow: ' . $expected]);
+
+        return false;
+    }
+
+    private function hasDecodedFloatingPointInteger(array $payload): bool
+    {
+        foreach (['duration', 'attendantsNumber'] as $field) {
+            if (array_key_exists($field, $payload) && is_float($payload[$field])) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
