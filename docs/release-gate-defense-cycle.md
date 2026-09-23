@@ -164,7 +164,7 @@ root-only lifecycle journal binds the exact username, email, role, marker and us
 ID before any request; credential or role drift is rejected before login.
 
 The reviewed operator bundle includes `deploy_ea.sh`, `scripts/ops/run_ordinary_live_probe.sh`,
-`scripts/ops/ordinary_live_probe.php` and their eleven release-gate libraries. Run them only from a root-controlled copy
+`scripts/ops/ordinary_live_probe.php` and their twelve release-gate libraries. Run them only from a root-controlled copy
 of the reviewed tools outside the replaceable application release, against the
 verified installed release. The wrapper pins the tool inode and resolves the
 original application directory by inode before each call and independent cleanup.
@@ -199,6 +199,7 @@ bash scripts/ops/run_ordinary_live_probe.sh preflight EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh account EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh methods EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh customer-boundary EXPECTED_RELEASE
+bash scripts/ops/run_ordinary_live_probe.sh customers-api EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh calendar-race EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh appointments-api EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh appointments-api-overlap EXPECTED_RELEASE
@@ -253,6 +254,18 @@ back-office request could add a dependent row between fixture activation and the
 HTTP request, and the ordinary customer delete path would legitimately cascade
 that unjournaled row. Fixture cleanup instead locks and verifies complete
 dependency sets before removing its owned customer rows.
+
+`customers-api` reuses the customer-boundary administrator and its two owned
+customer rows. Under real localhost HTTP Basic authentication, it sends a JSON
+`PUT` to customer A with an otherwise valid payload carrying customer B's ID and
+B's matching fields; the response must be `400`, and complete `users` rows A and
+B must remain unchanged. It then sends a matching-ID `PUT` to A, requiring
+`200`, the returned A ID and persistence of only the intended A first-name
+change, with B unchanged. The probe records fixed status/outcome classes and
+never emits raw rows, credentials or HTTP bodies. It performs no delete or
+non-fixture write; the existing shared lock, pending marker, three-hour cleanup
+timer, release/inode checks, private journal and fail-closed cleanup remain the
+wrapper's responsibility.
 
 Fixture service cleanup follows the application lock order: synthetic user
 parents, then the service, its appointment parent and generated buffer children.

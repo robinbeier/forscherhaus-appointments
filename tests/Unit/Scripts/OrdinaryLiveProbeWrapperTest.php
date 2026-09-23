@@ -56,6 +56,7 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
                 'OrdinaryAccountProbe.php',
                 'AccountSecurityMatrixProbe.php',
                 'CustomerRoleBoundaryProbe.php',
+                'CustomersApiWriteProbe.php',
                 'CalendarResponsibilityRaceProbe.php',
                 'AppointmentsApiWriteProbe.php',
                 'DefenseVerificationFixture.php',
@@ -203,6 +204,7 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
             [
                 'methods' => 'provider',
                 'customer-boundary' => 'admin',
+                'customers-api' => 'admin',
                 'calendar-race' => 'provider',
                 'appointments-api' => 'provider',
                 'appointments-api-overlap' => 'provider',
