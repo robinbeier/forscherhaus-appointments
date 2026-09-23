@@ -7,6 +7,7 @@ use ReleaseGate\AccountSecurityMatrixProbe;
 use ReleaseGate\AppointmentsApiWriteProbe;
 use ReleaseGate\CalendarResponsibilityRaceProbe;
 use ReleaseGate\CustomerRoleBoundaryProbe;
+use ReleaseGate\CustomersApiWriteProbe;
 use ReleaseGate\DefenseVerificationFixture;
 use ReleaseGate\OrdinaryAccountProbe;
 use ReleaseGate\OrdinaryLiveFixture;
@@ -43,6 +44,7 @@ if (
             'account',
             'methods',
             'customer-boundary',
+            'customers-api',
             'calendar-race',
             'appointments-api',
             'appointments-api-overlap',
@@ -152,6 +154,7 @@ try {
     require_once dirname(__DIR__) . '/release-gate/lib/OrdinaryProbeEvidence.php';
     require_once dirname(__DIR__) . '/release-gate/lib/AccountSecurityMatrixProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/CustomerRoleBoundaryProbe.php';
+    require_once dirname(__DIR__) . '/release-gate/lib/CustomersApiWriteProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/CalendarResponsibilityRaceProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/AppointmentsApiWriteProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/DefenseVerificationFixture.php';
@@ -308,6 +311,20 @@ try {
                 }
                 throw $error;
             }
+        } elseif ($action === 'customers-api') {
+            $evidence->run(
+                'supplemental_activate',
+                fn(): array => $verificationFixture->activate('customer_boundary', $context),
+            );
+            $probe = CustomersApiWriteProbe::forApp(
+                'http://localhost',
+                (string) $context['username'],
+                (string) $context['password'],
+                $ci->db,
+                $verificationFixture,
+                indexPage: (string) config_item('index_page'),
+            );
+            $result['evidence'] = $probe->run($evidence->step(...));
         } elseif (in_array($action, ['appointments-api', 'appointments-api-overlap'], true)) {
             $supplemental = $evidence->run(
                 'supplemental_activate',
@@ -352,7 +369,7 @@ try {
         if (
             in_array(
                 $action,
-                ['customer-boundary', 'calendar-race', 'appointments-api', 'appointments-api-overlap'],
+                ['customer-boundary', 'customers-api', 'calendar-race', 'appointments-api', 'appointments-api-overlap'],
                 true,
             ) &&
             $verificationFixture->verify() !== 'active'
