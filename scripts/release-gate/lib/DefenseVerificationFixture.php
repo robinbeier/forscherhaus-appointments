@@ -1251,6 +1251,41 @@ final class DefenseVerificationFixture
         $this->lockFixtureUsers($state, $alreadyCleaning);
         $this->assertRecoverableApiAdminSettings($state);
         $this->assertServiceDependencies($state, $alreadyCleaning, $wasPrepared);
+        $lockedUnavailabilities = $this->lockUnavailabilityRowsForCleanup($state);
+        foreach (['a', 'b'] as $key) {
+            $id = (int) ($ids['unavailability_' . $key] ?? 0);
+            if ($id < 1 || !isset($lockedUnavailabilities[$id])) {
+                continue;
+            }
+            $intent = $state['intents']['unavailabilities'][$key] ?? null;
+            if (!is_array($intent)) {
+                throw new RuntimeException('Unavailability cleanup intent is missing.');
+            }
+            $this->assertExactLockedRow($lockedUnavailabilities[$id], [
+                'notes' => $intent['marker'],
+                'id_users_provider' => $intent['provider_id'],
+                'is_unavailability' => 1,
+                'id_parent_appointment' => null,
+                'id_users_customer' => null,
+                'id_services' => null,
+            ]);
+            $allowedTimes = [[$intent['start'], $intent['end']]];
+            if (($state['profile'] ?? null) === 'unavailabilities_api' && $key === 'a') {
+                $allowedTimes[] = [
+                    date('Y-m-d H:i:s', strtotime((string) $intent['start']) + 600),
+                    date('Y-m-d H:i:s', strtotime((string) $intent['end']) + 600),
+                ];
+            }
+            if (
+                !in_array(
+                    [$lockedUnavailabilities[$id]['start_datetime'], $lockedUnavailabilities[$id]['end_datetime']],
+                    $allowedTimes,
+                    true,
+                )
+            ) {
+                throw new RuntimeException('Fixture identity drift detected.');
+            }
+        }
         if (($state['profile'] ?? null) === 'services_api') {
             foreach (['service_a', 'service_b'] as $key) {
                 if (!isset($state['ids'][$key])) {
@@ -1345,15 +1380,20 @@ final class DefenseVerificationFixture
         }
         foreach (['a', 'b'] as $key) {
             $id = (int) ($ids['unavailability_' . $key] ?? 0);
-            if ($id < 1 || $this->db->get_where('appointments', ['id' => $id])->num_rows() === 0) {
+            if ($id < 1 || !isset($lockedUnavailabilities[$id])) {
                 continue;
             }
             $intent = $state['intents']['unavailabilities'][$key] ?? null;
-            if (!is_array($intent)) {
-                throw new RuntimeException('Unavailability cleanup intent is missing.');
+            $this->db->delete('appointments', [
+                'id' => $id,
+                'notes' => $intent['marker'],
+                'id_users_provider' => $intent['provider_id'],
+                'is_unavailability' => 1,
+                'id_parent_appointment' => null,
+            ]);
+            if ($this->db->affected_rows() !== 1) {
+                throw new RuntimeException('Unavailability cleanup did not delete its bound row.');
             }
-            $this->assertExactRow('appointments', $id, ['notes' => $intent['marker'], 'is_unavailability' => 1]);
-            $this->db->delete('appointments', ['id' => $id, 'notes' => $intent['marker'], 'is_unavailability' => 1]);
         }
         foreach ($state['links'] ?? [] as $link) {
             if (!is_array($link) || count($link) !== 2) {
@@ -2197,6 +2237,52 @@ final class DefenseVerificationFixture
     private function assertExactRow(string $table, int $id, array $where): void
     {
         $row = $this->db->get_where($table, ['id' => $id])->row_array();
+        $this->assertExactLockedRow($row, $where);
+    }
+
+    /** @return array<int,array<string,mixed>> */
+    private function lockUnavailabilityRowsForCleanup(array $state): array
+    {
+        $ids = [];
+        foreach (['a', 'b'] as $key) {
+            $id = (int) ($state['ids']['unavailability_' . $key] ?? 0);
+            if ($id > 0) {
+                $ids[] = $id;
+            }
+        }
+        $ids = array_values(array_unique($ids));
+        sort($ids, SORT_NUMERIC);
+        if ($ids === []) {
+            return [];
+        }
+
+        $rows = $this->db
+            ->query(
+                'SELECT * FROM `' .
+                    $this->db->dbprefix('appointments') .
+                    '` WHERE id IN (' .
+                    implode(',', array_fill(0, count($ids), '?')) .
+                    ') ORDER BY id ASC FOR UPDATE',
+                $ids,
+            )
+            ->result_array();
+        $locked = [];
+        foreach ($rows as $row) {
+            $id = (int) ($row['id'] ?? 0);
+            if ($id < 1 || isset($locked[$id])) {
+                throw new RuntimeException('Unavailability cleanup lock set is invalid.');
+            }
+            $locked[$id] = $row;
+        }
+        return $locked;
+    }
+
+    /** @param array<string,mixed>|null $row @param array<string,mixed> $where */
+    private function assertExactLockedRow(?array $row, array $where): void
+    {
+        if ($row === null) {
+            throw new RuntimeException('Fixture identity drift detected.');
+        }
         foreach ($where as $key => $value) {
             if (($row[$key] ?? null) != $value) {
                 throw new RuntimeException('Fixture identity drift detected.');

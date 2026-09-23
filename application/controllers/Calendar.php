@@ -551,7 +551,7 @@ class Calendar extends EA_Controller
                         (int) $locked_unavailability['id_users_provider'] !==
                         (int) $stored_unavailability['id_users_provider']
                     ) {
-                        throw new RuntimeException('The unavailability provider changed during this request.');
+                        throw new RuntimeException('The unavailability provider changed during this request.', 403);
                     }
 
                     if (!$this->has_event_permissions((int) $locked_unavailability['id_users_provider'])) {
@@ -583,7 +583,11 @@ class Calendar extends EA_Controller
                 'warnings' => $warnings,
             ]);
         } catch (Throwable $e) {
-            json_exception($e);
+            if ($e->getCode() === 403) {
+                json_response(['success' => false, 'message' => $e->getMessage()], 403);
+            } else {
+                json_exception($e);
+            }
         }
     }
 
@@ -637,7 +641,11 @@ class Calendar extends EA_Controller
                 'success' => true,
             ]);
         } catch (Throwable $e) {
-            json_exception($e);
+            if ($e->getCode() === 403) {
+                json_response(['success' => false, 'message' => $e->getMessage()], 403);
+            } else {
+                json_exception($e);
+            }
         }
     }
 

@@ -27,6 +27,7 @@ final class CalendarUnavailabilityRaceTest extends TestCase
 {
     private BookingFlowFixtures $fixtures;
     private object $originalExceptions;
+    private \EA_Output $originalOutput;
     private int $providerId;
     private int $foreignProviderId;
     private int $unavailabilityId;
@@ -38,6 +39,16 @@ final class CalendarUnavailabilityRaceTest extends TestCase
         $exceptions = &load_class('Exceptions', 'core');
         $this->originalExceptions = $exceptions;
         $exceptions = new CalendarUnavailabilityRaceTestExceptions();
+        $this->originalOutput = get_instance()->output;
+        get_instance()->output = new class extends \EA_Output {
+            public int $statusCode = 200;
+
+            public function set_status_header($code = 200, $text = '')
+            {
+                $this->statusCode = (int) $code;
+                return parent::set_status_header($code, $text);
+            }
+        };
         $this->fixtures = new BookingFlowFixtures();
         $pair = $this->fixtures->resolveProviderServicePair();
         $this->providerId = $pair['provider_id'];
@@ -62,6 +73,7 @@ final class CalendarUnavailabilityRaceTest extends TestCase
     {
         $exceptions = &load_class('Exceptions', 'core');
         $exceptions = $this->originalExceptions;
+        get_instance()->output = $this->originalOutput;
         get_instance()->db->delete('appointments', ['id' => $this->unavailabilityId]);
         get_instance()->db->delete('user_settings', ['id_users' => $this->foreignProviderId]);
         get_instance()->db->delete('services_providers', ['id_users' => $this->foreignProviderId]);
@@ -97,6 +109,7 @@ final class CalendarUnavailabilityRaceTest extends TestCase
         $this->assertTrue($controller->reassigned);
         $this->assertIsArray($response);
         $this->assertFalse($response['success'] ?? true);
+        $this->assertSame(403, get_instance()->output->statusCode);
         $this->assertSame($this->foreignProviderId, (int) $stored['id_users_provider']);
         $this->assertSame('2035-06-01 08:00:00', $stored['start_datetime']);
     }
@@ -143,6 +156,7 @@ final class CalendarUnavailabilityRaceTest extends TestCase
         $this->assertTrue($race->reassigned);
         $this->assertIsArray($response);
         $this->assertFalse($response['success'] ?? true);
+        $this->assertSame(403, get_instance()->output->statusCode);
         $expected = $before;
         $expected['id_users_provider'] = (string) $this->foreignProviderId;
         $this->assertSame($expected, $stored);

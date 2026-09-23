@@ -116,6 +116,56 @@ final class UnavailabilitiesApiWriteProbeTest extends TestCase
         }
     }
 
+    public function testCleanupRejectsManualRowAttachedToAnotherAppointmentBeforeDeletion(): void
+    {
+        if (getenv('FH_DEFENSE_ISOLATED') !== '1' || posix_geteuid() !== 0) {
+            self::markTestSkipped('Requires the isolated root defense stack.');
+        }
+
+        $directory = '/var/lib/fh-unavailabilities-api-manual-drift-tests-' . bin2hex(random_bytes(8));
+        $ordinary = new OrdinaryLiveFixture($directory);
+        $fixture = new DefenseVerificationFixture($directory);
+        $driftedId = null;
+        try {
+            $actor = $ordinary->activate(roleSlug: 'admin');
+            $state = $fixture->activate('unavailabilities_api', $actor);
+            $driftedId = (int) $state['ids']['unavailability_a'];
+            $parentId = (int) $state['ids']['unavailability_b'];
+            $row = get_instance()
+                ->db->get_where('appointments', ['id' => $driftedId])
+                ->row_array();
+            self::assertNotEmpty($row);
+            get_instance()->db->update('appointments', ['id_parent_appointment' => $parentId], ['id' => $driftedId]);
+
+            try {
+                try {
+                    $fixture->deactivate();
+                    self::fail('Cleanup deleted a manual row after its parent link drifted.');
+                } catch (RuntimeException $error) {
+                    self::assertSame('Fixture identity drift detected.', $error->getMessage());
+                    $stillOwned = get_instance()
+                        ->db->get_where('appointments', ['id' => $driftedId])
+                        ->row_array();
+                    self::assertNotEmpty($stillOwned);
+                    self::assertSame($parentId, (int) $stillOwned['id_parent_appointment']);
+                }
+            } finally {
+                get_instance()->db->update('appointments', ['id_parent_appointment' => null], ['id' => $driftedId]);
+                if (is_file($directory . '/defense-verification.json')) {
+                    $fixture->deactivate();
+                }
+                if (is_file($directory . '/state.json')) {
+                    $ordinary->deactivate();
+                }
+                $this->removePrivateDirectory($directory);
+            }
+        } finally {
+            if (is_dir($directory)) {
+                $this->removePrivateDirectory($directory);
+            }
+        }
+    }
+
     public function testSnapshotRejectsMissingBufferConfiguration(): void
     {
         if (getenv('FH_DEFENSE_ISOLATED') !== '1' || posix_geteuid() !== 0) {

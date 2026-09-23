@@ -71,20 +71,21 @@ final class UnavailabilitiesApiWriteProbe
                 throw new RuntimeException('Unavailabilities API matching PUT returned the wrong row.');
             }
             $after = $this->fixture->unavailabilitiesApiSnapshot();
-            $expectedFields = [
-                'start_datetime' => $payload['start'],
-                'end_datetime' => $payload['end'],
-                'notes' => $before['a']['notes'],
-                'id_users_provider' => $before['a']['id_users_provider'],
-                'is_unavailability' => 1,
-                'id_parent_appointment' => null,
-            ];
-            foreach ($expectedFields as $field => $expected) {
-                if (($after['a'][$field] ?? null) != $expected) {
-                    throw new RuntimeException(
-                        'Unavailabilities API matching PUT did not persist the expected A field.',
-                    );
-                }
+            $expectedA = $before['a'];
+            $expectedA['start_datetime'] = $payload['start'];
+            $expectedA['end_datetime'] = $payload['end'];
+            $observedA = $after['a'];
+            if (
+                !array_key_exists('update_datetime', $expectedA) ||
+                !array_key_exists('update_datetime', $observedA) ||
+                !is_string($observedA['update_datetime']) ||
+                $observedA['update_datetime'] === ''
+            ) {
+                throw new RuntimeException('Unavailabilities API matching PUT has no update timestamp.');
+            }
+            $expectedA['update_datetime'] = $observedA['update_datetime'];
+            if ($observedA !== $expectedA) {
+                throw new RuntimeException('Unavailabilities API matching PUT changed an unexpected A field.');
             }
             if (
                 $after['b'] !== $before['b'] ||
