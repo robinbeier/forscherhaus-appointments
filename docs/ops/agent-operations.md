@@ -93,6 +93,9 @@ Current accepted baseline:
 - Monitor: `https://monitor.dasforscherhaus-leg.de/`
 - Active app path: `/var/www/html/easyappointments`
 - Release archive path: `/root/releases`
+- Ordinary probe bundle staging/archive path:
+  `/root/fh-ordinary-probe-bundles` (root:root `0700`; artifacts root:root
+  `0600`; outside release retention)
 - Host-local protected inputs: `/etc/fh`, `/etc/fh/healthz.token`,
   `/root/backups/uptime-kuma-push.env`
 - Core services: `apache2`, `php8.5-fpm`, `mariadb`, `docker`, `fail2ban`,
@@ -259,6 +262,11 @@ Disk, memory, or swap pressure:
   read-only; helper installation, execute approval, monitoring activation, and
   timer enablement remain separate production changes. See
   `docs/ops/production-release-archive-dump-retention.md`.
+- Retain ordinary probe bundles and matching `.provenance` files under
+  `/root/fh-ordinary-probe-bundles`; keep `/root/releases` for application
+  release pairs and legacy holds. This path rule does not authorize moving or
+  deleting production files, and the new directory is outside automatic
+  retention and deletion.
 - For native journal rotation, aggregate inspection, and approved manual cleanup,
   see `docs/ops/production-journald-retention.md`.
 - For aggregate daily application-log inspection and approved manual cleanup,
