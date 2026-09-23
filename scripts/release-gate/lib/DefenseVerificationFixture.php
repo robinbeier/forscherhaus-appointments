@@ -19,7 +19,7 @@ final class DefenseVerificationFixture
 {
     private const SCHEMA = 'defense-verification-fixture.v1';
     private const MAX_TTL = 600;
-    private const PROFILES = ['customer_boundary', 'calendar_race', 'services_api'];
+    private const PROFILES = ['customer_boundary', 'calendar_race', 'services_api', 'unavailabilities_api'];
     private const ACTIVE_TRANSACTION_ERROR = 'Defense verification fixture cannot run inside an active database transaction.';
 
     private object $db;
@@ -73,7 +73,9 @@ final class DefenseVerificationFixture
             }
             $actor = $this->assertActor(
                 $actorContext,
-                in_array($profile, ['customer_boundary', 'services_api'], true) ? 'admin' : 'provider',
+                in_array($profile, ['customer_boundary', 'services_api', 'unavailabilities_api'], true)
+                    ? 'admin'
+                    : 'provider',
             );
             $run = bin2hex(random_bytes(16));
             $marker = 'defense-verification:' . $run;
@@ -104,7 +106,9 @@ final class DefenseVerificationFixture
                         ? $this->activateCustomerBoundary($state)
                         : ($profile === 'services_api'
                             ? $this->activateServicesApi($state)
-                            : $this->activateCalendarRace($state));
+                            : ($profile === 'unavailabilities_api'
+                                ? $this->activateUnavailabilitiesApi($state)
+                                : $this->activateCalendarRace($state)));
                 $state['phase'] = 'active';
                 $this->writeState($state);
                 return $state;
@@ -177,6 +181,51 @@ final class DefenseVerificationFixture
                 $snapshot[$label] = $row ?: [];
             }
             return $snapshot;
+        });
+    }
+
+    /** Non-secret snapshots for the bounded Unavailabilities API probe. */
+    public function unavailabilitiesApiSnapshot(): array
+    {
+        return $this->withLock(function (): array {
+            $state = $this->readState();
+            $this->validateState($state);
+            $this->assertOwnership($state);
+            $serviceId = (int) ($state['ids']['service'] ?? 0);
+            $service = $serviceId > 0 ? $this->db->get_where('services', ['id' => $serviceId])->row_array() : [];
+            if ((int) ($service['buffer_before'] ?? 0) !== 10 || (int) ($service['buffer_after'] ?? 0) !== 10) {
+                throw new RuntimeException('Synthetic buffer configuration is not the bound 10/10 profile.');
+            }
+            $rows = [];
+            foreach (
+                ['a' => 'unavailability_a', 'b' => 'unavailability_b', 'ordinary' => 'appointment']
+                as $label => $key
+            ) {
+                $id = (int) ($state['ids'][$key] ?? 0);
+                $row = $id > 0 ? $this->db->get_where('appointments', ['id' => $id])->row_array() : [];
+                if ($row !== []) {
+                    $row['hash'] = hash('sha256', (string) ($row['hash'] ?? ''));
+                }
+                $rows[$label] = $row ?: [];
+            }
+            $parent = (int) ($state['ids']['appointment'] ?? 0);
+            $rows['buffers'] =
+                $parent > 0
+                    ? array_map(
+                        static function (array $row): array {
+                            $row['hash'] = hash('sha256', (string) ($row['hash'] ?? ''));
+                            return $row;
+                        },
+                        $this->db
+                            ->order_by('id', 'asc')
+                            ->get_where('appointments', ['id_parent_appointment' => $parent])
+                            ->result_array(),
+                    )
+                    : [];
+            if (count($rows['buffers']) !== 2) {
+                throw new RuntimeException('Synthetic appointment must have exactly two generated buffers.');
+            }
+            return $rows;
         });
     }
 
@@ -673,6 +722,100 @@ final class DefenseVerificationFixture
         return $state;
     }
 
+    /** Prepare two manual unavailabilities and one buffered ordinary appointment. */
+    private function activateUnavailabilitiesApi(array $state): array
+    {
+        $providerRole = $this->role('provider');
+        $customerRole = $this->role('customer');
+        $state['roles'] = ['admin' => $this->role('admin'), 'provider' => $providerRole, 'customer' => $customerRole];
+        $state['ids']['provider_target'] = $this->insertUser(
+            $state,
+            'provider_target',
+            $providerRole,
+            'unavailability-provider',
+        );
+        $state['ids']['calendar_customer'] = $this->insertCustomer($state, 'calendar_customer', $customerRole);
+        $state['ids']['service'] = $this->insertServiceForKey($state, 'service', 'buffered');
+        $state['intents']['buffer_configuration'] = [
+            'service_id' => $state['ids']['service'],
+            'buffer_before' => 10,
+            'buffer_after' => 10,
+        ];
+        $this->journal($state);
+        if (
+            !$this->db->update(
+                'services',
+                ['buffer_before' => 10, 'buffer_after' => 10],
+                ['id' => $state['ids']['service']],
+            )
+        ) {
+            throw new RuntimeException('Could not configure synthetic service buffers.');
+        }
+        $service = $this->db->get_where('services', ['id' => $state['ids']['service']])->row_array();
+        if ((int) ($service['buffer_before'] ?? 0) !== 10 || (int) ($service['buffer_after'] ?? 0) !== 10) {
+            throw new RuntimeException('Synthetic service buffer configuration was not confirmed.');
+        }
+        $state['links']['actor_service'] = [
+            'id_users' => $state['ids']['provider_target'],
+            'id_services' => $state['ids']['service'],
+        ];
+        $this->journal($state);
+        $this->insertExact('services_providers', $state['links']['actor_service']);
+        $ci = &\get_instance();
+        $ci->load->model('unavailabilities_model');
+        $ci->load->model('appointments_model');
+        $base = time() + 86400 * 40;
+        foreach (['a' => 9, 'b' => 12] as $key => $hour) {
+            $start = gmdate('Y-m-d ' . sprintf('%02d:00:00', $hour), $base);
+            $end = gmdate('Y-m-d ' . sprintf('%02d:30:00', $hour), $base);
+            $state['intents']['unavailabilities'][$key] = [
+                'marker' => $state['marker'] . ':manual:' . $key,
+                'provider_id' => $state['ids']['provider_target'],
+                'start' => $start,
+                'end' => $end,
+            ];
+            $this->journal($state);
+            $state['ids']['unavailability_' . $key] = (int) $ci->unavailabilities_model->save([
+                'start_datetime' => $start,
+                'end_datetime' => $end,
+                'id_users_provider' => $state['ids']['provider_target'],
+                'notes' => $state['intents']['unavailabilities'][$key]['marker'],
+            ]);
+            $this->journal($state);
+        }
+        $start = gmdate('Y-m-d 15:00:00', $base);
+        $end = gmdate('Y-m-d 15:30:00', $base);
+        $state['intents']['appointment'] = [
+            'marker' => $state['marker'] . ':ordinary',
+            'provider_id' => $state['ids']['provider_target'],
+            'customer_id' => $state['ids']['calendar_customer'],
+            'service_id' => $state['ids']['service'],
+            'start' => $start,
+            'end' => $end,
+        ];
+        $this->journal($state);
+        $state['ids']['appointment'] = (int) $ci->appointments_model->save([
+            'start_datetime' => $start,
+            'end_datetime' => $end,
+            'notes' => $state['intents']['appointment']['marker'],
+            'is_unavailability' => 0,
+            'id_users_provider' => $state['ids']['provider_target'],
+            'id_users_customer' => $state['ids']['calendar_customer'],
+            'id_services' => $state['ids']['service'],
+        ]);
+        $this->journal($state);
+        $children = $this->db
+            ->get_where('appointments', [
+                'id_parent_appointment' => $state['ids']['appointment'],
+                'is_unavailability' => 1,
+            ])
+            ->result_array();
+        if (count($children) !== 2) {
+            throw new RuntimeException('Synthetic appointment did not create exactly two buffers.');
+        }
+        return $state;
+    }
+
     /** @param array<string,mixed> $state @return array<string,mixed> */
     private function activateCalendarRace(array $state): array
     {
@@ -882,7 +1025,9 @@ final class DefenseVerificationFixture
                 ? 'services_providers'
                 : (in_array($key, ['service', 'service_a', 'service_b'], true)
                     ? 'services'
-                    : ($key === 'appointment' || str_starts_with($key, 'api_appointment_')
+                    : ($key === 'appointment' ||
+                    str_starts_with($key, 'api_appointment_') ||
+                    str_starts_with($key, 'unavailability_')
                         ? 'appointments'
                         : 'users'));
             if ($this->db->get_where($table, ['id' => $id])->num_rows() !== 1) {
@@ -970,11 +1115,20 @@ final class DefenseVerificationFixture
         }
         if (isset($state['ids']['appointment'])) {
             $this->assertExactRow('appointments', (int) $state['ids']['appointment'], [
-                'notes' => $state['marker'],
-                'id_users_provider' => $state['actor_id'],
+                'notes' => $state['intents']['appointment']['marker'] ?? $state['marker'],
+                'id_users_provider' => (int) ($state['intents']['appointment']['provider_id'] ?? $state['actor_id']),
                 'id_users_customer' => $state['ids']['calendar_customer'],
                 'id_services' => $state['ids']['service'],
             ]);
+        }
+        foreach ($state['intents']['unavailabilities'] ?? [] as $key => $intent) {
+            if (isset($state['ids']['unavailability_' . $key])) {
+                $this->assertExactRow('appointments', (int) $state['ids']['unavailability_' . $key], [
+                    'notes' => $intent['marker'],
+                    'id_users_provider' => (int) $intent['provider_id'],
+                    'is_unavailability' => 1,
+                ]);
+            }
         }
         foreach (['basic', 'bearer'] as $case) {
             $intent = $state['intents']['api_appointments'][$case] ?? null;
@@ -1158,15 +1312,48 @@ final class DefenseVerificationFixture
             $this->db->delete('appointments', ['id' => $id]);
         }
         if (isset($ids['appointment'])) {
+            if (($state['profile'] ?? null) === 'unavailabilities_api') {
+                $children = $this->db
+                    ->select('id')
+                    ->get_where('appointments', [
+                        'id_parent_appointment' => (int) $ids['appointment'],
+                        'is_unavailability' => 1,
+                    ])
+                    ->result_array();
+                foreach ($children as $child) {
+                    $childId = (int) ($child['id'] ?? 0);
+                    if ($childId < 1) {
+                        throw new RuntimeException('Synthetic buffer child ID is invalid.');
+                    }
+                    $this->db->delete('appointments', [
+                        'id' => $childId,
+                        'id_parent_appointment' => (int) $ids['appointment'],
+                        'is_unavailability' => 1,
+                    ]);
+                }
+            }
             $exists = $this->db->get_where('appointments', ['id' => (int) $ids['appointment']])->num_rows() !== 0;
             if ($exists || !$alreadyCleaning) {
                 $this->assertExactRow('appointments', (int) $ids['appointment'], [
-                    'notes' => $state['marker'],
-                    'id_users_provider' => $state['actor_id'],
+                    'notes' => $state['intents']['appointment']['marker'] ?? $state['marker'],
+                    'id_users_provider' =>
+                        (int) ($state['intents']['appointment']['provider_id'] ?? $state['actor_id']),
                     'id_users_customer' => $ids['calendar_customer'],
                 ]);
-                $this->db->delete('appointments', ['id' => $ids['appointment'], 'notes' => $state['marker']]);
+                $this->db->delete('appointments', ['id' => $ids['appointment']]);
             }
+        }
+        foreach (['a', 'b'] as $key) {
+            $id = (int) ($ids['unavailability_' . $key] ?? 0);
+            if ($id < 1 || $this->db->get_where('appointments', ['id' => $id])->num_rows() === 0) {
+                continue;
+            }
+            $intent = $state['intents']['unavailabilities'][$key] ?? null;
+            if (!is_array($intent)) {
+                throw new RuntimeException('Unavailability cleanup intent is missing.');
+            }
+            $this->assertExactRow('appointments', $id, ['notes' => $intent['marker'], 'is_unavailability' => 1]);
+            $this->db->delete('appointments', ['id' => $id, 'notes' => $intent['marker'], 'is_unavailability' => 1]);
         }
         foreach ($state['links'] ?? [] as $link) {
             if (!is_array($link) || count($link) !== 2) {
@@ -1597,14 +1784,51 @@ final class DefenseVerificationFixture
             }
             $generatedChildren = $this->db
                 ->query(
-                    'SELECT id, id_parent_appointment, id_services FROM ' .
+                    'SELECT id, id_parent_appointment, id_services, id_users_provider, id_users_customer, ' .
+                        'is_unavailability, start_datetime, end_datetime, notes FROM ' .
                         $this->db->dbprefix('appointments') .
                         ' WHERE id_parent_appointment = ? ORDER BY id FOR UPDATE',
                     [$parentId],
                 )
                 ->result_array();
-            if ($generatedChildren !== []) {
+            if ($generatedChildren !== [] && ($state['profile'] ?? null) !== 'unavailabilities_api') {
                 throw new RuntimeException('Unexpected generated appointment child; refusing cleanup.');
+            }
+            if (($state['profile'] ?? null) === 'unavailabilities_api') {
+                $parent = $this->db->get_where('appointments', ['id' => $parentId])->row_array();
+                $service = $this->db->get_where('services', ['id' => $serviceId])->row_array();
+                $before = (int) ($service['buffer_before'] ?? 0);
+                $after = (int) ($service['buffer_after'] ?? 0);
+                if ($before !== 10 || $after !== 10) {
+                    throw new RuntimeException('Synthetic service buffer configuration drifted; refusing cleanup.');
+                }
+                $expected = [
+                    [
+                        'start_datetime' => date('Y-m-d H:i:s', strtotime((string) $parent['start_datetime']) - 600),
+                        'end_datetime' => $parent['start_datetime'],
+                    ],
+                    [
+                        'start_datetime' => $parent['end_datetime'],
+                        'end_datetime' => date('Y-m-d H:i:s', strtotime((string) $parent['end_datetime']) + 600),
+                    ],
+                ];
+                if (count($generatedChildren) !== count($expected)) {
+                    throw new RuntimeException('Synthetic buffer child count drifted.');
+                }
+                foreach ($generatedChildren as $index => $child) {
+                    if (
+                        (int) ($child['id_parent_appointment'] ?? 0) !== $parentId ||
+                        (int) ($child['id_services'] ?? 0) !== 0 ||
+                        (int) ($child['id_users_provider'] ?? 0) !== (int) $parent['id_users_provider'] ||
+                        ($child['id_users_customer'] ?? null) !== null ||
+                        (int) ($child['is_unavailability'] ?? 0) !== 1 ||
+                        ($child['start_datetime'] ?? null) !== $expected[$index]['start_datetime'] ||
+                        ($child['end_datetime'] ?? null) !== $expected[$index]['end_datetime'] ||
+                        ($child['notes'] ?? null) !== lang('buffer_block_note')
+                    ) {
+                        throw new RuntimeException('Synthetic buffer child identity drifted.');
+                    }
+                }
             }
             foreach (['basic', 'bearer'] as $case) {
                 $apiParentId = (int) ($state['ids']['api_appointment_' . $case] ?? 0);
@@ -1780,6 +2004,26 @@ final class DefenseVerificationFixture
                 $state['ids']['appointment'] = (int) $rows[0]['id'];
             }
         }
+        foreach ($state['intents']['unavailabilities'] ?? [] as $key => $intent) {
+            $idKey = 'unavailability_' . $key;
+            if (isset($state['ids'][$idKey]) || !is_array($intent)) {
+                continue;
+            }
+            $rows = $this->db
+                ->where('notes', $intent['marker'])
+                ->where('id_users_provider', (int) $intent['provider_id'])
+                ->where('start_datetime', $intent['start'])
+                ->where('end_datetime', $intent['end'])
+                ->where('is_unavailability', 1)
+                ->get('appointments')
+                ->result_array();
+            if (count($rows) > 1) {
+                throw new RuntimeException('Fixture unavailability identity is ambiguous; refusing cleanup.');
+            }
+            if (count($rows) === 1) {
+                $state['ids'][$idKey] = (int) $rows[0]['id'];
+            }
+        }
         foreach (['basic', 'bearer'] as $case) {
             $key = 'api_appointment_' . $case;
             $intent = $state['intents']['api_appointments'][$case] ?? null;
@@ -1917,7 +2161,9 @@ final class DefenseVerificationFixture
                 ? 'services_providers'
                 : (in_array($key, ['service', 'service_a', 'service_b'], true)
                     ? 'services'
-                    : ($key === 'appointment' || str_starts_with($key, 'api_appointment_')
+                    : ($key === 'appointment' ||
+                    str_starts_with($key, 'api_appointment_') ||
+                    str_starts_with($key, 'unavailability_')
                         ? 'appointments'
                         : 'users'));
             if ($this->db->get_where($table, ['id' => (int) $id])->num_rows() !== 0) {

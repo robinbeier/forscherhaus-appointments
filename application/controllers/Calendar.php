@@ -505,6 +505,19 @@ class Calendar extends EA_Controller
             $request_dto = $this->calendarRequestDtoFactory()->buildUnavailabilityRequestDto();
             $unavailability = $request_dto->unavailability;
 
+            $this->validate_calendar_unavailability_payload($unavailability);
+
+            $this->unavailabilities_model->only($unavailability, [
+                'id',
+                'start_datetime',
+                'end_datetime',
+                'notes',
+                'id_users_provider',
+                'location',
+                'color',
+                'status',
+            ]);
+
             $required_permissions = empty($unavailability['id'])
                 ? can('add', PRIV_APPOINTMENTS)
                 : can('edit', PRIV_APPOINTMENTS);
@@ -512,6 +525,8 @@ class Calendar extends EA_Controller
             if (!$required_permissions) {
                 throw new RuntimeException('You do not have the required permissions for this task.');
             }
+
+            $stored_unavailability = null;
 
             if (!empty($unavailability['id'])) {
                 $stored_unavailability = $this->unavailabilities_model->find((int) $unavailability['id']);
@@ -522,9 +537,44 @@ class Calendar extends EA_Controller
 
             $this->check_event_permissions($provider_id);
 
-            $provider = $this->providers_model->find($provider_id);
+            if (!$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start unavailability transaction.');
+            }
 
-            $unavailability_id = $this->unavailabilities_model->save($unavailability);
+            try {
+                $this->lock_calendar_update_parents($stored_unavailability ?? [], $unavailability);
+
+                if ($stored_unavailability !== null) {
+                    $locked_unavailability = $this->lock_manual_unavailability((int) $unavailability['id']);
+
+                    if (
+                        (int) $locked_unavailability['id_users_provider'] !==
+                        (int) $stored_unavailability['id_users_provider']
+                    ) {
+                        throw new RuntimeException('The unavailability provider changed during this request.');
+                    }
+
+                    if (!$this->has_event_permissions((int) $locked_unavailability['id_users_provider'])) {
+                        throw new RuntimeException('You do not have the required permissions for this task.', 403);
+                    }
+                }
+
+                if (!$this->has_event_permissions($provider_id)) {
+                    throw new RuntimeException('You do not have the required permissions for this task.', 403);
+                }
+
+                $this->providers_model->find($provider_id);
+
+                $unavailability_id = $this->unavailabilities_model->save($unavailability);
+
+                if ($this->db->trans_status() === false || !$this->db->trans_commit()) {
+                    throw new RuntimeException('Could not commit unavailability transaction.');
+                }
+            } catch (Throwable $e) {
+                $this->db->trans_rollback();
+
+                throw $e;
+            }
 
             $unavailability = $this->unavailabilities_model->find($unavailability_id);
 
@@ -556,7 +606,32 @@ class Calendar extends EA_Controller
 
             $provider = $this->providers_model->find($unavailability['id_users_provider']);
 
-            $this->unavailabilities_model->delete($unavailability_id);
+            if (!$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start unavailability transaction.');
+            }
+
+            try {
+                $this->lock_calendar_update_parents($unavailability, $unavailability);
+
+                $locked_unavailability = $this->lock_manual_unavailability($unavailability_id);
+
+                if (
+                    (int) $locked_unavailability['id_users_provider'] !== (int) $unavailability['id_users_provider'] ||
+                    !$this->has_event_permissions((int) $locked_unavailability['id_users_provider'])
+                ) {
+                    throw new RuntimeException('You do not have the required permissions for this task.', 403);
+                }
+
+                $this->unavailabilities_model->delete($unavailability_id);
+
+                if ($this->db->trans_status() === false || !$this->db->trans_commit()) {
+                    throw new RuntimeException('Could not commit unavailability transaction.');
+                }
+            } catch (Throwable $e) {
+                $this->db->trans_rollback();
+
+                throw $e;
+            }
 
             json_response([
                 'success' => true,
@@ -564,6 +639,36 @@ class Calendar extends EA_Controller
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    private function validate_calendar_unavailability_payload(array $unavailability): void
+    {
+        if (
+            (array_key_exists('is_unavailability', $unavailability) &&
+                !in_array($unavailability['is_unavailability'], [true, 1, '1'], true)) ||
+            (array_key_exists('id_parent_appointment', $unavailability) &&
+                $unavailability['id_parent_appointment'] !== null)
+        ) {
+            throw new InvalidArgumentException('Protected unavailability fields cannot be changed.');
+        }
+    }
+
+    protected function lock_manual_unavailability(int $unavailability_id): array
+    {
+        $unavailability = $this->db
+            ->query(
+                'SELECT * FROM `' .
+                    $this->db->dbprefix('appointments') .
+                    '` WHERE `id` = ? AND `is_unavailability` = 1 AND `id_parent_appointment` IS NULL FOR UPDATE',
+                [$unavailability_id],
+            )
+            ->row_array();
+
+        if (!$unavailability) {
+            throw new InvalidArgumentException('Manual unavailability no longer exists.');
+        }
+
+        return $unavailability;
     }
 
     /**

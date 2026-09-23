@@ -116,6 +116,10 @@ class Unavailabilities_api_v1 extends EA_Controller
      */
     public function store(): void
     {
+        if (!$this->enforceWriteMethod('POST')) {
+            return;
+        }
+
         try {
             $unavailability = $this->apiRequestDtoFactory()->buildEntityWritePayloadDto()->payload;
 
@@ -144,6 +148,10 @@ class Unavailabilities_api_v1 extends EA_Controller
      */
     public function update(int $id): void
     {
+        if (!$this->enforceWriteMethod('PUT')) {
+            return;
+        }
+
         try {
             $occurrences = $this->unavailabilities_model->get(['id' => $id]);
 
@@ -157,7 +165,20 @@ class Unavailabilities_api_v1 extends EA_Controller
 
             $unavailability = $this->apiRequestDtoFactory()->buildEntityWritePayloadDto()->payload;
 
+            // The route identifies the only resource this request may update.
+            if (array_key_exists('id', $unavailability)) {
+                if (!is_int($unavailability['id']) || $unavailability['id'] !== $id) {
+                    response('', 400);
+
+                    return;
+                }
+
+                unset($unavailability['id']);
+            }
+
             $this->unavailabilities_model->api_decode($unavailability, $original_unavailability);
+
+            $unavailability['id'] = $id;
 
             $unavailability_id = $this->unavailabilities_model->save($unavailability);
 
@@ -178,6 +199,10 @@ class Unavailabilities_api_v1 extends EA_Controller
      */
     public function destroy(int $id): void
     {
+        if (!$this->enforceWriteMethod('DELETE')) {
+            return;
+        }
+
         try {
             $occurrences = $this->unavailabilities_model->get(['id' => $id]);
 
@@ -216,5 +241,16 @@ class Unavailabilities_api_v1 extends EA_Controller
         $this->api_request_dto_factory = $CI->api_request_dto_factory;
 
         return $this->api_request_dto_factory;
+    }
+
+    private function enforceWriteMethod(string $expected): bool
+    {
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) === $expected) {
+            return true;
+        }
+
+        response('', 405, ['Allow: ' . $expected]);
+
+        return false;
     }
 }

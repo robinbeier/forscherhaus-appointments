@@ -58,6 +58,7 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
                 'CustomerRoleBoundaryProbe.php',
                 'CustomersApiWriteProbe.php',
                 'ServicesApiWriteProbe.php',
+                'UnavailabilitiesApiWriteProbe.php',
                 'CalendarResponsibilityRaceProbe.php',
                 'AppointmentsApiWriteProbe.php',
                 'DefenseVerificationFixture.php',

@@ -9,6 +9,7 @@
             <file>./tests/Integration/Controllers/ProviderApiHttpWriteTest.php</file>
             <file>./tests/Integration/Controllers/CustomersApiHttpWriteTest.php</file>
             <file>./tests/Integration/Controllers/ServicesApiHttpWriteTest.php</file>
+            <file>./tests/Integration/Controllers/UnavailabilitiesApiHttpWriteTest.php</file>
             <file>./tests/Integration/Controllers/AppointmentsApiHttpWriteTest.php</file>
             <file>./tests/Integration/Controllers/StaffSettingsApiHttpTest.php</file>
             <file>./tests/Integration/Controllers/RescheduleCutoffHttpTest.php</file>
@@ -25,6 +26,7 @@
             <file>./tests/Integration/CustomerRoleBoundaryProbeTest.php</file>
             <file>./tests/Integration/CustomersApiWriteProbeTest.php</file>
             <file>./tests/Integration/ServicesApiWriteProbeTest.php</file>
+            <file>./tests/Integration/UnavailabilitiesApiWriteProbeTest.php</file>
             <file>./tests/Integration/CalendarResponsibilityRaceProbeTest.php</file>
             <file>./tests/Integration/AppointmentsApiWriteProbeTest.php</file>
             <file>./tests/Integration/Controllers/BookingDownloadHttpTest.php</file>

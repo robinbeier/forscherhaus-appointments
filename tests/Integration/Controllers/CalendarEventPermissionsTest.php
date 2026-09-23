@@ -36,6 +36,8 @@ class CalendarEventPermissionsTest extends TestCase
     private array $createdEventIds = [];
     /** @var array<int> */
     private array $createdBlockedPeriodIds = [];
+    /** @var array<int> */
+    private array $createdBufferIds = [];
     private object $originalExceptions;
     private ?array $providerRoleSnapshot = null;
     private ?array $adminBlockedPeriodsSnapshot = null;
@@ -69,6 +71,9 @@ class CalendarEventPermissionsTest extends TestCase
     {
         $exceptions = &load_class('Exceptions', 'core');
         $exceptions = $this->originalExceptions;
+        foreach ($this->createdBufferIds as $bufferId) {
+            get_instance()->db->delete('appointments', ['id' => $bufferId]);
+        }
         foreach ($this->createdEventIds as $eventId) {
             get_instance()->db->delete('appointments', ['id' => $eventId]);
         }
@@ -205,6 +210,79 @@ class CalendarEventPermissionsTest extends TestCase
 
         $this->assertDenied();
         $this->assertSame($this->otherProviderId, $this->storedProvider($id));
+    }
+
+    public function testForgedUnavailabilityPayloadCannotChangeManualRowOrItsBuffers(): void
+    {
+        $pair = $this->fixtures->resolveProviderServicePair();
+        $customerId = $this->fixtures->createCustomer();
+        $parentId = $this->fixtures->createAppointment(
+            $this->providerId,
+            $customerId,
+            $pair['service_id'],
+            new DateTimeImmutable('2035-03-05 11:00:00'),
+        );
+        $this->createBuffer($parentId, '2035-03-05 10:50:00', '2035-03-05 11:00:00');
+        $this->createBuffer($parentId, '2035-03-05 11:30:00', '2035-03-05 11:40:00');
+        $manualId = $this->createUnavailability($this->providerId, '2035-03-05 12:00:00');
+        $beforeManual = $this->appointmentRow($manualId);
+        $beforeParent = $this->appointmentRow($parentId);
+        $beforeBuffers = $this->bufferRows($parentId);
+
+        $this->authenticate($this->providerId, DB_SLUG_PROVIDER);
+        $_POST = [
+            'unavailability' => [
+                'id' => $manualId,
+                'start_datetime' => '2035-03-05 12:00:00',
+                'end_datetime' => '2035-03-05 12:30:00',
+                'id_users_provider' => $this->providerId,
+                'is_unavailability' => false,
+                'id_parent_appointment' => $parentId,
+            ],
+        ];
+        $this->controller()->save_unavailability();
+
+        $this->assertDenied('Protected unavailability fields cannot be changed.');
+        $afterManual = $this->appointmentRow($manualId);
+        $this->assertSame($beforeManual, $afterManual);
+        $this->assertSame($beforeParent, $this->appointmentRow($parentId));
+        $this->assertSame($beforeBuffers, $this->bufferRows($parentId));
+    }
+
+    public function testForgedParentLinkCannotCreateManualUnavailability(): void
+    {
+        $pair = $this->fixtures->resolveProviderServicePair();
+        $customerId = $this->fixtures->createCustomer();
+        $parentId = $this->fixtures->createAppointment(
+            $this->providerId,
+            $customerId,
+            $pair['service_id'],
+            new DateTimeImmutable('2035-03-05 13:00:00'),
+        );
+        $beforeParent = $this->appointmentRow($parentId);
+
+        $this->authenticate($this->providerId, DB_SLUG_PROVIDER);
+        $_POST = [
+            'unavailability' => [
+                'id' => 0,
+                'start_datetime' => '2035-03-05 14:00:00',
+                'end_datetime' => '2035-03-05 14:30:00',
+                'id_users_provider' => $this->providerId,
+                'is_unavailability' => false,
+                'id_parent_appointment' => $parentId,
+            ],
+        ];
+        $this->controller()->save_unavailability();
+
+        $this->assertDenied('Protected unavailability fields cannot be changed.');
+        $created = get_instance()
+            ->db->where('start_datetime', '2035-03-05 14:00:00')
+            ->where('notes IS NULL', null, false)
+            ->order_by('id', 'DESC')
+            ->get('appointments')
+            ->row_array();
+        $this->assertEmpty($created);
+        $this->assertSame($beforeParent, $this->appointmentRow($parentId));
     }
 
     public function testBlockedPeriodNotesRespectBlockedPeriodsViewPermissionOnBothReadEndpoints(): void
@@ -424,6 +502,46 @@ class CalendarEventPermissionsTest extends TestCase
         $id = (int) get_instance()->db->insert_id();
         $this->createdEventIds[] = $id;
         return $id;
+    }
+
+    private function createBuffer(int $parentId, string $start, string $end): int
+    {
+        $now = date('Y-m-d H:i:s');
+        get_instance()->db->insert('appointments', [
+            'book_datetime' => $now,
+            'start_datetime' => $start,
+            'end_datetime' => $end,
+            'notes' => 'Calendar forged payload buffer',
+            'hash' => 'calendar-buffer-' . bin2hex(random_bytes(4)),
+            'is_unavailability' => true,
+            'id_users_provider' => $this->providerId,
+            'id_users_customer' => null,
+            'id_services' => null,
+            'id_parent_appointment' => $parentId,
+            'create_datetime' => $now,
+            'update_datetime' => $now,
+        ]);
+        $id = (int) get_instance()->db->insert_id();
+        $this->createdBufferIds[] = $id;
+        return $id;
+    }
+
+    /** @return array<string, mixed> */
+    private function appointmentRow(int $id): array
+    {
+        return get_instance()
+            ->db->get_where('appointments', ['id' => $id])
+            ->row_array() ?? [];
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function bufferRows(int $parentId): array
+    {
+        return get_instance()
+            ->db->where('id_parent_appointment', $parentId)
+            ->order_by('id', 'ASC')
+            ->get('appointments')
+            ->result_array();
     }
 
     private function controller(): Calendar

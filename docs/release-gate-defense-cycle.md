@@ -101,6 +101,12 @@ concurrency guarantee.
 Basic and Bearer authentication, password omission, relationship clearing and
 owned Settings PUT persistence. `BackofficeWriteHttpTest` covers authenticated
 Customer and Blocked-period CRUD plus cleanup before destroy requests.
+`UnavailabilitiesApiHttpWriteTest` covers the authenticated POST/PUT/DELETE
+boundary through actual local HTTP: URL/body ID binding, ordinary appointment
+and generated-buffer rejection, direct alias method guards and owned-row
+nonmutation. The companion model test exercises direct lookup, update and
+delete against an owned ordinary appointment and its buffers. These are
+isolated regression results, not production evidence.
 `BackofficeHttpContractTest` checks GET/HEAD method rejection on the four
 backoffice controllers, missing-CSRF store/settings/updater requests, and the
 specified provider permission denials. Rejected requests compare deterministic
@@ -208,12 +214,43 @@ bash scripts/ops/run_ordinary_live_probe.sh methods EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh customer-boundary EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh customers-api EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh services-api EXPECTED_RELEASE
+bash scripts/ops/run_ordinary_live_probe.sh unavailabilities-api EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh calendar-race EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh appointments-api EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh appointments-api-overlap EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh session EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh cleanup EXPECTED_RELEASE
 ```
+
+### Unavailabilities API v1 live evidence boundary
+
+The `unavailabilities-api` action is one planned run against the bound active
+release. It uses the existing root-controlled ordinary-probe wrapper, shared
+production lock, independent cleanup timer and persistent recovery marker.
+Its dedicated profile creates one synthetic administrator, provider, customer,
+service, two manual unavailabilities and one ordinary appointment with exactly
+two generated buffers. Every identity is journaled before or immediately after
+creation and checked before cleanup. It never selects an existing appointment
+as a target.
+
+The required property is that a PUT to URL A with body ID B rejects with 400
+without changing A, B, the ordinary appointment or its buffers. A matching PUT
+must change only A's time window and return 200. A GET to the direct destroy
+alias must return 405 without deletion. The probe records only classified
+phase outcomes and row comparisons; it never stores credentials, raw hashes or
+response bodies in its evidence. The runtime is the real application HTTP path
+under the installed release, with a root-only journal and a bounded synthetic
+graph. Local isolated tests cover POST/DELETE and further denials separately;
+the productive probe does not claim those methods were exercised live.
+
+The only successful terminal result is `verified` with all three phases passed,
+exact identity-bound fixture and session cleanup, removed transient cleanup
+timer, absent recovery marker, unchanged active release and healthy production.
+A failed phase, incomplete cleanup, identity drift, unknown response or lost
+release binding stops the run and retains recovery evidence. No automatic retry
+or deletion of unowned rows is authorized. A change to the API handler, model,
+probe, fixture, wrapper, evidence phase allowlist or cleanup contract requires
+fresh local regression and review before this live result can be reused.
 
 Replace `EXPECTED_RELEASE` with the previously verified release marker. Default
 application root is `/var/www/html/easyappointments`; changing `APP_ROOT` requires
