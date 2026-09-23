@@ -95,9 +95,14 @@ authority. A missing, stale, contradictory, or unknown fact blocks the entry.
 6. **Deploy the reviewed archive through the existing host path.** Use the
    exact `/root/deploy_ea.sh` invocation and required host-local inputs in
    [Deployment](../deployment.md#deploy), preserving the shared lock across
-   any approved migration and deployment. Require the machine-readable
-   `deploy_result.v1` receipt when requested and independently compare its
-   outcome and exit code with the observed child result. Exit `0` is success;
+   any approved migration and deployment. For this entry, additionally pass
+   `--result-file "$DEPLOY_RESULT_FILE"`: choose one absent, run-specific leaf
+   beneath the existing canonical root-owned mode-`0700` `/root` directory,
+   bind that exact path to the run, and verify the leaf is absent before invoking
+   the deploy command. The helper rejects an existing or unsafe target; do not
+   remove or overwrite it to retry. Require the machine-readable
+   `deploy_result.v1` receipt and independently compare its outcome and exit
+   code with the observed child result. Exit `0` is success;
    `30` is verified pre-switch failure or rollback; `31`, `32`, `74`, missing,
    invalid, mismatched, killed, or unknown results require state inspection and
    block retry. Do not infer success from output alone.
