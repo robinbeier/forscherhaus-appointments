@@ -160,6 +160,12 @@ fresh Docker data lifecycle. Only its PHP image preparation uses the
 recipe key, loaded image ID and measured phase times. Existing gate evidence
 and cleanup failure handling are unchanged.
 
+The job also checks the actual ordinary production CLI entrypoint with PHPStan.
+This resolves its release-gate classes and catches missing imports before a
+production probe starts; the existing isolated tests continue to cover fixture
+recovery and interruption cleanup. The summary records this as
+`ordinary_operator_entrypoint` so its time cost remains visible.
+
 The pre-change observation was 182 seconds for the job, including 111.9 seconds
 for PHP build and 22.2 seconds for 97 tests / 668 assertions. This single run is
 not a statistical baseline. The provisional warm-job target is at most 100
