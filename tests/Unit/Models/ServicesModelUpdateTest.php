@@ -163,6 +163,106 @@ class ServicesModelUpdateTest extends TestCase
         ]);
     }
 
+    public function test_create_with_zero_duration_is_rejected(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage(
+            'The service duration cannot be less than ' . EVENT_MINIMUM_DURATION . ' minutes long.',
+        );
+
+        $this->createService(['duration' => 0]);
+    }
+
+    public function test_create_without_duration_is_rejected(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage(
+            'The service duration cannot be less than ' . EVENT_MINIMUM_DURATION . ' minutes long.',
+        );
+
+        $this->servicesModel->save([
+            'name' => 'Missing duration ' . uniqid('', true),
+            'attendants_number' => 1,
+        ]);
+    }
+
+    public function test_create_with_null_duration_is_rejected(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage(
+            'The service duration cannot be less than ' . EVENT_MINIMUM_DURATION . ' minutes long.',
+        );
+
+        $this->createService(['duration' => null]);
+    }
+
+    public function test_create_with_fractional_duration_is_rejected(): void
+    {
+        $this->expectException(\ServiceValidationException::class);
+
+        $this->createService(['duration' => 5.5]);
+    }
+
+    public function test_create_with_precision_hidden_fractional_duration_is_rejected(): void
+    {
+        $this->expectException(\ServiceValidationException::class);
+
+        $this->createService(['duration' => '30.0000000000000001']);
+    }
+
+    public function test_create_with_duration_above_signed_int_range_is_rejected(): void
+    {
+        $this->expectException(\ServiceValidationException::class);
+
+        $this->createService(['duration' => 2147483648]);
+    }
+
+    public function test_create_with_maximum_signed_int_duration_is_accepted(): void
+    {
+        $service_id = $this->createService(['duration' => 2147483647]);
+
+        try {
+            $this->assertSame(2147483647, (int) $this->servicesModel->find($service_id)['duration']);
+        } finally {
+            $this->servicesModel->delete($service_id);
+        }
+    }
+
+    public function test_create_with_positive_integer_duration_string_is_accepted(): void
+    {
+        $service_id = $this->createService(['duration' => '30']);
+
+        try {
+            $this->assertSame(30, (int) $this->servicesModel->find($service_id)['duration']);
+        } finally {
+            $this->servicesModel->delete($service_id);
+        }
+    }
+
+    public function test_create_with_exact_scientific_integer_strings_is_accepted(): void
+    {
+        $service_id = $this->createService(['duration' => '3e1', 'attendants_number' => '1e0']);
+
+        try {
+            $stored = $this->servicesModel->find($service_id);
+            $this->assertSame(30, (int) $stored['duration']);
+            $this->assertSame(1, (int) $stored['attendants_number']);
+        } finally {
+            $this->servicesModel->delete($service_id);
+        }
+    }
+
+    public function test_create_with_exact_negative_exponent_integer_string_is_accepted(): void
+    {
+        $service_id = $this->createService(['duration' => '300e-1']);
+
+        try {
+            $this->assertSame(30, (int) $this->servicesModel->find($service_id)['duration']);
+        } finally {
+            $this->servicesModel->delete($service_id);
+        }
+    }
+
     public function test_buffer_change_without_expected_values_is_rejected_atomically(): void
     {
         $service_id = $this->createService([
@@ -208,6 +308,32 @@ class ServicesModelUpdateTest extends TestCase
         $this->createService([
             'attendants_number' => 2,
         ]);
+    }
+
+    public function test_create_with_fractional_attendants_number_is_rejected(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Only attendants_number=1 is currently supported.');
+
+        $this->createService(['attendants_number' => 1.9]);
+    }
+
+    public function test_create_with_precision_hidden_fractional_attendants_number_is_rejected(): void
+    {
+        $this->expectException(\ServiceValidationException::class);
+
+        $this->createService(['attendants_number' => '1.0000000000000001']);
+    }
+
+    public function test_create_with_string_one_attendants_number_is_accepted(): void
+    {
+        $service_id = $this->createService(['attendants_number' => '1']);
+
+        try {
+            $this->assertSame(1, (int) $this->servicesModel->find($service_id)['attendants_number']);
+        } finally {
+            $this->servicesModel->delete($service_id);
+        }
     }
 
     private function createService(array $overrides = []): int

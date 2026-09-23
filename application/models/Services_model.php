@@ -11,6 +11,8 @@
  * @since       v1.0.0
  * ---------------------------------------------------------------------------- */
 
+class ServiceValidationException extends InvalidArgumentException {}
+
 /**
  * Services model.
  *
@@ -70,6 +72,8 @@ class Services_model extends EA_Model
     public function save(array $service, ?array $expected_buffer_values = null): int
     {
         $this->validate($service);
+        $service['duration'] = $this->parse_whole_number_input($service['duration']);
+        $service['attendants_number'] = 1;
         $service = $this->normalize_buffer_values($service);
 
         if (empty($service['id'])) {
@@ -101,7 +105,7 @@ class Services_model extends EA_Model
 
         // Make sure all required fields are provided.
         if (empty($service['name'])) {
-            throw new InvalidArgumentException('Not all required fields are provided for the service record: name.');
+            throw new ServiceValidationException('Not all required fields are provided for the service record: name.');
         }
 
         // If a category was provided then make sure it really exists in the database.
@@ -111,19 +115,28 @@ class Services_model extends EA_Model
                 ->num_rows();
 
             if (!$count) {
-                throw new InvalidArgumentException(
+                throw new ServiceValidationException(
                     'The provided category ID was not found in the database: ' . $service['id_service_categories'],
                 );
             }
         }
 
-        // Make sure the duration value is valid.
-        if (!empty($service['duration'])) {
-            if ((int) $service['duration'] < EVENT_MINIMUM_DURATION) {
-                throw new InvalidArgumentException(
-                    'The service duration cannot be less than ' . EVENT_MINIMUM_DURATION . ' minutes long.',
-                );
-            }
+        // The duration is stored in a signed INT column.
+        $duration = $service['duration'] ?? null;
+        $duration_value = $this->parse_whole_number_input($duration);
+        if (
+            ($duration_value === null &&
+                ($duration === null || (is_numeric($duration) && (float) $duration < EVENT_MINIMUM_DURATION))) ||
+            ($duration_value !== null && $duration_value < EVENT_MINIMUM_DURATION)
+        ) {
+            throw new ServiceValidationException(
+                'The service duration cannot be less than ' . EVENT_MINIMUM_DURATION . ' minutes long.',
+            );
+        }
+        if ($duration_value === null || $duration_value > 2147483647) {
+            throw new ServiceValidationException(
+                'The service duration must be a whole number within the supported range.',
+            );
         }
 
         $buffer_before = 0;
@@ -133,7 +146,7 @@ class Services_model extends EA_Model
             $raw_buffer_before = $raw_buffer_before === '' || $raw_buffer_before === null ? 0 : $raw_buffer_before;
 
             if (!is_numeric($raw_buffer_before)) {
-                throw new InvalidArgumentException(lang('buffer_limit_error'));
+                throw new ServiceValidationException(lang('buffer_limit_error'));
             }
 
             $buffer_before = (int) $raw_buffer_before;
@@ -146,7 +159,7 @@ class Services_model extends EA_Model
             $raw_buffer_after = $raw_buffer_after === '' || $raw_buffer_after === null ? 0 : $raw_buffer_after;
 
             if (!is_numeric($raw_buffer_after)) {
-                throw new InvalidArgumentException(lang('buffer_limit_error'));
+                throw new ServiceValidationException(lang('buffer_limit_error'));
             }
 
             $buffer_after = (int) $raw_buffer_after;
@@ -157,11 +170,11 @@ class Services_model extends EA_Model
             $buffer_before > 240 ||
             ($buffer_before > 0 && $buffer_before < EVENT_MINIMUM_DURATION)
         ) {
-            throw new InvalidArgumentException(lang('buffer_limit_error'));
+            throw new ServiceValidationException(lang('buffer_limit_error'));
         }
 
         if ($buffer_after < 0 || $buffer_after > 240 || ($buffer_after > 0 && $buffer_after < EVENT_MINIMUM_DURATION)) {
-            throw new InvalidArgumentException(lang('buffer_limit_error'));
+            throw new ServiceValidationException(lang('buffer_limit_error'));
         }
 
         // Availabilities type must have the correct value.
@@ -170,7 +183,7 @@ class Services_model extends EA_Model
             $service['availabilities_type'] !== AVAILABILITIES_TYPE_FLEXIBLE &&
             $service['availabilities_type'] !== AVAILABILITIES_TYPE_FIXED
         ) {
-            throw new InvalidArgumentException(
+            throw new ServiceValidationException(
                 'Service availabilities type must be either ' .
                     AVAILABILITIES_TYPE_FLEXIBLE .
                     ' or ' .
@@ -186,21 +199,88 @@ class Services_model extends EA_Model
             !empty($service['availabilities_type']) &&
             !in_array($service['availabilities_type'], [AVAILABILITIES_TYPE_FLEXIBLE, AVAILABILITIES_TYPE_FIXED])
         ) {
-            throw new InvalidArgumentException(
+            throw new ServiceValidationException(
                 'The provided availabilities type is invalid: ' . $service['availabilities_type'],
             );
         }
 
-        // Validate the attendants number value.
-        if (empty($service['attendants_number']) || (int) $service['attendants_number'] < 1) {
-            throw new InvalidArgumentException(
-                'The provided attendants number is invalid: ' . $service['attendants_number'],
-            );
+        // Validate the attendants number value without truncating fractional input.
+        $attendants_number = $service['attendants_number'] ?? null;
+        $parsed_attendants_number = $this->parse_whole_number_input($attendants_number);
+        if (
+            ($parsed_attendants_number === null &&
+                (!is_numeric($attendants_number) || (float) $attendants_number < 1)) ||
+            ($parsed_attendants_number !== null && $parsed_attendants_number < 1)
+        ) {
+            throw new ServiceValidationException('The provided attendants number is invalid: ' . $attendants_number);
         }
 
-        if ((int) $service['attendants_number'] !== 1) {
-            throw new InvalidArgumentException('Only attendants_number=1 is currently supported.');
+        if ($parsed_attendants_number !== 1) {
+            throw new ServiceValidationException('Only attendants_number=1 is currently supported.');
         }
+    }
+
+    private function parse_whole_number_input(mixed $value): ?int
+    {
+        if (is_int($value)) {
+            return $value;
+        }
+
+        if (is_float($value)) {
+            return is_finite($value) && floor($value) === $value && abs($value) <= 2147483647 ? (int) $value : null;
+        }
+
+        if (!is_string($value) || strlen($value) > 256) {
+            return null;
+        }
+
+        // Evaluate decimal/scientific text without floating-point rounding.
+        if (!preg_match('/^([+-]?)([0-9]+)(?:\.([0-9]+))?(?:[eE]([+-]?[0-9]+))?\z/', trim($value), $parts)) {
+            return null;
+        }
+
+        $digits = ltrim($parts[2] . ($parts[3] ?? ''), '0');
+        if ($digits === '') {
+            return 0;
+        }
+
+        $exponent_text = $parts[4] ?? '0';
+        $negative_exponent = str_starts_with($exponent_text, '-');
+        $exponent_digits = ltrim(ltrim($exponent_text, '+-'), '0');
+        if (strlen($exponent_digits) > 4) {
+            return null;
+        }
+        $exponent = (int) ($exponent_digits === '' ? '0' : $exponent_digits);
+        $exponent = $negative_exponent ? -$exponent : $exponent;
+        $scale = $exponent - strlen($parts[3] ?? '');
+
+        if ($scale >= 0) {
+            if (strlen($digits) + $scale > 10) {
+                return null;
+            }
+            $whole = $digits . str_repeat('0', $scale);
+        } else {
+            $fractional_places = -$scale;
+            if ($fractional_places > strlen($digits)) {
+                return null;
+            }
+            $fractional_suffix = substr($digits, -$fractional_places);
+            if (strspn($fractional_suffix, '0') !== strlen($fractional_suffix)) {
+                return null;
+            }
+            $whole = substr($digits, 0, -$fractional_places);
+        }
+
+        $whole = ltrim($whole, '0');
+        if ($whole === '') {
+            return 0;
+        }
+        if (strlen($whole) > 10 || (strlen($whole) === 10 && strcmp($whole, '2147483647') > 0)) {
+            return null;
+        }
+
+        $result = (int) $whole;
+        return $parts[1] === '-' ? -$result : $result;
     }
 
     protected function normalize_buffer_values(array $service): array
