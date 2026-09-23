@@ -41,7 +41,8 @@ authority. A missing, stale, contradictory, or unknown fact blocks the entry.
    is `open` and blocks. See [operations harness](agent-operations.md#verify-production-facts-before-designing-production-tooling).
 
 3. **Admit one operation.** Observe the existing shared production lock and
-   relevant recovery-marker state before starting; then let the reviewed
+   relevant recovery-marker state, including the CSP Report-Only pilot lease,
+   before any migration or deployment; then let the reviewed
    deploy/probe command acquire and manage them under its own contract. Follow
    [coordinated maintenance admission](maintenance-admission-contract.md) and
    the ordinary probe’s persistent pending-run contract. A busy, replaced,
@@ -66,6 +67,14 @@ authority. A missing, stale, contradictory, or unknown fact blocks the entry.
    ssh root@booking-server /bin/bash -s <<'SH'
    set -euo pipefail
    stat -c 'production_lock=%F %u:%g %a %d:%i' /var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock
+   test ! -L /var/lib/fh-deploy-orchestrator
+   stat -c 'csp_lease_parent=%F %u:%g %a %d:%i' /var/lib/fh-deploy-orchestrator
+   lease=/var/lib/fh-deploy-orchestrator/csp-report-only-pilot.state.json
+   if test -e "$lease" || test -L "$lease"; then
+       printf 'csp_pilot_lease=present\n'
+   else
+       printf 'csp_pilot_lease=absent\n'
+   fi
    for marker in run.pending request-unconfirmed; do
        if test -e "/var/lib/fh-defense-ordinary/$marker" || test -L "/var/lib/fh-defense-ordinary/$marker"; then
            printf '%s=present\n' "$marker"
@@ -82,7 +91,11 @@ authority. A missing, stale, contradictory, or unknown fact blocks the entry.
    SH
    ```
 
-   A missing lock, unexpected marker, or unknown timer state blocks admission.
+   Accept the CSP lease parent only as a non-symlink root-owned mode-`0700`
+   directory. A missing lock, untrusted CSP lease parent, present CSP pilot lease,
+   unexpected ordinary marker, or unknown timer state blocks admission before
+   any migration. Recheck immediately before the deploy child; a previous
+   absence is not authority if another operation starts meanwhile.
 
 5. **Prove recovery inputs when required.** If the deployment contract or
    migration plan requires a fresh database backup, use the existing
