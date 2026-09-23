@@ -157,6 +157,17 @@ class Customers_api_v1 extends EA_Controller
 
             $customer = $this->apiRequestDtoFactory()->buildEntityWritePayloadDto()->payload;
 
+            // The URL selects the customer. A body ID may only repeat that target.
+            if (array_key_exists('id', $customer)) {
+                if (!is_int($customer['id']) || $customer['id'] !== $id) {
+                    response('', 400);
+
+                    return;
+                }
+
+                unset($customer['id']);
+            }
+
             $this->customers_model->api_decode($customer, $original_customer);
 
             $customer_id = $this->customers_model->save($customer);

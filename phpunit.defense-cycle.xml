@@ -7,6 +7,7 @@
             <file>./tests/Integration/Controllers/DefenseCycleOrdinaryFlowTest.php</file>
             <file>./tests/Integration/Controllers/ProviderApiHttpAuthTest.php</file>
             <file>./tests/Integration/Controllers/ProviderApiHttpWriteTest.php</file>
+            <file>./tests/Integration/Controllers/CustomersApiHttpWriteTest.php</file>
             <file>./tests/Integration/Controllers/AppointmentsApiHttpWriteTest.php</file>
             <file>./tests/Integration/Controllers/StaffSettingsApiHttpTest.php</file>
             <file>./tests/Integration/Controllers/RescheduleCutoffHttpTest.php</file>
