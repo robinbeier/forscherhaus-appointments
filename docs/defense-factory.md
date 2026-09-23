@@ -217,3 +217,9 @@ without mutation; owned targets are confirmed and cleaned repeatably. The
 existing blocked-period JavaScript client uses POST for all three mutations.
 These checks do not prove concurrent behavior, production state, or transaction
 rollback beyond the observed no-mutation denial paths.
+
+The Blocked Periods API v1 has a separate authenticated write contract:
+`BlockedPeriodsApiHttpWriteTest` exercises POST, PUT, and DELETE over real
+loopback HTTP on the isolated stack, including URL/body ID conflicts, direct
+controller aliases, authorization denials, and unchanged unrelated rows. The
+Backoffice controller regressions above do not cover that API boundary.

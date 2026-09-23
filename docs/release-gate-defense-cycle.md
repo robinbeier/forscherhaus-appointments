@@ -107,6 +107,12 @@ and generated-buffer rejection, direct alias method guards and owned-row
 nonmutation. The companion model test exercises direct lookup, update and
 delete against an owned ordinary appointment and its buffers. These are
 isolated regression results, not production evidence.
+`BlockedPeriodsApiHttpWriteTest` separately covers the global Blocked Periods
+API v1 through real isolated HTTP: Admin and configured global Bearer writes,
+rejected Provider/invalid Bearer,
+URL/body ID binding, positive POST/PUT/DELETE controls, time-window rejection,
+direct alias method guards and complete owned-row nonmutation. Backoffice
+blocked-period tests do not establish this API-v1 behavior.
 `BackofficeHttpContractTest` checks GET/HEAD method rejection on the four
 backoffice controllers, missing-CSRF store/settings/updater requests, and the
 specified provider permission denials. Rejected requests compare deterministic
@@ -215,6 +221,7 @@ bash scripts/ops/run_ordinary_live_probe.sh customer-boundary EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh customers-api EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh services-api EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh unavailabilities-api EXPECTED_RELEASE
+bash scripts/ops/run_ordinary_live_probe.sh blocked-periods-api EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh calendar-race EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh appointments-api EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh appointments-api-overlap EXPECTED_RELEASE
@@ -251,6 +258,40 @@ release binding stops the run and retains recovery evidence. No automatic retry
 or deletion of unowned rows is authorized. A change to the API handler, model,
 probe, fixture, wrapper, evidence phase allowlist or cleanup contract requires
 fresh local regression and review before this live result can be reused.
+
+### Blocked Periods API v1 live evidence boundary
+
+The `blocked-periods-api` action is one planned run against the bound active
+release. Its dedicated profile creates one synthetic administrator and exactly
+two owned global blocked periods A/B, journaled before insertion. Their time
+windows are about 40 days in the past, so the probe cannot close a current or
+future booking slot. The probe refuses either period unless its complete
+window ends more than 30 days before the run. No existing period is selected as
+a target.
+
+The required property is that PUT to URL A with body ID B returns 400 and
+changes neither complete row; matching PUT returns 200 and shifts only A by ten
+minutes; GET on the direct destroy alias returns 405 without deletion. The
+actual runtime is the installed application over HTTP, under the existing
+root-controlled wrapper, shared production lock, independent cleanup timer and
+persistent recovery marker. Evidence records only the three classified phase
+results and row comparisons, never credentials, raw responses or private
+identifiers. Local isolated HTTP tests separately cover POST, DELETE, Basic and
+Bearer authorization, invalid intervals and additional alias methods; those
+are not claims of productive coverage.
+
+Only `verified` with all phases passed, identity-bound A/B and actor cleanup,
+removed transient timer and marker, unchanged active release and healthy
+production is a successful terminal result. Cleanup locks both period rows in
+stable ID order and checks their journaled identity and allowed time windows
+before deleting either. After interrupted activation, it reconstructs only
+rows matching durable intents and locks the rows actually inserted. Identity
+drift, an unknown HTTP result, lost release binding or incomplete cleanup
+retains recovery evidence and blocks retry. A change to the
+API handler, model, probe, fixture, wrapper, evidence phase allowlist or cleanup
+contract requires fresh local regression and review before reuse.
+
+### Shared ordinary-probe lifecycle
 
 Replace `EXPECTED_RELEASE` with the previously verified release marker. Default
 application root is `/var/www/html/easyappointments`; changing `APP_ROOT` requires

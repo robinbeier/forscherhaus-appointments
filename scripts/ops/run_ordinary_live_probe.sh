@@ -6,7 +6,7 @@ action=${1:-preflight}
 release=${2:-}
 app_root=${APP_ROOT:-/var/www/html/easyappointments}
 case "$action" in
-    preflight|account|methods|customer-boundary|customers-api|services-api|unavailabilities-api|calendar-race|appointments-api|appointments-api-overlap|session|cleanup|verify) ;;
+    preflight|account|methods|customer-boundary|customers-api|services-api|unavailabilities-api|blocked-periods-api|calendar-race|appointments-api|appointments-api-overlap|session|cleanup|verify) ;;
     *) echo 'unsupported action' >&2; exit 64 ;;
 esac
 [[ $# == 2 && "$release" =~ ^ea_[a-zA-Z0-9_]+$ ]] || { echo 'action and expected release required' >&2; exit 64; }
@@ -27,6 +27,7 @@ for path in "$probe" "$script_dir/../release-gate/lib/OrdinaryLiveFixture.php" \
     "$script_dir/../release-gate/lib/CustomersApiWriteProbe.php" \
     "$script_dir/../release-gate/lib/ServicesApiWriteProbe.php" \
     "$script_dir/../release-gate/lib/UnavailabilitiesApiWriteProbe.php" \
+    "$script_dir/../release-gate/lib/BlockedPeriodsApiWriteProbe.php" \
     "$script_dir/../release-gate/lib/CalendarResponsibilityRaceProbe.php" \
     "$script_dir/../release-gate/lib/AppointmentsApiWriteProbe.php" \
     "$script_dir/../release-gate/lib/DefenseVerificationFixture.php" \
@@ -171,7 +172,7 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 fixture_role=provider
-[[ "$action" != customer-boundary && "$action" != customers-api && "$action" != services-api && "$action" != unavailabilities-api ]] || fixture_role=admin
+[[ "$action" != customer-boundary && "$action" != customers-api && "$action" != services-api && "$action" != unavailabilities-api && "$action" != blocked-periods-api ]] || fixture_role=admin
 invoke activate "$fixture_role"
 case "$action" in
     account)
@@ -191,6 +192,9 @@ case "$action" in
         ;;
     unavailabilities-api)
         invoke unavailabilities-api
+        ;;
+    blocked-periods-api)
+        invoke blocked-periods-api
         ;;
     calendar-race)
         invoke calendar-race

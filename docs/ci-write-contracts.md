@@ -166,6 +166,32 @@ Zwei-Verbindungs-Test verschiebt die Anbieterzuordnung zwischen erster
 Autorisierung und Sperre und erwartet eine Ablehnung ohne Änderung. Lokale
 Nachweise belegen keine produktive Auslieferung.
 
+## Blocked Periods API v1
+
+Die API verwaltet globale Sperrzeiten. Admin-Basic-Authentifizierung oder der
+konfigurierte globale Bearer-Token sind die bestehenden API-Authorities; eine
+Sperrzeit hat keinen eigenen Anbieter oder benutzerspezifischen Eigentümer.
+`store`, `update` und `destroy` verlangen auch auf direkten Controller-Aliasen
+POST, PUT beziehungsweise DELETE. Ein anderes Verb erhält 405 mit dem passenden
+`Allow`-Header, bevor eine Schreib-Payload oder ein Zieldatensatz verarbeitet
+wird.
+
+Bei PUT ist allein die URL-ID das Ziel. Eine mitgesendete `id` muss dieselbe
+als Ganzzahl typisierte ID sein; eine abweichende, leere oder anders typisierte
+ID wird vor der Dekodierung mit 400 abgewiesen. Ohne Body-ID bleibt die URL-ID
+erhalten.
+POST ignoriert eine mitgesendete ID und legt einen neuen Datensatz an; DELETE
+verwendet ausschließlich die URL-ID. Ein Zeitfenster mit Startzeit ab oder nach
+der Endzeit wird vor einer Mutation abgewiesen. Die globale Sperrzeit wird von
+Kalender- und Buchungsverfügbarkeitsabfragen gelesen; der API-Schreibpfad hat keine
+zusätzlichen Kalender- oder Puffer-Schreibeffekte.
+
+`BlockedPeriodsApiHttpWriteTest` prüft diese Grenzen mit eigenen A/B-Datensätzen,
+authentifizierten HTTP-Anfragen, positiven Schreibkontrollen und vollständigen
+Vorher-/Nachher-Zeilenvergleichen in einem frischen isolierten Datenbank-Stack.
+Backoffice-Tests belegen diese API-v1-Grenzen nicht. Der lokale Nachweis ersetzt
+keinen produktiven Release- oder Verfügbarkeitsnachweis.
+
 ## Write-only Integrationsgeheimnisse
 
 Die authentifizierte REST-v1-API behandelt
