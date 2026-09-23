@@ -164,7 +164,7 @@ root-only lifecycle journal binds the exact username, email, role, marker and us
 ID before any request; credential or role drift is rejected before login.
 
 The reviewed operator bundle includes `deploy_ea.sh`, `scripts/ops/run_ordinary_live_probe.sh`,
-`scripts/ops/ordinary_live_probe.php` and their twelve release-gate libraries. Run them only from a root-controlled copy
+`scripts/ops/ordinary_live_probe.php` and their release-gate libraries. Run them only from a root-controlled copy
 of the reviewed tools outside the replaceable application release, against the
 verified installed release. Stage and retain each bundle *archive* and
 its matching `.provenance` file under `/root/fh-ordinary-probe-bundles`, a
@@ -207,6 +207,7 @@ bash scripts/ops/run_ordinary_live_probe.sh account EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh methods EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh customer-boundary EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh customers-api EXPECTED_RELEASE
+bash scripts/ops/run_ordinary_live_probe.sh services-api EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh calendar-race EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh appointments-api EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh appointments-api-overlap EXPECTED_RELEASE
@@ -273,6 +274,19 @@ never emits raw rows, credentials or HTTP bodies. It performs no delete or
 non-fixture write; the existing shared lock, pending marker, three-hour cleanup
 timer, release/inode checks, private journal and fail-closed cleanup remain the
 wrapper's responsibility.
+
+`services-api` uses one owned synthetic administrator and two separately
+journaled synthetic services A and B. Under real localhost HTTP Basic
+authentication it requires a PUT to URL A with body ID B to return `400`
+without changing either service or its owned relationships. A matching PUT
+must return `200` and change only the intended field of A. A direct wrong-verb
+destroy alias must return `405` without deletion. Invalid duration and
+attendant values must return `400` without mutation. The probe compares exact
+owned snapshots after each request and relies on the wrapper's release/inode
+checks, shared lock, pending marker and independent cleanup timer. It emits
+only classified results; full owned-row and journal cleanup must be verified
+before the run can close. This is one bounded live API write contract check,
+not evidence for arbitrary users, concurrent writers or public booking.
 
 Fixture service cleanup follows the application lock order: synthetic user
 parents, then the service, its appointment parent and generated buffer children.
