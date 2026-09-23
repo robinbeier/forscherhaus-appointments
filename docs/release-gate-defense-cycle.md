@@ -166,8 +166,15 @@ ID before any request; credential or role drift is rejected before login.
 The reviewed operator bundle includes `deploy_ea.sh`, `scripts/ops/run_ordinary_live_probe.sh`,
 `scripts/ops/ordinary_live_probe.php` and their twelve release-gate libraries. Run them only from a root-controlled copy
 of the reviewed tools outside the replaceable application release, against the
-verified installed release. The wrapper pins the tool inode and resolves the
-original application directory by inode before each call and independent cleanup.
+verified installed release. Stage and retain each bundle *archive* and
+its matching `.provenance` file under `/root/fh-ordinary-probe-bundles`, a
+root-owned `0700` directory whose artifacts are root-owned `0600`;
+`/root/releases` remains reserved for application release archive pairs and
+its legacy holds. This path rule retains
+the existing bundle evidence; it does not authorize moving or deleting
+production files or enabling a retention timer. The wrapper pins the tool inode
+and resolves the original application directory by inode before each call and
+independent cleanup.
 Do not rename, replace or delete this private operator bundle during a run. These are operator
 probes, not an alternative application release mechanism. If an application
 release is required, use the existing controlled deployment procedure.
