@@ -42,10 +42,20 @@ authority. A missing, stale, contradictory, or unknown fact blocks the entry.
 
 3. **Admit one operation.** Observe the existing shared production lock and
    relevant recovery-marker state, including the CSP Report-Only pilot lease,
-   before any migration or deployment; then let the reviewed
-   deploy/probe command acquire and manage them under its own contract. Follow
-   [coordinated maintenance admission](maintenance-admission-contract.md) and
-   the ordinary probe’s persistent pending-run contract. A busy, replaced,
+   before any migration or deployment. Without a migration, let the reviewed
+   deploy/probe command acquire and manage the lock under its own contract. For
+   an approved migration, the root operator must first acquire that same lock
+   through the verified installed `deploy_ea.sh` helper, then call its
+   `ordinary_assert_no_pending_probe` and
+   `ordinary_assert_no_active_csp_report_only_pilot` checks **while holding the
+   lock and before the first migration write**. Keep the validated descriptor
+   held and exported to the deploy child through completion or rollback as in
+   [Deployment](../deployment.md#deploy). A read-only snapshot taken before lock
+   acquisition does not authorize migration. The
+   [coordinated maintenance admission](maintenance-admission-contract.md)
+   document describes target enrollment, not proof of installed state; use the
+   verified installed helper and the ordinary probe’s persistent pending-run
+   contract. A busy, replaced,
    unsafe, or already-pending state blocks; no time-based expiry clears it.
 
 4. **Snapshot the exact timer before-state.** For any timer the approved
@@ -94,8 +104,9 @@ authority. A missing, stale, contradictory, or unknown fact blocks the entry.
    Accept the CSP lease parent only as a non-symlink root-owned mode-`0700`
    directory. A missing lock, untrusted CSP lease parent, present CSP pilot lease,
    unexpected ordinary marker, or unknown timer state blocks admission before
-   any migration. Recheck immediately before the deploy child; a previous
-   absence is not authority if another operation starts meanwhile.
+   any migration. After acquiring the shared lock, repeat the pending-probe and
+   CSP-lease checks before the first migration write. Recheck immediately before
+   the deploy child under the same held lock; a previous absence is not authority.
 
 5. **Prove recovery inputs when required.** If the deployment contract or
    migration plan requires a fresh database backup, use the existing
