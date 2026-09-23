@@ -74,6 +74,24 @@ final class DefenseCycleReportTest extends TestCase
         self::assertSame(41, $report['cleanup']['exit_code']);
     }
 
+    public function testFailedOperatorEntrypointHasItsOwnBlockingReceipt(): void
+    {
+        $report = $this->report('<testsuite><testcase class="A" name="ok"/></testsuite>', [
+            'entrypoint_status' => 'failed',
+        ]);
+
+        self::assertSame('failed', $report['overall_status']);
+        $entrypoint = array_values(
+            array_filter(
+                $report['phases'],
+                static fn(array $phase): bool => $phase['name'] === 'ordinary_operator_entrypoint',
+            ),
+        );
+        self::assertCount(1, $entrypoint);
+        self::assertSame('failed', $entrypoint[0]['status']);
+        self::assertSame(25, $entrypoint[0]['duration_ms']);
+    }
+
     private function report(?string $xml, array $override = []): array
     {
         $root = dirname(__DIR__, 3);
@@ -90,11 +108,13 @@ final class DefenseCycleReportTest extends TestCase
                 'app_db_ready',
                 'seed_install',
                 'phpunit',
+                'ordinary_operator_entrypoint',
                 'cleanup',
             ]
             as $phase
         ) {
-            $events .= "$phase|100|started\n$phase|125|passed\n";
+            $status = $phase === 'ordinary_operator_entrypoint' ? $override['entrypoint_status'] ?? 'passed' : 'passed';
+            $events .= "$phase|100|started\n$phase|125|$status\n";
         }
         file_put_contents($directory . '/events', $override['events'] ?? $events);
         if ($xml !== null) {

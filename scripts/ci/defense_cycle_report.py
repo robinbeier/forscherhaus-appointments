@@ -14,6 +14,7 @@ from pathlib import Path
 PHASES = (
     "compose_start", "php_ready", "synthetic_config", "mysql_ready",
     "php_ready_after_mysql", "app_db_ready", "seed_install", "phpunit",
+    "ordinary_operator_entrypoint",
     "cleanup",
 )
 

@@ -118,3 +118,7 @@ defense_cycle_begin phpunit
 ci_docker_compose exec -T php-fpm env FH_DEFENSE_ISOLATED=1 APP_ENV=testing \
     "${DEFENSE_CYCLE_PHPUNIT[@]}"
 defense_cycle_end phpunit
+defense_cycle_begin ordinary_operator_entrypoint
+ci_docker_compose exec -T php-fpm php vendor/bin/phpstan analyse --no-progress --memory-limit=1G \
+    --autoload-file scripts/ci/ordinary_probe_phpstan_bootstrap.php scripts/ops/ordinary_live_probe.php
+defense_cycle_end ordinary_operator_entrypoint

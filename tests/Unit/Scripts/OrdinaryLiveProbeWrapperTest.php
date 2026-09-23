@@ -38,8 +38,8 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
             echo pending-check >> "$MOCK_LOG"
             [ "${MOCK_PENDING:-0}" != 1 ] || return 75
         }
-        ordinary_probe_begin() { echo pending-begin >> "$MOCK_LOG"; }
-        ordinary_probe_finish() { echo pending-finish >> "$MOCK_LOG"; }
+        ordinary_probe_begin() { echo pending-begin >> "$MOCK_LOG"; : > "$MOCK_STATE/run.pending"; }
+        ordinary_probe_finish() { echo pending-finish >> "$MOCK_LOG"; rm -f -- "$MOCK_STATE/run.pending"; }
         ordinary_trusted_path() { return 0; }
         SH;
         file_put_contents($this->sandbox . '/deploy_ea.sh', $coordination);
@@ -102,7 +102,7 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
         );
         $this->writeMock(
             'php',
-            "#!/bin/sh\necho \"php \$*\" >> \"\$MOCK_LOG\"\nfor arg in \"\$@\"; do case \"\$arg\" in --action=*) action=\"\${arg#--action=}\";; esac; done\n[ \"\${MOCK_PHP_UNCONFIRMED_ACTION:-}\" != \"\$action\" ] || exit 86\ncase \",\${MOCK_PHP_FAIL_ACTIONS:-},\" in *\",\$action,\"*) exit 42;; esac\nexit 0\n",
+            "#!/bin/sh\necho \"php \$*\" >> \"\$MOCK_LOG\"\nfor arg in \"\$@\"; do case \"\$arg\" in --action=*) action=\"\${arg#--action=}\";; esac; done\n[ \"\${MOCK_PHP_UNCONFIRMED_ACTION:-}\" != \"\$action\" ] || exit 86\ncase \",\${MOCK_PHP_FAIL_ACTIONS:-},\" in *\",\$action,\"*) exit 42;; esac\nif [ \"\${MOCK_SEND_TERM:-0}\" = 1 ] && [ \"\$action\" = account ]; then\n    echo account-active >> \"\$MOCK_LOG\"\n    kill -TERM \"\$PPID\"\n    sleep 0.1\n    echo account-after-term >> \"\$MOCK_LOG\"\nfi\nexit 0\n",
         );
         $this->writeMock(
             'systemctl',
@@ -287,6 +287,44 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
         self::assertNotContains('pending-finish', $result['lines']);
     }
 
+    public function testTermDeliveredDuringAccountThatReturnsCleansUpButRetainsRecoveryMarker(): void
+    {
+        $result = $this->executeWrapper('account', ['MOCK_SEND_TERM' => '1']);
+
+        self::assertSame(143, $result['status'], $result['error']);
+        self::assertContains('account-active', $result['lines']);
+        self::assertContains('account-after-term', $result['lines']);
+        self::assertSame(
+            ['preflight', 'activate', 'account', 'deactivate', 'verify'],
+            $this->actions($result['lines']),
+        );
+        self::assertContains('systemctl stop fh-defense-ordinary-cleanup.timer', $result['lines']);
+        self::assertContains('systemctl stop fh-defense-ordinary-cleanup.service', $result['lines']);
+        self::assertNotContains('pending-finish', $result['lines']);
+        self::assertFileExists($this->sandbox . '/ordinary-state/run.pending');
+    }
+
+    public function testTermDeliveredDuringAccountThatReturnsRetainsTimerWhenCleanupFails(): void
+    {
+        $result = $this->executeWrapper('account', [
+            'MOCK_SEND_TERM' => '1',
+            'MOCK_PHP_FAIL_ACTIONS' => 'deactivate',
+        ]);
+
+        self::assertSame(1, $result['status'], $result['error']);
+        self::assertContains('account-active', $result['lines']);
+        self::assertContains('account-after-term', $result['lines']);
+        self::assertSame(['preflight', 'activate', 'account', 'deactivate'], $this->actions($result['lines']));
+        self::assertFalse(
+            (bool) array_filter(
+                $result['lines'],
+                static fn(string $line): bool => str_starts_with($line, 'systemctl stop'),
+            ),
+        );
+        self::assertNotContains('pending-finish', $result['lines']);
+        self::assertFileExists($this->sandbox . '/ordinary-state/run.pending');
+    }
+
     public function testUnconfirmedCalendarRequestCreatesIndependentBlockAndSkipsAutomaticCleanup(): void
     {
         $result = $this->executeWrapper('calendar-race', [
@@ -376,7 +414,12 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
     {
         $env = array_merge(
             getenv(),
-            ['PATH' => $this->bin . ':/usr/bin:/bin', 'MOCK_LOG' => $this->log, 'APP_ROOT' => $this->sandbox . '/app'],
+            [
+                'PATH' => $this->bin . ':/usr/bin:/bin',
+                'MOCK_LOG' => $this->log,
+                'MOCK_STATE' => $this->sandbox . '/ordinary-state',
+                'APP_ROOT' => $this->sandbox . '/app',
+            ],
             $extra,
         );
         $process = proc_open(

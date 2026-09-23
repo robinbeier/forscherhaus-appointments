@@ -16,6 +16,7 @@ final class DefenseCycleRunnerTest extends TestCase
                 'real_phpunit' => 0,
                 'seed_failure' => 1,
                 'phpunit_failure' => 23,
+                'entrypoint_failure' => 29,
                 'cleanup_failure' => 41,
                 'both_fail' => 23,
                 'report_failure' => 0,
@@ -64,6 +65,10 @@ final class DefenseCycleRunnerTest extends TestCase
                     fi
                 }
                 ci_docker_compose() {
+                    if [[ "$*" == *vendor/bin/phpstan* ]]; then
+                        printf 'entrypoint\n' >> "$FIXTURE_ROOT/lifecycle"
+                        if [[ "$FIXTURE_MODE" == entrypoint_failure ]]; then return 29; fi
+                    fi
                     if [[ "$*" == *vendor/bin/phpunit* ]]; then
                         printf 'phpunit\n' >> "$FIXTURE_ROOT/lifecycle"
                         if [[ "$FIXTURE_MODE" == real_phpunit || "$FIXTURE_MODE" == report_failure ]]; then
@@ -141,6 +146,9 @@ final class DefenseCycleRunnerTest extends TestCase
                 if ($mode === 'seed_failure') {
                     self::assertStringNotContainsString('phpunit', $events);
                 }
+                if ($mode === 'entrypoint_failure') {
+                    self::assertSame(1, substr_count($events, 'entrypoint'));
+                }
                 if ($mode === 'report_failure') {
                     self::assertStringContainsString('summary report unavailable', $error);
                 } else {
@@ -155,6 +163,15 @@ final class DefenseCycleRunnerTest extends TestCase
                         in_array($mode, ['cleanup_failure', 'both_fail'], true) ? 'failed' : 'passed',
                         $report['cleanup']['status'],
                     );
+                    if ($mode === 'entrypoint_failure') {
+                        $entrypoint = array_values(
+                            array_filter(
+                                $report['phases'],
+                                static fn(array $phase): bool => $phase['name'] === 'ordinary_operator_entrypoint',
+                            ),
+                        );
+                        self::assertSame('failed', $entrypoint[0]['status']);
+                    }
                     foreach ($report['phases'] as $phase) {
                         self::assertIsInt($phase['duration_ms']);
                         self::assertGreaterThanOrEqual(0, $phase['duration_ms']);
