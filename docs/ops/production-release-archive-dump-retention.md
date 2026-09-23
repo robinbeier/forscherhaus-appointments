@@ -234,7 +234,7 @@ rollout has this exact order:
    bash scripts/ops/prod_doctor.sh
    bash scripts/ops/prod_cleanup_inventory.sh
    ssh -o StrictHostKeyChecking=accept-new \
-     "${PROD_SSH_TARGET:-root@188.245.244.123}" \
+     "${PROD_SSH_TARGET:-root@booking-server}" \
      '/usr/local/libexec/fh-release-archive-dump-retention-v1 marker-status 691200'
    ```
 
@@ -253,7 +253,7 @@ rollout has this exact order:
 
    ```bash
      ssh -o StrictHostKeyChecking=accept-new \
-     "${PROD_SSH_TARGET:-root@188.245.244.123}" \
+     "${PROD_SSH_TARGET:-root@booking-server}" \
      'KUMA_PUSH_ENV_FILE=/root/backups/uptime-kuma-push.env /usr/local/libexec/fh-kuma-push-runtime-v1/scripts/ops/kuma_push_host_resources.sh'
    ```
 
@@ -273,7 +273,7 @@ rollout has this exact order:
 
    ```bash
    ssh -o StrictHostKeyChecking=accept-new \
-     "${PROD_SSH_TARGET:-root@188.245.244.123}" \
+     "${PROD_SSH_TARGET:-root@booking-server}" \
      '/usr/bin/systemctl enable fh-release-archive-dump-retention.timer && /usr/bin/systemctl is-enabled fh-release-archive-dump-retention.timer && /usr/bin/systemctl is-active fh-release-archive-dump-retention.timer'
    ```
 
@@ -287,7 +287,7 @@ rollout has this exact order:
    bash scripts/ops/prod_cleanup_inventory.sh
    bash scripts/ops/prod_release_archive_dump_retention.sh
    ssh -o StrictHostKeyChecking=accept-new \
-     "${PROD_SSH_TARGET:-root@188.245.244.123}" \
+     "${PROD_SSH_TARGET:-root@booking-server}" \
      '/usr/bin/systemctl start fh-release-archive-dump-retention.timer && /usr/bin/systemctl is-enabled fh-release-archive-dump-retention.timer && /usr/bin/systemctl is-active fh-release-archive-dump-retention.timer && /usr/bin/systemctl list-timers --all fh-release-archive-dump-retention.timer && /usr/bin/systemctl show fh-release-archive-dump-retention.service -p ActiveState -p SubState -p Result -p ExecMainStatus'
    ```
 

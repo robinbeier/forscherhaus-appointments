@@ -53,7 +53,7 @@ For the current production host upload path:
 
 ```bash
 ./build_release.sh --rel ea_YYYYMMDD_HHMM --expected-commit "$(git rev-parse HEAD)" --project "$PWD" \
-  --upload root@188.245.244.123 --remote-dir /root/releases
+  --upload root@booking-server --remote-dir /root/releases
 ```
 
 The builder:
@@ -135,6 +135,12 @@ from the production host using the uploaded archive:
   --zero-surprise-canary-credentials-file /etc/fh/zero-surprise-canary.ini \
   --zero-surprise-incident-webhook-file /etc/fh/zero-surprise-incident-webhook.ini
 ```
+
+For the [production release entry](ops/production-release-entry.md), also pass
+`--result-file "$DEPLOY_RESULT_FILE"` with one absent, run-specific path under
+an existing canonical root-owned mode-`0700` directory. Retain and validate
+the resulting receipt against the observed child exit; the base command above
+does not create a receipt by itself.
 
 Production uses the Docker-backed `fh-pdf-renderer` service. Deployment
 keeps that independently managed container running and checks renderer and

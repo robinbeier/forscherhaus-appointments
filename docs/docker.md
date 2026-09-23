@@ -294,7 +294,7 @@ bash ./scripts/import_prod_backup.sh
 
 The script will:
 
-- create a fresh backup on `root@188.245.244.123`
+- create a fresh backup on `root@booking-server` over Tailscale
 - download the dump plus metadata to `/tmp`
 - create a safety archive of the current local `docker/mysql` directory in a unique private temporary directory (directory `0700`, archive `0600`); its printed path remains available for recovery
 - reset the local MySQL data directory

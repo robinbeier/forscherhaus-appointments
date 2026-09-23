@@ -12,7 +12,7 @@ aggregate journal size, use the approved production SSH target from
 [agent-operations.md](agent-operations.md):
 
 ```bash
-ssh root@188.245.244.123 'journalctl --disk-usage'
+ssh root@booking-server 'journalctl --disk-usage'
 ```
 
 Do not print journal entries or protected configuration. If disk usage is

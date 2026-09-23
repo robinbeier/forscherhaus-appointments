@@ -10,7 +10,7 @@ umask 022
 PROJECT="${PROJECT:-$PWD}"
 REL=""
 EXPECTED_COMMIT=""
-UPLOAD="${UPLOAD:-root@188.245.244.123}"   # Ziel-Host (user@host); mit --skip-upload deaktivieren
+UPLOAD="${UPLOAD:-root@booking-server}"   # Tailscale-Ziel (user@host); mit --skip-upload deaktivieren
 REMOTE_DIR="${REMOTE_DIR:-/root/releases}" # Zielverzeichnis auf dem Server
 DRYRUN=0
 

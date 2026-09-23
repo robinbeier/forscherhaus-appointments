@@ -89,6 +89,7 @@ Primary references:
 - [Production Provider UI smoke](docs/release-gate-provider-ui-smoke.md)
 - [Production Customers UI smoke](docs/release-gate-customers-ui-smoke.md)
 - [Deployment runbook](docs/deployment.md)
+- [Production release and operator entry](docs/ops/production-release-entry.md)
 - [Agent Harness Index](docs/agent-harness-index.md)
 
 Release artifact builds should go through `./build_release.sh`. The builder now
