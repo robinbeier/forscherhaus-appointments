@@ -15,7 +15,7 @@ final class OrdinaryProbeEntrypointContractTest extends TestCase
 
         $files = ordinary_probe_required_libraries($source, __DIR__ . '/../../../scripts/release-gate/lib');
 
-        self::assertCount(12, $files);
+        self::assertCount(13, $files);
     }
 
     public function testMissingRuntimeRequireIsRejected(): void

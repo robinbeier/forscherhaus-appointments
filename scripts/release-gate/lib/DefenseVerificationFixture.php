@@ -19,7 +19,7 @@ final class DefenseVerificationFixture
 {
     private const SCHEMA = 'defense-verification-fixture.v1';
     private const MAX_TTL = 600;
-    private const PROFILES = ['customer_boundary', 'calendar_race'];
+    private const PROFILES = ['customer_boundary', 'calendar_race', 'services_api'];
     private const ACTIVE_TRANSACTION_ERROR = 'Defense verification fixture cannot run inside an active database transaction.';
 
     private object $db;
@@ -71,7 +71,10 @@ final class DefenseVerificationFixture
             ) {
                 throw new RuntimeException('A defense verification fixture already exists.');
             }
-            $actor = $this->assertActor($actorContext, $profile === 'customer_boundary' ? 'admin' : 'provider');
+            $actor = $this->assertActor(
+                $actorContext,
+                in_array($profile, ['customer_boundary', 'services_api'], true) ? 'admin' : 'provider',
+            );
             $run = bin2hex(random_bytes(16));
             $marker = 'defense-verification:' . $run;
             $now = time();
@@ -99,7 +102,9 @@ final class DefenseVerificationFixture
                 $state =
                     $profile === 'customer_boundary'
                         ? $this->activateCustomerBoundary($state)
-                        : $this->activateCalendarRace($state);
+                        : ($profile === 'services_api'
+                            ? $this->activateServicesApi($state)
+                            : $this->activateCalendarRace($state));
                 $state['phase'] = 'active';
                 $this->writeState($state);
                 return $state;
@@ -145,6 +150,33 @@ final class DefenseVerificationFixture
             ];
             $this->writeState($state);
             return $state;
+        });
+    }
+
+    /** Non-secret snapshots for mutation-free Services API assertions. */
+    public function servicesApiSnapshot(): array
+    {
+        return $this->withLock(function (): array {
+            $state = $this->readState();
+            $this->validateState($state);
+            $this->assertOwnership($state);
+            $snapshot = [];
+            foreach (['a' => 'service_a', 'b' => 'service_b'] as $label => $key) {
+                $id = (int) ($state['ids'][$key] ?? 0);
+                $row = $id > 0 ? $this->db->get_where('services', ['id' => $id])->row_array() : [];
+                if ($row !== []) {
+                    $row['providers'] = $this->db
+                        ->get_where('services_providers', ['id_services' => $id])
+                        ->result_array();
+                    $row['appointments'] = $this->db
+                        ->select('id')
+                        ->order_by('id', 'asc')
+                        ->get_where('appointments', ['id_services' => $id])
+                        ->result_array();
+                }
+                $snapshot[$label] = $row ?: [];
+            }
+            return $snapshot;
         });
     }
 
@@ -614,6 +646,33 @@ final class DefenseVerificationFixture
         return $state;
     }
 
+    /** Prepare two independently owned services for the Services API probe. */
+    private function activateServicesApi(array $state): array
+    {
+        $adminRole = $this->role('admin');
+        $providerRole = $this->role('provider');
+        $state['roles'] = ['admin' => $adminRole];
+        $state['roles']['provider'] = $providerRole;
+        $state['ids']['provider_target'] = $this->insertUser(
+            $state,
+            'provider_target',
+            $providerRole,
+            'services-api-provider',
+        );
+        $state['ids']['service_a'] = $this->insertServiceForKey($state, 'service_a', 'A');
+        $state['ids']['service_b'] = $this->insertServiceForKey($state, 'service_b', 'B');
+        foreach (['service_a', 'service_b'] as $key) {
+            $linkKey = 'provider_' . $key;
+            $state['links'][$linkKey] = [
+                'id_users' => $state['ids']['provider_target'],
+                'id_services' => $state['ids'][$key],
+            ];
+            $this->journal($state);
+            $this->insertExact('services_providers', $state['links'][$linkKey]);
+        }
+        return $state;
+    }
+
     /** @param array<string,mixed> $state @return array<string,mixed> */
     private function activateCalendarRace(array $state): array
     {
@@ -763,16 +822,23 @@ final class DefenseVerificationFixture
     /** @param array<string,mixed> $state */
     private function insertService(array &$state): int
     {
-        $state['intents']['service'] = ['description' => $state['marker']];
+        return $this->insertServiceForKey($state, 'service', '');
+    }
+
+    /** @param array<string,mixed> $state */
+    private function insertServiceForKey(array &$state, string $key, string $suffix): int
+    {
+        $description = $key === 'service' ? $state['marker'] : $state['marker'] . ':' . $key;
+        $state['intents'][$key] = ['description' => $description];
         $this->journal($state);
         $this->insertExact('services', [
-            'name' => 'Synthetic ' . $state['run_id'],
+            'name' => 'Synthetic ' . $state['run_id'] . ($suffix === '' ? '' : ' ' . $suffix),
             'duration' => 30,
             'buffer_before' => 0,
             'buffer_after' => 0,
             'price' => 0,
             'currency' => 'EUR',
-            'description' => $state['marker'],
+            'description' => $description,
             'location' => null,
             'color' => '#6c757d',
             'availabilities_type' => AVAILABILITIES_TYPE_FLEXIBLE,
@@ -781,7 +847,7 @@ final class DefenseVerificationFixture
             'id_service_categories' => null,
         ]);
         $id = (int) $this->db->insert_id();
-        $state['ids']['service'] = $id;
+        $state['ids'][$key] = $id;
         $this->journal($state);
         return $id;
     }
@@ -814,7 +880,7 @@ final class DefenseVerificationFixture
             }
             $table = str_contains($key, 'service_link')
                 ? 'services_providers'
-                : ($key === 'service'
+                : (in_array($key, ['service', 'service_a', 'service_b'], true)
                     ? 'services'
                     : ($key === 'appointment' || str_starts_with($key, 'api_appointment_')
                         ? 'appointments'
@@ -881,9 +947,24 @@ final class DefenseVerificationFixture
                 }
             }
         }
-        if (isset($state['ids']['service'])) {
-            $this->assertExactRow('services', (int) $state['ids']['service'], [
-                'description' => $state['marker'],
+        foreach (['service_a', 'service_b'] as $key) {
+            if (isset($state['ids'][$key])) {
+                $service = $this->db->get_where('services', ['id' => (int) $state['ids'][$key]])->row_array();
+                if (($service['description'] ?? null) !== $state['marker'] . ':' . $key) {
+                    throw new RuntimeException('Fixture service identity drift detected.');
+                }
+                if ((int) ($service['attendants_number'] ?? 0) !== 1) {
+                    throw new RuntimeException('Fixture service contract drift detected.');
+                }
+            }
+        }
+        foreach (['service', 'service_a', 'service_b'] as $key) {
+            if (!isset($state['ids'][$key])) {
+                continue;
+            }
+            $description = $state['marker'] . ($key === 'service' ? '' : ':' . $key);
+            $this->assertExactRow('services', (int) $state['ids'][$key], [
+                'description' => $description,
                 'attendants_number' => 1,
             ]);
         }
@@ -1016,6 +1097,33 @@ final class DefenseVerificationFixture
         $this->lockFixtureUsers($state, $alreadyCleaning);
         $this->assertRecoverableApiAdminSettings($state);
         $this->assertServiceDependencies($state, $alreadyCleaning, $wasPrepared);
+        if (($state['profile'] ?? null) === 'services_api') {
+            foreach (['service_a', 'service_b'] as $key) {
+                if (!isset($state['ids'][$key])) {
+                    continue;
+                }
+                $id = (int) $state['ids'][$key];
+                if ($this->db->get_where('services', ['id' => $id])->num_rows() === 0) {
+                    if (!$alreadyCleaning) {
+                        throw new RuntimeException('Synthetic Services API service disappeared; refusing cleanup.');
+                    }
+                    continue;
+                }
+                foreach ($state['links'] ?? [] as $link) {
+                    if (is_array($link) && (int) ($link['id_services'] ?? 0) === $id) {
+                        $this->db->delete('services_providers', [
+                            'id_users' => (int) $link['id_users'],
+                            'id_services' => $id,
+                        ]);
+                    }
+                }
+                $this->assertExactRow('services', $id, [
+                    'description' => $state['marker'] . ':' . $key,
+                    'attendants_number' => 1,
+                ]);
+                $this->db->delete('services', ['id' => $id, 'description' => $state['marker'] . ':' . $key]);
+            }
+        }
         foreach (['basic', 'bearer'] as $case) {
             $key = 'api_appointment_' . $case;
             if (!isset($ids[$key])) {
@@ -1405,6 +1513,66 @@ final class DefenseVerificationFixture
     /** Lock and compare every child before deleting the synthetic service. */
     private function assertServiceDependencies(array $state, bool $alreadyCleaning, bool $prepared = false): void
     {
+        if (($state['profile'] ?? null) === 'services_api') {
+            foreach (['service_a', 'service_b'] as $key) {
+                if (!isset($state['ids'][$key])) {
+                    continue;
+                }
+                $serviceId = (int) $state['ids'][$key];
+                $rows = $this->db
+                    ->query('SELECT id FROM `' . $this->db->dbprefix('services') . '` WHERE id = ? FOR UPDATE', [
+                        $serviceId,
+                    ])
+                    ->result_array();
+                $expected = [];
+                foreach ($state['links'] ?? [] as $link) {
+                    if (is_array($link) && (int) ($link['id_services'] ?? 0) === $serviceId) {
+                        $expected[] = ['id_users' => (int) $link['id_users'], 'id_services' => $serviceId];
+                    }
+                }
+                $actual = $this->db
+                    ->query(
+                        'SELECT id_users, id_services FROM `' .
+                            $this->db->dbprefix('services_providers') .
+                            '` WHERE id_services = ? ORDER BY id_users FOR UPDATE',
+                        [$serviceId],
+                    )
+                    ->result_array();
+                $actual = array_map(
+                    static fn(array $row): array => [
+                        'id_users' => (int) $row['id_users'],
+                        'id_services' => (int) $row['id_services'],
+                    ],
+                    $actual,
+                );
+                $appointments = $this->db
+                    ->query(
+                        'SELECT id FROM `' .
+                            $this->db->dbprefix('appointments') .
+                            '` WHERE id_services = ? ORDER BY id FOR UPDATE',
+                        [$serviceId],
+                    )
+                    ->result_array();
+                if ($appointments !== []) {
+                    throw new RuntimeException(
+                        'Synthetic Services API service gained an appointment; refusing cleanup.',
+                    );
+                }
+                if ($rows === []) {
+                    if (!$alreadyCleaning || $actual !== []) {
+                        throw new RuntimeException('Synthetic Services API service disappeared with dependencies.');
+                    }
+                } elseif (
+                    count($rows) !== 1 ||
+                    (!$prepared && $actual !== $expected) ||
+                    ($prepared &&
+                        array_filter($actual, static fn(array $link): bool => !in_array($link, $expected, true)) !== [])
+                ) {
+                    throw new RuntimeException('Unexpected Services API service relationship; refusing cleanup.');
+                }
+            }
+            return;
+        }
         if (!isset($state['ids']['service'])) {
             return;
         }
@@ -1582,13 +1750,16 @@ final class DefenseVerificationFixture
                 }
             }
         }
-        if (!isset($state['ids']['service']) && isset($state['intents']['service'])) {
-            $rows = $this->db->get_where('services', $state['intents']['service'])->result_array();
+        foreach (['service', 'service_a', 'service_b'] as $key) {
+            if (isset($state['ids'][$key]) || !isset($state['intents'][$key])) {
+                continue;
+            }
+            $rows = $this->db->get_where('services', $state['intents'][$key])->result_array();
             if (count($rows) > 1) {
                 throw new RuntimeException('Fixture service identity is ambiguous; refusing cleanup.');
             }
             if (count($rows) === 1) {
-                $state['ids']['service'] = (int) $rows[0]['id'];
+                $state['ids'][$key] = (int) $rows[0]['id'];
             }
         }
         if (!isset($state['ids']['appointment']) && isset($state['intents']['appointment'])) {
@@ -1744,7 +1915,7 @@ final class DefenseVerificationFixture
         foreach ($state['ids'] as $key => $id) {
             $table = str_contains($key, 'service_link')
                 ? 'services_providers'
-                : ($key === 'service'
+                : (in_array($key, ['service', 'service_a', 'service_b'], true)
                     ? 'services'
                     : ($key === 'appointment' || str_starts_with($key, 'api_appointment_')
                         ? 'appointments'
