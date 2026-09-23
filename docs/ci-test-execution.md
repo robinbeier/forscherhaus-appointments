@@ -161,10 +161,16 @@ recipe key, loaded image ID and measured phase times. Existing gate evidence
 and cleanup failure handling are unchanged.
 
 The job also checks the actual ordinary production CLI entrypoint with PHPStan.
-This resolves its release-gate classes and catches missing imports before a
-production probe starts; the existing isolated tests continue to cover fixture
-recovery and interruption cleanup. The summary records this as
+Its bootstrap loads only the libraries explicitly required by that entrypoint
+and rejects imports without a corresponding runtime class; PHPStan catches
+unresolved source references before a production probe starts. The existing
+isolated tests continue to cover fixture recovery and interruption cleanup.
+The summary records this as
 `ordinary_operator_entrypoint` so its time cost remains visible.
+The signal regression covers TERM delivered while the account child is active
+and cleanup after that child returns. It does not establish bounded recovery
+from a permanently hung child; the retained marker and independent timer still
+require operator-controlled recovery if the shared lock never becomes free.
 
 The pre-change observation was 182 seconds for the job, including 111.9 seconds
 for PHP build and 22.2 seconds for 97 tests / 668 assertions. This single run is

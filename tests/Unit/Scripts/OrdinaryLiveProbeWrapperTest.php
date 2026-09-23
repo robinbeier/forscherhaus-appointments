@@ -102,7 +102,7 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
         );
         $this->writeMock(
             'php',
-            "#!/bin/sh\necho \"php \$*\" >> \"\$MOCK_LOG\"\nfor arg in \"\$@\"; do case \"\$arg\" in --action=*) action=\"\${arg#--action=}\";; esac; done\n[ \"\${MOCK_PHP_UNCONFIRMED_ACTION:-}\" != \"\$action\" ] || exit 86\ncase \",\${MOCK_PHP_FAIL_ACTIONS:-},\" in *\",\$action,\"*) exit 42;; esac\nif [ \"\${MOCK_SEND_TERM:-0}\" = 1 ] && [ \"\$action\" = account ]; then\n    echo account-active >> \"\$MOCK_LOG\"\n    kill -TERM \"\$PPID\"\n    echo account-after-term >> \"\$MOCK_LOG\"\nfi\nexit 0\n",
+            "#!/bin/sh\necho \"php \$*\" >> \"\$MOCK_LOG\"\nfor arg in \"\$@\"; do case \"\$arg\" in --action=*) action=\"\${arg#--action=}\";; esac; done\n[ \"\${MOCK_PHP_UNCONFIRMED_ACTION:-}\" != \"\$action\" ] || exit 86\ncase \",\${MOCK_PHP_FAIL_ACTIONS:-},\" in *\",\$action,\"*) exit 42;; esac\nif [ \"\${MOCK_SEND_TERM:-0}\" = 1 ] && [ \"\$action\" = account ]; then\n    echo account-active >> \"\$MOCK_LOG\"\n    kill -TERM \"\$PPID\"\n    sleep 0.1\n    echo account-after-term >> \"\$MOCK_LOG\"\nfi\nexit 0\n",
         );
         $this->writeMock(
             'systemctl',
@@ -287,12 +287,13 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
         self::assertNotContains('pending-finish', $result['lines']);
     }
 
-    public function testTermDuringActiveProbeCleansUpButRetainsRecoveryMarker(): void
+    public function testTermDeliveredDuringAccountThatReturnsCleansUpButRetainsRecoveryMarker(): void
     {
         $result = $this->executeWrapper('account', ['MOCK_SEND_TERM' => '1']);
 
         self::assertSame(143, $result['status'], $result['error']);
         self::assertContains('account-active', $result['lines']);
+        self::assertContains('account-after-term', $result['lines']);
         self::assertSame(
             ['preflight', 'activate', 'account', 'deactivate', 'verify'],
             $this->actions($result['lines']),
@@ -303,7 +304,7 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
         self::assertFileExists($this->sandbox . '/ordinary-state/run.pending');
     }
 
-    public function testTermDuringActiveProbeRetainsTimerWhenCleanupFails(): void
+    public function testTermDeliveredDuringAccountThatReturnsRetainsTimerWhenCleanupFails(): void
     {
         $result = $this->executeWrapper('account', [
             'MOCK_SEND_TERM' => '1',
@@ -312,6 +313,7 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
 
         self::assertSame(1, $result['status'], $result['error']);
         self::assertContains('account-active', $result['lines']);
+        self::assertContains('account-after-term', $result['lines']);
         self::assertSame(['preflight', 'activate', 'account', 'deactivate'], $this->actions($result['lines']));
         self::assertFalse(
             (bool) array_filter(
