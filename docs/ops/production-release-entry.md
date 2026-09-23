@@ -51,7 +51,10 @@ authority. A missing, stale, contradictory, or unknown fact blocks the entry.
    operation may change, capture `is-enabled`, `is-active`, `list-timers --all`,
    and the associated service `ActiveState`, `SubState`, `Result`, and
    `ExecMainStatus`. This includes backup continuity and session retention when
-   affected. Separately verify that release/archive/dump retention remains
+   affected, and the transient `fh-defense-ordinary-cleanup.timer` and service
+   that the ordinary probe creates. Before a new probe, both transient units
+   must report `LoadState=not-found`; after verified cleanup they must return to
+   that state. Separately verify that release/archive/dump retention remains
    disabled/inactive; enabling it is a separate production change. Restore and
    verify the exact before-state after any temporary pause.
    See [retention operations](production-release-archive-dump-retention.md#marker-and-monitoring).
@@ -70,10 +73,11 @@ authority. A missing, stale, contradictory, or unknown fact blocks the entry.
            printf '%s=absent\n' "$marker"
        fi
    done
-   for unit in fh-backup-set-continuity.timer fh-session-retention.timer fh-release-archive-dump-retention.timer; do
+   for unit in fh-backup-set-continuity.timer fh-session-retention.timer fh-release-archive-dump-retention.timer fh-defense-ordinary-cleanup.timer; do
        printf '%s enabled=%s active=%s\n' "$unit" "$(systemctl is-enabled "$unit")" "$(systemctl is-active "$unit")"
+       systemctl show "$unit" -p LoadState -p ActiveState -p SubState -p Result
        systemctl list-timers --all --no-pager "$unit"
-       systemctl show "${unit%.timer}.service" -p ActiveState -p SubState -p Result -p ExecMainStatus
+       systemctl show "${unit%.timer}.service" -p LoadState -p ActiveState -p SubState -p Result -p ExecMainStatus
    done
    SH
    ```
