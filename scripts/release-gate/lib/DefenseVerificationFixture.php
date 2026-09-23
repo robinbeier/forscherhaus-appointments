@@ -958,9 +958,13 @@ final class DefenseVerificationFixture
                 }
             }
         }
-        if (isset($state['ids']['service'])) {
-            $this->assertExactRow('services', (int) $state['ids']['service'], [
-                'description' => $state['marker'],
+        foreach (['service', 'service_a', 'service_b'] as $key) {
+            if (!isset($state['ids'][$key])) {
+                continue;
+            }
+            $description = $state['marker'] . ($key === 'service' ? '' : ':' . $key);
+            $this->assertExactRow('services', (int) $state['ids'][$key], [
+                'description' => $description,
                 'attendants_number' => 1,
             ]);
         }
@@ -1558,7 +1562,12 @@ final class DefenseVerificationFixture
                     if (!$alreadyCleaning || $actual !== []) {
                         throw new RuntimeException('Synthetic Services API service disappeared with dependencies.');
                     }
-                } elseif (count($rows) !== 1 || $actual !== $expected) {
+                } elseif (
+                    count($rows) !== 1 ||
+                    (!$prepared && $actual !== $expected) ||
+                    ($prepared &&
+                        array_filter($actual, static fn(array $link): bool => !in_array($link, $expected, true)) !== [])
+                ) {
                     throw new RuntimeException('Unexpected Services API service relationship; refusing cleanup.');
                 }
             }
@@ -1741,13 +1750,16 @@ final class DefenseVerificationFixture
                 }
             }
         }
-        if (!isset($state['ids']['service']) && isset($state['intents']['service'])) {
-            $rows = $this->db->get_where('services', $state['intents']['service'])->result_array();
+        foreach (['service', 'service_a', 'service_b'] as $key) {
+            if (isset($state['ids'][$key]) || !isset($state['intents'][$key])) {
+                continue;
+            }
+            $rows = $this->db->get_where('services', $state['intents'][$key])->result_array();
             if (count($rows) > 1) {
                 throw new RuntimeException('Fixture service identity is ambiguous; refusing cleanup.');
             }
             if (count($rows) === 1) {
-                $state['ids']['service'] = (int) $rows[0]['id'];
+                $state['ids'][$key] = (int) $rows[0]['id'];
             }
         }
         if (!isset($state['ids']['appointment']) && isset($state['intents']['appointment'])) {

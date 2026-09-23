@@ -1473,6 +1473,71 @@ final class DefenseVerificationFixtureTest extends TestCase
         self::assertSame(0, $db->get_where('users', ['id' => $state['foreign_provider_id']])->num_rows());
     }
 
+    public function testServicesApiPreparedJournalRecoversServicesBeforeIdsArePublished(): void
+    {
+        $actor = $this->ordinary->activate(roleSlug: 'admin');
+        $state = $this->fixture->activate('services_api', $actor);
+        $journalPath = $this->stateDirectory . '/defense-verification.json';
+        $prepared = $state;
+        $prepared['phase'] = 'prepared';
+        unset($prepared['ids']['service_a'], $prepared['ids']['service_b']);
+        file_put_contents($journalPath, json_encode($prepared, JSON_THROW_ON_ERROR));
+        chmod($journalPath, 0600);
+
+        self::assertSame('cleanup_pending', $this->fixture->verify());
+        $this->fixture->deactivate();
+        self::assertSame('clean', $this->fixture->verify());
+        $db = &get_instance()->db;
+        foreach (['service_a', 'service_b'] as $key) {
+            self::assertSame(0, $db->get_where('services', ['id' => $state['ids'][$key]])->num_rows());
+            self::assertSame(
+                0,
+                $db->get_where('services_providers', ['id_services' => $state['ids'][$key]])->num_rows(),
+            );
+        }
+    }
+
+    public function testServicesApiPreparedCleanupAcceptsOnlyJournaledLinksThatExist(): void
+    {
+        $actor = $this->ordinary->activate(roleSlug: 'admin');
+        $state = $this->fixture->activate('services_api', $actor);
+        $link = $state['links']['provider_service_b'];
+        $db = &get_instance()->db;
+        $db->delete('services_providers', $link);
+        $state['phase'] = 'prepared';
+        $journalPath = $this->stateDirectory . '/defense-verification.json';
+        file_put_contents($journalPath, json_encode($state, JSON_THROW_ON_ERROR));
+        chmod($journalPath, 0600);
+
+        self::assertSame('cleanup_pending', $this->fixture->verify());
+        $this->fixture->deactivate();
+        self::assertSame('clean', $this->fixture->verify());
+        foreach (['service_a', 'service_b'] as $key) {
+            self::assertSame(0, $db->get_where('services', ['id' => $state['ids'][$key]])->num_rows());
+        }
+    }
+
+    public function testServicesApiPreparedLinkAllowanceSurvivesCleaningRetry(): void
+    {
+        $actor = $this->ordinary->activate(roleSlug: 'admin');
+        $state = $this->fixture->activate('services_api', $actor);
+        $link = $state['links']['provider_service_b'];
+        $db = &get_instance()->db;
+        $db->delete('services_providers', $link);
+        $state['phase'] = 'cleaning';
+        $state['cleanup_origin_phase'] = 'prepared';
+        $journalPath = $this->stateDirectory . '/defense-verification.json';
+        file_put_contents($journalPath, json_encode($state, JSON_THROW_ON_ERROR));
+        chmod($journalPath, 0600);
+
+        self::assertSame('cleanup_pending', $this->fixture->verify());
+        $this->fixture->deactivate();
+        self::assertSame('clean', $this->fixture->verify());
+        foreach (['service_a', 'service_b'] as $key) {
+            self::assertSame(0, $db->get_where('services', ['id' => $state['ids'][$key]])->num_rows());
+        }
+    }
+
     public function testPreparedCleanupRetainsMissingLinkAllowanceAcrossAFailedAttempt(): void
     {
         $actor = $this->ordinary->activate();
