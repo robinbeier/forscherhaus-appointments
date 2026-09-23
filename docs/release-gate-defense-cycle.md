@@ -113,6 +113,12 @@ rejected Provider/invalid Bearer,
 URL/body ID binding, positive POST/PUT/DELETE controls, time-window rejection,
 direct alias method guards and complete owned-row nonmutation. Backoffice
 blocked-period tests do not establish this API-v1 behavior.
+`ServiceCategoriesApiHttpWriteTest` covers Service Categories API v1 with
+separate owned A/B categories and an owned linked service: Admin/Bearer writes,
+Provider/invalid/absent credential denials, URL/body ID binding, direct-alias
+method guards, POST/PUT/DELETE controls, and the FK-defined category deletion
+effect that keeps the service while clearing its category. These are isolated
+HTTP/database results, not a production booking or deployment claim.
 `BackofficeHttpContractTest` checks GET/HEAD method rejection on the four
 backoffice controllers, missing-CSRF store/settings/updater requests, and the
 specified provider permission denials. Rejected requests compare deterministic
@@ -222,6 +228,7 @@ bash scripts/ops/run_ordinary_live_probe.sh customers-api EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh services-api EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh unavailabilities-api EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh blocked-periods-api EXPECTED_RELEASE
+bash scripts/ops/run_ordinary_live_probe.sh service-categories-api EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh calendar-race EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh appointments-api EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh appointments-api-overlap EXPECTED_RELEASE
@@ -290,6 +297,36 @@ drift, an unknown HTTP result, lost release binding or incomplete cleanup
 retains recovery evidence and blocks retry. A change to the
 API handler, model, probe, fixture, wrapper, evidence phase allowlist or cleanup
 contract requires fresh local regression and review before reuse.
+
+### Service Categories API v1 live evidence boundary
+
+The `service-categories-api` action permits one planned run against the bound
+active release. Its dedicated fixture creates one synthetic administrator and
+two independently owned categories A/B, with durable intents and exact row
+identities. It does not attach a service or select an existing category as a
+target. The normal root-controlled wrapper, shared production lock, independent
+cleanup timer and persistent recovery marker apply throughout the run.
+
+A PUT to URL A with body ID B must return 400 and leave both complete category
+rows unchanged. A matching PUT must return 200 and change only A's name and
+description. A GET to the direct destroy alias must return 405 and leave both
+rows unchanged. The probe observes actual HTTP behavior and database snapshots
+on the installed release, recording only classified phase outcomes. Isolated
+local tests establish the additional POST/DELETE, authorization and linked
+service/availability behavior; the live run makes no claim to have exercised
+those paths or a real service association.
+
+Only `verified` with all three phases passed, exact identity-bound fixture and
+actor cleanup, removed transient timer and marker, unchanged active release
+and healthy production is successful. Interrupted activation may reconstruct
+only rows matching journaled intents. Cleanup locks the owned categories and
+refuses to delete either while any service references it, preventing an
+unintended `ON DELETE SET NULL` effect. The isolated test proves refusal for an
+already linked service; a forced concurrent link/cleanup interleaving is not
+covered. Identity drift, unknown HTTP completion,
+lost release binding or incomplete cleanup retain recovery evidence and stop
+further probe/deployment work. A change to the handler, probe, fixture, wrapper,
+evidence classes or cleanup contract requires fresh local tests and review.
 
 ### Shared ordinary-probe lifecycle
 

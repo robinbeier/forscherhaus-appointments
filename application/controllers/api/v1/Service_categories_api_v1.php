@@ -116,6 +116,10 @@ class Service_categories_api_v1 extends EA_Controller
      */
     public function store(): void
     {
+        if (!$this->enforceWriteMethod('POST')) {
+            return;
+        }
+
         try {
             $service_category = $this->apiRequestDtoFactory()->buildEntityWritePayloadDto()->payload;
 
@@ -144,6 +148,10 @@ class Service_categories_api_v1 extends EA_Controller
      */
     public function update(int $id): void
     {
+        if (!$this->enforceWriteMethod('PUT')) {
+            return;
+        }
+
         try {
             $occurrences = $this->service_categories_model->get(['id' => $id]);
 
@@ -157,7 +165,26 @@ class Service_categories_api_v1 extends EA_Controller
 
             $service_category = $this->apiRequestDtoFactory()->buildEntityWritePayloadDto()->payload;
 
+            // The URL selects the category. A body ID may only repeat that target.
+            if (array_key_exists('id', $service_category)) {
+                if (!is_int($service_category['id']) || $service_category['id'] !== $id) {
+                    response('', 400);
+
+                    return;
+                }
+
+                unset($service_category['id']);
+            }
+
+            if (!array_key_exists('name', $service_category) && !array_key_exists('description', $service_category)) {
+                response('', 400);
+
+                return;
+            }
+
             $this->service_categories_model->api_decode($service_category, $original_category);
+
+            $service_category['id'] = $id;
 
             $service_category_id = $this->service_categories_model->save($service_category);
 
@@ -178,6 +205,10 @@ class Service_categories_api_v1 extends EA_Controller
      */
     public function destroy(int $id): void
     {
+        if (!$this->enforceWriteMethod('DELETE')) {
+            return;
+        }
+
         try {
             $occurrences = $this->service_categories_model->get(['id' => $id]);
 
@@ -216,5 +247,16 @@ class Service_categories_api_v1 extends EA_Controller
         $this->api_request_dto_factory = $CI->api_request_dto_factory;
 
         return $this->api_request_dto_factory;
+    }
+
+    private function enforceWriteMethod(string $expected): bool
+    {
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) === $expected) {
+            return true;
+        }
+
+        response('', 405, ['Allow: ' . $expected]);
+
+        return false;
     }
 }

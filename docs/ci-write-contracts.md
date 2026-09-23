@@ -192,6 +192,35 @@ Vorher-/Nachher-Zeilenvergleichen in einem frischen isolierten Datenbank-Stack.
 Backoffice-Tests belegen diese API-v1-Grenzen nicht. Der lokale Nachweis ersetzt
 keinen produktiven Release- oder Verfügbarkeitsnachweis.
 
+## Service Categories API v1
+
+Die authentifizierten Schreibaktionen verwenden auch bei direkten
+Controller-Aliasen ausschließlich POST für `store`, PUT für `update` und DELETE
+für `destroy`. Ein falsches Verb erhält 405 mit passendem `Allow`-Header vor
+Payload- oder Datensatzverarbeitung. Die bestehenden Authorities sind
+Admin-Basic und der konfigurierte globale Bearer; Provider- und ungültige
+Zugangsdaten erteilen keine Schreibberechtigung.
+
+Bei PUT bestimmt allein die URL-ID die Kategorie. Eine Body-`id` muss dieselbe
+JSON-Ganzzahl sein; abweichende, leere und anders typisierte IDs werden mit
+400 vor jeder Mutation abgewiesen. Ein PUT ohne Body-ID behält das URL-Ziel.
+Leere oder nur aus unbekannten Eigenschaften bestehende PUT-Payloads werden
+ohne Änderung mit 400 abgewiesen. POST ignoriert eine mitgesendete ID und
+erzeugt einen neuen Datensatz; DELETE verwendet ausschließlich die URL-ID.
+
+Die bestehende Fremdschlüsselregel `ON DELETE SET NULL` löst bei erfolgreicher
+Löschung einer Kategorie die Zuordnung verknüpfter Services, ohne die Services
+selbst zu löschen. Kategorieänderungen wirken über die bestehenden Lese-Joins
+auf die Darstellung dieser Services; der Kategorien-Schreibpfad führt keine
+zusätzlichen Buchungs- oder Kalenderwrites aus.
+
+`ServiceCategoriesApiHttpWriteTest` prüft diese Grenzen über echtes isoliertes
+HTTP und eine frische Datenbank mit eigenen A/B-Kategorien und eigenem Service.
+Er vergleicht die vollständigen eigenen Zeilen, die Verfügbarkeit des eigenen
+verknüpften Service vor und nach der Kategorielöschung und die Bereinigung.
+Dieser lokale Nachweis belegt weder produktive Auslieferung noch alle
+konkurrierenden oder fehlerinduzierten Datenbankabläufe.
+
 ## Write-only Integrationsgeheimnisse
 
 Die authentifizierte REST-v1-API behandelt

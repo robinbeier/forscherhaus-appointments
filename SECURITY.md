@@ -61,6 +61,14 @@ controller alias. A changed blocked period affects booking availability, so a
 rejected request must leave the complete period row unchanged. The precise
 contract and evidence boundary live in [CI write contracts](docs/ci-write-contracts.md#blocked-periods-api-v1).
 
+For service categories, authenticated API writes must likewise bind PUT to the
+URL-selected category and enforce the declared method on direct aliases.
+Rejected writes must not change another category or a linked service. A
+successful category deletion follows the existing foreign-key rule: linked
+services remain while their category reference becomes null. See the
+[Service Categories API contract](docs/ci-write-contracts.md#service-categories-api-v1)
+for the exact local evidence and limits.
+
 The product supports `services.attendants_number = 1`, enforced by
 [Services_model](application/models/Services_model.php). Other values are not
 supported product behavior; this application rule is not a claim of a database

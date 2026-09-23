@@ -25,6 +25,7 @@ final class DefenseVerificationFixture
         'services_api',
         'unavailabilities_api',
         'blocked_periods_api',
+        'service_categories_api',
     ];
     private const ACTIVE_TRANSACTION_ERROR = 'Defense verification fixture cannot run inside an active database transaction.';
 
@@ -81,7 +82,13 @@ final class DefenseVerificationFixture
                 $actorContext,
                 in_array(
                     $profile,
-                    ['customer_boundary', 'services_api', 'unavailabilities_api', 'blocked_periods_api'],
+                    [
+                        'customer_boundary',
+                        'services_api',
+                        'unavailabilities_api',
+                        'blocked_periods_api',
+                        'service_categories_api',
+                    ],
                     true,
                 )
                     ? 'admin'
@@ -120,7 +127,9 @@ final class DefenseVerificationFixture
                                 ? $this->activateUnavailabilitiesApi($state)
                                 : ($profile === 'blocked_periods_api'
                                     ? $this->activateBlockedPeriodsApi($state)
-                                    : $this->activateCalendarRace($state))));
+                                    : ($profile === 'service_categories_api'
+                                        ? $this->activateServiceCategoriesApi($state)
+                                        : $this->activateCalendarRace($state)))));
                 $state['phase'] = 'active';
                 $this->writeState($state);
                 return $state;
@@ -271,6 +280,34 @@ final class DefenseVerificationFixture
                     throw new RuntimeException('Blocked period identity drift detected.');
                 }
                 $rows[$label] = $row ?: [];
+            }
+            return $rows;
+        });
+    }
+
+    /** Non-secret snapshots for the bounded Service Categories API probe. */
+    public function serviceCategoriesApiSnapshot(): array
+    {
+        return $this->withLock(function (): array {
+            $state = $this->readState();
+            $this->validateState($state);
+            $this->assertOwnership($state);
+            $rows = [];
+            foreach (['a' => 'category_a', 'b' => 'category_b'] as $label => $key) {
+                $id = (int) ($state['ids'][$key] ?? 0);
+                $row = $id > 0 ? $this->db->get_where('service_categories', ['id' => $id])->row_array() : [];
+                $intent = $state['intents']['service_categories'][$label] ?? null;
+                if (!is_array($intent) || !is_array($row) || $row === []) {
+                    throw new RuntimeException('Service category snapshot is missing an owned row.');
+                }
+                $allowed = [[$intent['name'], $intent['description']]];
+                if (isset($intent['updated_name'], $intent['updated_description'])) {
+                    $allowed[] = [$intent['updated_name'], $intent['updated_description']];
+                }
+                if (!in_array([$row['name'] ?? null, $row['description'] ?? null], $allowed, true)) {
+                    throw new RuntimeException('Service category identity drift detected.');
+                }
+                $rows[$label] = $row;
             }
             return $rows;
         });
@@ -898,6 +935,37 @@ final class DefenseVerificationFixture
         return $state;
     }
 
+    /** Prepare two independently owned global service categories for the API probe. */
+    private function activateServiceCategoriesApi(array $state): array
+    {
+        $state['roles'] = ['admin' => $this->role('admin')];
+        $state['intents']['service_categories'] = [];
+        foreach (['a', 'b'] as $key) {
+            $name = $state['marker'] . ':category:' . $key;
+            $description = 'Synthetic ' . $state['run_id'] . ' ' . strtoupper($key);
+            $state['intents']['service_categories'][$key] = [
+                'name' => $name,
+                'description' => $description,
+                'updated_name' => $state['marker'] . ':category:' . $key . ':updated',
+                'updated_description' => $description . ' updated',
+            ];
+            $this->journal($state);
+            if (
+                !$this->db->insert('service_categories', [
+                    'name' => $name,
+                    'description' => $description,
+                    'create_datetime' => date('Y-m-d H:i:s'),
+                    'update_datetime' => date('Y-m-d H:i:s'),
+                ])
+            ) {
+                throw new RuntimeException('Could not insert synthetic service category.');
+            }
+            $state['ids']['category_' . $key] = (int) $this->db->insert_id();
+            $this->journal($state);
+        }
+        return $state;
+    }
+
     /** @param array<string,mixed> $state @return array<string,mixed> */
     private function activateCalendarRace(array $state): array
     {
@@ -1105,15 +1173,17 @@ final class DefenseVerificationFixture
             }
             $table = str_starts_with($key, 'blocked_period_')
                 ? 'blocked_periods'
-                : (str_contains($key, 'service_link')
-                    ? 'services_providers'
-                    : (in_array($key, ['service', 'service_a', 'service_b'], true)
-                        ? 'services'
-                        : ($key === 'appointment' ||
-                        str_starts_with($key, 'api_appointment_') ||
-                        str_starts_with($key, 'unavailability_')
-                            ? 'appointments'
-                            : 'users')));
+                : (str_starts_with($key, 'category_')
+                    ? 'service_categories'
+                    : (str_contains($key, 'service_link')
+                        ? 'services_providers'
+                        : (in_array($key, ['service', 'service_a', 'service_b'], true)
+                            ? 'services'
+                            : ($key === 'appointment' ||
+                            str_starts_with($key, 'api_appointment_') ||
+                            str_starts_with($key, 'unavailability_')
+                                ? 'appointments'
+                                : 'users'))));
             if ($this->db->get_where($table, ['id' => $id])->num_rows() !== 1) {
                 throw new RuntimeException('Fixture ownership is missing or ambiguous.');
             }
@@ -1328,6 +1398,27 @@ final class DefenseVerificationFixture
                 'end_datetime' => $intent['end'],
             ]);
         }
+        foreach ($state['ids'] as $key => $id) {
+            if (!str_starts_with($key, 'category_')) {
+                continue;
+            }
+            $shortKey = substr($key, strlen('category_'));
+            $intent = $state['intents']['service_categories'][$shortKey] ?? null;
+            if (!is_array($intent)) {
+                throw new RuntimeException('Prepared service category intent is missing.');
+            }
+            $row = $this->db->get_where('service_categories', ['id' => (int) $id])->row_array();
+            if ($row === []) {
+                throw new RuntimeException('Prepared service category is missing.');
+            }
+            $allowed = [[$intent['name'], $intent['description']]];
+            if (isset($intent['updated_name'], $intent['updated_description'])) {
+                $allowed[] = [$intent['updated_name'], $intent['updated_description']];
+            }
+            if (!in_array([$row['name'] ?? null, $row['description'] ?? null], $allowed, true)) {
+                throw new RuntimeException('Prepared service category identity drift detected.');
+            }
+        }
         foreach ($state['links'] ?? [] as $link) {
             if (!is_array($link)) {
                 throw new RuntimeException('Prepared fixture service relationship is invalid.');
@@ -1351,6 +1442,72 @@ final class DefenseVerificationFixture
         $this->lockFixtureUsers($state, $alreadyCleaning);
         $this->assertRecoverableApiAdminSettings($state);
         $this->assertServiceDependencies($state, $alreadyCleaning, $wasPrepared);
+        if (($state['profile'] ?? null) === 'service_categories_api') {
+            $idsToDelete = [];
+            $categoryIntents = [];
+            foreach (['a', 'b'] as $key) {
+                $id = (int) ($ids['category_' . $key] ?? 0);
+                $intent = $state['intents']['service_categories'][$key] ?? null;
+                if ($id < 1 && $wasPrepared) {
+                    continue;
+                }
+                if ($id < 1 || !is_array($intent)) {
+                    throw new RuntimeException('Service category cleanup identity is missing.');
+                }
+                $idsToDelete[] = $id;
+                $categoryIntents[$id] = $intent;
+            }
+            if (count(array_unique($idsToDelete)) !== count($idsToDelete)) {
+                throw new RuntimeException('Service category cleanup IDs are ambiguous.');
+            }
+            sort($idsToDelete, SORT_NUMERIC);
+            $lockedIds = [];
+            foreach ($idsToDelete as $id) {
+                $row = $this->db
+                    ->query(
+                        'SELECT * FROM `' . $this->db->dbprefix('service_categories') . '` WHERE id = ? FOR UPDATE',
+                        [$id],
+                    )
+                    ->row_array();
+                if (!is_array($row)) {
+                    if (!$alreadyCleaning) {
+                        throw new RuntimeException('Synthetic service category disappeared; refusing cleanup.');
+                    }
+                    continue;
+                }
+                $intent = $categoryIntents[$id];
+                $allowed = [[$intent['name'], $intent['description']]];
+                if (isset($intent['updated_name'], $intent['updated_description'])) {
+                    $allowed[] = [$intent['updated_name'], $intent['updated_description']];
+                }
+                if (!in_array([$row['name'] ?? null, $row['description'] ?? null], $allowed, true)) {
+                    throw new RuntimeException('Service category identity drift detected.');
+                }
+                $lockedIds[] = $id;
+            }
+            if ($lockedIds !== []) {
+                $linkedServices = $this->db
+                    ->query(
+                        'SELECT id FROM `' .
+                            $this->db->dbprefix('services') .
+                            '` WHERE id_service_categories IN (' .
+                            implode(', ', array_fill(0, count($lockedIds), '?')) .
+                            ') ORDER BY id FOR UPDATE',
+                        $lockedIds,
+                    )
+                    ->result_array();
+                if ($linkedServices !== []) {
+                    throw new RuntimeException(
+                        'Service category cleanup found a linked service; refusing to unlink it.',
+                    );
+                }
+            }
+            foreach ($lockedIds as $id) {
+                if (!$this->db->delete('service_categories', ['id' => $id])) {
+                    throw new RuntimeException('Service category cleanup delete failed.');
+                }
+            }
+        }
         if (($state['profile'] ?? null) === 'blocked_periods_api') {
             $blockedIds = [];
             foreach (['a', 'b'] as $key) {
@@ -2279,6 +2436,24 @@ final class DefenseVerificationFixture
                 $state['ids'][$idKey] = (int) $rows[0]['id'];
             }
         }
+        foreach ($state['intents']['service_categories'] ?? [] as $key => $intent) {
+            $idKey = 'category_' . $key;
+            if (isset($state['ids'][$idKey]) || !is_array($intent)) {
+                continue;
+            }
+            $rows = $this->db
+                ->get_where('service_categories', [
+                    'name' => $intent['name'],
+                    'description' => $intent['description'],
+                ])
+                ->result_array();
+            if (count($rows) > 1) {
+                throw new RuntimeException('Service category identity is ambiguous; refusing cleanup.');
+            }
+            if (count($rows) === 1) {
+                $state['ids'][$idKey] = (int) $rows[0]['id'];
+            }
+        }
         foreach (['basic', 'bearer'] as $case) {
             $key = 'api_appointment_' . $case;
             $intent = $state['intents']['api_appointments'][$case] ?? null;
@@ -2414,15 +2589,17 @@ final class DefenseVerificationFixture
         foreach ($state['ids'] as $key => $id) {
             $table = str_starts_with($key, 'blocked_period_')
                 ? 'blocked_periods'
-                : (str_contains($key, 'service_link')
-                    ? 'services_providers'
-                    : (in_array($key, ['service', 'service_a', 'service_b'], true)
-                        ? 'services'
-                        : ($key === 'appointment' ||
-                        str_starts_with($key, 'api_appointment_') ||
-                        str_starts_with($key, 'unavailability_')
-                            ? 'appointments'
-                            : 'users')));
+                : (str_starts_with($key, 'category_')
+                    ? 'service_categories'
+                    : (str_contains($key, 'service_link')
+                        ? 'services_providers'
+                        : (in_array($key, ['service', 'service_a', 'service_b'], true)
+                            ? 'services'
+                            : ($key === 'appointment' ||
+                            str_starts_with($key, 'api_appointment_') ||
+                            str_starts_with($key, 'unavailability_')
+                                ? 'appointments'
+                                : 'users'))));
             if ($this->db->get_where($table, ['id' => (int) $id])->num_rows() !== 0) {
                 $remaining[] = $key;
             }
@@ -2665,6 +2842,7 @@ final class DefenseVerificationFixture
         return $this->db->like('notes', 'defense-verification:', 'after')->count_all_results('users') > 0 ||
             $this->db->like('username', 'defense_verify_', 'after')->count_all_results('user_settings') > 0 ||
             $this->db->like('description', 'defense-verification:', 'after')->count_all_results('services') > 0 ||
+            $this->db->like('name', 'defense-verification:', 'after')->count_all_results('service_categories') > 0 ||
             $this->db->like('notes', 'defense-verification:', 'after')->count_all_results('appointments') > 0 ||
             $this->db->like('notes', 'defense-verification:', 'after')->count_all_results('blocked_periods') > 0;
     }
