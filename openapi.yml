@@ -499,6 +499,7 @@ paths:
             tags:
                 - unavailabilities
             summary: Update an unavailability
+            description: If the request body includes an id, it must be an integer matching unavailabilityId in the URL.
             parameters:
                 - name: unavailabilityId
                   in: path
@@ -518,6 +519,8 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/UnavailabilityRecord'
+                '400':
+                    description: The request body id does not match the URL target.
                 '401':
                     description: Unauthorized
                 '404':

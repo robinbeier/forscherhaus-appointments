@@ -133,6 +133,39 @@ beabsichtigte Übertragung des Editorplans auf alle serverseitig ausgewählten
 Anbieter bleibt erhalten. Die gemeinsame Transaktion und getrennten
 Testnachweise beschreibt [der atomare Arbeitsplan-Vertrag](atomic-write-contracts.md#global-working-plan-application).
 
+## Unavailabilities API v1
+
+Die authentifizierten Schreibaktionen verlangen ihr kanonisches HTTP-Verb:
+`store` POST, `update` PUT und `destroy` DELETE. Das gilt auch bei direktem
+Aufruf eines Controller-Alias. Ein falsches Verb erhält 405 mit `Allow`, bevor
+eine Schreib-Payload gelesen oder ein Datensatz verändert wird.
+
+Bei PUT bestimmt ausschließlich die URL den Zieldatensatz. Eine mitgesendete
+`id` muss eine identische JSON-Ganzzahl sein; eine abweichende oder anders
+typisierte `id` wird mit 400 vor jeder Mutation abgewiesen. Ohne Body-ID bleibt
+der URL-Datensatz das Ziel. Das Modell akzeptiert für Lookup und Änderung nur
+Datensätze vom Typ Nichtverfügbarkeit. Geschützte Typ- und Elternfelder können
+bei einer Änderung nicht umgeschrieben werden. Generierte Termin-Puffer bleiben gegen
+direkte Änderung oder Löschung geschützt. UPDATE und DELETE binden ihre
+Datenbankoperation zusätzlich an Typ und fehlende Elternverknüpfung, damit ein
+regulärer Termin samt abhängigen Puffern nicht über diesen Pfad verändert wird.
+
+Der Kalender-Endpunkt filtert die schreibbaren Felder. Bei vorhandenen
+Nichtverfügbarkeiten sperrt er zuerst die bisherigen und angefragten
+Anbieterzeilen und dann den manuellen Datensatz; eine inzwischen geänderte
+Anbieterzuordnung führt vor der Mutation zum Abbruch. Die Kalender-Änderung
+und -Löschung besitzen eine gemeinsame Transaktionsgrenze. Diese Sperrfolge
+schützt den geprüften Datensatz, verspricht aber keine anwendungsweite
+Serialisierung aller Anbieter-Berechtigungsänderungen.
+
+Die isolierten HTTP-Regressionen prüfen Normalfälle, unautorisierte Anfragen,
+abweichende Body-IDs, reguläre Termin-IDs, generierte Puffer und direkte Aliase
+mit einem Vorher-/Nachher-Abgleich der eigenen Testdatensätze. Die Modelltests
+prüfen die Typgrenze bei direkten Kalender-/Modellaufrufen. Ein gezielter
+Zwei-Verbindungs-Test verschiebt die Anbieterzuordnung zwischen erster
+Autorisierung und Sperre und erwartet eine Ablehnung ohne Änderung. Lokale
+Nachweise belegen keine produktive Auslieferung.
+
 ## Write-only Integrationsgeheimnisse
 
 Die authentifizierte REST-v1-API behandelt

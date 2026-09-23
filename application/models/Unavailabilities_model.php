@@ -79,7 +79,9 @@ class Unavailabilities_model extends EA_Model
     {
         // If an unavailability ID is provided then check whether the record really exists in the database.
         if (!empty($unavailability['id'])) {
-            $count = $this->db->get_where('appointments', ['id' => $unavailability['id']])->num_rows();
+            $count = $this->db
+                ->get_where('appointments', ['id' => $unavailability['id'], 'is_unavailability' => true])
+                ->num_rows();
 
             if (!$count) {
                 throw new InvalidArgumentException(
@@ -206,9 +208,27 @@ class Unavailabilities_model extends EA_Model
     {
         $this->assert_unavailability_is_mutable((int) $unavailability['id']);
 
+        if (
+            (array_key_exists('is_unavailability', $unavailability) &&
+                !in_array($unavailability['is_unavailability'], [true, 1, '1'], true)) ||
+            (array_key_exists('id_parent_appointment', $unavailability) &&
+                $unavailability['id_parent_appointment'] !== null)
+        ) {
+            throw new InvalidArgumentException('Protected unavailability fields cannot be changed.');
+        }
+
+        $unavailability['is_unavailability'] = true;
+        $unavailability['id_parent_appointment'] = null;
+
         $unavailability['update_datetime'] = date('Y-m-d H:i:s');
 
-        if (!$this->db->update('appointments', $unavailability, ['id' => $unavailability['id']])) {
+        if (
+            !$this->db->update('appointments', $unavailability, [
+                'id' => $unavailability['id'],
+                'is_unavailability' => true,
+                'id_parent_appointment' => null,
+            ])
+        ) {
             throw new RuntimeException('Could not update unavailability record.');
         }
 
@@ -226,13 +246,21 @@ class Unavailabilities_model extends EA_Model
     {
         $this->assert_unavailability_is_mutable($unavailability_id);
 
-        $this->db->delete('appointments', ['id' => $unavailability_id]);
+        if (
+            !$this->db->delete('appointments', [
+                'id' => $unavailability_id,
+                'is_unavailability' => true,
+                'id_parent_appointment' => null,
+            ])
+        ) {
+            throw new RuntimeException('Could not delete unavailability record.');
+        }
     }
 
     protected function assert_unavailability_is_mutable(int $unavailability_id): void
     {
         if ($unavailability_id <= 0) {
-            return;
+            throw new InvalidArgumentException('The unavailability ID must be positive.');
         }
 
         $row = $this->db
@@ -244,10 +272,12 @@ class Unavailabilities_model extends EA_Model
             ->row_array();
 
         if (!$row) {
-            return;
+            throw new InvalidArgumentException(
+                'The provided unavailability ID was not found in the database: ' . $unavailability_id,
+            );
         }
 
-        if (!empty($row['id_parent_appointment'])) {
+        if ($row['id_parent_appointment'] !== null) {
             throw new RuntimeException('Buffer-generated unavailability blocks cannot be modified directly.');
         }
     }
@@ -263,7 +293,9 @@ class Unavailabilities_model extends EA_Model
      */
     public function find(int $unavailability_id): array
     {
-        $unavailability = $this->db->get_where('appointments', ['id' => $unavailability_id])->row_array();
+        $unavailability = $this->db
+            ->get_where('appointments', ['id' => $unavailability_id, 'is_unavailability' => true])
+            ->row_array();
 
         if (!$unavailability) {
             throw new InvalidArgumentException(

@@ -10,6 +10,7 @@ use ReleaseGate\CustomerRoleBoundaryProbe;
 use ReleaseGate\CustomersApiWriteProbe;
 use ReleaseGate\DefenseVerificationFixture;
 use ReleaseGate\ServicesApiWriteProbe;
+use ReleaseGate\UnavailabilitiesApiWriteProbe;
 use ReleaseGate\OrdinaryAccountProbe;
 use ReleaseGate\OrdinaryLiveFixture;
 use ReleaseGate\OrdinaryProbeSessions;
@@ -47,6 +48,7 @@ if (
             'customer-boundary',
             'customers-api',
             'services-api',
+            'unavailabilities-api',
             'calendar-race',
             'appointments-api',
             'appointments-api-overlap',
@@ -158,6 +160,7 @@ try {
     require_once dirname(__DIR__) . '/release-gate/lib/CustomerRoleBoundaryProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/CustomersApiWriteProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/ServicesApiWriteProbe.php';
+    require_once dirname(__DIR__) . '/release-gate/lib/UnavailabilitiesApiWriteProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/CalendarResponsibilityRaceProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/AppointmentsApiWriteProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/DefenseVerificationFixture.php';
@@ -341,6 +344,19 @@ try {
                 indexPage: (string) config_item('index_page'),
             );
             $result['evidence'] = $probe->run($evidence->step(...));
+        } elseif ($action === 'unavailabilities-api') {
+            $evidence->run(
+                'supplemental_activate',
+                fn(): array => $verificationFixture->activate('unavailabilities_api', $context),
+            );
+            $probe = UnavailabilitiesApiWriteProbe::forApp(
+                'http://localhost',
+                (string) $context['username'],
+                (string) $context['password'],
+                $verificationFixture,
+                indexPage: (string) config_item('index_page'),
+            );
+            $result['evidence'] = $probe->run($evidence->step(...));
         } elseif (in_array($action, ['appointments-api', 'appointments-api-overlap'], true)) {
             $supplemental = $evidence->run(
                 'supplemental_activate',
@@ -389,6 +405,7 @@ try {
                     'customer-boundary',
                     'customers-api',
                     'services-api',
+                    'unavailabilities-api',
                     'calendar-race',
                     'appointments-api',
                     'appointments-api-overlap',
