@@ -9,7 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SSH_OPTIONS=(-o StrictHostKeyChecking=accept-new)
 
-PROD_SSH_TARGET="${PROD_SSH_TARGET:-root@188.245.244.123}"
+PROD_SSH_TARGET="${PROD_SSH_TARGET:-root@booking-server}"
 REMOTE_BACKUP_SCRIPT="${REMOTE_BACKUP_SCRIPT:-/root/backups/bin/backup_easyappointments.sh}"
 REMOTE_BACKUP_DIR="${REMOTE_BACKUP_DIR:-}"
 REMOTE_BACKUP_ROOT="${REMOTE_BACKUP_ROOT:-/root/backups/easyappointments}"
@@ -25,7 +25,7 @@ Usage:
 
 Options:
   --prod-ssh-target TARGET         SSH target for production access.
-                                   Default: root@188.245.244.123
+                                   Default: root@booking-server (Tailscale)
   --remote-backup-script PATH      Remote backup script to run when no backup dir is given.
                                    Default: /root/backups/bin/backup_easyappointments.sh
   --remote-backup-dir PATH         Reuse an existing remote backup directory instead of creating a new one.

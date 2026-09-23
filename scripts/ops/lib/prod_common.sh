@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 prod_default_ssh_target() {
-    printf '%s\n' "${PROD_SSH_TARGET:-root@188.245.244.123}"
+    printf '%s\n' "${PROD_SSH_TARGET:-root@booking-server}"
 }
 
 prod_apply_macos_path() {
@@ -13,7 +13,7 @@ prod_apply_macos_path() {
 prod_usage_common() {
     cat <<'USAGE'
 Common options:
-  --prod-ssh-target TARGET  SSH target. Default: root@188.245.244.123
+  --prod-ssh-target TARGET  SSH target. Default: root@booking-server (Tailscale)
   -h, --help                Show help.
 USAGE
 }

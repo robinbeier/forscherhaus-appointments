@@ -53,7 +53,7 @@ For the current production host upload path:
 
 ```bash
 ./build_release.sh --rel ea_YYYYMMDD_HHMM --expected-commit "$(git rev-parse HEAD)" --project "$PWD" \
-  --upload root@188.245.244.123 --remote-dir /root/releases
+  --upload root@booking-server --remote-dir /root/releases
 ```
 
 The builder:

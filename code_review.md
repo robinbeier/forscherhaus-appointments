@@ -81,6 +81,11 @@ Assess whether the executed validation actually proves the change is safe:
   rule wins for mixed changes.
 - Flag missing negative-path or edge-case coverage when the change affects them.
 - Flag weak assertions that would let the bug survive.
+- For database time comparisons on write paths, compare canonical values
+  under the actual lock. Verify accepted legacy input formats, timezone and
+  DST boundaries, rejected ambiguous years, and no-mutation failures through
+  the real HTTP path. PR #641 showed that a source-level check can miss a
+  lexicographic comparison against normalized database timestamps.
 
 Do not ask for broad new test suites unless the risk justifies them.
 

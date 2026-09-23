@@ -24,7 +24,9 @@ a short pointer file for emergency orientation.
    Never print DB rows, Push URLs, tokens, passwords, `config.php`, Kuma DB
    contents, health-token values, or `/etc/fh` file contents.
 
-The doctor reports the current state; post-change validation enforces the
+The doctor reports the current host and health state; the separate
+`prod_cleanup_inventory.sh` reports the active release marker and protected
+storage classes. Post-change validation enforces the
 existing health and resource requirements. Both deliberately sample again:
 a pre-change result does not prove the post-change state. For application logs,
 the doctor counts all error-like entries in recently modified files, while
@@ -36,8 +38,10 @@ Before implementation relies on a production path, runtime, service, identity,
 permission, or configuration, capture a small read-only production-facts record.
 Compose it from the existing commands instead of adding another broad doctor:
 
-- start with `prod_doctor.sh` for the redacted host, service, runtime, release,
+- start with `prod_doctor.sh` for the redacted host, service, runtime,
   listener, and health classes;
+- use `prod_cleanup_inventory.sh` when an active release marker or protected
+  storage fact is needed;
 - add only the narrow read-only preflight for the affected operation, such as
   the CSP preflight below or `prod_cleanup_inventory.sh` for protected storage;
 - record the observed release binding, capture time, source command, redacted
@@ -68,16 +72,16 @@ operator approval is the timing decision; access-log classification and active
 HTTP connections do not veto it. Keep functional validation, concurrency locks,
 and rollback checks.
 
-Default target:
+Default target over Tailscale MagicDNS:
 
 ```bash
-root@188.245.244.123
+root@booking-server
 ```
 
 Override it with:
 
 ```bash
-bash scripts/ops/prod_doctor.sh --prod-ssh-target root@example
+bash scripts/ops/prod_doctor.sh --prod-ssh-target root@booking-server
 ```
 
 ## Production Map
