@@ -40,6 +40,31 @@ authority. A missing, stale, contradictory, or unknown fact blocks the entry.
    secret. A fact not directly observed or contradicted by a fresh command
    is `open` and blocks. See [operations harness](agent-operations.md#verify-production-facts-before-designing-production-tooling).
 
+   Before backup, timer changes, or deployment, use the reusable, entirely
+   read-only `scripts/ops/prod_release_readiness_preflight.sh` result as the
+   release-entry gate. Bind `ACTIVE_RELEASE_ID` to the **currently active**
+   release from the last trusted deployment receipt and the fresh inventory;
+   it is not the new candidate ID. Run from the reviewed, clean checkout: the
+   preflight derives the three expected installed-tool hashes from tracked,
+   unchanged local sources rather than accepting hashes copied from the remote
+   query. The new candidate's archive and provenance stay bound separately in
+   step 1.
+
+   ```bash
+   PROD_SSH_TARGET=root@booking-server bash scripts/ops/prod_release_readiness_preflight.sh \
+     --expected-active-release "$ACTIVE_RELEASE_ID"
+   ```
+
+   Require exit `0`, schema `production_release_readiness.v1`, `status=passed`,
+   and `result_class=readiness_verified`. Keep its UTC capture time, fixed
+   sources, and invalidation boundary with the release workpad. Any other exit,
+   malformed receipt, unknown state, changed identity, or mismatch blocks
+   before the first writer. This gate shares one checked marker/lock/timer/tool
+   result across release-specific operator steps instead of repeating their
+   parsing as shell fragments. It does not acquire the lock or authorize a
+   later write: rerun or re-evaluate if production state changes, and retain
+   the separate lock check under the writer's own contract in step 3.
+
 3. **Admit one operation.** Observe the existing shared production lock and
    relevant recovery-marker state, including the CSP Report-Only pilot lease,
    before any migration or deployment. Without a migration, let the reviewed

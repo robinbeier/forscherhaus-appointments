@@ -141,6 +141,11 @@ Script inventory:
   releases, backups, sessions, cache, logs, uploads, and cleanup candidate
   classes plus the aggregate dump-producer admission exit class, without
   deleting anything or forwarding admission output
+- `prod_release_readiness_preflight.sh` checks the expected active release
+  marker, shared lock/recovery state, timer baseline, and bound installed tool
+  hashes entirely read-only before release writes; its classified receipt is a
+  short-lived observation, not lock or deployment authority. See
+  `docs/ops/production-release-entry.md`.
 - `prod_build_cache_retention.sh` reports aggregate Docker build-cache facts in
   read-only mode by default and exposes a separately confirmed, age- and
   storage-bounded builder-cache-only execute gate; see
