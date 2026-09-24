@@ -242,6 +242,9 @@ def main() -> int:
     else:
         print(f"status: {report.get('status', 'unknown')}")
         print(f"repository: {report.get('repository', '<unknown>')}")
+        if "error" in report:
+            print(f"error: {report['error']}")
+            return code
         counts = report.get("counts", {})
         print("worktrees: registered={registered} existing={existing} dirty={dirty} prunable={prunable}".format(**counts))
         primary = report.get("primary", {})

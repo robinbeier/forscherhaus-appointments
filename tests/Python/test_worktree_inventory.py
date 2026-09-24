@@ -71,6 +71,19 @@ class WorktreeInventoryTest(unittest.TestCase):
         self.assertTrue(missing.parent.exists())
         self.assertFalse(missing.exists())
 
+    def test_human_output_for_unavailable_inventory_is_compact_unknown(self):
+        result = subprocess.run(
+            ["python3", str(SCRIPT), "--repo", str(self.root / "not-a-checkout")],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("status: unknown", result.stdout)
+        self.assertIn("error: worktree inventory unavailable", result.stdout)
+        self.assertNotIn("Traceback", result.stderr)
+
     def test_reports_dirty_primary_and_blocks_refresh(self):
         (self.primary / "local-note.txt").write_text("uncommitted\n")
         code, report = module.inventory(["--repo", str(self.primary)])
