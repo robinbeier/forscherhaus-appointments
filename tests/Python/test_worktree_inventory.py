@@ -5,6 +5,7 @@ import shlex
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 
 SCRIPT = Path(__file__).parents[2] / "scripts/ci/worktree_inventory.py"
@@ -311,6 +312,72 @@ class WorktreeInventoryTest(unittest.TestCase):
         self.assertTrue(report["primary"]["dirty"])
         self.assertEqual(report["status"], "blocked")
 
+    def test_git_repository_environment_cannot_override_repo_argument(self):
+        other = self.root / "other"
+        subprocess.run(["git", "init", "--initial-branch=main", str(other)], check=True, capture_output=True)
+        git(other, "config", "user.email", "test@example.invalid")
+        git(other, "config", "user.name", "Inventory Test")
+        (other / "other.txt").write_text("other\n")
+        git(other, "add", "other.txt")
+        git(other, "commit", "-m", "other")
+
+        with mock.patch.dict(
+            module.os.environ,
+            {
+                "GIT_DIR": str(other / ".git"),
+                "GIT_WORK_TREE": str(other),
+                "GIT_INDEX_FILE": str(other / ".git/index"),
+            },
+            clear=False,
+        ):
+            code, output, _ = module._run_git(self.primary, ["rev-parse", "--show-toplevel"])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(Path(output.decode().strip()).resolve(), self.primary.resolve())
+
+    def test_global_git_config_cannot_redirect_remote_freshness(self):
+        alternate = self.root / "alternate.git"
+        subprocess.run(["git", "init", "--bare", str(alternate)], check=True, capture_output=True)
+        git(self.primary, "push", str(alternate), "main")
+        self.advance_remote()
+        global_config = self.root / "global.gitconfig"
+        subprocess.run(
+            [
+                "git",
+                "config",
+                "--file",
+                str(global_config),
+                f"url.{alternate}.insteadOf",
+                str(self.remote),
+            ],
+            check=True,
+            capture_output=True,
+        )
+
+        with mock.patch.dict(module.os.environ, {"GIT_CONFIG_GLOBAL": str(global_config)}, clear=False):
+            code, report = module.inventory(["--repo", str(self.primary)])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(report["primary"]["freshness"], "stale")
+        self.assertEqual(report["primary"]["remote_main_sha"], git(self.external, "rev-parse", "HEAD"))
+
+    def test_replaced_registered_path_cannot_masquerade_as_same_head_worktree(self):
+        candidate = self.root / "release-candidate"
+        decoy = self.root / "other-decoy"
+        git(self.primary, "worktree", "add", "--detach", str(candidate), "HEAD")
+        git(self.primary, "worktree", "add", "--detach", str(decoy), "HEAD")
+        import shutil
+        shutil.rmtree(candidate)
+        candidate.symlink_to(decoy, target_is_directory=True)
+
+        code, report = module.inventory(["--repo", str(self.primary)])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(report["status"], "unknown")
+        self.assertIsNone(report["authority"]["release"])
+        replacement = next(item for item in report["worktrees"] if item["role"] == "release-candidate")
+        self.assertFalse(replacement["identity_verified"])
+
     def test_partial_clone_does_not_lazy_fetch_remote_commit(self):
         git(self.remote, "config", "uploadpack.allowFilter", "true")
         git(self.remote, "config", "uploadpack.allowAnySHA1InWant", "true")
@@ -349,6 +416,11 @@ class WorktreeInventoryTest(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertEqual(captured["env"]["GIT_NO_LAZY_FETCH"], "1")
+        self.assertEqual(captured["env"]["GIT_NO_REPLACE_OBJECTS"], "1")
+        for name in module.GIT_REPOSITORY_ENV:
+            if name == "GIT_NO_REPLACE_OBJECTS":
+                continue
+            self.assertNotIn(name, captured["env"])
 
     def test_remote_url_credentials_are_redacted_from_default_report(self):
         secret_url = "https://user:secret@example.invalid/repo.git"

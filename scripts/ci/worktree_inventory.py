@@ -20,22 +20,52 @@ from typing import Callable
 
 sys.dont_write_bytecode = True
 TIMEOUT = 8
+GIT_REPOSITORY_ENV = (
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_CONFIG",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_COUNT",
+    "GIT_GRAFT_FILE",
+    "GIT_DIR",
+    "GIT_IMPLICIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_INTERNAL_SUPER_PREFIX",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_NAMESPACE",
+    "GIT_NO_REPLACE_OBJECTS",
+    "GIT_PREFIX",
+    "GIT_REPLACE_REF_BASE",
+    "GIT_SHALLOW_FILE",
+    "GIT_WORK_TREE",
+    "GIT_COMMON_DIR",
+)
+GIT_CONFIG_OVERRIDE_ENV = ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTEM")
 
 
 def _run_git(repo: Path, arguments: list[str], timeout: int = TIMEOUT) -> tuple[int, bytes, bytes]:
     try:
+        child_env = {
+            key: value
+            for key, value in os.environ.items()
+            if key not in GIT_REPOSITORY_ENV
+            and key not in GIT_CONFIG_OVERRIDE_ENV
+            and not key.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"))
+        }
+        child_env.update(
+            {
+                "GIT_NO_LAZY_FETCH": "1",
+                "GIT_NO_REPLACE_OBJECTS": "1",
+                "GIT_OPTIONAL_LOCKS": "0",
+                "PYTHONDONTWRITEBYTECODE": "1",
+            }
+        )
         returncode = subprocess.run(
             ["git", "-C", str(repo), *arguments],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             timeout=timeout,
             check=False,
-            env={
-                **os.environ,
-                "GIT_NO_LAZY_FETCH": "1",
-                "GIT_OPTIONAL_LOCKS": "0",
-                "PYTHONDONTWRITEBYTECODE": "1",
-            },
+            env=child_env,
         )
         return returncode.returncode, returncode.stdout, returncode.stderr
     except (OSError, subprocess.TimeoutExpired) as error:
@@ -168,6 +198,11 @@ def inventory(
         entry["operation_state"] = []
         entry["identity_verified"] = False
         if exists:
+            # A registered path replaced by a symlink can expose another
+            # clean worktree with the same HEAD and common Git directory.
+            # Require the registered path itself to remain canonical before
+            # trusting any repository identity obtained through it.
+            path_is_canonical = not path.is_symlink() and path.resolve(strict=False) == path.absolute()
             common_status, path_common_dir, _ = runner(path, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
             head_status, path_head, _ = runner(path, ["rev-parse", "HEAD"])
             branch_status, path_branch, _ = runner(path, ["symbolic-ref", "-q", "HEAD"])
@@ -178,7 +213,8 @@ def inventory(
                 else branch_status == 1 and entry.get("detached") is True
             )
             entry["identity_verified"] = (
-                common_status == 0
+                path_is_canonical
+                and common_status == 0
                 and bool(path_common_dir)
                 and Path(_text(path_common_dir)).resolve(strict=False) == common_dir
                 and head_status == 0
