@@ -40,6 +40,17 @@ GIT_REPOSITORY_ENV = (
     "GIT_COMMON_DIR",
 )
 GIT_CONFIG_OVERRIDE_ENV = ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTEM")
+OPERATION_MARKERS = (
+    "MERGE_HEAD",
+    "CHERRY_PICK_HEAD",
+    "REVERT_HEAD",
+    "rebase-merge",
+    "rebase-apply",
+    "sequencer",
+    "BISECT_START",
+    "BISECT_LOG",
+    "BISECT_NAMES",
+)
 
 
 def _run_git(repo: Path, arguments: list[str], timeout: int = TIMEOUT) -> tuple[int, bytes, bytes]:
@@ -74,6 +85,152 @@ def _run_git(repo: Path, arguments: list[str], timeout: int = TIMEOUT) -> tuple[
 
 def _text(value: bytes) -> str:
     return value.decode("utf-8", errors="replace").strip()
+
+
+def _configured_filters(
+    repo: Path,
+    runner: Callable[..., tuple[int, bytes, bytes]],
+) -> tuple[bool, list[str]]:
+    """Return whether effective clean/process filters are known and configured.
+
+    A status operation can invoke configured clean/process filters, including
+    through an initialized submodule.  Names are collected so the caller can
+    blank those commands for the one status invocation; a failed config read
+    is itself an unknown result.
+    """
+    code, output, _ = runner(
+        repo, ["config", "--get-regexp", r"^filter\..+\.(clean|process)$"],
+    )
+    if code not in (0, 1):
+        return False, []
+    if code == 1 and output:
+        return False, []
+    names = {
+        ".".join(parts[1:-1])
+        for line in output.decode("utf-8", errors="surrogateescape").splitlines()
+        for parts in [line.split(None, 1)[0].split(".")]
+        if len(parts) >= 3 and parts[0] == "filter" and parts[-1] in {"clean", "process"}
+    }
+    return True, sorted(names)
+
+
+def _submodule_paths(
+    repo: Path,
+    runner: Callable[..., tuple[int, bytes, bytes]],
+) -> tuple[bool, list[tuple[str, Path | None]]]:
+    """Read submodule paths from the index without shell hooks."""
+    code, output, _ = runner(repo, ["-c", "core.fsmonitor=false", "ls-files", "--stage", "-z"])
+    if code != 0:
+        return False, []
+    paths: list[tuple[str, Path | None]] = []
+    for record in output.decode("utf-8", errors="surrogateescape").split("\0"):
+        if not record or "\t" not in record:
+            continue
+        mode, relative = record.split("\t", 1)
+        if not mode.startswith("160000 "):
+            continue
+        relative_path = Path(relative)
+        if relative_path.is_absolute() or ".." in relative_path.parts:
+            return False, []
+        child = repo / relative_path
+        paths.append((relative, child if child.is_dir() and not child.is_symlink() else None))
+    return True, paths
+
+
+def _active_filter_state(
+    repo: Path,
+    configured_filters: list[str],
+    runner: Callable[..., tuple[int, bytes, bytes]],
+) -> tuple[bool, bool]:
+    """Check tracked paths for effective filter attributes without a shell."""
+    code, output, _ = runner(repo, ["-c", "core.fsmonitor=false", "ls-files", "-z"])
+    if code != 0:
+        return False, False
+    paths = [path for path in output.decode("utf-8", errors="surrogateescape").split("\0") if path]
+    configured = set(configured_filters)
+    for offset in range(0, len(paths), 256):
+        batch = paths[offset : offset + 256]
+        attr_code, attr_output, _ = runner(
+            repo, ["-c", "core.fsmonitor=false", "check-attr", "-z", "filter", "--", *batch]
+        )
+        if attr_code != 0:
+            return False, False
+        values = attr_output.decode("utf-8", errors="surrogateescape").split("\0")
+        if values and values[-1] == "":
+            values.pop()
+        if len(values) != 3 * len(batch):
+            return False, False
+        for index, expected_path in enumerate(batch):
+            index *= 3
+            if values[index] != expected_path or values[index + 1] != "filter":
+                return False, False
+            value = values[index + 2]
+            if value not in {"", "unspecified", "unset"} and value in configured:
+                return True, True
+    return True, False
+
+
+def _operation_state(
+    repo: Path,
+    runner: Callable[..., tuple[int, bytes, bytes]],
+) -> tuple[bool, list[str]]:
+    state_paths: list[str] = []
+    for marker in OPERATION_MARKERS:
+        marker_code, marker_path, _ = runner(repo, ["rev-parse", "--git-path", marker])
+        if marker_code != 0 or not _text(marker_path):
+            return False, []
+        resolved_marker = Path(_text(marker_path))
+        if not resolved_marker.is_absolute():
+            resolved_marker = repo / resolved_marker
+        if resolved_marker.exists():
+            state_paths.append(marker)
+    return True, state_paths
+
+
+def _repository_guards(
+    repo: Path,
+    runner: Callable[..., tuple[int, bytes, bytes]],
+    seen: set[Path] | None = None,
+    depth: int = 0,
+) -> tuple[bool, list[str], list[str], bool]:
+    """Inspect filters and paused operations recursively before ``status``.
+
+    Returns ``(checked, filter_names, operation_markers, active_filters)``.  The bounded
+    recursion and canonical-path set prevent malformed submodule metadata from
+    making the read-only inventory walk unbounded.
+    """
+    if seen is None:
+        seen = set()
+    if depth > 32:
+        return False, [], [], False
+    try:
+        canonical = repo.resolve(strict=True)
+    except (OSError, RuntimeError, ValueError):
+        return False, [], [], False
+    if canonical in seen:
+        return False, [], [], False
+    seen.add(canonical)
+    filter_checked, filters = _configured_filters(repo, runner)
+    operation_checked, operation_state = _operation_state(repo, runner)
+    submodules_checked, submodules = _submodule_paths(repo, runner)
+    if not (filter_checked and operation_checked and submodules_checked):
+        return False, filters, operation_state, False
+    attributes_checked, active_filters = _active_filter_state(repo, filters, runner)
+    if not attributes_checked:
+        return False, filters, operation_state, False
+    for relative, child in submodules:
+        if child is None:
+            return False, filters, operation_state, active_filters
+        child_checked, child_filters, child_state, child_active_filters = _repository_guards(
+            child, runner, seen, depth + 1
+        )
+        if child_state:
+            operation_state.extend(f"submodule:{relative}:{marker}" for marker in child_state)
+        filters.extend(child_filters)
+        active_filters = active_filters or child_active_filters
+        if not child_checked:
+            return False, filters, operation_state, active_filters
+    return True, sorted(set(filters)), operation_state, active_filters
 
 
 def _parse_worktrees(output: str) -> list[dict[str, object]]:
@@ -233,6 +390,9 @@ def inventory(
         entry["dirty"] = None
         entry["operation_state_checked"] = False
         entry["operation_state"] = []
+        entry["filter_state_checked"] = False
+        entry["configured_filters"] = False
+        entry["active_filters"] = False
         entry["git_admin_verified"] = False
         entry["index_state_checked"] = False
         entry["index_hidden_state"] = False
@@ -276,44 +436,43 @@ def inventory(
             entry["git_admin_verified"] = admin_path_matches
             entry["identity_verified"] = entry["identity_verified"] and entry["git_admin_verified"]
             if entry["identity_verified"]:
-                status_code, status, _ = runner(
-                    path,
-                    [
-                        "-c",
-                        "core.fsmonitor=false",
-                        "status",
-                        "--porcelain=v1",
-                        "--untracked-files=all",
-                        "--ignore-submodules=none",
-                    ],
-                )
-                if status_code == 0:
-                    entry["dirty"] = bool(status.strip())
-                state_markers = (
-                    "MERGE_HEAD",
-                    "CHERRY_PICK_HEAD",
-                    "REVERT_HEAD",
-                    "rebase-merge",
-                    "rebase-apply",
-                    "sequencer",
-                    "BISECT_START",
-                    "BISECT_LOG",
-                    "BISECT_NAMES",
-                )
-                state_paths: list[str] = []
-                state_probe_ok = True
-                for marker in state_markers:
-                    marker_code, marker_path, _ = runner(path, ["rev-parse", "--git-path", marker])
-                    if marker_code != 0 or not _text(marker_path):
-                        state_probe_ok = False
-                        break
-                    resolved_marker = Path(_text(marker_path))
-                    if not resolved_marker.is_absolute():
-                        resolved_marker = path / resolved_marker
-                    if resolved_marker.exists():
-                        state_paths.append(marker)
-                entry["operation_state_checked"] = state_probe_ok
+                guards_checked, configured_filters, state_paths, active_filters = _repository_guards(path, runner)
+                entry["filter_state_checked"] = guards_checked
+                entry["configured_filters"] = bool(configured_filters)
+                entry["active_filters"] = active_filters
+                entry["operation_state_checked"] = guards_checked
                 entry["operation_state"] = state_paths
+                # Blank every effective clean/process command on the status
+                # invocation. Git propagates command-line config to status
+                # calls it starts for initialized submodules, so configured
+                # filters are observed without executing their commands.
+                if guards_checked and not active_filters:
+                    status_arguments = ["-c", "core.fsmonitor=false"]
+                    for filter_name in configured_filters:
+                        status_arguments.extend(
+                            [
+                                "-c",
+                                f"filter.{filter_name}.clean=",
+                                "-c",
+                                f"filter.{filter_name}.process=",
+                                "-c",
+                                f"filter.{filter_name}.required=false",
+                            ]
+                        )
+                    status_arguments.extend(
+                        [
+                            "status",
+                            "--porcelain=v1",
+                            "--untracked-files=all",
+                            "--ignore-submodules=none",
+                        ]
+                    )
+                    status_code, status, _ = runner(
+                        path,
+                        status_arguments,
+                    )
+                    if status_code == 0:
+                        entry["dirty"] = bool(status.strip())
                 index_code, index_output, _ = runner(
                     path,
                     ["-c", "core.fsmonitor=false", "ls-files", "-v", "-z", "--recurse-submodules"],

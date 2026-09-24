@@ -348,6 +348,82 @@ class WorktreeInventoryTest(unittest.TestCase):
         self.assertTrue(report["primary"]["dirty"])
         self.assertFalse(marker.exists())
 
+    def test_configured_clean_filter_is_never_executed(self):
+        attributes = self.primary / ".gitattributes"
+        filtered = self.primary / "filtered.txt"
+        attributes.write_text("filtered.txt filter=marker\n")
+        filtered.write_text("initial\n")
+        git(self.primary, "add", ".gitattributes", "filtered.txt")
+        git(self.primary, "commit", "-m", "add filtered fixture")
+        marker = self.root / "clean-filter-ran"
+        clean_filter = self.root / "clean-filter"
+        clean_filter.write_text(f"#!/bin/sh\ntouch {marker}\ncat\n")
+        clean_filter.chmod(0o755)
+        git(self.primary, "config", "filter.marker.clean", str(clean_filter))
+        filtered.write_text("changed\n")
+
+        code, report = module.inventory(["--repo", str(self.primary)])
+
+        self.assertEqual(code, 1)
+        self.assertFalse(marker.exists())
+        self.assertTrue(report["primary"]["filter_state_checked"])
+        self.assertTrue(report["primary"]["configured_filters"])
+        self.assertIsNone(report["primary"]["dirty"])
+        self.assertIn(report["status"], {"unknown", "blocked"})
+        self.assertIsNone(report["authority"]["source"])
+
+    def test_filter_probe_preserves_non_utf8_tracked_path(self):
+        raw_path = b"tracked-\xff.txt"
+
+        def runner(repo, arguments, timeout=module.TIMEOUT):
+            if "ls-files" in arguments:
+                return 0, raw_path + b"\0", b""
+            if "check-attr" in arguments:
+                self.assertEqual(
+                    arguments[-1].encode("utf-8", errors="surrogateescape"), raw_path
+                )
+                return 0, raw_path + b"\0filter\0marker\0", b""
+            self.fail(f"unexpected Git probe: {arguments}")
+
+        checked, active = module._active_filter_state(self.primary, ["marker"], runner)
+
+        self.assertTrue(checked)
+        self.assertTrue(active)
+
+    def test_initialized_submodule_operation_state_blocks_authority(self):
+        subrepo = self.root / "subrepo"
+        subprocess.run(["git", "init", "--initial-branch=main", str(subrepo)], check=True, capture_output=True)
+        git(subrepo, "config", "user.email", "test@example.invalid")
+        git(subrepo, "config", "user.name", "Inventory Test")
+        (subrepo / "tracked.txt").write_text("initial\n")
+        git(subrepo, "add", "tracked.txt")
+        git(subrepo, "commit", "-m", "submodule initial")
+        git(self.primary, "-c", "protocol.file.allow=always", "submodule", "add", str(subrepo), "vendor/child")
+        git(self.primary, "commit", "-m", "add submodule fixture")
+        child = self.primary / "vendor/child"
+        git(child, "checkout", "-b", "side")
+        (child / "tracked.txt").write_text("side\n")
+        git(child, "commit", "-am", "side change")
+        side_sha = git(child, "rev-parse", "HEAD")
+        git(child, "checkout", "main")
+        (child / "tracked.txt").write_text("main\n")
+        git(child, "commit", "-am", "main change")
+        conflict = subprocess.run(
+            ["git", "cherry-pick", side_sha], cwd=child, text=True, capture_output=True
+        )
+        self.assertNotEqual(conflict.returncode, 0)
+        git(self.primary, "config", "submodule.vendor/child.ignore", "all")
+
+        code, report = module.inventory(["--repo", str(self.primary)])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(report["status"], "blocked")
+        self.assertIn(
+            "submodule:vendor/child:CHERRY_PICK_HEAD",
+            report["primary"]["operation_state"],
+        )
+        self.assertIsNone(report["authority"]["source"])
+
     def test_assume_unchanged_tracked_file_blocks_authority(self):
         git(self.primary, "update-index", "--assume-unchanged", "README.md")
         (self.primary / "README.md").write_text("hidden change\n")
