@@ -1,9 +1,11 @@
 import importlib.util
 import json
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import shlex
 import subprocess
 import tempfile
+import threading
 import unittest
 from unittest import mock
 
@@ -123,6 +125,112 @@ class WorktreeInventoryTest(unittest.TestCase):
         self.assertIn("error: worktree inventory unavailable", result.stdout)
         self.assertNotIn("Traceback", result.stderr)
 
+    def test_invalid_worktree_inventory_encoding_is_unknown_without_authority(self):
+        real_runner = module._run_git
+
+        def invalid_runner(repo, arguments, timeout=module.TIMEOUT):
+            if arguments == ["worktree", "list", "--porcelain", "-z"]:
+                return 0, b"worktree \xff\x00", b""
+            return real_runner(repo, arguments, timeout)
+
+        code, report = module.inventory(["--repo", str(self.primary)], runner=invalid_runner)
+
+        self.assertEqual(code, 1)
+        self.assertEqual(report["status"], "unknown")
+        self.assertEqual(report["error"], "worktree inventory encoding unavailable")
+
+    def test_remote_probe_does_not_execute_inherited_askpass_on_http_401(self):
+        marker = self.root / "askpass-ran"
+        askpass = self.root / "askpass"
+        askpass.write_text(f"#!/bin/sh\ntouch {marker}\nexit 1\n")
+        askpass.chmod(0o755)
+
+        class UnauthorizedHandler(BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802
+                self.send_response(401)
+                self.send_header("WWW-Authenticate", 'Basic realm="test"')
+                self.end_headers()
+
+            def log_message(self, format, *args):
+                return
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), UnauthorizedHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            git(self.primary, "remote", "set-url", "origin", f"http://127.0.0.1:{server.server_port}/repo.git")
+            with mock.patch.dict(
+                module.os.environ,
+                {"GIT_ASKPASS": str(askpass), "SSH_ASKPASS": str(askpass)},
+                clear=False,
+            ):
+                code, report = module.inventory(["--repo", str(self.primary)])
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+        self.assertEqual(code, 1)
+        self.assertFalse(marker.exists())
+        self.assertEqual(report["primary"]["freshness"], "unknown")
+        self.assertIsNone(report["primary"]["remote_main_sha"])
+        self.assertIsNone(report["authority"]["source"])
+
+    def test_option_shaped_remote_cannot_run_upload_pack_program(self):
+        marker = self.root / "upload-pack-ran"
+        program = self.root / "upload-pack"
+        program.write_text(f"#!/bin/sh\ntouch {marker}\nexit 1\n")
+        program.chmod(0o755)
+        remote = f"--upload-pack={program}"
+        remote_probe = []
+
+        def observing_runner(repo, arguments, timeout=module.TIMEOUT):
+            if arguments[:1] == ["ls-remote"]:
+                remote_probe.append(arguments)
+            return module._run_git(repo, arguments, timeout)
+
+        code, report = module.inventory(
+            ["--repo", str(self.primary), f"--remote={remote}"], runner=observing_runner
+        )
+
+        self.assertEqual(code, 1)
+        self.assertFalse(marker.exists())
+        self.assertEqual(remote_probe, [["ls-remote", "--", remote, "refs/heads/main"]])
+        self.assertEqual(report["primary"]["freshness"], "unknown")
+        self.assertIsNone(report["authority"]["source"])
+
+    def test_ext_remote_cannot_run_local_helper(self):
+        marker = self.root / "remote-helper-ran"
+        program = self.root / "remote-helper"
+        program.write_text(f"#!/bin/sh\ntouch {marker}\nexit 1\n")
+        program.chmod(0o755)
+        git(self.primary, "config", "protocol.ext.allow", "always")
+
+        code, report = module.inventory(
+            ["--repo", str(self.primary), f"--remote=ext::{program}"]
+        )
+
+        self.assertEqual(code, 1)
+        self.assertFalse(marker.exists())
+        self.assertEqual(report["primary"]["freshness"], "unknown")
+        self.assertIsNone(report["authority"]["source"])
+
+    def test_ssh_remote_cannot_run_inherited_command(self):
+        marker = self.root / "ssh-command-ran"
+        program = self.root / "ssh-command"
+        program.write_text(f"#!/bin/sh\ntouch {marker}\nexit 1\n")
+        program.chmod(0o755)
+
+        with mock.patch.dict(module.os.environ, {"GIT_SSH_COMMAND": str(program)}):
+            code, report = module.inventory(
+                ["--repo", str(self.primary), "--remote=ssh://example.invalid/repo"]
+            )
+
+        self.assertEqual(code, 1)
+        self.assertFalse(marker.exists())
+        self.assertEqual(report["primary"]["freshness"], "unknown")
+        self.assertIsNone(report["authority"]["source"])
+
     def test_reports_dirty_primary_and_blocks_refresh(self):
         (self.primary / "local-note.txt").write_text("uncommitted\n")
         code, report = module.inventory(["--repo", str(self.primary)])
@@ -217,6 +325,24 @@ class WorktreeInventoryTest(unittest.TestCase):
             subprocess.run(shlex.split(command), check=True, capture_output=True)
         self.assertEqual(git(self.primary, "rev-parse", "HEAD"), git(self.external, "rev-parse", "HEAD"))
 
+    def test_dash_prefixed_branch_refresh_command_is_executable(self):
+        initial_sha = git(self.primary, "rev-parse", "HEAD")
+        git(self.primary, "update-ref", "refs/heads/-x", initial_sha)
+        git(self.primary, "symbolic-ref", "HEAD", "refs/heads/-x")
+        self.advance_remote()
+        remote_sha = git(self.external, "rev-parse", "HEAD")
+        git(self.remote, "update-ref", "refs/heads/-x", remote_sha)
+
+        code, report = module.inventory(["--repo", str(self.primary), "--branch=-x", "--show-paths"])
+
+        self.assertEqual(code, 1)
+        commands = report["safe_primary_refresh"]["commands"]
+        self.assertTrue(report["safe_primary_refresh"]["safe_ff_only"])
+        self.assertIn("fetch -- origin refs/heads/-x", commands[0])
+        for command in commands:
+            subprocess.run(shlex.split(command), check=True, capture_output=True)
+        self.assertEqual(git(self.primary, "rev-parse", "HEAD"), remote_sha)
+
     def test_remote_freshness_uses_registered_primary_context_from_linked_worktree(self):
         self.advance_remote()
         git(self.primary, "config", "extensions.worktreeConfig", "true")
@@ -233,7 +359,7 @@ class WorktreeInventoryTest(unittest.TestCase):
         self.assertEqual(report["primary"]["remote_main_sha"], git(self.external, "rev-parse", "HEAD"))
         commands = report["safe_primary_refresh"]["commands"]
         self.assertEqual(len(commands), 2)
-        self.assertIn(f"git -C {shlex.quote(str(self.primary.resolve()))} fetch origin main", commands[0])
+        self.assertIn(f"git -C {shlex.quote(str(self.primary.resolve()))} fetch -- origin refs/heads/main", commands[0])
         self.assertIn(f"git -C {shlex.quote(str(self.primary.resolve()))} merge --ff-only", commands[1])
 
     def test_in_progress_operation_blocks_clean_worktree_candidate(self):
@@ -532,7 +658,7 @@ class WorktreeInventoryTest(unittest.TestCase):
 
         self.assertEqual(code, 1)
         self.assertEqual(report["status"], "unknown")
-        self.assertIsNone(report["authority"]["release"])
+        self.assertEqual(report["error"], "worktree inventory encoding unavailable")
 
     def test_symlink_loop_in_registered_path_fails_closed_without_traceback(self):
         candidate = self.root / "release-candidate"

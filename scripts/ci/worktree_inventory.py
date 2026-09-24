@@ -64,14 +64,33 @@ def _run_git(repo: Path, arguments: list[str], timeout: int = TIMEOUT) -> tuple[
         }
         child_env.update(
             {
+                # A remote can select a local helper (for example ext::) even
+                # after option parsing ends. Keep transports that do not
+                # launch an inherited SSH or git-proxy command.
+                "GIT_ALLOW_PROTOCOL": "file:http:https",
                 "GIT_NO_LAZY_FETCH": "1",
                 "GIT_NO_REPLACE_OBJECTS": "1",
                 "GIT_OPTIONAL_LOCKS": "0",
                 "PYTHONDONTWRITEBYTECODE": "1",
             }
         )
+        git_arguments = list(arguments)
+        if "ls-remote" in git_arguments:
+            # Remote freshness is a read-only probe. Do not allow an
+            # inherited askpass program or credential helper to execute, and
+            # never wait for interactive credentials.
+            child_env.pop("GIT_ASKPASS", None)
+            child_env.pop("SSH_ASKPASS", None)
+            child_env["GIT_TERMINAL_PROMPT"] = "0"
+            git_arguments = [
+                "-c",
+                "credential.helper=",
+                "-c",
+                "core.askPass=",
+                *git_arguments,
+            ]
         returncode = subprocess.run(
-            ["git", "-C", str(repo), *arguments],
+            ["git", "-C", str(repo), *git_arguments],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             timeout=timeout,
@@ -370,7 +389,12 @@ def inventory(
     if code != 0:
         report = {"status": "unknown", "repository": str(repo.name), "error": "worktree inventory unavailable"}
         return 1, report
-    entries = _parse_worktrees(raw_worktree_bytes.decode("utf-8", errors="replace"))
+    try:
+        raw_worktree_text = raw_worktree_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        report = {"status": "unknown", "repository": str(repo.name), "error": "worktree inventory encoding unavailable"}
+        return 1, report
+    entries = _parse_worktrees(raw_worktree_text)
     if not entries:
         report = {"status": "unknown", "repository": str(repo.name), "error": "no worktree registered"}
         return 1, report
@@ -504,7 +528,7 @@ def inventory(
     local_main = None
     if primary_branch == args.branch and primary.get("sha"):
         local_main = str(primary["sha"])
-    remote_code, remote_main = primary_git("ls-remote", args.remote, f"refs/heads/{args.branch}")
+    remote_code, remote_main = primary_git("ls-remote", "--", args.remote, f"refs/heads/{args.branch}")
     remote_fields = remote_main.split()
     remote_sha = (
         remote_fields[0]
@@ -571,12 +595,12 @@ def inventory(
         primary_path = str(primary["path"])
         if args.show_paths:
             refresh["commands"] = [
-                f"git -C {shlex.quote(primary_path)} fetch {shlex.quote(remote_display)} {shlex.quote(args.branch)}",
+                f"git -C {shlex.quote(primary_path)} fetch -- {shlex.quote(remote_display)} {shlex.quote(f'refs/heads/{args.branch}')}",
                 f"git -C {shlex.quote(primary_path)} merge --ff-only {remote_sha}",
             ]
         else:
             refresh["commands"] = [
-                f"From <{primary['label']}>: git fetch {shlex.quote(remote_display)} {shlex.quote(args.branch)}",
+                f"From <{primary['label']}>: git fetch -- {shlex.quote(remote_display)} {shlex.quote(f'refs/heads/{args.branch}')}",
                 f"From <{primary['label']}>: git merge --ff-only {remote_sha}",
             ]
     elif freshness == "current":

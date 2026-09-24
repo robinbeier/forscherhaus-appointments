@@ -44,6 +44,9 @@ and remote freshness is observable. The proposed merge is bound to the exact
 observed remote commit; if that commit cannot be fetched, rerun the inventory.
 When the remote commit is not yet available locally, fetch the branch and rerun
 the inventory before relying on a refresh proposal.
+The read-only remote probe accepts file, HTTP, and HTTPS transports. SSH,
+git://, and custom Git helpers report unknown freshness because they can run
+locally configured commands.
 A prunable registration is only a review
 suggestion; inspect it and run Git's prune command manually when its ownership
 is clear. Local role labels are candidates, not proof of current PR or release
