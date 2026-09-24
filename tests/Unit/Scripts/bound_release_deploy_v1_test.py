@@ -3,7 +3,9 @@
 import argparse
 import contextlib
 import importlib.util
+import json
 import os
+import tempfile
 import unittest
 from unittest import mock
 
@@ -14,6 +16,9 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 ORIGINAL_CONFIG_BINDINGS = MODULE.config_bindings
 ORIGINAL_NO_RECOVERY = MODULE.no_recovery
+ORIGINAL_RESERVE_GUARD = MODULE.reserve_recovery_guard
+ORIGINAL_RETIRE_GUARD = MODULE.retire_recovery_guard
+ORIGINAL_LEXISTS = os.path.lexists
 
 
 def arguments():
@@ -41,9 +46,11 @@ class BoundReleaseDeployTest(unittest.TestCase):
         self.stack.enter_context(mock.patch.object(MODULE, 'checked_module', side_effect=lambda *_: next(self.module_sequence)))
         self.stack.enter_context(mock.patch.object(MODULE, 'trusted_parent'))
         self.stack.enter_context(mock.patch.object(MODULE, 'bound_hash'))
-        self.stack.enter_context(mock.patch.object(MODULE, 'no_recovery'))
+        self.no_recovery = self.stack.enter_context(mock.patch.object(MODULE, 'no_recovery'))
+        self.guard = self.stack.enter_context(mock.patch.object(MODULE, 'reserve_recovery_guard'))
+        self.retire_guard = self.stack.enter_context(mock.patch.object(MODULE, 'retire_recovery_guard'))
         self.stack.enter_context(mock.patch.object(MODULE, 'active_release'))
-        self.stack.enter_context(mock.patch.object(MODULE.os.path, 'lexists', return_value=False))
+        self.lexists = self.stack.enter_context(mock.patch.object(MODULE.os.path, 'lexists', return_value=False))
         self.stack.enter_context(mock.patch.object(MODULE, 'config_bindings', return_value=tuple(
             (((1, 2), b'\0' * 32) for _ in MODULE.CONFIGS))))
         self.reserve = self.stack.enter_context(mock.patch.object(MODULE, 'reserve_intent'))
@@ -52,7 +59,7 @@ class BoundReleaseDeployTest(unittest.TestCase):
         }))
         self.child = self.stack.enter_context(mock.patch.object(MODULE.subprocess, 'run', return_value=argparse.Namespace(returncode=0)))
         self.lock_fd = os.open(os.devnull, os.O_RDONLY)
-        self.stack.enter_context(mock.patch.object(MODULE, 'open_lock', return_value=self.lock_fd))
+        self.open_lock = self.stack.enter_context(mock.patch.object(MODULE, 'open_lock', return_value=self.lock_fd))
 
     def test_verified_inputs_invoke_existing_deploy_once_with_bound_dump(self):
         self.assertEqual(('deployed', 0), MODULE.run(arguments()))
@@ -108,6 +115,72 @@ class BoundReleaseDeployTest(unittest.TestCase):
             MODULE.run(arguments())
         self.child.assert_called_once()
         self.reserve.assert_called_once()
+
+    def test_uncertain_rollback_keeps_global_guard_and_blocks_next_release(self):
+        with tempfile.TemporaryDirectory() as directory:
+            guard = os.path.join(directory, 'recovery-pending.json')
+            with mock.patch.object(MODULE, 'RECOVERY_GUARD', guard), \
+                    mock.patch.object(MODULE, 'RECOVERY', (guard,)):
+                self.guard.side_effect = ORIGINAL_RESERVE_GUARD
+                self.no_recovery.side_effect = ORIGINAL_NO_RECOVERY
+                self.lexists.side_effect = ORIGINAL_LEXISTS
+                self.child.return_value = argparse.Namespace(returncode=32)
+                self.receipt.return_value = {
+                    'schema': 'deploy_result.v1', 'outcome': 'switch_recovery_required', 'exit_code': 32,
+                }
+                self.assertEqual(('recovery_required', 32), MODULE.run(arguments()))
+                self.assertTrue(os.path.isfile(guard))
+                self.retire_guard.assert_not_called()
+
+                blocked = arguments()
+                blocked.release = 'ea_second_candidate'
+                self.module_sequence = iter((self.pair, self.backup))
+                self.open_lock.return_value = os.open(os.devnull, os.O_RDONLY)
+                with self.assertRaisesRegex(MODULE.AdmissionError, 'recovery_pending'):
+                    MODULE.run(blocked)
+                self.child.assert_called_once()
+
+                os.unlink(guard)
+
+    def test_safe_terminal_guard_is_retired_with_exact_payload(self):
+        with tempfile.TemporaryDirectory() as directory:
+            guard = os.path.join(directory, 'recovery-pending.json')
+            with mock.patch.object(MODULE, 'RECOVERY_GUARD', guard):
+                ORIGINAL_RESERVE_GUARD(
+                    'ea_checked_candidate', 'ea_previous', 'a' * 32,
+                    '/root/fh-deploy-intent-ea_checked_candidate.json',
+                    '/root/fh-deploy-result-' + 'a' * 32 + '.json',
+                )
+                self.assertTrue(os.path.isfile(guard))
+                payload = json.dumps({
+                    'schema': 'bound_release_deploy_recovery_guard.v1',
+                    'release': 'ea_checked_candidate',
+                    'expected_active_release': 'ea_previous',
+                    'run_id': 'a' * 32,
+                    'intent_path': '/root/fh-deploy-intent-ea_checked_candidate.json',
+                    'result_path': '/root/fh-deploy-result-' + 'a' * 32 + '.json',
+                }, sort_keys=True, separators=(',', ':')).encode('ascii') + b'\n'
+                observed = MODULE.identity(os.lstat(guard))
+                with mock.patch.object(MODULE, 'read_bound_file', return_value=(payload, observed)):
+                    ORIGINAL_RETIRE_GUARD(
+                        'ea_checked_candidate', 'ea_previous', 'a' * 32,
+                        '/root/fh-deploy-intent-ea_checked_candidate.json',
+                        '/root/fh-deploy-result-' + 'a' * 32 + '.json',
+                    )
+                self.assertFalse(os.path.exists(guard))
+
+    def test_safe_terminal_receipts_retire_global_guard(self):
+        self.assertEqual(('deployed', 0), MODULE.run(arguments()))
+        self.retire_guard.assert_called_once()
+
+        self.retire_guard.reset_mock()
+        self.module_sequence = iter((self.pair, self.backup))
+        self.open_lock.return_value = os.open(os.devnull, os.O_RDONLY)
+        self.receipt.return_value = {
+            'schema': 'deploy_result.v1', 'outcome': 'failed_pre_switch', 'exit_code': 30,
+        }
+        self.assertEqual(('confirmed_failed', 30), MODULE.run(arguments()))
+        self.assertEqual(1, self.retire_guard.call_count)
 
     def test_stale_config_binding_blocks_before_reservation(self):
         old = tuple((((1, 2), b'\0' * 32) for _ in MODULE.CONFIGS))

@@ -190,7 +190,8 @@ production lock. Verify installed SHA-256, owner, mode, file identity, and
 unchanged timer and service state before releasing the lock. An occupied
 destination or mismatch stops; do not overwrite it. The read-only release
 preflight binds this fourth helper to the reviewed source and rejects an
-unresolved backup-timer transition marker even if the timer appears active.
+unresolved backup-timer transition marker or prior deployment recovery marker,
+even if the timer appears active.
 Installation alone does not authorize a timer transition, backup, or
 application deploy.
 
@@ -241,7 +242,12 @@ application deploy.
    The release ID identifies the protected intent, which records the run ID;
    that run ID identifies the result leaf. A different run ID cannot relaunch
    the same release candidate after an unknown transport or deploy result.
-   Never delete either leaf to retry. For a separately
+   Before the deploy child starts, a root-owned, fsync-backed global recovery
+   guard is also reserved. It blocks every later release candidate after an
+   unknown or recovery-required result. Only a matching safe receipt and active
+   release marker retire it in that same invocation; a later invocation never
+   clears it automatically. Never delete the intent, result or guard to retry.
+   For a separately
    authorized migration use the direct, lock-preserving
    [deployment procedure](../deployment.md#deploy) and its additional gate.
 

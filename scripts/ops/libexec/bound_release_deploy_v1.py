@@ -25,6 +25,7 @@ DEPLOY = '/root/deploy_ea.sh'
 LOCK = '/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock'
 CONTINUITY = '/root/backups/easyappointments/backup_continuity_state.json'
 MARKER = '/var/www/html/easyappointments/_RELEASE'
+RECOVERY_GUARD = '/root/fh-deploy-recovery-pending.v1.json'
 CONFIGS = (
     # config.php is intentionally bound to the runtime user's primary group
     # at invocation time.  The other credentials remain root-owned specs.
@@ -36,6 +37,7 @@ CONFIGS = (
 )
 RECOVERY = (
     '/var/lib/fh-deploy-orchestrator/active-run.json',
+    RECOVERY_GUARD,
     '/var/lib/fh-deploy-orchestrator/backup-timer-transition.v1.json',
     '/var/lib/fh-deploy-orchestrator/csp-report-only-pilot.state.json',
     '/var/lib/fh-defense-ordinary/run.pending',
@@ -172,6 +174,69 @@ def no_recovery():
             fail('recovery_pending')
 
 
+def reserve_recovery_guard(release, expected_active_release, run_id, intent_path, result_path):
+    guard_dir = os.path.dirname(RECOVERY_GUARD)
+    trusted_parent(guard_dir, 0o700)
+    if os.path.lexists(RECOVERY_GUARD):
+        fail('recovery_pending')
+    data = json.dumps({
+        'schema': 'bound_release_deploy_recovery_guard.v1',
+        'release': release,
+        'expected_active_release': expected_active_release,
+        'run_id': run_id,
+        'intent_path': intent_path,
+        'result_path': result_path,
+    }, sort_keys=True, separators=(',', ':')).encode('ascii') + b'\n'
+    fd = os.open(RECOVERY_GUARD,
+                 os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
+                 0o600)
+    try:
+        view = memoryview(data)
+        while view:
+            written = os.write(fd, view)
+            if written <= 0:
+                fail('recovery_guard_unknown')
+            view = view[written:]
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    directory = os.open(guard_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
+def retire_recovery_guard(release, expected_active_release, run_id, intent_path, result_path):
+    data, observed = read_bound_file(RECOVERY_GUARD, 4096, 0o600, 0, 0)
+    try:
+        value = json.loads(data)
+    except json.JSONDecodeError:
+        fail('recovery_guard_unknown')
+    expected = {
+        'schema': 'bound_release_deploy_recovery_guard.v1',
+        'release': release,
+        'expected_active_release': expected_active_release,
+        'run_id': run_id,
+        'intent_path': intent_path,
+        'result_path': result_path,
+    }
+    if value != expected:
+        fail('recovery_guard_mismatch')
+    current = os.lstat(RECOVERY_GUARD)
+    if identity(current) != observed:
+        fail('recovery_guard_identity_changed')
+    os.unlink(RECOVERY_GUARD)
+    guard_dir = os.path.dirname(RECOVERY_GUARD)
+    directory = os.open(guard_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+    if os.path.lexists(RECOVERY_GUARD):
+        fail('recovery_guard_identity_changed')
+
+
 def runtime_user_primary_gid():
     try:
         account = pwd.getpwnam('www-data')
@@ -290,6 +355,8 @@ def run(args):
                         'sha256': observed[1].hex()} for spec, observed in zip(CONFIGS, before)],
         }
         reserve_intent(intent_path, args.release, args.commit, args.run_id, bindings)
+        reserve_recovery_guard(args.release, args.expected_active_release, args.run_id,
+                               intent_path, result_path)
         command = [DEPLOY, '--rel', args.release,
                    '--healthz-token-file', CONFIGS[1][0],
                    '--zero-surprise-dump-file', handoff['dump_path'],
@@ -305,8 +372,13 @@ def run(args):
         receipt = checked_receipt(result_path, child.returncode)
         if receipt['exit_code'] == 0:
             active_release(args.release)
+            retire_recovery_guard(args.release, args.expected_active_release, args.run_id,
+                                  intent_path, result_path)
             return 'deployed', 0
         if receipt['exit_code'] == 30:
+            active_release(args.expected_active_release)
+            retire_recovery_guard(args.release, args.expected_active_release, args.run_id,
+                                  intent_path, result_path)
             return 'confirmed_failed', 30
         return 'recovery_required', receipt['exit_code']
     finally:

@@ -8,6 +8,7 @@ EXPECTED_RELEASE=''; APP_ROOT='/var/www/html/easyappointments'
 LOCK_PATH='/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock'
 RECOVERY_MARKER='/var/lib/fh-defense-ordinary/request-unconfirmed'
 TIMER_TRANSITION_MARKER='/var/lib/fh-deploy-orchestrator/backup-timer-transition.v1.json'
+DEPLOY_RECOVERY_MARKER='/root/fh-deploy-recovery-pending.v1.json'
 CLEANUP_TIMER='fh-defense-ordinary-cleanup.timer'; RETENTION_TIMER='fh-release-archive-dump-retention.timer'
 BACKUP_TIMER='fh-backup-set-continuity.timer'; SESSION_TIMER='fh-session-retention.timer'
 HELPERS=()
@@ -49,9 +50,9 @@ done
 prod_require_cmd ssh
 receipt_file="$(mktemp "${TMPDIR:-/tmp}/prod-release-readiness.XXXXXX")"
 trap 'rm -f -- "$receipt_file"' EXIT
-if ssh "${SSH_OPTIONS[@]}" "$PROD_SSH_TARGET" bash -s -- "$APP_ROOT" "$EXPECTED_RELEASE" "$LOCK_PATH" "$RECOVERY_MARKER" "$CLEANUP_TIMER" "$RETENTION_TIMER" "$BACKUP_TIMER" "$SESSION_TIMER" "$TIMER_TRANSITION_MARKER" "${HELPERS[@]}" >"$receipt_file" 2>/dev/null <<'REMOTE'
+if ssh "${SSH_OPTIONS[@]}" "$PROD_SSH_TARGET" bash -s -- "$APP_ROOT" "$EXPECTED_RELEASE" "$LOCK_PATH" "$RECOVERY_MARKER" "$CLEANUP_TIMER" "$RETENTION_TIMER" "$BACKUP_TIMER" "$SESSION_TIMER" "$TIMER_TRANSITION_MARKER" "$DEPLOY_RECOVERY_MARKER" "${HELPERS[@]}" >"$receipt_file" 2>/dev/null <<'REMOTE'
 set -u
-APP_ROOT="$1"; EXPECTED_RELEASE="$2"; LOCK_PATH="$3"; RECOVERY_MARKER="$4"; CLEANUP_TIMER="$5"; RETENTION_TIMER="$6"; BACKUP_TIMER="$7"; SESSION_TIMER="$8"; TIMER_TRANSITION_MARKER="$9"; shift 9
+APP_ROOT="$1"; EXPECTED_RELEASE="$2"; LOCK_PATH="$3"; RECOVERY_MARKER="$4"; CLEANUP_TIMER="$5"; RETENTION_TIMER="$6"; BACKUP_TIMER="$7"; SESSION_TIMER="$8"; TIMER_TRANSITION_MARKER="$9"; DEPLOY_RECOVERY_MARKER="${10}"; shift 10
 result() {
     printf 'schema=production_release_readiness.v1\nstatus=%s\nresult_class=%s\ncaptured_at_utc=%s\nsource_marker=app_root/_RELEASE\nsource_lock=shared_production_lock\nsource_timers=systemctl_show\nsource_tools=tracked_local_vs_installed_sha256\ninvalidation=first_mutation_or_identity_change\n' \
         "$1" "$2" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -101,6 +102,7 @@ recovery_root="$(dirname -- "$RECOVERY_MARKER")"
 csp_lease="$orchestrator_root/csp-report-only-pilot.state.json"
 if [[ -e "$RECOVERY_MARKER" || -L "$RECOVERY_MARKER" || -e "$csp_lease" || -L "$csp_lease" ]]; then fail recovery_pending; fi
 [[ ! -e "$TIMER_TRANSITION_MARKER" && ! -L "$TIMER_TRANSITION_MARKER" ]] || fail recovery_pending
+[[ ! -e "$DEPLOY_RECOVERY_MARKER" && ! -L "$DEPLOY_RECOVERY_MARKER" ]] || fail recovery_pending
 for artifact in run.pending request-unconfirmed state.json defense-verification.json defense-verification.json.tmp sessions.json sessions.json.tmp; do
     [[ ! -e "$recovery_root/$artifact" && ! -L "$recovery_root/$artifact" ]] || fail recovery_pending
 done
