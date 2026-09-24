@@ -399,10 +399,9 @@ Record four separate UTC-stamped facts before landing:
 Final-head evidence (UTC)
 
 - Review: <reviewed head SHA>, <base SHA>, <scope>, <reviewer>, <timestamp>, <result>
-- CI: <CI head SHA>, <blocking checks>, <timestamp>, <result>
-- CI integration: <tested base SHA>, <tested head SHA>, <timestamp>, <result>
+- CI: <tested base SHA>, <CI head SHA>, <blocking checks>, <timestamp>, <result>
 - Comments/findings: <PR head>, <timestamp>, <open substantive findings>, <unresolved threads>
-- Landing: <current base SHA>, <current PR head>, <mergeability>, <CAS SHA checked>, <timestamp>
+- Landing: <current base SHA>, <current PR head>, <mergeability>, <CAS SHA checked>, <base guard verified or head-only limit>, <timestamp>
 ```
 
 For example, the [PR #654 review summary](https://github.com/robinbeier/forscherhaus-appointments/pull/654)
@@ -418,6 +417,11 @@ affected diff. If the base differs, update the PR branch with the new base,
 review the affected diff against that base, and require a fresh blocking CI run
 for the resulting base/head pair before landing. A previous green run for the
 old base/head pair does not cover the new integration.
+The final base read is a point-in-time check. The current merge command guards
+the PR head, not the target branch's base SHA. Unless strict up-to-date branch
+protection or a merge queue is independently verified, do not describe the
+landing as atomically bound to the reviewed base. Record this residual boundary
+in the landing evidence; a newly observed base mismatch blocks until rebinding.
 
 Treat both human findings and Codex-review findings as real review work until
 they are explicitly addressed or rejected with a clear rationale.
@@ -488,7 +492,9 @@ Before `Ready to Merge`, the primary checks:
 Read the current PR head, CI results, and review feedback immediately before
 landing. Use the compare-and-swap command
 `gh pr merge --merge --match-head-commit <current_head_sha>` so a later push
-cannot silently change the code being merged. A successful local gate alone
+cannot silently change the PR head being merged. This command does not reject a
+concurrent target-branch update; apply the base limitation in Final-head
+evidence above. A successful local gate alone
 is not merge permission. No additional landing command is required for this
 standard path. Verify the merge and updated `origin/main`
 before marking an associated issue `Done`.

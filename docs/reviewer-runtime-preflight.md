@@ -64,6 +64,9 @@ scope, runtime, role, and capabilities. Rebind the review target after a head/ba
 change. If the base changed, update the branch and require fresh blocking CI for
 the resulting pair before landing. A runtime reset, changed model/role/tools,
 or expired reviewer session requires a fresh startup check.
+The current head-only merge compare-and-swap does not atomically guard the base;
+record the last observed base and this limit unless strict up-to-date protection
+or an equivalent merge queue has been verified.
 
 A runtime launch or tool failure is a harness issue, not a PR finding. Do not
 repeat a known-unsupported role or weaken a review gate to obtain output.

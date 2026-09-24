@@ -19,8 +19,9 @@
     },
     "land": {
         "requires_exact_head": true,
-        "requires_reviewed_base_head_pair": true,
+        "requires_base_check_before_merge": true,
         "base_change_requires_new_head_and_current_blocking_ci": true,
+        "head_cas_does_not_guard_base": true,
         "merge_command": "gh pr merge --merge --match-head-commit <current_head_sha>",
         "push_after_ready_linear_state": "In Review",
         "requires_independent_review": true,

@@ -49,8 +49,9 @@ class AgentWorkflowContractTest extends TestCase
             $contract['authority']['primary_owned_mutations'] ?? null,
         );
         self::assertTrue($contract['land']['requires_exact_head'] ?? null);
-        self::assertTrue($contract['land']['requires_reviewed_base_head_pair'] ?? null);
+        self::assertTrue($contract['land']['requires_base_check_before_merge'] ?? null);
         self::assertTrue($contract['land']['base_change_requires_new_head_and_current_blocking_ci'] ?? null);
+        self::assertTrue($contract['land']['head_cas_does_not_guard_base'] ?? null);
         self::assertSame(
             'gh pr merge --merge --match-head-commit <current_head_sha>',
             $contract['land']['merge_command'] ?? null,
