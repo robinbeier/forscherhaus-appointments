@@ -157,7 +157,15 @@ Use the states as follows:
 - `Ready to Merge`: final landing phase after the required reviews are
   finding-free and blocking CI is green on the same unchanged exact commit.
   Any new push returns the issue to `In Review`.
-- `Done`: the merge commit and updated `origin/main` have been verified.
+- `Done`: for a code-only issue, the merge commit and updated `origin/main`
+  have been verified. If the issue's acceptance criteria explicitly include a
+  deployment or production proof, keep it active until that proof is complete;
+  alternatively, first create and link a separate production issue that carries
+  the exact outstanding acceptance criteria and evidence required for closure.
+  Record that issue ID in the code issue's workpad, then mark the code issue
+  `Done` after its verified merge. For example,
+  ROB-605 and ROB-607 must keep their implementation and live-evidence
+  milestones distinct instead of treating a merged PR as production proof.
 
 ## Codex Workpad
 
@@ -176,7 +184,12 @@ concise and structured:
 
 ### Status
 
-- Summary: ...
+- Implemented: ...
+- Merged: ...
+- Active release: ...
+- Live proof: ...
+- Synthetic cleanup: ...
+- Unresolved limits: ...
 - Next: ...
 
 ### Plan
@@ -197,6 +210,12 @@ Rules:
 
 - Summarize evidence; do not paste long command output.
 - Omit empty sections instead of filling them with placeholders.
+- Keep the six status facts in the Workpad template separate. A merged PR does
+  not imply an active release or a successful live proof.
+- Preserve superseded historical notes instead of deleting them. Mark each
+  `Superseded by` entry with the relevant commit, release, run, or production
+  proof ID and its observation time. Earlier assumptions then remain auditable
+  without appearing to be current status.
 - Do not put PR URLs into the workpad; keep PR linkage on the Linear issue and
   in GitHub.
 - Update it when entering a new run, before opening or updating a PR, whenever
