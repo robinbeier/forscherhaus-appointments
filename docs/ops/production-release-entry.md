@@ -201,9 +201,10 @@ alone does not authorize a timer transition, backup, or application deploy.
    already published archive/provenance pair, a fresh verified backup handoff,
    and the exact currently active release. Its inputs are the reviewed commit,
    release and current-release IDs, and the two local artifact paths; it derives
-   the artifact and tool hashes from the clean checkout. It streams the runner
-   from the checked commit's exact blob, then rechecks production readiness and
-   binds both published files, the restored dump and host
+   the artifact and tool hashes from the clean checkout. It verifies the release
+   pair and artifact with code from a private snapshot of the checked commit,
+   streams the runner from that commit's exact blob, then rechecks production
+   readiness and binds both published files, the restored dump and host
    configuration under the shared lock, then invokes the existing
    `/root/deploy_ea.sh` at most once with an absent run-specific result leaf.
    The root-only intent reservation and `deploy_result.v1` receipt stay on the

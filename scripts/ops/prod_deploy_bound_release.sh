@@ -66,11 +66,49 @@ PROVENANCE_SHA="$(shasum -a 256 "$PROVENANCE" | awk '{print $1}')"
 ARCHIVE_SIZE="$(wc -c < "$ARCHIVE" | tr -d ' ')"
 PROVENANCE_SIZE="$(wc -c < "$PROVENANCE" | tr -d ' ')"
 
-if ! bash "$PROJECT/scripts/ops/publish_existing_release.sh" \
-    --rel "$REL" --expected-commit "$COMMIT" --archive "$ARCHIVE" --provenance "$PROVENANCE" \
-    --expected-archive-sha256 "$ARCHIVE_SHA" \
-    --expected-provenance-sha256 "$PROVENANCE_SHA" \
-    --verify-only >/dev/null; then
+# Both release verifiers and all code they load come from the reviewed commit.
+# The mutable checkout is never an executable input after the clean-tree check.
+snapshot_dir="$(mktemp -d "${TMPDIR:-/tmp}/fh-bound-source.XXXXXX")"
+trap 'rm -rf -- "$snapshot_dir"' EXIT
+git -C "$PROJECT" archive "$COMMIT" \
+    build_release.sh composer.lock package-lock.json deploy_ea.sh \
+    scripts/ops/verify_local_release_pair.php \
+    scripts/ops/lib/ReleaseBuildProvenanceProducerV1.php \
+    scripts/ops/lib/DeploymentEvidenceAuthorityV1.php \
+    scripts/ops/lib/DeploymentContractV1.php \
+    scripts/ops/libexec/inspect_release_archive_v1.py \
+    scripts/release-gate/validate_release_artifact.php \
+    scripts/release-gate/lib/ReleaseArtifactValidator.php \
+    scripts/ops/prod_release_readiness_preflight.sh \
+    scripts/ops/lib/prod_common.sh \
+    scripts/ops/libexec/backup_set_producer_v1.py \
+    scripts/ops/libexec/backup_timer_transition_v1.py \
+    scripts/ops/libexec/deployment_dump_attestation_v1.py \
+    | tar -x -C "$snapshot_dir"
+for source in \
+    build_release.sh composer.lock package-lock.json deploy_ea.sh \
+    scripts/ops/verify_local_release_pair.php \
+    scripts/ops/lib/ReleaseBuildProvenanceProducerV1.php \
+    scripts/ops/lib/DeploymentEvidenceAuthorityV1.php \
+    scripts/ops/lib/DeploymentContractV1.php \
+    scripts/ops/libexec/inspect_release_archive_v1.py \
+    scripts/release-gate/validate_release_artifact.php \
+    scripts/release-gate/lib/ReleaseArtifactValidator.php \
+    scripts/ops/prod_release_readiness_preflight.sh \
+    scripts/ops/lib/prod_common.sh \
+    scripts/ops/libexec/backup_set_producer_v1.py \
+    scripts/ops/libexec/backup_timer_transition_v1.py \
+    scripts/ops/libexec/deployment_dump_attestation_v1.py; do
+    [[ -f "$snapshot_dir/$source" && ! -L "$snapshot_dir/$source" ]] || {
+        echo 'ERROR: commit-bound verification source unavailable.' >&2; exit 70;
+    }
+done
+
+if [[ "$(php "$snapshot_dir/scripts/ops/verify_local_release_pair.php" \
+    --release="$REL" --commit="$COMMIT" \
+    --archive="$ARCHIVE" --provenance="$PROVENANCE")" != verified ]] ||
+   ! php "$snapshot_dir/scripts/release-gate/validate_release_artifact.php" \
+    --archive="$ARCHIVE" >/dev/null; then
     echo 'ERROR: local reviewed release pair failed verification.' >&2; exit 70
 fi
 
@@ -95,29 +133,7 @@ RUNNER_SHA="$(printf '%s' "$RUNNER_B64" | decode_runner | shasum -a 256 | awk '{
     echo 'ERROR: local runner differs from reviewed commit.' >&2; exit 70;
 }
 
-# The readiness script itself sends a read-only shell program to production.
-# Run it and its sourced helper from the same commit, not from a mutable path.
-snapshot_dir="$(mktemp -d "${TMPDIR:-/tmp}/fh-bound-source.XXXXXX")"
-trap 'rm -rf -- "$snapshot_dir"' EXIT
-git -C "$PROJECT" archive "$COMMIT" \
-    deploy_ea.sh \
-    scripts/ops/prod_release_readiness_preflight.sh \
-    scripts/ops/lib/prod_common.sh \
-    scripts/ops/libexec/backup_set_producer_v1.py \
-    scripts/ops/libexec/backup_timer_transition_v1.py \
-    scripts/ops/libexec/deployment_dump_attestation_v1.py \
-    | tar -x -C "$snapshot_dir"
-for source in \
-    deploy_ea.sh \
-    scripts/ops/prod_release_readiness_preflight.sh \
-    scripts/ops/lib/prod_common.sh \
-    scripts/ops/libexec/backup_set_producer_v1.py \
-    scripts/ops/libexec/backup_timer_transition_v1.py \
-    scripts/ops/libexec/deployment_dump_attestation_v1.py; do
-    [[ -f "$snapshot_dir/$source" && ! -L "$snapshot_dir/$source" ]] || {
-        echo 'ERROR: commit-bound readiness source unavailable.' >&2; exit 70;
-    }
-done
+# The readiness script also sends a read-only shell program to production.
 git_dir="$(git -C "$PROJECT" rev-parse --absolute-git-dir)"
 preflight="$(GIT_DIR="$git_dir" GIT_WORK_TREE="$snapshot_dir" \
     bash "$snapshot_dir/scripts/ops/prod_release_readiness_preflight.sh" \
