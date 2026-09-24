@@ -189,8 +189,10 @@ root-owned, single-link regular file with mode `0555` at
 production lock. Verify installed SHA-256, owner, mode, file identity, and
 unchanged timer and service state before releasing the lock. An occupied
 destination or mismatch stops; do not overwrite it. The read-only release
-preflight binds this fourth helper to the reviewed source. Installation
-alone does not authorize a timer transition, backup, or application deploy.
+preflight binds this fourth helper to the reviewed source and rejects an
+unresolved backup-timer transition marker even if the timer appears active.
+Installation alone does not authorize a timer transition, backup, or
+application deploy.
 
 ## Controlled execution and bounded verification
 
