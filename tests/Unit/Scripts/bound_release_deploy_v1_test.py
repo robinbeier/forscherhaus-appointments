@@ -13,6 +13,7 @@ SPEC = importlib.util.spec_from_file_location('bound_release_deploy_v1', PATH)
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 ORIGINAL_CONFIG_BINDINGS = MODULE.config_bindings
+ORIGINAL_NO_RECOVERY = MODULE.no_recovery
 
 
 def arguments():
@@ -140,6 +141,12 @@ class BoundReleaseDeployTest(unittest.TestCase):
         with mock.patch.object(MODULE.pwd, 'getpwnam', return_value=root_account):
             with self.assertRaisesRegex(MODULE.AdmissionError, 'runtime_user_invalid'):
                 MODULE.runtime_user_primary_gid()
+
+    def test_interrupted_backup_timer_restore_blocks_admission(self):
+        transition_marker = '/var/lib/fh-deploy-orchestrator/backup-timer-transition.v1.json'
+        with mock.patch.object(MODULE.os.path, 'lexists', side_effect=lambda path: path == transition_marker):
+            with self.assertRaisesRegex(MODULE.AdmissionError, 'recovery_pending'):
+                ORIGINAL_NO_RECOVERY()
 
 
 if __name__ == '__main__':
