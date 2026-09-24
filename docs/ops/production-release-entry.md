@@ -148,8 +148,12 @@ authority. A missing, stale, contradictory, or unknown fact blocks the entry.
        printf '%s enabled=%s active=%s\n' "$unit" "$(systemctl is-enabled "$unit")" "$(systemctl is-active "$unit")"
        systemctl show "$unit" -p LoadState -p ActiveState -p SubState -p Result
        systemctl list-timers --all --no-pager "$unit"
-       systemctl show "${unit%.timer}.service" -p LoadState -p ActiveState -p SubState -p Result -p ExecMainStatus
+       if test "$unit" != fh-backup-set-continuity.timer; then
+           systemctl show "${unit%.timer}.service" -p LoadState -p ActiveState -p SubState -p Result -p ExecMainStatus
+       fi
    done
+   systemctl show fh-backup-set-producer.service fh-backup-set-restore-verify.service \
+       -p LoadState -p ActiveState -p SubState -p Result -p ExecMainStatus
    SH
    ```
 

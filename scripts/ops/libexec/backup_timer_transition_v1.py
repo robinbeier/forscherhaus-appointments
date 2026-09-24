@@ -20,7 +20,7 @@ STATE_PATH = ORCHESTRATOR_ROOT + '/backup-timer-transition.v1.json'
 BACKUP_ROOT = '/root/backups/easyappointments'
 CONTINUITY_PATH = BACKUP_ROOT + '/backup_continuity_state.json'
 TIMER = 'fh-backup-set-continuity.timer'
-SERVICE = 'fh-backup-set-continuity.service'
+SERVICES = ('fh-backup-set-producer.service', 'fh-backup-set-restore-verify.service')
 SYSTEMCTL = '/usr/bin/systemctl'
 RUN_ID = re.compile(r'\A[0-9a-f]{32}\Z')
 MAX_STATE = 4096
@@ -130,10 +130,14 @@ def timer_state():
 
 
 def assert_service_quiet():
-    result = systemctl('is-active', SERVICE)
-    value = result.stdout.strip()
-    if value != 'inactive' or result.returncode not in (0, 3):
-        fail('backup_service_active', 75)
+    for service in SERVICES:
+        result = systemctl('show', service, '--property=LoadState,ActiveState,SubState')
+        values = dict(line.split('=', 1) for line in result.stdout.splitlines() if '=' in line)
+        if (result.returncode != 0 or set(values) != {'LoadState', 'ActiveState', 'SubState'} or
+                values['LoadState'] != 'loaded'):
+            fail('backup_service_unknown', 75)
+        if values['ActiveState'] != 'inactive' or values['SubState'] != 'dead':
+            fail('backup_service_active', 75)
 
 
 def assert_quiet():

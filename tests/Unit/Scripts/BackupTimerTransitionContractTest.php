@@ -43,11 +43,24 @@ final class BackupTimerTransitionContractTest extends TestCase
               is-enabled)
                 if [ "$state" = enabled ]; then echo enabled; else echo disabled; exit 1; fi ;;
               is-active)
-                if [ "$2" = fh-backup-set-continuity.service ]; then
-                  if [ "$FH_TIMER_MODE" = service-active ]; then echo active; else echo inactive; exit 3; fi
-                fi
+                if [ "$2" != fh-backup-set-continuity.timer ]; then exit 2; fi
                 if [ "$state" = enabled ]; then echo active; else echo inactive; exit 3; fi ;;
               show)
+                case "$2" in
+                  fh-backup-set-producer.service|fh-backup-set-restore-verify.service)
+                    if [ "$FH_TIMER_MODE" = service-unloaded ]; then
+                      printf 'LoadState=not-found\nActiveState=inactive\nSubState=dead\n'
+                    elif [ "$FH_TIMER_MODE" = producer-active ] && [ "$2" = fh-backup-set-producer.service ]; then
+                      printf 'LoadState=loaded\nActiveState=active\nSubState=running\n'
+                    elif [ "$FH_TIMER_MODE" = restore-active ] && [ "$2" = fh-backup-set-restore-verify.service ]; then
+                      printf 'LoadState=loaded\nActiveState=active\nSubState=running\n'
+                    else
+                      printf 'LoadState=loaded\nActiveState=inactive\nSubState=dead\n'
+                    fi
+                    exit 0 ;;
+                  fh-backup-set-continuity.timer) ;;
+                  *) exit 2 ;;
+                esac
                 if [ "$state" = enabled ]; then echo waiting; else echo dead; fi ;;
               disable)
                 if [ "$FH_TIMER_MODE" = disable-failed ]; then exit 1; fi
@@ -237,8 +250,12 @@ final class BackupTimerTransitionContractTest extends TestCase
     public function testUnexpectedTimerAndActiveServiceRefuseBeforeMutation(): void
     {
         $run = str_repeat('f', 32);
-        $active = $this->invokeTransition('pause', $run, 'service-active');
-        self::assertSame('backup_service_active', $active['receipt']['result_class']);
+        foreach (['producer-active', 'restore-active'] as $mode) {
+            $active = $this->invokeTransition('pause', $run, $mode);
+            self::assertSame('backup_service_active', $active['receipt']['result_class']);
+        }
+        $unloaded = $this->invokeTransition('pause', $run, 'service-unloaded');
+        self::assertSame('backup_service_unknown', $unloaded['receipt']['result_class']);
         self::assertStringNotContainsString('disable --now', (string) file_get_contents($this->root . '/timer.log'));
         self::assertSame(0, $this->invokeTransition('pause', $run)['exit']);
         file_put_contents($this->root . '/timer.state', "enabled\n");
