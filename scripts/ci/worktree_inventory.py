@@ -30,7 +30,12 @@ def _run_git(repo: Path, arguments: list[str], timeout: int = TIMEOUT) -> tuple[
             stderr=subprocess.PIPE,
             timeout=timeout,
             check=False,
-            env={**os.environ, "GIT_OPTIONAL_LOCKS": "0", "PYTHONDONTWRITEBYTECODE": "1"},
+            env={
+                **os.environ,
+                "GIT_NO_LAZY_FETCH": "1",
+                "GIT_OPTIONAL_LOCKS": "0",
+                "PYTHONDONTWRITEBYTECODE": "1",
+            },
         )
         return returncode.returncode, returncode.stdout, returncode.stderr
     except (OSError, subprocess.TimeoutExpired) as error:
@@ -159,6 +164,8 @@ def inventory(
         entry["exists"] = exists
         entry["role"] = _role(entry, index)
         entry["dirty"] = None
+        entry["operation_state_checked"] = False
+        entry["operation_state"] = []
         entry["identity_verified"] = False
         if exists:
             common_status, path_common_dir, _ = runner(path, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
@@ -182,6 +189,28 @@ def inventory(
                 status_code, status, _ = runner(path, ["status", "--porcelain=v1", "--untracked-files=all"])
                 if status_code == 0:
                     entry["dirty"] = bool(status.strip())
+                state_markers = (
+                    "MERGE_HEAD",
+                    "CHERRY_PICK_HEAD",
+                    "REVERT_HEAD",
+                    "rebase-merge",
+                    "rebase-apply",
+                    "sequencer",
+                )
+                state_paths: list[str] = []
+                state_probe_ok = True
+                for marker in state_markers:
+                    marker_code, marker_path, _ = runner(path, ["rev-parse", "--git-path", marker])
+                    if marker_code != 0 or not _text(marker_path):
+                        state_probe_ok = False
+                        break
+                    resolved_marker = Path(_text(marker_path))
+                    if not resolved_marker.is_absolute():
+                        resolved_marker = path / resolved_marker
+                    if resolved_marker.exists():
+                        state_paths.append(marker)
+                entry["operation_state_checked"] = state_probe_ok
+                entry["operation_state"] = state_paths
         entry["display_path"] = _display_path(str(path), str(entry["label"]), args.show_paths)
 
     primary = entries[0]
@@ -215,8 +244,15 @@ def inventory(
             freshness = "current"
         else:
             shallow_code, shallow = primary_git("rev-parse", "--is-shallow-repository")
-            object_code, _ = primary_git("cat-file", "-e", f"{remote_sha}^{{commit}}")
-            if shallow_code == 0 and shallow == "false" and object_code == 0:
+            # ``cat-file -e`` may satisfy a missing promisor object by
+            # contacting the remote. ``rev-list --missing=print`` performs a
+            # local object walk instead; together with GIT_NO_LAZY_FETCH this
+            # keeps freshness inspection read-only even for partial clones.
+            object_code, object_output = primary_git("rev-list", "--max-count=1", "--missing=print", f"{remote_sha}^{{commit}}")
+            object_available = object_code == 0 and remote_sha in object_output.split() and not any(
+                line.startswith("?") for line in object_output.splitlines()
+            )
+            if shallow_code == 0 and shallow == "false" and object_available:
                 local_ancestor_code, _ = primary_git("merge-base", "--is-ancestor", local_main, remote_sha)
                 remote_ancestor_code, _ = primary_git("merge-base", "--is-ancestor", remote_sha, local_main)
                 if local_ancestor_code == 0 and remote_ancestor_code == 1:
@@ -238,7 +274,14 @@ def inventory(
 
     dirty = [entry for entry in entries if entry.get("dirty") is True]
     active = [entry for entry in entries if entry.get("exists") is True]
-    blocked_refresh = primary.get("dirty") is not False or primary.get("identity_verified") is not True or primary_branch != args.branch or not remote_sha
+    blocked_refresh = (
+        primary.get("dirty") is not False
+        or primary.get("identity_verified") is not True
+        or primary.get("operation_state_checked") is not True
+        or bool(primary.get("operation_state"))
+        or primary_branch != args.branch
+        or not remote_sha
+    )
     refresh = {
         "safe_ff_only": not blocked_refresh and stale,
         "commands": [],
@@ -268,18 +311,26 @@ def inventory(
         refresh["reason"] = "primary must be clean, on main, and remote main must be readable"
 
     def eligible_candidate(item: dict[str, object]) -> bool:
-        return item.get("identity_verified") is True and item.get("dirty") is False and not item.get("prunable")
+        return (
+            item.get("identity_verified") is True
+            and item.get("dirty") is False
+            and item.get("operation_state_checked") is True
+            and not item.get("operation_state")
+            and not item.get("prunable")
+        )
 
     authority: dict[str, object] = {
-        "source": primary["display_path"] if prune_code == 0 and primary_branch == args.branch and primary.get("identity_verified") is True and primary.get("dirty") is False and primary.get("freshness") == "current" else None,
+        "source": primary["display_path"] if prune_code == 0 and primary_branch == args.branch and primary.get("identity_verified") is True and primary.get("dirty") is False and primary.get("operation_state_checked") is True and not primary.get("operation_state") and primary.get("freshness") == "current" else None,
         "test": next((item["display_path"] for item in entries if item["role"] == "test-candidate" and eligible_candidate(item)), None),
         "pull_request": next((item["display_path"] for item in entries if item["role"] == "pull-request-candidate" and eligible_candidate(item)), None),
         "release": next((item["display_path"] for item in entries if item["role"] == "release-candidate" and eligible_candidate(item)), None),
         "note": "Roles are local candidates; PR/release authority still requires current external evidence.",
     }
-    status = "blocked" if dirty or prunable or freshness in {"stale", "ahead", "diverged"} else "ready"
+    in_progress = [entry for entry in entries if entry.get("operation_state")]
+    state_unknown = any(entry.get("operation_state_checked") is not True for entry in entries)
+    status = "blocked" if dirty or prunable or in_progress or freshness in {"stale", "ahead", "diverged"} else "ready"
     primary_not_authoritative = primary_branch != args.branch or primary.get("freshness") != "current"
-    if primary_not_authoritative or any(item.get("dirty") is None for item in entries) or remote_sha is None or prune_code != 0:
+    if primary_not_authoritative or any(item.get("dirty") is None for item in entries) or state_unknown or remote_sha is None or prune_code != 0:
         status = "unknown" if status == "ready" else status
     result_entries = []
     for entry in entries:
@@ -291,7 +342,7 @@ def inventory(
         "branch": args.branch,
         "primary": {key: value for key, value in primary.items() if key != "path" or args.show_paths},
         "worktrees": result_entries,
-        "counts": {"registered": len(entries), "existing": len(active), "dirty": len(dirty), "prunable": len(prunable)},
+        "counts": {"registered": len(entries), "existing": len(active), "dirty": len(dirty), "prunable": len(prunable), "in_progress": len(in_progress)},
         "prunable_suggestions": [
             {"display_path": entry["display_path"], "reason": entry.get("prune_reason"), "action": "review; no automatic prune; run git worktree prune manually only when ownership is clear"}
             for entry in prunable
@@ -315,7 +366,7 @@ def main() -> int:
             print(f"error: {report['error']}")
             return code
         counts = report.get("counts", {})
-        print("worktrees: registered={registered} existing={existing} dirty={dirty} prunable={prunable}".format(**counts))
+        print("worktrees: registered={registered} existing={existing} dirty={dirty} prunable={prunable} in_progress={in_progress}".format(**counts))
         primary = report.get("primary", {})
         print(f"primary: {primary.get('display_path', '<unknown>')} {primary.get('freshness', 'unknown')}")
         print("authority: " + json.dumps(report.get("authority", {}), ensure_ascii=False, sort_keys=True))

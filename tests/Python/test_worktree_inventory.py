@@ -234,6 +234,90 @@ class WorktreeInventoryTest(unittest.TestCase):
         self.assertIn(f"git -C {shlex.quote(str(self.primary.resolve()))} fetch origin main", commands[0])
         self.assertIn(f"git -C {shlex.quote(str(self.primary.resolve()))} merge --ff-only", commands[1])
 
+    def test_in_progress_operation_blocks_clean_worktree_candidate(self):
+        secondary = self.root / "in-progress"
+        git(self.primary, "worktree", "add", "-b", "codex/in-progress", str(secondary))
+        marker = Path(git(secondary, "rev-parse", "--git-path", "CHERRY_PICK_HEAD"))
+        marker.write_text("0" * 40 + "\n")
+
+        code, report = module.inventory(["--repo", str(self.primary)])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(report["status"], "blocked")
+        self.assertEqual(report["counts"]["in_progress"], 1)
+        self.assertIsNone(report["authority"]["pull_request"])
+        candidate = next(item for item in report["worktrees"] if item["role"] == "pull-request-candidate")
+        self.assertEqual(candidate["operation_state"], ["CHERRY_PICK_HEAD"])
+        self.assertFalse(candidate["dirty"])
+
+    def test_primary_operation_state_suppresses_refresh_command(self):
+        self.advance_remote()
+        marker = Path(git(self.primary, "rev-parse", "--git-path", "MERGE_HEAD"))
+        if not marker.is_absolute():
+            marker = self.primary / marker
+        marker.write_text("0" * 40 + "\n")
+
+        code, report = module.inventory(["--repo", str(self.primary)])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(report["primary"]["freshness"], "stale")
+        self.assertEqual(report["primary"]["operation_state"], ["MERGE_HEAD"])
+        self.assertFalse(report["safe_primary_refresh"]["safe_ff_only"])
+        self.assertEqual(report["safe_primary_refresh"]["commands"], [])
+
+    def test_clean_primary_with_cherry_pick_state_is_not_authority(self):
+        marker = Path(git(self.primary, "rev-parse", "--git-path", "CHERRY_PICK_HEAD"))
+        if not marker.is_absolute():
+            marker = self.primary / marker
+        marker.write_text("0" * 40 + "\n")
+
+        code, report = module.inventory(["--repo", str(self.primary)])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(report["status"], "blocked")
+        self.assertFalse(report["primary"]["dirty"])
+        self.assertEqual(report["primary"]["operation_state"], ["CHERRY_PICK_HEAD"])
+        self.assertIsNone(report["authority"]["source"])
+
+    def test_partial_clone_does_not_lazy_fetch_remote_commit(self):
+        git(self.remote, "config", "uploadpack.allowFilter", "true")
+        git(self.remote, "config", "uploadpack.allowAnySHA1InWant", "true")
+        partial = self.root / "partial"
+        subprocess.run(
+            ["git", "clone", "--filter=blob:none", f"file://{self.remote}", str(partial)],
+            check=True,
+            capture_output=True,
+        )
+        self.advance_remote(fetch_primary=False)
+        pack_dir = partial / git(partial, "rev-parse", "--git-dir") / "objects" / "pack"
+        before = sorted(path.name for path in pack_dir.glob("*") if path.is_file())
+
+        code, report = module.inventory(["--repo", str(partial)])
+
+        after = sorted(path.name for path in pack_dir.glob("*") if path.is_file())
+        self.assertEqual(code, 1)
+        self.assertEqual(report["status"], "unknown")
+        self.assertEqual(report["primary"]["freshness"], "unknown")
+        self.assertEqual(report["primary"]["remote_main_sha"], git(self.external, "rev-parse", "HEAD"))
+        self.assertEqual(after, before)
+
+    def test_git_probes_disable_lazy_fetch(self):
+        real_run = module.subprocess.run
+        captured = {}
+
+        def capture_run(*args, **kwargs):
+            captured.update(kwargs)
+            return real_run(*args, **kwargs)
+
+        module.subprocess.run = capture_run
+        try:
+            code, _, _ = module._run_git(self.primary, ["rev-parse", "HEAD"])
+        finally:
+            module.subprocess.run = real_run
+
+        self.assertEqual(code, 0)
+        self.assertEqual(captured["env"]["GIT_NO_LAZY_FETCH"], "1")
+
     def test_remote_url_credentials_are_redacted_from_default_report(self):
         secret_url = "https://user:secret@example.invalid/repo.git"
 
