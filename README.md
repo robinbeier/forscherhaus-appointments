@@ -30,6 +30,21 @@ isolated, portless CI Docker stack. It does not inspect the ordinary Docker
 project, published ports or all services started by the Quickstart below.
 Use the Quickstart setup to install dependencies and managed hooks.
 
+Before a later session or a multi-worktree closeout, use the read-only
+worktree inventory to compare the primary checkout with remote `main` and to
+identify dirty or prunable registrations:
+
+```bash
+python3 scripts/ci/worktree_inventory.py --json
+```
+
+The inventory never fetches, prunes or deletes. It reports a safe fast-forward
+refresh proposal only when the primary checkout is clean, attached to `main`,
+and remote freshness is observable. A prunable registration is only a review
+suggestion; inspect it and run Git's prune command manually when its ownership
+is clear. Local role labels are candidates, not proof of current PR or release
+authority.
+
 ```bash
 ./scripts/setup-worktree.sh
 docker compose up -d
