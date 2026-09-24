@@ -147,21 +147,33 @@ def assert_quiet():
                 fail('recovery_marker_present', 75)
     except OSError:
         fail('activity_state_unknown', 75)
+    proc_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW
+    record_flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW
     try:
         with os.scandir('/proc') as entries:
             for entry in entries:
                 if not entry.name.isdigit() or int(entry.name) == os.getpid():
                     continue
                 try:
-                    with open(os.path.join('/proc', entry.name, 'status'), 'rb') as handle:
-                        status = handle.read(4097)
-                    uid_rows = [line.split() for line in status.splitlines() if line.startswith(b'Uid:')]
-                    if len(status) > 4096 or len(uid_rows) != 1 or len(uid_rows[0]) != 5:
-                        fail('activity_state_unknown', 75)
-                    if not all(uid == b'0' for uid in uid_rows[0][1:]):
-                        continue
-                    with open(os.path.join('/proc', entry.name, 'cmdline'), 'rb') as handle:
-                        raw = handle.read(131073)
+                    process_fd = os.open(os.path.join('/proc', entry.name), proc_flags)
+                    try:
+                        status_fd = os.open('status', record_flags, dir_fd=process_fd)
+                        try:
+                            status = os.read(status_fd, 4097)
+                        finally:
+                            os.close(status_fd)
+                        uid_rows = [line.split() for line in status.splitlines() if line.startswith(b'Uid:')]
+                        if len(status) > 4096 or len(uid_rows) != 1 or len(uid_rows[0]) != 5:
+                            fail('activity_state_unknown', 75)
+                        if not all(uid == b'0' for uid in uid_rows[0][1:]):
+                            continue
+                        cmdline_fd = os.open('cmdline', record_flags, dir_fd=process_fd)
+                        try:
+                            raw = os.read(cmdline_fd, 131073)
+                        finally:
+                            os.close(cmdline_fd)
+                    finally:
+                        os.close(process_fd)
                 except (FileNotFoundError, ProcessLookupError):
                     continue
                 except OSError:

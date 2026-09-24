@@ -98,7 +98,7 @@ final class BackupTimerTransitionContractTest extends TestCase
                 "'/var/lib/fh-defense-ordinary",
                 "'/root/backups/easyappointments'",
                 "os.scandir('/proc')",
-                "os.path.join('/proc', entry.name,",
+                "os.path.join('/proc', entry.name)",
             ],
             [
                 var_export($this->root, true),
@@ -106,7 +106,7 @@ final class BackupTimerTransitionContractTest extends TestCase
                 "'" . $this->root . '/ordinary',
                 var_export($this->root . '/backups', true),
                 'os.scandir(' . var_export($this->root . '/proc', true) . ')',
-                'os.path.join(' . var_export($this->root . '/proc', true) . ', entry.name,',
+                'os.path.join(' . var_export($this->root . '/proc', true) . ', entry.name)',
             ],
             $source,
         );
@@ -125,7 +125,7 @@ final class BackupTimerTransitionContractTest extends TestCase
             \RecursiveIteratorIterator::CHILD_FIRST,
         );
         foreach ($files as $file) {
-            $file->isDir() ? rmdir($file->getPathname()) : unlink($file->getPathname());
+            $file->isDir() && !$file->isLink() ? rmdir($file->getPathname()) : unlink($file->getPathname());
         }
         rmdir($this->root);
     }
@@ -172,6 +172,18 @@ final class BackupTimerTransitionContractTest extends TestCase
         file_put_contents($process . '/cmdline', "/usr/local/libexec/fh-backup-set-producer-v1\0");
         $directProducer = $this->invokeTransition('pause', str_repeat('4', 32));
         self::assertSame('activity_present', $directProducer['receipt']['result_class']);
+        self::assertStringNotContainsString('disable --now', (string) file_get_contents($this->root . '/timer.log'));
+    }
+
+    public function testSymlinkedProcessDirectoryCannotSupplyActivityIdentity(): void
+    {
+        $external = $this->root . '/external-process';
+        mkdir($external, 0700);
+        file_put_contents($external . '/status', "Name:\ttest\nUid:\t0\t0\t0\t0\n");
+        file_put_contents($external . '/cmdline', "/bin/true\0");
+        symlink($external, $this->root . '/proc/123');
+        $result = $this->invokeTransition('pause', str_repeat('6', 32));
+        self::assertSame('activity_state_unknown', $result['receipt']['result_class']);
         self::assertStringNotContainsString('disable --now', (string) file_get_contents($this->root . '/timer.log'));
     }
 
