@@ -66,8 +66,8 @@ PROVENANCE_SHA="$(shasum -a 256 "$PROVENANCE" | awk '{print $1}')"
 ARCHIVE_SIZE="$(wc -c < "$ARCHIVE" | tr -d ' ')"
 PROVENANCE_SIZE="$(wc -c < "$PROVENANCE" | tr -d ' ')"
 
-# Both release verifiers and all code they load come from the reviewed commit.
-# The mutable checkout is never an executable input after the clean-tree check.
+# Both release verifiers and all code they load are extracted from the reviewed
+# commit. The operator account and its same-UID processes remain trusted.
 snapshot_dir="$(mktemp -d "${TMPDIR:-/tmp}/fh-bound-source.XXXXXX")"
 trap 'rm -rf -- "$snapshot_dir"' EXIT
 git -C "$PROJECT" archive "$COMMIT" \
@@ -118,9 +118,12 @@ if [[ "$(shasum -a 256 "$ARCHIVE" | awk '{print $1}')" != "$ARCHIVE_SHA" ||
       "$(wc -c < "$PROVENANCE" | tr -d ' ')" != "$PROVENANCE_SIZE" ]]; then
     echo 'ERROR: local release pair changed after verification.' >&2; exit 70
 fi
-DEPLOY_SHA="$(shasum -a 256 "$PROJECT/deploy_ea.sh" | awk '{print $1}')"
-PAIR_SHA="$(shasum -a 256 "$PROJECT/scripts/ops/libexec/release_pair_admission_v1.py" | awk '{print $1}')"
-BACKUP_SHA="$(shasum -a 256 "$PROJECT/scripts/ops/libexec/backup_handoff_admission_v1.py" | awk '{print $1}')"
+commit_blob_sha() {
+    git -C "$PROJECT" cat-file blob "$COMMIT:$1" | shasum -a 256 | awk '{print $1}'
+}
+DEPLOY_SHA="$(commit_blob_sha 'deploy_ea.sh')"
+PAIR_SHA="$(commit_blob_sha 'scripts/ops/libexec/release_pair_admission_v1.py')"
+BACKUP_SHA="$(commit_blob_sha 'scripts/ops/libexec/backup_handoff_admission_v1.py')"
 # Keep the exact commit-bound runner bytes in memory. The worktree path may be
 # edited after the clean-tree check; it must never become root-executed input.
 RUNNER_B64="$(git -C "$PROJECT" cat-file blob "$COMMIT:scripts/ops/libexec/bound_release_deploy_v1.py" | base64 | tr -d '\n')"

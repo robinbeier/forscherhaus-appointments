@@ -201,7 +201,8 @@ alone does not authorize a timer transition, backup, or application deploy.
    already published archive/provenance pair, a fresh verified backup handoff,
    and the exact currently active release. Its inputs are the reviewed commit,
    release and current-release IDs, and the two local artifact paths; it derives
-   the artifact and tool hashes from the clean checkout. It verifies the release
+   the artifact hashes from those files and the tool hashes from the pinned
+   commit. It verifies the release
    pair and artifact with code from a private snapshot of the checked commit,
    streams the runner from that commit's exact blob, then rechecks production
    readiness and binds both published files, the restored dump and host
@@ -209,6 +210,14 @@ alone does not authorize a timer transition, backup, or application deploy.
    `/root/deploy_ea.sh` at most once with an absent run-specific result leaf.
    The root-only intent reservation and `deploy_result.v1` receipt stay on the
    host. No old per-release script or copied inode/hash list is an input.
+
+   The operator account and all processes running under its local UID are one
+   trusted boundary: that account also holds the production SSH authority.
+   The private commit snapshot prevents ordinary checkout drift from changing
+   which verifier runs. Its owner-writable files do not defend against a
+   hostile process with the same UID. If the operator workstation or account
+   is suspected compromised, stop the release and recover that authority;
+   this wrapper cannot establish an independent trust boundary on that host.
 
    ```bash
    bash scripts/ops/prod_deploy_bound_release.sh \
