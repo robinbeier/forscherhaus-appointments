@@ -313,6 +313,41 @@ class WorktreeInventoryTest(unittest.TestCase):
         self.assertTrue(report["primary"]["dirty"])
         self.assertEqual(report["status"], "blocked")
 
+    def test_submodule_assume_unchanged_file_blocks_authority(self):
+        subrepo = self.root / "subrepo"
+        subprocess.run(["git", "init", "--initial-branch=main", str(subrepo)], check=True, capture_output=True)
+        git(subrepo, "config", "user.email", "test@example.invalid")
+        git(subrepo, "config", "user.name", "Inventory Test")
+        (subrepo / "tracked.txt").write_text("initial\n")
+        git(subrepo, "add", "tracked.txt")
+        git(subrepo, "commit", "-m", "submodule initial")
+        git(self.primary, "-c", "protocol.file.allow=always", "submodule", "add", str(subrepo), "vendor/child")
+        git(self.primary, "commit", "-m", "add submodule fixture")
+        child = self.primary / "vendor/child"
+        git(child, "update-index", "--assume-unchanged", "tracked.txt")
+        (child / "tracked.txt").write_text("hidden change\n")
+
+        code, report = module.inventory(["--repo", str(self.primary)])
+
+        self.assertEqual(code, 1)
+        self.assertTrue(report["primary"]["index_hidden_state"])
+        self.assertGreaterEqual(report["primary"]["index_hidden_count"], 1)
+        self.assertIsNone(report["authority"]["source"])
+
+    def test_fsmonitor_hook_is_disabled_during_status_and_dirty_is_visible(self):
+        marker = self.root / "fsmonitor-ran"
+        hook = self.primary / ".git/fsmonitor-hook"
+        hook.write_text(f"#!/bin/sh\ntouch {marker}\nexit 1\n")
+        hook.chmod(0o755)
+        git(self.primary, "config", "core.fsmonitor", str(hook))
+        (self.primary / "README.md").write_text("dirty with fsmonitor\n")
+
+        code, report = module.inventory(["--repo", str(self.primary)])
+
+        self.assertEqual(code, 1)
+        self.assertTrue(report["primary"]["dirty"])
+        self.assertFalse(marker.exists())
+
     def test_assume_unchanged_tracked_file_blocks_authority(self):
         git(self.primary, "update-index", "--assume-unchanged", "README.md")
         (self.primary / "README.md").write_text("hidden change\n")
@@ -538,7 +573,7 @@ class WorktreeInventoryTest(unittest.TestCase):
         real_runner = module._run_git
 
         def failing_runner(repo, arguments, timeout=module.TIMEOUT):
-            if Path(repo).resolve() == self.primary.resolve() and arguments[:1] == ["status"]:
+            if Path(repo).resolve() == self.primary.resolve() and "status" in arguments:
                 return 1, b"", b"status unavailable"
             return real_runner(repo, arguments, timeout)
 
@@ -571,7 +606,7 @@ class WorktreeInventoryTest(unittest.TestCase):
         real_runner = module._run_git
 
         def failing_secondary_runner(repo, arguments, timeout=module.TIMEOUT):
-            if Path(repo).resolve() == secondary.resolve() and arguments[:1] == ["status"]:
+            if Path(repo).resolve() == secondary.resolve() and "status" in arguments:
                 return 1, b"", b"status unavailable"
             return real_runner(repo, arguments, timeout)
 

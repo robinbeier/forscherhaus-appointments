@@ -278,7 +278,14 @@ def inventory(
             if entry["identity_verified"]:
                 status_code, status, _ = runner(
                     path,
-                    ["status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules=none"],
+                    [
+                        "-c",
+                        "core.fsmonitor=false",
+                        "status",
+                        "--porcelain=v1",
+                        "--untracked-files=all",
+                        "--ignore-submodules=none",
+                    ],
                 )
                 if status_code == 0:
                     entry["dirty"] = bool(status.strip())
@@ -307,7 +314,10 @@ def inventory(
                         state_paths.append(marker)
                 entry["operation_state_checked"] = state_probe_ok
                 entry["operation_state"] = state_paths
-                index_code, index_output, _ = runner(path, ["ls-files", "-v", "-z"])
+                index_code, index_output, _ = runner(
+                    path,
+                    ["-c", "core.fsmonitor=false", "ls-files", "-v", "-z", "--recurse-submodules"],
+                )
                 if index_code == 0:
                     hidden_flags = {"h", "s", "S"}
                     hidden_count = sum(
