@@ -49,6 +49,9 @@ class AgentWorkflowContractTest extends TestCase
             $contract['authority']['primary_owned_mutations'] ?? null,
         );
         self::assertTrue($contract['land']['requires_exact_head'] ?? null);
+        self::assertTrue($contract['land']['requires_base_check_before_merge'] ?? null);
+        self::assertTrue($contract['land']['base_change_requires_new_head_and_current_blocking_ci'] ?? null);
+        self::assertTrue($contract['land']['head_cas_does_not_guard_base'] ?? null);
         self::assertSame(
             'gh pr merge --merge --match-head-commit <current_head_sha>',
             $contract['land']['merge_command'] ?? null,
@@ -63,6 +66,7 @@ class AgentWorkflowContractTest extends TestCase
         self::assertFalse($contract['review']['requires_sealed_runner'] ?? null);
         self::assertFalse($contract['review']['requires_external_bootstrap_review'] ?? null);
         self::assertTrue($contract['review']['summary_binds_reviewed_head'] ?? null);
+        self::assertTrue($contract['review']['summary_binds_reviewed_base'] ?? null);
         self::assertSame(
             [
                 'protocol' => 'docs/reviewer-runtime-preflight.md',

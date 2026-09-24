@@ -58,9 +58,15 @@ do not dispatch an agent fallback: use a human reviewer or block.
 
 Bind the verified repository, base, head, and exact scope before the real
 review. The handshake is not review evidence. Use the same ready reviewer session
-for the actual review and follow-up questions; preserve its enforced boundary. Before dispatching the real review or a follow-up,
-revalidate the head, base, scope, runtime, role, and capabilities. Rebind the review target after a head/base change. A runtime reset, changed
-model/role/tools or expired reviewer session requires a fresh startup check.
+for the actual review and follow-up questions; preserve its enforced boundary.
+Before dispatching the real review or a follow-up, revalidate the head, base,
+scope, runtime, role, and capabilities. Rebind the review target after a head/base
+change. If the base changed, update the branch and require fresh blocking CI for
+the resulting pair before landing. A runtime reset, changed model/role/tools,
+or expired reviewer session requires a fresh startup check.
+The current head-only merge compare-and-swap does not atomically guard the base;
+record the last observed base and this limit unless strict up-to-date protection
+or an equivalent merge queue has been verified.
 
 A runtime launch or tool failure is a harness issue, not a PR finding. Do not
 repeat a known-unsupported role or weaken a review gate to obtain output.
@@ -118,3 +124,11 @@ Return an independent final review result covering correctness/security,
 design/maintainability, and tests/regressions. Separate confirmed findings
 from hypotheses and report harness failures as harness failures.
 ```
+
+Before handoff, note the exact base/head SHA, reviewed scope, reviewer, and UTC
+capture time. The primary records that result alongside separate CI, comment,
+and landing facts in the [final-head evidence](../WORKFLOW.md#final-head-evidence)
+format. Mark a bot completion for an older head as `stale`, rather than using
+it as proof for the current head. Revalidate the exact base/head and scope
+before recording the result and again immediately before landing; a changed
+base requires review of the affected diff even when the PR head is unchanged.
