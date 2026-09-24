@@ -81,6 +81,10 @@ Assess whether the executed validation actually proves the change is safe:
   rule wins for mixed changes.
 - Flag missing negative-path or edge-case coverage when the change affects them.
 - Flag weak assertions that would let the bug survive.
+- For injected write-path failures, require an observable proof that the intended
+  write and failpoint were reached against the isolated database, plus a
+  before/after state check; an early-error negative control should not satisfy
+  the post-write proof.
 - For database time comparisons on write paths, compare canonical values
   under the actual lock. Verify accepted legacy input formats, timezone and
   DST boundaries, rejected ambiguous years, and no-mutation failures through
