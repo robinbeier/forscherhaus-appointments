@@ -215,6 +215,25 @@ class WorktreeInventoryTest(unittest.TestCase):
             subprocess.run(shlex.split(command), check=True, capture_output=True)
         self.assertEqual(git(self.primary, "rev-parse", "HEAD"), git(self.external, "rev-parse", "HEAD"))
 
+    def test_remote_freshness_uses_registered_primary_context_from_linked_worktree(self):
+        self.advance_remote()
+        git(self.primary, "config", "extensions.worktreeConfig", "true")
+        linked = self.root / "linked"
+        git(self.primary, "worktree", "add", "-b", "codex/linked", str(linked))
+        git(linked, "config", "--worktree", "remote.origin.url", str(self.root / "missing.git"))
+
+        code, report = module.inventory(["--repo", str(linked), "--show-paths"])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(report["status"], "blocked")
+        self.assertEqual(report["primary"]["path"], str(self.primary.resolve()))
+        self.assertEqual(report["primary"]["freshness"], "stale")
+        self.assertEqual(report["primary"]["remote_main_sha"], git(self.external, "rev-parse", "HEAD"))
+        commands = report["safe_primary_refresh"]["commands"]
+        self.assertEqual(len(commands), 2)
+        self.assertIn(f"git -C {shlex.quote(str(self.primary.resolve()))} fetch origin main", commands[0])
+        self.assertIn(f"git -C {shlex.quote(str(self.primary.resolve()))} merge --ff-only", commands[1])
+
     def test_remote_url_credentials_are_redacted_from_default_report(self):
         secret_url = "https://user:secret@example.invalid/repo.git"
 

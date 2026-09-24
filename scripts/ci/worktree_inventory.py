@@ -185,11 +185,21 @@ def inventory(
         entry["display_path"] = _display_path(str(path), str(entry["label"]), args.show_paths)
 
     primary = entries[0]
+    # Remote freshness belongs to the registered primary checkout, even when
+    # the command was invoked from a linked worktree. With worktree-specific
+    # Git configuration enabled, a linked checkout can override ``origin``;
+    # using that context would compare the primary HEAD with the wrong remote.
+    primary_repo = Path(str(primary["path"])).expanduser().resolve(strict=False)
+
+    def primary_git(*command: str) -> tuple[int, str]:
+        code, output, _ = runner(primary_repo, list(command))
+        return code, _text(output)
+
     primary_branch = primary.get("branch")
     local_main = None
     if primary_branch == args.branch and primary.get("sha"):
         local_main = str(primary["sha"])
-    remote_code, remote_main = git("ls-remote", args.remote, f"refs/heads/{args.branch}")
+    remote_code, remote_main = primary_git("ls-remote", args.remote, f"refs/heads/{args.branch}")
     remote_fields = remote_main.split()
     remote_sha = (
         remote_fields[0]
@@ -204,11 +214,11 @@ def inventory(
         if local_main == remote_sha:
             freshness = "current"
         else:
-            shallow_code, shallow = git("rev-parse", "--is-shallow-repository")
-            object_code, _ = git("cat-file", "-e", f"{remote_sha}^{{commit}}")
+            shallow_code, shallow = primary_git("rev-parse", "--is-shallow-repository")
+            object_code, _ = primary_git("cat-file", "-e", f"{remote_sha}^{{commit}}")
             if shallow_code == 0 and shallow == "false" and object_code == 0:
-                local_ancestor_code, _ = git("merge-base", "--is-ancestor", local_main, remote_sha)
-                remote_ancestor_code, _ = git("merge-base", "--is-ancestor", remote_sha, local_main)
+                local_ancestor_code, _ = primary_git("merge-base", "--is-ancestor", local_main, remote_sha)
+                remote_ancestor_code, _ = primary_git("merge-base", "--is-ancestor", remote_sha, local_main)
                 if local_ancestor_code == 0 and remote_ancestor_code == 1:
                     freshness = "stale"
                 elif local_ancestor_code == 1 and remote_ancestor_code == 0:
