@@ -35,6 +35,7 @@ done
 [[ "$REL" =~ ^ea_[A-Za-z0-9_]+$ && "$ACTIVE" =~ ^ea_[A-Za-z0-9_]+$ && "$COMMIT" =~ ^[a-f0-9]{40}$ ]] || {
     echo 'ERROR: invalid release or commit identity.' >&2; exit 64;
 }
+[[ "$REL" != "$ACTIVE" ]] || { echo 'ERROR: active release cannot be the deployment candidate.' >&2; exit 64; }
 [[ "$ARCHIVE" == /* && "$PROVENANCE" == /* ]] || { echo 'ERROR: absolute release paths required.' >&2; exit 64; }
 if (( EXECUTE == 0 )); then
     [[ -z "$CONFIRM" ]] || { echo 'ERROR: confirmation requires --execute.' >&2; exit 64; }
@@ -60,18 +61,25 @@ for source in "${sources[@]}"; do
     [[ -f "$PROJECT/$source" && ! -L "$PROJECT/$source" ]] || { echo 'ERROR: operator source unavailable.' >&2; exit 70; }
 done
 
-if ! bash "$PROJECT/scripts/ops/publish_existing_release.sh" \
-    --rel "$REL" --expected-commit "$COMMIT" --archive "$ARCHIVE" --provenance "$PROVENANCE" \
-    --expected-archive-sha256 "$(shasum -a 256 "$ARCHIVE" | awk '{print $1}')" \
-    --expected-provenance-sha256 "$(shasum -a 256 "$PROVENANCE" | awk '{print $1}')" \
-    --verify-only >/dev/null; then
-    echo 'ERROR: local reviewed release pair failed verification.' >&2; exit 70
-fi
-
 ARCHIVE_SHA="$(shasum -a 256 "$ARCHIVE" | awk '{print $1}')"
 PROVENANCE_SHA="$(shasum -a 256 "$PROVENANCE" | awk '{print $1}')"
 ARCHIVE_SIZE="$(wc -c < "$ARCHIVE" | tr -d ' ')"
 PROVENANCE_SIZE="$(wc -c < "$PROVENANCE" | tr -d ' ')"
+
+if ! bash "$PROJECT/scripts/ops/publish_existing_release.sh" \
+    --rel "$REL" --expected-commit "$COMMIT" --archive "$ARCHIVE" --provenance "$PROVENANCE" \
+    --expected-archive-sha256 "$ARCHIVE_SHA" \
+    --expected-provenance-sha256 "$PROVENANCE_SHA" \
+    --verify-only >/dev/null; then
+    echo 'ERROR: local reviewed release pair failed verification.' >&2; exit 70
+fi
+
+if [[ "$(shasum -a 256 "$ARCHIVE" | awk '{print $1}')" != "$ARCHIVE_SHA" ||
+      "$(shasum -a 256 "$PROVENANCE" | awk '{print $1}')" != "$PROVENANCE_SHA" ||
+      "$(wc -c < "$ARCHIVE" | tr -d ' ')" != "$ARCHIVE_SIZE" ||
+      "$(wc -c < "$PROVENANCE" | tr -d ' ')" != "$PROVENANCE_SIZE" ]]; then
+    echo 'ERROR: local release pair changed after verification.' >&2; exit 70
+fi
 DEPLOY_SHA="$(shasum -a 256 "$PROJECT/deploy_ea.sh" | awk '{print $1}')"
 PAIR_SHA="$(shasum -a 256 "$PROJECT/scripts/ops/libexec/release_pair_admission_v1.py" | awk '{print $1}')"
 BACKUP_SHA="$(shasum -a 256 "$PROJECT/scripts/ops/libexec/backup_handoff_admission_v1.py" | awk '{print $1}')"

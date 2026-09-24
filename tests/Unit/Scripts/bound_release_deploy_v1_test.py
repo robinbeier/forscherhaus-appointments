@@ -70,6 +70,14 @@ class BoundReleaseDeployTest(unittest.TestCase):
         self.reserve.assert_not_called()
         self.child.assert_not_called()
 
+    def test_active_release_cannot_be_redeployed(self):
+        same = arguments()
+        same.release = same.expected_active_release
+        with self.assertRaisesRegex(MODULE.AdmissionError, 'same_release_invalid'):
+            MODULE.run(same)
+        self.reserve.assert_not_called()
+        self.child.assert_not_called()
+
     def test_occupied_receipt_blocks_before_reservation_or_child(self):
         with mock.patch.object(MODULE.os.path, 'lexists', side_effect=[True]):
             with self.assertRaisesRegex(MODULE.AdmissionError, 'receipt_or_intent_occupied'):

@@ -229,6 +229,8 @@ def run(args):
                     args.continuity_sha, args.deploy_sha, args.pair_helper_sha, args.backup_helper_sha)) or
             args.archive_size <= 0 or args.provenance_size <= 0):
         fail('input_invalid')
+    if args.release == args.expected_active_release:
+        fail('same_release_invalid')
     pair = checked_module('release_pair_admission_v1', PAIR_HELPER, args.pair_helper_sha)
     backup = checked_module('backup_handoff_admission_v1', BACKUP_HELPER, args.backup_helper_sha)
     trusted_parent('/root', 0o700)
