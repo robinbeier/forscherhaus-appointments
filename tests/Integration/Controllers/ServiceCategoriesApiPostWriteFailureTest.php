@@ -80,6 +80,7 @@ final class ServiceCategoriesApiPostWriteFailureTest extends TestCase
         $name = $this->fixture->run . '_post_write_failure';
         $this->createdCategoryNames[] = $name;
         $model = $this->faultingModel();
+        $model->expectedPersistedName = $name;
         $controller = $this->controller($model, ['name' => $name, 'description' => 'must roll back']);
 
         $controller->store();
@@ -87,12 +88,39 @@ final class ServiceCategoriesApiPostWriteFailureTest extends TestCase
         self::assertSame(500, $this->capturedOutput()->status, $this->capturedOutput()->body);
         self::assertTrue($model->saveCompleted, 'The injected failure must follow a successful insert.');
         self::assertTrue($model->postWriteReadAttempted, 'The injected find failure must be reached.');
+        self::assertTrue(
+            $model->writeVisibleBeforeFailure,
+            'The inserted category must be visible inside the transaction before the injected failure.',
+        );
         self::assertSame(
             0,
             get_instance()
                 ->db->get_where('service_categories', ['name' => $name])
                 ->num_rows(),
             'A post-insert response failure must not leave a persisted category behind.',
+        );
+    }
+
+    public function testPreWriteFailureDoesNotSatisfyPostWriteEvidence(): void
+    {
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+        $name = $this->fixture->run . '_pre_write_failure';
+        $this->createdCategoryNames[] = $name;
+        $model = $this->faultingModel();
+        $model->failBeforeWrite = true;
+        $controller = $this->controller($model, ['name' => $name]);
+
+        $controller->store();
+
+        self::assertSame(500, $this->capturedOutput()->status, $this->capturedOutput()->body);
+        self::assertFalse($model->saveCompleted);
+        self::assertFalse($model->postWriteReadAttempted);
+        self::assertFalse($model->writeVisibleBeforeFailure);
+        self::assertSame(
+            0,
+            get_instance()
+                ->db->get_where('service_categories', ['name' => $name])
+                ->num_rows(),
         );
     }
 
@@ -112,6 +140,7 @@ final class ServiceCategoriesApiPostWriteFailureTest extends TestCase
 
         $_SERVER['REQUEST_METHOD'] = 'PUT';
         $model = $this->faultingModel();
+        $model->expectedPersistedName = $this->fixture->run . '_after_update';
         $payload = [
             'name' => $this->fixture->run . '_after_update',
             'description' => 'must roll back',
@@ -122,6 +151,10 @@ final class ServiceCategoriesApiPostWriteFailureTest extends TestCase
         self::assertSame(500, $this->capturedOutput()->status, $this->capturedOutput()->body);
         self::assertTrue($model->saveCompleted, 'The injected failure must follow a successful update.');
         self::assertTrue($model->postWriteReadAttempted, 'The injected find failure must be reached.');
+        self::assertTrue(
+            $model->writeVisibleBeforeFailure,
+            'The updated category must be visible inside the transaction before the injected failure.',
+        );
         self::assertSame(
             $before,
             $db->get_where('service_categories', ['id' => $categoryId])->row_array(),
@@ -172,13 +205,19 @@ final class ServiceCategoriesApiControllerHarness extends Service_categories_api
 
 final class ServiceCategoriesApiPostWriteFaultModel extends Service_categories_model
 {
+    public bool $failBeforeWrite = false;
     public bool $saveCompleted = false;
     public bool $postWriteReadAttempted = false;
+    public bool $writeVisibleBeforeFailure = false;
+    public ?string $expectedPersistedName = null;
 
     public function __construct() {}
 
     public function save(array $service_category): int
     {
+        if ($this->failBeforeWrite) {
+            throw new RuntimeException('Injected pre-write failure.');
+        }
         $id = parent::save($service_category);
         $this->saveCompleted = true;
         return $id;
@@ -187,6 +226,8 @@ final class ServiceCategoriesApiPostWriteFaultModel extends Service_categories_m
     public function find(int $service_category_id): array
     {
         $this->postWriteReadAttempted = true;
+        $row = $this->db->get_where('service_categories', ['id' => $service_category_id])->row_array();
+        $this->writeVisibleBeforeFailure = $row !== null && $row['name'] === $this->expectedPersistedName;
         throw new RuntimeException('Injected post-write response failure.');
     }
 }
