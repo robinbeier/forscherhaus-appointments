@@ -209,7 +209,17 @@ class GeneralSettingsBatchValidationTest extends TestCase
     public function testSettingsApiUpdateAndShowReturnNormalizedCompanyColor(): void
     {
         $controller = $this->createApiController('#abc');
-        $controller->update('company_color');
+        $previousMethod = $_SERVER['REQUEST_METHOD'] ?? null;
+        $_SERVER['REQUEST_METHOD'] = 'PUT';
+        try {
+            $controller->update('company_color');
+        } finally {
+            if ($previousMethod === null) {
+                unset($_SERVER['REQUEST_METHOD']);
+            } else {
+                $_SERVER['REQUEST_METHOD'] = $previousMethod;
+            }
+        }
         $updateResponse = json_decode(get_instance()->output->get_output(), true, flags: JSON_THROW_ON_ERROR);
 
         $this->assertSame(['name' => 'company_color', 'value' => '#aabbcc'], $updateResponse);
