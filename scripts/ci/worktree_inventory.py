@@ -146,11 +146,48 @@ def _assign_labels(entries: list[dict[str, object]]) -> None:
     """Assign stable labels without revealing checkout paths."""
     collisions: dict[str, int] = {}
     for entry in entries:
-        canonical = str(Path(str(entry["path"])).expanduser().resolve(strict=False))
+        raw_path = Path(str(entry["path"])).expanduser()
+        try:
+            canonical = str(raw_path.resolve(strict=False))
+        except (OSError, RuntimeError, ValueError):
+            canonical = str(raw_path.absolute())
         digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
         collisions[digest] = collisions.get(digest, 0) + 1
         suffix = "" if collisions[digest] == 1 else f"-{collisions[digest]}"
         entry["label"] = f"worktree-{digest}{suffix}"
+
+
+def _registered_git_admin(common_dir: Path, worktree_path: Path) -> Path | None:
+    """Return the Git admin directory registered for a canonical worktree."""
+    try:
+        canonical_path = worktree_path.resolve(strict=False)
+        if canonical_path == common_dir.parent.resolve(strict=False):
+            return common_dir
+        worktrees_dir = common_dir / "worktrees"
+        if not worktrees_dir.is_dir():
+            return None
+        admin_dirs = list(worktrees_dir.iterdir())
+    except (OSError, RuntimeError, UnicodeError, ValueError):
+        return None
+    matches: list[Path] = []
+    metadata_error = False
+    for admin_dir in admin_dirs:
+        gitdir_file = admin_dir / "gitdir"
+        try:
+            if not gitdir_file.is_file():
+                continue
+            registered_gitdir = Path(gitdir_file.read_text(encoding="utf-8").strip()).expanduser()
+            if not registered_gitdir.is_absolute():
+                registered_gitdir = (admin_dir / registered_gitdir).resolve(strict=False)
+            if registered_gitdir.name == ".git":
+                registered_gitdir = registered_gitdir.parent
+            if registered_gitdir.resolve(strict=False) == canonical_path:
+                matches.append(admin_dir.resolve(strict=False))
+        except (OSError, RuntimeError, UnicodeError, ValueError):
+            metadata_error = True
+    if metadata_error:
+        return None
+    return matches[0] if len(matches) == 1 else None
 
 
 def inventory(
@@ -196,14 +233,22 @@ def inventory(
         entry["dirty"] = None
         entry["operation_state_checked"] = False
         entry["operation_state"] = []
+        entry["git_admin_verified"] = False
+        entry["index_state_checked"] = False
+        entry["index_hidden_state"] = False
+        entry["index_hidden_count"] = 0
         entry["identity_verified"] = False
         if exists:
             # A registered path replaced by a symlink can expose another
             # clean worktree with the same HEAD and common Git directory.
             # Require the registered path itself to remain canonical before
             # trusting any repository identity obtained through it.
-            path_is_canonical = not path.is_symlink() and path.resolve(strict=False) == path.absolute()
+            try:
+                path_is_canonical = not path.is_symlink() and path.resolve(strict=False) == path.absolute()
+            except (OSError, RuntimeError, ValueError):
+                path_is_canonical = False
             common_status, path_common_dir, _ = runner(path, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
+            admin_status, path_admin_dir, _ = runner(path, ["rev-parse", "--path-format=absolute", "--absolute-git-dir"])
             head_status, path_head, _ = runner(path, ["rev-parse", "HEAD"])
             branch_status, path_branch, _ = runner(path, ["symbolic-ref", "-q", "HEAD"])
             registered_branch = entry.get("branch")
@@ -221,6 +266,15 @@ def inventory(
                 and _text(path_head) == entry.get("sha")
                 and branch_matches
             )
+            registered_admin = _registered_git_admin(common_dir, path) if path_is_canonical else None
+            admin_path_matches = False
+            if admin_status == 0 and path_admin_dir and registered_admin is not None:
+                try:
+                    admin_path_matches = Path(_text(path_admin_dir)).resolve(strict=False) == registered_admin
+                except (OSError, RuntimeError, ValueError):
+                    admin_path_matches = False
+            entry["git_admin_verified"] = admin_path_matches
+            entry["identity_verified"] = entry["identity_verified"] and entry["git_admin_verified"]
             if entry["identity_verified"]:
                 status_code, status, _ = runner(
                     path,
@@ -253,6 +307,17 @@ def inventory(
                         state_paths.append(marker)
                 entry["operation_state_checked"] = state_probe_ok
                 entry["operation_state"] = state_paths
+                index_code, index_output, _ = runner(path, ["ls-files", "-v", "-z"])
+                if index_code == 0:
+                    hidden_flags = {"h", "s", "S"}
+                    hidden_count = sum(
+                        1
+                        for record in index_output.decode("utf-8", errors="replace").split("\0")
+                        if record and record[0] in hidden_flags
+                    )
+                    entry["index_state_checked"] = True
+                    entry["index_hidden_count"] = hidden_count
+                    entry["index_hidden_state"] = hidden_count > 0
         entry["display_path"] = _display_path(str(path), str(entry["label"]), args.show_paths)
 
     primary = entries[0]
@@ -321,15 +386,19 @@ def inventory(
         or primary.get("identity_verified") is not True
         or primary.get("operation_state_checked") is not True
         or bool(primary.get("operation_state"))
+        or primary.get("git_admin_verified") is not True
+        or primary.get("index_state_checked") is not True
+        or primary.get("index_hidden_state") is True
         or primary_branch != args.branch
         or not remote_sha
     )
+    remote_actionable = remote_display == args.remote
     refresh = {
-        "safe_ff_only": not blocked_refresh and stale,
+        "safe_ff_only": remote_actionable and not blocked_refresh and stale,
         "commands": [],
         "reason": None,
     }
-    if stale and not blocked_refresh:
+    if stale and not blocked_refresh and remote_actionable:
         primary_path = str(primary["path"])
         if args.show_paths:
             refresh["commands"] = [
@@ -349,6 +418,8 @@ def inventory(
         refresh["reason"] = "local and remote main have diverged"
     elif freshness == "unknown":
         refresh["reason"] = "remote ancestry is unavailable; fetch the branch and rerun the inventory"
+    elif stale and not remote_actionable:
+        refresh["reason"] = "remote address is redacted; rerun with an executable remote name or explicit path"
     else:
         refresh["reason"] = "primary must be clean, on main, and remote main must be readable"
 
@@ -358,11 +429,14 @@ def inventory(
             and item.get("dirty") is False
             and item.get("operation_state_checked") is True
             and not item.get("operation_state")
+            and item.get("git_admin_verified") is True
+            and item.get("index_state_checked") is True
+            and item.get("index_hidden_state") is not True
             and not item.get("prunable")
         )
 
     authority: dict[str, object] = {
-        "source": primary["display_path"] if prune_code == 0 and primary_branch == args.branch and primary.get("identity_verified") is True and primary.get("dirty") is False and primary.get("operation_state_checked") is True and not primary.get("operation_state") and primary.get("freshness") == "current" else None,
+        "source": primary["display_path"] if prune_code == 0 and primary_branch == args.branch and primary.get("identity_verified") is True and primary.get("dirty") is False and primary.get("operation_state_checked") is True and not primary.get("operation_state") and primary.get("git_admin_verified") is True and primary.get("index_state_checked") is True and primary.get("index_hidden_state") is not True and primary.get("freshness") == "current" else None,
         "test": next((item["display_path"] for item in entries if item["role"] == "test-candidate" and eligible_candidate(item)), None),
         "pull_request": next((item["display_path"] for item in entries if item["role"] == "pull-request-candidate" and eligible_candidate(item)), None),
         "release": next((item["display_path"] for item in entries if item["role"] == "release-candidate" and eligible_candidate(item)), None),
@@ -370,9 +444,17 @@ def inventory(
     }
     in_progress = [entry for entry in entries if entry.get("operation_state")]
     state_unknown = any(entry.get("operation_state_checked") is not True for entry in entries)
-    status = "blocked" if dirty or prunable or in_progress or freshness in {"stale", "ahead", "diverged"} else "ready"
+    admin_unknown = any(
+        entry.get("exists") is True and entry.get("git_admin_verified") is not True
+        for entry in entries
+    )
+    hidden_index = [entry for entry in entries if entry.get("index_hidden_state") is True]
+    index_unknown = any(entry.get("index_state_checked") is not True for entry in entries if entry.get("identity_verified") is True)
+    status = "blocked" if dirty or prunable or in_progress or hidden_index or freshness in {"stale", "ahead", "diverged"} else "ready"
+    if admin_unknown:
+        status = "unknown"
     primary_not_authoritative = primary_branch != args.branch or primary.get("freshness") != "current"
-    if primary_not_authoritative or any(item.get("dirty") is None for item in entries) or state_unknown or remote_sha is None or prune_code != 0:
+    if primary_not_authoritative or any(item.get("dirty") is None for item in entries) or state_unknown or index_unknown or remote_sha is None or prune_code != 0:
         status = "unknown" if status == "ready" else status
     result_entries = []
     for entry in entries:

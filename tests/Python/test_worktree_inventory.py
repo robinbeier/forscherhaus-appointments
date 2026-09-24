@@ -199,7 +199,8 @@ class WorktreeInventoryTest(unittest.TestCase):
         self.assertEqual(report["remote"], "<remote>")
         self.assertNotIn(str(self.remote), serialized)
         self.assertNotIn(str(self.remote), " ".join(report["safe_primary_refresh"]["commands"]))
-        self.assertIn("fetch '<remote>' main", report["safe_primary_refresh"]["commands"][0])
+        self.assertFalse(report["safe_primary_refresh"]["safe_ff_only"])
+        self.assertEqual(report["safe_primary_refresh"]["commands"], [])
 
     def test_custom_remote_refresh_commands_fast_forward_the_primary(self):
         self.advance_remote()
@@ -312,6 +313,18 @@ class WorktreeInventoryTest(unittest.TestCase):
         self.assertTrue(report["primary"]["dirty"])
         self.assertEqual(report["status"], "blocked")
 
+    def test_assume_unchanged_tracked_file_blocks_authority(self):
+        git(self.primary, "update-index", "--assume-unchanged", "README.md")
+        (self.primary / "README.md").write_text("hidden change\n")
+
+        code, report = module.inventory(["--repo", str(self.primary)])
+
+        self.assertEqual(code, 1)
+        self.assertFalse(report["primary"]["dirty"])
+        self.assertTrue(report["primary"]["index_hidden_state"])
+        self.assertGreaterEqual(report["primary"]["index_hidden_count"], 1)
+        self.assertIsNone(report["authority"]["source"])
+
     def test_git_repository_environment_cannot_override_repo_argument(self):
         other = self.root / "other"
         subprocess.run(["git", "init", "--initial-branch=main", str(other)], check=True, capture_output=True)
@@ -377,6 +390,50 @@ class WorktreeInventoryTest(unittest.TestCase):
         self.assertIsNone(report["authority"]["release"])
         replacement = next(item for item in report["worktrees"] if item["role"] == "release-candidate")
         self.assertFalse(replacement["identity_verified"])
+
+    def test_copied_detached_worktree_cannot_masquerade_as_registered_path(self):
+        candidate = self.root / "release-candidate"
+        decoy = self.root / "other-decoy"
+        git(self.primary, "worktree", "add", "--detach", str(candidate), "HEAD")
+        git(self.primary, "worktree", "add", "--detach", str(decoy), "HEAD")
+        import shutil
+        shutil.rmtree(candidate)
+        shutil.copytree(decoy, candidate, symlinks=True)
+
+        code, report = module.inventory(["--repo", str(self.primary)])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(report["status"], "unknown")
+        self.assertIsNone(report["authority"]["release"])
+        replacement = next(item for item in report["worktrees"] if item["role"] == "release-candidate")
+        self.assertFalse(replacement["identity_verified"])
+        self.assertFalse(replacement["git_admin_verified"])
+
+    def test_invalid_gitdir_metadata_fails_closed_without_traceback(self):
+        candidate = self.root / "release-candidate"
+        git(self.primary, "worktree", "add", "--detach", str(candidate), "HEAD")
+        common_dir = Path(git(self.primary, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+        invalid_admin = common_dir / "worktrees" / "000-invalid-metadata"
+        invalid_admin.mkdir()
+        (invalid_admin / "gitdir").write_bytes(b"\xff\xfe\n")
+
+        code, report = module.inventory(["--repo", str(self.primary)])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(report["status"], "unknown")
+        self.assertIsNone(report["authority"]["release"])
+
+    def test_symlink_loop_in_registered_path_fails_closed_without_traceback(self):
+        candidate = self.root / "release-candidate"
+        git(self.primary, "worktree", "add", "--detach", str(candidate), "HEAD")
+        import shutil
+        shutil.rmtree(candidate)
+        candidate.symlink_to(candidate, target_is_directory=True)
+
+        code, report = module.inventory(["--repo", str(self.primary)])
+
+        self.assertEqual(code, 1)
+        self.assertIsNone(report["authority"]["release"])
 
     def test_partial_clone_does_not_lazy_fetch_remote_commit(self):
         git(self.remote, "config", "uploadpack.allowFilter", "true")
@@ -451,11 +508,31 @@ class WorktreeInventoryTest(unittest.TestCase):
         serialized = json.dumps(report)
 
         self.assertEqual(code, 1)
-        self.assertTrue(report["safe_primary_refresh"]["safe_ff_only"])
+        self.assertFalse(report["safe_primary_refresh"]["safe_ff_only"])
         self.assertEqual(report["remote"], "<remote>")
         self.assertNotIn("secret", serialized)
         self.assertNotIn(secret_url, serialized)
-        self.assertIn("fetch '<remote>' main", report["safe_primary_refresh"]["commands"][0])
+        self.assertEqual(report["safe_primary_refresh"]["commands"], [])
+
+    def test_credential_free_remote_url_also_suppresses_refresh(self):
+        self.advance_remote()
+        remote_url = "https://example.invalid/repo.git"
+        remote_sha = git(self.external, "rev-parse", "HEAD")
+        real_runner = module._run_git
+
+        def url_remote_runner(repo, arguments, timeout=module.TIMEOUT):
+            if arguments[:1] == ["ls-remote"]:
+                return 0, f"{remote_sha}\trefs/heads/main\n".encode(), b""
+            return real_runner(repo, arguments, timeout)
+
+        code, report = module.inventory(
+            ["--repo", str(self.primary), "--remote", remote_url, "--show-paths"],
+            runner=url_remote_runner,
+        )
+
+        self.assertEqual(code, 1)
+        self.assertFalse(report["safe_primary_refresh"]["safe_ff_only"])
+        self.assertEqual(report["safe_primary_refresh"]["commands"], [])
 
     def test_status_failure_blocks_refresh_without_claiming_dirty(self):
         real_runner = module._run_git
