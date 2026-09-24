@@ -194,20 +194,53 @@ alone does not authorize a timer transition, backup, or application deploy.
 
 ## Controlled execution and bounded verification
 
-6. **Deploy the reviewed archive through the existing host path.** Use the
-   exact `/root/deploy_ea.sh` invocation and required host-local inputs in
-   [Deployment](../deployment.md#deploy), preserving the shared lock across
-   any approved migration and deployment. For this entry, additionally pass
-   `--result-file "$DEPLOY_RESULT_FILE"`: choose one absent, run-specific leaf
-   beneath the existing canonical root-owned mode-`0700` `/root` directory,
-   bind that exact path to the run, and verify the leaf is absent before invoking
-   the deploy command. The helper rejects an existing or unsafe target; do not
-   remove or overwrite it to retry. Require the machine-readable
-   `deploy_result.v1` receipt and independently compare its outcome and exit
-   code with the observed child result. Exit `0` is success;
-   `30` is verified pre-switch failure or rollback; `31`, `32`, `74`, missing,
-   invalid, mismatched, killed, or unknown results require state inspection and
-   block retry. Do not infer success from output alone.
+6. **Deploy the reviewed archive through the existing host path.** For a
+   normal release without migration, use the checked-main
+   `scripts/ops/prod_deploy_bound_release.sh` entry once the two read-only
+   admission helpers are installed at their reviewed hashes. It requires the
+   already published archive/provenance pair, a fresh verified backup handoff,
+   and the exact currently active release. Its inputs are the reviewed commit,
+   release and current-release IDs, and the two local artifact paths; it derives
+   the artifact and tool hashes from the clean checkout. It rechecks production
+   readiness, binds both published files, the restored dump and host
+   configuration under the shared lock, then invokes the existing
+   `/root/deploy_ea.sh` at most once with an absent run-specific result leaf.
+   The root-only intent reservation and `deploy_result.v1` receipt stay on the
+   host. No old per-release script or copied inode/hash list is an input.
+
+   ```bash
+   bash scripts/ops/prod_deploy_bound_release.sh \
+     --rel "$RELEASE_ID" --expected-commit "$REVIEWED_MAIN_COMMIT" \
+     --expected-active-release "$ACTIVE_RELEASE_ID" \
+     --archive "$ARCHIVE" --provenance "$PROVENANCE" \
+     --execute --confirm-live-deploy ROB-618
+   ```
+
+   Before this command, independently confirm that the exact main commit has
+   successful blocking CI and review, that `publish_existing_release.sh`
+   published the exact pair, and that the separate ROB-466/ROB-461 backup and
+   restore completed with the backup timer returned to its original state.
+   The wrapper does not build, upload, back up, pause timers, migrate data, or
+   retry. Its `deployed` result requires the child's exit `0`, matching durable
+   receipt, and new active marker. A result of `confirmed_failed`,
+   `recovery_required`, missing receipt, SSH interruption, or any unknown
+   result stops further writes until the exact host state has been inspected.
+   The release ID identifies the protected intent, which records the run ID;
+   that run ID identifies the result leaf. A different run ID cannot relaunch
+   the same release candidate after an unknown transport or deploy result.
+   Never delete either leaf to retry. For a separately
+   authorized migration use the direct, lock-preserving
+   [deployment procedure](../deployment.md#deploy) and its additional gate.
+
+   The two new read-only helpers are
+   `scripts/ops/libexec/release_pair_admission_v1.py` and
+   `scripts/ops/libexec/backup_handoff_admission_v1.py`. Their first host
+   installation is a separate, reviewed no-clobber step: bind the merged main
+   source SHA-256, prove each target absent under the canonical
+   `/usr/local/libexec/fh` directory, transfer and install root:root mode
+   `0555` under the shared lock, and verify stable path, owner, mode, link
+   count, inode and hash afterward. An occupied or mismatched target blocks.
+   Installing the helpers alone does not deploy an application release.
 
 7. **Run one bounded ordinary probe.** After the active `_RELEASE` marker and
    app-root identity match the pinned release, use the existing

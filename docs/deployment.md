@@ -153,8 +153,13 @@ export the `ORDINARY_CHANGE_LOCK_FD` obtained from the sourced deploy helper. Th
 child verifies that inherited descriptor against the trusted lock inode before
 reusing it; an arbitrary or stale descriptor is refused.
 
-After resolving any pending production migrations above, run the deployment
-from the production host using the uploaded archive:
+For a normal reviewed application release without migration, use the
+[bound production release entry](ops/production-release-entry.md#controlled-execution-and-bounded-verification)
+from the clean main checkout. It validates the already published archive and
+provenance, the verified backup handoff and current host state, then calls the
+same `deploy_ea.sh` primitive once. A separately authorized migration or
+recovery can invoke the primitive directly on the production host using the
+uploaded archive:
 
 ```bash
 /root/deploy_ea.sh \
@@ -166,11 +171,11 @@ from the production host using the uploaded archive:
   --zero-surprise-incident-webhook-file /etc/fh/zero-surprise-incident-webhook.ini
 ```
 
-For the [production release entry](ops/production-release-entry.md), also pass
-`--result-file "$DEPLOY_RESULT_FILE"` with one absent, run-specific path under
-an existing canonical root-owned mode-`0700` directory. Retain and validate
-the resulting receipt against the observed child exit; the base command above
-does not create a receipt by itself.
+For a direct invocation, also pass `--result-file "$DEPLOY_RESULT_FILE"` with
+one absent, run-specific path under an existing canonical root-owned
+mode-`0700` directory. Retain and validate the resulting receipt against the
+observed child exit; the base command above does not create a receipt by
+itself. The bound entry selects and validates its own result path.
 
 Production uses the Docker-backed `fh-pdf-renderer` service. Deployment
 keeps that independently managed container running and checks renderer and
