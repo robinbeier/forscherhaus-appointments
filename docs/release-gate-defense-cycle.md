@@ -230,6 +230,7 @@ bash scripts/ops/run_ordinary_live_probe.sh services-api EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh unavailabilities-api EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh blocked-periods-api EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh service-categories-api EXPECTED_RELEASE
+bash scripts/ops/run_ordinary_live_probe.sh secretaries-api EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh calendar-race EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh appointments-api EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh appointments-api-overlap EXPECTED_RELEASE
@@ -353,6 +354,29 @@ covered. Identity drift, unknown HTTP completion,
 lost release binding or incomplete cleanup retain recovery evidence and stop
 further probe/deployment work. A change to the handler, probe, fixture, wrapper,
 evidence classes or cleanup contract requires fresh local tests and review.
+
+### Secretaries API v1 alias live evidence boundary
+
+The `secretaries-api` action permits one planned run against the bound active
+release. Its dedicated journaled profile creates one synthetic provider and two
+Secretary users, each with complete settings and one provider relationship. The
+target and sentinel are selected only from those owned rows; no existing user,
+setting, or relationship is used.
+
+A PUT to the direct `store` alias must return 405 with `Allow: POST`, and a GET
+to the direct `destroy` alias must return 405 with `Allow: DELETE`. Full target
+and sentinel user, settings, and provider-link snapshots must remain identical
+after both requests. The root-controlled wrapper, shared lock, independent
+cleanup timer, durable fixture intents, and recovery marker apply throughout.
+
+Only `verified` with both phases passed, exact identity-bound fixture cleanup,
+removed transient timer and marker, unchanged active release, and healthy
+production is successful. Interrupted activation may reconstruct only rows
+matching journaled identities; cleanup refuses ambiguous users or relationships.
+The isolated HTTP/database test proves the same wrong-verb status, headers,
+snapshots, and cleanup locally. It does not establish production, proxy, or
+concurrent behavior. Changes to the handler, probe, fixture, wrapper, evidence
+contract, or cleanup path require fresh local tests and review.
 
 ### Shared ordinary-probe lifecycle
 

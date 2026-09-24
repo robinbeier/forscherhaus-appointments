@@ -99,6 +99,8 @@ final class OrdinaryProbeEvidence
                     'service_categories_api_conflict_put',
                     'service_categories_api_matching_put',
                     'service_categories_api_wrong_verb_destroy',
+                    'secretaries_api_store_alias',
+                    'secretaries_api_destroy_alias',
                     'race_parent_lock',
                     'race_request_wait',
                     'race_reassignment',
