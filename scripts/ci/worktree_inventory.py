@@ -186,7 +186,10 @@ def inventory(
                 and branch_matches
             )
             if entry["identity_verified"]:
-                status_code, status, _ = runner(path, ["status", "--porcelain=v1", "--untracked-files=all"])
+                status_code, status, _ = runner(
+                    path,
+                    ["status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules=none"],
+                )
                 if status_code == 0:
                     entry["dirty"] = bool(status.strip())
                 state_markers = (
@@ -196,6 +199,9 @@ def inventory(
                     "rebase-merge",
                     "rebase-apply",
                     "sequencer",
+                    "BISECT_START",
+                    "BISECT_LOG",
+                    "BISECT_NAMES",
                 )
                 state_paths: list[str] = []
                 state_probe_ok = True

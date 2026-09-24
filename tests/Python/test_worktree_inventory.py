@@ -279,6 +279,38 @@ class WorktreeInventoryTest(unittest.TestCase):
         self.assertEqual(report["primary"]["operation_state"], ["CHERRY_PICK_HEAD"])
         self.assertIsNone(report["authority"]["source"])
 
+    def test_active_bisect_in_linked_worktree_is_not_candidate(self):
+        secondary = self.root / "bisect"
+        git(self.primary, "worktree", "add", "-b", "codex/bisect", str(secondary))
+        git(secondary, "bisect", "start")
+
+        code, report = module.inventory(["--repo", str(self.primary)])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(report["status"], "blocked")
+        candidate = next(item for item in report["worktrees"] if item["role"] == "pull-request-candidate")
+        self.assertEqual(candidate["operation_state"], ["BISECT_START", "BISECT_LOG", "BISECT_NAMES"])
+        self.assertIsNone(report["authority"]["pull_request"])
+
+    def test_submodule_changes_are_dirty_even_when_ignore_all_is_configured(self):
+        subrepo = self.root / "subrepo"
+        subprocess.run(["git", "init", "--initial-branch=main", str(subrepo)], check=True, capture_output=True)
+        git(subrepo, "config", "user.email", "test@example.invalid")
+        git(subrepo, "config", "user.name", "Inventory Test")
+        (subrepo / "tracked.txt").write_text("initial\n")
+        git(subrepo, "add", "tracked.txt")
+        git(subrepo, "commit", "-m", "submodule initial")
+        git(self.primary, "-c", "protocol.file.allow=always", "submodule", "add", str(subrepo), "vendor/child")
+        git(self.primary, "commit", "-m", "add submodule fixture")
+        git(self.primary, "config", "submodule.vendor/child.ignore", "all")
+        (self.primary / "vendor/child/tracked.txt").write_text("changed\n")
+
+        code, report = module.inventory(["--repo", str(self.primary)])
+
+        self.assertEqual(code, 1)
+        self.assertTrue(report["primary"]["dirty"])
+        self.assertEqual(report["status"], "blocked")
+
     def test_partial_clone_does_not_lazy_fetch_remote_commit(self):
         git(self.remote, "config", "uploadpack.allowFilter", "true")
         git(self.remote, "config", "uploadpack.allowAnySHA1InWant", "true")
