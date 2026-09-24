@@ -31,16 +31,19 @@ final class ProdReleaseReadinessPreflightTest extends TestCase
         $helperBindings = [
             '/root/deploy_ea.sh',
             '/usr/local/libexec/fh-backup-set-producer-v1',
+            '/usr/local/libexec/fh-backup-timer-transition-v1',
             '/usr/local/libexec/fh/deployment_dump_attestation_v1.py',
         ];
         $sourceFiles = [
             dirname(__DIR__, 3) . '/deploy_ea.sh',
             dirname(__DIR__, 3) . '/scripts/ops/libexec/backup_set_producer_v1.py',
+            dirname(__DIR__, 3) . '/scripts/ops/libexec/backup_timer_transition_v1.py',
             dirname(__DIR__, 3) . '/scripts/ops/libexec/deployment_dump_attestation_v1.py',
         ];
         $helperFixtures = [
             $this->root . '/deploy_ea.sh',
             $this->root . '/backup-set-producer-v1',
+            $this->root . '/backup-timer-transition-v1',
             $this->root . '/deployment_dump_attestation_v1.py',
         ];
         foreach ($helperFixtures as $index => $path) {
@@ -81,6 +84,7 @@ final class ProdReleaseReadinessPreflightTest extends TestCase
               case "$spec" in
                 /root/deploy_ea.sh=*) mapped+=("%s=${spec#*=}") ;;
                 /usr/local/libexec/fh-backup-set-producer-v1=*) mapped+=("%s=${spec#*=}") ;;
+                /usr/local/libexec/fh-backup-timer-transition-v1=*) mapped+=("%s=${spec#*=}") ;;
                 /usr/local/libexec/fh/deployment_dump_attestation_v1.py=*) mapped+=("%s=${spec#*=}") ;;
                 *) mapped+=("$spec") ;;
               esac
@@ -94,6 +98,7 @@ final class ProdReleaseReadinessPreflightTest extends TestCase
             $helperFixtures[0],
             $helperFixtures[1],
             $helperFixtures[2],
+            $helperFixtures[3],
         );
         file_put_contents($this->root . '/bin/ssh', $ssh);
         chmod($this->root . '/bin/ssh', 0755);
@@ -134,6 +139,14 @@ final class ProdReleaseReadinessPreflightTest extends TestCase
         $fixture = $this->root . '/deploy_ea.sh';
         file_put_contents($fixture, 'changed');
         chmod($fixture, 0555);
+        [$status, $out] = $this->executePreflight();
+        self::assertSame(20, $status);
+        self::assertStringContainsString('helper_hash_mismatch', $out);
+        file_put_contents($fixture, file_get_contents(dirname(__DIR__, 3) . '/deploy_ea.sh'));
+        chmod($fixture, 0555);
+        $timerHelper = $this->root . '/backup-timer-transition-v1';
+        file_put_contents($timerHelper, 'changed');
+        chmod($timerHelper, 0555);
         [$status, $out] = $this->executePreflight();
         self::assertSame(20, $status);
         self::assertStringContainsString('helper_hash_mismatch', $out);

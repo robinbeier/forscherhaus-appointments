@@ -35,6 +35,7 @@ local_sha256() {
 for binding in \
     'deploy_ea.sh=/root/deploy_ea.sh' \
     'scripts/ops/libexec/backup_set_producer_v1.py=/usr/local/libexec/fh-backup-set-producer-v1' \
+    'scripts/ops/libexec/backup_timer_transition_v1.py=/usr/local/libexec/fh-backup-timer-transition-v1' \
     'scripts/ops/libexec/deployment_dump_attestation_v1.py=/usr/local/libexec/fh/deployment_dump_attestation_v1.py'; do
     local_file="${binding%%=*}"; installed_file="${binding#*=}"
     [[ -f "$REPO_ROOT/$local_file" && ! -L "$REPO_ROOT/$local_file" ]] || { printf 'ERROR: reviewed local helper source unavailable.\n' >&2; exit 64; }
