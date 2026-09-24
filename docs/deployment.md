@@ -56,6 +56,36 @@ For the current production host upload path:
   --upload root@booking-server --remote-dir /root/releases
 ```
 
+When the build and the authorized upload happen at different times, build only
+once with `--skip-upload`. Keep the two reported files together in their private
+output directory. After review, from the same clean commit checkout, publish
+those **existing bytes** without another build:
+
+```bash
+bash scripts/ops/publish_existing_release.sh \
+  --rel ea_YYYYMMDD_HHMM --expected-commit "$(git rev-parse HEAD)" \
+  --archive /private/tmp/EXACT.output.DIR/ea_YYYYMMDD_HHMM.tar.gz \
+  --provenance /private/tmp/EXACT.output.DIR/ea_YYYYMMDD_HHMM.build-provenance.json \
+  --expected-archive-sha256 HASH_RECORDED_AT_BUILD \
+  --expected-provenance-sha256 SIDECAR_HASH_RECORDED_AT_BUILD \
+  --upload root@booking-server
+```
+
+Replace the illustrative paths with the exact paths printed by the build. The
+same command with `--verify-only` and without `--upload` performs local checks
+without contacting production. Publication verifies the pair's names, private
+directory, commit, source hashes, canonical provenance, archive digest/size and
+inventory, and complete archive contract. It then uses the existing no-clobber
+remote publisher and checks the local hashes again after transfer. Both pinned
+SHA-256 values must match the hashes recorded from the original build. A mismatch
+stops; do not rebuild under the same release ID to make it fit an earlier hash.
+The one-command build-and-upload path above uses this same publication step.
+
+Composer and generated frontend assets can give two builds from one commit
+different archive metadata and SHA-256 values. This path does not claim
+byte-for-byte reproducible rebuilds: the reviewed, retained archive and
+provenance are the release candidate, and their exact bytes are published.
+
 The builder:
 
 - refreshes frontend release assets with `npm run build`

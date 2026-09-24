@@ -14,7 +14,7 @@ require_once __DIR__ . '/DeploymentEvidenceAuthorityV1.php';
 final class ReleaseBuildProvenanceProducerV1
 {
     private const BLOCK_BYTES = 4096;
-    private const FIXED_TEMP_OVERHEAD_BYTES = 67_108_864;
+    public const FIXED_TEMP_OVERHEAD_BYTES = 67_108_864;
 
     /** @return array<string,mixed> */
     public static function create(
@@ -81,9 +81,15 @@ final class ReleaseBuildProvenanceProducerV1
     }
 
     /** @return array{sha256:string,size_bytes:int,entry_count:int,stage_inode_count:int,stage_unpacked_bytes:int} */
-    private static function inspectArchive(string $path): array
+    public static function inspectArchive(string $path): array
     {
-        $command = [self::resolveLocalPython3(), '-I', '-B', dirname(__DIR__) . '/libexec/inspect_release_archive_v1.py', $path];
+        $command = [
+            self::resolveLocalPython3(),
+            '-I',
+            '-B',
+            dirname(__DIR__) . '/libexec/inspect_release_archive_v1.py',
+            $path,
+        ];
         $pipes = [];
         $process = proc_open($command, [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']], $pipes, null, []);
         if (!is_resource($process)) {

@@ -25,32 +25,47 @@ final class BuildReleasePublicationContractTest extends TestCase
     {
         $script = file_get_contents(dirname(__DIR__, 3) . '/build_release.sh');
         self::assertIsString($script);
+        $publisher = file_get_contents(dirname(__DIR__, 3) . '/scripts/ops/publish_existing_release.sh');
+        self::assertIsString($publisher);
         self::assertStringContainsString(
             './build_release.sh --expected-commit "$(git rev-parse HEAD)" --rel ea_20251005_2000',
             $script,
         );
-        self::assertStringContainsString('ARCHIVE_TEMP=".${REL}.tar.gz.upload-${REMOTE_NONCE}"', $script);
+        self::assertStringContainsString('ARCHIVE_TEMP=".${REL}.tar.gz.upload-${REMOTE_NONCE}"', $publisher);
         self::assertStringContainsString('OUTPUT="$(cd "$OUTPUT" && pwd -P)"', $script);
         self::assertStringContainsString('STAGE="$(cd "$STAGE" && pwd -P)"', $script);
         self::assertStringContainsString('PROJECT="$(pwd -P)"', $script);
         self::assertStringContainsString(
             'PROVENANCE_TEMP=".${REL}.build-provenance.json.upload-${REMOTE_NONCE}"',
-            $script,
+            $publisher,
         );
-        self::assertStringContainsString('scp -- "$ARCHIVE" "$UPLOAD:$REMOTE_DIR/$ARCHIVE_TEMP"', $script);
-        self::assertStringContainsString('scp -- "$PROVENANCE" "$UPLOAD:$REMOTE_DIR/$PROVENANCE_TEMP"', $script);
-        self::assertStringContainsString('/usr/bin/python3 -I -B - --prepare "$REMOTE_DIR"', $script);
-        self::assertStringNotContainsString('/usr/bin/install -d', $script);
-        self::assertStringContainsString('ssh "$UPLOAD" /usr/bin/chmod 0600', $script);
-        self::assertStringContainsString('[[ "$UPLOAD" =~ ^root@[A-Za-z0-9.-]+$ ]]', $script);
-        self::assertStringContainsString('[[ "$REMOTE_DIR" == "/root/releases" ]]', $script);
-        self::assertStringContainsString('"$REMOTE_DIR" "$REL" "$REMOTE_NONCE" "$LOCAL_SHA" "$ARCHIVE_SIZE"', $script);
+        self::assertStringContainsString('scp -- "$ARCHIVE" "$UPLOAD:$REMOTE_DIR/$ARCHIVE_TEMP"', $publisher);
+        self::assertStringContainsString('scp -- "$PROVENANCE" "$UPLOAD:$REMOTE_DIR/$PROVENANCE_TEMP"', $publisher);
+        self::assertStringContainsString('/usr/bin/python3 -I -B - --prepare "$REMOTE_DIR"', $publisher);
+        self::assertStringNotContainsString('/usr/bin/install -d', $publisher);
+        self::assertStringContainsString('ssh "$UPLOAD" /usr/bin/chmod 0600', $publisher);
+        self::assertStringContainsString('[[ "$UPLOAD" =~ ^root@[A-Za-z0-9.-]+$ ]]', $publisher);
+        self::assertStringContainsString('[[ "$REMOTE_DIR" == "/root/releases" ]]', $publisher);
+        self::assertStringContainsString(
+            '"$REMOTE_DIR" "$REL" "$REMOTE_NONCE" "$ARCHIVE_SHA" "$ARCHIVE_SIZE"',
+            $publisher,
+        );
         self::assertStringContainsString(
             '[[ "$PUBLISH_STATUS" =~ ^(published|attached):(published|attached)$ ]]',
-            $script,
+            $publisher,
         );
-        self::assertStringContainsString("trap 'remote_cleanup; cleanup' EXIT", $script);
-        self::assertStringContainsString('< scripts/ops/libexec/publish_release_pair_v1.py', $script);
+        self::assertStringContainsString('trap remote_cleanup EXIT', $publisher);
+        self::assertStringContainsString('< "$PROJECT/scripts/ops/libexec/publish_release_pair_v1.py"', $publisher);
+        self::assertStringContainsString('bash "$PROJECT/scripts/ops/publish_existing_release.sh"', $script);
+        self::assertStringContainsString('--expected-archive-sha256 "$LOCAL_SHA"', $script);
+        self::assertStringContainsString('--expected-provenance-sha256 "$PROVENANCE_SHA"', $script);
+        self::assertStringContainsString(
+            '[[ "$ARCHIVE_SHA" == "$EXPECTED_ARCHIVE_SHA" && "$PROVENANCE_SHA" == "$EXPECTED_PROVENANCE_SHA" ]]',
+            $publisher,
+        );
+        self::assertStringContainsString('--verify-only) VERIFY_ONLY=1', $publisher);
+        self::assertStringNotContainsString('npm run build', $publisher);
+        self::assertStringNotContainsString('composer install', $publisher);
         self::assertStringNotContainsString('WARNUNG: Remote-Checksumme', $script);
         self::assertStringNotContainsString("scp '\$ARCHIVE' '\${UPLOAD}':'\$REMOTE_DIR/'", $script);
         self::assertStringNotContainsString('-mindepth', $script);
