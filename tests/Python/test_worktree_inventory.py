@@ -199,6 +199,38 @@ class WorktreeInventoryTest(unittest.TestCase):
         self.assertEqual(report["primary"]["freshness"], "unknown")
         self.assertIsNone(report["authority"]["source"])
 
+    def test_named_remote_uploadpack_override_is_not_executed_or_authoritative(self):
+        marker = self.root / "configured-upload-pack-ran"
+        program = self.root / "configured-upload-pack"
+        program.write_text(f"#!/bin/sh\ntouch {marker}\nexit 1\n")
+        program.chmod(0o755)
+        git(self.primary, "config", "extensions.worktreeConfig", "true")
+        git(self.primary, "config", "--worktree", "remote.origin.uploadpack", str(program))
+
+        code, report = module.inventory(["--repo", str(self.primary)])
+
+        self.assertEqual(code, 1)
+        self.assertFalse(marker.exists())
+        self.assertEqual(report["status"], "unknown")
+        self.assertIsNone(report["primary"]["remote_main_sha"])
+        self.assertIsNone(report["authority"]["source"])
+
+    def test_slash_named_remote_uploadpack_override_is_not_executed(self):
+        marker = self.root / "slash-upload-pack-ran"
+        program = self.root / "slash-upload-pack"
+        program.write_text(f"#!/bin/sh\ntouch {marker}\nexit 1\n")
+        program.chmod(0o755)
+        remote_name = "team/review"
+        git(self.primary, "remote", "add", remote_name, str(self.remote))
+        git(self.primary, "config", f"remote.{remote_name}.uploadpack", str(program))
+
+        code, report = module.inventory(["--repo", str(self.primary), "--remote", remote_name])
+
+        self.assertEqual(code, 1)
+        self.assertFalse(marker.exists())
+        self.assertEqual(report["status"], "unknown")
+        self.assertIsNone(report["authority"]["source"])
+
     def test_ext_remote_cannot_run_local_helper(self):
         marker = self.root / "remote-helper-ran"
         program = self.root / "remote-helper"

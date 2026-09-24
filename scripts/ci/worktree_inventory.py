@@ -318,6 +318,26 @@ def _display_remote(remote: str, show_paths: bool) -> str:
     return "<remote>"
 
 
+def _remote_uploadpack_override(
+    repo: Path,
+    remote: str,
+    runner: Callable[..., tuple[int, bytes, bytes]],
+) -> tuple[bool, bool]:
+    """Check whether a configured remote overrides Git's upload-pack executable."""
+    remote_code, remote_output, _ = runner(repo, ["remote"])
+    if remote_code != 0:
+        return False, True
+    configured_remotes = remote_output.decode("utf-8", errors="surrogateescape").splitlines()
+    if remote not in configured_remotes:
+        return True, False
+    code, output, _ = runner(repo, ["config", "--get-all", f"remote.{remote}.uploadpack"])
+    if code == 1 and not output:
+        return True, False
+    if code == 0:
+        return True, bool(output.strip())
+    return False, True
+
+
 def _assign_labels(entries: list[dict[str, object]]) -> None:
     """Assign stable labels without revealing checkout paths."""
     collisions: dict[str, int] = {}
@@ -528,7 +548,19 @@ def inventory(
     local_main = None
     if primary_branch == args.branch and primary.get("sha"):
         local_main = str(primary["sha"])
-    remote_code, remote_main = primary_git("ls-remote", "--", args.remote, f"refs/heads/{args.branch}")
+    remote_config_checked, remote_uploadpack_override = _remote_uploadpack_override(
+        primary_repo, args.remote, runner
+    )
+    if remote_uploadpack_override:
+        observations.append("remote upload-pack override is configured; freshness probe was skipped")
+        remote_code, remote_main = 1, ""
+    elif not remote_config_checked:
+        observations.append("remote upload-pack configuration could not be verified")
+        remote_code, remote_main = 1, ""
+    else:
+        remote_code, remote_main = primary_git(
+            "ls-remote", "--", args.remote, f"refs/heads/{args.branch}"
+        )
     remote_fields = remote_main.split()
     remote_sha = (
         remote_fields[0]
@@ -629,7 +661,7 @@ def inventory(
         )
 
     authority: dict[str, object] = {
-        "source": primary["display_path"] if prune_code == 0 and primary_branch == args.branch and primary.get("identity_verified") is True and primary.get("dirty") is False and primary.get("operation_state_checked") is True and not primary.get("operation_state") and primary.get("git_admin_verified") is True and primary.get("index_state_checked") is True and primary.get("index_hidden_state") is not True and primary.get("freshness") == "current" else None,
+        "source": primary["display_path"] if not remote_uploadpack_override and remote_config_checked and prune_code == 0 and primary_branch == args.branch and primary.get("identity_verified") is True and primary.get("dirty") is False and primary.get("operation_state_checked") is True and not primary.get("operation_state") and primary.get("git_admin_verified") is True and primary.get("index_state_checked") is True and primary.get("index_hidden_state") is not True and primary.get("freshness") == "current" else None,
         "test": next((item["display_path"] for item in entries if item["role"] == "test-candidate" and eligible_candidate(item)), None),
         "pull_request": next((item["display_path"] for item in entries if item["role"] == "pull-request-candidate" and eligible_candidate(item)), None),
         "release": next((item["display_path"] for item in entries if item["role"] == "release-candidate" and eligible_candidate(item)), None),
