@@ -41,9 +41,11 @@ path in [WORKFLOW.md](../../../WORKFLOW.md#pr-and-review-expectations).
    to `Done` and update its `## Codex Workpad`. If its acceptance criteria
    include deployment or production proof, keep it `In Progress` with the
    remaining proof and next action visible in the workpad until that proof
-   passes. Alternatively, first create and link a separate production issue
-   carrying the exact remaining acceptance criteria and evidence; record its
-   ID in the code issue's workpad before marking the merged code issue `Done`.
+   passes. Only when creation of another issue is separately authorized may
+   you first create and link a production issue carrying the exact remaining
+   acceptance criteria and evidence; record its ID in the code issue's workpad
+   before marking the merged code issue `Done`. Otherwise keep the original
+   issue active.
    Follow the [Linear state rules](../../../WORKFLOW.md#linear-states).
 
 Never merge unresolved substantive findings or a later head than the one whose

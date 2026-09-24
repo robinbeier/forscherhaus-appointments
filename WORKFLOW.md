@@ -148,10 +148,15 @@ Review change path:
 
 `In Review` -> `In Progress` -> `In Review`
 
+If production proof remains after merge:
+
+`Ready to Merge` -> `In Progress` -> `Done`
+
 Use the states as follows:
 
 - `Todo`: ready to start, no implementation has begun yet.
-- `In Progress`: active implementation, review corrections, and local validation.
+- `In Progress`: active implementation, review corrections, local validation,
+  or an explicitly outstanding production proof after a verified merge.
 - `In Review`: PR exists and is waiting on human review, CI completion, or
   explicit merge intent.
 - `Ready to Merge`: final landing phase after the required reviews are
@@ -160,10 +165,12 @@ Use the states as follows:
 - `Done`: for a code-only issue, the merge commit and updated `origin/main`
   have been verified. If the issue's acceptance criteria explicitly include a
   deployment or production proof, keep it active until that proof is complete;
-  alternatively, first create and link a separate production issue that carries
-  the exact outstanding acceptance criteria and evidence required for closure.
-  Record that issue ID in the code issue's workpad, then mark the code issue
-  `Done` after its verified merge. For example,
+  alternatively, when creation of another issue is separately authorized, first
+  create and link a production issue that carries the exact outstanding
+  acceptance criteria and evidence required for closure. Record that issue ID
+  in the code issue's workpad, then mark the code issue `Done` after its
+  verified merge. Without that authorization, keep the original issue active.
+  For example,
   ROB-605 and ROB-607 must keep their implementation and live-evidence
   milestones distinct instead of treating a merged PR as production proof.
 
