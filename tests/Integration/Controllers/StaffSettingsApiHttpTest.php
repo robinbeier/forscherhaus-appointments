@@ -421,6 +421,40 @@ final class StaffSettingsApiHttpTest extends TestCase
         self::assertSame($beforeB, $f->adminDeleteState($idB));
     }
 
+    #[DataProvider('validWriteAuthenticationCases')]
+    public function testAdminDestroyControllerAliasRejectsGetWithoutMutation(string $authentication): void
+    {
+        $f = $this->fixture;
+        $admin = $this->writeClient($authentication);
+        $created = $this->success(
+            $admin->requestJsonApp('POST', 'api/v1/admins', $f->adminWritePayload('destroy-alias')),
+            201,
+        );
+        $id = (int) $created['id'];
+        $before = $f->adminDeleteState($id);
+
+        $response = $admin->get('api/v1/admins_api_v1/destroy/' . $id);
+
+        self::assertSame(405, $response->statusCode, $response->body);
+        self::assertSame('DELETE', $response->header('Allow'));
+        self::assertSame($before, $f->adminDeleteState($id));
+    }
+
+    #[DataProvider('validWriteAuthenticationCases')]
+    public function testAdminStoreControllerAliasRejectsPutWithoutMutation(string $authentication): void
+    {
+        $f = $this->fixture;
+        $admin = $this->writeClient($authentication);
+        $payload = $f->adminWritePayload('store-alias-' . $authentication);
+        self::assertSame([], $f->adminWriteState($payload['email']));
+
+        $response = $admin->requestJsonApp('PUT', 'api/v1/admins_api_v1/store', $payload);
+
+        self::assertSame(405, $response->statusCode, $response->body);
+        self::assertSame('POST', $response->header('Allow'));
+        self::assertSame([], $f->adminWriteState($payload['email']));
+    }
+
     public function testSecretaryUpdateControllerAliasRejectsGetWithoutMutation(): void
     {
         $f = $this->fixture;

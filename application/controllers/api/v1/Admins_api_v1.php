@@ -118,6 +118,12 @@ class Admins_api_v1 extends EA_Controller
      */
     public function store(): void
     {
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+            response('', 405, ['Allow: POST']);
+
+            return;
+        }
+
         try {
             $admin = $this->apiRequestDtoFactory()->buildEntityWritePayloadDto()->payload;
 
@@ -203,6 +209,12 @@ class Admins_api_v1 extends EA_Controller
      */
     public function destroy(int $id): void
     {
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'DELETE') {
+            response('', 405, ['Allow: DELETE']);
+
+            return;
+        }
+
         try {
             $occurrences = $this->admins_model->get(['id' => $id]);
 

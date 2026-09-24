@@ -250,6 +250,21 @@ Zuordnungen vor und nach abgewiesenen sowie passenden PUT-Anfragen. Sie belegen
 ihren lokalen HTTP-/Datenbanklauf, nicht die produktive Auslieferung oder alle
 konkurrierenden Änderungen.
 
+## Admins API v1 direkte Schreibaliase
+
+Die kanonischen Admin-Routen verwenden POST für `store` und DELETE für
+`destroy`. Auch direkt erreichbare `Admins_api_v1`-Controller-Aliase erzwingen
+diese Methoden nach der API-Authentifizierung und vor Payload-Auswertung,
+Datensatzsuche oder Mutation. Abweichende Methoden erhalten 405 mit
+`Allow: POST` beziehungsweise `Allow: DELETE`. Der bestehende Schutz des
+letzten Administrators bleibt eine eigene Modellregel.
+
+`StaffSettingsApiHttpTest` prüft mit eigenen synthetischen Admin-Datensätzen,
+Basic und Bearer die Ablehnung der direkten Aliase samt vollständigem
+Benutzer-/Einstellungszustand. Die vorhandenen kanonischen POST- und
+DELETE-Tests bleiben Positivkontrollen. Das ist lokaler HTTP-/Datenbanknachweis,
+kein produktiver Schreibtest.
+
 ## Settings API v1
 
 Die generische Settings API erlaubt authentifizierten Admin-Basic- und
