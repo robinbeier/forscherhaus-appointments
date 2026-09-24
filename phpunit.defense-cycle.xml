@@ -27,6 +27,7 @@
             <file>./tests/Integration/AccountSecurityMatrixProbeTest.php</file>
             <file>./tests/Integration/CustomerRoleBoundaryProbeTest.php</file>
             <file>./tests/Integration/CustomersApiWriteProbeTest.php</file>
+            <file>./tests/Integration/StaffApiPutProbeTest.php</file>
             <file>./tests/Integration/ServicesApiWriteProbeTest.php</file>
             <file>./tests/Integration/UnavailabilitiesApiWriteProbeTest.php</file>
             <file>./tests/Integration/BlockedPeriodsApiWriteProbeTest.php</file>

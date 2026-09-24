@@ -8,6 +8,7 @@ use ReleaseGate\AppointmentsApiWriteProbe;
 use ReleaseGate\CalendarResponsibilityRaceProbe;
 use ReleaseGate\CustomerRoleBoundaryProbe;
 use ReleaseGate\CustomersApiWriteProbe;
+use ReleaseGate\StaffApiPutProbe;
 use ReleaseGate\DefenseVerificationFixture;
 use ReleaseGate\ServicesApiWriteProbe;
 use ReleaseGate\UnavailabilitiesApiWriteProbe;
@@ -49,6 +50,7 @@ if (
             'methods',
             'customer-boundary',
             'customers-api',
+            'staff-api',
             'services-api',
             'unavailabilities-api',
             'blocked-periods-api',
@@ -163,6 +165,7 @@ try {
     require_once dirname(__DIR__) . '/release-gate/lib/AccountSecurityMatrixProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/CustomerRoleBoundaryProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/CustomersApiWriteProbe.php';
+    require_once dirname(__DIR__) . '/release-gate/lib/StaffApiPutProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/ServicesApiWriteProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/UnavailabilitiesApiWriteProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/BlockedPeriodsApiWriteProbe.php';
@@ -337,6 +340,20 @@ try {
                 indexPage: (string) config_item('index_page'),
             );
             $result['evidence'] = $probe->run($evidence->step(...));
+        } elseif ($action === 'staff-api') {
+            $evidence->run(
+                'supplemental_activate',
+                fn(): array => $verificationFixture->activate('customer_boundary', $context),
+            );
+            $probe = StaffApiPutProbe::forApp(
+                'http://localhost',
+                (string) $context['username'],
+                (string) $context['password'],
+                $ci->db,
+                $verificationFixture,
+                indexPage: (string) config_item('index_page'),
+            );
+            $result['evidence'] = $probe->run($evidence->step(...));
         } elseif ($action === 'services-api') {
             $evidence->run(
                 'supplemental_activate',
@@ -436,6 +453,7 @@ try {
                 [
                     'customer-boundary',
                     'customers-api',
+                    'staff-api',
                     'services-api',
                     'unavailabilities-api',
                     'blocked-periods-api',
