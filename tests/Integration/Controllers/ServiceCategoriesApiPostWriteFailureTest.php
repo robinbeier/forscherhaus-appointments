@@ -85,6 +85,8 @@ final class ServiceCategoriesApiPostWriteFailureTest extends TestCase
         $controller->store();
 
         self::assertSame(500, $this->capturedOutput()->status, $this->capturedOutput()->body);
+        self::assertTrue($model->saveCompleted, 'The injected failure must follow a successful insert.');
+        self::assertTrue($model->postWriteReadAttempted, 'The injected find failure must be reached.');
         self::assertSame(
             0,
             get_instance()
@@ -118,6 +120,8 @@ final class ServiceCategoriesApiPostWriteFailureTest extends TestCase
         $controller->update($categoryId);
 
         self::assertSame(500, $this->capturedOutput()->status, $this->capturedOutput()->body);
+        self::assertTrue($model->saveCompleted, 'The injected failure must follow a successful update.');
+        self::assertTrue($model->postWriteReadAttempted, 'The injected find failure must be reached.');
         self::assertSame(
             $before,
             $db->get_where('service_categories', ['id' => $categoryId])->row_array(),
@@ -152,6 +156,7 @@ final class ServiceCategoriesApiPostWriteFailureTest extends TestCase
 
 final class ServiceCategoriesApiControllerHarness extends Service_categories_api_v1
 {
+    public object $db;
     public object $service_categories_model;
     public Api_request_dto_factory $api_request_dto_factory;
 
@@ -159,6 +164,7 @@ final class ServiceCategoriesApiControllerHarness extends Service_categories_api
 
     public function configure(ServiceCategoriesApiPostWriteFaultModel $model, Api_request_dto_factory $factory): void
     {
+        $this->db = get_instance()->db;
         $this->service_categories_model = $model;
         $this->api_request_dto_factory = $factory;
     }
@@ -166,10 +172,21 @@ final class ServiceCategoriesApiControllerHarness extends Service_categories_api
 
 final class ServiceCategoriesApiPostWriteFaultModel extends Service_categories_model
 {
+    public bool $saveCompleted = false;
+    public bool $postWriteReadAttempted = false;
+
     public function __construct() {}
+
+    public function save(array $service_category): int
+    {
+        $id = parent::save($service_category);
+        $this->saveCompleted = true;
+        return $id;
+    }
 
     public function find(int $service_category_id): array
     {
+        $this->postWriteReadAttempted = true;
         throw new RuntimeException('Injected post-write response failure.');
     }
 }
