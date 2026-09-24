@@ -400,6 +400,7 @@ Final-head evidence (UTC)
 
 - Review: <reviewed head SHA>, <base SHA>, <scope>, <reviewer>, <timestamp>, <result>
 - CI: <CI head SHA>, <blocking checks>, <timestamp>, <result>
+- CI integration: <tested base SHA>, <tested head SHA>, <timestamp>, <result>
 - Comments/findings: <PR head>, <timestamp>, <open substantive findings>, <unresolved threads>
 - Landing: <current base SHA>, <current PR head>, <mergeability>, <CAS SHA checked>, <timestamp>
 ```
@@ -412,8 +413,11 @@ Record the older Security Review marker as `stale` relative to the final head;
 it is not evidence for that head. Apply the existing review gate to the actual
 final head, use the platform run state or a bounded status poll for pending results,
 and do not add a fixed sleep. Re-read both base and head before recording the
-landing evidence. If either differs from the reviewed pair, rebind the review
-target and inspect the affected diff before landing.
+landing evidence. If the head differs, rebind the review target and inspect the
+affected diff. If the base differs, update the PR branch with the new base,
+review the affected diff against that base, and require a fresh blocking CI run
+for the resulting base/head pair before landing. A previous green run for the
+old base/head pair does not cover the new integration.
 
 Treat both human findings and Codex-review findings as real review work until
 they are explicitly addressed or rejected with a clear rationale.
@@ -469,8 +473,9 @@ path applies when this repository's workflow or review tools are changed.
 Before `Ready to Merge`, the primary checks:
 
 - the current PR head matches the reviewed head and the tested code; the current
-  base SHA matches the reviewed base SHA, or the reviewer has inspected the
-  affected diff against the new base and recorded the rebound base/head pair
+  base SHA matches the reviewed and CI-tested base SHA; if the base moved, the
+  branch was updated, the affected diff independently reviewed, and fresh
+  blocking CI passed for the new base/head pair
 - all applicable blocking CI checks in `.github/workflows/ci.yml` passed for
   that head; missing, pending, failed, or unexpectedly skipped checks block
 - independent review is recorded with the reviewed commit, scope, result,

@@ -58,9 +58,12 @@ do not dispatch an agent fallback: use a human reviewer or block.
 
 Bind the verified repository, base, head, and exact scope before the real
 review. The handshake is not review evidence. Use the same ready reviewer session
-for the actual review and follow-up questions; preserve its enforced boundary. Before dispatching the real review or a follow-up,
-revalidate the head, base, scope, runtime, role, and capabilities. Rebind the review target after a head/base change. A runtime reset, changed
-model/role/tools or expired reviewer session requires a fresh startup check.
+for the actual review and follow-up questions; preserve its enforced boundary.
+Before dispatching the real review or a follow-up, revalidate the head, base,
+scope, runtime, role, and capabilities. Rebind the review target after a head/base
+change. If the base changed, update the branch and require fresh blocking CI for
+the resulting pair before landing. A runtime reset, changed model/role/tools,
+or expired reviewer session requires a fresh startup check.
 
 A runtime launch or tool failure is a harness issue, not a PR finding. Do not
 repeat a known-unsupported role or weaken a review gate to obtain output.
