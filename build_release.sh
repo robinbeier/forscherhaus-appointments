@@ -239,33 +239,11 @@ fi
 # 6) Optional: Upload + Remote-Verifikation
 if [[ -n "${UPLOAD}" ]]; then
   if [[ "$DRYRUN" -eq 0 ]]; then
-    [[ "$UPLOAD" =~ ^root@[A-Za-z0-9.-]+$ ]] || { echo "[!] Upload target must be root@host." >&2; exit 1; }
-    [[ "$REMOTE_DIR" == "/root/releases" ]] || { echo "[!] Remote release directory must be /root/releases." >&2; exit 1; }
-    REMOTE_NONCE=$(php -r 'echo bin2hex(random_bytes(16));')
-    ARCHIVE_SIZE=$(wc -c < "$ARCHIVE" | tr -d ' ')
-    PROVENANCE_SIZE=$(wc -c < "$PROVENANCE" | tr -d ' ')
-    ARCHIVE_TEMP=".${REL}.tar.gz.upload-${REMOTE_NONCE}"
-    PROVENANCE_TEMP=".${REL}.build-provenance.json.upload-${REMOTE_NONCE}"
-    remote_cleanup() {
-      ssh "$UPLOAD" /usr/bin/rm -f -- "$REMOTE_DIR/$ARCHIVE_TEMP" "$REMOTE_DIR/$PROVENANCE_TEMP" >/dev/null 2>&1 || true
-    }
-    trap 'remote_cleanup; cleanup' EXIT
-
-    PREPARE_STATUS=$(ssh "$UPLOAD" /usr/bin/python3 -I -B - --prepare "$REMOTE_DIR" \
-      < scripts/ops/libexec/publish_release_pair_v1.py)
-    [[ "$PREPARE_STATUS" == "ready" ]] || { echo "[!] Remote release root preparation failed." >&2; exit 1; }
-    scp -- "$ARCHIVE" "$UPLOAD:$REMOTE_DIR/$ARCHIVE_TEMP"
-    scp -- "$PROVENANCE" "$UPLOAD:$REMOTE_DIR/$PROVENANCE_TEMP"
-    ssh "$UPLOAD" /usr/bin/chmod 0600 "$REMOTE_DIR/$ARCHIVE_TEMP" "$REMOTE_DIR/$PROVENANCE_TEMP"
-    PUBLISH_STATUS=$(ssh "$UPLOAD" /usr/bin/python3 -I -B - \
-      "$REMOTE_DIR" "$REL" "$REMOTE_NONCE" "$LOCAL_SHA" "$ARCHIVE_SIZE" \
-      "$PROVENANCE_SHA" "$PROVENANCE_SIZE" \
-      < scripts/ops/libexec/publish_release_pair_v1.py)
-    [[ "$PUBLISH_STATUS" =~ ^(published|attached):(published|attached)$ ]] || {
-      echo "[!] Remote release pair publication returned an invalid status." >&2; exit 1;
-    }
-    trap cleanup EXIT
-    echo "[OK] Remote release pair: $PUBLISH_STATUS"
+    bash "$PROJECT/scripts/ops/publish_existing_release.sh" \
+      --rel "$REL" --expected-commit "$EXPECTED_COMMIT" \
+      --archive "$ARCHIVE" --provenance "$PROVENANCE" \
+      --expected-archive-sha256 "$LOCAL_SHA" --expected-provenance-sha256 "$PROVENANCE_SHA" \
+      --upload "$UPLOAD" --remote-dir "$REMOTE_DIR"
   else
     echo "[DRY-RUN] (würde Archiv und Provenance als verifiziertes No-Clobber-Paar veröffentlichen)"
   fi
