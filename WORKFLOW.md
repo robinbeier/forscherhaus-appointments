@@ -391,6 +391,28 @@ affected paths, then records an updated review summary for the new head.
 Repeat the broader review only if scope or risk changed. Do not claim that an
 older review covered code it never inspected.
 
+### Final-head evidence
+
+Record four separate UTC-stamped facts before landing:
+
+```md
+Final-head evidence (UTC)
+
+- Review: <reviewed head SHA>, <base SHA>, <scope>, <reviewer>, <timestamp>, <result>
+- CI: <CI head SHA>, <blocking checks>, <timestamp>, <result>
+- Comments/findings: <PR head>, <timestamp>, <open substantive findings>, <unresolved threads>
+- Landing: <current PR head>, <mergeability>, <CAS SHA checked>, <timestamp>
+```
+
+For example, the [PR #654 review summary](https://github.com/robinbeier/forscherhaus-appointments/pull/654)
+showed Code Review completed for `63db5dafeeb0282688e30d296e8b23ec1d5ad41b`
+at `2026-09-24T03:13:50Z`, while Security Review completed for
+`ea9d39987a07b0284106b53790589ee8b455be51` at `2026-09-24T03:11:07Z`.
+Record the older Security Review marker as `stale` relative to the final head;
+it is not evidence for that head. Apply the existing review gate to the actual
+final head, use the platform run state or a bounded status poll for pending results,
+and do not add a fixed sleep. Re-read the head before recording the evidence.
+
 Treat both human findings and Codex-review findings as real review work until
 they are explicitly addressed or rejected with a clear rationale.
 

@@ -118,3 +118,10 @@ Return an independent final review result covering correctness/security,
 design/maintainability, and tests/regressions. Separate confirmed findings
 from hypotheses and report harness failures as harness failures.
 ```
+
+Before handoff, note the exact base/head SHA, reviewed scope, reviewer, and UTC
+capture time. The primary records that result alongside separate CI, comment,
+and landing facts in the [final-head evidence](../WORKFLOW.md#final-head-evidence)
+format. Mark a bot completion for an older head as `stale`, rather than using
+it as proof for the current head. Revalidate the exact base/head and scope
+before recording the result.
