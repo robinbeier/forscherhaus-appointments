@@ -12,6 +12,7 @@
             <file>./tests/Integration/Controllers/UnavailabilitiesApiHttpWriteTest.php</file>
             <file>./tests/Integration/Controllers/BlockedPeriodsApiHttpWriteTest.php</file>
             <file>./tests/Integration/Controllers/ServiceCategoriesApiHttpWriteTest.php</file>
+            <file>./tests/Integration/Controllers/ServiceCategoriesApiPostWriteFailureTest.php</file>
             <file>./tests/Integration/Controllers/AppointmentsApiHttpWriteTest.php</file>
             <file>./tests/Integration/Controllers/StaffSettingsApiHttpTest.php</file>
             <file>./tests/Integration/Controllers/RescheduleCutoffHttpTest.php</file>
@@ -37,6 +38,7 @@
             <file>./tests/Integration/Controllers/BookingDownloadHttpTest.php</file>
             <file>./tests/Integration/Controllers/ReadOnlyProbeHttpTest.php</file>
             <file>./tests/Integration/Controllers/CspReportHttpTest.php</file>
+            <file>./tests/Unit/Controllers/ServiceCategoriesApiDeleteStatusTest.php</file>
             <file>./tests/Integration/DefenseVerificationFixtureTest.php</file>
             <file>./tests/Unit/Scripts/GateHttpClientTest.php</file>
             <file>./tests/Unit/Scripts/OrdinaryLiveProbeWrapperTest.php</file>

@@ -214,10 +214,22 @@ selbst zu löschen. Kategorieänderungen wirken über die bestehenden Lese-Joins
 auf die Darstellung dieser Services; der Kategorien-Schreibpfad führt keine
 zusätzlichen Buchungs- oder Kalenderwrites aus.
 
+POST und PUT halten Speicherung, erneutes Lesen und API-Antwortprojektion in
+einer Transaktion. Schlägt ein Schritt vor dem Commit fehl, darf eine
+Fehlerantwort keine persistierte Kategorieänderung hinterlassen. Ein
+fehlgeschlagenes Datenbank-DELETE darf nicht als HTTP 204 ausgegeben werden.
+Kontrollierte lokale Fehlerinjektion prüft die Antwort zusammen mit dem
+Datenbankzustand; Verbindungsabbrüche nach einem erfolgreichen Commit bleiben
+eine gesonderte, hier nicht gelöste Transportgrenze.
+
 `ServiceCategoriesApiHttpWriteTest` prüft diese Grenzen über echtes isoliertes
 HTTP und eine frische Datenbank mit eigenen A/B-Kategorien und eigenem Service.
 Er vergleicht die vollständigen eigenen Zeilen, die Verfügbarkeit des eigenen
 verknüpften Service vor und nach der Kategorielöschung und die Bereinigung.
+`ServiceCategoriesApiPostWriteFailureTest` prüft die Controller-Antwort und den
+echten isolierten DB-Zustand nach injizierten Fehlern beim erneuten Lesen;
+`ServiceCategoriesApiDeleteStatusTest` prüft die Antwort bei einer injizierten
+fehlgeschlagenen Low-Level-Löschung.
 Dieser lokale Nachweis belegt weder produktive Auslieferung noch alle
 konkurrierenden oder fehlerinduzierten Datenbankabläufe.
 

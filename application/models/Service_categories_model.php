@@ -134,7 +134,9 @@ class Service_categories_model extends EA_Model
      */
     public function delete(int $service_category_id): void
     {
-        $this->db->delete('service_categories', ['id' => $service_category_id]);
+        if (!$this->db->delete('service_categories', ['id' => $service_category_id])) {
+            throw new RuntimeException('Could not delete service-category.');
+        }
     }
 
     /**
