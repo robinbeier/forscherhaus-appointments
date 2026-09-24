@@ -45,7 +45,7 @@ authority. A missing, stale, contradictory, or unknown fact blocks the entry.
    release-entry gate. Bind `ACTIVE_RELEASE_ID` to the **currently active**
    release from the last trusted deployment receipt and the fresh inventory;
    it is not the new candidate ID. Run from the reviewed, clean checkout: the
-   preflight derives the three expected installed-tool hashes from tracked,
+   preflight derives the four expected installed-tool hashes from tracked,
    unchanged local sources rather than accepting hashes copied from the remote
    query. The new candidate's archive and provenance stay bound separately in
    step 1.
@@ -94,6 +94,33 @@ authority. A missing, stale, contradictory, or unknown fact blocks the entry.
    disabled/inactive; enabling it is a separate production change. Restore and
    verify the exact before-state after any temporary pause.
    See [retention operations](production-release-archive-dump-retention.md#marker-and-monitoring).
+
+   For the backup continuity timer, use the installed, separately reviewed
+   `fh-backup-timer-transition-v1` operator helper after its path, owner, mode,
+   file identity, and SHA-256 have been bound to the release operation. Its
+   source is `scripts/ops/libexec/backup_timer_transition_v1.py`; a checkout
+   copy is not an installed production tool. Assign one fresh 32-character
+   lowercase hex run ID to the release and retain it for both calls:
+
+   ```bash
+   ssh root@booking-server /usr/bin/python3 -I -B \
+     /usr/local/libexec/fh-backup-timer-transition-v1 pause "$RUN_ID"
+   # Run the separately locked backup and isolated restore under their own contracts.
+   ssh root@booking-server /usr/bin/python3 -I -B \
+     /usr/local/libexec/fh-backup-timer-transition-v1 restore "$RUN_ID"
+   ```
+
+   Require the matching `backup_timer_transition.v1` success receipt and exit
+   `0` for **each** call. The helper acquires the shared lock afresh for each
+   timer transition, rejects concurrent activity and recovery markers inside
+   the lock, records the bound before-state, and releases the lock so backup
+   and restore can acquire it independently. A busy lock, mismatched run or
+   identity, missing or contradictory receipt, failed timer change, or SSH
+   interruption is unresolved: inspect the exact state and recover under a
+   separately bound plan. Do not issue a second pause/restore merely because
+   the first result is missing. Confirm the full timer and service metadata
+   from the read-only snapshot again after the restore. Free-standing
+   `systemctl disable/enable` commands are not the release entry.
 
    For the host facts the inventory does not report, use a fixed read-only
    query and keep only its metadata/classes (never state-file contents):
@@ -146,6 +173,20 @@ authority. A missing, stale, contradictory, or unknown fact blocks the entry.
    application rollback does not undo a database migration. See
    [backup producer](production-backup-set-producer.md)
    and [deployment evidence authority](../deployment-evidence-authority-v1.md).
+
+## First installation of the timer helper
+
+The timer-transition helper is initially absent on existing hosts. Before
+its first use, complete a separate, reviewed installation step from the exact
+successfully checked `main` commit: bind the tracked source SHA-256 and the
+absent destination, transfer a no-clobber candidate, and install it as a
+root-owned, single-link regular file with mode `0555` at
+`/usr/local/libexec/fh-backup-timer-transition-v1` while holding the shared
+production lock. Verify installed SHA-256, owner, mode, file identity, and
+unchanged timer and service state before releasing the lock. An occupied
+destination or mismatch stops; do not overwrite it. The read-only release
+preflight binds this fourth helper to the reviewed source. Installation
+alone does not authorize a timer transition, backup, or application deploy.
 
 ## Controlled execution and bounded verification
 

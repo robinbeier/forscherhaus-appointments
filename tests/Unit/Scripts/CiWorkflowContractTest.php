@@ -287,6 +287,14 @@ class CiWorkflowContractTest extends TestCase
             $rootDeploymentScript,
         );
         self::assertStringContainsString('tests/Unit/Scripts/BackupSetProducerRootTest.php', $rootDeploymentScript);
+        self::assertStringContainsString(
+            'tests/Unit/Scripts/BackupTimerTransitionContractTest.php',
+            $rootDeploymentScript,
+        );
+        self::assertStringContainsString(
+            'tests/Unit/Scripts/ProdReleaseReadinessPreflightTest.php',
+            $rootDeploymentScript,
+        );
         self::assertStringContainsString('tests/Unit/Scripts/PublishReleasePairRootTest.php', $rootDeploymentScript);
         self::assertStringContainsString('tests/Unit/Scripts/SessionRetentionRootTest.php', $rootDeploymentScript);
         self::assertStringContainsString(

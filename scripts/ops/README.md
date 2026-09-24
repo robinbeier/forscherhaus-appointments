@@ -321,6 +321,15 @@ Dump restore attestation:
 
 Closed production backup sets:
 
+- The release-only backup-timer transition helper is tracked at
+  `scripts/ops/libexec/backup_timer_transition_v1.py`. Its fixed installed
+  path is `/usr/local/libexec/fh-backup-timer-transition-v1`, root-owned mode
+  `0555`. Install it no-clobber under the shared production lock from a
+  reviewed, SHA-256-bound `main` source; verify path, owner, mode, identity,
+  and hash before first use. The release-readiness preflight checks its
+  installed hash against the tracked source. See
+  `docs/ops/production-release-entry.md` for the separate installation and
+  pause/restore gates.
 - Install `scripts/ops/libexec/backup_set_producer_v1.py` as root-owned mode
   `0555` at `/usr/local/libexec/fh-backup-set-producer-v1`.
 - Install `scripts/ops/libexec/backup_set_producer_supervisor_v1.sh` as
