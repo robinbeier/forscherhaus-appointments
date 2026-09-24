@@ -42,6 +42,8 @@ The inventory never fetches, prunes or deletes. It reports a safe fast-forward
 refresh proposal only when the primary checkout is clean, attached to `main`,
 and remote freshness is observable. The proposed merge is bound to the exact
 observed remote commit; if that commit cannot be fetched, rerun the inventory.
+When the remote commit is not yet available locally, fetch the branch and rerun
+the inventory before relying on a refresh proposal.
 A prunable registration is only a review
 suggestion; inspect it and run Git's prune command manually when its ownership
 is clear. Local role labels are candidates, not proof of current PR or release

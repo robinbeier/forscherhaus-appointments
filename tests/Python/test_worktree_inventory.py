@@ -42,11 +42,13 @@ class WorktreeInventoryTest(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def advance_remote(self):
+    def advance_remote(self, fetch_primary=True):
         (self.external / "README.md").write_text("remote advance\n")
         git(self.external, "add", "README.md")
         git(self.external, "commit", "-m", "advance remote")
         git(self.external, "push", "origin", "main")
+        if fetch_primary:
+            git(self.primary, "fetch", "origin", "main")
 
     def test_reports_stale_primary_and_prunable_registration_without_mutation(self):
         self.advance_remote()
@@ -71,6 +73,41 @@ class WorktreeInventoryTest(unittest.TestCase):
         self.assertIn("no automatic prune", report["prunable_suggestions"][0]["action"])
         self.assertTrue(missing.parent.exists())
         self.assertFalse(missing.exists())
+
+    def test_unfetched_remote_commit_does_not_produce_refresh_command(self):
+        self.advance_remote(fetch_primary=False)
+
+        code, report = module.inventory(["--repo", str(self.primary)])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(report["primary"]["freshness"], "unknown")
+        self.assertFalse(report["safe_primary_refresh"]["safe_ff_only"])
+        self.assertEqual(report["safe_primary_refresh"]["commands"], [])
+
+    def test_local_main_ahead_of_remote_does_not_produce_refresh_command(self):
+        (self.primary / "README.md").write_text("local advance\n")
+        git(self.primary, "add", "README.md")
+        git(self.primary, "commit", "-m", "local advance")
+
+        code, report = module.inventory(["--repo", str(self.primary)])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(report["primary"]["freshness"], "ahead")
+        self.assertFalse(report["safe_primary_refresh"]["safe_ff_only"])
+        self.assertEqual(report["safe_primary_refresh"]["commands"], [])
+
+    def test_diverged_main_does_not_produce_refresh_command(self):
+        self.advance_remote()
+        (self.primary / "README.md").write_text("local divergence\n")
+        git(self.primary, "add", "README.md")
+        git(self.primary, "commit", "-m", "local divergence")
+
+        code, report = module.inventory(["--repo", str(self.primary)])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(report["primary"]["freshness"], "diverged")
+        self.assertFalse(report["safe_primary_refresh"]["safe_ff_only"])
+        self.assertEqual(report["safe_primary_refresh"]["commands"], [])
 
     def test_human_output_for_unavailable_inventory_is_compact_unknown(self):
         result = subprocess.run(
@@ -280,6 +317,16 @@ class WorktreeInventoryTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(report["status"], "ready")
         self.assertIsNotNone(report["authority"]["pull_request"])
+
+    def test_newline_in_primary_path_is_preserved_by_porcelain_inventory(self):
+        newline_primary = self.root / "primary\ncheckout"
+        subprocess.run(["git", "clone", "-q", str(self.remote), str(newline_primary)], check=True)
+
+        code, report = module.inventory(["--repo", str(newline_primary), "--show-paths"])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(report["primary"]["path"], str(newline_primary.resolve()))
+        self.assertTrue(report["primary"]["identity_verified"])
 
     def test_reused_registered_path_cannot_masquerade_as_worktree(self):
         secondary = self.root / "pr-candidate"

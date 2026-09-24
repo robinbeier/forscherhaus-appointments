@@ -44,7 +44,7 @@ def _text(value: bytes) -> str:
 def _parse_worktrees(output: str) -> list[dict[str, object]]:
     entries: list[dict[str, object]] = []
     current: dict[str, object] | None = None
-    for line in output.splitlines() + [""]:
+    for line in output.split("\0"):
         if line.startswith("worktree "):
             if current:
                 entries.append(current)
@@ -137,11 +137,11 @@ def inventory(
         code, output, _ = runner(repo, list(command))
         return code, _text(output)
 
-    code, raw_worktrees = git("worktree", "list", "--porcelain")
+    code, raw_worktree_bytes, _ = runner(repo, ["worktree", "list", "--porcelain", "-z"])
     if code != 0:
         report = {"status": "unknown", "repository": str(repo.name), "error": "worktree inventory unavailable"}
         return 1, report
-    entries = _parse_worktrees(raw_worktrees)
+    entries = _parse_worktrees(raw_worktree_bytes.decode("utf-8", errors="replace"))
     if not entries:
         report = {"status": "unknown", "repository": str(repo.name), "error": "no worktree registered"}
         return 1, report
@@ -199,8 +199,24 @@ def inventory(
         and re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", remote_fields[0])
         else None
     )
-    stale = bool(local_main and remote_sha and local_main != remote_sha)
-    primary["freshness"] = "stale" if stale else ("current" if local_main and remote_sha else "unknown")
+    freshness = "unknown"
+    if local_main and remote_sha and primary.get("identity_verified") is True:
+        if local_main == remote_sha:
+            freshness = "current"
+        else:
+            shallow_code, shallow = git("rev-parse", "--is-shallow-repository")
+            object_code, _ = git("cat-file", "-e", f"{remote_sha}^{{commit}}")
+            if shallow_code == 0 and shallow == "false" and object_code == 0:
+                local_ancestor_code, _ = git("merge-base", "--is-ancestor", local_main, remote_sha)
+                remote_ancestor_code, _ = git("merge-base", "--is-ancestor", remote_sha, local_main)
+                if local_ancestor_code == 0 and remote_ancestor_code == 1:
+                    freshness = "stale"
+                elif local_ancestor_code == 1 and remote_ancestor_code == 0:
+                    freshness = "ahead"
+                elif local_ancestor_code == 1 and remote_ancestor_code == 1:
+                    freshness = "diverged"
+    stale = freshness == "stale"
+    primary["freshness"] = freshness
     primary["remote_main_sha"] = remote_sha
 
     prune_code, prune_output = git("worktree", "prune", "--dry-run", "-v")
@@ -230,8 +246,14 @@ def inventory(
                 f"From <{primary['label']}>: git fetch {shlex.quote(remote_display)} {shlex.quote(args.branch)}",
                 f"From <{primary['label']}>: git merge --ff-only {remote_sha}",
             ]
-    elif not stale:
-        refresh["reason"] = "primary is current or remote freshness is unknown"
+    elif freshness == "current":
+        refresh["reason"] = "primary is current"
+    elif freshness == "ahead":
+        refresh["reason"] = "local main is ahead of remote main"
+    elif freshness == "diverged":
+        refresh["reason"] = "local and remote main have diverged"
+    elif freshness == "unknown":
+        refresh["reason"] = "remote ancestry is unavailable; fetch the branch and rerun the inventory"
     else:
         refresh["reason"] = "primary must be clean, on main, and remote main must be readable"
 
@@ -245,7 +267,7 @@ def inventory(
         "release": next((item["display_path"] for item in entries if item["role"] == "release-candidate" and eligible_candidate(item)), None),
         "note": "Roles are local candidates; PR/release authority still requires current external evidence.",
     }
-    status = "blocked" if dirty or prunable or stale else "ready"
+    status = "blocked" if dirty or prunable or freshness in {"stale", "ahead", "diverged"} else "ready"
     primary_not_authoritative = primary_branch != args.branch or primary.get("freshness") != "current"
     if primary_not_authoritative or any(item.get("dirty") is None for item in entries) or remote_sha is None or prune_code != 0:
         status = "unknown" if status == "ready" else status
