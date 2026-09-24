@@ -129,11 +129,7 @@ class Service_categories_api_v1 extends EA_Controller
                 unset($service_category['id']);
             }
 
-            $service_category_id = $this->service_categories_model->save($service_category);
-
-            $created_service_category = $this->service_categories_model->find($service_category_id);
-
-            $this->service_categories_model->api_encode($created_service_category);
+            $created_service_category = $this->saveAndEncode($service_category);
 
             json_response($created_service_category, 201);
         } catch (Throwable $e) {
@@ -186,11 +182,7 @@ class Service_categories_api_v1 extends EA_Controller
 
             $service_category['id'] = $id;
 
-            $service_category_id = $this->service_categories_model->save($service_category);
-
-            $updated_service_category = $this->service_categories_model->find($service_category_id);
-
-            $this->service_categories_model->api_encode($updated_service_category);
+            $updated_service_category = $this->saveAndEncode($service_category);
 
             json_response($updated_service_category);
         } catch (Throwable $e) {
@@ -225,6 +217,35 @@ class Service_categories_api_v1 extends EA_Controller
             response('', 204);
         } catch (Throwable $e) {
             json_exception($e);
+        }
+    }
+
+    /** Keep the write and response projection atomic before reporting success. */
+    private function saveAndEncode(array $service_category): array
+    {
+        if ($this->db->trans_active() || !$this->db->trans_begin()) {
+            throw new RuntimeException('Could not start service-category write transaction.');
+        }
+
+        try {
+            $service_category_id = $this->service_categories_model->save($service_category);
+            $saved_service_category = $this->service_categories_model->find($service_category_id);
+            $this->service_categories_model->api_encode($saved_service_category);
+
+            // A response that cannot be represented as JSON must not commit a write.
+            json_encode($saved_service_category, JSON_THROW_ON_ERROR);
+
+            if (!$this->db->trans_status() || !$this->db->trans_commit()) {
+                throw new RuntimeException('Could not commit service-category write transaction.');
+            }
+
+            return $saved_service_category;
+        } catch (Throwable $error) {
+            if ($this->db->trans_active() && !$this->db->trans_rollback()) {
+                throw new RuntimeException('Could not roll back service-category write transaction.', 0, $error);
+            }
+
+            throw $error;
         }
     }
 
