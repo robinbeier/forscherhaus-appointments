@@ -70,8 +70,9 @@ final class DefenseCycleHttpServer
             if (!is_resource($this->process)) {
                 throw new RuntimeException('Could not start the isolated HTTP server.');
             }
-            for ($attempt = 0; $attempt < 50; $attempt++) {
-                $connection = @stream_socket_client('tcp://' . $address, $errno, $error, 0.1);
+            // Preserve the readiness budget while avoiding a 100 ms stall for every server start.
+            for ($attempt = 0; $attempt < 250; $attempt++) {
+                $connection = @stream_socket_client('tcp://' . $address, $errno, $error, 0.02);
                 if ($connection) {
                     fclose($connection);
                     return;
@@ -79,7 +80,7 @@ final class DefenseCycleHttpServer
                 if (!proc_get_status($this->process)['running']) {
                     throw new RuntimeException('Isolated HTTP server exited during startup.');
                 }
-                usleep(100000);
+                usleep(20000);
             }
             throw new RuntimeException('Isolated HTTP server startup timed out.');
         } catch (\Throwable $error) {
