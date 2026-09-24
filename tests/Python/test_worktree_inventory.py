@@ -3,6 +3,7 @@ import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import shlex
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -262,6 +263,24 @@ class WorktreeInventoryTest(unittest.TestCase):
         self.assertFalse(marker.exists())
         self.assertEqual(report["primary"]["freshness"], "unknown")
         self.assertIsNone(report["authority"]["source"])
+
+    def test_git_exec_path_wrapper_is_not_executed(self):
+        marker = self.root / "git-exec-path-ran"
+        exec_path = self.root / "git-exec-path"
+        exec_path.mkdir()
+        real_upload_pack = shutil.which("git-upload-pack")
+        self.assertIsNotNone(real_upload_pack)
+        wrapper = exec_path / "git-upload-pack"
+        wrapper.write_text(f"#!/bin/sh\ntouch {marker}\nexec {shlex.quote(real_upload_pack)} \"$@\"\n")
+        wrapper.chmod(0o755)
+
+        with mock.patch.dict(module.os.environ, {"GIT_EXEC_PATH": str(exec_path)}, clear=False):
+            code, report = module.inventory(["--repo", str(self.primary)])
+
+        self.assertEqual(code, 0)
+        self.assertFalse(marker.exists())
+        self.assertEqual(report["primary"]["freshness"], "current")
+        self.assertIsNotNone(report["authority"]["source"])
 
     def test_reports_dirty_primary_and_blocks_refresh(self):
         (self.primary / "local-note.txt").write_text("uncommitted\n")
@@ -743,10 +762,10 @@ class WorktreeInventoryTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(captured["env"]["GIT_NO_LAZY_FETCH"], "1")
         self.assertEqual(captured["env"]["GIT_NO_REPLACE_OBJECTS"], "1")
-        for name in module.GIT_REPOSITORY_ENV:
-            if name == "GIT_NO_REPLACE_OBJECTS":
-                continue
-            self.assertNotIn(name, captured["env"])
+        self.assertEqual(
+            {name for name in captured["env"] if name.startswith("GIT_")},
+            {"GIT_ALLOW_PROTOCOL", "GIT_NO_LAZY_FETCH", "GIT_NO_REPLACE_OBJECTS", "GIT_OPTIONAL_LOCKS"},
+        )
 
     def test_remote_url_credentials_are_redacted_from_default_report(self):
         secret_url = "https://user:secret@example.invalid/repo.git"

@@ -20,26 +20,6 @@ from typing import Callable
 
 sys.dont_write_bytecode = True
 TIMEOUT = 8
-GIT_REPOSITORY_ENV = (
-    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-    "GIT_CONFIG",
-    "GIT_CONFIG_PARAMETERS",
-    "GIT_CONFIG_COUNT",
-    "GIT_GRAFT_FILE",
-    "GIT_DIR",
-    "GIT_IMPLICIT_WORK_TREE",
-    "GIT_INDEX_FILE",
-    "GIT_INTERNAL_SUPER_PREFIX",
-    "GIT_OBJECT_DIRECTORY",
-    "GIT_NAMESPACE",
-    "GIT_NO_REPLACE_OBJECTS",
-    "GIT_PREFIX",
-    "GIT_REPLACE_REF_BASE",
-    "GIT_SHALLOW_FILE",
-    "GIT_WORK_TREE",
-    "GIT_COMMON_DIR",
-)
-GIT_CONFIG_OVERRIDE_ENV = ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTEM")
 OPERATION_MARKERS = (
     "MERGE_HEAD",
     "CHERRY_PICK_HEAD",
@@ -58,9 +38,7 @@ def _run_git(repo: Path, arguments: list[str], timeout: int = TIMEOUT) -> tuple[
         child_env = {
             key: value
             for key, value in os.environ.items()
-            if key not in GIT_REPOSITORY_ENV
-            and key not in GIT_CONFIG_OVERRIDE_ENV
-            and not key.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"))
+            if not key.startswith("GIT_")
         }
         child_env.update(
             {
