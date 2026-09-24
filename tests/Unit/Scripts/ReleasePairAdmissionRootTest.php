@@ -14,6 +14,10 @@ final class ReleasePairAdmissionRootTest extends TestCase
     private string $release = 'ea_admission_test';
     private string $archive;
     private string $provenance;
+    /** @var array{dev:int,ino:int}|null */
+    private ?array $createdDirectory = null;
+    /** @var array<string,array{dev:int,ino:int}> */
+    private array $ownedFiles = [];
 
     protected function setUp(): void
     {
@@ -24,25 +28,40 @@ final class ReleasePairAdmissionRootTest extends TestCase
             $this->markTestSkipped('/root/releases already exists; the root test will not mutate it.');
         }
         $this->helper = dirname(__DIR__, 3) . '/scripts/ops/libexec/release_pair_admission_v1.py';
-        mkdir('/root/releases', 0700, true);
+        self::assertTrue(mkdir('/root/releases', 0700, true));
+        $this->createdDirectory = $this->fileIdentity('/root/releases');
         $this->archive = '/root/releases/' . $this->release . '.tar.gz';
         $this->provenance = '/root/releases/' . $this->release . '.build-provenance.json';
-        file_put_contents($this->archive, 'archive');
-        file_put_contents($this->provenance, '{"schema":"test"}');
+        self::assertNotFalse(file_put_contents($this->archive, 'archive'));
+        $this->ownedFiles[$this->archive] = $this->fileIdentity($this->archive);
+        self::assertNotFalse(file_put_contents($this->provenance, '{"schema":"test"}'));
+        $this->ownedFiles[$this->provenance] = $this->fileIdentity($this->provenance);
         chmod($this->archive, 0600);
         chmod($this->provenance, 0600);
     }
 
     protected function tearDown(): void
     {
-        if (is_dir('/root/releases') && !is_link('/root/releases')) {
-            foreach (scandir('/root/releases') ?: [] as $leaf) {
-                if ($leaf !== '.' && $leaf !== '..') {
-                    unlink('/root/releases/' . $leaf);
-                }
-            }
-            rmdir('/root/releases');
+        if ($this->createdDirectory === null || is_link('/root/releases') || !is_dir('/root/releases')) {
+            return;
         }
+        if ($this->fileIdentity('/root/releases') !== $this->createdDirectory) {
+            self::fail('Release fixture directory identity changed; refusing cleanup.');
+        }
+        foreach ($this->ownedFiles as $path => $identity) {
+            if (file_exists($path) || is_link($path)) {
+                if ($this->fileIdentity($path) !== $identity) {
+                    self::fail('Release fixture file identity changed; refusing cleanup.');
+                }
+                unlink($path);
+            }
+        }
+        self::assertSame(
+            ['.', '..'],
+            scandir('/root/releases'),
+            'Unexpected release files remain; refusing directory removal.',
+        );
+        rmdir('/root/releases');
     }
 
     public function testExactPairIsVerifiedWithPayloadHashesAndSizes(): void
@@ -61,6 +80,7 @@ final class ReleasePairAdmissionRootTest extends TestCase
         $provenanceHash = hash_file('sha256', $this->provenance);
         $provenanceSize = (int) filesize($this->provenance);
         unlink($this->provenance);
+        unset($this->ownedFiles[$this->provenance]);
         $result = $this->runAdmission(null, null, $provenanceHash, $provenanceSize);
         self::assertSame(70, $result['exit']);
         self::assertSame('pair_missing', $this->payload($result)['result_class']);
@@ -80,7 +100,10 @@ final class ReleasePairAdmissionRootTest extends TestCase
     {
         $real = '/root/releases/real-provenance';
         rename($this->provenance, $real);
+        unset($this->ownedFiles[$this->provenance]);
+        $this->ownedFiles[$real] = $this->fileIdentity($real);
         symlink($real, $this->provenance);
+        $this->ownedFiles[$this->provenance] = $this->fileIdentity($this->provenance);
         $result = $this->runAdmission();
         self::assertSame(70, $result['exit']);
         self::assertSame('pair_occupied', $this->payload($result)['result_class']);
@@ -123,5 +146,14 @@ final class ReleasePairAdmissionRootTest extends TestCase
     private function payload(array $result): array
     {
         return json_decode($result['stdout'], true, 32, JSON_THROW_ON_ERROR);
+    }
+
+    /** @return array{dev:int,ino:int} */
+    private function fileIdentity(string $path): array
+    {
+        clearstatcache(true, $path);
+        $stat = lstat($path);
+        self::assertIsArray($stat);
+        return ['dev' => $stat['dev'], 'ino' => $stat['ino']];
     }
 }
