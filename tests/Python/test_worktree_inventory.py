@@ -1,6 +1,7 @@
 import importlib.util
 import json
 from pathlib import Path
+import shlex
 import subprocess
 import tempfile
 import unittest
@@ -62,7 +63,7 @@ class WorktreeInventoryTest(unittest.TestCase):
         self.assertEqual(report["counts"]["prunable"], 1)
         self.assertEqual(report["counts"]["dirty"], 0)
         self.assertTrue(report["safe_primary_refresh"]["safe_ff_only"])
-        self.assertIn("merge --ff-only origin/main", report["safe_primary_refresh"]["commands"][1])
+        self.assertIn(f"merge --ff-only {git(self.external, 'rev-parse', 'HEAD')}", report["safe_primary_refresh"]["commands"][1])
         self.assertNotIn(str(self.primary), " ".join(report["safe_primary_refresh"]["commands"]))
         self.assertNotIn("--prune", " ".join(report["safe_primary_refresh"]["commands"]))
         self.assertIsNone(report["authority"]["source"])
@@ -135,6 +136,21 @@ class WorktreeInventoryTest(unittest.TestCase):
         self.assertEqual(report["primary"]["freshness"], "unknown")
         self.assertIsNone(report["primary"]["remote_main_sha"])
 
+    def test_malformed_remote_identity_is_unknown_and_nonzero(self):
+        real_runner = module._run_git
+
+        def malformed_remote_runner(repo, arguments, timeout=module.TIMEOUT):
+            if arguments[:1] == ["ls-remote"]:
+                return 0, b"not-a-commit\trefs/heads/main\n", b""
+            return real_runner(repo, arguments, timeout)
+
+        code, report = module.inventory(["--repo", str(self.primary)], runner=malformed_remote_runner)
+
+        self.assertEqual(code, 1)
+        self.assertEqual(report["status"], "unknown")
+        self.assertIsNone(report["primary"]["remote_main_sha"])
+        self.assertFalse(report["safe_primary_refresh"]["safe_ff_only"])
+
     def test_custom_remote_path_is_redacted_from_default_report_and_commands(self):
         self.advance_remote()
 
@@ -145,7 +161,22 @@ class WorktreeInventoryTest(unittest.TestCase):
         self.assertEqual(report["remote"], "<remote>")
         self.assertNotIn(str(self.remote), serialized)
         self.assertNotIn(str(self.remote), " ".join(report["safe_primary_refresh"]["commands"]))
-        self.assertIn("git fetch '<remote>' main", report["safe_primary_refresh"]["commands"][0])
+        self.assertIn("fetch '<remote>' main", report["safe_primary_refresh"]["commands"][0])
+
+    def test_custom_remote_refresh_commands_fast_forward_the_primary(self):
+        self.advance_remote()
+
+        code, report = module.inventory(
+            ["--repo", str(self.primary), "--remote", str(self.remote), "--show-paths"]
+        )
+
+        self.assertEqual(code, 1)
+        commands = report["safe_primary_refresh"]["commands"]
+        self.assertEqual(len(commands), 2)
+        self.assertIn(f"merge --ff-only {git(self.external, 'rev-parse', 'HEAD')}", commands[1])
+        for command in commands:
+            subprocess.run(shlex.split(command), check=True, capture_output=True)
+        self.assertEqual(git(self.primary, "rev-parse", "HEAD"), git(self.external, "rev-parse", "HEAD"))
 
     def test_remote_url_credentials_are_redacted_from_default_report(self):
         secret_url = "https://user:secret@example.invalid/repo.git"
@@ -157,6 +188,30 @@ class WorktreeInventoryTest(unittest.TestCase):
         self.assertEqual(report["remote"], "<remote>")
         self.assertNotIn("secret", serialized)
         self.assertNotIn(secret_url, serialized)
+
+    def test_remote_url_credentials_remain_redacted_with_show_paths(self):
+        self.advance_remote()
+        secret_url = "https://user:secret@example.invalid/repo.git"
+        remote_sha = git(self.external, "rev-parse", "HEAD")
+        real_runner = module._run_git
+
+        def credential_remote_runner(repo, arguments, timeout=module.TIMEOUT):
+            if arguments[:1] == ["ls-remote"]:
+                return 0, f"{remote_sha}\trefs/heads/main\n".encode(), b""
+            return real_runner(repo, arguments, timeout)
+
+        code, report = module.inventory(
+            ["--repo", str(self.primary), "--remote", secret_url, "--show-paths"],
+            runner=credential_remote_runner,
+        )
+        serialized = json.dumps(report)
+
+        self.assertEqual(code, 1)
+        self.assertTrue(report["safe_primary_refresh"]["safe_ff_only"])
+        self.assertEqual(report["remote"], "<remote>")
+        self.assertNotIn("secret", serialized)
+        self.assertNotIn(secret_url, serialized)
+        self.assertIn("fetch '<remote>' main", report["safe_primary_refresh"]["commands"][0])
 
     def test_status_failure_blocks_refresh_without_claiming_dirty(self):
         real_runner = module._run_git
@@ -215,6 +270,36 @@ class WorktreeInventoryTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(report["status"], "blocked")
         self.assertIsNone(report["authority"]["release"])
+
+    def test_valid_clean_secondary_worktree_is_a_candidate(self):
+        secondary = self.root / "pr-candidate"
+        git(self.primary, "worktree", "add", "-b", "codex/candidate", str(secondary))
+
+        code, report = module.inventory(["--repo", str(self.primary)])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(report["status"], "ready")
+        self.assertIsNotNone(report["authority"]["pull_request"])
+
+    def test_reused_registered_path_cannot_masquerade_as_worktree(self):
+        secondary = self.root / "pr-candidate"
+        git(self.primary, "worktree", "add", "-b", "codex/candidate", str(secondary))
+        import shutil
+        shutil.rmtree(secondary)
+        subprocess.run(["git", "init", "--initial-branch=main", str(secondary)], check=True, capture_output=True)
+        git(secondary, "config", "user.email", "test@example.invalid")
+        git(secondary, "config", "user.name", "Replacement Repository")
+        (secondary / "README.md").write_text("replacement\n")
+        git(secondary, "add", "README.md")
+        git(secondary, "commit", "-m", "replacement")
+
+        code, report = module.inventory(["--repo", str(self.primary)])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(report["status"], "unknown")
+        self.assertIsNone(report["authority"]["pull_request"])
+        replacement = next(item for item in report["worktrees"] if item["role"] == "pull-request-candidate")
+        self.assertFalse(replacement["identity_verified"])
 
     def test_labels_are_unique_when_worktree_basenames_collide(self):
         first = self.root / "one" / "checkout"

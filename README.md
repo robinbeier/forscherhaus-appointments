@@ -40,10 +40,13 @@ python3 scripts/ci/worktree_inventory.py --json
 
 The inventory never fetches, prunes or deletes. It reports a safe fast-forward
 refresh proposal only when the primary checkout is clean, attached to `main`,
-and remote freshness is observable. A prunable registration is only a review
+and remote freshness is observable. The proposed merge is bound to the exact
+observed remote commit; if that commit cannot be fetched, rerun the inventory.
+A prunable registration is only a review
 suggestion; inspect it and run Git's prune command manually when its ownership
 is clear. Local role labels are candidates, not proof of current PR or release
-authority.
+authority. `--show-paths` reveals checkout paths for local diagnosis, but never
+prints a remote URL containing account information.
 
 ```bash
 ./scripts/setup-worktree.sh

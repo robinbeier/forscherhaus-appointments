@@ -100,6 +100,8 @@ def _display_path(path: str, label: str, show_paths: bool) -> str:
 
 def _display_remote(remote: str, show_paths: bool) -> str:
     """Keep remote URLs, paths, and embedded credentials out of default output."""
+    if "://" in remote or "@" in remote:
+        return "<remote>"
     if show_paths or re.fullmatch(r"[A-Za-z0-9._-]+", remote):
         return remote
     return "<remote>"
@@ -144,6 +146,12 @@ def inventory(
         report = {"status": "unknown", "repository": str(repo.name), "error": "no worktree registered"}
         return 1, report
 
+    common_code, raw_common_dir = git("rev-parse", "--path-format=absolute", "--git-common-dir")
+    if common_code != 0 or not raw_common_dir:
+        report = {"status": "unknown", "repository": str(repo.name), "error": "worktree identity unavailable"}
+        return 1, report
+    common_dir = Path(raw_common_dir).resolve(strict=False)
+
     _assign_labels(entries)
     for index, entry in enumerate(entries):
         path = Path(str(entry["path"]))
@@ -151,11 +159,29 @@ def inventory(
         entry["exists"] = exists
         entry["role"] = _role(entry, index)
         entry["dirty"] = None
+        entry["identity_verified"] = False
         if exists:
-            status_code, status, _ = runner(path, ["status", "--porcelain=v1", "--untracked-files=all"])
-            entry["dirty"] = status_code == 0 and bool(status.strip())
-            if status_code != 0:
-                entry["dirty"] = None
+            common_status, path_common_dir, _ = runner(path, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
+            head_status, path_head, _ = runner(path, ["rev-parse", "HEAD"])
+            branch_status, path_branch, _ = runner(path, ["symbolic-ref", "-q", "HEAD"])
+            registered_branch = entry.get("branch")
+            branch_matches = (
+                branch_status == 0 and _text(path_branch) == f"refs/heads/{registered_branch}"
+                if registered_branch
+                else branch_status == 1 and entry.get("detached") is True
+            )
+            entry["identity_verified"] = (
+                common_status == 0
+                and bool(path_common_dir)
+                and Path(_text(path_common_dir)).resolve(strict=False) == common_dir
+                and head_status == 0
+                and _text(path_head) == entry.get("sha")
+                and branch_matches
+            )
+            if entry["identity_verified"]:
+                status_code, status, _ = runner(path, ["status", "--porcelain=v1", "--untracked-files=all"])
+                if status_code == 0:
+                    entry["dirty"] = bool(status.strip())
         entry["display_path"] = _display_path(str(path), str(entry["label"]), args.show_paths)
 
     primary = entries[0]
@@ -164,7 +190,15 @@ def inventory(
     if primary_branch == args.branch and primary.get("sha"):
         local_main = str(primary["sha"])
     remote_code, remote_main = git("ls-remote", args.remote, f"refs/heads/{args.branch}")
-    remote_sha = remote_main.split()[0] if remote_code == 0 and remote_main.split() else None
+    remote_fields = remote_main.split()
+    remote_sha = (
+        remote_fields[0]
+        if remote_code == 0
+        and len(remote_fields) == 2
+        and remote_fields[1] == f"refs/heads/{args.branch}"
+        and re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", remote_fields[0])
+        else None
+    )
     stale = bool(local_main and remote_sha and local_main != remote_sha)
     primary["freshness"] = "stale" if stale else ("current" if local_main and remote_sha else "unknown")
     primary["remote_main_sha"] = remote_sha
@@ -178,7 +212,7 @@ def inventory(
 
     dirty = [entry for entry in entries if entry.get("dirty") is True]
     active = [entry for entry in entries if entry.get("exists") is True]
-    blocked_refresh = primary.get("dirty") is not False or primary_branch != args.branch or not remote_sha
+    blocked_refresh = primary.get("dirty") is not False or primary.get("identity_verified") is not True or primary_branch != args.branch or not remote_sha
     refresh = {
         "safe_ff_only": not blocked_refresh and stale,
         "commands": [],
@@ -188,13 +222,13 @@ def inventory(
         primary_path = str(primary["path"])
         if args.show_paths:
             refresh["commands"] = [
-                f"git -C {shlex.quote(primary_path)} fetch {shlex.quote(args.remote)} {shlex.quote(args.branch)}",
-                f"git -C {shlex.quote(primary_path)} merge --ff-only {shlex.quote(args.remote)}/{shlex.quote(args.branch)}",
+                f"git -C {shlex.quote(primary_path)} fetch {shlex.quote(remote_display)} {shlex.quote(args.branch)}",
+                f"git -C {shlex.quote(primary_path)} merge --ff-only {remote_sha}",
             ]
         else:
             refresh["commands"] = [
                 f"From <{primary['label']}>: git fetch {shlex.quote(remote_display)} {shlex.quote(args.branch)}",
-                f"From <{primary['label']}>: git merge --ff-only {shlex.quote(remote_display)}/{shlex.quote(args.branch)}",
+                f"From <{primary['label']}>: git merge --ff-only {remote_sha}",
             ]
     elif not stale:
         refresh["reason"] = "primary is current or remote freshness is unknown"
@@ -202,10 +236,10 @@ def inventory(
         refresh["reason"] = "primary must be clean, on main, and remote main must be readable"
 
     def eligible_candidate(item: dict[str, object]) -> bool:
-        return item.get("exists") is True and item.get("dirty") is False and not item.get("prunable")
+        return item.get("identity_verified") is True and item.get("dirty") is False and not item.get("prunable")
 
     authority: dict[str, object] = {
-        "source": primary["display_path"] if prune_code == 0 and primary_branch == args.branch and primary.get("dirty") is False and primary.get("freshness") == "current" else None,
+        "source": primary["display_path"] if prune_code == 0 and primary_branch == args.branch and primary.get("identity_verified") is True and primary.get("dirty") is False and primary.get("freshness") == "current" else None,
         "test": next((item["display_path"] for item in entries if item["role"] == "test-candidate" and eligible_candidate(item)), None),
         "pull_request": next((item["display_path"] for item in entries if item["role"] == "pull-request-candidate" and eligible_candidate(item)), None),
         "release": next((item["display_path"] for item in entries if item["role"] == "release-candidate" and eligible_candidate(item)), None),
