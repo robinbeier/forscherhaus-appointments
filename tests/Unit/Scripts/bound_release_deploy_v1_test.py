@@ -12,6 +12,7 @@ PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../scripts
 SPEC = importlib.util.spec_from_file_location('bound_release_deploy_v1', PATH)
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
+ORIGINAL_CONFIG_BINDINGS = MODULE.config_bindings
 
 
 def arguments():
@@ -115,6 +116,30 @@ class BoundReleaseDeployTest(unittest.TestCase):
                 MODULE.run(arguments())
         self.reserve.assert_not_called()
         self.child.assert_not_called()
+
+    def test_config_binding_uses_runtime_primary_gid_instead_of_legacy_33(self):
+        observed_gids = []
+
+        def read_bound_file(path, maximum, mode, uid, gid):
+            observed_gids.append(gid)
+            return b'config', (1, 2)
+
+        runtime = argparse.Namespace(pw_uid=33, pw_gid=44)
+        with mock.patch.object(MODULE.pwd, 'getpwnam', return_value=runtime), \
+                mock.patch.object(MODULE, 'read_bound_file', side_effect=read_bound_file):
+            ORIGINAL_CONFIG_BINDINGS()
+
+        self.assertEqual([44, 0, 0, 0, 0], observed_gids)
+
+    def test_config_binding_fails_closed_when_runtime_user_is_missing_or_root(self):
+        with mock.patch.object(MODULE.pwd, 'getpwnam', side_effect=KeyError):
+            with self.assertRaisesRegex(MODULE.AdmissionError, 'runtime_user_missing'):
+                MODULE.runtime_user_primary_gid()
+
+        root_account = argparse.Namespace(pw_uid=0, pw_gid=0)
+        with mock.patch.object(MODULE.pwd, 'getpwnam', return_value=root_account):
+            with self.assertRaisesRegex(MODULE.AdmissionError, 'runtime_user_invalid'):
+                MODULE.runtime_user_primary_gid()
 
 
 if __name__ == '__main__':

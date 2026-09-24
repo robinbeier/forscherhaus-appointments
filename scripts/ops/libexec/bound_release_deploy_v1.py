@@ -11,6 +11,7 @@ import hashlib
 import hmac
 import json
 import os
+import pwd
 import re
 import stat
 import subprocess
@@ -25,7 +26,9 @@ LOCK = '/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock'
 CONTINUITY = '/root/backups/easyappointments/backup_continuity_state.json'
 MARKER = '/var/www/html/easyappointments/_RELEASE'
 CONFIGS = (
-    ('/var/www/html/easyappointments/config.php', 0o440, 0, 33),
+    # config.php is intentionally bound to the runtime user's primary group
+    # at invocation time.  The other credentials remain root-owned specs.
+    ('/var/www/html/easyappointments/config.php', 0o440, 0, None),
     ('/etc/fh/healthz.token', 0o600, 0, 0),
     ('/etc/fh/zero-surprise-predeploy.ini', 0o600, 0, 0),
     ('/etc/fh/zero-surprise-canary.ini', 0o600, 0, 0),
@@ -168,9 +171,24 @@ def no_recovery():
             fail('recovery_pending')
 
 
+def runtime_user_primary_gid():
+    try:
+        account = pwd.getpwnam('www-data')
+    except KeyError:
+        fail('runtime_user_missing')
+    if account.pw_uid == 0:
+        fail('runtime_user_invalid')
+    return account.pw_gid
+
+
+def resolved_configs():
+    runtime_gid = runtime_user_primary_gid()
+    return ((CONFIGS[0][0], CONFIGS[0][1], CONFIGS[0][2], runtime_gid),) + CONFIGS[1:]
+
+
 def config_bindings():
     bindings = []
-    for path, mode, uid, gid in CONFIGS:
+    for path, mode, uid, gid in resolved_configs():
         data, observed = read_bound_file(path, 1024 * 1024, mode, uid, gid)
         bindings.append((observed, hashlib.sha256(data).digest()))
     return tuple(bindings)
