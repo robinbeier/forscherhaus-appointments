@@ -124,4 +124,5 @@ capture time. The primary records that result alongside separate CI, comment,
 and landing facts in the [final-head evidence](../WORKFLOW.md#final-head-evidence)
 format. Mark a bot completion for an older head as `stale`, rather than using
 it as proof for the current head. Revalidate the exact base/head and scope
-before recording the result.
+before recording the result and again immediately before landing; a changed
+base requires review of the affected diff even when the PR head is unchanged.

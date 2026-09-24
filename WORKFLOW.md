@@ -401,7 +401,7 @@ Final-head evidence (UTC)
 - Review: <reviewed head SHA>, <base SHA>, <scope>, <reviewer>, <timestamp>, <result>
 - CI: <CI head SHA>, <blocking checks>, <timestamp>, <result>
 - Comments/findings: <PR head>, <timestamp>, <open substantive findings>, <unresolved threads>
-- Landing: <current PR head>, <mergeability>, <CAS SHA checked>, <timestamp>
+- Landing: <current base SHA>, <current PR head>, <mergeability>, <CAS SHA checked>, <timestamp>
 ```
 
 For example, the [PR #654 review summary](https://github.com/robinbeier/forscherhaus-appointments/pull/654)
@@ -411,7 +411,9 @@ at `2026-09-24T03:13:50Z`, while Security Review completed for
 Record the older Security Review marker as `stale` relative to the final head;
 it is not evidence for that head. Apply the existing review gate to the actual
 final head, use the platform run state or a bounded status poll for pending results,
-and do not add a fixed sleep. Re-read the head before recording the evidence.
+and do not add a fixed sleep. Re-read both base and head before recording the
+landing evidence. If either differs from the reviewed pair, rebind the review
+target and inspect the affected diff before landing.
 
 Treat both human findings and Codex-review findings as real review work until
 they are explicitly addressed or rejected with a clear rationale.
@@ -466,7 +468,9 @@ path applies when this repository's workflow or review tools are changed.
 
 Before `Ready to Merge`, the primary checks:
 
-- the current PR head matches the reviewed head and the tested code
+- the current PR head matches the reviewed head and the tested code; the current
+  base SHA matches the reviewed base SHA, or the reviewer has inspected the
+  affected diff against the new base and recorded the rebound base/head pair
 - all applicable blocking CI checks in `.github/workflows/ci.yml` passed for
   that head; missing, pending, failed, or unexpectedly skipped checks block
 - independent review is recorded with the reviewed commit, scope, result,
