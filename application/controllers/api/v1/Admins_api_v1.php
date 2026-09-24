@@ -150,6 +150,12 @@ class Admins_api_v1 extends EA_Controller
      */
     public function update(int $id): void
     {
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'PUT') {
+            response('', 405, ['Allow: PUT']);
+
+            return;
+        }
+
         try {
             $occurrences = $this->admins_model->get(['id' => $id]);
 
@@ -163,7 +169,20 @@ class Admins_api_v1 extends EA_Controller
 
             $admin = $this->apiRequestDtoFactory()->buildEntityWritePayloadDto()->payload;
 
+            // The URL selects the admin; a body ID may only repeat that target.
+            if (array_key_exists('id', $admin)) {
+                if (!is_int($admin['id']) || $admin['id'] !== $id) {
+                    response('', 400);
+
+                    return;
+                }
+
+                unset($admin['id']);
+            }
+
             $this->admins_model->api_decode($admin, $original_admin);
+
+            $admin['id'] = $id;
 
             $admin_id = $this->admins_model->save($admin);
 

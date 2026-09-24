@@ -69,6 +69,12 @@ services remain while their category reference becomes null. See the
 [Service Categories API contract](docs/ci-write-contracts.md#service-categories-api-v1)
 for the exact local evidence and limits.
 
+For authenticated staff API v1 PUT requests, the URL selects the Admin,
+Provider, or Secretary record. A body ID cannot redirect the update to another
+user in the shared table, and a direct controller alias cannot change it under
+a different HTTP method. See the [Staff API PUT contract](docs/ci-write-contracts.md#staff-api-v1-put)
+for the bounded local evidence and its limits.
+
 The product supports `services.attendants_number = 1`, enforced by
 [Services_model](application/models/Services_model.php). Other values are not
 supported product behavior; this application rule is not a claim of a database

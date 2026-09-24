@@ -285,6 +285,138 @@ final class StaffSettingsApiHttpTest extends TestCase
         $this->assertNoSyntheticSecrets($adminCreate, $adminUpdate, $secretaryCreate, $updated);
     }
 
+    public function testAdminPutRejectsMismatchedOrInvalidBodyIdWithoutPartialChange(): void
+    {
+        $f = $this->fixture;
+        $admin = $this->writeClient('basic');
+
+        $adminPayloadA = $f->adminWritePayload('url-id-a');
+        $adminA = $this->success($admin->requestJsonApp('POST', 'api/v1/admins', $adminPayloadA), 201);
+        $adminIdA = (int) $adminA['id'];
+        $adminPayloadB = $f->adminWritePayload('url-id-b');
+        $adminB = $this->success($admin->requestJsonApp('POST', 'api/v1/admins', $adminPayloadB), 201);
+        $adminIdB = (int) $adminB['id'];
+
+        foreach ([$adminIdB, 0, null, '', 'not-an-id', 1.5] as $bodyId) {
+            $update = $adminPayloadA;
+            $update['id'] = $bodyId;
+            // Preserve B's unique identity fields so the baseline can reach save(B)
+            // and the assertion observes the target boundary instead of a duplicate error.
+            $update['email'] = $adminPayloadB['email'];
+            $update['settings']['username'] = $adminPayloadB['settings']['username'];
+            $update['firstName'] = $f->run . '_must-not-change';
+            $beforeA = $f->adminDeleteState($adminIdA);
+            $beforeB = $f->adminDeleteState($adminIdB);
+
+            $response = $admin->requestJsonApp('PUT', 'api/v1/admins/' . $adminIdA, $update);
+
+            self::assertSame(
+                400,
+                $response->statusCode,
+                'Admin PUT must reject body ID ' . var_export($bodyId, true) . ': ' . $response->body,
+            );
+            self::assertSame($beforeA, $f->adminDeleteState($adminIdA));
+            self::assertSame($beforeB, $f->adminDeleteState($adminIdB));
+        }
+
+        $matchingAdmin = $adminPayloadA;
+        $matchingAdmin['id'] = $adminIdA;
+        $matchingAdmin['firstName'] = $f->run . '_matching-url-id';
+        $response = $admin->requestJsonApp('PUT', 'api/v1/admins/' . $adminIdA, $matchingAdmin);
+        self::assertSame(200, $response->statusCode, $response->body);
+        self::assertSame($adminIdA, (int) ($this->success($response, 200)['id'] ?? 0));
+        self::assertSame($matchingAdmin['firstName'], $f->adminDeleteState($adminIdA)['user']['first_name']);
+        self::assertSame($adminIdB, (int) ($f->adminDeleteState($adminIdB)['user']['id'] ?? 0));
+    }
+
+    public function testSecretaryPutRejectsMismatchedOrInvalidBodyIdWithoutPartialChange(): void
+    {
+        $f = $this->fixture;
+        $admin = $this->writeClient('basic');
+        $secretaryPayloadA = $f->secretaryWritePayload('url-id-a', [$f->providerId]);
+        $secretaryA = $this->success($admin->requestJsonApp('POST', 'api/v1/secretaries', $secretaryPayloadA), 201);
+        $secretaryIdA = (int) $secretaryA['id'];
+        $secretaryPayloadB = $f->secretaryWritePayload('url-id-b', [$f->providerId]);
+        $secretaryB = $this->success($admin->requestJsonApp('POST', 'api/v1/secretaries', $secretaryPayloadB), 201);
+        $secretaryIdB = (int) $secretaryB['id'];
+
+        foreach ([$secretaryIdB, 0, null, '', 'not-an-id', 1.5] as $bodyId) {
+            $update = $secretaryPayloadA;
+            $update['id'] = $bodyId;
+            // Preserve B's unique identity fields so a redirected save(B) remains observable.
+            $update['email'] = $secretaryPayloadB['email'];
+            $update['settings']['username'] = $secretaryPayloadB['settings']['username'];
+            $update['firstName'] = $f->run . '_must-not-change';
+            $update['providers'] = [];
+            $beforeA = $f->secretaryDeleteState($secretaryIdA);
+            $beforeB = $f->secretaryDeleteState($secretaryIdB);
+
+            $response = $admin->requestJsonApp('PUT', 'api/v1/secretaries/' . $secretaryIdA, $update);
+
+            self::assertSame(
+                400,
+                $response->statusCode,
+                'Secretary PUT must reject body ID ' . var_export($bodyId, true) . ': ' . $response->body,
+            );
+            self::assertSame($beforeA, $f->secretaryDeleteState($secretaryIdA));
+            self::assertSame($beforeB, $f->secretaryDeleteState($secretaryIdB));
+        }
+
+        $matchingSecretary = $secretaryPayloadA;
+        $matchingSecretary['id'] = $secretaryIdA;
+        $matchingSecretary['firstName'] = $f->run . '_matching-url-id';
+        $response = $admin->requestJsonApp('PUT', 'api/v1/secretaries/' . $secretaryIdA, $matchingSecretary);
+        self::assertSame(200, $response->statusCode, $response->body);
+        self::assertSame($secretaryIdA, (int) ($this->success($response, 200)['id'] ?? 0));
+        self::assertSame(
+            $matchingSecretary['firstName'],
+            $f->secretaryDeleteState($secretaryIdA)['user']['first_name'],
+        );
+        self::assertSame($secretaryIdB, (int) ($f->secretaryDeleteState($secretaryIdB)['user']['id'] ?? 0));
+    }
+
+    public function testAdminUpdateControllerAliasRejectsGetWithoutMutation(): void
+    {
+        $f = $this->fixture;
+        $admin = $this->writeClient('basic');
+        $payloadA = $f->adminWritePayload('alias-a');
+        $createdA = $this->success($admin->requestJsonApp('POST', 'api/v1/admins', $payloadA), 201);
+        $idA = (int) $createdA['id'];
+        $payloadB = $f->adminWritePayload('alias-b');
+        $createdB = $this->success($admin->requestJsonApp('POST', 'api/v1/admins', $payloadB), 201);
+        $idB = (int) $createdB['id'];
+        $beforeA = $f->adminDeleteState($idA);
+        $beforeB = $f->adminDeleteState($idB);
+
+        $response = $admin->get('api/v1/admins_api_v1/update/' . $idA);
+
+        self::assertSame(405, $response->statusCode, $response->body);
+        self::assertSame('PUT', $response->header('Allow'));
+        self::assertSame($beforeA, $f->adminDeleteState($idA));
+        self::assertSame($beforeB, $f->adminDeleteState($idB));
+    }
+
+    public function testSecretaryUpdateControllerAliasRejectsGetWithoutMutation(): void
+    {
+        $f = $this->fixture;
+        $admin = $this->writeClient('basic');
+        $payloadA = $f->secretaryWritePayload('alias-a', [$f->providerId]);
+        $createdA = $this->success($admin->requestJsonApp('POST', 'api/v1/secretaries', $payloadA), 201);
+        $idA = (int) $createdA['id'];
+        $payloadB = $f->secretaryWritePayload('alias-b', [$f->providerId]);
+        $createdB = $this->success($admin->requestJsonApp('POST', 'api/v1/secretaries', $payloadB), 201);
+        $idB = (int) $createdB['id'];
+        $beforeA = $f->secretaryDeleteState($idA);
+        $beforeB = $f->secretaryDeleteState($idB);
+
+        $response = $admin->get('api/v1/secretaries_api_v1/update/' . $idA);
+
+        self::assertSame(405, $response->statusCode, $response->body);
+        self::assertSame('PUT', $response->header('Allow'));
+        self::assertSame($beforeA, $f->secretaryDeleteState($idA));
+        self::assertSame($beforeB, $f->secretaryDeleteState($idB));
+    }
+
     #[DataProvider('invalidWriteAuthenticationCases')]
     public function testStaffAndSettingsWritesRejectInvalidAuthenticationWithoutMutation(string $case): void
     {

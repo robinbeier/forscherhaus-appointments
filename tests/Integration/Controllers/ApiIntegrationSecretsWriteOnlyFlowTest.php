@@ -106,7 +106,7 @@ final class ApiIntegrationSecretsWriteOnlyFlowTest extends TestCase
         $this->resetRequest();
         $payload = $this->providerPayload('rotated-google', 'rotated-caldav');
         $identity = $this->providerIdentityFromPayload($payload);
-        $this->setPostPayload($payload);
+        $this->setPutPayload($payload);
         $this->createProvidersController()->update($providerId);
         $response = $this->decodeJsonOutput();
         $this->assertSuccessfulProviderResponse($response, $providerId, $identity, $serviceId);
@@ -122,7 +122,7 @@ final class ApiIntegrationSecretsWriteOnlyFlowTest extends TestCase
         $before = $this->providerSettings($providerId);
         $identity = $this->providerIdentity($providerId);
 
-        $this->setPostPayload(['notes' => 'synthetic provider update']);
+        $this->setPutPayload(['notes' => 'synthetic provider update']);
         $this->createProvidersController()->update($providerId);
         $response = $this->decodeJsonOutput();
         $this->assertSuccessfulProviderResponse($response, $providerId, $identity);
@@ -138,7 +138,7 @@ final class ApiIntegrationSecretsWriteOnlyFlowTest extends TestCase
 
         $payload = $this->providerPayload('rotated-google', 'rotated-caldav');
         $identity = $this->providerIdentityFromPayload($payload);
-        $this->setPostPayload($payload);
+        $this->setPutPayload($payload);
         $this->createProvidersController()->update($providerId);
         $response = $this->decodeJsonOutput();
         $this->assertSuccessfulProviderResponse($response, $providerId, $identity);
@@ -148,7 +148,7 @@ final class ApiIntegrationSecretsWriteOnlyFlowTest extends TestCase
         $this->assertTrue(($afterRotation['google_token'] ?? null) === 'rotated-google');
         $this->assertTrue(($afterRotation['caldav_password'] ?? null) === 'rotated-caldav');
 
-        $this->setPostPayload(['settings' => ['googleToken' => 'single-google']]);
+        $this->setPutPayload(['settings' => ['googleToken' => 'single-google']]);
         $this->createProvidersController()->update($providerId);
         $response = $this->decodeJsonOutput();
         $this->assertSuccessfulProviderResponse($response, $providerId, $identity);
@@ -158,7 +158,7 @@ final class ApiIntegrationSecretsWriteOnlyFlowTest extends TestCase
         $this->assertSame('single-google', $afterGoogleOnly['google_token'] ?? null);
         $this->assertSame('rotated-caldav', $afterGoogleOnly['caldav_password'] ?? null);
 
-        $this->setPostPayload(['settings' => ['caldavPassword' => 'single-caldav']]);
+        $this->setPutPayload(['settings' => ['caldavPassword' => 'single-caldav']]);
         $this->createProvidersController()->update($providerId);
         $response = $this->decodeJsonOutput();
         $this->assertSuccessfulProviderResponse($response, $providerId, $identity);
@@ -168,7 +168,7 @@ final class ApiIntegrationSecretsWriteOnlyFlowTest extends TestCase
         $this->assertSame('single-google', $afterCaldavOnly['google_token'] ?? null);
         $this->assertSame('single-caldav', $afterCaldavOnly['caldav_password'] ?? null);
 
-        $this->setPostPayload([
+        $this->setPutPayload([
             'settings' => [
                 'googleToken' => 'single-google',
                 'caldavPassword' => 'single-caldav',
@@ -188,7 +188,7 @@ final class ApiIntegrationSecretsWriteOnlyFlowTest extends TestCase
     {
         $providerId = $this->createProvider();
         $identity = $this->providerIdentity($providerId);
-        $this->setPostPayload([
+        $this->setPutPayload([
             'settings' => [
                 'googleToken' => null,
                 'caldavPassword' => null,
@@ -214,7 +214,7 @@ final class ApiIntegrationSecretsWriteOnlyFlowTest extends TestCase
         $beforeProvider = $this->CI->db->get_where('users', ['id' => $providerId])->row_array();
         $beforeSettings = $this->providerSettings($providerId);
 
-        $this->setPostPayload([
+        $this->setPutPayload([
             'notes' => 'must not be persisted',
             'settings' => [
                 'googleToken' => ['synthetic-sensitive-value'],
@@ -404,6 +404,12 @@ final class ApiIntegrationSecretsWriteOnlyFlowTest extends TestCase
         $_GET = [];
         $_SERVER['REQUEST_METHOD'] = 'POST';
         $this->CI->output->set_output('');
+    }
+
+    private function setPutPayload(array $payload): void
+    {
+        $this->setPostPayload($payload);
+        $_SERVER['REQUEST_METHOD'] = 'PUT';
     }
 
     private function resetRequest(): void

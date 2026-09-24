@@ -221,6 +221,23 @@ verknüpften Service vor und nach der Kategorielöschung und die Bereinigung.
 Dieser lokale Nachweis belegt weder produktive Auslieferung noch alle
 konkurrierenden oder fehlerinduzierten Datenbankabläufe.
 
+## Staff API v1 PUT
+
+Bei `PUT /api/v1/admins/:id`, `providers/:id` und `secretaries/:id` bestimmt
+die URL den zu ändernden Mitarbeiterdatensatz. Eine Body-`id` darf nur als
+identische JSON-Ganzzahl wiederholt werden; abweichende oder anders typisierte
+IDs werden mit 400 vor der Modellmutation abgewiesen. Ohne Body-ID bleibt das
+URL-Ziel verbindlich. Ein direkter `update`-Controller-Alias darf nur mit PUT
+schreiben und lehnt andere Methoden mit 405 ab. Das bloße Vorhandensein einer
+ID in der gemeinsamen `users`-Tabelle erteilt keine Autorität, einen Datensatz
+einer anderen Mitarbeiterrolle zu ändern.
+
+Die isolierten Staff-HTTP-Tests verwenden je Rolle eigene A/B-Datensätze und
+prüfen Antwort, vollständige Benutzerzeilen, Einstellungen und relevante
+Zuordnungen vor und nach abgewiesenen sowie passenden PUT-Anfragen. Sie belegen
+ihren lokalen HTTP-/Datenbanklauf, nicht die produktive Auslieferung oder alle
+konkurrierenden Änderungen.
+
 ## Write-only Integrationsgeheimnisse
 
 Die authentifizierte REST-v1-API behandelt

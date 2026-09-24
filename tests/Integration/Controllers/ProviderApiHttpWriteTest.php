@@ -144,6 +144,77 @@ final class ProviderApiHttpWriteTest extends TestCase
         }
     }
 
+    public function testProviderPutRejectsMismatchedOrInvalidBodyIdWithoutMutatingEitherRecord(): void
+    {
+        $f = $this->fixture;
+        $admin = $this->basicClient($this->credentials['admin_username'], $this->credentials['password']);
+
+        $payloadA = $f->providerWritePayload('url-id-a');
+        $createdA = $this->success($admin->requestJsonApp('POST', 'api/v1/providers', $payloadA), 201);
+        $stateA = $f->providerWriteState($payloadA['email']);
+        $idA = (int) ($createdA['id'] ?? 0);
+        self::assertSame($idA, (int) ($stateA['user']['id'] ?? 0));
+
+        $payloadB = $f->providerWritePayload('url-id-b');
+        $createdB = $this->success($admin->requestJsonApp('POST', 'api/v1/providers', $payloadB), 201);
+        $stateB = $f->providerWriteState($payloadB['email']);
+        $idB = (int) ($createdB['id'] ?? 0);
+        self::assertSame($idB, (int) ($stateB['user']['id'] ?? 0));
+
+        foreach ([$idB, 0, null, '', 'not-an-id', 1.5] as $bodyId) {
+            $update = $payloadA;
+            $update['id'] = $bodyId;
+            // Keep B's identity fields so the vulnerable baseline can reach save(B)
+            // without tripping the unique email/username validators.
+            $update['email'] = $payloadB['email'];
+            $update['settings']['username'] = $payloadB['settings']['username'];
+            $update['firstName'] = $f->run . '_must-not-change';
+            $beforeA = $f->providerWriteState($payloadA['email']);
+            $beforeB = $f->providerWriteState($payloadB['email']);
+
+            $response = $admin->requestJsonApp('PUT', 'api/v1/providers/' . $idA, $update);
+
+            self::assertSame(
+                400,
+                $response->statusCode,
+                'Provider PUT must reject body ID ' . var_export($bodyId, true) . ': ' . $response->body,
+            );
+            self::assertSame($beforeA, $f->providerWriteState($payloadA['email']));
+            self::assertSame($beforeB, $f->providerWriteState($payloadB['email']));
+        }
+
+        $matching = $payloadA;
+        $matching['id'] = $idA;
+        $matching['firstName'] = $f->run . '_matching-url-id';
+        $response = $admin->requestJsonApp('PUT', 'api/v1/providers/' . $idA, $matching);
+        self::assertSame(200, $response->statusCode, $response->body);
+        self::assertSame($idA, (int) ($this->success($response, 200)['id'] ?? 0));
+        self::assertSame($matching['firstName'], $f->providerWriteState($payloadA['email'])['user']['first_name']);
+        self::assertSame($idB, (int) ($f->providerWriteState($payloadB['email'])['user']['id'] ?? 0));
+    }
+
+    public function testProviderUpdateControllerAliasRejectsGetWithoutMutation(): void
+    {
+        $f = $this->fixture;
+        $admin = $this->basicClient($this->credentials['admin_username'], $this->credentials['password']);
+        $payloadA = $f->providerWritePayload('alias-a');
+        $createdA = $this->success($admin->requestJsonApp('POST', 'api/v1/providers', $payloadA), 201);
+        $idA = (int) $createdA['id'];
+        $payloadB = $f->providerWritePayload('alias-b');
+        $createdB = $this->success($admin->requestJsonApp('POST', 'api/v1/providers', $payloadB), 201);
+        $idB = (int) $createdB['id'];
+        $beforeA = $f->providerWriteState($payloadA['email']);
+        $beforeB = $f->providerWriteState($payloadB['email']);
+
+        $response = $admin->get('api/v1/providers_api_v1/update/' . $idA);
+
+        self::assertSame(405, $response->statusCode, $response->body);
+        self::assertSame('PUT', $response->header('Allow'));
+        self::assertSame($beforeA, $f->providerWriteState($payloadA['email']));
+        self::assertSame($beforeB, $f->providerWriteState($payloadB['email']));
+        self::assertSame($idB, (int) ($f->providerWriteState($payloadB['email'])['user']['id'] ?? 0));
+    }
+
     public function testProviderDeleteUsesAuthorizedAdminAndBearerAndIsIdempotent(): void
     {
         $f = $this->fixture;

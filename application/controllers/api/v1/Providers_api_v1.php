@@ -150,6 +150,12 @@ class Providers_api_v1 extends EA_Controller
      */
     public function update(int $id): void
     {
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'PUT') {
+            response('', 405, ['Allow: PUT']);
+
+            return;
+        }
+
         try {
             $occurrences = $this->providers_model->get(['id' => $id]);
 
@@ -163,7 +169,20 @@ class Providers_api_v1 extends EA_Controller
 
             $provider = $this->apiRequestDtoFactory()->buildEntityWritePayloadDto()->payload;
 
+            // The URL selects the provider; a body ID may only repeat that target.
+            if (array_key_exists('id', $provider)) {
+                if (!is_int($provider['id']) || $provider['id'] !== $id) {
+                    response('', 400);
+
+                    return;
+                }
+
+                unset($provider['id']);
+            }
+
             $this->providers_model->api_decode($provider, $original_provider);
+
+            $provider['id'] = $id;
 
             $provider_id = $this->providers_model->save($provider);
 
