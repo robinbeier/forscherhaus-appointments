@@ -225,6 +225,7 @@ bash scripts/ops/run_ordinary_live_probe.sh account EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh methods EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh customer-boundary EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh customers-api EXPECTED_RELEASE
+bash scripts/ops/run_ordinary_live_probe.sh staff-api EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh services-api EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh unavailabilities-api EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh blocked-periods-api EXPECTED_RELEASE
@@ -235,6 +236,31 @@ bash scripts/ops/run_ordinary_live_probe.sh appointments-api-overlap EXPECTED_RE
 bash scripts/ops/run_ordinary_live_probe.sh session EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh cleanup EXPECTED_RELEASE
 ```
+
+### Staff API v1 live evidence boundary
+
+The `staff-api` action performs one release-bound ordinary probe with the
+existing root-controlled wrapper, shared production lock, independent cleanup
+timer and persistent recovery marker. Its journaled `customer_boundary`
+profile supplies only its own administrator actor, provider target, administrator
+target and customer rows; no existing account is selected.
+
+The probe requires provider URL A with the administrator's body ID B and
+administrator URL B with the provider's body ID A to return 400 without changing
+either complete user row, settings or relevant relationships. A direct GET to
+the provider update alias must return 405. A matching provider PUT must return
+200 and change only the owned provider's first name. Evidence contains classified
+phase outcomes and status classes, not credentials, response bodies or private
+identifiers. The local isolated HTTP/database tests cover the equivalent
+same-role cases and Secretary writes; the productive probe does not claim those
+paths were exercised live.
+
+Only `verified` with all phases passed, identity-bound fixture and session
+cleanup, removed transient timer and recovery marker, unchanged active release
+and healthy production is terminal success. An unknown response, snapshot drift,
+interruption or incomplete cleanup retains recovery evidence and stops. Changes
+to the handler, probe, wrapper, fixture or evidence phase contract require fresh
+local tests and review before this result can be reused.
 
 ### Unavailabilities API v1 live evidence boundary
 
