@@ -250,6 +250,21 @@ Zuordnungen vor und nach abgewiesenen sowie passenden PUT-Anfragen. Sie belegen
 ihren lokalen HTTP-/Datenbanklauf, nicht die produktive Auslieferung oder alle
 konkurrierenden Änderungen.
 
+## Settings API v1
+
+Die generische Settings API erlaubt authentifizierten Admin-Basic- und
+Bearer-Clients das Lesen gespeicherter Werte sowie `PUT /api/v1/settings/:name`.
+Der API-Token bleibt nach dem bestehenden privilegierten Vertrag sichtbar;
+dieser Methodenfix führt keine neue Namens- oder Wert-Whitelist ein.
+Ein direkt erreichbarer `Settings_api_v1/update/:name`-Alias darf nur mit PUT
+schreiben. GET und POST werden vor der Auswertung von `value` mit 405 und
+`Allow: PUT` abgewiesen. Für Settings existiert kein DELETE-Endpunkt.
+
+`StaffSettingsApiHttpTest` prüft dies über das echte lokale HTTP-Routing mit
+synthetischen eigenen Einstellungen: abgewiesene direkte Aliase lassen die
+vollständige Zeile unverändert, erlaubtes PUT persistiert. Das belegt die
+isolierte Testumgebung, nicht die produktive Auslieferung.
+
 ## Write-only Integrationsgeheimnisse
 
 Die authentifizierte REST-v1-API behandelt

@@ -93,6 +93,12 @@ class Settings_api_v1 extends EA_Controller
      */
     public function update(string $name): void
     {
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'PUT') {
+            response('', 405, ['Allow: PUT']);
+
+            return;
+        }
+
         try {
             $request_dto = $this->apiRequestDtoFactory()->buildSettingsUpdateDto();
             $value = $request_dto->value;

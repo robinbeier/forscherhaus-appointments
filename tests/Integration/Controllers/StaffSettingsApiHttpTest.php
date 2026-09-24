@@ -216,6 +216,31 @@ final class StaffSettingsApiHttpTest extends TestCase
         self::assertSame($value, $this->fixture->settingRow((int) $setting['id'])['value']);
     }
 
+    public function testSettingsUpdateControllerAliasRejectsGetAndPostWithoutMutation(): void
+    {
+        $setting = $this->fixture->ownedSetting('alias-probe', 'before');
+        $before = $this->fixture->settingRow((int) $setting['id']);
+        foreach ([$this->writeClient('basic'), $this->writeClient('bearer')] as $client) {
+            $get = $client->get('api/v1/settings_api_v1/update/' . $setting['name'], ['value' => 'get-value']);
+            self::assertSame(405, $get->statusCode, $get->body);
+            self::assertSame('PUT', $get->header('Allow'));
+            self::assertSame($before, $this->fixture->settingRow((int) $setting['id']));
+
+            $post = $client->requestJsonApp('POST', 'api/v1/settings_api_v1/update/' . $setting['name'], [
+                'value' => 'post-value',
+            ]);
+            self::assertSame(405, $post->statusCode, $post->body);
+            self::assertSame('PUT', $post->header('Allow'));
+            self::assertSame($before, $this->fixture->settingRow((int) $setting['id']));
+        }
+
+        $canonicalPost = $this->writeClient('basic')->requestJsonApp('POST', 'api/v1/settings/' . $setting['name'], [
+            'value' => 'canonical-post-value',
+        ]);
+        self::assertSame(404, $canonicalPost->statusCode, $canonicalPost->body);
+        self::assertSame($before, $this->fixture->settingRow((int) $setting['id']));
+    }
+
     #[DataProvider('validWriteAuthenticationCases')]
     public function testAdminAndSecretaryWritesPersistWithoutPasswordOnUpdateAndSecretaryClear(
         string $authentication,
