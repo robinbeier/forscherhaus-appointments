@@ -146,6 +146,12 @@ class Secretaries_api_v1 extends EA_Controller
      */
     public function update(int $id): void
     {
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'PUT') {
+            response('', 405, ['Allow: PUT']);
+
+            return;
+        }
+
         try {
             $occurrences = $this->secretaries_model->get(['id' => $id]);
 
@@ -159,7 +165,20 @@ class Secretaries_api_v1 extends EA_Controller
 
             $secretary = $this->apiRequestDtoFactory()->buildEntityWritePayloadDto()->payload;
 
+            // The URL selects the secretary; a body ID may only repeat that target.
+            if (array_key_exists('id', $secretary)) {
+                if (!is_int($secretary['id']) || $secretary['id'] !== $id) {
+                    response('', 400);
+
+                    return;
+                }
+
+                unset($secretary['id']);
+            }
+
             $this->secretaries_model->api_decode($secretary, $original_secretary);
+
+            $secretary['id'] = $id;
 
             $secretary_id = $this->secretaries_model->save($secretary);
 
