@@ -37,8 +37,16 @@ path in [WORKFLOW.md](../../../WORKFLOW.md#pr-and-review-expectations).
 
     Do not queue auto-merge or use `--delete-branch` from a worker worktree.
 
-5. Verify the merge commit and refreshed `origin/main`, move the associated
-   Linear issue to `Done`, and update the `## Codex Workpad` with the result.
+5. Verify the merge commit and refreshed `origin/main`. Set a code-only issue
+   to `Done` and update its `## Codex Workpad`. If its acceptance criteria
+   include deployment or production proof, keep it `In Progress` with the
+   remaining proof and next action visible in the workpad until that proof
+   passes. Only when creation of another issue is separately authorized may
+   you first create and link a production issue carrying the exact remaining
+   acceptance criteria and evidence; record its ID in the code issue's workpad
+   before marking the merged code issue `Done`. Otherwise keep the original
+   issue active.
+   Follow the [Linear state rules](../../../WORKFLOW.md#linear-states).
 
 Never merge unresolved substantive findings or a later head than the one whose
 blocking CI and independent review were verified. Keep the workpad compact and

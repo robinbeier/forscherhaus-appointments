@@ -23,6 +23,8 @@ Read-only-Diagnose und Review: <JA|NEIN|NICHT ERTEILT>
 Lokale Dateien ändern und lokale Tests ausführen: <JA|NEIN|NICHT ERTEILT>
 Linear-Codex-Workpad aktualisieren: <JA|NEIN|NICHT ERTEILT>
 Linear-Status ändern: <JA|NEIN|NICHT ERTEILT>
+Neues Linear-Produktionsnachweis-Issue erstellen und mit dem Ticket verlinken: <JA|NEIN|NICHT ERTEILT>
+Zweck und zu übertragende Abnahmekriterien des neuen Issues: <konkret oder entfällt>
 Veröffentlichten PR-Link am Linear-Issue anhängen: <JA|NEIN|NICHT ERTEILT>
 Commit erstellen: <JA|NEIN|NICHT ERTEILT>
 Push ausführen: <JA|NEIN|NICHT ERTEILT>
@@ -35,7 +37,10 @@ SHA-gebundener Merge des final geprüften PR-Heads: <JA|NEIN|NICHT ERTEILT>
 Optionale Einschränkung auf einen bestimmten Commit: <SHA oder keine>
 ```
 
-Die Felder für Workpad, Review-Anforderung und Review-Antworten erlauben
+Die Freigabe für ein neues Produktionsnachweis-Issue gilt nur für den genannten
+Zweck, die übertragenen Abnahmekriterien und die Verlinkung zum bezeichneten
+Ticket. Ohne diese Freigabe bleibt ein Ticket mit offenem Produktionsnachweis
+nach dem Merge aktiv. Die Felder für Workpad, Review-Anforderung und Review-Antworten erlauben
 jeweils nur diese Kommentare am bezeichneten Ticket beziehungsweise PR. Andere Nachrichten
 oder externe Kommunikation benötigen einen eigenen Auftrag. Plattformseitige aktuelle Bestätigungen und
 Freigabeprüfungen gelten weiterhin; diese Vorlage umgeht keine Policy,
