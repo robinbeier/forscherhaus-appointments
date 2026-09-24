@@ -83,9 +83,45 @@ fi
 DEPLOY_SHA="$(shasum -a 256 "$PROJECT/deploy_ea.sh" | awk '{print $1}')"
 PAIR_SHA="$(shasum -a 256 "$PROJECT/scripts/ops/libexec/release_pair_admission_v1.py" | awk '{print $1}')"
 BACKUP_SHA="$(shasum -a 256 "$PROJECT/scripts/ops/libexec/backup_handoff_admission_v1.py" | awk '{print $1}')"
-RUNNER_SHA="$(shasum -a 256 "$PROJECT/scripts/ops/libexec/bound_release_deploy_v1.py" | awk '{print $1}')"
+# Keep the exact commit-bound runner bytes in memory. The worktree path may be
+# edited after the clean-tree check; it must never become root-executed input.
+RUNNER_B64="$(git -C "$PROJECT" cat-file blob "$COMMIT:scripts/ops/libexec/bound_release_deploy_v1.py" | base64 | tr -d '\n')"
+[[ -n "$RUNNER_B64" ]] || { echo 'ERROR: reviewed runner unavailable.' >&2; exit 70; }
+decode_runner() {
+    python3 -I -B -c 'import base64,sys;sys.stdout.buffer.write(base64.b64decode(sys.stdin.buffer.read(),validate=True))'
+}
+RUNNER_SHA="$(printf '%s' "$RUNNER_B64" | decode_runner | shasum -a 256 | awk '{print $1}')"
+[[ "$(shasum -a 256 "$PROJECT/scripts/ops/libexec/bound_release_deploy_v1.py" | awk '{print $1}')" == "$RUNNER_SHA" ]] || {
+    echo 'ERROR: local runner differs from reviewed commit.' >&2; exit 70;
+}
 
-preflight="$(bash "$PROJECT/scripts/ops/prod_release_readiness_preflight.sh" --expected-active-release "$ACTIVE")" || {
+# The readiness script itself sends a read-only shell program to production.
+# Run it and its sourced helper from the same commit, not from a mutable path.
+snapshot_dir="$(mktemp -d "${TMPDIR:-/tmp}/fh-bound-source.XXXXXX")"
+trap 'rm -rf -- "$snapshot_dir"' EXIT
+git -C "$PROJECT" archive "$COMMIT" \
+    deploy_ea.sh \
+    scripts/ops/prod_release_readiness_preflight.sh \
+    scripts/ops/lib/prod_common.sh \
+    scripts/ops/libexec/backup_set_producer_v1.py \
+    scripts/ops/libexec/backup_timer_transition_v1.py \
+    scripts/ops/libexec/deployment_dump_attestation_v1.py \
+    | tar -x -C "$snapshot_dir"
+for source in \
+    deploy_ea.sh \
+    scripts/ops/prod_release_readiness_preflight.sh \
+    scripts/ops/lib/prod_common.sh \
+    scripts/ops/libexec/backup_set_producer_v1.py \
+    scripts/ops/libexec/backup_timer_transition_v1.py \
+    scripts/ops/libexec/deployment_dump_attestation_v1.py; do
+    [[ -f "$snapshot_dir/$source" && ! -L "$snapshot_dir/$source" ]] || {
+        echo 'ERROR: commit-bound readiness source unavailable.' >&2; exit 70;
+    }
+done
+git_dir="$(git -C "$PROJECT" rev-parse --absolute-git-dir)"
+preflight="$(GIT_DIR="$git_dir" GIT_WORK_TREE="$snapshot_dir" \
+    bash "$snapshot_dir/scripts/ops/prod_release_readiness_preflight.sh" \
+    --expected-active-release "$ACTIVE")" || {
     echo 'ERROR: production readiness is not established.' >&2; exit 70
 }
 [[ "$preflight" == *$'schema=production_release_readiness.v1\nstatus=passed\nresult_class=readiness_verified\n'* ]] || {
@@ -105,9 +141,9 @@ run_id="$(openssl rand -hex 16)"
 [[ "$run_id" =~ ^[a-f0-9]{32}$ ]] || { echo 'ERROR: unique run identity unavailable.' >&2; exit 70; }
 printf 'schema=bound_release_deploy_attempt.v1\nrun_id=%s\n' "$run_id"
 receipt_file="$(mktemp "${TMPDIR:-/tmp}/fh-bound-deploy.XXXXXX")"
-trap 'rm -f -- "$receipt_file"' EXIT
+trap 'rm -f -- "$receipt_file"; rm -rf -- "$snapshot_dir"' EXIT
 
-if ssh -o BatchMode=yes -o ConnectTimeout=12 "$TARGET" \
+if printf '%s' "$RUNNER_B64" | decode_runner | ssh -o BatchMode=yes -o ConnectTimeout=12 "$TARGET" \
     /usr/bin/python3 -I -B - \
     --release "$REL" --expected-active-release "$ACTIVE" --commit "$COMMIT" \
     --archive-sha "$ARCHIVE_SHA" --archive-size "$ARCHIVE_SIZE" \
@@ -115,7 +151,7 @@ if ssh -o BatchMode=yes -o ConnectTimeout=12 "$TARGET" \
     --continuity-sha "$continuity_sha" --deploy-sha "$DEPLOY_SHA" \
     --pair-helper-sha "$PAIR_SHA" --backup-helper-sha "$BACKUP_SHA" \
     --run-id "$run_id" \
-    < "$PROJECT/scripts/ops/libexec/bound_release_deploy_v1.py" > "$receipt_file" 2>/dev/null; then
+    > "$receipt_file" 2>/dev/null; then
     remote_rc=0
 else
     remote_rc=$?
