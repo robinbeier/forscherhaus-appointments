@@ -2,6 +2,8 @@
 # Admit and invoke exactly one already-built, reviewed production release.
 set -Eeuo pipefail
 umask 077
+# Git replacement refs must not redirect any reviewed-commit object read.
+export GIT_NO_REPLACE_OBJECTS=1
 
 PROJECT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 TARGET='root@booking-server'
@@ -45,6 +47,9 @@ fi
 [[ "$CONFIRM" == ROB-618 ]] || { echo 'ERROR: live deploy confirmation required.' >&2; exit 64; }
 [[ "$(git -C "$PROJECT" symbolic-ref --short HEAD)" == main && "$(git -C "$PROJECT" rev-parse HEAD)" == "$COMMIT" ]] || {
     echo 'ERROR: clean reviewed main commit required.' >&2; exit 70;
+}
+[[ "$(git -C "$PROJECT" rev-parse --verify "$COMMIT^{commit}")" == "$COMMIT" ]] || {
+    echo 'ERROR: reviewed commit object is unavailable.' >&2; exit 70;
 }
 git -C "$PROJECT" diff --quiet HEAD && git -C "$PROJECT" diff --cached --quiet || {
     echo 'ERROR: tracked source is modified.' >&2; exit 70;
