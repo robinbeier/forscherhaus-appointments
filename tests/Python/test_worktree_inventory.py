@@ -174,6 +174,48 @@ class WorktreeInventoryTest(unittest.TestCase):
         self.assertFalse(report["safe_primary_refresh"]["safe_ff_only"])
         self.assertEqual(report["safe_primary_refresh"]["commands"], [])
 
+    def test_failed_prune_dry_run_blocks_ready_source_claim(self):
+        real_runner = module._run_git
+
+        def failing_prune_runner(repo, arguments, timeout=module.TIMEOUT):
+            if arguments[:3] == ["worktree", "prune", "--dry-run"]:
+                return 1, b"", b"prune unavailable"
+            return real_runner(repo, arguments, timeout)
+
+        code, report = module.inventory(["--repo", str(self.primary)], runner=failing_prune_runner)
+
+        self.assertEqual(code, 1)
+        self.assertEqual(report["status"], "unknown")
+        self.assertIsNone(report["authority"]["source"])
+        self.assertIn("prunable registration check unavailable", report["observations"])
+
+    def test_unreadable_secondary_worktree_is_not_an_authority_candidate(self):
+        secondary = self.root / "pr-candidate"
+        git(self.primary, "worktree", "add", "-b", "codex/candidate", str(secondary))
+        real_runner = module._run_git
+
+        def failing_secondary_runner(repo, arguments, timeout=module.TIMEOUT):
+            if Path(repo).resolve() == secondary.resolve() and arguments[:1] == ["status"]:
+                return 1, b"", b"status unavailable"
+            return real_runner(repo, arguments, timeout)
+
+        code, report = module.inventory(["--repo", str(self.primary)], runner=failing_secondary_runner)
+
+        self.assertEqual(code, 1)
+        self.assertEqual(report["status"], "unknown")
+        self.assertIsNone(report["authority"]["pull_request"])
+
+    def test_dirty_secondary_worktree_is_not_an_authority_candidate(self):
+        secondary = self.root / "release-candidate"
+        git(self.primary, "worktree", "add", "-b", "codex/release-candidate", str(secondary))
+        (secondary / "local-note.txt").write_text("uncommitted\n")
+
+        code, report = module.inventory(["--repo", str(self.primary)])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(report["status"], "blocked")
+        self.assertIsNone(report["authority"]["release"])
+
     def test_labels_are_unique_when_worktree_basenames_collide(self):
         first = self.root / "one" / "checkout"
         second = self.root / "two" / "checkout"

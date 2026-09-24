@@ -201,16 +201,19 @@ def inventory(
     else:
         refresh["reason"] = "primary must be clean, on main, and remote main must be readable"
 
+    def eligible_candidate(item: dict[str, object]) -> bool:
+        return item.get("exists") is True and item.get("dirty") is False and not item.get("prunable")
+
     authority: dict[str, object] = {
-        "source": primary["display_path"] if primary_branch == args.branch and primary.get("dirty") is False and primary.get("freshness") == "current" else None,
-        "test": next((item["display_path"] for item in entries if item["role"] == "test-candidate" and not item.get("prunable")), None),
-        "pull_request": next((item["display_path"] for item in entries if item["role"] == "pull-request-candidate" and not item.get("prunable")), None),
-        "release": next((item["display_path"] for item in entries if item["role"] == "release-candidate" and not item.get("prunable")), None),
+        "source": primary["display_path"] if prune_code == 0 and primary_branch == args.branch and primary.get("dirty") is False and primary.get("freshness") == "current" else None,
+        "test": next((item["display_path"] for item in entries if item["role"] == "test-candidate" and eligible_candidate(item)), None),
+        "pull_request": next((item["display_path"] for item in entries if item["role"] == "pull-request-candidate" and eligible_candidate(item)), None),
+        "release": next((item["display_path"] for item in entries if item["role"] == "release-candidate" and eligible_candidate(item)), None),
         "note": "Roles are local candidates; PR/release authority still requires current external evidence.",
     }
     status = "blocked" if dirty or prunable or stale else "ready"
     primary_not_authoritative = primary_branch != args.branch or primary.get("freshness") != "current"
-    if primary_not_authoritative or any(item.get("dirty") is None for item in entries) or remote_sha is None:
+    if primary_not_authoritative or any(item.get("dirty") is None for item in entries) or remote_sha is None or prune_code != 0:
         status = "unknown" if status == "ready" else status
     result_entries = []
     for entry in entries:
