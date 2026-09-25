@@ -70,14 +70,30 @@ final class CspReportHttpTest extends TestCase
     }
 
     /**
-     * Exercise the controller's early return after the first accepted report.
-     * The fixed production config path is created only when absent and is
-     * removed again only when this test created it.
+     * Exercise the controller's early return against a prefilled future rate
+     * window. The fixed production config path is created only when absent and
+     * is removed again only when this test created it.
      */
-    public function testRateLimitedBatchReturns429AndPersistsOnlyOneReport(): void
+    public function testRateLimitedBatchReturns429AndLeavesPrefilledWindowUnchanged(): void
     {
         self::assertNotNull($this->server);
         $this->prepareOwnedRateLimitState();
+        $aggregatePath = \Csp_report_only::aggregatePath();
+        self::assertSame(
+            'accepted',
+            \Csp_report_only::record(
+                [
+                    'surface' => 'app',
+                    'directive' => 'script-src',
+                    'blocked_origin' => 'inline',
+                    'disposition' => 'report',
+                ],
+                $this->rateLimitConfig(),
+                $aggregatePath,
+                time() + 3600,
+            )['status'],
+        );
+        $aggregateBefore = (string) file_get_contents($aggregatePath);
         $payload = [
             [
                 'type' => 'csp-violation',
@@ -104,17 +120,13 @@ final class CspReportHttpTest extends TestCase
             ->requestRawApp('POST', 'csp-report', json_encode($payload, JSON_THROW_ON_ERROR), 'application/csp-report');
         self::assertSame(429, $response->statusCode, $response->body);
 
-        $aggregatePath = \Csp_report_only::aggregatePath();
         self::assertFileExists($aggregatePath);
-        $summary = \Csp_report_only::summarizeAggregateJson((string) file_get_contents($aggregatePath), [
-            'retention_hours' => 48,
-        ]);
-        self::assertIsArray($summary);
-        self::assertSame(1, $summary['accepted']);
-        self::assertSame(0, $summary['dropped']['rate_limited']);
+        self::assertSame($aggregateBefore, (string) file_get_contents($aggregatePath));
         $aggregate = json_decode((string) file_get_contents($aggregatePath), true, 8, JSON_THROW_ON_ERROR);
         self::assertIsArray($aggregate);
         self::assertSame(1, $aggregate['rate_window']['count']);
+        self::assertSame(1, array_sum(array_column($aggregate['buckets'], 'accepted')));
+        self::assertSame(0, $aggregate['dropped']['rate_limited']);
     }
 
     public function testMalformedActiveReportReturns204WithoutAggregateOrLock(): void
@@ -160,16 +172,7 @@ final class CspReportHttpTest extends TestCase
             throw new RuntimeException('CSP config directory is not a safe directory.');
         }
 
-        $config = [
-            'schema' => \Csp_report_only::CONFIG_SCHEMA,
-            'enabled' => true,
-            'app_host' => 'app.example.test',
-            'www_host' => 'www.example.test',
-            'google_analytics_enabled' => false,
-            'matomo_origin' => null,
-            'max_reports_per_minute' => 1,
-            'retention_hours' => 48,
-        ];
+        $config = $this->rateLimitConfig();
         $handle = @fopen($configPath, 'x');
         if (!is_resource($handle)) {
             $this->cleanupOwnedRateLimitState();
@@ -185,6 +188,21 @@ final class CspReportHttpTest extends TestCase
         }
         $this->ownedConfig = true;
         $this->ownedAggregate = true;
+    }
+
+    /** @return array<string,mixed> */
+    private function rateLimitConfig(): array
+    {
+        return [
+            'schema' => \Csp_report_only::CONFIG_SCHEMA,
+            'enabled' => true,
+            'app_host' => 'app.example.test',
+            'www_host' => 'www.example.test',
+            'google_analytics_enabled' => false,
+            'matomo_origin' => null,
+            'max_reports_per_minute' => 1,
+            'retention_hours' => 48,
+        ];
     }
 
     private function cleanupOwnedRateLimitState(): void
