@@ -105,6 +105,41 @@ class TestRoutingGuardTest(unittest.TestCase):
                     script.write_text("#!/bin/bash\nphp vendor/bin/phpunit " + path + "\n")
                     self.assertTrue(module.has_route(path, workflow, set(), ["tests/Unit/"], root))
 
+    def test_reviewed_python_route_accepts_root_wrapper_and_exact_module(self):
+        path = "tests/Unit/Scripts/bound_release_recovery_inspect_v1_test.py"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            script = root / module.ROOT_DEPLOYMENT_SCRIPT
+            script.parent.mkdir(parents=True)
+            script.write_text(
+                "#!/bin/bash\n"
+                "sudo python3 -B -m unittest tests.Unit.Scripts.bound_release_recovery_inspect_v1_test\n"
+            )
+            workflow = (
+                "  root-deployment-tests:\n"
+                "    steps:\n"
+                "      - run: bash scripts/ci/run_root_deployment_regressions.sh\n"
+            )
+            self.assertTrue(module.has_route(path, workflow, set(), [], root))
+
+    def test_reviewed_python_route_rejects_missing_wrapper_or_prefix_match(self):
+        path = "tests/Unit/Scripts/bound_release_recovery_inspect_v1_test.py"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            script = root / module.ROOT_DEPLOYMENT_SCRIPT
+            script.parent.mkdir(parents=True)
+            script.write_text(
+                "#!/bin/bash\n"
+                "sudo python3 -B -m unittest tests.Unit.Scripts.bound_release_recovery_inspect_v1_test_extra\n"
+            )
+            routed_workflow = (
+                "  root-deployment-tests:\n"
+                "    steps:\n"
+                "      - run: bash scripts/ci/run_root_deployment_regressions.sh\n"
+            )
+            self.assertFalse(module.has_route(path, routed_workflow, set(), [], root))
+            self.assertFalse(module.has_route(path, "  root-deployment-tests:\n    steps:\n      - run: echo unrelated\n", set(), [], root))
+
     def test_non_php_reference_must_be_in_a_run_step(self):
         path = "pdf-renderer/new.test.js"
         workflow = """  js-test:
