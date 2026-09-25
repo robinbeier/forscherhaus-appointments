@@ -380,7 +380,7 @@ jobs:
     steps:
       - name: Git clone
         uses: actions/checkout@v6
-      - name: Run isolated Calendar and canary suites
+      - name: Run isolated application root suites
         run: |
           set -o pipefail
           mkdir -p storage/logs/ci
@@ -402,6 +402,24 @@ jobs:
               --fail-on-empty-test-suite \
               --log-junit storage/logs/ci/zero-surprise-canary-fixture.junit.xml \
               tests/Integration/ZeroSurpriseCanaryFixtureTest.php
+            APP_ENV=testing php -d memory_limit=512M vendor/bin/phpunit \
+              --fail-on-skipped \
+              --fail-on-empty-test-suite \
+              --log-junit storage/logs/ci/customers-ui-smoke-fixture-lifecycle.junit.xml \
+              tests/Unit/Libraries/CustomersUiSmokeFixtureLifecycleTest.php
+            APP_ENV=testing php -d memory_limit=512M vendor/bin/phpunit \
+              --fail-on-skipped \
+              --fail-on-empty-test-suite \
+              --log-junit storage/logs/ci/provider-ui-smoke-fixture-lifecycle.junit.xml \
+              tests/Unit/Libraries/ProviderUiSmokeFixtureLifecycleTest.php
+            php vendor/bin/phpunit \
+              --fail-on-skipped \
+              --fail-on-empty-test-suite \
+              --log-junit storage/logs/ci/csp-report-only-root.junit.xml \
+              --no-configuration \
+              --bootstrap tests/bootstrap.php \
+              tests/Unit/Scripts/CspReportOnlyActivationScriptTest.php \
+              tests/Unit/Scripts/CspReportOnlyStatusScriptTest.php
           ' 2>&1 | tee storage/logs/ci/calendar-canary-regressions.log
       - name: Upload per-test receipt
         if: always()
@@ -411,6 +429,9 @@ jobs:
           path: |
             storage/logs/ci/calendar-authorization.junit.xml
             storage/logs/ci/zero-surprise-canary-fixture.junit.xml
+            storage/logs/ci/customers-ui-smoke-fixture-lifecycle.junit.xml
+            storage/logs/ci/provider-ui-smoke-fixture-lifecycle.junit.xml
+            storage/logs/ci/csp-report-only-root.junit.xml
             storage/logs/ci/calendar-canary-regressions.log
           if-no-files-found: error
       - name: Cleanup isolated database and canary fixture

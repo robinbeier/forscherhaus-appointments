@@ -22,12 +22,15 @@ final class CspReportOnlyActivationScriptTest extends TestCase
         chown($directory, 0);
         chgrp($directory, 0);
         $target = $directory . '/csp-report-only.json';
-        $candidate = \readActivationCandidate(
-            $this->repoRoot() . '/scripts/ops/config/csp_report_only.production.v1.json',
-        );
-        self::assertIsArray($candidate);
+        $candidatePath = $directory . '/candidate.json';
 
         try {
+            self::assertTrue(
+                copy($this->repoRoot() . '/scripts/ops/config/csp_report_only.production.v1.json', $candidatePath),
+            );
+            self::assertTrue(chmod($candidatePath, 0644));
+            $candidate = \readActivationCandidate($candidatePath);
+            self::assertIsArray($candidate);
             self::assertSame(
                 ['status' => 'passed', 'result_class' => 'activation_installed'],
                 \installActivation($target, $candidate['bytes'], $candidate['sha256']),
@@ -50,6 +53,7 @@ final class CspReportOnlyActivationScriptTest extends TestCase
             self::assertFileDoesNotExist($target);
         } finally {
             @unlink($target);
+            @unlink($candidatePath);
             rmdir($directory);
         }
     }
