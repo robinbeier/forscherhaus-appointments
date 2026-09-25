@@ -106,7 +106,8 @@ final class MaintenanceActivityIdentityContractTest extends TestCase
         mkdir($longRootStatus, 0777, true);
         file_put_contents(
             $longRootStatus . '/status',
-            "Name:\ttest\nUid:\t{$trustedUid}\t{$trustedUid}\t{$trustedUid}\t{$trustedUid}\nGroups:\t" . str_repeat('1 ', 3000),
+            "Name:\ttest\nUid:\t{$trustedUid}\t{$trustedUid}\t{$trustedUid}\t{$trustedUid}\nGroups:\t" .
+                str_repeat('1 ', 3000),
         );
         file_put_contents($longRootStatus . '/cmdline', "/usr/local/bin/deploy_ea.sh\0");
 
@@ -187,14 +188,14 @@ final class MaintenanceActivityIdentityContractTest extends TestCase
             $dropCode =
                 'import ctypes,os,time; ctypes.CDLL(None).prctl(4, 0, 0, 0, 0); os.setuid(65534); time.sleep(5)';
             $process = $this->startSpoofedProcess($dropCode);
-            usleep(100000);
+            $this->waitForSpoofedProcess($process, 65534);
             foreach ($this->scannerSources() as $relative => $source) {
                 self::assertSame(0, $this->runHarness($source, '/proc', 0, 0), $relative);
             }
             proc_terminate($process);
             proc_close($process);
             $process = $this->startSpoofedProcess('import time; time.sleep(5)');
-            usleep(100000);
+            $this->waitForSpoofedProcess($process, 0);
             foreach ($this->scannerSources() as $relative => $source) {
                 self::assertSame(0, $this->runHarness($source, '/proc', 0, 1), $relative);
             }
@@ -204,6 +205,35 @@ final class MaintenanceActivityIdentityContractTest extends TestCase
                 proc_close($process);
             }
         }
+    }
+
+    /** @param resource $process */
+    private function waitForSpoofedProcess($process, int $expectedUid): void
+    {
+        $status = proc_get_status($process);
+        self::assertIsArray($status);
+        $pid = (int) ($status['pid'] ?? 0);
+        self::assertGreaterThan(0, $pid);
+
+        $statusPath = '/proc/' . $pid . '/status';
+        $cmdlinePath = '/proc/' . $pid . '/cmdline';
+        $deadline = microtime(true) + 2.0;
+        do {
+            $procStatus = @file_get_contents($statusPath);
+            $cmdline = @file_get_contents($cmdlinePath);
+            if (
+                is_string($procStatus) &&
+                preg_match('/^Uid:\s+(\d+)/m', $procStatus, $matches) === 1 &&
+                (int) $matches[1] === $expectedUid &&
+                is_string($cmdline) &&
+                explode("\0", $cmdline, 2)[0] === '/usr/local/bin/deploy_ea.sh'
+            ) {
+                return;
+            }
+            usleep(10000);
+        } while (microtime(true) < $deadline);
+
+        self::fail(sprintf('Spoofed process did not reach uid %d before timeout.', $expectedUid));
     }
 
     /** @return array<string, string> */
