@@ -50,7 +50,9 @@ It requires the canary's root/testing runtime, fails on skipped tests, and
 uploads separate per-test JUnit receipts before removing its owned stack. The
 worktree inventory Python tests run in their own parallel job. A lightweight
 `test-routing` check flags newly added test files without a reviewed CI route;
-the hosted receipts, rather than this static check, establish actual execution.
+it checks executable workflow steps rather than filter or artifact mentions and
+requires an explicit root-script entry for newly added `root-deployment` tests.
+The hosted receipts, rather than this static check, establish actual execution.
 
 Architecture/ownership documentation and CODEOWNERS checks continue to run.
 The architecture-boundaries job skips PHP setup and Composer installation for

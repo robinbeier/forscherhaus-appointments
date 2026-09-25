@@ -33,11 +33,37 @@ REQUIRED_DIRECT_ROUTES = {
     ),
     "python-worktree-inventory": ("tests.Python.test_worktree_inventory",),
 }
+ROOT_DEPLOYMENT_SCRIPT = "scripts/ci/run_root_deployment_regressions.sh"
 
 
 def job_body(workflow: str, name: str) -> str:
     match = re.search(rf"(?ms)^  {re.escape(name)}:\n(.*?)(?=^  [a-z][a-z0-9-]*:\n|\Z)", workflow)
     return match.group(1) if match else ""
+
+
+def run_commands(workflow: str) -> str:
+    """Read workflow step commands, excluding filters, artifacts and comments."""
+    lines = workflow.splitlines()
+    commands: list[str] = []
+    index = 0
+    while index < len(lines):
+        match = re.match(r"^(\s*)(?:-\s+)?run:\s*(.*)$", lines[index])
+        if not match:
+            index += 1
+            continue
+        indent = len(match.group(1))
+        inline = match.group(2)
+        if inline not in ("", "|", ">", "|-", ">-"):
+            commands.append(inline)
+        index += 1
+        while index < len(lines):
+            line = lines[index]
+            if line.strip() and len(line) - len(line.lstrip()) <= indent:
+                break
+            if line.strip() and not line.lstrip().startswith("#"):
+                commands.append(line)
+            index += 1
+    return "\n".join(commands)
 
 
 def added_test_files(base: str) -> list[str]:
@@ -69,12 +95,23 @@ def configured_php_tests() -> tuple[set[str], list[str]]:
     return files, directories
 
 
-def has_route(path: str, workflow: str, files: set[str], directories: list[str]) -> bool:
+def has_route(path: str, workflow: str, files: set[str], directories: list[str], root: Path = ROOT) -> bool:
     if path.endswith("Test.php") and (path in files or any(path.startswith(directory) for directory in directories)):
+        source = (root / path).read_text(encoding="utf-8")
+        if re.search(r"#\[Group\(['\"]root-deployment['\"]\)\]", source):
+            script = (root / ROOT_DEPLOYMENT_SCRIPT).read_text(encoding="utf-8")
+            script_commands = "\n".join(line for line in script.splitlines() if not line.lstrip().startswith("#"))
+            return (
+                ROOT_DEPLOYMENT_SCRIPT in run_commands(workflow)
+                and path in script_commands
+            )
         return True
     # Other test types need an explicit CI invocation or a reviewed wrapper.
     # A new indirect wrapper is intentionally flagged for a routing decision.
-    return path in workflow or (path.endswith(".py") and path.removesuffix(".py").replace("/", ".") in workflow)
+    commands = run_commands(workflow)
+    return path in commands or (
+        path.endswith(".py") and path.removesuffix(".py").replace("/", ".") in commands
+    )
 
 
 def main() -> int:
@@ -88,7 +125,7 @@ def main() -> int:
         f"{job}: {token}"
         for job, tokens in REQUIRED_DIRECT_ROUTES.items()
         for token in tokens
-        if token not in job_body(workflow, job)
+        if token not in run_commands(job_body(workflow, job))
     ]
     if missing_required:
         raise SystemExit("Required direct test routing missing: " + ", ".join(missing_required))
