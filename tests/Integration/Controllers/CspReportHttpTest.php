@@ -117,6 +117,21 @@ final class CspReportHttpTest extends TestCase
         self::assertSame(1, $aggregate['rate_window']['count']);
     }
 
+    public function testMalformedActiveReportReturns204WithoutAggregateOrLock(): void
+    {
+        self::assertNotNull($this->server);
+        $this->prepareOwnedRateLimitState();
+
+        $response = $this->server
+            ->client()
+            ->requestRawApp('POST', 'csp-report', '{"csp-report":{"disposition":"report"}}', 'application/csp-report');
+        self::assertSame(204, $response->statusCode, $response->body);
+
+        $aggregatePath = \Csp_report_only::aggregatePath();
+        self::assertFileDoesNotExist($aggregatePath);
+        self::assertFileDoesNotExist($aggregatePath . '.lock');
+    }
+
     private function prepareOwnedRateLimitState(): void
     {
         $configDirectory = dirname(\Csp_report_only::CONFIG_PATH);
