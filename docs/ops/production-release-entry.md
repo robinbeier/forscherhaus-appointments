@@ -254,13 +254,14 @@ application deploy.
    remains known, but the host guard state must be inspected before further
    writes. A later invocation never clears the guard automatically. Never
    delete the intent, result or guard to retry.
-   An unknown first SSH result has no automated recovery-only entry in this
-   change. Owner-controlled recovery must inspect the recorded guard, intent,
-   receipt and active marker under the shared lock. A durable `0` receipt with
-   the candidate marker or `30` with the prior marker can establish a terminal
-   state; `31`, `32`, `143`, missing or contradictory evidence cannot. The
-   runner's internal `--ack` is not an operator recovery command. Do not
-   re-run the wrapper with a fresh run ID to investigate an unknown result.
+   After ROB-621, the separate [read-only recovery inspector](bound-release-recovery-inspector.md)
+   can classify the recorded guard, intent, receipt and active marker under the
+   shared lock using the original private run binding. A durable `0` receipt
+   with the candidate marker or `30` with the prior marker can establish a
+   terminal state; `31`, `32`, `143`, missing or contradictory evidence cannot.
+   The inspector never acknowledges or retires a guard. The runner's internal
+   `--ack` is not an operator recovery command. Do not re-run the deploy wrapper
+   with a fresh run ID to investigate an unknown result.
    For a separately
    authorized migration use the direct, lock-preserving
    [deployment procedure](../deployment.md#deploy) and its additional gate.
