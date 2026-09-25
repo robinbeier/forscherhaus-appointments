@@ -80,6 +80,53 @@ final class BookingDownloadHttpTest extends TestCase
         }
     }
 
+    public function testConfirmationJsonRoundTripsOwnedNamesWithoutScriptBreakout(): void
+    {
+        $fixture = $this->fixture;
+        $serviceName = 'Musik & Mathe – Jörg </ScRiPt><script>alert("service")</script> 🚀';
+        $providerLastName = 'O\'Connor </sCrIpT><img src=x onerror=alert(1)> – 李';
+        $db = get_instance()->db;
+        self::assertTrue($db->update('services', ['name' => $serviceName], ['id' => $fixture->serviceId]));
+        self::assertTrue($db->update('users', ['last_name' => $providerLastName], ['id' => $fixture->providerId]));
+
+        $appointment = $fixture->appointment();
+        $hash = (string) $appointment['hash'];
+        self::assertSame(64, strlen($hash));
+
+        $response = $this->anonymousClient()->get('booking_confirmation/of/' . $hash);
+        self::assertSame(200, $response->statusCode);
+        self::assertStringStartsWith('text/html', strtolower((string) $response->header('content-type')));
+        self::assertStringContainsString('data-generate-pdf', $response->body);
+        self::assertStringContainsString('data-share-url', $response->body);
+        self::assertStringContainsString('/booking/reschedule/' . $hash, $response->body);
+
+        $sharePayload = $this->embeddedJson($response->body, 'sharePayload');
+        $pdfData = $this->embeddedJson($response->body, 'appointmentPdfData');
+        self::assertSame($serviceName . ' – Synthetic ' . $providerLastName, $sharePayload['title']);
+        self::assertStringContainsString($serviceName, $sharePayload['title']);
+        self::assertStringContainsString($providerLastName, $sharePayload['title']);
+        self::assertSame($serviceName, $pdfData['title']);
+        self::assertSame('Synthetic ' . $providerLastName, $pdfData['teacher']);
+        self::assertStringContainsString('/booking/reschedule/' . $hash, $sharePayload['url']);
+        self::assertStringContainsString('/booking/reschedule/' . $hash, $pdfData['manageUrl']);
+        self::assertStringNotContainsString(
+            '</script',
+            strtolower($this->embeddedJsonLiteral($response->body, 'sharePayload')),
+        );
+        self::assertStringNotContainsString(
+            '</script',
+            strtolower($this->embeddedJsonLiteral($response->body, 'appointmentPdfData')),
+        );
+        self::assertStringNotContainsString(
+            '<script>alert("service")',
+            strtolower($this->embeddedJsonLiteral($response->body, 'sharePayload')),
+        );
+        self::assertStringNotContainsString(
+            '<img src=x onerror=',
+            strtolower($this->embeddedJsonLiteral($response->body, 'appointmentPdfData')),
+        );
+    }
+
     public function testUnknownAndMalformedHashesDoNotExposeOwnedDownloadData(): void
     {
         $fixture = $this->fixture;
@@ -188,5 +235,21 @@ final class BookingDownloadHttpTest extends TestCase
         self::assertSame($snapshots['customer'], $fixture->row('users', $fixture->customerId));
         self::assertSame($snapshots['provider'], $fixture->row('users', $fixture->providerId));
         self::assertSame($snapshots['service'], $fixture->row('services', $fixture->serviceId));
+    }
+
+    /** @return array<string, mixed> */
+    private function embeddedJson(string $html, string $name): array
+    {
+        $decoded = json_decode($this->embeddedJsonLiteral($html, $name), true, 512, JSON_THROW_ON_ERROR);
+        self::assertIsArray($decoded, $name . ' must decode to an object.');
+        return $decoded;
+    }
+
+    private function embeddedJsonLiteral(string $html, string $name): string
+    {
+        $pattern = '/const ' . preg_quote($name, '/') . ' = (?<json>\{.*?\});/s';
+        self::assertSame(1, preg_match($pattern, $html, $matches), $name . ' JSON literal must be present.');
+        self::assertArrayHasKey('json', $matches);
+        return $matches['json'];
     }
 }

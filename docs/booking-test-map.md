@@ -27,6 +27,7 @@ ist eine Orientierung, keine vollständige Testliste.
 | Reise/Verhalten | Tests | Ebene und abgedecktes Risiko |
 | --- | --- | --- |
 | Browser lädt Bestätigungs-PDF und Download wird ausgewertet | `scripts/release-gate/booking_confirmation_pdf_gate.php` plus `scripts/release-gate/playwright/booking_confirmation_download.js` | Browser-/Release-Gate, read-only; reale Bestätigungsseite, PDF/Download und Parser |
+| Bestätigung bewahrt gemischte Script-Tags, Sonderzeichen und Unicode in Share-/PDF-Daten | `tests/Integration/Controllers/BookingDownloadHttpTest.php::testConfirmationJsonRoundTripsOwnedNamesWithoutScriptBreakout` | FH_DEFENSE_ISOLATED HTTP/DB; echte Fixture, eigener Hash, Status/Payload, Button-/Link-Erreichbarkeit, JSON-Roundtrip und kein ausführbarer Script-Ausbruch; Fixture-Cleanup |
 | Download-Sentinel bleibt stabil | `tests/Unit/Scripts/BookingConfirmationDownloadSnippetTest.php`, `BookingConfirmationRunCodeResultTest.php` | Source-/Parser-Unit; Marker, Fallback-Ausgabe und ungültige Playwright-Ausgabe |
 
 | Kalenderdatei und Download | `tests/Unit/Libraries/IcsFileTest.php` plus `Appointments::ics` coverage | Unit/HTTP; ICS generation and parent download remain available; application mail is intentionally absent |
@@ -71,3 +72,7 @@ Szenario erhalten. Vier Tests werden zu zwei, ohne Änderung am Produktcode.
   bei `prepare_booking`, der PDF-Gate-Fluss startet mit bereits vorhandenem
   Bestätigungs-Hash. Das ist eine beobachtete Abgrenzung, kein Vorschlag für
   neue Tests.
+- Der bisherige `BookingConfirmationJsonTest` prüfte nur ausgewählte
+  `json_encode`-Ausdrücke im View-Quelltext. Der HTTP-Test ersetzt ihn durch
+  gerenderte Share- und PDF-Daten aus einer eigenen DB-Fixture; er schützt
+  damit das Ausgabeverhalten auch bei einer anderen sicheren Kodierung.
