@@ -123,6 +123,17 @@ class TestRoutingGuardTest(unittest.TestCase):
         self.assertFalse(module.has_route(path, workflow, set(), []))
         self.assertTrue(module.has_route(path, workflow + "      - run: node pdf-renderer/new.test.js\n", set(), []))
 
+    def test_route_requires_complete_path_or_python_module_name(self):
+        python = "tests/Python/test_worktree.py"
+        workflow = "  inventory:\n    steps:\n      - run: python3 -m unittest tests.Python.test_worktree_inventory\n"
+        self.assertFalse(module.has_route(python, workflow, set(), []))
+        self.assertTrue(module.has_route(python, workflow + "      - run: python3 -m unittest tests.Python.test_worktree\n", set(), []))
+
+        javascript = "pdf-renderer/new.test.js"
+        workflow = "  js-test:\n    steps:\n      - run: node --test pdf-renderer/new.test.js.extra\n"
+        self.assertFalse(module.has_route(javascript, workflow, set(), []))
+        self.assertTrue(module.has_route(javascript, workflow + "      - run: node --test pdf-renderer/new.test.js\n", set(), []))
+
     def test_shell_comment_filter_preserves_quoted_hashes(self):
         self.assertEqual(
             "node --test 'fixture#one.test.js' ",

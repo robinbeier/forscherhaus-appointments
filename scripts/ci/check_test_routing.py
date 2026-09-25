@@ -86,6 +86,12 @@ def run_commands(workflow: str) -> str:
     return "\n".join(commands)
 
 
+def contains_test_argument(commands: str, name: str, *, module: bool = False) -> bool:
+    """Find a complete path/module token, never a prefix of another test."""
+    word_characters = r"A-Za-z0-9_." if module else r"A-Za-z0-9_./-"
+    return re.search(rf"(?<![{word_characters}]){re.escape(name)}(?![{word_characters}])", commands) is not None
+
+
 def added_test_files(base: str, root: Path = ROOT) -> list[str]:
     result = subprocess.run(
         ["git", "diff", "--no-renames", "--name-only", "--diff-filter=A", f"{base}...HEAD", "--", "tests", "pdf-renderer"],
@@ -125,15 +131,17 @@ def has_route(path: str, workflow: str, files: set[str], directories: list[str],
             script = (root / ROOT_DEPLOYMENT_SCRIPT).read_text(encoding="utf-8")
             script_commands = "\n".join(without_shell_comment(line) for line in script.splitlines())
             return (
-                ROOT_DEPLOYMENT_SCRIPT in run_commands(workflow)
-                and path in script_commands
+                contains_test_argument(run_commands(workflow), ROOT_DEPLOYMENT_SCRIPT)
+                and contains_test_argument(script_commands, path)
             )
         return True
     # Other test types need an explicit CI invocation or a reviewed wrapper.
     # A new indirect wrapper is intentionally flagged for a routing decision.
     commands = run_commands(workflow)
-    return path in commands or (
-        path.endswith(".py") and path.removesuffix(".py").replace("/", ".") in commands
+    return contains_test_argument(commands, path) or (
+        path.endswith(".py") and contains_test_argument(
+            commands, path.removesuffix(".py").replace("/", "."), module=True
+        )
     )
 
 
@@ -162,7 +170,7 @@ def main() -> int:
         f"{job}: {token}"
         for job, tokens in REQUIRED_DIRECT_ROUTES.items()
         for token in tokens
-        if token not in run_commands(job_body(workflow, job))
+        if not contains_test_argument(run_commands(job_body(workflow, job)), token)
     ]
     if missing_required:
         raise SystemExit("Required direct test routing missing: " + ", ".join(missing_required))
