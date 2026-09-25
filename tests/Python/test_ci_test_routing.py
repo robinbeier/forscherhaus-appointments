@@ -14,6 +14,46 @@ spec.loader.exec_module(module)
 
 
 class TestRoutingGuardTest(unittest.TestCase):
+    def test_push_uses_event_before_and_requires_a_valid_commit(self):
+        before = "a" * 40
+        self.assertEqual(before, module.comparison_base(None, "push", before))
+        self.assertEqual("origin/main", module.comparison_base(None, "pull_request", None))
+        self.assertEqual("HEAD~2", module.comparison_base("HEAD~2", "push", None))
+        for invalid in (None, "", "0" * 40, "not-a-commit"):
+            with self.subTest(invalid=invalid), self.assertRaises(SystemExit):
+                module.comparison_base(None, "push", invalid)
+
+    def test_comparison_includes_tests_from_earlier_commit_in_push(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+
+            def git(*arguments):
+                return subprocess.run(
+                    ["git", *arguments], cwd=root, check=True, capture_output=True, text=True
+                ).stdout.strip()
+
+            git("init", "--initial-branch=main")
+            git("config", "user.email", "test@example.invalid")
+            git("config", "user.name", "Routing Test")
+            (root / "README.md").write_text("initial\n")
+            git("add", ".")
+            git("commit", "-m", "initial")
+            before = git("rev-parse", "HEAD")
+
+            test_path = root / "tests/Integration/EarlierTest.php"
+            test_path.parent.mkdir(parents=True)
+            test_path.write_text("<?php\n")
+            git("add", ".")
+            git("commit", "-m", "add unrouted test")
+            (root / "README.md").write_text("later\n")
+            git("commit", "-am", "later change")
+
+            self.assertEqual([], module.added_test_files("HEAD^", root))
+            self.assertEqual(
+                ["tests/Integration/EarlierTest.php"],
+                module.added_test_files(module.comparison_base(None, "push", before), root),
+            )
+
     def test_rename_destination_is_checked_as_a_new_route(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

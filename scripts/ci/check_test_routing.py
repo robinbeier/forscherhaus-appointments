@@ -114,11 +114,25 @@ def has_route(path: str, workflow: str, files: set[str], directories: list[str],
     )
 
 
+def comparison_base(explicit_base: str | None, event_name: str | None, event_before: str | None) -> str:
+    if explicit_base:
+        return explicit_base
+    if event_name != "push":
+        return "origin/main"
+    if (
+        not event_before
+        or not re.fullmatch(r"[a-f0-9]{40}|[a-f0-9]{64}", event_before)
+        or set(event_before) == {"0"}
+    ):
+        raise SystemExit("Push event lacks a valid before commit for the complete routing comparison")
+    return event_before
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", default=None)
     args = parser.parse_args()
-    base = args.base or ("HEAD^" if os.getenv("GITHUB_EVENT_NAME") == "push" else "origin/main")
+    base = comparison_base(args.base, os.getenv("GITHUB_EVENT_NAME"), os.getenv("GITHUB_EVENT_BEFORE"))
 
     workflow = WORKFLOW.read_text(encoding="utf-8")
     missing_required = [

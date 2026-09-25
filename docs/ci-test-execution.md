@@ -52,6 +52,8 @@ worktree inventory Python tests run in their own parallel job. A lightweight
 `test-routing` check flags newly added test files without a reviewed CI route;
 it checks executable workflow steps rather than filter or artifact mentions and
 requires an explicit root-script entry for newly added `root-deployment` tests.
+On a push, the check compares the full range from the event's previous commit;
+renamed test destinations are checked as new paths.
 The hosted receipts, rather than this static check, establish actual execution.
 
 Architecture/ownership documentation and CODEOWNERS checks continue to run.
