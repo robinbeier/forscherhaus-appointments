@@ -30,6 +30,9 @@ final class CspReportHttpTest extends TestCase
     public function testInactiveCollectorUsesOnlyTheExactPostRoute(): void
     {
         self::assertNotNull($this->server);
+        $aggregatePath = \Csp_report_only::aggregatePath();
+        $aggregateExistedBefore = is_file($aggregatePath);
+        $aggregateBefore = $aggregateExistedBefore ? (string) file_get_contents($aggregatePath) : null;
         $client = new GateHttpClient(
             $this->server->baseUrl,
             additionalHeaders: [
@@ -44,8 +47,7 @@ final class CspReportHttpTest extends TestCase
         self::assertNull($exact->header('content-security-policy-report-only'));
 
         $automaticControllerPath = $client->post('csp_report', ['synthetic' => 'fixed'], withCsrfToken: false);
-        self::assertNotSame(204, $automaticControllerPath->statusCode);
-        self::assertNotSame(429, $automaticControllerPath->statusCode);
+        self::assertSame(403, $automaticControllerPath->statusCode);
         self::assertNull($automaticControllerPath->header('content-security-policy'));
         self::assertNull($automaticControllerPath->header('content-security-policy-report-only'));
 
@@ -53,5 +55,10 @@ final class CspReportHttpTest extends TestCase
         self::assertSame(404, $wrongMethod->statusCode);
         self::assertNull($wrongMethod->header('content-security-policy'));
         self::assertNull($wrongMethod->header('content-security-policy-report-only'));
+
+        self::assertSame($aggregateExistedBefore, is_file($aggregatePath));
+        if ($aggregateExistedBefore) {
+            self::assertSame($aggregateBefore, (string) file_get_contents($aggregatePath));
+        }
     }
 }

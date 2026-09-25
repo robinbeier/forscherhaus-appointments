@@ -249,19 +249,72 @@ final class CspReportOnlyTest extends TestCase
         self::assertSame('text/html', Csp_report_only::responseContentType($output));
     }
 
-    public function testMalformedPayloadPathHasNoPersistentInvalidAccountingWrite(): void
+    public function testMalformedPayloadIsRejectedWithoutCreatingAggregateState(): void
     {
-        $source = (string) file_get_contents(APPPATH . 'controllers/Csp_report.php');
-        self::assertStringNotContainsString('recordDropped', $source);
+        $directory = $this->temporaryRoot() . '/csp-report-only-invalid-' . bin2hex(random_bytes(4));
+        mkdir($directory, 0700, true);
+        $path = $directory . '/aggregate.json';
+
+        try {
+            self::assertNull(Csp_report_only::classifyReports(['invalid' => 'payload'], $this->config()));
+            self::assertSame(
+                ['status' => 'error', 'reason' => 'invalid_report'],
+                Csp_report_only::record(
+                    ['surface' => 'attacker-controlled', 'directive' => 'script-src'],
+                    $this->config(),
+                    $path,
+                    1700000000,
+                ),
+            );
+            self::assertFileDoesNotExist($path);
+            self::assertFileDoesNotExist($path . '.lock');
+        } finally {
+            if (is_file($path . '.lock')) {
+                unlink($path . '.lock');
+            }
+            if (is_file($path)) {
+                unlink($path);
+            }
+            rmdir($directory);
+        }
     }
 
-    public function testReportingBatchStopsAfterFirstRateLimitedResult(): void
+    public function testRateLimitResultLeavesAggregateStateUnchanged(): void
     {
-        $source = (string) file_get_contents(APPPATH . 'controllers/Csp_report.php');
-        $rateLimit = strpos($source, "if (\$result['status'] === 'rate_limited')");
-        self::assertIsInt($rateLimit);
-        self::assertStringContainsString("set_status_header(429)->set_output('');", substr($source, $rateLimit, 240));
-        self::assertStringContainsString('return;', substr($source, $rateLimit, 300));
+        $directory = $this->temporaryRoot() . '/csp-report-only-rate-' . bin2hex(random_bytes(4));
+        mkdir($directory, 0700, true);
+        $path = $directory . '/aggregate.json';
+        $report = [
+            'surface' => 'app',
+            'directive' => 'script-src',
+            'blocked_origin' => 'self',
+            'disposition' => 'report',
+        ];
+
+        try {
+            self::assertSame(
+                'accepted',
+                Csp_report_only::record($report, $this->config(['max_reports_per_minute' => 1]), $path, 1700000000)[
+                    'status'
+                ],
+            );
+            $before = (string) file_get_contents($path);
+            self::assertSame(
+                'rate_limited',
+                Csp_report_only::record($report, $this->config(['max_reports_per_minute' => 1]), $path, 1700000001)[
+                    'status'
+                ],
+            );
+            self::assertSame($before, (string) file_get_contents($path));
+        } finally {
+            if (is_file($path . '.lock')) {
+                unlink($path . '.lock');
+            }
+            if (is_file($path)) {
+                unlink($path);
+            }
+            rmdir($directory);
+        }
     }
 
     public function testAppWwwAnalyticsAndExcludedSurfaceMatrix(): void
