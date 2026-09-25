@@ -4,8 +4,79 @@ namespace Tests\Unit\Core;
 
 use Tests\TestCase;
 
+require_once APPPATH . 'core/Provider_ui_smoke_access_policy.php';
+
 class ProviderUiSmokeBoundarySourceTest extends TestCase
 {
+    public function testReservedIdentityAndPaddingAreClassifiedAcrossAuthenticationSurfaces(): void
+    {
+        $reserved = \Provider_ui_smoke_access_policy::USERNAME;
+
+        self::assertTrue(\Provider_ui_smoke_access_policy::isReservedIdentity($reserved, null, null));
+        self::assertTrue(\Provider_ui_smoke_access_policy::isReservedIdentity(null, $reserved . '   ', null));
+        self::assertTrue(\Provider_ui_smoke_access_policy::isReservedIdentity(null, null, $reserved));
+        self::assertFalse(\Provider_ui_smoke_access_policy::isReservedIdentity('provider', 'provider', 'provider'));
+        self::assertFalse(\Provider_ui_smoke_access_policy::isReservedIdentity(null, null, null));
+    }
+
+    public function testProviderUiPolicyAllowsOnlyTheBoundSmokeRoutesAndMethods(): void
+    {
+        self::assertTrue(\Provider_ui_smoke_access_policy::isAllowedRoute('Dashboard', 'index', 'GET'));
+        self::assertTrue(\Provider_ui_smoke_access_policy::isAllowedRoute('Dashboard', 'provider_metrics', 'POST'));
+        self::assertTrue(
+            \Provider_ui_smoke_access_policy::isAllowedRoute(
+                'Dashboard_export',
+                'provider_parent_appointments_pdf',
+                'GET',
+            ),
+        );
+        self::assertTrue(\Provider_ui_smoke_access_policy::isLogoutRoute('Logout', 'index', 'GET'));
+        self::assertFalse(\Provider_ui_smoke_access_policy::isAllowedRoute('Dashboard', 'index', 'POST'));
+        self::assertFalse(\Provider_ui_smoke_access_policy::isAllowedRoute('Customers', 'index', 'GET'));
+        self::assertFalse(\Provider_ui_smoke_access_policy::isLogoutRoute('Logout', 'index', 'POST'));
+    }
+
+    public function testProviderUiLeaseIsValidOnlyDuringItsBoundedWindow(): void
+    {
+        $issued = new \DateTimeImmutable('2026-01-01T12:00:00Z');
+        $expires = $issued->modify('+60 seconds');
+        $notes = \Provider_ui_smoke_access_policy::buildActiveNotes($issued, $expires);
+
+        self::assertTrue(
+            \Provider_ui_smoke_access_policy::hasActiveLease($notes, new \DateTimeImmutable('2026-01-01T12:00:30Z')),
+        );
+        self::assertFalse(
+            \Provider_ui_smoke_access_policy::hasActiveLease($notes, new \DateTimeImmutable('2026-01-01T12:01:00Z')),
+        );
+        self::assertFalse(
+            \Provider_ui_smoke_access_policy::hasActiveLease(
+                \Provider_ui_smoke_access_policy::DORMANT_NOTES,
+                new \DateTimeImmutable('2026-01-01T12:00:30Z'),
+            ),
+        );
+    }
+
+    public function testControllerRunsProviderBoundaryBeforeSharedSetupContinues(): void
+    {
+        $source = file_get_contents(APPPATH . 'core/EA_Controller.php');
+        self::assertIsString($source);
+
+        $constructorStart = strpos($source, 'public function __construct()');
+        $constructorEnd = strpos($source, 'private function ensure_user_exists', $constructorStart ?: 0);
+        self::assertIsInt($constructorStart);
+        self::assertIsInt($constructorEnd);
+        $constructor = substr($source, $constructorStart, $constructorEnd - $constructorStart);
+
+        $accountCheck = strpos($constructor, '$this->ensure_user_exists();');
+        $providerBoundary = strpos($constructor, '$this->enforce_provider_ui_smoke_boundary();');
+        $sharedSetup = strpos($constructor, '$this->configure_timezone();');
+        self::assertIsInt($accountCheck);
+        self::assertIsInt($providerBoundary);
+        self::assertIsInt($sharedSetup);
+        self::assertLessThan($providerBoundary, $accountCheck);
+        self::assertLessThan($sharedSetup, $providerBoundary);
+    }
+
     public function testControllerBoundaryCoversSessionLoginAndBasicAuthIdentities(): void
     {
         $source = file_get_contents(APPPATH . 'core/EA_Controller.php');

@@ -571,6 +571,9 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
         $controller->validate();
 
         $this->assertFalse($ldap_client->called);
+        $response = json_decode((string) get_instance()->output->get_output(), true);
+        $this->assertIsArray($response);
+        $this->assertFalse($response['success'] ?? true);
     }
 
     public function testAccentInsensitiveReservedLoginCreatesCanonicalGuardedSession(): void

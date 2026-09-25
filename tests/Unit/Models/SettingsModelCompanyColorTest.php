@@ -25,7 +25,8 @@ class SettingsModelCompanyColorTest extends TestCase
         $this->settingsModel->validate(['name' => 'company_color', 'value' => '#abc']);
         $this->settingsModel->validate(['name' => 'company_color', 'value' => '#A1b2C3']);
 
-        $this->assertTrue(true);
+        $this->assertTrue(validate_hex_color('#abc'));
+        $this->assertTrue(validate_hex_color('#A1b2C3'));
     }
 
     public function testSaveNormalizesThreeDigitCompanyColorBeforePersistence(): void
