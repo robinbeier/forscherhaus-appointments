@@ -131,6 +131,16 @@ already current disposable installation. They do not execute a pending migration
 or establish rollback safety. These cases are a bounded matrix, not every role,
 method, credential or update/destroy payload combination.
 
+`ProviderPdfExportHttpTest` uses real loopback HTTP sessions and two synthetic
+providers, customers and booked appointments. It checks both canonical provider
+PDF routes and direct aliases, foreign-ID rejection, current database role,
+GET-only method handling, unchanged owned appointments after denial, and the
+absence of fixed HTML debug dumps with the debug flag enabled. A loopback
+recording renderer captures the HTML sent by the application and returns dummy
+PDF bytes; this proves the authentication/database-to-renderer handoff, not
+Chromium rendering or printable PDF content. The existing on-demand provider UI
+smoke remains the real-PDF check. This test adds no browser job to CI.
+
 The Admins/Secretaries atomic-write, Staff-delete and Settings-batch model tests
 run in the normal database-backed Unit suite. Their cleanup asserts owned row
 absence; partial-fixture tests register identities before writes and preserve

@@ -194,6 +194,13 @@ The optional JSON report contains only pass/fail booleans, bounded counts,
 durations, PDF metadata, and stable assertion labels. It is evidence of the
 gate result, not a credential or fixture snapshot.
 
+The smoke uses one reserved provider with stronger route and role containment
+than an ordinary provider session. It checks real rendering and cleanup for
+that identity, but does not establish cross-provider isolation, rejection after
+an ordinary account's role changes, or the absence of sensitive debug dumps
+under every web-server configuration. Those properties have separate isolated
+regressions and release-specific evidence limits.
+
 ## Exit And Cleanup Semantics
 
 The operator orchestrator uses:
