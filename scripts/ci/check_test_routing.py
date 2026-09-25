@@ -54,7 +54,9 @@ def without_shell_comment(command: str) -> str:
                 quote = character
             elif quote == character:
                 quote = None
-        elif character == "#" and quote is None and (index == 0 or command[index - 1].isspace()):
+        elif character == "#" and quote is None and (
+            index == 0 or command[index - 1].isspace() or command[index - 1] in ";|&()"
+        ):
             return command[:index]
     return command
 
@@ -116,7 +118,7 @@ def configured_php_tests() -> tuple[set[str], list[str]]:
 def has_route(path: str, workflow: str, files: set[str], directories: list[str], root: Path = ROOT) -> bool:
     if path.endswith("Test.php") and (path in files or any(path.startswith(directory) for directory in directories)):
         source = (root / path).read_text(encoding="utf-8")
-        if re.search(r"#\[Group\(['\"]root-deployment['\"]\)\]", source):
+        if re.search(r"#\[\s*Group\s*\(\s*['\"]root-deployment['\"]\s*\)\s*\]", source):
             script = (root / ROOT_DEPLOYMENT_SCRIPT).read_text(encoding="utf-8")
             script_commands = "\n".join(without_shell_comment(line) for line in script.splitlines())
             return (

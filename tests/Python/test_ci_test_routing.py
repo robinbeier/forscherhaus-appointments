@@ -88,15 +88,17 @@ class TestRoutingGuardTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "tests/Unit/Scripts").mkdir(parents=True)
-            (root / path).write_text("<?php #[Group('root-deployment')]\n")
             script = root / module.ROOT_DEPLOYMENT_SCRIPT
             script.parent.mkdir(parents=True)
-            script.write_text("#!/bin/bash\nphp vendor/bin/phpunit existing.php # " + path + "\n")
             workflow = "  root-deployment-tests:\n    steps:\n      - run: bash " + module.ROOT_DEPLOYMENT_SCRIPT + "\n"
-            self.assertFalse(module.has_route(path, workflow, set(), ["tests/Unit/"], root))
+            for attribute in ("#[Group('root-deployment')]", "#[Group( 'root-deployment' )]"):
+                with self.subTest(attribute=attribute):
+                    (root / path).write_text("<?php " + attribute + "\n")
+                    script.write_text("#!/bin/bash\nphp vendor/bin/phpunit existing.php # " + path + "\n")
+                    self.assertFalse(module.has_route(path, workflow, set(), ["tests/Unit/"], root))
 
-            script.write_text("#!/bin/bash\nphp vendor/bin/phpunit " + path + "\n")
-            self.assertTrue(module.has_route(path, workflow, set(), ["tests/Unit/"], root))
+                    script.write_text("#!/bin/bash\nphp vendor/bin/phpunit " + path + "\n")
+                    self.assertTrue(module.has_route(path, workflow, set(), ["tests/Unit/"], root))
 
     def test_non_php_reference_must_be_in_a_run_step(self):
         path = "pdf-renderer/new.test.js"
@@ -121,6 +123,12 @@ class TestRoutingGuardTest(unittest.TestCase):
             "node --test 'fixture#one.test.js' ",
             module.without_shell_comment("node --test 'fixture#one.test.js' # ignored.test.js"),
         )
+        path = "pdf-renderer/new.test.js"
+        for separator in (";", "|", "&", "(", ")"):
+            with self.subTest(separator=separator):
+                self.assertFalse(module.has_route(
+                    path, "  js-test:\n    steps:\n      - run: node --test existing.test.js" + separator + "# " + path + "\n", set(), []
+                ))
 
 
 if __name__ == "__main__":
