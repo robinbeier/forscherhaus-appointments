@@ -342,6 +342,7 @@ class CiWorkflowContractTest extends TestCase
         }
         self::assertSame(5, substr_count($run, '--fail-on-skipped'));
         self::assertSame(5, substr_count($run, '--log-junit'));
+        self::assertStringContainsString('--bootstrap tests/bootstrap.php', $run);
         self::assertSame('always()', $steps['Cleanup isolated database and canary fixture']['if']);
 
         $receipt = $steps['Upload per-test receipt'];

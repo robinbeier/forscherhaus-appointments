@@ -417,7 +417,7 @@ jobs:
               --fail-on-empty-test-suite \
               --log-junit storage/logs/ci/csp-report-only-root.junit.xml \
               --no-configuration \
-              --bootstrap vendor/autoload.php \
+              --bootstrap tests/bootstrap.php \
               tests/Unit/Scripts/CspReportOnlyActivationScriptTest.php \
               tests/Unit/Scripts/CspReportOnlyStatusScriptTest.php
           ' 2>&1 | tee storage/logs/ci/calendar-canary-regressions.log
