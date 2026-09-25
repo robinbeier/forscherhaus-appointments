@@ -59,6 +59,24 @@ On a push, the check compares the full range from the event's previous commit;
 renamed test destinations are checked as new paths.
 The hosted receipts, rather than this static check, establish actual execution.
 
+## Per-test receipts and skips
+
+The `build-test`, `root-deployment-tests`, and
+`calendar-canary-regressions` jobs save PHPUnit JUnit and Open Test Reporting
+(OTR) XML plus a compact
+`*.cases.json` CI artifact. Each entry records job, GitHub run, suite, class,
+test name, and the actual `pass`, `fail`, `error`, or `skip` status. PHPUnit's
+JUnit logger omits skip reasons, so the paired OTR report supplies them;
+test-specific warning output is associated with the case. Missing, invalid,
+or inconsistent reports fail the receipt step. The
+existing Defense per-test receipts remain unchanged.
+
+A skip is not a passed test. A separate test path counts as a counterpart only
+when its own run and case receipt show that it executed. Runner warnings
+without a test association and full PHPUnit output remain available in the
+existing gate logs. Timing comparisons must include receipt generation and
+upload in the total time to merge readiness, not just PHPUnit duration.
+
 Architecture/ownership documentation and CODEOWNERS checks continue to run.
 The architecture-boundaries job skips PHP setup and Composer installation for
 ordinary docs; its existing Deptrac selector still produces the normal skipped
