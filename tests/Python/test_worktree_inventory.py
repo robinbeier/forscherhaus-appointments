@@ -578,6 +578,8 @@ class WorktreeInventoryTest(unittest.TestCase):
         git(self.primary, "-c", "protocol.file.allow=always", "submodule", "add", str(subrepo), "vendor/child")
         git(self.primary, "commit", "-m", "add submodule fixture")
         child = self.primary / "vendor/child"
+        git(child, "config", "user.email", "test@example.invalid")
+        git(child, "config", "user.name", "Inventory Test")
         git(child, "checkout", "-b", "side")
         (child / "tracked.txt").write_text("side\n")
         git(child, "commit", "-am", "side change")
