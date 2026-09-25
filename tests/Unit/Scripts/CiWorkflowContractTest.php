@@ -288,6 +288,7 @@ class CiWorkflowContractTest extends TestCase
         self::assertStringContainsString('set -euo pipefail', $rootDeploymentScript);
         self::assertStringContainsString('cd "$ROOT_DIR"', $rootDeploymentScript);
         self::assertStringContainsString('--fail-on-skipped', $rootDeploymentScript);
+        self::assertStringContainsString('--display-warnings', $rootDeploymentScript);
         self::assertStringContainsString(
             '--log-junit storage/logs/ci/root-deployment.junit.xml',
             $rootDeploymentScript,

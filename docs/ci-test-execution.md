@@ -67,13 +67,15 @@ The `build-test`, `root-deployment-tests`, and
 `*.cases.json` CI artifact. Each entry records job, GitHub run, suite, class,
 test name, and the actual `pass`, `fail`, `error`, or `skip` status. PHPUnit's
 JUnit logger omits skip reasons, so the paired OTR report supplies them;
-test-specific warning output is associated with the case. Missing, invalid,
-or inconsistent reports fail the receipt step. The
+test-specific warning output is associated with the case. The root job also
+uses PHPUnit's `--display-warnings`; its existing gate log retains the named
+warning details without adding them to the normal passing-case output.
+Missing, invalid, or inconsistent reports fail the receipt step. The
 existing Defense per-test receipts remain unchanged.
 
 A skip is not a passed test. A separate test path counts as a counterpart only
 when its own run and case receipt show that it executed. Runner warnings
-without a test association and full PHPUnit output remain available in the
+without a test association and full PHPUnit output remain visible in the
 existing gate logs. Timing comparisons must include receipt generation and
 upload in the total time to merge readiness, not just PHPUnit duration.
 

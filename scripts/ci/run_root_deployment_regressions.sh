@@ -15,6 +15,7 @@ systemd-analyze verify \
   scripts/ops/systemd/fh-release-archive-dump-retention.timer
 sudo env FH_ROOT_HOST_TESTS_REQUIRED=1 php vendor/bin/phpunit --no-configuration --bootstrap vendor/autoload.php \
   --fail-on-skipped \
+  --display-warnings \
   --log-junit storage/logs/ci/root-deployment.junit.xml \
   --log-otr storage/logs/ci/root-deployment.otr.xml \
   tests/Unit/Scripts/DeployResultReceiptStorageTest.php \
