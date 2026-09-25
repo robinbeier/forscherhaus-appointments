@@ -2,6 +2,7 @@
 
 import importlib.util
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 
@@ -13,6 +14,35 @@ spec.loader.exec_module(module)
 
 
 class TestRoutingGuardTest(unittest.TestCase):
+    def test_rename_destination_is_checked_as_a_new_route(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+
+            def git(*arguments):
+                subprocess.run(["git", *arguments], cwd=root, check=True, capture_output=True)
+
+            git("init", "--initial-branch=main")
+            git("config", "user.email", "test@example.invalid")
+            git("config", "user.name", "Routing Test")
+            source = root / "tests/Unit/MovedTest.php"
+            source.parent.mkdir(parents=True)
+            source.write_text("<?php\n")
+            git("add", ".")
+            git("commit", "-m", "add routed test")
+
+            destination = root / "tests/Integration/MovedTest.php"
+            destination.parent.mkdir(parents=True)
+            git("mv", str(source), str(destination))
+            git("commit", "-m", "move to unrouted suite")
+
+            self.assertEqual(
+                ["tests/Integration/MovedTest.php"],
+                module.added_test_files("HEAD^", root),
+            )
+            self.assertFalse(
+                module.has_route("tests/Integration/MovedTest.php", "", set(), ["tests/Unit/"], root)
+            )
+
     def test_excluded_root_group_requires_an_explicit_root_script_route(self):
         path = "tests/Unit/Scripts/NewRootTest.php"
         with tempfile.TemporaryDirectory() as directory:

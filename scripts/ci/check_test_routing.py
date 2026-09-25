@@ -66,10 +66,10 @@ def run_commands(workflow: str) -> str:
     return "\n".join(commands)
 
 
-def added_test_files(base: str) -> list[str]:
+def added_test_files(base: str, root: Path = ROOT) -> list[str]:
     result = subprocess.run(
-        ["git", "diff", "--name-only", "--diff-filter=A", f"{base}...HEAD", "--", "tests", "pdf-renderer"],
-        cwd=ROOT,
+        ["git", "diff", "--no-renames", "--name-only", "--diff-filter=A", f"{base}...HEAD", "--", "tests", "pdf-renderer"],
+        cwd=root,
         check=True,
         capture_output=True,
         text=True,
