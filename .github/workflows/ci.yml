@@ -339,7 +339,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Verify routing guard behavior
-        run: python3 -B -m unittest -v tests.Python.test_ci_test_routing
+        run: python3 -B -m unittest -v tests.Python.test_ci_test_routing tests.Python.test_summarize_junit
       - name: Check test routing manifest
         env:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
@@ -392,35 +392,59 @@ jobs:
             test ! -e config.php
             install -m 0600 config-sample.php config.php
             php index.php console install
+            # Keep later per-suite evidence after an earlier test failure.
+            suite_status=0
             APP_ENV=testing php -d memory_limit=512M vendor/bin/phpunit \
               --fail-on-skipped \
               --fail-on-empty-test-suite \
               --log-junit storage/logs/ci/calendar-authorization.junit.xml \
-              tests/Integration/Controllers/CalendarCombinedAuthorizationTest.php
+              --log-otr storage/logs/ci/calendar-authorization.otr.xml \
+              tests/Integration/Controllers/CalendarCombinedAuthorizationTest.php || suite_status=1
             FH_CANARY_INTEGRATION=1 APP_ENV=testing php -d memory_limit=512M vendor/bin/phpunit \
               --fail-on-skipped \
               --fail-on-empty-test-suite \
               --log-junit storage/logs/ci/zero-surprise-canary-fixture.junit.xml \
-              tests/Integration/ZeroSurpriseCanaryFixtureTest.php
+              --log-otr storage/logs/ci/zero-surprise-canary-fixture.otr.xml \
+              tests/Integration/ZeroSurpriseCanaryFixtureTest.php || suite_status=1
             APP_ENV=testing php -d memory_limit=512M vendor/bin/phpunit \
               --fail-on-skipped \
               --fail-on-empty-test-suite \
               --log-junit storage/logs/ci/customers-ui-smoke-fixture-lifecycle.junit.xml \
-              tests/Unit/Libraries/CustomersUiSmokeFixtureLifecycleTest.php
+              --log-otr storage/logs/ci/customers-ui-smoke-fixture-lifecycle.otr.xml \
+              tests/Unit/Libraries/CustomersUiSmokeFixtureLifecycleTest.php || suite_status=1
             APP_ENV=testing php -d memory_limit=512M vendor/bin/phpunit \
               --fail-on-skipped \
               --fail-on-empty-test-suite \
               --log-junit storage/logs/ci/provider-ui-smoke-fixture-lifecycle.junit.xml \
-              tests/Unit/Libraries/ProviderUiSmokeFixtureLifecycleTest.php
+              --log-otr storage/logs/ci/provider-ui-smoke-fixture-lifecycle.otr.xml \
+              tests/Unit/Libraries/ProviderUiSmokeFixtureLifecycleTest.php || suite_status=1
             php vendor/bin/phpunit \
               --fail-on-skipped \
               --fail-on-empty-test-suite \
               --log-junit storage/logs/ci/csp-report-only-root.junit.xml \
+              --log-otr storage/logs/ci/csp-report-only-root.otr.xml \
               --no-configuration \
               --bootstrap tests/bootstrap.php \
               tests/Unit/Scripts/CspReportOnlyActivationScriptTest.php \
-              tests/Unit/Scripts/CspReportOnlyStatusScriptTest.php
+              tests/Unit/Scripts/CspReportOnlyStatusScriptTest.php || suite_status=1
+            exit "$suite_status"
           ' 2>&1 | tee storage/logs/ci/calendar-canary-regressions.log
+      - name: Summarize application root test cases
+        if: always()
+        run: |
+          python3 -B scripts/ci/summarize_junit.py \
+            --job calendar-canary-regressions --run '${{ github.run_id }}' \
+            --input storage/logs/ci/calendar-authorization.junit.xml \
+            --otr-input storage/logs/ci/calendar-authorization.otr.xml \
+            --input storage/logs/ci/zero-surprise-canary-fixture.junit.xml \
+            --otr-input storage/logs/ci/zero-surprise-canary-fixture.otr.xml \
+            --input storage/logs/ci/customers-ui-smoke-fixture-lifecycle.junit.xml \
+            --otr-input storage/logs/ci/customers-ui-smoke-fixture-lifecycle.otr.xml \
+            --input storage/logs/ci/provider-ui-smoke-fixture-lifecycle.junit.xml \
+            --otr-input storage/logs/ci/provider-ui-smoke-fixture-lifecycle.otr.xml \
+            --input storage/logs/ci/csp-report-only-root.junit.xml \
+            --otr-input storage/logs/ci/csp-report-only-root.otr.xml \
+            > storage/logs/ci/calendar-canary-regressions.cases.json
       - name: Upload per-test receipt
         if: always()
         uses: actions/upload-artifact@v7
@@ -428,10 +452,16 @@ jobs:
           name: calendar-canary-regressions-receipt
           path: |
             storage/logs/ci/calendar-authorization.junit.xml
+            storage/logs/ci/calendar-authorization.otr.xml
             storage/logs/ci/zero-surprise-canary-fixture.junit.xml
+            storage/logs/ci/zero-surprise-canary-fixture.otr.xml
             storage/logs/ci/customers-ui-smoke-fixture-lifecycle.junit.xml
+            storage/logs/ci/customers-ui-smoke-fixture-lifecycle.otr.xml
             storage/logs/ci/provider-ui-smoke-fixture-lifecycle.junit.xml
+            storage/logs/ci/provider-ui-smoke-fixture-lifecycle.otr.xml
             storage/logs/ci/csp-report-only-root.junit.xml
+            storage/logs/ci/csp-report-only-root.otr.xml
+            storage/logs/ci/calendar-canary-regressions.cases.json
             storage/logs/ci/calendar-canary-regressions.log
           if-no-files-found: error
       - name: Cleanup isolated database and canary fixture
@@ -515,12 +545,33 @@ jobs:
               --configuration phpunit.xml \
               --exclude-group root-deployment \
               --fail-on-empty-test-suite \
+              --log-junit storage/logs/ci/phpunit-general.junit.xml \
+              --log-otr storage/logs/ci/phpunit-general.otr.xml \
               | tee storage/logs/ci/phpunit-general.log; then
             echo "::error::The general PHPUnit suite failed." >&2
             exit 1
           fi
           grep -Eq '^(OK \([1-9][0-9]* tests?,|Tests: [1-9][0-9]*,)' storage/logs/ci/phpunit-general.log
           ROB557_GATE_COMMAND
+      - name: Summarize general PHPUnit cases
+        if: always()
+        run: |
+          python3 -B scripts/ci/summarize_junit.py \
+            --job build-test --run '${{ github.run_id }}' \
+            --input storage/logs/ci/phpunit-general.junit.xml \
+            --otr-input storage/logs/ci/phpunit-general.otr.xml \
+            > storage/logs/ci/phpunit-general.cases.json
+      - name: Upload general PHPUnit receipt
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: phpunit-general-receipt
+          path: |
+            storage/logs/ci/phpunit-general.junit.xml
+            storage/logs/ci/phpunit-general.otr.xml
+            storage/logs/ci/phpunit-general.cases.json
+            storage/logs/ci/phpunit-general.log
+          if-no-files-found: error
       - name: Diagnostics (build-test database)
         if: failure()
         run: |
@@ -571,6 +622,24 @@ jobs:
           python3 -B scripts/ci/run_gate_with_summary.py --label root-deployment-tests-2 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           bash scripts/ci/run_root_deployment_regressions.sh
           ROB557_GATE_COMMAND
+      - name: Summarize root deployment PHPUnit cases
+        if: always()
+        run: |
+          python3 -B scripts/ci/summarize_junit.py \
+            --job root-deployment-tests --run '${{ github.run_id }}' \
+            --input storage/logs/ci/root-deployment.junit.xml \
+            --otr-input storage/logs/ci/root-deployment.otr.xml \
+            > storage/logs/ci/root-deployment.cases.json
+      - name: Upload root deployment PHPUnit receipt
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: root-deployment-receipt
+          path: |
+            storage/logs/ci/root-deployment.junit.xml
+            storage/logs/ci/root-deployment.otr.xml
+            storage/logs/ci/root-deployment.cases.json
+          if-no-files-found: error
       - name: Gate diagnostic summary
         if: always()
         run: python3 -B scripts/ci/run_gate_with_summary.py --summarize --job-status '${{ job.status }}'

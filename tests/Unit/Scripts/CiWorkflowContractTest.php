@@ -218,6 +218,8 @@ class CiWorkflowContractTest extends TestCase
         self::assertStringContainsString('if ! APP_ENV=testing php -d memory_limit=512M vendor/bin/phpunit', $general);
         self::assertStringContainsString('--configuration phpunit.xml', $general);
         self::assertStringContainsString('--fail-on-empty-test-suite', $general);
+        self::assertStringContainsString('--log-junit storage/logs/ci/phpunit-general.junit.xml', $general);
+        self::assertStringContainsString('--log-otr storage/logs/ci/phpunit-general.otr.xml', $general);
         self::assertStringContainsString('| tee storage/logs/ci/phpunit-general.log', $general);
         self::assertStringContainsString('The general PHPUnit suite failed.', $general);
         self::assertStringContainsString('exit 1', $general);
@@ -227,6 +229,18 @@ class CiWorkflowContractTest extends TestCase
         );
 
         self::assertStringContainsString('--exclude-group root-deployment', $general);
+        self::assertSame('always()', $steps['Summarize general PHPUnit cases']['if']);
+        self::assertStringContainsString(
+            '--input storage/logs/ci/phpunit-general.junit.xml',
+            $this->stepRun($steps, 'Summarize general PHPUnit cases'),
+        );
+        self::assertStringContainsString(
+            '--otr-input storage/logs/ci/phpunit-general.otr.xml',
+            $this->stepRun($steps, 'Summarize general PHPUnit cases'),
+        );
+        self::assertSame('always()', $steps['Upload general PHPUnit receipt']['if']);
+        self::assertSame('actions/upload-artifact@v7', $steps['Upload general PHPUnit receipt']['uses']);
+        self::assertSame('error', $steps['Upload general PHPUnit receipt']['with']['if-no-files-found']);
         $changesJob = $this->workflowJob('changes');
         self::assertSame(
             '${{ steps.filter.outputs.runtime_checks_required }}',
@@ -255,6 +269,8 @@ class CiWorkflowContractTest extends TestCase
                 'Setup PHP',
                 'Install dependencies',
                 'Root deployment regression tests',
+                'Summarize root deployment PHPUnit cases',
+                'Upload root deployment PHPUnit receipt',
                 'Gate diagnostic summary',
                 'Upload gate diagnostic evidence',
             ],
@@ -271,6 +287,30 @@ class CiWorkflowContractTest extends TestCase
         );
         self::assertStringContainsString('set -euo pipefail', $rootDeploymentScript);
         self::assertStringContainsString('cd "$ROOT_DIR"', $rootDeploymentScript);
+        self::assertStringContainsString('--fail-on-skipped', $rootDeploymentScript);
+        self::assertStringContainsString('--display-warnings', $rootDeploymentScript);
+        self::assertStringContainsString(
+            '--log-junit storage/logs/ci/root-deployment.junit.xml',
+            $rootDeploymentScript,
+        );
+        self::assertStringContainsString('--log-otr storage/logs/ci/root-deployment.otr.xml', $rootDeploymentScript);
+        self::assertStringContainsString(
+            'tests/Unit/Scripts/MaintenanceActivityIdentityContractTest.php',
+            $rootDeploymentScript,
+        );
+        self::assertStringContainsString('tests/Unit/Scripts/ProdBuildCacheRetentionTest.php', $rootDeploymentScript);
+        self::assertSame('always()', $rootSteps['Summarize root deployment PHPUnit cases']['if']);
+        self::assertStringContainsString(
+            '--input storage/logs/ci/root-deployment.junit.xml',
+            $this->stepRun($rootSteps, 'Summarize root deployment PHPUnit cases'),
+        );
+        self::assertStringContainsString(
+            '--otr-input storage/logs/ci/root-deployment.otr.xml',
+            $this->stepRun($rootSteps, 'Summarize root deployment PHPUnit cases'),
+        );
+        self::assertSame('always()', $rootSteps['Upload root deployment PHPUnit receipt']['if']);
+        self::assertSame('actions/upload-artifact@v7', $rootSteps['Upload root deployment PHPUnit receipt']['uses']);
+        self::assertSame('error', $rootSteps['Upload root deployment PHPUnit receipt']['with']['if-no-files-found']);
         self::assertStringContainsString('systemd-analyze verify', $rootDeploymentScript);
         self::assertStringContainsString('scripts/ops/systemd/fh-session-retention.service', $rootDeploymentScript);
         self::assertStringContainsString('scripts/ops/systemd/fh-session-retention.timer', $rootDeploymentScript);
@@ -342,6 +382,16 @@ class CiWorkflowContractTest extends TestCase
         }
         self::assertSame(5, substr_count($run, '--fail-on-skipped'));
         self::assertSame(5, substr_count($run, '--log-junit'));
+        self::assertSame(5, substr_count($run, '--log-otr'));
+        self::assertStringContainsString('suite_status=0', $run);
+        self::assertSame(5, substr_count($run, '|| suite_status=1'));
+        self::assertStringContainsString('exit "$suite_status"', $run);
+        self::assertSame('always()', $steps['Summarize application root test cases']['if']);
+        self::assertSame(5, substr_count($this->stepRun($steps, 'Summarize application root test cases'), '--input'));
+        self::assertSame(
+            5,
+            substr_count($this->stepRun($steps, 'Summarize application root test cases'), '--otr-input'),
+        );
         self::assertStringContainsString('--bootstrap tests/bootstrap.php', $run);
         self::assertSame('always()', $steps['Cleanup isolated database and canary fixture']['if']);
 
@@ -354,6 +404,10 @@ class CiWorkflowContractTest extends TestCase
         );
         self::assertStringContainsString(
             'storage/logs/ci/provider-ui-smoke-fixture-lifecycle.junit.xml',
+            $receipt['with']['path'],
+        );
+        self::assertStringContainsString(
+            'storage/logs/ci/calendar-canary-regressions.cases.json',
             $receipt['with']['path'],
         );
     }
