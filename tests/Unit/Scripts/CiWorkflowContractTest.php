@@ -321,6 +321,42 @@ class CiWorkflowContractTest extends TestCase
         );
     }
 
+    public function testRootDependentApplicationFixturesRunWithSeparateReceiptsAndCleanup(): void
+    {
+        $steps = $this->namedSteps($this->workflowJob('calendar-canary-regressions'));
+        $run = $this->stepRun($steps, 'Run isolated application root suites');
+
+        foreach (
+            [
+                'customers-ui-smoke-fixture-lifecycle.junit.xml',
+                'provider-ui-smoke-fixture-lifecycle.junit.xml',
+                'tests/Unit/Libraries/CustomersUiSmokeFixtureLifecycleTest.php',
+                'tests/Unit/Libraries/ProviderUiSmokeFixtureLifecycleTest.php',
+                'csp-report-only-root.junit.xml',
+                'tests/Unit/Scripts/CspReportOnlyActivationScriptTest.php',
+                'tests/Unit/Scripts/CspReportOnlyStatusScriptTest.php',
+            ]
+            as $expected
+        ) {
+            self::assertStringContainsString($expected, $run);
+        }
+        self::assertSame(5, substr_count($run, '--fail-on-skipped'));
+        self::assertSame(5, substr_count($run, '--log-junit'));
+        self::assertSame('always()', $steps['Cleanup isolated database and canary fixture']['if']);
+
+        $receipt = $steps['Upload per-test receipt'];
+        self::assertSame('always()', $receipt['if']);
+        self::assertSame('actions/upload-artifact@v7', $receipt['uses']);
+        self::assertStringContainsString(
+            'storage/logs/ci/customers-ui-smoke-fixture-lifecycle.junit.xml',
+            $receipt['with']['path'],
+        );
+        self::assertStringContainsString(
+            'storage/logs/ci/provider-ui-smoke-fixture-lifecycle.junit.xml',
+            $receipt['with']['path'],
+        );
+    }
+
     public function testDeepRuntimeWorkloadProfileInputsStayExplicitInTheWorkflow(): void
     {
         $steps = $this->namedSteps($this->workflowJob('deep-runtime-suite'));
