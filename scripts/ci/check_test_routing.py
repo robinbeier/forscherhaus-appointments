@@ -34,6 +34,9 @@ REQUIRED_DIRECT_ROUTES = {
     "python-worktree-inventory": ("tests.Python.test_worktree_inventory",),
 }
 ROOT_DEPLOYMENT_SCRIPT = "scripts/ci/run_root_deployment_regressions.sh"
+REVIEWED_INDIRECT_PYTHON_ROUTES = {
+    "tests/Unit/Scripts/bound_release_recovery_inspect_v1_test.py": ROOT_DEPLOYMENT_SCRIPT,
+}
 
 
 def job_body(workflow: str, name: str) -> str:
@@ -136,8 +139,18 @@ def has_route(path: str, workflow: str, files: set[str], directories: list[str],
             )
         return True
     # Other test types need an explicit CI invocation or a reviewed wrapper.
-    # A new indirect wrapper is intentionally flagged for a routing decision.
+    # This is a deliberately enumerated route: the root-deployment job invokes
+    # the wrapper, and the wrapper invokes this exact unittest module.
     commands = run_commands(workflow)
+    route_script = REVIEWED_INDIRECT_PYTHON_ROUTES.get(path)
+    if route_script:
+        script = (root / route_script).read_text(encoding="utf-8")
+        script_commands = "\n".join(without_shell_comment(line) for line in script.splitlines())
+        module_name = path.removesuffix(".py").replace("/", ".")
+        return (
+            contains_test_argument(commands, route_script)
+            and contains_test_argument(script_commands, module_name, module=True)
+        )
     return contains_test_argument(commands, path) or (
         path.endswith(".py") and contains_test_argument(
             commands, path.removesuffix(".py").replace("/", "."), module=True

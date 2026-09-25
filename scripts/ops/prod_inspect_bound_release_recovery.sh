@@ -10,6 +10,7 @@ TARGET='root@booking-server'
 MODE=''; SOURCE_COMMIT=''; ACTIVE=''; REL=''; COMMIT=''; RUN_ID=''
 ARCHIVE_SHA=''; PROVENANCE_SHA=''; CONTINUITY_SHA=''; DEPLOY_SHA=''; PAIR_SHA=''; BACKUP_SHA=''
 RUN=0; CONFIRM=''
+INSPECTION_TIMEOUT_SECONDS="${FH_RECOVERY_INSPECT_TIMEOUT_SECONDS:-60}"
 
 usage() {
     cat <<'USAGE'
@@ -74,6 +75,9 @@ if (( RUN == 0 )); then
     exit 0
 fi
 [[ "$CONFIRM" == ROB-621 ]] || { echo 'ERROR: read-only confirmation required.' >&2; exit 64; }
+[[ "$INSPECTION_TIMEOUT_SECONDS" =~ ^([1-9]|[1-5][0-9]|60)$ ]] || {
+    echo 'ERROR: inspection timeout must be between 1 and 60 seconds.' >&2; exit 64;
+}
 [[ "$(git -C "$PROJECT" symbolic-ref --short HEAD)" == main &&
    "$(git -C "$PROJECT" rev-parse HEAD)" == "$SOURCE_COMMIT" ]] || {
     echo 'ERROR: reviewed current main commit required.' >&2; exit 70;
@@ -91,9 +95,6 @@ source_sha="$(git -C "$PROJECT" cat-file blob "$SOURCE_COMMIT:$SOURCE" | shasum 
 [[ "$(shasum -a 256 "$PROJECT/$SOURCE" | awk '{print $1}')" == "$source_sha" ]] || {
     echo 'ERROR: inspector differs from reviewed source.' >&2; exit 70;
 }
-source_b64="$(git -C "$PROJECT" cat-file blob "$SOURCE_COMMIT:$SOURCE" | base64 | tr -d '\n')"
-[[ -n "$source_b64" ]] || { echo 'ERROR: inspector source unavailable.' >&2; exit 70; }
-
 remote_args=(--mode "$MODE" --expected-active-release "$ACTIVE")
 if [[ "$MODE" == recovery ]]; then
     remote_args+=(--release "$REL" --commit "$COMMIT" --run-id "$RUN_ID"
@@ -103,11 +104,30 @@ if [[ "$MODE" == recovery ]]; then
 fi
 receipt_file="$(mktemp "${TMPDIR:-/tmp}/fh-recovery-inspect.XXXXXX")"
 trap 'rm -f -- "$receipt_file"' EXIT
-decode_source() {
-    python3 -I -B -c 'import base64,sys;sys.stdout.buffer.write(base64.b64decode(sys.stdin.buffer.read(),validate=True))'
-}
-if printf '%s' "$source_b64" | decode_source | ssh -o BatchMode=yes -o ConnectTimeout=12 "$TARGET" \
-    /usr/bin/python3 -I -B - "${remote_args[@]}" > "$receipt_file" 2>/dev/null; then
+if git -C "$PROJECT" cat-file blob "$SOURCE_COMMIT:$SOURCE" | python3 -I -B -c '
+import hashlib
+import subprocess
+import sys
+
+source = sys.stdin.buffer.read(1024 * 1024 + 1)
+if not source or len(source) > 1024 * 1024 or hashlib.sha256(source).hexdigest() != sys.argv[2]:
+    sys.exit(70)
+command = [
+    "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=12", sys.argv[4],
+    "/usr/bin/python3", "-I", "-B", "-", *sys.argv[5:],
+]
+try:
+    with open(sys.argv[1], "wb") as receipt:
+        completed = subprocess.run(
+            command, input=source, stdout=receipt, stderr=subprocess.DEVNULL,
+            timeout=int(sys.argv[3]), check=False,
+        )
+except subprocess.TimeoutExpired:
+    sys.exit(124)
+except OSError:
+    sys.exit(127)
+sys.exit(completed.returncode if completed.returncode >= 0 else 128 - completed.returncode)
+' "$receipt_file" "$source_sha" "$INSPECTION_TIMEOUT_SECONDS" "$TARGET" "${remote_args[@]}"; then
     remote_rc=0
 else
     remote_rc=$?

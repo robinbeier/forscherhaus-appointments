@@ -356,6 +356,44 @@ class RecoveryWrapperTransportTest(unittest.TestCase):
             self.assertIn('--mode recovery', invocation)
             self.assertNotRegex(invocation, r'\s(deploy|ack|retry)(\s|$)')
 
+    def test_established_ssh_hang_hits_total_timeout_without_retry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo = pathlib.Path(directory)
+            (repo / 'scripts/ops').mkdir(parents=True)
+            (repo / 'scripts/ops/libexec').mkdir()
+            wrapper = repo / 'scripts/ops/prod_inspect_bound_release_recovery.sh'
+            shutil.copy2(WRAPPER_PATH, wrapper)
+            wrapper.chmod(0o755)
+            shutil.copy2(INSPECTOR_PATH, repo / 'scripts/ops/libexec/bound_release_recovery_inspect_v1.py')
+            subprocess.run(['git', 'init', '-q', '-b', 'main'], cwd=repo, check=True)
+            subprocess.run(['git', 'config', 'user.email', 'test@example.invalid'], cwd=repo, check=True)
+            subprocess.run(['git', 'config', 'user.name', 'Test'], cwd=repo, check=True)
+            subprocess.run(['git', 'add', '.'], cwd=repo, check=True)
+            subprocess.run(['git', 'commit', '-qm', 'fixture'], cwd=repo, check=True)
+            source_commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=repo, text=True).strip()
+            fake_bin = repo / 'bin'
+            fake_bin.mkdir()
+            log = repo / 'ssh.log'
+            fake_ssh = fake_bin / 'ssh'
+            fake_ssh.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$SSH_LOG"\nexec sleep 10\n')
+            fake_ssh.chmod(0o755)
+            env = dict(os.environ, PATH=str(fake_bin) + ':' + os.environ['PATH'],
+                       SSH_LOG=str(log), FH_RECOVERY_INSPECT_TIMEOUT_SECONDS='1')
+            command = [str(wrapper), '--source-commit', source_commit, '--mode', 'recovery',
+                       '--expected-active-release', 'ea_previous', '--release', 'ea_candidate',
+                       '--commit', 'b' * 40, '--run-id', 'a' * 32,
+                       '--archive-sha', 'c' * 64, '--provenance-sha', 'd' * 64,
+                       '--continuity-sha', 'e' * 64, '--deploy-sha', 'f' * 64,
+                       '--pair-helper-sha', '1' * 64, '--backup-helper-sha', '2' * 64,
+                       '--run-read-only', '--confirm-read-only', 'ROB-621']
+            completed = subprocess.run(command, cwd=repo, env=env, text=True,
+                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+            self.assertEqual(70, completed.returncode)
+            self.assertIn('status=blocked', completed.stdout)
+            self.assertIn('result_class=transport_or_receipt_unknown', completed.stdout)
+            self.assertEqual(1, len(log.read_text().splitlines()))
+            self.assertNotRegex(log.read_text(), r'\s(deploy|ack|retry)(\s|$)')
+
 
 if __name__ == '__main__':
     unittest.main()

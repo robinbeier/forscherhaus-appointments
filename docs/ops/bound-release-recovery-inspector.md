@@ -18,6 +18,10 @@ checked `main` commit containing the inspector. The wrapper requires that exact
 clean `main`, verifies the local source against its commit blob before and
 after the SSH call, and streams those bytes to the Tailscale MagicDNS target
 `root@booking-server`. It does not install a helper on production.
+The complete SSH inspection is capped at 60 seconds, including an established
+but stalled session. A timeout is an unknown transport result, never a reason
+to retry a deployment. For a local stalled-session regression, the cap may be
+shortened with `FH_RECOVERY_INSPECT_TIMEOUT_SECONDS` (1–60); it cannot be raised.
 
 Default invocation is plan-only. After recording the current production marker
 from the existing read-only inventory, a first no-guard check can establish
