@@ -91,7 +91,12 @@ class TestRoutingGuardTest(unittest.TestCase):
             script = root / module.ROOT_DEPLOYMENT_SCRIPT
             script.parent.mkdir(parents=True)
             workflow = "  root-deployment-tests:\n    steps:\n      - run: bash " + module.ROOT_DEPLOYMENT_SCRIPT + "\n"
-            for attribute in ("#[Group('root-deployment')]", "#[Group( 'root-deployment' )]"):
+            for attribute in (
+                "#[Group('root-deployment')]",
+                "#[Group( 'root-deployment' )]",
+                "#[\\PHPUnit\\Framework\\Attributes\\Group('root-deployment')]",
+                "#[RootGroup('root-deployment')]",
+            ):
                 with self.subTest(attribute=attribute):
                     (root / path).write_text("<?php " + attribute + "\n")
                     script.write_text("#!/bin/bash\nphp vendor/bin/phpunit existing.php # " + path + "\n")
