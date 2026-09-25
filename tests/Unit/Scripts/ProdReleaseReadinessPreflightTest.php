@@ -8,6 +8,8 @@ final class ProdReleaseReadinessPreflightTest extends TestCase
     private string $root = '';
     private string $app = '';
     private string $lockPath = '';
+    private string $timerTransitionMarker = '';
+    private string $deployRecoveryMarker = '';
     /** @var list<string> */ private array $helpers = [];
 
     protected function setUp(): void
@@ -17,6 +19,8 @@ final class ProdReleaseReadinessPreflightTest extends TestCase
         }
         $this->root = '/root/release-readiness-test-' . bin2hex(random_bytes(6));
         $this->app = $this->root . '/app';
+        $this->timerTransitionMarker = $this->root . '/backup-timer-transition.v1.json';
+        $this->deployRecoveryMarker = $this->root . '/fh-deploy-recovery-pending.v1.json';
         mkdir($this->app, 0755, true);
         mkdir($this->root . '/locks', 0700, true);
         chmod($this->root . '/locks', 0700);
@@ -74,11 +78,13 @@ final class ProdReleaseReadinessPreflightTest extends TestCase
             while [[ $# -gt 0 && "$1" != bash ]]; do shift; done
             [[ "$1" == bash ]] || exit 97
             shift 3
-            base=("${@:1:8}")
+            base=("${@:1:10}")
             base[0]=%s
             base[2]=%s
             base[3]=%s
-            shift 8
+            base[8]=%s
+            base[9]=%s
+            shift 10
             mapped=()
             for spec in "$@"; do
               case "$spec" in
@@ -95,6 +101,8 @@ final class ProdReleaseReadinessPreflightTest extends TestCase
             var_export($this->app, true),
             var_export($this->lockPath, true),
             var_export($this->root . '/ordinary/request-unconfirmed', true),
+            var_export($this->timerTransitionMarker, true),
+            var_export($this->deployRecoveryMarker, true),
             $helperFixtures[0],
             $helperFixtures[1],
             $helperFixtures[2],
@@ -162,6 +170,24 @@ final class ProdReleaseReadinessPreflightTest extends TestCase
         [$status, $out] = $this->executePreflight(['SYSTEMCTL_MODE' => 'timer_bad']);
         self::assertSame(20, $status);
         self::assertStringContainsString('timer_not_active', $out);
+    }
+
+    public function testActiveTimerWithInterruptedRestoreMarkerFailsClosed(): void
+    {
+        file_put_contents($this->timerTransitionMarker, 'restore-pending');
+        chmod($this->timerTransitionMarker, 0600);
+        [$status, $out] = $this->executePreflight();
+        self::assertSame(20, $status);
+        self::assertStringContainsString('recovery_pending', $out);
+    }
+
+    public function testPreviousUnresolvedDeploymentBlocksReadiness(): void
+    {
+        file_put_contents($this->deployRecoveryMarker, 'recovery-pending');
+        chmod($this->deployRecoveryMarker, 0600);
+        [$status, $out] = $this->executePreflight();
+        self::assertSame(20, $status);
+        self::assertStringContainsString('recovery_pending', $out);
     }
 
     public function testNonCanonicalBindingsAreRejectedBeforeAnySshCall(): void
