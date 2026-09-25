@@ -304,9 +304,25 @@ def checked_receipt(path, observed_exit):
     return value
 
 
-def run(args):
-    if os.geteuid() != 0 or os.uname().nodename.split('.')[0] != 'booking-server':
-        fail('host_invalid')
+def checked_result(path):
+    try:
+        data, _ = read_bound_file(path, 256, 0o600, 0, 0)
+    except (AdmissionError, OSError):
+        fail('ack_result_unknown')
+    try:
+        value = json.loads(data)
+    except json.JSONDecodeError:
+        fail('ack_result_unknown')
+    if (not isinstance(value, dict) or set(value) != {'schema', 'outcome', 'exit_code'} or
+            value.get('schema') != 'deploy_result.v1' or
+            value.get('outcome') not in RECEIPT_OUTCOMES or
+            type(value.get('exit_code')) is not int or
+            value['exit_code'] != RECEIPT_OUTCOMES[value['outcome']]):
+        fail('ack_result_unknown')
+    return value
+
+
+def validate_args(args):
     if (not RELEASE_ID.fullmatch(args.release) or not RELEASE_ID.fullmatch(args.expected_active_release) or
             not RUN_ID.fullmatch(args.run_id) or not re.fullmatch(r'[0-9a-f]{40}', args.commit) or
             not all(HEX64.fullmatch(value) for value in (args.archive_sha, args.provenance_sha,
@@ -315,6 +331,75 @@ def run(args):
         fail('input_invalid')
     if args.release == args.expected_active_release:
         fail('same_release_invalid')
+
+
+def acknowledge(args):
+    if os.geteuid() != 0 or os.uname().nodename.split('.')[0] != 'booking-server':
+        fail('host_invalid')
+    validate_args(args)
+    intent_path = '/root/fh-deploy-intent-' + args.release + '.json'
+    result_path = '/root/fh-deploy-result-' + args.run_id + '.json'
+    lock_fd = open_lock()
+    try:
+        guard_data, guard_observed = read_bound_file(RECOVERY_GUARD, 4096, 0o600, 0, 0)
+        try:
+            guard = json.loads(guard_data)
+        except json.JSONDecodeError:
+            fail('recovery_guard_unknown')
+        expected_guard = {
+            'schema': 'bound_release_deploy_recovery_guard.v1',
+            'release': args.release,
+            'expected_active_release': args.expected_active_release,
+            'run_id': args.run_id,
+            'intent_path': intent_path,
+            'result_path': result_path,
+        }
+        if guard != expected_guard:
+            fail('recovery_guard_mismatch')
+        if identity(os.lstat(RECOVERY_GUARD)) != guard_observed:
+            fail('recovery_guard_identity_changed')
+
+        intent_data, _ = read_bound_file(intent_path, 4096, 0o600, 0, 0)
+        try:
+            intent = json.loads(intent_data)
+        except json.JSONDecodeError:
+            fail('intent_unknown')
+        bindings = intent.get('bindings') if isinstance(intent, dict) else None
+        expected_binding_values = {
+            'archive_sha256': args.archive_sha,
+            'provenance_sha256': args.provenance_sha,
+            'continuity_sha256': args.continuity_sha,
+            'deploy_sha256': args.deploy_sha,
+            'pair_helper_sha256': args.pair_helper_sha,
+            'backup_helper_sha256': args.backup_helper_sha,
+        }
+        if (not isinstance(intent, dict) or set(intent) != {'schema', 'release', 'commit', 'run_id', 'bindings'} or
+                intent['schema'] != 'bound_release_deploy_intent.v1' or
+                intent['release'] != args.release or intent['commit'] != args.commit or
+                intent['run_id'] != args.run_id or not isinstance(bindings, dict) or
+                any(bindings.get(key) != value for key, value in expected_binding_values.items())):
+            fail('intent_mismatch')
+
+        result = checked_result(result_path)
+        if result['exit_code'] == 0:
+            active_release(args.release)
+        elif result['exit_code'] == 30:
+            active_release(args.expected_active_release)
+        else:
+            fail('ack_result_not_terminal')
+        # The guard identity is checked again by retire_recovery_guard before
+        # unlinking; keep the exact receipt/intent binding above under LOCK.
+        retire_recovery_guard(args.release, args.expected_active_release, args.run_id,
+                              intent_path, result_path)
+        return 'acknowledged', 0
+    finally:
+        os.close(lock_fd)
+
+
+def run(args):
+    if os.geteuid() != 0 or os.uname().nodename.split('.')[0] != 'booking-server':
+        fail('host_invalid')
+    validate_args(args)
     pair = checked_module('release_pair_admission_v1', PAIR_HELPER, args.pair_helper_sha)
     backup = checked_module('backup_handoff_admission_v1', BACKUP_HELPER, args.backup_helper_sha)
     trusted_parent('/root', 0o700)
@@ -366,19 +451,16 @@ def run(args):
                    '--result-file', result_path]
         environment = dict(os.environ)
         environment['ORDINARY_CHANGE_LOCK_FD'] = str(lock_fd)
+        environment['BOUND_RELEASE_RUN_ID'] = args.run_id
         child = subprocess.run(command, env=environment, pass_fds=(lock_fd,),
                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                stderr=subprocess.DEVNULL, check=False)
         receipt = checked_receipt(result_path, child.returncode)
         if receipt['exit_code'] == 0:
             active_release(args.release)
-            retire_recovery_guard(args.release, args.expected_active_release, args.run_id,
-                                  intent_path, result_path)
             return 'deployed', 0
         if receipt['exit_code'] == 30:
             active_release(args.expected_active_release)
-            retire_recovery_guard(args.release, args.expected_active_release, args.run_id,
-                                  intent_path, result_path)
             return 'confirmed_failed', 30
         return 'recovery_required', receipt['exit_code']
     finally:
@@ -399,15 +481,21 @@ def main():
     parser.add_argument('--pair-helper-sha', required=True)
     parser.add_argument('--backup-helper-sha', required=True)
     parser.add_argument('--run-id', required=True)
+    parser.add_argument('--ack', action='store_true')
     args = parser.parse_args()
     try:
-        result_class, code = run(args)
-        status = 'passed' if code == 0 else 'failed'
+        if args.ack:
+            result_class, code = acknowledge(args)
+            status = 'passed' if code == 0 else 'failed'
+        else:
+            result_class, code = run(args)
+            status = 'passed' if code == 0 else 'failed'
     except AdmissionError as error:
         result_class, code, status = error.result_class, error.code, 'failed'
     except (OSError, ValueError, TypeError, subprocess.SubprocessError):
         result_class, code, status = 'result_unknown', 70, 'failed'
-    print(json.dumps({'schema': 'bound_release_deploy.v1', 'status': status,
+    schema = 'bound_release_deploy_ack.v1' if args.ack else 'bound_release_deploy.v1'
+    print(json.dumps({'schema': schema, 'status': status,
                       'result_class': result_class}, sort_keys=True, separators=(',', ':')))
     return code
 

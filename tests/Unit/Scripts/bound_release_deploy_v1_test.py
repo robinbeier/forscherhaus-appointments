@@ -11,6 +11,7 @@ from unittest import mock
 
 
 PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../scripts/ops/libexec/bound_release_deploy_v1.py'))
+WRAPPER_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../scripts/ops/prod_deploy_bound_release.sh'))
 SPEC = importlib.util.spec_from_file_location('bound_release_deploy_v1', PATH)
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
@@ -67,6 +68,7 @@ class BoundReleaseDeployTest(unittest.TestCase):
         command = self.child.call_args.args[0]
         self.assertEqual(MODULE.DEPLOY, command[0])
         self.assertEqual('/private/synthetic.sql.gz', command[command.index('--zero-surprise-dump-file') + 1])
+        self.assertEqual(arguments().run_id, self.child.call_args.kwargs['env']['BOUND_RELEASE_RUN_ID'])
         self.assertEqual(1, self.reserve.call_count)
         self.assertEqual(1, self.receipt.call_count)
 
@@ -169,18 +171,201 @@ class BoundReleaseDeployTest(unittest.TestCase):
                     )
                 self.assertFalse(os.path.exists(guard))
 
-    def test_safe_terminal_receipts_retire_global_guard(self):
+    def test_safe_terminal_receipts_retain_global_guard_until_acknowledged(self):
         self.assertEqual(('deployed', 0), MODULE.run(arguments()))
-        self.retire_guard.assert_called_once()
+        self.retire_guard.assert_not_called()
 
-        self.retire_guard.reset_mock()
         self.module_sequence = iter((self.pair, self.backup))
         self.open_lock.return_value = os.open(os.devnull, os.O_RDONLY)
         self.receipt.return_value = {
             'schema': 'deploy_result.v1', 'outcome': 'failed_pre_switch', 'exit_code': 30,
         }
         self.assertEqual(('confirmed_failed', 30), MODULE.run(arguments()))
-        self.assertEqual(1, self.retire_guard.call_count)
+        self.retire_guard.assert_not_called()
+
+    def test_acknowledgement_revalidates_exact_guard_intent_result_and_active_marker(self):
+        args = arguments()
+        observed = (1, 2, 0, 0, 0, 1, 1, 1, 1)
+        intent_path = '/root/fh-deploy-intent-' + args.release + '.json'
+        result_path = '/root/fh-deploy-result-' + args.run_id + '.json'
+        guard_path = MODULE.RECOVERY_GUARD
+        guard = {
+            'schema': 'bound_release_deploy_recovery_guard.v1',
+            'release': args.release,
+            'expected_active_release': args.expected_active_release,
+            'run_id': args.run_id,
+            'intent_path': intent_path,
+            'result_path': result_path,
+        }
+        intent = {
+            'schema': 'bound_release_deploy_intent.v1',
+            'release': args.release,
+            'commit': args.commit,
+            'run_id': args.run_id,
+            'bindings': {
+                'archive_sha256': args.archive_sha,
+                'provenance_sha256': args.provenance_sha,
+                'continuity_sha256': args.continuity_sha,
+                'deploy_sha256': args.deploy_sha,
+                'pair_helper_sha256': args.pair_helper_sha,
+                'backup_helper_sha256': args.backup_helper_sha,
+            },
+        }
+        result = {'schema': 'deploy_result.v1', 'outcome': 'succeeded', 'exit_code': 0}
+
+        def read_bound_file(path, *_):
+            values = {
+                guard_path: guard,
+                intent_path: intent,
+                result_path: result,
+            }
+            return (json.dumps(values[path]).encode() + b'\n', observed)
+
+        with mock.patch.object(MODULE, 'read_bound_file', side_effect=read_bound_file), \
+                mock.patch.object(MODULE.os, 'lstat', return_value=argparse.Namespace(
+                    st_dev=1, st_ino=2, st_mode=0, st_uid=0, st_gid=0, st_nlink=1,
+                    st_size=1, st_mtime_ns=1, st_ctime_ns=1,
+                )), \
+                mock.patch.object(MODULE, 'active_release') as active:
+            self.assertEqual(('acknowledged', 0), MODULE.acknowledge(args))
+
+        active.assert_called_once_with(args.release)
+        self.retire_guard.assert_called_once_with(
+            args.release, args.expected_active_release, args.run_id, intent_path, result_path,
+        )
+
+    def test_acknowledgement_rejects_intent_identity_or_hash_mismatch(self):
+        args = arguments()
+        observed = (1, 2, 0, 0, 0, 1, 1, 1, 1)
+        intent_path = '/root/fh-deploy-intent-' + args.release + '.json'
+        result_path = '/root/fh-deploy-result-' + args.run_id + '.json'
+        guard_path = MODULE.RECOVERY_GUARD
+        guard = {
+            'schema': 'bound_release_deploy_recovery_guard.v1',
+            'release': args.release,
+            'expected_active_release': args.expected_active_release,
+            'run_id': args.run_id,
+            'intent_path': intent_path,
+            'result_path': result_path,
+        }
+        bindings = {
+            'archive_sha256': args.archive_sha,
+            'provenance_sha256': args.provenance_sha,
+            'continuity_sha256': args.continuity_sha,
+            'deploy_sha256': args.deploy_sha,
+            'pair_helper_sha256': args.pair_helper_sha,
+            'backup_helper_sha256': args.backup_helper_sha,
+        }
+        intent = {
+            'schema': 'bound_release_deploy_intent.v1',
+            'release': args.release,
+            'commit': args.commit,
+            'run_id': args.run_id,
+            'bindings': bindings,
+        }
+        result = {'schema': 'deploy_result.v1', 'outcome': 'succeeded', 'exit_code': 0}
+        for field, value in [('run_id', 'f' * 32), ('release', 'ea_other_candidate'), ('bindings', {
+            **bindings,
+            'archive_sha256': '0' * 64,
+        })]:
+            mismatched = dict(intent)
+            mismatched[field] = value
+
+            def read_bound_file(path, *_, mismatched=mismatched):
+                values = {guard_path: guard, intent_path: mismatched, result_path: result}
+                return (json.dumps(values[path]).encode() + b'\n', observed)
+
+            self.open_lock.return_value = os.open(os.devnull, os.O_RDONLY)
+            with mock.patch.object(MODULE, 'read_bound_file', side_effect=read_bound_file), \
+                    mock.patch.object(MODULE.os, 'lstat', return_value=argparse.Namespace(
+                        st_dev=1, st_ino=2, st_mode=0, st_uid=0, st_gid=0, st_nlink=1,
+                        st_size=1, st_mtime_ns=1, st_ctime_ns=1,
+                    )):
+                with self.assertRaisesRegex(MODULE.AdmissionError, 'intent_mismatch'):
+                    MODULE.acknowledge(args)
+            self.retire_guard.assert_not_called()
+
+    def test_acknowledgement_rejects_nonterminal_receipt_without_retiring_guard(self):
+        args = arguments()
+        observed = (1, 2, 0, 0, 0, 1, 1, 1, 1)
+        intent_path = '/root/fh-deploy-intent-' + args.release + '.json'
+        result_path = '/root/fh-deploy-result-' + args.run_id + '.json'
+        guard_path = MODULE.RECOVERY_GUARD
+        guard = {
+            'schema': 'bound_release_deploy_recovery_guard.v1',
+            'release': args.release,
+            'expected_active_release': args.expected_active_release,
+            'run_id': args.run_id,
+            'intent_path': intent_path,
+            'result_path': result_path,
+        }
+        intent = {
+            'schema': 'bound_release_deploy_intent.v1', 'release': args.release,
+            'commit': args.commit, 'run_id': args.run_id, 'bindings': {
+                'archive_sha256': args.archive_sha, 'provenance_sha256': args.provenance_sha,
+                'continuity_sha256': args.continuity_sha, 'deploy_sha256': args.deploy_sha,
+                'pair_helper_sha256': args.pair_helper_sha, 'backup_helper_sha256': args.backup_helper_sha,
+            },
+        }
+        result = {'schema': 'deploy_result.v1', 'outcome': 'rollback_failed_or_unverifiable', 'exit_code': 31}
+
+        def read_bound_file(path, *_):
+            values = {guard_path: guard, intent_path: intent, result_path: result}
+            return (json.dumps(values[path]).encode() + b'\n', observed)
+
+        self.open_lock.return_value = os.open(os.devnull, os.O_RDONLY)
+        with mock.patch.object(MODULE, 'read_bound_file', side_effect=read_bound_file), \
+                mock.patch.object(MODULE.os, 'lstat', return_value=argparse.Namespace(
+                    st_dev=1, st_ino=2, st_mode=0, st_uid=0, st_gid=0, st_nlink=1,
+                    st_size=1, st_mtime_ns=1, st_ctime_ns=1,
+                )):
+            with self.assertRaisesRegex(MODULE.AdmissionError, 'ack_result_not_terminal'):
+                MODULE.acknowledge(args)
+        self.retire_guard.assert_not_called()
+
+    def test_acknowledgement_rejects_active_marker_mismatch_without_retiring_guard(self):
+        args = arguments()
+        observed = (1, 2, 0, 0, 0, 1, 1, 1, 1)
+        intent_path = '/root/fh-deploy-intent-' + args.release + '.json'
+        result_path = '/root/fh-deploy-result-' + args.run_id + '.json'
+        guard_path = MODULE.RECOVERY_GUARD
+        guard = {
+            'schema': 'bound_release_deploy_recovery_guard.v1', 'release': args.release,
+            'expected_active_release': args.expected_active_release, 'run_id': args.run_id,
+            'intent_path': intent_path, 'result_path': result_path,
+        }
+        intent = {
+            'schema': 'bound_release_deploy_intent.v1', 'release': args.release,
+            'commit': args.commit, 'run_id': args.run_id, 'bindings': {
+                'archive_sha256': args.archive_sha, 'provenance_sha256': args.provenance_sha,
+                'continuity_sha256': args.continuity_sha, 'deploy_sha256': args.deploy_sha,
+                'pair_helper_sha256': args.pair_helper_sha, 'backup_helper_sha256': args.backup_helper_sha,
+            },
+        }
+        result = {'schema': 'deploy_result.v1', 'outcome': 'succeeded', 'exit_code': 0}
+
+        def read_bound_file(path, *_):
+            values = {guard_path: guard, intent_path: intent, result_path: result}
+            return (json.dumps(values[path]).encode() + b'\n', observed)
+
+        self.open_lock.return_value = os.open(os.devnull, os.O_RDONLY)
+        marker_error = MODULE.AdmissionError('active_release_mismatch')
+        with mock.patch.object(MODULE, 'read_bound_file', side_effect=read_bound_file), \
+                mock.patch.object(MODULE.os, 'lstat', return_value=argparse.Namespace(
+                    st_dev=1, st_ino=2, st_mode=0, st_uid=0, st_gid=0, st_nlink=1,
+                    st_size=1, st_mtime_ns=1, st_ctime_ns=1,
+                )), \
+                mock.patch.object(MODULE, 'active_release', side_effect=marker_error):
+            with self.assertRaisesRegex(MODULE.AdmissionError, 'active_release_mismatch'):
+                MODULE.acknowledge(args)
+        self.retire_guard.assert_not_called()
+
+    def test_wrapper_ack_parser_rejects_unknown_transport_exit_as_definite_failure(self):
+        with open(WRAPPER_PATH, encoding='utf-8') as handle:
+            source = handle.read()
+        self.assertIn("if code == 0 and value['status'] == 'passed' and value['result_class'] == 'acknowledged':", source)
+        self.assertNotIn("if code in (70, 75) and value['status'] == 'failed':", source)
+        self.assertNotIn("if code != 0 and value['status'] == 'failed':", source)
 
     def test_stale_config_binding_blocks_before_reservation(self):
         old = tuple((((1, 2), b'\0' * 32) for _ in MODULE.CONFIGS))

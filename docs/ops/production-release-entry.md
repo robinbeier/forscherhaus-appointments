@@ -244,9 +244,23 @@ application deploy.
    the same release candidate after an unknown transport or deploy result.
    Before the deploy child starts, a root-owned, fsync-backed global recovery
    guard is also reserved. It blocks every later release candidate after an
-   unknown or recovery-required result. Only a matching safe receipt and active
-   release marker retire it in that same invocation; a later invocation never
-   clears it automatically. Never delete the intent, result or guard to retry.
+   unknown or recovery-required result. A terminal `0` or `30` result retains
+   the guard until the caller has validated the first SSH response and sends a
+   separate acknowledgment. That acknowledgment takes the shared lock and
+   rechecks the exact guard, intent, receipt and active release before retiring
+   the guard. It is never sent after an unknown first response or a recovery
+   result. The wrapper reports deployment and acknowledgment outcomes
+   separately. If the acknowledgment result is unknown, the deployment result
+   remains known, but the host guard state must be inspected before further
+   writes. A later invocation never clears the guard automatically. Never
+   delete the intent, result or guard to retry.
+   An unknown first SSH result has no automated recovery-only entry in this
+   change. Owner-controlled recovery must inspect the recorded guard, intent,
+   receipt and active marker under the shared lock. A durable `0` receipt with
+   the candidate marker or `30` with the prior marker can establish a terminal
+   state; `31`, `32`, `143`, missing or contradictory evidence cannot. The
+   runner's internal `--ack` is not an operator recovery command. Do not
+   re-run the wrapper with a fresh run ID to investigate an unknown result.
    For a separately
    authorized migration use the direct, lock-preserving
    [deployment procedure](../deployment.md#deploy) and its additional gate.
@@ -261,6 +275,15 @@ application deploy.
    count, inode and hash afterward. An occupied or mismatched target blocks.
    Installing the helpers alone does not deploy an application release.
 
+   This guard also changes the host's existing `/root/deploy_ea.sh` primitive.
+   Before the first bound release, bind the reviewed `deploy_ea.sh` source and
+   the installed file by SHA-256, owner, mode, link count and inode. With no
+   active deployment or recovery, retain a no-clobber, hash-bound copy of the
+   old primitive; replace the host file only under the shared production lock
+   and verify the installed candidate afterward. A mismatch or failed check
+   restores the exact retained predecessor under that lock. This tool update
+   does not itself authorize an application deployment.
+
 7. **Run one bounded ordinary probe.** After the active `_RELEASE` marker and
    app-root identity match the pinned release, use the existing
    `scripts/ops/run_ordinary_live_probe.sh` action(s) and the exact expected
@@ -274,9 +297,10 @@ application deploy.
 8. **Stop on uncertainty; recover before proceeding.** On deployment or probe
    interruption, SSH loss, signal, marker drift, lock loss, failed cleanup,
    failed health, or unknown mutation outcome: retain pending markers, cleanup
-   protection, and private evidence until the existing recovery path proves
-   their removal safe. Inspect the exact host state and use the documented
-   rollback or recovery mode. Never retry, clear a marker, delete a dump/archive, or restore a
+   protection, and private evidence until an owner-controlled recovery action
+   proves their removal safe. Inspect the exact host state; the bound deploy
+   guard has no automatic recovery command here. Never retry, clear a marker,
+   delete a dump/archive, or restore a
    database based on an absent result or elapsed time.
 
 ## Exit evidence

@@ -177,6 +177,19 @@ mode-`0700` directory. Retain and validate the resulting receipt against the
 observed child exit; the base command above does not create a receipt by
 itself. The bound entry selects and validates its own result path.
 
+When `/root/fh-deploy-recovery-pending.v1.json` exists, the host primitive
+refuses a direct invocation. Only the already admitted bound entry may continue
+the exact child call: it inherits the shared lock descriptor and supplies
+`BOUND_RELEASE_RUN_ID`. The primitive then checks the root-owned guard's exact
+release, run, intent and result identities before doing any deployment work.
+There is no command-line override for a pending guard. This change provides no
+automatic recovery or guard-clearance command after an unknown first SSH
+result. Stop further writes and obtain an owner-controlled inspection of the
+recorded guard, intent, result and active release under the shared lock before
+deciding a separate recovery action. The runner's internal `--ack` is only for
+the original wrapper after it has received a known terminal result; it is not
+a manual recovery interface. Never remove the guard merely to permit a retry.
+
 Production uses the Docker-backed `fh-pdf-renderer` service. Deployment
 keeps that independently managed container running and checks renderer and
 application health. Application deployment and rollback do not restart or update

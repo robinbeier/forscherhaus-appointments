@@ -17,6 +17,10 @@ Default is plan-only. A live invocation requires the reviewed main/CI release
 pair already published on production and a fresh verified ROB-466/ROB-461
 backup handoff. The command never builds, uploads, backs up, changes timers,
 retries, or uses breakglass. It admits and calls the existing deploy_ea.sh once.
+For a known terminal 0/30 result it then performs a separate locked
+acknowledgement. Output reports deployment result and acknowledgement status
+separately; an acknowledgement transport failure leaves the deployment result
+known while reporting acknowledgement uncertainty.
 USAGE
 }
 
@@ -137,7 +141,10 @@ decode_runner() {
     python3 -I -B -c 'import base64,sys;sys.stdout.buffer.write(base64.b64decode(sys.stdin.buffer.read(),validate=True))'
 }
 RUNNER_SHA="$(printf '%s' "$RUNNER_B64" | decode_runner | shasum -a 256 | awk '{print $1}')"
-[[ "$(shasum -a 256 "$PROJECT/scripts/ops/libexec/bound_release_deploy_v1.py" | awk '{print $1}')" == "$RUNNER_SHA" ]] || {
+runner_unchanged() {
+    [[ "$(shasum -a 256 "$PROJECT/scripts/ops/libexec/bound_release_deploy_v1.py" | awk '{print $1}')" == "$RUNNER_SHA" ]]
+}
+runner_unchanged || {
     echo 'ERROR: local runner differs from reviewed commit.' >&2; exit 70;
 }
 
@@ -181,11 +188,11 @@ else
     remote_rc=$?
 fi
 
-[[ "$(shasum -a 256 "$PROJECT/scripts/ops/libexec/bound_release_deploy_v1.py" | awk '{print $1}')" == "$RUNNER_SHA" ]] || {
+runner_unchanged || {
     echo 'schema=bound_release_deploy.v1'; echo 'status=failed'; echo 'result_class=local_operator_identity_unknown'; exit 70;
 }
 
-python3 -I -B - "$receipt_file" "$remote_rc" <<'PY'
+if validated_result="$(python3 -I -B - "$receipt_file" "$remote_rc" <<'PY'
 import json, sys
 try:
     with open(sys.argv[1], 'rb') as handle:
@@ -215,3 +222,98 @@ except (OSError, ValueError, KeyError, TypeError):
     print('result_class=transport_or_receipt_unknown')
     sys.exit(70)
 PY
+ )"; then
+    validation_rc=0
+else
+    validation_rc=$?
+fi
+
+deployment_known=0
+deployment_status=failed
+deployment_class=transport_or_receipt_unknown
+if (( validation_rc == 0 )); then
+    deployment_known=1
+    deployment_status=passed
+    deployment_class=deployed
+elif (( remote_rc == 30 )) && [[ "$validated_result" == *$'status=failed\nresult_class=confirmed_failed'* ]]; then
+    deployment_known=1
+    deployment_class=confirmed_failed
+elif (( remote_rc == 31 || remote_rc == 32 || remote_rc == 143 )) &&
+     [[ "$validated_result" == *$'status=failed\nresult_class=recovery_required'* ]]; then
+    deployment_known=1
+    deployment_class=recovery_required
+fi
+
+ack_status=not_attempted
+ack_class=not_attempted
+if (( deployment_known == 1 )) && { (( remote_rc == 0 )) || (( remote_rc == 30 )); }; then
+    runner_unchanged || {
+        echo 'schema=bound_release_deploy.v1'; echo 'status=failed'; echo 'result_class=acknowledgment_unknown';
+        echo "deployment_status=$deployment_status"; echo "deployment_result_class=$deployment_class";
+        echo 'ack_status=uncertain'; echo 'ack_result_class=local_operator_identity_unknown'; exit 70;
+    }
+    ack_receipt_file="$(mktemp "${TMPDIR:-/tmp}/fh-bound-deploy-ack.XXXXXX")"
+    trap 'rm -f -- "$receipt_file" "$ack_receipt_file"; rm -rf -- "$snapshot_dir"' EXIT
+    if printf '%s' "$RUNNER_B64" | decode_runner | ssh -o BatchMode=yes -o ConnectTimeout=12 "$TARGET" \
+        /usr/bin/python3 -I -B - \
+        --ack --release "$REL" --expected-active-release "$ACTIVE" --commit "$COMMIT" \
+        --archive-sha "$ARCHIVE_SHA" --archive-size "$ARCHIVE_SIZE" \
+        --provenance-sha "$PROVENANCE_SHA" --provenance-size "$PROVENANCE_SIZE" \
+        --continuity-sha "$continuity_sha" --deploy-sha "$DEPLOY_SHA" \
+        --pair-helper-sha "$PAIR_SHA" --backup-helper-sha "$BACKUP_SHA" \
+        --run-id "$run_id" > "$ack_receipt_file" 2>/dev/null; then
+        ack_rc=0
+    else
+        ack_rc=$?
+    fi
+    if ack_output="$(python3 -I -B - "$ack_receipt_file" "$ack_rc" <<'PY'
+import json, sys
+try:
+    with open(sys.argv[1], 'rb') as handle:
+        raw = handle.read(1025)
+    code = int(sys.argv[2])
+    value = json.loads(raw)
+    if (len(raw) > 1024 or not isinstance(value, dict) or
+            set(value) != {'schema', 'status', 'result_class'} or
+            value['schema'] != 'bound_release_deploy_ack.v1' or
+            not isinstance(value['result_class'], str) or len(value['result_class']) > 80):
+        raise ValueError('contradictory acknowledgement')
+    if code == 0 and value['status'] == 'passed' and value['result_class'] == 'acknowledged':
+        print('ack_status=acknowledged')
+        print('ack_result_class=acknowledged')
+        sys.exit(0)
+    raise ValueError('contradictory acknowledgement')
+except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+    print('ack_status=uncertain')
+    print('ack_result_class=transport_or_receipt_unknown')
+    sys.exit(70)
+PY
+    )"; then
+        ack_status=acknowledged
+        ack_class=acknowledged
+    else
+        ack_status=uncertain
+        ack_class=transport_or_receipt_unknown
+    fi
+fi
+if (( deployment_known == 0 )); then
+    printf 'schema=bound_release_deploy.v1\nstatus=failed\nresult_class=transport_or_receipt_unknown\ndeployment_status=unknown\ndeployment_result_class=transport_or_receipt_unknown\nack_status=%s\nack_result_class=%s\n' "$ack_status" "$ack_class"
+    exit 70
+fi
+overall_status=failed
+if [[ "$deployment_class" == deployed && "$ack_status" == acknowledged ]]; then
+    overall_status=passed
+fi
+overall_result_class=$deployment_class
+if [[ "$overall_status" == failed && "$ack_status" == uncertain ]]; then
+    overall_result_class=acknowledgment_unknown
+fi
+printf 'schema=bound_release_deploy.v1\nstatus=%s\nresult_class=%s\ndeployment_status=%s\ndeployment_result_class=%s\nack_status=%s\nack_result_class=%s\n' \
+    "$overall_status" "$overall_result_class" "$deployment_status" "$deployment_class" "$ack_status" "$ack_class"
+if [[ "$deployment_class" == deployed && "$ack_status" == acknowledged ]]; then
+    exit 0
+fi
+if [[ "$deployment_class" == confirmed_failed && "$ack_status" == acknowledged ]]; then
+    exit 30
+fi
+exit 70
