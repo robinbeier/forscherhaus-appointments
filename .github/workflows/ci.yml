@@ -392,30 +392,32 @@ jobs:
             test ! -e config.php
             install -m 0600 config-sample.php config.php
             php index.php console install
+            # Keep later per-suite evidence after an earlier test failure.
+            suite_status=0
             APP_ENV=testing php -d memory_limit=512M vendor/bin/phpunit \
               --fail-on-skipped \
               --fail-on-empty-test-suite \
               --log-junit storage/logs/ci/calendar-authorization.junit.xml \
               --log-otr storage/logs/ci/calendar-authorization.otr.xml \
-              tests/Integration/Controllers/CalendarCombinedAuthorizationTest.php
+              tests/Integration/Controllers/CalendarCombinedAuthorizationTest.php || suite_status=1
             FH_CANARY_INTEGRATION=1 APP_ENV=testing php -d memory_limit=512M vendor/bin/phpunit \
               --fail-on-skipped \
               --fail-on-empty-test-suite \
               --log-junit storage/logs/ci/zero-surprise-canary-fixture.junit.xml \
               --log-otr storage/logs/ci/zero-surprise-canary-fixture.otr.xml \
-              tests/Integration/ZeroSurpriseCanaryFixtureTest.php
+              tests/Integration/ZeroSurpriseCanaryFixtureTest.php || suite_status=1
             APP_ENV=testing php -d memory_limit=512M vendor/bin/phpunit \
               --fail-on-skipped \
               --fail-on-empty-test-suite \
               --log-junit storage/logs/ci/customers-ui-smoke-fixture-lifecycle.junit.xml \
               --log-otr storage/logs/ci/customers-ui-smoke-fixture-lifecycle.otr.xml \
-              tests/Unit/Libraries/CustomersUiSmokeFixtureLifecycleTest.php
+              tests/Unit/Libraries/CustomersUiSmokeFixtureLifecycleTest.php || suite_status=1
             APP_ENV=testing php -d memory_limit=512M vendor/bin/phpunit \
               --fail-on-skipped \
               --fail-on-empty-test-suite \
               --log-junit storage/logs/ci/provider-ui-smoke-fixture-lifecycle.junit.xml \
               --log-otr storage/logs/ci/provider-ui-smoke-fixture-lifecycle.otr.xml \
-              tests/Unit/Libraries/ProviderUiSmokeFixtureLifecycleTest.php
+              tests/Unit/Libraries/ProviderUiSmokeFixtureLifecycleTest.php || suite_status=1
             php vendor/bin/phpunit \
               --fail-on-skipped \
               --fail-on-empty-test-suite \
@@ -424,7 +426,8 @@ jobs:
               --no-configuration \
               --bootstrap tests/bootstrap.php \
               tests/Unit/Scripts/CspReportOnlyActivationScriptTest.php \
-              tests/Unit/Scripts/CspReportOnlyStatusScriptTest.php
+              tests/Unit/Scripts/CspReportOnlyStatusScriptTest.php || suite_status=1
+            exit "$suite_status"
           ' 2>&1 | tee storage/logs/ci/calendar-canary-regressions.log
       - name: Summarize application root test cases
         if: always()

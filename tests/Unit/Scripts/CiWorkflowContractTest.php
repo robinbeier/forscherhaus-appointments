@@ -383,6 +383,9 @@ class CiWorkflowContractTest extends TestCase
         self::assertSame(5, substr_count($run, '--fail-on-skipped'));
         self::assertSame(5, substr_count($run, '--log-junit'));
         self::assertSame(5, substr_count($run, '--log-otr'));
+        self::assertStringContainsString('suite_status=0', $run);
+        self::assertSame(5, substr_count($run, '|| suite_status=1'));
+        self::assertStringContainsString('exit "$suite_status"', $run);
         self::assertSame('always()', $steps['Summarize application root test cases']['if']);
         self::assertSame(5, substr_count($this->stepRun($steps, 'Summarize application root test cases'), '--input'));
         self::assertSame(

@@ -172,6 +172,36 @@ class SummarizeJunitTest(unittest.TestCase):
         with self.assertRaises(module.ReceiptError):
             module.parse_reports([path], otr_paths=[ambiguous], job="job", run="run")
 
+    def test_otr_identity_and_outcome_must_match_every_junit_case(self):
+        path = self.write_report(
+            '<testsuite name="suite"><testcase class="Expected" '
+            'classname="Expected" name="expectedTest"/></testsuite>'
+        )
+        unfinished = self.write_otr(
+            '<events xmlns:e="urn:phpunit"><e:started id="1" name="expectedTest">'
+            '<sources><methodSource className="Expected" methodName="expectedTest"/></sources>'
+            '</e:started></events>'
+        )
+        receipt = module.parse_reports([path], otr_paths=[unfinished], job="job", run="run")
+        self.assertEqual(receipt["summary"]["pass"], 1)
+        self.assertEqual(receipt["tests"][0]["otr_result"], "started_without_finish")
+
+        unrelated_failure = self.write_otr(
+            '<events xmlns:e="urn:phpunit"><e:started id="2" name="otherTest">'
+            '<sources><methodSource className="Unrelated" methodName="otherTest"/></sources>'
+            '</e:started><e:finished id="2"><result status="FAILED"/></e:finished></events>'
+        )
+        with self.assertRaises(module.ReceiptError):
+            module.parse_reports([path], otr_paths=[unrelated_failure], job="job", run="run")
+
+        contradictory_failure = self.write_otr(
+            '<events xmlns:e="urn:phpunit"><e:started id="3" name="expectedTest">'
+            '<sources><methodSource className="Expected" methodName="expectedTest"/></sources>'
+            '</e:started><e:finished id="3"><result status="FAILED"/></e:finished></events>'
+        )
+        with self.assertRaises(module.ReceiptError):
+            module.parse_reports([path], otr_paths=[contradictory_failure], job="job", run="run")
+
 
 if __name__ == "__main__":
     unittest.main()
