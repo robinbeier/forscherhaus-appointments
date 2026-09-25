@@ -40,6 +40,7 @@ ZERO_SURPRISE_CANARY_CREDENTIALS_FILE=""
 ZERO_SURPRISE_CANARY_REPORT=""
 ZERO_SURPRISE_INCIDENT_WEBHOOK_FILE=""
 ZERO_SURPRISE_INCIDENT_TIMEOUT=10
+RECOVERY_GUARD='/root/fh-deploy-recovery-pending.v1.json'
 
 RENDERER_HEALTH_RETRIES=15
 RENDERER_HEALTH_SLEEP_SECONDS=2
@@ -143,6 +144,71 @@ ordinary_assert_no_active_csp_report_only_pilot() {
     echo '[!] Active or unresolved CSP report-only pilot lease blocks deployment.' >&2
     return 75
   fi
+}
+
+ordinary_assert_bound_recovery_guard() {
+  local guard="$RECOVERY_GUARD" guard_parent before opened payload after expected_intent guard_size guard_fd
+  if [[ ! -e "$guard" && ! -L "$guard" ]]; then
+    [[ -z "${BOUND_RELEASE_RUN_ID:-}" ]] || return 1
+    return 0
+  fi
+  [[ -n "${BOUND_RELEASE_RUN_ID:-}" && "$BOUND_RELEASE_RUN_ID" =~ ^[0-9a-f]{32}$ ]] || return 75
+  [[ -n "${ORDINARY_CHANGE_LOCK_FD:-}" && "$ORDINARY_CHANGE_LOCK_FD" =~ ^[0-9]+$ ]] || return 75
+  [[ -e "/proc/$$/fd/$ORDINARY_CHANGE_LOCK_FD" ]] || return 75
+  guard_parent="$(dirname -- "$guard")" || return 1
+  ordinary_trusted_path "$guard_parent" || return 75
+  [[ -f "$guard" && ! -L "$guard" ]] || return 75
+  before="$(stat -c '%a:%u:%g:%h:%s:%d:%i' -- "$guard" 2>/dev/null || true)"
+  [[ "$before" =~ ^600:0:0:1:[1-9][0-9]*:[0-9]+:[0-9]+$ ]] || return 75
+  guard_size="$(stat -c '%s' -- "$guard" 2>/dev/null || true)"
+  [[ "$guard_size" =~ ^[1-9][0-9]*$ && "$guard_size" -le 4096 ]] || return 75
+  exec {guard_fd}<"$guard" || return 75
+  opened="$(stat -Lc '%a:%u:%g:%h:%s:%d:%i' -- "/proc/$$/fd/$guard_fd" 2>/dev/null || true)"
+  payload="$(cat <&"$guard_fd" 2>/dev/null || true)"
+  exec {guard_fd}<&-
+  after="$(stat -c '%a:%u:%g:%h:%s:%d:%i' -- "$guard" 2>/dev/null || true)"
+  [[ "$before" == "$opened" && "$before" == "$after" && ${#payload} -le 4096 ]] || return 75
+  expected_intent="/root/fh-deploy-intent-${REL}.json"
+  printf '%s' "$payload" | \
+  BOUND_GUARD_EXPECTED_RELEASE="$REL" \
+  BOUND_GUARD_EXPECTED_RUN_ID="$BOUND_RELEASE_RUN_ID" \
+  BOUND_GUARD_EXPECTED_INTENT="$expected_intent" \
+  BOUND_GUARD_EXPECTED_RESULT="${DEPLOY_RESULT_RECEIPT_PATH:-}" \
+  php -r '
+    $data = stream_get_contents(STDIN);
+    try { $value = json_decode($data, true, 8, JSON_THROW_ON_ERROR); } catch (Throwable $error) { exit(1); }
+    if (!is_array($value) || array_is_list($value)) exit(1);
+    $keys = array_keys($value); sort($keys);
+    if ($keys !== ["expected_active_release", "intent_path", "release", "result_path", "run_id", "schema"]) exit(1);
+    if ($value["schema"] !== "bound_release_deploy_recovery_guard.v1") exit(1);
+    if ($value["release"] !== getenv("BOUND_GUARD_EXPECTED_RELEASE") || $value["run_id"] !== getenv("BOUND_GUARD_EXPECTED_RUN_ID") || $value["intent_path"] !== getenv("BOUND_GUARD_EXPECTED_INTENT") || $value["result_path"] !== getenv("BOUND_GUARD_EXPECTED_RESULT")) exit(1);
+    if (!preg_match("/^ea_[A-Za-z0-9_]+$/", $value["release"]) || !preg_match("/^ea_[A-Za-z0-9_]+$/", $value["expected_active_release"])) exit(1);
+  ' || return 75
+  [[ -f "$expected_intent" && ! -L "$expected_intent" ]] || return 75
+  ordinary_trusted_path "$expected_intent" || return 75
+  local intent_before intent_opened intent_payload intent_after intent_size intent_fd
+  intent_before="$(stat -c '%a:%u:%g:%h:%s:%d:%i' -- "$expected_intent" 2>/dev/null || true)"
+  [[ "$intent_before" =~ ^600:0:0:1:[1-9][0-9]*:[0-9]+:[0-9]+$ ]] || return 75
+  intent_size="$(stat -c '%s' -- "$expected_intent" 2>/dev/null || true)"
+  [[ "$intent_size" =~ ^[1-9][0-9]*$ && "$intent_size" -le 4096 ]] || return 75
+  exec {intent_fd}<"$expected_intent" || return 75
+  intent_opened="$(stat -Lc '%a:%u:%g:%h:%s:%d:%i' -- "/proc/$$/fd/$intent_fd" 2>/dev/null || true)"
+  intent_payload="$(cat <&"$intent_fd" 2>/dev/null || true)"
+  exec {intent_fd}<&-
+  intent_after="$(stat -c '%a:%u:%g:%h:%s:%d:%i' -- "$expected_intent" 2>/dev/null || true)"
+  [[ "$intent_before" == "$intent_opened" && "$intent_before" == "$intent_after" && ${#intent_payload} -le 4096 ]] || return 75
+  printf '%s' "$intent_payload" | \
+  BOUND_INTENT_EXPECTED_RELEASE="$REL" \
+  BOUND_INTENT_EXPECTED_RUN_ID="$BOUND_RELEASE_RUN_ID" \
+  php -r '
+    $data = stream_get_contents(STDIN);
+    try { $value = json_decode($data, true, 8, JSON_THROW_ON_ERROR); } catch (Throwable $error) { exit(1); }
+    if (!is_array($value) || array_is_list($value)) exit(1);
+    $keys = array_keys($value); sort($keys);
+    if ($keys !== ["bindings", "commit", "release", "run_id", "schema"]) exit(1);
+    if ($value["schema"] !== "bound_release_deploy_intent.v1" || $value["release"] !== getenv("BOUND_INTENT_EXPECTED_RELEASE") || $value["run_id"] !== getenv("BOUND_INTENT_EXPECTED_RUN_ID")) exit(1);
+    if (!preg_match("/^ea_[A-Za-z0-9_]+$/", $value["release"]) || !preg_match("/^[0-9a-f]{32}$/", $value["run_id"]) || !preg_match("/^[0-9a-f]{40}$/", $value["commit"]) || !is_array($value["bindings"])) exit(1);
+  ' || return 75
 }
 
 ordinary_probe_begin() {
@@ -2425,8 +2491,6 @@ done
 if [[ -n "$DEPLOY_RESULT_RECEIPT_PATH" && "$DRYRUN" -eq 1 ]]; then
   die "[!] --result-file cannot be used with --dry-run."
 fi
-deploy_result_receipt_prepare || die "[!] Refusing unsafe deploy result target."
-
 [[ -n "$REL" ]] || die "[!] --rel is required."
 [[ "$REQUIRE_ZERO_SURPRISE" == "0" || "$REQUIRE_ZERO_SURPRISE" == "1" ]] \
   || die "[!] --require-zero-surprise must be 0 or 1."
@@ -2468,6 +2532,9 @@ validate_trusted_deploy_script "$CURRENT_SCRIPT_PATH" "$WEBUSER" \
 if [[ "$DRYRUN" -eq 0 ]]; then
   ordinary_production_change_lock \
     || die "[!] Shared production-change lock is unavailable; deployment refused."
+  ordinary_assert_bound_recovery_guard \
+    || die "[!] Pending bound-release recovery requires the matching guarded invocation."
+  deploy_result_receipt_prepare || die "[!] Refusing unsafe deploy result target."
   ordinary_assert_no_pending_probe \
     || die "[!] Ordinary probe recovery must finish before deployment."
   ordinary_assert_no_active_csp_report_only_pilot \

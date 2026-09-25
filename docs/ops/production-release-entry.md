@@ -189,25 +189,100 @@ root-owned, single-link regular file with mode `0555` at
 production lock. Verify installed SHA-256, owner, mode, file identity, and
 unchanged timer and service state before releasing the lock. An occupied
 destination or mismatch stops; do not overwrite it. The read-only release
-preflight binds this fourth helper to the reviewed source. Installation
-alone does not authorize a timer transition, backup, or application deploy.
+preflight binds this fourth helper to the reviewed source and rejects an
+unresolved backup-timer transition marker or prior deployment recovery marker,
+even if the timer appears active.
+Installation alone does not authorize a timer transition, backup, or
+application deploy.
 
 ## Controlled execution and bounded verification
 
-6. **Deploy the reviewed archive through the existing host path.** Use the
-   exact `/root/deploy_ea.sh` invocation and required host-local inputs in
-   [Deployment](../deployment.md#deploy), preserving the shared lock across
-   any approved migration and deployment. For this entry, additionally pass
-   `--result-file "$DEPLOY_RESULT_FILE"`: choose one absent, run-specific leaf
-   beneath the existing canonical root-owned mode-`0700` `/root` directory,
-   bind that exact path to the run, and verify the leaf is absent before invoking
-   the deploy command. The helper rejects an existing or unsafe target; do not
-   remove or overwrite it to retry. Require the machine-readable
-   `deploy_result.v1` receipt and independently compare its outcome and exit
-   code with the observed child result. Exit `0` is success;
-   `30` is verified pre-switch failure or rollback; `31`, `32`, `74`, missing,
-   invalid, mismatched, killed, or unknown results require state inspection and
-   block retry. Do not infer success from output alone.
+6. **Deploy the reviewed archive through the existing host path.** For a
+   normal release without migration, use the checked-main
+   `scripts/ops/prod_deploy_bound_release.sh` entry once the two read-only
+   admission helpers are installed at their reviewed hashes. It requires the
+   already published archive/provenance pair, a fresh verified backup handoff,
+   and the exact currently active release. Its inputs are the reviewed commit,
+   release and current-release IDs, and the two local artifact paths; it derives
+   the artifact hashes from those files and the tool hashes from the pinned
+   commit. It verifies the release
+   pair and artifact with code from a private snapshot of the checked commit,
+   streams the runner from that commit's exact blob, then rechecks production
+   readiness and binds both published files, the restored dump and host
+   configuration under the shared lock, then invokes the existing
+   `/root/deploy_ea.sh` at most once with an absent run-specific result leaf.
+   The root-only intent reservation and `deploy_result.v1` receipt stay on the
+   host. No old per-release script or copied inode/hash list is an input.
+
+   The operator account and all processes running under its local UID are one
+   trusted boundary: that account also holds the production SSH authority.
+   The private commit snapshot prevents ordinary checkout drift from changing
+   which verifier runs. Its owner-writable files do not defend against a
+   hostile process with the same UID. If the operator workstation or account
+   is suspected compromised, stop the release and recover that authority;
+   this wrapper cannot establish an independent trust boundary on that host.
+
+   ```bash
+   bash scripts/ops/prod_deploy_bound_release.sh \
+     --rel "$RELEASE_ID" --expected-commit "$REVIEWED_MAIN_COMMIT" \
+     --expected-active-release "$ACTIVE_RELEASE_ID" \
+     --archive "$ARCHIVE" --provenance "$PROVENANCE" \
+     --execute --confirm-live-deploy ROB-618
+   ```
+
+   Before this command, independently confirm that the exact main commit has
+   successful blocking CI and review, that `publish_existing_release.sh`
+   published the exact pair, and that the separate ROB-466/ROB-461 backup and
+   restore completed with the backup timer returned to its original state.
+   The wrapper does not build, upload, back up, pause timers, migrate data, or
+   retry. Its `deployed` result requires the child's exit `0`, matching durable
+   receipt, and new active marker. A result of `confirmed_failed`,
+   `recovery_required`, missing receipt, SSH interruption, or any unknown
+   result stops further writes until the exact host state has been inspected.
+   The release ID identifies the protected intent, which records the run ID;
+   that run ID identifies the result leaf. A different run ID cannot relaunch
+   the same release candidate after an unknown transport or deploy result.
+   Before the deploy child starts, a root-owned, fsync-backed global recovery
+   guard is also reserved. It blocks every later release candidate after an
+   unknown or recovery-required result. A terminal `0` or `30` result retains
+   the guard until the caller has validated the first SSH response and sends a
+   separate acknowledgment. That acknowledgment takes the shared lock and
+   rechecks the exact guard, intent, receipt and active release before retiring
+   the guard. It is never sent after an unknown first response or a recovery
+   result. The wrapper reports deployment and acknowledgment outcomes
+   separately. If the acknowledgment result is unknown, the deployment result
+   remains known, but the host guard state must be inspected before further
+   writes. A later invocation never clears the guard automatically. Never
+   delete the intent, result or guard to retry.
+   An unknown first SSH result has no automated recovery-only entry in this
+   change. Owner-controlled recovery must inspect the recorded guard, intent,
+   receipt and active marker under the shared lock. A durable `0` receipt with
+   the candidate marker or `30` with the prior marker can establish a terminal
+   state; `31`, `32`, `143`, missing or contradictory evidence cannot. The
+   runner's internal `--ack` is not an operator recovery command. Do not
+   re-run the wrapper with a fresh run ID to investigate an unknown result.
+   For a separately
+   authorized migration use the direct, lock-preserving
+   [deployment procedure](../deployment.md#deploy) and its additional gate.
+
+   The two new read-only helpers are
+   `scripts/ops/libexec/release_pair_admission_v1.py` and
+   `scripts/ops/libexec/backup_handoff_admission_v1.py`. Their first host
+   installation is a separate, reviewed no-clobber step: bind the merged main
+   source SHA-256, prove each target absent under the canonical
+   `/usr/local/libexec/fh` directory, transfer and install root:root mode
+   `0555` under the shared lock, and verify stable path, owner, mode, link
+   count, inode and hash afterward. An occupied or mismatched target blocks.
+   Installing the helpers alone does not deploy an application release.
+
+   This guard also changes the host's existing `/root/deploy_ea.sh` primitive.
+   Before the first bound release, bind the reviewed `deploy_ea.sh` source and
+   the installed file by SHA-256, owner, mode, link count and inode. With no
+   active deployment or recovery, retain a no-clobber, hash-bound copy of the
+   old primitive; replace the host file only under the shared production lock
+   and verify the installed candidate afterward. A mismatch or failed check
+   restores the exact retained predecessor under that lock. This tool update
+   does not itself authorize an application deployment.
 
 7. **Run one bounded ordinary probe.** After the active `_RELEASE` marker and
    app-root identity match the pinned release, use the existing
@@ -222,9 +297,10 @@ alone does not authorize a timer transition, backup, or application deploy.
 8. **Stop on uncertainty; recover before proceeding.** On deployment or probe
    interruption, SSH loss, signal, marker drift, lock loss, failed cleanup,
    failed health, or unknown mutation outcome: retain pending markers, cleanup
-   protection, and private evidence until the existing recovery path proves
-   their removal safe. Inspect the exact host state and use the documented
-   rollback or recovery mode. Never retry, clear a marker, delete a dump/archive, or restore a
+   protection, and private evidence until an owner-controlled recovery action
+   proves their removal safe. Inspect the exact host state; the bound deploy
+   guard has no automatic recovery command here. Never retry, clear a marker,
+   delete a dump/archive, or restore a
    database based on an absent result or elapsed time.
 
 ## Exit evidence

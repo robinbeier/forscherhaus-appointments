@@ -4,10 +4,270 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Scripts;
 
+use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
 final class DeployStableResultTest extends TestCase
 {
+    #[Group('root-deployment')]
+    public function testPendingRecoveryGuardBlocksDirectPrimitiveWithoutBoundIdentity(): void
+    {
+        $result = $this->runShell(
+            <<<'BASH'
+            set -eu
+            fixture="$(mktemp -d /root/deploy-bound-guard.XXXXXX)"
+            release="ea_guard_direct_${BASHPID}"
+            run_id='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+            intent="/root/fh-deploy-intent-${release}.json"
+            trap 'rm -rf "$fixture"; rm -f "$intent"' EXIT
+            chmod 700 "$fixture"
+            printf '%s\n' "{\"bindings\":{},\"commit\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"release\":\"$release\",\"run_id\":\"$run_id\",\"schema\":\"bound_release_deploy_intent.v1\"}" > "$intent"
+            chmod 600 "$intent"
+            printf '%s\n' "{\"expected_active_release\":\"ea_previous\",\"intent_path\":\"$intent\",\"release\":\"$release\",\"result_path\":\"/root/result.json\",\"run_id\":\"$run_id\",\"schema\":\"bound_release_deploy_recovery_guard.v1\"}" > "$fixture/guard"
+            chmod 600 "$fixture/guard"
+            exec 8< "$fixture/guard"
+            source ./deploy_ea.sh
+            RECOVERY_GUARD="$fixture/guard"
+            REL="$release"
+            DEPLOY_RESULT_RECEIPT_PATH='/root/result.json'
+            ORDINARY_CHANGE_LOCK_FD=8
+            unset BOUND_RELEASE_RUN_ID
+            ! ordinary_assert_bound_recovery_guard
+            BASH
+            ,
+        );
+
+        self::assertSame(0, $result['exit_code'], $result['stdout'] . $result['stderr']);
+    }
+
+    #[Group('root-deployment')]
+    public function testRejectedGuardAdmissionCannotActivateOrPublishProtectedReceipt(): void
+    {
+        $result = $this->runShell(
+            <<<'BASH'
+            set -eu
+            fixture="$(mktemp -d /root/deploy-bound-guard.XXXXXX)"
+            trap 'rm -rf "$fixture"' EXIT
+            chmod 700 "$fixture"
+            printf 'pending\n' > "$fixture/guard"
+            chmod 600 "$fixture/guard"
+            : > "$fixture/lock"
+            chmod 600 "$fixture/lock"
+            exec 10< "$fixture/lock"
+            source ./deploy_ea.sh
+            RECOVERY_GUARD="$fixture/guard"
+            REL='ea_guard_rejected'
+            DEPLOY_RESULT_RECEIPT_PATH="$fixture/result.json"
+            ORDINARY_CHANGE_LOCK_FD=10
+            DEPLOY_RESULT_RECEIPT_ACTIVE=0
+            unset BOUND_RELEASE_RUN_ID
+            ! ordinary_assert_bound_recovery_guard
+            [[ "$DEPLOY_RESULT_RECEIPT_ACTIVE" == 0 ]]
+            [[ ! -e "$DEPLOY_RESULT_RECEIPT_PATH" ]]
+            BASH
+            ,
+        );
+
+        self::assertSame(0, $result['exit_code'], $result['stdout'] . $result['stderr']);
+    }
+
+    #[Group('root-deployment')]
+    public function testFullEntryRejectsPendingGuardBeforePublishingResult(): void
+    {
+        if (function_exists('posix_geteuid') && posix_geteuid() !== 0) {
+            self::markTestSkipped('root fixture required');
+        }
+        if (
+            (!is_file('/.dockerenv') && getenv('FH_ROOT_HOST_TESTS_REQUIRED') !== '1') ||
+            str_starts_with((string) gethostname(), 'booking-server')
+        ) {
+            self::markTestSkipped('fixed production-path fixture restricted to isolated root test runners');
+        }
+        $guard = '/root/fh-deploy-recovery-pending.v1.json';
+        if (is_file($guard) || is_link($guard)) {
+            self::markTestSkipped('fixed recovery guard already exists');
+        }
+        $lockDirectory = '/var/lib/fh-deploy-orchestrator/locks';
+        $lock = $lockDirectory . '/fh-production-change.lock';
+        $createdDirectory = false;
+        $createdLock = false;
+        $guardIdentity = null;
+        $lockIdentity = null;
+        if (!is_dir($lockDirectory)) {
+            if (!mkdir($lockDirectory, 0700, true)) {
+                self::markTestSkipped('production lock fixture directory unavailable');
+            }
+            $createdDirectory = true;
+        }
+        if (!is_file($lock)) {
+            $lockStream = @fopen($lock, 'x+b');
+            if (!is_resource($lockStream)) {
+                if ($createdDirectory) {
+                    @rmdir($lockDirectory);
+                }
+                self::markTestSkipped('production lock fixture unavailable');
+            }
+            fflush($lockStream);
+            if (function_exists('fsync')) {
+                fsync($lockStream);
+            }
+            fclose($lockStream);
+            if (!chmod($lock, 0600)) {
+                if ($createdDirectory) {
+                    @unlink($lock);
+                    @rmdir($lockDirectory);
+                }
+                self::markTestSkipped('production lock fixture unavailable');
+            }
+            $lockIdentity = lstat($lock);
+            if (!is_array($lockIdentity)) {
+                self::markTestSkipped('production lock fixture unavailable');
+            }
+            $createdLock = true;
+        }
+        $result = '/root/fh-bound-entry-result-' . getmypid() . '.json';
+        $trustedScript = '/root/fh-bound-entry-deploy-' . getmypid() . '.sh';
+        $trustedScriptIdentity = null;
+        try {
+            $sourceScript = dirname(__DIR__, 3) . '/deploy_ea.sh';
+            $sourceContents = file_get_contents($sourceScript);
+            $scriptStream = @fopen($trustedScript, 'x+b');
+            if (!is_string($sourceContents) || !is_resource($scriptStream)) {
+                self::markTestSkipped('root-controlled deploy script fixture unavailable');
+            }
+            fwrite($scriptStream, $sourceContents);
+            fflush($scriptStream);
+            if (function_exists('fsync')) {
+                fsync($scriptStream);
+            }
+            fclose($scriptStream);
+            if (!chmod($trustedScript, 0700)) {
+                self::markTestSkipped('root-controlled deploy script fixture unavailable');
+            }
+            $trustedScriptIdentity = lstat($trustedScript);
+            self::assertIsArray($trustedScriptIdentity);
+            $guardStream = @fopen($guard, 'x+b');
+            if (!is_resource($guardStream)) {
+                self::markTestSkipped('fixed recovery guard became occupied');
+            }
+            fwrite($guardStream, "pending\n");
+            fflush($guardStream);
+            if (function_exists('fsync')) {
+                fsync($guardStream);
+            }
+            fclose($guardStream);
+            chmod($guard, 0600);
+            $guardIdentity = lstat($guard);
+            self::assertIsArray($guardIdentity);
+            $run = $this->runCommand([
+                'bash',
+                $trustedScript,
+                '--rel',
+                'ea_guard_full_entry_' . getmypid(),
+                '--result-file',
+                $result,
+                '--reload',
+                'php8.2-fpm',
+                '--require-zero-surprise',
+                '0',
+                '--zero-surprise-canary-enabled',
+                '0',
+                '--zero-surprise-breakglass-file',
+                '/root/fh-bound-entry-ack.json',
+            ]);
+            self::assertSame(30, $run['exit_code'], $run['stdout'] . $run['stderr']);
+            self::assertStringContainsString(
+                'Pending bound-release recovery requires the matching guarded invocation.',
+                $run['stdout'] . $run['stderr'],
+            );
+            self::assertFileDoesNotExist($result);
+        } finally {
+            $currentGuard = @lstat($guard);
+            if (
+                is_array($guardIdentity) &&
+                is_array($currentGuard) &&
+                $currentGuard['dev'] === $guardIdentity['dev'] &&
+                $currentGuard['ino'] === $guardIdentity['ino'] &&
+                $currentGuard['uid'] === $guardIdentity['uid'] &&
+                $currentGuard['gid'] === $guardIdentity['gid'] &&
+                $currentGuard['mode'] === $guardIdentity['mode'] &&
+                $currentGuard['nlink'] === $guardIdentity['nlink']
+            ) {
+                @unlink($guard);
+            }
+            $currentTrustedScript = @lstat($trustedScript);
+            if (
+                is_array($trustedScriptIdentity) &&
+                is_array($currentTrustedScript) &&
+                $currentTrustedScript['dev'] === $trustedScriptIdentity['dev'] &&
+                $currentTrustedScript['ino'] === $trustedScriptIdentity['ino'] &&
+                $currentTrustedScript['uid'] === $trustedScriptIdentity['uid'] &&
+                $currentTrustedScript['gid'] === $trustedScriptIdentity['gid'] &&
+                $currentTrustedScript['mode'] === $trustedScriptIdentity['mode'] &&
+                $currentTrustedScript['nlink'] === $trustedScriptIdentity['nlink']
+            ) {
+                @unlink($trustedScript);
+            }
+            if ($createdLock) {
+                $currentLock = @lstat($lock);
+                if (
+                    is_array($lockIdentity) &&
+                    is_array($currentLock) &&
+                    $currentLock['dev'] === $lockIdentity['dev'] &&
+                    $currentLock['ino'] === $lockIdentity['ino'] &&
+                    $currentLock['uid'] === $lockIdentity['uid'] &&
+                    $currentLock['gid'] === $lockIdentity['gid'] &&
+                    $currentLock['mode'] === $lockIdentity['mode'] &&
+                    $currentLock['nlink'] === $lockIdentity['nlink']
+                ) {
+                    @unlink($lock);
+                }
+            }
+            if ($createdDirectory) {
+                @rmdir($lockDirectory);
+                @rmdir(dirname($lockDirectory));
+            }
+        }
+    }
+
+    #[Group('root-deployment')]
+    public function testPendingRecoveryGuardAdmitsOnlyMatchingBoundChild(): void
+    {
+        $result = $this->runShell(
+            <<<'BASH'
+            set -eu
+            fixture="$(mktemp -d /root/deploy-bound-guard.XXXXXX)"
+            release="ea_guard_child_${BASHPID}"
+            run_id='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+            intent="/root/fh-deploy-intent-${release}.json"
+            trap 'rm -rf "$fixture"; rm -f "$intent"' EXIT
+            chmod 700 "$fixture"
+            printf '%s\n' "{\"bindings\":{},\"commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"release\":\"$release\",\"run_id\":\"$run_id\",\"schema\":\"bound_release_deploy_intent.v1\"}" > "$intent"
+            chmod 600 "$intent"
+            printf '%s\n' "{\"expected_active_release\":\"ea_previous\",\"intent_path\":\"$intent\",\"release\":\"$release\",\"result_path\":\"/root/result.json\",\"run_id\":\"$run_id\",\"schema\":\"bound_release_deploy_recovery_guard.v1\"}" > "$fixture/guard"
+            chmod 600 "$fixture/guard"
+            : > "$fixture/lock"
+            chmod 600 "$fixture/lock"
+            exec 10< "$fixture/lock"
+            flock -x 10
+            source ./deploy_ea.sh
+            RECOVERY_GUARD="$fixture/guard"
+            REL="$release"
+            DEPLOY_RESULT_RECEIPT_PATH='/root/result.json'
+            ORDINARY_CHANGE_LOCK_FD=10
+            BOUND_RELEASE_RUN_ID='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+            ordinary_assert_bound_recovery_guard
+            BOUND_RELEASE_RUN_ID='cccccccccccccccccccccccccccccccc'
+            ! ordinary_assert_bound_recovery_guard
+            [[ "$(stat -Lc '%d:%i' -- /proc/$$/fd/10)" == "$(stat -c '%d:%i' -- "$fixture/lock")" ]]
+            ! flock -n "$fixture/lock" true
+            BASH
+            ,
+        );
+
+        self::assertSame(0, $result['exit_code'], $result['stdout'] . $result['stderr']);
+    }
+
     public function testZeroSurpriseStageRuntimePreparesConfiguredRuntimeCacheDirectory(): void
     {
         $result = $this->runShell(

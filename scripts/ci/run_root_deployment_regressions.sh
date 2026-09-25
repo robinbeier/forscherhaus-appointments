@@ -24,7 +24,11 @@ sudo env FH_ROOT_HOST_TESTS_REQUIRED=1 php vendor/bin/phpunit --no-configuration
   tests/Unit/Scripts/BackupTimerTransitionContractTest.php \
   tests/Unit/Scripts/ProdReleaseReadinessPreflightTest.php \
   tests/Unit/Scripts/PublishReleasePairRootTest.php \
+  tests/Unit/Scripts/ReleasePairAdmissionRootTest.php \
   tests/Unit/Scripts/ReleaseArchiveDumpRetentionRootTest.php \
   tests/Unit/Scripts/SessionRetentionRootTest.php \
   tests/Unit/Scripts/ReleaseArtifactValidatorTest.php
 sudo python3 -m unittest tests.Unit.Scripts.release_archive_dump_retention_v1_test
+sudo python3 -B -m unittest \
+  tests.Unit.Scripts.backup_handoff_admission_v1_test \
+  tests.Unit.Scripts.bound_release_deploy_v1_test
