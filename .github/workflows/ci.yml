@@ -327,6 +327,92 @@ jobs:
               - 'docs/ops/production-dump-producer-admission.md'
               - 'docs/ops/production-release-archive-dump-retention.md'
 
+  test-routing:
+    needs:
+      - changes
+    if: needs.changes.outputs.runtime_checks_required == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Git clone
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Check test routing manifest
+        run: python3 scripts/ci/check_test_routing.py
+
+  python-worktree-inventory:
+    needs:
+      - changes
+    if: needs.changes.outputs.runtime_checks_required == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Git clone
+        uses: actions/checkout@v6
+      - name: Run worktree inventory tests
+        run: |
+          set -o pipefail
+          mkdir -p storage/logs/ci
+          python3 -B -m unittest -v tests.Python.test_worktree_inventory 2>&1 | tee storage/logs/ci/python-worktree-inventory.log
+      - name: Upload per-test receipt
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: python-worktree-inventory-receipt
+          path: storage/logs/ci/python-worktree-inventory.log
+          if-no-files-found: error
+
+  calendar-canary-regressions:
+    needs:
+      - changes
+    if: needs.changes.outputs.runtime_checks_required == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      COMPOSE_FILE: docker-compose.yml:docker/compose.zero-surprise.yml
+      EA_SKIP_NPM_BOOTSTRAP: '1'
+      EA_SKIP_ASSET_BUILD_BOOTSTRAP: '1'
+    steps:
+      - name: Git clone
+        uses: actions/checkout@v6
+      - name: Run isolated Calendar and canary suites
+        run: |
+          set -o pipefail
+          mkdir -p storage/logs/ci
+          docker compose up -d mysql
+          bash scripts/ci/wait_for_mysql_readiness.sh
+          docker compose run --rm --user root -T php-fpm bash -lc '
+            set -euo pipefail
+            composer install --no-interaction --no-progress
+            test ! -e config.php
+            install -m 0600 config-sample.php config.php
+            php index.php console install
+            APP_ENV=testing php -d memory_limit=512M vendor/bin/phpunit \
+              --fail-on-skipped \
+              --fail-on-empty-test-suite \
+              --log-junit storage/logs/ci/calendar-authorization.junit.xml \
+              tests/Integration/Controllers/CalendarCombinedAuthorizationTest.php
+            FH_CANARY_INTEGRATION=1 APP_ENV=testing php -d memory_limit=512M vendor/bin/phpunit \
+              --fail-on-skipped \
+              --fail-on-empty-test-suite \
+              --log-junit storage/logs/ci/zero-surprise-canary-fixture.junit.xml \
+              tests/Integration/ZeroSurpriseCanaryFixtureTest.php
+          ' 2>&1 | tee storage/logs/ci/calendar-canary-regressions.log
+      - name: Upload per-test receipt
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: calendar-canary-regressions-receipt
+          path: |
+            storage/logs/ci/calendar-authorization.junit.xml
+            storage/logs/ci/zero-surprise-canary-fixture.junit.xml
+            storage/logs/ci/calendar-canary-regressions.log
+          if-no-files-found: error
+      - name: Cleanup isolated database and canary fixture
+        if: always()
+        run: docker compose down -v --remove-orphans
+
   build-test:
     needs:
       - changes

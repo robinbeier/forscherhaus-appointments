@@ -44,6 +44,14 @@ avoids rediscovering root-only tests in the general CI run. Local `phpunit.xml`
 and coverage selection are unchanged; running the normal local command still
 discovers all tests and applies their existing platform prerequisites.
 
+The `calendar-canary-regressions` job runs the calendar authorization and
+zero-surprise canary fixture tests against one fresh, isolated Docker database.
+It requires the canary's root/testing runtime, fails on skipped tests, and
+uploads separate per-test JUnit receipts before removing its owned stack. The
+worktree inventory Python tests run in their own parallel job. A lightweight
+`test-routing` check flags newly added test files without a reviewed CI route;
+the hosted receipts, rather than this static check, establish actual execution.
+
 Architecture/ownership documentation and CODEOWNERS checks continue to run.
 The architecture-boundaries job skips PHP setup and Composer installation for
 ordinary docs; its existing Deptrac selector still produces the normal skipped
