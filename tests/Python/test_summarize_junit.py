@@ -202,6 +202,19 @@ class SummarizeJunitTest(unittest.TestCase):
         with self.assertRaises(module.ReceiptError):
             module.parse_reports([path], otr_paths=[contradictory_failure], job="job", run="run")
 
+    def test_otr_failed_matches_junit_error_without_losing_error_classification(self):
+        path = self.write_report(
+            '<testsuite name="suite"><testcase classname="A" name="broken">'
+            '<error message="database unavailable"/></testcase></testsuite>'
+        )
+        otr = self.write_otr(
+            '<events xmlns:e="urn:phpunit"><e:started id="1" className="A" methodName="broken"/>'
+            '<e:finished id="1" result="FAILED"/></events>'
+        )
+        receipt = module.parse_reports([path], otr_paths=[otr], job="job", run="run")
+        self.assertEqual(receipt["summary"], {"total": 1, "pass": 0, "fail": 0, "error": 1, "skip": 0})
+        self.assertEqual(receipt["tests"][0]["status"], "error")
+
 
 if __name__ == "__main__":
     unittest.main()

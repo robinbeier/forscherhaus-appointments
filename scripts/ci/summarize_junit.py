@@ -302,7 +302,8 @@ def parse_reports(
                 expected_status = "FAIL"
             else:
                 expected_status = "ERROR"
-            if observed_status != expected_status and not (
+            compatible_failure = expected_status in {"FAIL", "ERROR"} and observed_status in {"FAIL", "ERROR"}
+            if observed_status != expected_status and not compatible_failure and not (
                 observed_status == "MISSING" and expected_status == "SUCCESSFUL"
             ):
                 raise ReceiptError(f"JUnit and OTR test results differ: {path} / {otr_path}")
