@@ -138,14 +138,25 @@ class SummarizeJunitTest(unittest.TestCase):
             '<events xmlns:e="urn:events" xmlns:phpunit="urn:phpunit">'
             '<e:started id="2" name="testFirst"><sources><phpunit:methodSource '
             'className="Tests\\Unit\\RootFixtures" methodName="testFirst"/></sources></e:started>'
-            '<e:finished id="2"><result status="SKIPPED"><reason>first reason</reason></result></e:finished>'
-            '<e:finished id="2"><result status="SKIPPED"><reason>second reason</reason></result></e:finished>'
+            '<e:finished id="2"><result status="SKIPPED"><reason>root required</reason></result></e:finished>'
+            '<e:finished id="2"><result status="SKIPPED"><reason>root required</reason></result></e:finished>'
             '</events>'
         )
         receipt = module.parse_reports([path], otr_paths=[otr], job="build-test", run="789")
         self.assertEqual(receipt["summary"]["skip"], 2)
-        self.assertEqual([test["reason"] for test in receipt["tests"]], ["first reason", "second reason"])
+        self.assertEqual([test["reason"] for test in receipt["tests"]], ["root required", "root required"])
         self.assertEqual(receipt["tests"][1]["class"], "Tests\\Unit\\RootFixtures")
+
+        conflicting = self.write_otr(
+            '<events xmlns:e="urn:events" xmlns:phpunit="urn:phpunit">'
+            '<e:started id="2" name="testFirst"><sources><phpunit:methodSource '
+            'className="Tests\\Unit\\RootFixtures" methodName="testFirst"/></sources></e:started>'
+            '<e:finished id="2"><result status="SKIPPED"><reason>first reason</reason></result></e:finished>'
+            '<e:finished id="2"><result status="SKIPPED"><reason>second reason</reason></result></e:finished>'
+            '</events>'
+        )
+        with self.assertRaises(module.ReceiptError):
+            module.parse_reports([path], otr_paths=[conflicting], job="build-test", run="789")
 
     def test_unmatched_or_ambiguous_skip_evidence_fails_closed(self):
         path = self.write_report('<testsuite name="suite"><testcase classname="A" name="guard"><skipped/></testcase></testsuite>')

@@ -257,11 +257,16 @@ def parse_reports(
                         (entry, reason)
                         for entry, reason in zip(grouped_entries, otr_by_key[key])
                     )
-            elif len(entries) > 1 and len(events) > 1 and len({method for method, _reason in events}) == 1:
-                # PHPUnit 13 can reuse one OTR id for a whole skipped method
-                # group.  In that format the event sequence is the only
-                # trustworthy association with the JUnit testcases.
-                assignments.extend((entry, reason) for entry, (_method, reason) in zip(entries, events))
+            elif (
+                len(entries) > 1
+                and len(events) > 1
+                and len({method for method, _reason in events}) == 1
+                and len({reason for _method, reason in events}) == 1
+            ):
+                # PHPUnit 13 can reuse one OTR id for a whole skipped class
+                # group. Only a shared reason can be safely attributed to
+                # each JUnit case when OTR omits the individual method names.
+                assignments.extend((entry, events[0][1]) for entry in entries)
             else:
                 raise ReceiptError(f"OTR skip evidence is unmatched or ambiguous: {path} / {otr_path}")
 
