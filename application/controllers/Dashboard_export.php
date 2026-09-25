@@ -280,7 +280,8 @@ class Dashboard_export extends EA_Controller
                 'exports/provider_parent_appointments_pdf',
                 $view_data,
                 $this->buildProviderParentAppointmentsPdfFilename($provider, $period->start, $period->end),
-                $this->buildPdfStreamOptions(APPPATH . '../storage/logs/provider_parent_appointments_pdf_dump.html'),
+                // This view contains parent names and must never leave a fixed HTML debug dump.
+                $this->buildPdfStreamOptions(),
             );
         } catch (Throwable $exception) {
             log_message('error', 'Failed to render provider parent appointments export: ' . $exception->getMessage());
@@ -317,9 +318,8 @@ class Dashboard_export extends EA_Controller
                 'exports/provider_preparation_pdf',
                 $view_data,
                 $this->buildProviderPreparationPdfFilename($provider, $period->start, $period->end),
-                $this->buildProviderPreparationPdfStreamOptions(
-                    APPPATH . '../storage/logs/provider_preparation_pdf_dump.html',
-                ),
+                // Preparation data is also sensitive; render without a persistent HTML dump.
+                $this->buildProviderPreparationPdfStreamOptions(),
             );
         } catch (Throwable $exception) {
             log_message('error', 'Failed to render provider preparation export: ' . $exception->getMessage());
@@ -342,7 +342,25 @@ class Dashboard_export extends EA_Controller
      */
     protected function assertProvider(): void
     {
-        if (session('role_slug') !== DB_SLUG_PROVIDER || (int) session('user_id') <= 0) {
+        if (strtoupper($this->input->method(true)) !== 'GET') {
+            abort(405, 'Method Not Allowed', ['Allow: GET']);
+        }
+
+        $user_id = (int) session('user_id');
+
+        if (session('role_slug') !== DB_SLUG_PROVIDER || $user_id <= 0) {
+            abort(403, 'Forbidden');
+        }
+
+        $current_role = $this->db
+            ->select('roles.slug')
+            ->from('users')
+            ->join('roles', 'roles.id = users.id_roles')
+            ->where('users.id', $user_id)
+            ->get()
+            ->row_array();
+
+        if (($current_role['slug'] ?? null) !== DB_SLUG_PROVIDER) {
             abort(403, 'Forbidden');
         }
     }

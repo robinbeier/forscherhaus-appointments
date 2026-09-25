@@ -47,6 +47,20 @@ related data; nullable or empty historical hash fields do not grant access.
 Keep existing nonempty legacy hashes compatible. The isolated HTTP regression
 in `BookingDownloadHttpTest` covers these routes, not every booking operation.
 
+Provider parent-appointment and preparation PDFs contain personal appointment
+data. Only GET may reach either export, including through direct controller
+aliases. The authenticated session must identify a provider whose role is still
+current in the database; request-supplied provider IDs cannot select another
+provider's records. These two exports must not persist their rendered HTML to
+fixed debug-dump files, even when the general PDF debug flag is enabled. Bundled
+Nginx denies the two historical dump URLs because storage from an older release
+may be copied forward. For other web servers, verify their storage-deny rule
+and the absence of those files before release. The isolated
+`ProviderPdfExportHttpTest` covers two synthetic providers and the
+controller-to-renderer HTML handoff. The separate provider UI smoke checks real
+PDF rendering with one reserved synthetic identity; it does not prove
+cross-provider isolation or stale-role denial in production.
+
 Across write paths, establish server-side authority before mutation, reject
 without partial changes, and keep dependent effects consistent with commit
 success. Follow the [write-path contracts](docs/ci-write-contracts.md) and
