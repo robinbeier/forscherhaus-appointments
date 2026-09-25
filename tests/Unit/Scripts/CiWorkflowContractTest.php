@@ -287,11 +287,17 @@ class CiWorkflowContractTest extends TestCase
         );
         self::assertStringContainsString('set -euo pipefail', $rootDeploymentScript);
         self::assertStringContainsString('cd "$ROOT_DIR"', $rootDeploymentScript);
+        self::assertStringContainsString('--fail-on-skipped', $rootDeploymentScript);
         self::assertStringContainsString(
             '--log-junit storage/logs/ci/root-deployment.junit.xml',
             $rootDeploymentScript,
         );
         self::assertStringContainsString('--log-otr storage/logs/ci/root-deployment.otr.xml', $rootDeploymentScript);
+        self::assertStringContainsString(
+            'tests/Unit/Scripts/MaintenanceActivityIdentityContractTest.php',
+            $rootDeploymentScript,
+        );
+        self::assertStringContainsString('tests/Unit/Scripts/ProdBuildCacheRetentionTest.php', $rootDeploymentScript);
         self::assertSame('always()', $rootSteps['Summarize root deployment PHPUnit cases']['if']);
         self::assertStringContainsString(
             '--input storage/logs/ci/root-deployment.junit.xml',

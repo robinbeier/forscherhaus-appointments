@@ -1,10 +1,10 @@
 import importlib.util
 import io
+import json
 from pathlib import Path
 import tempfile
 import unittest
 from contextlib import redirect_stdout
-import json
 
 
 MODULE_PATH = Path(__file__).parents[2] / "scripts/ci/summarize_junit.py"
@@ -125,6 +125,27 @@ class SummarizeJunitTest(unittest.TestCase):
         receipt = module.parse_reports([path], otr_paths=[otr], job="calendar", run="456")
         self.assertEqual(receipt["summary"], {"total": 1, "pass": 0, "fail": 0, "error": 0, "skip": 1})
         self.assertEqual(receipt["tests"][0]["reason"], "requires owned synthetic stack")
+
+    def test_phpunit_13_reuses_an_event_id_for_multiple_class_skips(self):
+        path = self.write_report(
+            '<testsuite name="Tests\\Unit\\RootFixtures" tests="2" skipped="2">'
+            '<testcase name="testFirst" class="Tests\\Unit\\RootFixtures" '
+            'classname="Tests.Unit.RootFixtures"><skipped/></testcase>'
+            '<testcase name="testSecond" class="Tests\\Unit\\RootFixtures" '
+            'classname="Tests.Unit.RootFixtures"><skipped/></testcase></testsuite>'
+        )
+        otr = self.write_otr(
+            '<events xmlns:e="urn:events" xmlns:phpunit="urn:phpunit">'
+            '<e:started id="2" name="testFirst"><sources><phpunit:methodSource '
+            'className="Tests\\Unit\\RootFixtures" methodName="testFirst"/></sources></e:started>'
+            '<e:finished id="2"><result status="SKIPPED"><reason>first reason</reason></result></e:finished>'
+            '<e:finished id="2"><result status="SKIPPED"><reason>second reason</reason></result></e:finished>'
+            '</events>'
+        )
+        receipt = module.parse_reports([path], otr_paths=[otr], job="build-test", run="789")
+        self.assertEqual(receipt["summary"]["skip"], 2)
+        self.assertEqual([test["reason"] for test in receipt["tests"]], ["first reason", "second reason"])
+        self.assertEqual(receipt["tests"][1]["class"], "Tests\\Unit\\RootFixtures")
 
     def test_unmatched_or_ambiguous_skip_evidence_fails_closed(self):
         path = self.write_report('<testsuite name="suite"><testcase classname="A" name="guard"><skipped/></testcase></testsuite>')

@@ -14,18 +14,21 @@ systemd-analyze verify \
   scripts/ops/systemd/fh-release-archive-dump-retention.service \
   scripts/ops/systemd/fh-release-archive-dump-retention.timer
 sudo env FH_ROOT_HOST_TESTS_REQUIRED=1 php vendor/bin/phpunit --no-configuration --bootstrap vendor/autoload.php \
+  --fail-on-skipped \
   --log-junit storage/logs/ci/root-deployment.junit.xml \
   --log-otr storage/logs/ci/root-deployment.otr.xml \
   tests/Unit/Scripts/DeployResultReceiptStorageTest.php \
   tests/Unit/Scripts/DeployRuntimeConfigPermissionsTest.php \
   tests/Unit/Scripts/DeployRuntimeConfigRollbackTest.php \
   tests/Unit/Scripts/DeployStableResultTest.php \
+  tests/Unit/Scripts/MaintenanceActivityIdentityContractTest.php \
   tests/Unit/Scripts/OrdinaryDeploymentCoordinationTest.php \
   tests/Unit/Scripts/GateCliSupportTest.php \
   tests/Unit/Scripts/DeploymentDumpAttestationProducerV1RootTest.php \
   tests/Unit/Scripts/BackupSetProducerRootTest.php \
   tests/Unit/Scripts/BackupTimerTransitionContractTest.php \
   tests/Unit/Scripts/ProdReleaseReadinessPreflightTest.php \
+  tests/Unit/Scripts/ProdBuildCacheRetentionTest.php \
   tests/Unit/Scripts/PublishReleasePairRootTest.php \
   tests/Unit/Scripts/ReleasePairAdmissionRootTest.php \
   tests/Unit/Scripts/ReleaseArchiveDumpRetentionRootTest.php \

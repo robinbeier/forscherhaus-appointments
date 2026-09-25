@@ -133,17 +133,14 @@ def _parse_otr(path: Path) -> list[tuple[str, str, str]]:
         if result_status.upper() != "SKIPPED":
             continue
         event_id = _attribute(element, "id", "testId", "testid")
-        candidates = [
-            index
-            for index, event in enumerate(started)
-            if index not in consumed and event_id and event["id"] == event_id
-        ]
+        candidates = [index for index, event in enumerate(started) if event_id and event["id"] == event_id]
         if not candidates and not event_id:
             candidates = [index for index in range(len(started) - 1, -1, -1) if index not in consumed]
         if len(candidates) != 1:
             raise ReceiptError(f"OTR skip event is unmatched or ambiguous: {path}")
         index = candidates[0]
-        consumed.add(index)
+        if not event_id:
+            consumed.add(index)
         event = started[index]
         reason = _attribute(element, "reason")
         if not reason:
@@ -206,14 +203,18 @@ def parse_reports(
         saw_report = True
         otr_skips = _parse_otr(otr_path)
         junit_skip_entries: dict[tuple[str, str], list[dict[str, object]]] = {}
+        junit_by_class: dict[str, list[dict[str, object]]] = {}
         for suite_name, testcase in report_tests:
             status, reason = _status(testcase)
+            test_class = testcase.get("class") or testcase.get("classname", suite_name or "unspecified")
+            if not testcase.get("class") and "." in test_class:
+                test_class = test_class.replace(".", "\\")
             entry: dict[str, object] = {
                 "job": job,
                 "run": run,
                 "source": str(path),
                 "suite": suite_name or "unspecified",
-                "class": testcase.get("classname", suite_name or "unspecified"),
+                "class": test_class,
                 "name": testcase.get("name", "unspecified"),
                 "status": status,
             }
@@ -227,21 +228,48 @@ def parse_reports(
             if status == "skip":
                 key = (entry["class"], _method_name(str(entry["name"])))
                 junit_skip_entries.setdefault(key, []).append(entry)
+                junit_by_class.setdefault(str(entry["class"]), []).append(entry)
 
         otr_by_key: dict[tuple[str, str], list[str]] = {}
         for class_name, method_name, reason in otr_skips:
             otr_by_key.setdefault((class_name, method_name), []).append(reason)
-        if set(otr_by_key) != set(junit_skip_entries):
+        otr_by_class: dict[str, list[tuple[str, str]]] = {}
+        for (class_name, method), reasons in otr_by_key.items():
+            otr_by_class.setdefault(class_name, []).extend((method, reason) for reason in reasons)
+        if set(otr_by_class) != set(junit_by_class):
             raise ReceiptError(f"OTR and JUnit skipped tests do not match: {path} / {otr_path}")
-        for key, entries in junit_skip_entries.items():
-            reasons = otr_by_key[key]
-            if len(entries) != len(reasons):
+
+        assignments: list[tuple[dict[str, object], str]] = []
+        for class_name, entries in junit_by_class.items():
+            events = otr_by_class[class_name]
+            if len(entries) != len(events):
                 raise ReceiptError(f"OTR skip evidence is unmatched or ambiguous: {path} / {otr_path}")
-            for entry, reason in zip(entries, reasons):
-                existing = entry.get("reason")
-                if existing is not None and existing != reason:
-                    raise ReceiptError(f"JUnit and OTR skip reasons differ: {path} / {otr_path}")
-                entry["reason"] = reason
+            exact = all(
+                len(junit_skip_entries.get((class_name, _method_name(str(entry["name"]))), []))
+                == len(otr_by_key.get((class_name, _method_name(str(entry["name"]))), []))
+                for entry in entries
+            )
+            if exact:
+                for key, grouped_entries in junit_skip_entries.items():
+                    if key[0] != class_name:
+                        continue
+                    assignments.extend(
+                        (entry, reason)
+                        for entry, reason in zip(grouped_entries, otr_by_key[key])
+                    )
+            elif len(entries) > 1 and len(events) > 1 and len({method for method, _reason in events}) == 1:
+                # PHPUnit 13 can reuse one OTR id for a whole skipped method
+                # group.  In that format the event sequence is the only
+                # trustworthy association with the JUnit testcases.
+                assignments.extend((entry, reason) for entry, (_method, reason) in zip(entries, events))
+            else:
+                raise ReceiptError(f"OTR skip evidence is unmatched or ambiguous: {path} / {otr_path}")
+
+        for entry, reason in assignments:
+            existing = entry.get("reason")
+            if existing is not None and existing != reason:
+                raise ReceiptError(f"JUnit and OTR skip reasons differ: {path} / {otr_path}")
+            entry["reason"] = reason
 
     if not saw_report:
         raise ReceiptError("at least one JUnit report is required")
