@@ -41,6 +41,24 @@ def job_body(workflow: str, name: str) -> str:
     return match.group(1) if match else ""
 
 
+def without_shell_comment(command: str) -> str:
+    quote: str | None = None
+    escaped = False
+    for index, character in enumerate(command):
+        if escaped:
+            escaped = False
+        elif character == "\\" and quote != "'":
+            escaped = True
+        elif character in ("'", '"'):
+            if quote is None:
+                quote = character
+            elif quote == character:
+                quote = None
+        elif character == "#" and quote is None and (index == 0 or command[index - 1].isspace()):
+            return command[:index]
+    return command
+
+
 def run_commands(workflow: str) -> str:
     """Read workflow step commands, excluding filters, artifacts and comments."""
     lines = workflow.splitlines()
@@ -54,14 +72,14 @@ def run_commands(workflow: str) -> str:
         indent = len(match.group(1))
         inline = match.group(2)
         if inline not in ("", "|", ">", "|-", ">-"):
-            commands.append(inline)
+            commands.append(without_shell_comment(inline))
         index += 1
         while index < len(lines):
             line = lines[index]
             if line.strip() and len(line) - len(line.lstrip()) <= indent:
                 break
             if line.strip() and not line.lstrip().startswith("#"):
-                commands.append(line)
+                commands.append(without_shell_comment(line))
             index += 1
     return "\n".join(commands)
 
@@ -100,7 +118,7 @@ def has_route(path: str, workflow: str, files: set[str], directories: list[str],
         source = (root / path).read_text(encoding="utf-8")
         if re.search(r"#\[Group\(['\"]root-deployment['\"]\)\]", source):
             script = (root / ROOT_DEPLOYMENT_SCRIPT).read_text(encoding="utf-8")
-            script_commands = "\n".join(line for line in script.splitlines() if not line.lstrip().startswith("#"))
+            script_commands = "\n".join(without_shell_comment(line) for line in script.splitlines())
             return (
                 ROOT_DEPLOYMENT_SCRIPT in run_commands(workflow)
                 and path in script_commands

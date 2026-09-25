@@ -91,7 +91,7 @@ class TestRoutingGuardTest(unittest.TestCase):
             (root / path).write_text("<?php #[Group('root-deployment')]\n")
             script = root / module.ROOT_DEPLOYMENT_SCRIPT
             script.parent.mkdir(parents=True)
-            script.write_text("#!/bin/bash\n# " + path + "\n")
+            script.write_text("#!/bin/bash\nphp vendor/bin/phpunit existing.php # " + path + "\n")
             workflow = "  root-deployment-tests:\n    steps:\n      - run: bash " + module.ROOT_DEPLOYMENT_SCRIPT + "\n"
             self.assertFalse(module.has_route(path, workflow, set(), ["tests/Unit/"], root))
 
@@ -111,10 +111,16 @@ class TestRoutingGuardTest(unittest.TestCase):
           path: pdf-renderer/new.test.js
       - run: |
           # pdf-renderer/new.test.js
-          npm test
+          node --test existing.test.js # pdf-renderer/new.test.js
 """
         self.assertFalse(module.has_route(path, workflow, set(), []))
         self.assertTrue(module.has_route(path, workflow + "      - run: node pdf-renderer/new.test.js\n", set(), []))
+
+    def test_shell_comment_filter_preserves_quoted_hashes(self):
+        self.assertEqual(
+            "node --test 'fixture#one.test.js' ",
+            module.without_shell_comment("node --test 'fixture#one.test.js' # ignored.test.js"),
+        )
 
 
 if __name__ == "__main__":
