@@ -339,7 +339,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Verify routing guard behavior
-        run: python3 -B -m unittest -v tests.Python.test_ci_test_routing
+        run: python3 -B -m unittest -v tests.Python.test_ci_test_routing tests.Python.test_summarize_junit
       - name: Check test routing manifest
         env:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
