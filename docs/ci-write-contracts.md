@@ -265,6 +265,21 @@ Benutzer-/Einstellungszustand. Die vorhandenen kanonischen POST- und
 DELETE-Tests bleiben Positivkontrollen. Das ist lokaler HTTP-/Datenbanknachweis,
 kein produktiver Schreibtest.
 
+## Secretaries API v1 direkte Schreibaliase
+
+Die kanonischen Secretary-Routen verwenden POST für `store` und DELETE für
+`destroy`. Auch direkt erreichbare `Secretaries_api_v1`-Controller-Aliase
+erzwingen diese Methoden nach der API-Authentifizierung und vor
+Payload-Auswertung, Datensatzsuche oder Mutation. Abweichende Methoden erhalten
+405 mit `Allow: POST` beziehungsweise `Allow: DELETE`; die bestehenden
+Provider- und Rollenbeziehungen bleiben unverändert.
+
+`StaffSettingsApiHttpTest` prüft mit eigenen synthetischen Secretary-Datensätzen
+und gültiger Basic- beziehungsweise Bearer-Authentifizierung die Ablehnung der
+direkten Aliase samt vollständigem Benutzer-, Einstellungs- und
+Provider-Zustand. Das ist lokaler HTTP-/Datenbanknachweis, kein produktiver
+Schreibtest.
+
 ## Settings API v1
 
 Die generische Settings API erlaubt authentifizierten Admin-Basic- und

@@ -77,6 +77,149 @@ final class DefenseVerificationFixtureTest extends TestCase
         $this->fixture->deactivate();
     }
 
+    public function testSecretariesPreparedRecoveryCleansRelationships(): void
+    {
+        $actor = $this->ordinary->activate(roleSlug: 'admin');
+        $state = $this->fixture->activate('secretaries_api', $actor);
+        $journalPath = $this->stateDirectory . '/defense-verification.json';
+        $journal = json_decode((string) file_get_contents($journalPath), true, 512, JSON_THROW_ON_ERROR);
+        $journal['phase'] = 'prepared';
+        file_put_contents($journalPath, json_encode($journal, JSON_THROW_ON_ERROR));
+
+        $this->fixture->deactivate();
+
+        $db = &get_instance()->db;
+        self::assertSame('clean', $this->fixture->verify());
+        self::assertSame(
+            0,
+            $db
+                ->get_where('secretaries_providers', [
+                    'id_users_secretary' => (int) $state['ids']['secretary_target'],
+                ])
+                ->num_rows(),
+        );
+        self::assertSame(
+            0,
+            $db
+                ->get_where('secretaries_providers', [
+                    'id_users_secretary' => (int) $state['ids']['secretary_sentinel'],
+                ])
+                ->num_rows(),
+        );
+    }
+
+    public function testSecretariesPreparedRecoveryRejectsAnOutsiderExactRelationship(): void
+    {
+        $actor = $this->ordinary->activate(roleSlug: 'admin');
+        $state = $this->fixture->activate('secretaries_api', $actor);
+        $journalPath = $this->stateDirectory . '/defense-verification.json';
+        $originalJournal = (string) file_get_contents($journalPath);
+        $journal = json_decode($originalJournal, true, 512, JSON_THROW_ON_ERROR);
+        $journal['phase'] = 'prepared';
+        foreach (array_keys($journal['intents']['secretary_links']) as $key) {
+            $journal['intents']['secretary_links'][$key]['stage'] = 'prepared';
+        }
+        $db = &get_instance()->db;
+        $link = [
+            'id_users_secretary' => (int) $state['ids']['secretary_target'],
+            'id_users_provider' => (int) $state['ids']['provider_target'],
+        ];
+        $db->delete('secretaries_providers', $link);
+        $db->insert('secretaries_providers', $link);
+        file_put_contents($journalPath, json_encode($journal, JSON_THROW_ON_ERROR));
+
+        try {
+            $this->expectException(RuntimeException::class);
+            $this->expectExceptionMessage('Prepared secretary relationship provenance is unproven.');
+            $this->fixture->deactivate();
+        } finally {
+            $db->delete('secretaries_providers', $link);
+            $db->insert('secretaries_providers', $link);
+            file_put_contents($journalPath, $originalJournal);
+            if (is_file($journalPath)) {
+                $this->fixture->deactivate();
+            }
+        }
+    }
+
+    public function testSecretariesDestroyAliasCompleteTargetLossReconcilesAndCleansRemainingOwnedRows(): void
+    {
+        $actor = $this->ordinary->activate(roleSlug: 'admin');
+        $state = $this->fixture->activate('secretaries_api', $actor);
+        $this->fixture->beginSecretariesApiDestroyAlias();
+        $db = &get_instance()->db;
+        $targetId = (int) $state['ids']['secretary_target'];
+        $db->delete('secretaries_providers', ['id_users_secretary' => $targetId]);
+        $db->delete('user_settings', ['id_users' => $targetId]);
+        $db->query('DELETE FROM ' . $db->dbprefix('users') . ' WHERE id = ?', [$targetId]);
+        self::assertSame(0, $db->get_where('users', ['id' => $targetId])->num_rows());
+
+        $this->fixture->deactivate();
+
+        self::assertSame('clean', $this->fixture->verify());
+        self::assertSame('active', $this->ordinary->verify());
+        self::assertSame(0, $db->get_where('users', ['id' => (int) $state['ids']['secretary_sentinel']])->num_rows());
+        self::assertSame(0, $db->get_where('users', ['id' => (int) $state['ids']['provider_target']])->num_rows());
+        $this->ordinary->deactivate();
+        self::assertSame('clean', $this->ordinary->verify());
+    }
+
+    public function testSecretariesDestroyAliasPartialTargetLossRemainsFailClosed(): void
+    {
+        $actor = $this->ordinary->activate(roleSlug: 'admin');
+        $state = $this->fixture->activate('secretaries_api', $actor);
+        $this->fixture->beginSecretariesApiDestroyAlias();
+        $db = &get_instance()->db;
+        $db->delete('secretaries_providers', [
+            'id_users_secretary' => (int) $state['ids']['secretary_target'],
+        ]);
+
+        try {
+            $this->expectException(RuntimeException::class);
+            $this->expectExceptionMessage('Secretary destroy alias target ownership drifted.');
+            $this->fixture->deactivate();
+        } finally {
+            $db->insert('secretaries_providers', [
+                'id_users_secretary' => (int) $state['ids']['secretary_target'],
+                'id_users_provider' => (int) $state['ids']['provider_target'],
+            ]);
+            $this->fixture->deactivate();
+        }
+    }
+
+    public function testSecretariesDestroyAliasReconciledCleaningRetryRetainsAbsenceEvidence(): void
+    {
+        $actor = $this->ordinary->activate(roleSlug: 'admin');
+        $state = $this->fixture->activate('secretaries_api', $actor);
+        $this->fixture->beginSecretariesApiDestroyAlias();
+        $db = &get_instance()->db;
+        $targetId = (int) $state['ids']['secretary_target'];
+        $targetLink = [
+            'id_users_secretary' => $targetId,
+            'id_users_provider' => (int) $state['ids']['provider_target'],
+        ];
+        $db->delete('secretaries_providers', $targetLink);
+        $db->delete('user_settings', ['id_users' => $targetId]);
+        $db->query('DELETE FROM ' . $db->dbprefix('users') . ' WHERE id = ?', [$targetId]);
+
+        $journalPath = $this->stateDirectory . '/defense-verification.json';
+        $journal = json_decode((string) file_get_contents($journalPath), true, 512, JSON_THROW_ON_ERROR);
+        $journal['phase'] = 'cleaning';
+        $journal['intents']['secretary_alias']['destroy_stage'] = 'target_absent_reconciled';
+        $journal['intents']['secretary_alias']['reconciled_target_id'] = $targetId;
+        $journal['intents']['secretary_alias']['reconciled_target_link'] = $targetLink;
+        unset($journal['ids']['secretary_target'], $journal['usernames']['secretary_target']);
+        unset($journal['links']['secretary_target'], $journal['intents']['secretary_links']['secretary_target']);
+        file_put_contents($journalPath, json_encode($journal, JSON_THROW_ON_ERROR));
+
+        $this->fixture->deactivate();
+
+        self::assertSame('clean', $this->fixture->verify());
+        self::assertSame('active', $this->ordinary->verify());
+        $this->ordinary->deactivate();
+        self::assertSame('clean', $this->ordinary->verify());
+    }
+
     public function testCalendarRaceLifecycleCleansAllRelationshipsAndObjects(): void
     {
         $actor = $this->ordinary->activate();

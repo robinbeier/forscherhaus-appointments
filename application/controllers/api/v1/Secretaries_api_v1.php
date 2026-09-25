@@ -110,6 +110,12 @@ class Secretaries_api_v1 extends EA_Controller
      */
     public function store(): void
     {
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+            response('', 405, ['Allow: POST']);
+
+            return;
+        }
+
         try {
             $secretary = $this->apiRequestDtoFactory()->buildEntityWritePayloadDto()->payload;
 
@@ -199,6 +205,12 @@ class Secretaries_api_v1 extends EA_Controller
      */
     public function destroy(int $id): void
     {
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'DELETE') {
+            response('', 405, ['Allow: DELETE']);
+
+            return;
+        }
+
         try {
             $occurrences = $this->secretaries_model->get(['id' => $id]);
 

@@ -476,6 +476,51 @@ final class StaffSettingsApiHttpTest extends TestCase
         self::assertSame($beforeB, $f->secretaryDeleteState($idB));
     }
 
+    #[DataProvider('validWriteAuthenticationCases')]
+    public function testSecretaryStoreControllerAliasRejectsPutWithoutMutation(string $authentication): void
+    {
+        $f = $this->fixture;
+        $client = $this->writeClient($authentication);
+        $payload = $f->secretaryWritePayload('store-alias-' . $authentication, [$f->providerId]);
+        self::assertSame([], $f->secretaryWriteState($payload['email']));
+
+        $response = $client->requestJsonApp('PUT', 'api/v1/secretaries_api_v1/store', $payload);
+
+        self::assertSame(405, $response->statusCode, $response->body);
+        self::assertSame('POST', $response->header('Allow'));
+        self::assertSame([], $f->secretaryWriteState($payload['email']));
+    }
+
+    #[DataProvider('validWriteAuthenticationCases')]
+    public function testSecretaryDestroyControllerAliasRejectsGetWithoutMutation(string $authentication): void
+    {
+        $f = $this->fixture;
+        $client = $this->writeClient($authentication);
+        $sentinelPayload = $f->secretaryWritePayload('destroy-alias-sentinel-' . $authentication, [$f->providerId]);
+        $sentinel = $this->success($client->requestJsonApp('POST', 'api/v1/secretaries', $sentinelPayload), 201);
+        $sentinelId = (int) ($sentinel['id'] ?? 0);
+        self::assertGreaterThan(0, $sentinelId);
+        self::assertSame([$f->providerId], $f->secretaryWriteState($sentinelPayload['email'])['providers']);
+
+        $payload = $f->secretaryWritePayload('destroy-alias-target-' . $authentication, [$f->providerId]);
+        $created = $this->success($client->requestJsonApp('POST', 'api/v1/secretaries', $payload), 201);
+        $id = (int) ($created['id'] ?? 0);
+        self::assertGreaterThan(0, $id);
+        $beforeTarget = $f->secretaryDeleteState($id);
+        $beforeSentinel = $f->secretaryDeleteState($sentinelId);
+
+        $response = $client->get('api/v1/secretaries_api_v1/destroy/' . $id);
+
+        self::assertSame(405, $response->statusCode, $response->body);
+        self::assertSame('DELETE', $response->header('Allow'));
+        self::assertSame($beforeTarget, $f->secretaryDeleteState($id));
+        self::assertSame($beforeSentinel, $f->secretaryDeleteState($sentinelId));
+
+        $f->cleanup();
+        self::assertSame([], $f->secretaryWriteState($sentinelPayload['email']));
+        self::assertSame([], $f->secretaryWriteState($payload['email']));
+    }
+
     #[DataProvider('invalidWriteAuthenticationCases')]
     public function testStaffAndSettingsWritesRejectInvalidAuthenticationWithoutMutation(string $case): void
     {

@@ -26,6 +26,7 @@ final class DefenseVerificationFixture
         'unavailabilities_api',
         'blocked_periods_api',
         'service_categories_api',
+        'secretaries_api',
     ];
     private const ACTIVE_TRANSACTION_ERROR = 'Defense verification fixture cannot run inside an active database transaction.';
 
@@ -88,6 +89,7 @@ final class DefenseVerificationFixture
                         'unavailabilities_api',
                         'blocked_periods_api',
                         'service_categories_api',
+                        'secretaries_api',
                     ],
                     true,
                 )
@@ -129,7 +131,9 @@ final class DefenseVerificationFixture
                                     ? $this->activateBlockedPeriodsApi($state)
                                     : ($profile === 'service_categories_api'
                                         ? $this->activateServiceCategoriesApi($state)
-                                        : $this->activateCalendarRace($state)))));
+                                        : ($profile === 'secretaries_api'
+                                            ? $this->activateSecretariesApi($state)
+                                            : $this->activateCalendarRace($state))))));
                 $state['phase'] = 'active';
                 $this->writeState($state);
                 return $state;
@@ -310,6 +314,70 @@ final class DefenseVerificationFixture
                 $rows[$label] = $row;
             }
             return $rows;
+        });
+    }
+
+    /** Non-secret snapshots for the bounded Secretaries API alias probe. */
+    public function secretariesApiSnapshot(): array
+    {
+        return $this->withLock(function (): array {
+            $state = $this->readState();
+            $this->validateState($state);
+            $this->assertOwnership($state);
+            $rows = [];
+            foreach (['target' => 'secretary_target', 'sentinel' => 'secretary_sentinel'] as $label => $key) {
+                $id = (int) ($state['ids'][$key] ?? 0);
+                $user = $id > 0 ? $this->db->get_where('users', ['id' => $id])->row_array() : [];
+                $settings = $id > 0 ? $this->db->get_where('user_settings', ['id_users' => $id])->row_array() : [];
+                $providers =
+                    $id > 0
+                        ? $this->db
+                            ->order_by('id_users_provider', 'ASC')
+                            ->get_where('secretaries_providers', ['id_users_secretary' => $id])
+                            ->result_array()
+                        : [];
+                $rows[$label] = [
+                    'user' => $user ?: [],
+                    'settings' => $settings ?: [],
+                    'providers' => $providers,
+                ];
+            }
+            return $rows;
+        });
+    }
+
+    public function beginSecretariesApiDestroyAlias(): void
+    {
+        $this->withLock(function (): void {
+            $state = $this->readState();
+            $this->validateState($state);
+            if (($state['profile'] ?? null) !== 'secretaries_api') {
+                throw new RuntimeException('Secretary alias stage requires its dedicated graph.');
+            }
+            $this->assertOwnership($state);
+            $stage = $state['intents']['secretary_alias']['destroy_stage'] ?? null;
+            if ($stage !== null && $stage !== 'complete') {
+                throw new RuntimeException('Secretary destroy alias stage is already in progress.');
+            }
+            $state['intents']['secretary_alias']['destroy_stage'] = 'started';
+            $this->writeState($state);
+        });
+    }
+
+    public function completeSecretariesApiDestroyAlias(): void
+    {
+        $this->withLock(function (): void {
+            $state = $this->readState();
+            $this->validateState($state);
+            if (($state['profile'] ?? null) !== 'secretaries_api') {
+                throw new RuntimeException('Secretary alias stage requires its dedicated graph.');
+            }
+            if (($state['intents']['secretary_alias']['destroy_stage'] ?? null) !== 'started') {
+                throw new RuntimeException('Secretary destroy alias stage is not active.');
+            }
+            $this->assertOwnership($state);
+            $state['intents']['secretary_alias']['destroy_stage'] = 'complete';
+            $this->writeState($state);
         });
     }
 
@@ -709,6 +777,7 @@ final class DefenseVerificationFixture
             $wasCleaning = $state['phase'] === 'cleaning';
             $wasPrepared = $state['phase'] === 'prepared' || ($state['cleanup_origin_phase'] ?? null) === 'prepared';
             $state = $this->recoverExactIds($state);
+            $state = $this->reconcileSecretariesApiDestroyAlias($state);
             if (isset($state['intents']['appointment']) && !isset($state['ids']['appointment'])) {
                 throw new RuntimeException('Appointment intent could not be reconstructed; refusing cleanup.');
             }
@@ -776,6 +845,33 @@ final class DefenseVerificationFixture
         $state['admin_target_id'] = $state['ids']['admin_target'];
         $state['customer_update_id'] = $state['ids']['customer_find_update'];
         $state['customer_delete_id'] = $state['ids']['customer_destroy'];
+        return $state;
+    }
+
+    /** Prepare two owned Secretaries and one provider relationship for alias checks. */
+    private function activateSecretariesApi(array $state): array
+    {
+        $secretaryRole = $this->role('secretary');
+        $providerRole = $this->role('provider');
+        $state['roles'] = ['secretary' => $secretaryRole, 'provider' => $providerRole];
+        $state['ids']['provider_target'] = $this->insertUser(
+            $state,
+            'provider_target',
+            $providerRole,
+            'secretary-api-provider',
+        );
+        foreach (['secretary_target', 'secretary_sentinel'] as $key) {
+            $state['ids'][$key] = $this->insertUser($state, $key, $secretaryRole, 'secretary-api');
+            $state['links'][$key] = [
+                'id_users_secretary' => $state['ids'][$key],
+                'id_users_provider' => $state['ids']['provider_target'],
+            ];
+            $state['intents']['secretary_links'][$key] = ['stage' => 'prepared'];
+            $this->journal($state);
+            $this->insertExact('secretaries_providers', $state['links'][$key]);
+            $state['intents']['secretary_links'][$key]['stage'] = 'complete';
+            $this->journal($state);
+        }
         return $state;
     }
 
@@ -1197,6 +1293,8 @@ final class DefenseVerificationFixture
                 'customer_find_update',
                 'customer_destroy',
                 'calendar_customer',
+                'secretary_target',
+                'secretary_sentinel',
             ]
             as $key
         ) {
@@ -1209,7 +1307,9 @@ final class DefenseVerificationFixture
                     ? 'provider'
                     : (in_array($key, ['admin_target', 'api_admin'], true)
                         ? 'admin'
-                        : 'customer');
+                        : (in_array($key, ['secretary_target', 'secretary_sentinel'], true)
+                            ? 'secretary'
+                            : 'customer'));
                 if ((int) ($user['id_roles'] ?? 0) !== (int) $state['roles'][$roleKey]) {
                     throw new RuntimeException('Fixture role drift detected.');
                 }
@@ -1314,17 +1414,27 @@ final class DefenseVerificationFixture
             }
             $this->assertApiHashDigest($row, $intent['hash_digest']);
         }
-        foreach ($state['links'] ?? [] as $link) {
-            if (
-                !is_array($link) ||
-                $this->db
+        foreach ($state['links'] ?? [] as $linkKey => $link) {
+            if (!is_array($link)) {
+                throw new RuntimeException('Fixture relationship journal is invalid.');
+            }
+            if (isset($link['id_users_secretary'], $link['id_users_provider'])) {
+                $matches = $this->db
+                    ->get_where('secretaries_providers', [
+                        'id_users_secretary' => (int) $link['id_users_secretary'],
+                        'id_users_provider' => (int) $link['id_users_provider'],
+                    ])
+                    ->num_rows();
+            } else {
+                $matches = $this->db
                     ->get_where('services_providers', [
                         'id_users' => (int) ($link['id_users'] ?? 0),
                         'id_services' => (int) ($link['id_services'] ?? 0),
                     ])
-                    ->num_rows() !== 1
-            ) {
-                throw new RuntimeException('Fixture service relationship drift detected.');
+                    ->num_rows();
+            }
+            if ($matches !== 1) {
+                throw new RuntimeException('Fixture relationship drift detected.');
             }
         }
     }
@@ -1419,9 +1529,25 @@ final class DefenseVerificationFixture
                 throw new RuntimeException('Prepared service category identity drift detected.');
             }
         }
-        foreach ($state['links'] ?? [] as $link) {
+        foreach ($state['links'] ?? [] as $linkKey => $link) {
             if (!is_array($link)) {
                 throw new RuntimeException('Prepared fixture service relationship is invalid.');
+            }
+            if (isset($link['id_users_secretary'], $link['id_users_provider'])) {
+                $matches = $this->db
+                    ->get_where('secretaries_providers', [
+                        'id_users_secretary' => (int) $link['id_users_secretary'],
+                        'id_users_provider' => (int) $link['id_users_provider'],
+                    ])
+                    ->num_rows();
+                $stage = $state['intents']['secretary_links'][$linkKey]['stage'] ?? null;
+                if ($stage === 'prepared' && $matches !== 0) {
+                    throw new RuntimeException('Prepared secretary relationship provenance is unproven.');
+                }
+                if ($stage === 'complete' && $matches !== 1) {
+                    throw new RuntimeException('Prepared secretary relationship is incomplete or ambiguous.');
+                }
+                continue;
             }
             $matches = $this->db
                 ->get_where('services_providers', [
@@ -1433,6 +1559,65 @@ final class DefenseVerificationFixture
                 throw new RuntimeException('Prepared fixture service relationship is ambiguous.');
             }
         }
+    }
+
+    /** @param array<string,mixed> $state @return array<string,mixed> */
+    private function reconcileSecretariesApiDestroyAlias(array $state): array
+    {
+        if (($state['profile'] ?? null) !== 'secretaries_api') {
+            return $state;
+        }
+        $stage = $state['intents']['secretary_alias']['destroy_stage'] ?? null;
+        if ($stage === 'target_absent_reconciled') {
+            $targetId = (int) ($state['intents']['secretary_alias']['reconciled_target_id'] ?? 0);
+            if ($targetId < 1) {
+                throw new RuntimeException('Secretary destroy alias reconciliation evidence is unavailable.');
+            }
+            if (
+                $this->db->get_where('users', ['id' => $targetId])->num_rows() !== 0 ||
+                $this->db->get_where('user_settings', ['id_users' => $targetId])->num_rows() !== 0 ||
+                $this->db->get_where('secretaries_providers', ['id_users_secretary' => $targetId])->num_rows() !== 0
+            ) {
+                throw new RuntimeException('Secretary destroy alias reconciled absence no longer holds.');
+            }
+            return $state;
+        }
+        if ($stage !== 'started') {
+            return $state;
+        }
+        $targetId = (int) ($state['ids']['secretary_target'] ?? 0);
+        $intent = $state['intents']['users']['secretary_target'] ?? null;
+        $link = $state['links']['secretary_target'] ?? null;
+        if ($targetId < 1 || !is_array($intent) || !is_array($link)) {
+            throw new RuntimeException('Secretary destroy alias reconciliation identity is unavailable.');
+        }
+        $user = $this->db->get_where('users', ['id' => $targetId])->row_array();
+        $settings = $this->db->get_where('user_settings', ['id_users' => $targetId])->result_array();
+        $links = $this->db->get_where('secretaries_providers', ['id_users_secretary' => $targetId])->result_array();
+        if (is_array($user) && $user !== []) {
+            if (
+                ($user['notes'] ?? null) !== ($intent['marker'] ?? null) ||
+                ($user['email'] ?? null) !== ($intent['email'] ?? null) ||
+                (int) ($user['id_roles'] ?? 0) !== (int) ($intent['role_id'] ?? 0) ||
+                count($settings) !== 1 ||
+                ($settings[0]['username'] ?? null) !== ($intent['username'] ?? null) ||
+                count($links) !== 1 ||
+                (int) ($links[0]['id_users_secretary'] ?? 0) !== (int) ($link['id_users_secretary'] ?? 0) ||
+                (int) ($links[0]['id_users_provider'] ?? 0) !== (int) ($link['id_users_provider'] ?? 0)
+            ) {
+                throw new RuntimeException('Secretary destroy alias target ownership drifted.');
+            }
+            return $state;
+        }
+        if ($settings !== [] || $links !== []) {
+            throw new RuntimeException('Secretary destroy alias target suffered partial loss.');
+        }
+        $state['intents']['secretary_alias']['destroy_stage'] = 'target_absent_reconciled';
+        $state['intents']['secretary_alias']['reconciled_target_id'] = $targetId;
+        $state['intents']['secretary_alias']['reconciled_target_link'] = $link;
+        unset($state['ids']['secretary_target'], $state['usernames']['secretary_target']);
+        unset($state['links']['secretary_target'], $state['intents']['secretary_links']['secretary_target']);
+        return $state;
     }
 
     /** @param array<string,mixed> $state */
@@ -1743,7 +1928,14 @@ final class DefenseVerificationFixture
         }
         foreach ($state['links'] ?? [] as $link) {
             if (!is_array($link) || count($link) !== 2) {
-                throw new RuntimeException('Fixture service relationship journal is invalid.');
+                throw new RuntimeException('Fixture relationship journal is invalid.');
+            }
+            if (isset($link['id_users_secretary'], $link['id_users_provider'])) {
+                $this->db->delete('secretaries_providers', [
+                    'id_users_secretary' => (int) $link['id_users_secretary'],
+                    'id_users_provider' => (int) $link['id_users_provider'],
+                ]);
+                continue;
             }
             $this->db->delete('services_providers', [
                 'id_users' => (int) $link['id_users'],
@@ -1773,6 +1965,8 @@ final class DefenseVerificationFixture
                         'customer_find_update',
                         'customer_destroy',
                         'calendar_customer',
+                        'secretary_target',
+                        'secretary_sentinel',
                     ],
                     true,
                 )
@@ -1952,6 +2146,8 @@ final class DefenseVerificationFixture
                 'customer_find_update',
                 'customer_destroy',
                 'calendar_customer',
+                'secretary_target',
+                'secretary_sentinel',
             ]
             as $key
         ) {
@@ -2605,19 +2801,37 @@ final class DefenseVerificationFixture
             }
         }
         foreach ($state['links'] ?? [] as $key => $link) {
-            if (
-                is_array($link) &&
-                $this->db
-                    ->get_where('services_providers', [
+            if (!is_array($link)) {
+                continue;
+            }
+            $table = isset($link['id_users_secretary'], $link['id_users_provider'])
+                ? 'secretaries_providers'
+                : 'services_providers';
+            $where =
+                $table === 'secretaries_providers'
+                    ? [
+                        'id_users_secretary' => (int) $link['id_users_secretary'],
+                        'id_users_provider' => (int) $link['id_users_provider'],
+                    ]
+                    : [
                         'id_users' => (int) ($link['id_users'] ?? 0),
                         'id_services' => (int) ($link['id_services'] ?? 0),
-                    ])
-                    ->num_rows() !== 0
-            ) {
+                    ];
+            if ($this->db->get_where($table, $where)->num_rows() !== 0) {
                 $remaining[] = 'link:' . $key;
             }
         }
-        foreach (['provider_target', 'admin_target', 'foreign_provider', 'api_admin'] as $key) {
+        foreach (
+            [
+                'provider_target',
+                'admin_target',
+                'foreign_provider',
+                'api_admin',
+                'secretary_target',
+                'secretary_sentinel',
+            ]
+            as $key
+        ) {
             if (
                 isset($state['ids'][$key]) &&
                 $this->db->get_where('user_settings', ['id_users' => (int) $state['ids'][$key]])->num_rows() !== 0
