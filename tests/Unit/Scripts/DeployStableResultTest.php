@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Scripts;
 
+use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
 final class DeployStableResultTest extends TestCase
 {
+    #[Group('root-deployment')]
     public function testPendingRecoveryGuardBlocksDirectPrimitiveWithoutBoundIdentity(): void
     {
         $result = $this->runShell(
@@ -38,6 +40,7 @@ final class DeployStableResultTest extends TestCase
         self::assertSame(0, $result['exit_code'], $result['stdout'] . $result['stderr']);
     }
 
+    #[Group('root-deployment')]
     public function testRejectedGuardAdmissionCannotActivateOrPublishProtectedReceipt(): void
     {
         $result = $this->runShell(
@@ -68,13 +71,17 @@ final class DeployStableResultTest extends TestCase
         self::assertSame(0, $result['exit_code'], $result['stdout'] . $result['stderr']);
     }
 
+    #[Group('root-deployment')]
     public function testFullEntryRejectsPendingGuardBeforePublishingResult(): void
     {
         if (function_exists('posix_geteuid') && posix_geteuid() !== 0) {
             self::markTestSkipped('root fixture required');
         }
-        if (!is_file('/.dockerenv') || str_starts_with((string) gethostname(), 'booking-server')) {
-            self::markTestSkipped('fixed production-path fixture restricted to isolated Docker tests');
+        if (
+            (!is_file('/.dockerenv') && getenv('FH_ROOT_HOST_TESTS_REQUIRED') !== '1') ||
+            str_starts_with((string) gethostname(), 'booking-server')
+        ) {
+            self::markTestSkipped('fixed production-path fixture restricted to isolated root test runners');
         }
         $guard = '/root/fh-deploy-recovery-pending.v1.json';
         if (is_file($guard) || is_link($guard)) {
@@ -223,6 +230,7 @@ final class DeployStableResultTest extends TestCase
         }
     }
 
+    #[Group('root-deployment')]
     public function testPendingRecoveryGuardAdmitsOnlyMatchingBoundChild(): void
     {
         $result = $this->runShell(
