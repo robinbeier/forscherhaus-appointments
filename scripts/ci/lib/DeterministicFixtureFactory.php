@@ -20,7 +20,27 @@ final class DeterministicFixtureFactory
         private readonly int $bookingSearchDays = 14,
         private readonly string $timezone = 'UTC',
         private readonly bool $syntheticCanary = false,
-    ) {}
+        private readonly ?string $bookingStartDate = null,
+    ) {
+        if ($this->bookingStartDate !== null && !preg_match('/\A\d{4}-\d{2}-\d{2}\z/', $this->bookingStartDate)) {
+            throw new GateAssertionException('booking_start_date must use YYYY-MM-DD format.');
+        }
+        if ($this->bookingStartDate !== null) {
+            $parsed = DateTimeImmutable::createFromFormat(
+                '!Y-m-d',
+                $this->bookingStartDate,
+                new DateTimeZone($this->timezone),
+            );
+            $errors = DateTimeImmutable::getLastErrors();
+            if (
+                $parsed === false ||
+                ($errors !== false && ($errors['warning_count'] > 0 || $errors['error_count'] > 0)) ||
+                $parsed->format('Y-m-d') !== $this->bookingStartDate
+            ) {
+                throw new GateAssertionException('booking_start_date must be a valid calendar date.');
+            }
+        }
+    }
 
     public static function create(int $bookingSearchDays = 14): self
     {
@@ -330,7 +350,7 @@ final class DeterministicFixtureFactory
             throw new GateAssertionException('Provider/service pairs list is empty.');
         }
 
-        $startDate = new DateTimeImmutable('tomorrow', new DateTimeZone(date_default_timezone_get() ?: 'UTC'));
+        $startDate = $this->resolveBookingWindowStart();
 
         for ($offset = 0; $offset < $this->bookingSearchDays; $offset++) {
             $candidateDate = $startDate->modify('+' . $offset . ' day')->format('Y-m-d');
@@ -371,6 +391,21 @@ final class DeterministicFixtureFactory
                 $this->bookingSearchDays,
             ),
         );
+    }
+
+    private function bookingWindowStart(?DateTimeImmutable $now = null): DateTimeImmutable
+    {
+        $timezone = new DateTimeZone($this->timezone);
+        $today = ($now ?? new DateTimeImmutable('now', $timezone))->setTimezone($timezone)->setTime(0, 0);
+
+        return $today->modify('+1 day');
+    }
+
+    private function resolveBookingWindowStart(?DateTimeImmutable $now = null): DateTimeImmutable
+    {
+        return $this->bookingStartDate !== null
+            ? new DateTimeImmutable($this->bookingStartDate . ' 00:00:00', new DateTimeZone($this->timezone))
+            : $this->bookingWindowStart($now);
     }
 
     public function markerMatches(?string $value): bool

@@ -36,8 +36,11 @@ if (!defined('ZERO_SURPRISE_REPLAY_TEST_MODE')) {
         }
 
         $composeProject = buildComposeProjectName($config['release_id']);
+        $config['booking_start_date'] = resolveBoundBookingStartDate($config);
 
-        $bookingReportPath = 'storage/logs/release-gate/zero-surprise-booking-' . $timestamp . '.json';
+        $initialBookingReportPath = 'storage/logs/release-gate/zero-surprise-booking-initial-' . $timestamp . '.json';
+        $hypotheticalBookingReportPath =
+            'storage/logs/release-gate/zero-surprise-booking-hypothetical-unblocked-' . $timestamp . '.json';
         $dashboardReportPath = 'storage/logs/release-gate/zero-surprise-dashboard-' . $timestamp . '.json';
 
         $report = new ZeroSurpriseReport(
@@ -53,6 +56,7 @@ if (!defined('ZERO_SURPRISE_REPLAY_TEST_MODE')) {
                 'start_date' => $config['start_date'],
                 'end_date' => $config['end_date'],
                 'booking_search_days' => $config['booking_search_days'],
+                'booking_start_date' => $config['booking_start_date'],
                 'retry_count' => $config['retry_count'],
                 'max_pdf_duration_ms' => $config['max_pdf_duration_ms'],
                 'timezone' => $config['timezone'],
@@ -73,6 +77,7 @@ if (!defined('ZERO_SURPRISE_REPLAY_TEST_MODE')) {
                 'details' => $restoreStep['details'],
             ],
         );
+        $baselineBlockers = $restoreStep['baseline_blockers'] ?? null;
 
         $bookingReport = null;
         $dashboardReport = null;
@@ -89,26 +94,205 @@ if (!defined('ZERO_SURPRISE_REPLAY_TEST_MODE')) {
                 '--username=' . $config['username'],
                 '--password-stdin',
                 '--booking-search-days=' . $config['booking_search_days'],
+                '--booking-start-date=' . $config['booking_start_date'],
                 '--retry-count=' . $config['retry_count'],
                 '--run-id=' . buildRunId($config['release_id']),
                 '--timezone=' . $config['timezone'],
-                '--output-json=' . $bookingReportPath,
+                '--output-json=' . $initialBookingReportPath,
             ]);
 
             $bookingStep = runExternalStep($bookingCommand, $repoRoot, 900, $config['password']);
-            $report->addStep(
-                'booking_write_replay',
-                $bookingStep['status'],
-                $bookingStep['exit_code'],
-                $bookingStep['duration_ms'],
-                [
-                    'child_report' => $bookingReportPath,
-                    'command' => $bookingStep['command'],
-                    'timed_out' => $bookingStep['timed_out'],
-                    'stdout_tail' => $bookingStep['stdout_tail'],
-                    'stderr_tail' => $bookingStep['stderr_tail'],
-                ],
-            );
+            $bookingReport = readJsonFile($repoRoot . '/' . $initialBookingReportPath);
+
+            if ($bookingStep['status'] === ZeroSurpriseReport::STATUS_PASS) {
+                if ($baselineBlockers !== null && $baselineBlockers !== []) {
+                    $report->addStep(
+                        'isolated_full_window_blocker_consistency',
+                        ZeroSurpriseReport::STATUS_FAIL,
+                        ZERO_SURPRISE_EXIT_ASSERTION_FAILURE,
+                        0.0,
+                        ['category' => 'baseline_blocker_with_booking_success'],
+                    );
+                    $report->setFailure(
+                        'A full-window blocker was present in the restored baseline but booking unexpectedly succeeded.',
+                        RuntimeException::class,
+                        'assertion_failure',
+                    );
+                }
+                $report->addStep(
+                    'booking_write_replay',
+                    $bookingStep['status'],
+                    $bookingStep['exit_code'],
+                    $bookingStep['duration_ms'],
+                    [
+                        'child_report' => $initialBookingReportPath,
+                        'command' => $bookingStep['command'],
+                        'timed_out' => $bookingStep['timed_out'],
+                    ],
+                );
+            } elseif (isNoLiveSlotFailure($bookingReport, $config, $bookingStep)) {
+                $coverage = probeNoSlotBlockedWindow($composePrefix, $repoRoot, $config);
+                $report->addStep(
+                    'isolated_no_slot_coverage',
+                    $coverage['status'],
+                    $coverage['exit_code'],
+                    $coverage['duration_ms'],
+                    [
+                        'category' => $coverage['category'],
+                        'window_days' => $config['booking_search_days'],
+                        'source' => 'isolated_restored_database',
+                    ],
+                );
+
+                if ($coverage['category'] !== 'full' || $coverage['status'] !== ZeroSurpriseReport::STATUS_PASS) {
+                    $report->setFailure(
+                        'Hypothetical unblocked clone requires a verified full blocked-period window.',
+                        RuntimeException::class,
+                        $coverage['category'] === 'unknown' ? 'runtime_error' : 'assertion_failure',
+                    );
+                } else {
+                    $hypotheticalReady = false;
+                    $baselineMatch = compareCurrentBlockedPeriodSnapshot(
+                        $composePrefix,
+                        $repoRoot,
+                        $config,
+                        $baselineBlockers,
+                    );
+                    $report->addStep(
+                        'isolated_full_window_blocker_baseline_match',
+                        $baselineMatch['status'],
+                        $baselineMatch['exit_code'],
+                        $baselineMatch['duration_ms'],
+                        ['category' => $baselineMatch['category']],
+                    );
+                    if ($baselineMatch['status'] !== ZeroSurpriseReport::STATUS_PASS) {
+                        $report->setFailure(
+                            'Restored blocked-period baseline changed before isolated clone deletion.',
+                            RuntimeException::class,
+                            $baselineMatch['exit_code'] === ZERO_SURPRISE_EXIT_ASSERTION_FAILURE
+                                ? 'assertion_failure'
+                                : 'runtime_error',
+                        );
+                    }
+                    $removal =
+                        $baselineMatch['status'] === ZeroSurpriseReport::STATUS_PASS
+                            ? removeFullWindowBlockedPeriods($composePrefix, $repoRoot, $config)
+                            : [
+                                'status' => ZeroSurpriseReport::STATUS_FAIL,
+                                'exit_code' => ZERO_SURPRISE_EXIT_ASSERTION_FAILURE,
+                                'duration_ms' => 0.0,
+                                'affected_count' => 0,
+                            ];
+                    $report->addStep(
+                        'isolated_full_window_blocker_removal',
+                        $removal['status'],
+                        $removal['exit_code'],
+                        $removal['duration_ms'],
+                        [
+                            'source' => 'isolated_restored_database',
+                            'category' =>
+                                $removal['status'] === ZeroSurpriseReport::STATUS_PASS
+                                    ? 'full_window_rows_removed'
+                                    : 'full_window_rows_not_removed',
+                        ],
+                    );
+                    if ($removal['status'] !== ZeroSurpriseReport::STATUS_PASS) {
+                        $report->setFailure(
+                            'Full-window blocked-period removal failed closed.',
+                            RuntimeException::class,
+                            $removal['exit_code'] === ZERO_SURPRISE_EXIT_ASSERTION_FAILURE
+                                ? 'assertion_failure'
+                                : 'runtime_error',
+                        );
+                    } else {
+                        $postcondition = probeNoSlotBlockedWindow($composePrefix, $repoRoot, $config);
+                        $report->addStep(
+                            'isolated_no_slot_coverage_postcondition',
+                            $postcondition['status'],
+                            $postcondition['exit_code'],
+                            $postcondition['duration_ms'],
+                            [
+                                'category' => $postcondition['category'],
+                                'window_days' => $config['booking_search_days'],
+                                'source' => 'isolated_restored_database',
+                            ],
+                        );
+                        if ($postcondition['category'] === 'unknown' || $postcondition['category'] === 'full') {
+                            $report->setFailure(
+                                'Full-window blocked-period removal postcondition failed closed.',
+                                RuntimeException::class,
+                                $postcondition['category'] === 'unknown' ? 'runtime_error' : 'assertion_failure',
+                            );
+                        } elseif ($postcondition['status'] === ZeroSurpriseReport::STATUS_PASS) {
+                            $hypotheticalReady = true;
+                        }
+                    }
+                }
+
+                $hypotheticalBookingCommand = composeCommand($composePrefix, [
+                    'exec',
+                    '-T',
+                    'php-fpm',
+                    'php',
+                    'scripts/ci/booking_write_contract_smoke.php',
+                    '--base-url=' . $config['base_url'],
+                    '--index-page=' . $config['index_page'],
+                    '--booking-search-days=' . $config['booking_search_days'],
+                    '--booking-start-date=' . $config['booking_start_date'],
+                    '--retry-count=' . $config['retry_count'],
+                    '--timezone=' . $config['timezone'],
+                    '--run-id=' . buildRunId($config['release_id']) . '-hypothetical-unblocked',
+                    '--username=' . $config['username'],
+                    '--password-stdin',
+                    '--output-json=' . $hypotheticalBookingReportPath,
+                ]);
+                if (
+                    $coverage['category'] === 'full' &&
+                    $coverage['status'] === ZeroSurpriseReport::STATUS_PASS &&
+                    ($hypotheticalReady ?? false)
+                ) {
+                    $hypotheticalBookingStep = runExternalStep(
+                        $hypotheticalBookingCommand,
+                        $repoRoot,
+                        900,
+                        $config['password'],
+                    );
+                    $bookingReport = readJsonFile($repoRoot . '/' . $hypotheticalBookingReportPath);
+                    $report->addStep(
+                        'booking_write_replay',
+                        $hypotheticalBookingStep['status'],
+                        $hypotheticalBookingStep['exit_code'],
+                        $hypotheticalBookingStep['duration_ms'],
+                        [
+                            'child_report' => $hypotheticalBookingReportPath,
+                            'command' => $hypotheticalBookingStep['command'],
+                            'timed_out' => $hypotheticalBookingStep['timed_out'],
+                            'source' => 'hypothetical_unblocked_isolated_clone',
+                        ],
+                    );
+                    if ($hypotheticalBookingStep['status'] !== ZeroSurpriseReport::STATUS_PASS) {
+                        $report->setFailure(
+                            'Hypothetical unblocked isolated booking replay failed.',
+                            RuntimeException::class,
+                            $hypotheticalBookingStep['exit_code'] === ZERO_SURPRISE_EXIT_ASSERTION_FAILURE
+                                ? 'assertion_failure'
+                                : 'runtime_error',
+                        );
+                    }
+                }
+            } else {
+                $report->addStep(
+                    'booking_write_replay',
+                    $bookingStep['status'],
+                    $bookingStep['exit_code'],
+                    $bookingStep['duration_ms'],
+                    [
+                        'child_report' => $initialBookingReportPath,
+                        'command' => $bookingStep['command'],
+                        'timed_out' => $bookingStep['timed_out'],
+                    ],
+                );
+            }
 
             $dashboardCommand = composeCommand($composePrefix, [
                 'exec',
@@ -141,7 +325,6 @@ if (!defined('ZERO_SURPRISE_REPLAY_TEST_MODE')) {
                 ],
             );
 
-            $bookingReport = readJsonFile($repoRoot . '/' . $bookingReportPath);
             $dashboardReport = readJsonFile($repoRoot . '/' . $dashboardReportPath);
         } else {
             $report->setFailure(
@@ -606,6 +789,449 @@ function runExternalStep(array $command, string $repoRoot, int $timeoutSeconds, 
 }
 
 /**
+ * Prove the no-slot condition from the restored database without exposing
+ * identifiers. The query accepts only a single row covering the full window;
+ * partial coverage and absence remain hard failures.
+ *
+ * @param array<int,string> $composePrefix
+ * @param array<string,mixed> $config
+ * @return array{status:string,exit_code:int,duration_ms:float,category:string}
+ */
+function probeNoSlotBlockedWindow(array $composePrefix, string $repoRoot, array $config): array
+{
+    $days = (int) ($config['booking_search_days'] ?? 0);
+    $startDate = trim((string) ($config['booking_start_date'] ?? ''));
+    if ($days <= 0 || !preg_match('/\A\d{4}-\d{2}-\d{2}\z/', $startDate)) {
+        return [
+            'status' => ZeroSurpriseReport::STATUS_FAIL,
+            'exit_code' => ZERO_SURPRISE_EXIT_RUNTIME_ERROR,
+            'duration_ms' => 0.0,
+            'category' => 'unknown',
+        ];
+    }
+
+    $start = new DateTimeImmutable(
+        $startDate . ' 00:00:00',
+        new DateTimeZone((string) ($config['timezone'] ?? 'Europe/Berlin')),
+    );
+    $end = $start->modify('+' . $days . ' days');
+    $sql = buildBlockedWindowCoverageSql($start, $end);
+
+    try {
+        $result = GateProcessRunner::run(
+            composeCommand($composePrefix, [
+                'exec',
+                '-T',
+                'mysql',
+                'mysql',
+                '-N',
+                '-B',
+                '-uroot',
+                '-psecret',
+                'easyappointments',
+                '-e',
+                $sql,
+            ]),
+            $repoRoot,
+            null,
+            120,
+        );
+    } catch (Throwable) {
+        return [
+            'status' => ZeroSurpriseReport::STATUS_FAIL,
+            'exit_code' => ZERO_SURPRISE_EXIT_RUNTIME_ERROR,
+            'duration_ms' => 0.0,
+            'category' => 'unknown',
+        ];
+    }
+
+    $category = classifyBlockedWindowCoverage(
+        (string) ($result['stdout'] ?? ''),
+        (int) ($result['exit_code'] ?? 1),
+        (bool) ($result['timed_out'] ?? false),
+    );
+    $pass = in_array($category, ['full', 'partial', 'absent'], true);
+
+    return [
+        'status' => $pass ? ZeroSurpriseReport::STATUS_PASS : ZeroSurpriseReport::STATUS_FAIL,
+        'exit_code' =>
+            $category === 'unknown'
+                ? ZERO_SURPRISE_EXIT_RUNTIME_ERROR
+                : ($pass
+                    ? ZERO_SURPRISE_EXIT_SUCCESS
+                    : ZERO_SURPRISE_EXIT_ASSERTION_FAILURE),
+        'duration_ms' => (float) ($result['duration_ms'] ?? 0.0),
+        'category' => $category,
+    ];
+}
+
+function buildBlockedWindowCoverageSql(DateTimeImmutable $start, DateTimeImmutable $end): string
+{
+    $startSql = mysqlQuote($start->format('Y-m-d H:i:s'));
+    $endSql = mysqlQuote($end->format('Y-m-d H:i:s'));
+
+    return 'SELECT CASE ' .
+        "WHEN EXISTS (SELECT 1 FROM ea_blocked_periods WHERE start_datetime <= {$startSql} AND end_datetime >= {$endSql}) THEN 'full' " .
+        "WHEN EXISTS (SELECT 1 FROM ea_blocked_periods WHERE end_datetime > {$startSql} AND start_datetime < {$endSql}) THEN 'partial' " .
+        "ELSE 'absent' END";
+}
+
+/**
+ * Remove only rows covering the complete window from the isolated clone.
+ * The command returns a fixed count pair and never exposes row identities.
+ *
+ * @param array<int,string> $composePrefix
+ * @param array<string,mixed> $config
+ * @return array{status:string,exit_code:int,duration_ms:float,affected_count:int}
+ */
+function removeFullWindowBlockedPeriods(array $composePrefix, string $repoRoot, array $config): array
+{
+    $days = (int) ($config['booking_search_days'] ?? 0);
+    $startDate = trim((string) ($config['booking_start_date'] ?? ''));
+    if ($days <= 0 || !preg_match('/\A\d{4}-\d{2}-\d{2}\z/', $startDate)) {
+        return [
+            'status' => ZeroSurpriseReport::STATUS_FAIL,
+            'exit_code' => ZERO_SURPRISE_EXIT_RUNTIME_ERROR,
+            'duration_ms' => 0.0,
+            'affected_count' => 0,
+        ];
+    }
+    $start = new DateTimeImmutable(
+        $startDate . ' 00:00:00',
+        new DateTimeZone((string) ($config['timezone'] ?? 'Europe/Berlin')),
+    );
+    $end = $start->modify('+' . $days . ' days');
+    $startSql = mysqlQuote($start->format('Y-m-d H:i:s'));
+    $endSql = mysqlQuote($end->format('Y-m-d H:i:s'));
+    $where = "start_datetime <= {$startSql} AND end_datetime >= {$endSql}";
+    $sql =
+        "SELECT CONCAT('full_count=', COUNT(*)) FROM ea_blocked_periods WHERE {$where}; " .
+        "START TRANSACTION; DELETE FROM ea_blocked_periods WHERE {$where}; " .
+        "SELECT CONCAT('deleted_count=', ROW_COUNT()); COMMIT;";
+
+    try {
+        $result = GateProcessRunner::run(
+            composeCommand($composePrefix, [
+                'exec',
+                '-T',
+                'mysql',
+                'mysql',
+                '-N',
+                '-B',
+                '-uroot',
+                '-psecret',
+                'easyappointments',
+                '-e',
+                $sql,
+            ]),
+            $repoRoot,
+            null,
+            120,
+        );
+    } catch (Throwable) {
+        return [
+            'status' => ZeroSurpriseReport::STATUS_FAIL,
+            'exit_code' => ZERO_SURPRISE_EXIT_RUNTIME_ERROR,
+            'duration_ms' => 0.0,
+            'affected_count' => 0,
+        ];
+    }
+    $counts = parseBlockedWindowRemovalCounts(
+        (string) ($result['stdout'] ?? ''),
+        (int) ($result['exit_code'] ?? 1),
+        (bool) ($result['timed_out'] ?? false),
+    );
+    $valid = validateBlockedWindowRemovalCounts($counts);
+
+    return [
+        'status' => $valid ? ZeroSurpriseReport::STATUS_PASS : ZeroSurpriseReport::STATUS_FAIL,
+        'exit_code' => $valid
+            ? ZERO_SURPRISE_EXIT_SUCCESS
+            : ($counts === null
+                ? ZERO_SURPRISE_EXIT_RUNTIME_ERROR
+                : ZERO_SURPRISE_EXIT_ASSERTION_FAILURE),
+        'duration_ms' => (float) ($result['duration_ms'] ?? 0.0),
+        'affected_count' => $counts['deleted_count'] ?? 0,
+    ];
+}
+
+/**
+ * Bind one booking-window start for the whole restored replay. This prevents
+ * a midnight or DST boundary from making the SQL probe and child HTTP runs
+ * inspect different windows.
+ */
+function resolveBoundBookingStartDate(array $config): string
+{
+    $timezone = new DateTimeZone((string) ($config['timezone'] ?? 'Europe/Berlin'));
+
+    return (new DateTimeImmutable('tomorrow', $timezone))->setTime(0, 0)->format('Y-m-d');
+}
+
+/**
+ * Read full-window blocker identities into process memory only. The caller
+ * must never add the returned IDs or timestamps to a report.
+ *
+ * @return array{status:string,category:string,exit_code:int,duration_ms:float,snapshot:array<int,array{id:int,start:string,end:string}>|null}
+ */
+function snapshotFullWindowBlockedPeriods(array $composePrefix, string $repoRoot, array $config): array
+{
+    $days = (int) ($config['booking_search_days'] ?? 0);
+    $startDate = trim((string) ($config['booking_start_date'] ?? ''));
+    if ($days <= 0 || !preg_match('/\A\d{4}-\d{2}-\d{2}\z/', $startDate)) {
+        return [
+            'status' => ZeroSurpriseReport::STATUS_FAIL,
+            'category' => 'baseline_unavailable',
+            'exit_code' => ZERO_SURPRISE_EXIT_RUNTIME_ERROR,
+            'duration_ms' => 0.0,
+            'snapshot' => null,
+        ];
+    }
+    $timezone = new DateTimeZone((string) ($config['timezone'] ?? 'Europe/Berlin'));
+    $start = new DateTimeImmutable($startDate . ' 00:00:00', $timezone);
+    $end = $start->modify('+' . $days . ' days');
+    $sql = buildFullWindowBlockedPeriodSnapshotSql($start, $end);
+
+    try {
+        $result = GateProcessRunner::run(
+            composeCommand($composePrefix, [
+                'exec',
+                '-T',
+                'mysql',
+                'mysql',
+                '-N',
+                '-B',
+                '-uroot',
+                '-psecret',
+                'easyappointments',
+                '-e',
+                $sql,
+            ]),
+            $repoRoot,
+            null,
+            120,
+        );
+    } catch (Throwable) {
+        return [
+            'status' => ZeroSurpriseReport::STATUS_FAIL,
+            'category' => 'baseline_unavailable',
+            'exit_code' => ZERO_SURPRISE_EXIT_RUNTIME_ERROR,
+            'duration_ms' => 0.0,
+            'snapshot' => null,
+        ];
+    }
+    $snapshot = parseFullWindowBlockedPeriodSnapshot(
+        (string) ($result['stdout'] ?? ''),
+        (int) ($result['exit_code'] ?? 1),
+        (bool) ($result['timed_out'] ?? false),
+    );
+    if ($snapshot === null) {
+        return [
+            'status' => ZeroSurpriseReport::STATUS_FAIL,
+            'category' => 'baseline_unavailable',
+            'exit_code' => ZERO_SURPRISE_EXIT_RUNTIME_ERROR,
+            'duration_ms' => (float) ($result['duration_ms'] ?? 0.0),
+            'snapshot' => null,
+        ];
+    }
+
+    return [
+        'status' => ZeroSurpriseReport::STATUS_PASS,
+        'category' => $snapshot === [] ? 'baseline_absent' : 'baseline_full',
+        'exit_code' => ZERO_SURPRISE_EXIT_SUCCESS,
+        'duration_ms' => (float) ($result['duration_ms'] ?? 0.0),
+        'snapshot' => $snapshot,
+    ];
+}
+
+function buildFullWindowBlockedPeriodSnapshotSql(DateTimeImmutable $start, DateTimeImmutable $end): string
+{
+    return 'SELECT id, start_datetime, end_datetime FROM ea_blocked_periods WHERE start_datetime <= ' .
+        mysqlQuote($start->format('Y-m-d H:i:s')) .
+        ' AND end_datetime >= ' .
+        mysqlQuote($end->format('Y-m-d H:i:s')) .
+        ' ORDER BY id, start_datetime, end_datetime';
+}
+
+/** @return array<int,array{id:int,start:string,end:string}>|null */
+function parseFullWindowBlockedPeriodSnapshot(string $output, int $exitCode, bool $timedOut): ?array
+{
+    if ($exitCode !== 0 || $timedOut) {
+        return null;
+    }
+    $output = trim($output);
+    if ($output === '') {
+        return [];
+    }
+    $rows = [];
+    foreach (preg_split('/\R/', $output) ?: [] as $line) {
+        $parts = explode("\t", trim($line));
+        if (
+            count($parts) !== 3 ||
+            !ctype_digit($parts[0]) ||
+            (int) $parts[0] <= 0 ||
+            !isValidSqlDateTime($parts[1]) ||
+            !isValidSqlDateTime($parts[2]) ||
+            $parts[1] > $parts[2]
+        ) {
+            return null;
+        }
+        $rows[] = ['id' => (int) $parts[0], 'start' => $parts[1], 'end' => $parts[2]];
+    }
+    return $rows;
+}
+
+function isValidSqlDateTime(string $value): bool
+{
+    if (preg_match('/\A\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\z/', $value) !== 1) {
+        return false;
+    }
+    $parsed = DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $value, new DateTimeZone('UTC'));
+    $errors = DateTimeImmutable::getLastErrors();
+
+    return $parsed !== false && ($errors === false || ($errors['warning_count'] === 0 && $errors['error_count'] === 0));
+}
+
+/** @param array<int,array{id:int,start:string,end:string}>|null $baseline */
+function compareCurrentBlockedPeriodSnapshot(
+    array $composePrefix,
+    string $repoRoot,
+    array $config,
+    ?array $baseline,
+): array {
+    if ($baseline === null) {
+        return [
+            'status' => ZeroSurpriseReport::STATUS_FAIL,
+            'category' => 'baseline_unavailable',
+            'exit_code' => ZERO_SURPRISE_EXIT_RUNTIME_ERROR,
+            'duration_ms' => 0.0,
+        ];
+    }
+    $current = snapshotFullWindowBlockedPeriods($composePrefix, $repoRoot, $config);
+    if ($current['status'] !== ZeroSurpriseReport::STATUS_PASS) {
+        return [
+            'status' => ZeroSurpriseReport::STATUS_FAIL,
+            'category' => 'baseline_unavailable',
+            'exit_code' => ZERO_SURPRISE_EXIT_RUNTIME_ERROR,
+            'duration_ms' => $current['duration_ms'],
+        ];
+    }
+    $category = classifyBlockedPeriodSnapshotComparison($baseline, $current['snapshot']);
+    $matches = $category === 'baseline_match';
+    return [
+        'status' => $matches ? ZeroSurpriseReport::STATUS_PASS : ZeroSurpriseReport::STATUS_FAIL,
+        'category' => $category,
+        'exit_code' => $matches ? ZERO_SURPRISE_EXIT_SUCCESS : ZERO_SURPRISE_EXIT_ASSERTION_FAILURE,
+        'duration_ms' => $current['duration_ms'],
+    ];
+}
+
+/** @param array<int,array{id:int,start:string,end:string}>|null $baseline @param array<int,array{id:int,start:string,end:string}>|null $current */
+function classifyBlockedPeriodSnapshotComparison(?array $baseline, ?array $current): string
+{
+    if ($baseline === null || $current === null) {
+        return 'baseline_unavailable';
+    }
+
+    return $baseline === $current ? 'baseline_match' : 'baseline_drift';
+}
+
+/** @return array{full_count:int,deleted_count:int}|null */
+function parseBlockedWindowRemovalCounts(string $output, int $exitCode, bool $timedOut): ?array
+{
+    if ($exitCode !== 0 || $timedOut) {
+        return null;
+    }
+    $lines = preg_split('/\R/', trim($output));
+    if ($lines === false || count($lines) !== 2) {
+        return null;
+    }
+    $matches = [];
+    foreach ($lines as $line) {
+        if (preg_match('/\A(full_count|deleted_count)=(\d+)\z/', trim($line), $match) !== 1) {
+            return null;
+        }
+        $matches[$match[1]] = (int) $match[2];
+    }
+    if (!isset($matches['full_count'], $matches['deleted_count'])) {
+        return null;
+    }
+
+    return ['full_count' => $matches['full_count'], 'deleted_count' => $matches['deleted_count']];
+}
+
+/** @param array{full_count:int,deleted_count:int}|null $counts */
+function validateBlockedWindowRemovalCounts(?array $counts): bool
+{
+    return $counts !== null && $counts['full_count'] > 0 && $counts['deleted_count'] === $counts['full_count'];
+}
+
+function classifyBlockedWindowCoverage(string $output, int $exitCode, bool $timedOut): string
+{
+    if ($exitCode !== 0 || $timedOut) {
+        return 'unknown';
+    }
+
+    $category = trim($output);
+
+    return in_array($category, ['full', 'partial', 'absent'], true) ? $category : 'unknown';
+}
+
+/**
+ * Select the hypothetical isolated-clone path only for the exact no-slot failure.
+ * Other assertion, HTTP, cleanup and runtime failures remain failures.
+ *
+ * @param array<string, mixed>|null $bookingReport
+ * @param array<string, mixed> $config
+ * @param array<string, mixed> $initialStep
+ */
+function isNoLiveSlotFailure(?array $bookingReport, array $config, array $initialStep): bool
+{
+    if (
+        ($initialStep['status'] ?? null) !== ZeroSurpriseReport::STATUS_FAIL ||
+        (int) ($initialStep['exit_code'] ?? 0) !== ZERO_SURPRISE_EXIT_ASSERTION_FAILURE ||
+        ($initialStep['timed_out'] ?? true) !== false
+    ) {
+        return false;
+    }
+    if (!is_array($bookingReport)) {
+        return false;
+    }
+
+    $failure = $bookingReport['failure'] ?? null;
+    if (!is_array($failure) || ($failure['classification'] ?? null) !== 'contract_mismatch') {
+        return false;
+    }
+
+    $message = trim((string) ($failure['message'] ?? ''));
+    if (
+        preg_match(
+            '/^No booking hours available across (\d+) provider\/service pairs in (\d+)-day window\.$/',
+            $message,
+            $matches,
+        ) !== 1
+    ) {
+        return false;
+    }
+
+    $expectedDays = (int) ($config['booking_search_days'] ?? 0);
+    $reportedDays = (int) ($matches[2] ?? 0);
+    $cleanup = $bookingReport['state']['cleanup'] ?? null;
+    if (
+        !is_array($cleanup) ||
+        !is_array($cleanup['created'] ?? null) ||
+        !is_array($cleanup['deleted'] ?? null) ||
+        !is_array($cleanup['failures'] ?? null) ||
+        $cleanup['created'] !== [] ||
+        $cleanup['deleted'] !== [] ||
+        $cleanup['failures'] !== []
+    ) {
+        return false;
+    }
+
+    return $expectedDays > 0 && $reportedDays === $expectedDays && (int) ($matches[1] ?? 0) > 0;
+}
+
+/**
  * @param array<int, string> $composePrefix
  * @param array<string, mixed> $config
  * @return array<string, mixed>
@@ -614,6 +1240,7 @@ function runRestoreDumpStep(string $repoRoot, array $composePrefix, array $confi
 {
     $stepStartedAt = microtime(true);
     $substeps = [];
+    $baselineBlockers = null;
 
     $upResult = GateProcessRunner::run(
         composeCommand($composePrefix, ['up', '-d', 'mysql', 'php-fpm', 'nginx', 'pdf-renderer']),
@@ -707,6 +1334,30 @@ function runRestoreDumpStep(string $repoRoot, array $composePrefix, array $confi
         ];
     }
 
+    // Capture the exact full-window identities immediately after import. The
+    // values stay in memory and are deliberately excluded from report details.
+    $baseline = snapshotFullWindowBlockedPeriods($composePrefix, $repoRoot, $config);
+    $substeps[] = [
+        'name' => 'blocked_period_baseline_snapshot',
+        'status' => $baseline['status'],
+        'category' => $baseline['category'],
+        'exit_code' => $baseline['exit_code'],
+        'duration_ms' => $baseline['duration_ms'],
+    ];
+    if ($baseline['status'] !== ZeroSurpriseReport::STATUS_PASS || !is_array($baseline['snapshot'])) {
+        return [
+            'status' => ZeroSurpriseReport::STATUS_FAIL,
+            'exit_code' => $baseline['exit_code'],
+            'duration_ms' => round((microtime(true) - $stepStartedAt) * 1000, 2),
+            'baseline_blockers' => null,
+            'details' => [
+                'failed_substep' => 'blocked_period_baseline_snapshot',
+                'substeps' => $substeps,
+            ],
+        ];
+    }
+    $baselineBlockers = $baseline['snapshot'];
+
     $migrateResult = GateProcessRunner::run(
         composeCommand($composePrefix, ['exec', '-T', 'php-fpm', 'php', 'index.php', 'console', 'migrate']),
         $repoRoot,
@@ -775,6 +1426,7 @@ function runRestoreDumpStep(string $repoRoot, array $composePrefix, array $confi
         'status' => ZeroSurpriseReport::STATUS_PASS,
         'exit_code' => ZERO_SURPRISE_EXIT_SUCCESS,
         'duration_ms' => round((microtime(true) - $stepStartedAt) * 1000, 2),
+        'baseline_blockers' => $baselineBlockers,
         'details' => [
             'substeps' => $substeps,
         ],
