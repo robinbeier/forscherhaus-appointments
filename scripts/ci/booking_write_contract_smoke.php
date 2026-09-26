@@ -194,7 +194,9 @@ function runBookingContractsAttempt(
     );
 
     $cleanup = new WriteContractCleanupRegistry();
-    $cleanup->addFallbackSweeper(static fn(): array => sweepRunMarkerResources($config, $factory));
+    if ($config['resolve_slot_output'] === null) {
+        $cleanup->addFallbackSweeper(static fn(): array => sweepRunMarkerResources($config, $factory));
+    }
 
     try {
         $bookingPage = $client->get('booking', [], $config['http_timeout']);
@@ -210,7 +212,14 @@ function runBookingContractsAttempt(
                 ),
             ];
         }
-        $slot = $factory->resolveBookableSlot($client, $config['http_timeout'], $pairs);
+        $futureBookingLimit = null;
+        if ($config['canary_context'] !== null) {
+            $futureBookingLimit = parsePositiveIntValue(
+                $bootstrap['future_booking_limit'] ?? null,
+                'booking bootstrap future_booking_limit',
+            );
+        }
+        $slot = $factory->resolveBookableSlot($client, $config['http_timeout'], $pairs, $futureBookingLimit);
 
         $state['provider_id'] = $slot['provider_id'];
         $state['service_id'] = $slot['service_id'];
@@ -218,6 +227,11 @@ function runBookingContractsAttempt(
         $state['slot_hour'] = $slot['hour'];
         $state['slot_start'] = $slot['start_datetime'];
         $state['slot_end'] = $slot['end_datetime'];
+
+        if ($config['resolve_slot_output'] !== null) {
+            writeResolvedSlot($config['resolve_slot_output'], $slot, $factory->runId());
+            return;
+        }
 
         if (shouldRunConfiguredCheck($config, 'booking_register_success_contract')) {
             runCheck(
@@ -1114,6 +1128,7 @@ function parseCliOptions(): array
         'booking-start-date::',
         'retry-count::',
         'output-json::',
+        'resolve-slot-output::',
         'run-id::',
         'timezone::',
         'csrf-cookie-name::',
@@ -1167,6 +1182,11 @@ function parseCliOptions(): array
         bookingWriteCheckDependencies(),
     );
 
+    $resolveSlotOutput = resolveOptionalPath($options['resolve-slot-output'] ?? null);
+    if ($resolveSlotOutput !== null && $canaryContext === null) {
+        throw new ContractAssertionException('Option --resolve-slot-output requires a verified canary context.');
+    }
+
     return [
         'base_url' => $baseUrl,
         'index_page' => (string) ($options['index-page'] ?? 'index.php'),
@@ -1177,6 +1197,7 @@ function parseCliOptions(): array
         'booking_start_date' => $bookingStartDate === '' ? null : $bookingStartDate,
         'retry_count' => max(0, $retryCount),
         'output_json' => (string) ($options['output-json'] ?? ''),
+        'resolve_slot_output' => $resolveSlotOutput,
         'run_id' => $runId,
         'canary_context_file' => $contextFile,
         'canary_context' => $canaryContext,
@@ -1188,6 +1209,117 @@ function parseCliOptions(): array
         'selection_reason_by_check' => $selection['selection_reason_by_check'],
         'effective_check_lookup' => array_fill_keys($selection['effective_checks'], true),
     ];
+}
+
+function parsePositiveIntValue(mixed $raw, string $context): int
+{
+    if (is_int($raw)) {
+        $value = $raw;
+    } elseif (is_string($raw) && preg_match('/^\d+$/', trim($raw)) === 1) {
+        $value = (int) trim($raw);
+    } else {
+        throw new ContractAssertionException($context . ' must be a positive integer.');
+    }
+
+    if ($value <= 0) {
+        throw new ContractAssertionException($context . ' must be a positive integer.');
+    }
+
+    return $value;
+}
+
+function resolveOptionalPath(mixed $raw): ?string
+{
+    if ($raw === null) {
+        return null;
+    }
+
+    $path = trim(is_array($raw) ? (string) end($raw) : (string) $raw);
+    if ($path === '') {
+        return null;
+    }
+
+    if (str_contains($path, "\0") || !str_starts_with($path, '/')) {
+        throw new ContractAssertionException('Option --resolve-slot-output must be an absolute path.');
+    }
+
+    return $path;
+}
+
+/** @param array<string,mixed> $slot */
+function writeResolvedSlot(string $path, array $slot, string $runId): void
+{
+    if ($path !== ZeroSurpriseCanaryContext::SLOT_PATH) {
+        throw new ContractAssertionException('Resolved slot output path must be the fixed canary path.');
+    }
+    $directory = dirname($path);
+    $parent = @lstat($directory);
+    if (
+        !is_array($parent) ||
+        ($parent['uid'] ?? -1) !== ZeroSurpriseCanaryContext::SLOT_OWNER_UID ||
+        (($parent['mode'] ?? 0) & 0170000) !== 0040000 ||
+        (($parent['mode'] ?? 0) & 0777) !== 0700 ||
+        ($parent['nlink'] ?? 0) < 2
+    ) {
+        throw new RuntimeException('Resolved slot output directory must be root-owned and mode 0700.');
+    }
+    if (@lstat($path) !== false) {
+        throw new RuntimeException('A previous resolved slot receipt is still present.');
+    }
+
+    $payload = [
+        'schema' => 'zero_surprise_booking_slot.v1',
+        'run_id' => $runId,
+        'date' => (string) ($slot['date'] ?? ''),
+        'mode' => (string) ($slot['mode'] ?? ''),
+        'hours_count' => (int) ($slot['hours_count'] ?? 0),
+        'search_window_start' => (string) ($slot['search_window_start'] ?? ''),
+        'search_days' => (int) ($slot['search_days'] ?? 0),
+    ];
+    if (
+        !preg_match('/\A\d{4}-\d{2}-\d{2}\z/', $payload['date']) ||
+        !preg_match('/\A\d{4}-\d{2}-\d{2}\z/', $payload['search_window_start']) ||
+        $payload['hours_count'] <= 0 ||
+        $payload['search_days'] <= 0
+    ) {
+        throw new ContractAssertionException('Resolved booking slot output is incomplete.');
+    }
+
+    $temporary = $directory . '/.selected-slot.' . bin2hex(random_bytes(16));
+    $encoded = json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n";
+    $handle = @fopen($temporary, 'x');
+    if ($handle === false || !@chmod($temporary, 0600)) {
+        if (is_resource($handle)) {
+            fclose($handle);
+        }
+        @unlink($temporary);
+        throw new RuntimeException('Could not publish resolved booking slot output.');
+    }
+    $stat = @fstat($handle);
+    if (
+        !is_array($stat) ||
+        ($stat['uid'] ?? -1) !== ZeroSurpriseCanaryContext::SLOT_OWNER_UID ||
+        ($stat['nlink'] ?? 0) !== 1 ||
+        (($stat['mode'] ?? 0) & 0170000) !== 0100000 ||
+        (($stat['mode'] ?? 0) & 0777) !== 0600 ||
+        @fwrite($handle, $encoded) !== strlen($encoded) ||
+        !@fflush($handle)
+    ) {
+        fclose($handle);
+        @unlink($temporary);
+        throw new RuntimeException('Could not publish resolved booking slot output.');
+    }
+    if (function_exists('fsync') && !@fsync($handle)) {
+        fclose($handle);
+        @unlink($temporary);
+        throw new RuntimeException('Could not flush resolved booking slot output.');
+    }
+    fclose($handle);
+    if (!@link($temporary, $path)) {
+        @unlink($temporary);
+        throw new RuntimeException('Could not publish resolved booking slot output without replacement.');
+    }
+    @unlink($temporary);
 }
 
 /**
@@ -1265,6 +1397,7 @@ function printHelpAndExit(): void
       --retry-count=1
       --http-timeout=15
       --output-json=PATH
+      --resolve-slot-output=PATH (canary-only, read-only slot discovery)
       --run-id=STRING
       --timezone=Europe/Berlin
       --csrf-cookie-name=csrf_cookie

@@ -76,7 +76,7 @@
             "source": "scripts/release-gate/lib/ZeroSurpriseCanaryContext.php",
             "install": "scripts/release-gate/lib/ZeroSurpriseCanaryContext.php",
             "role": "pdf_gate_library",
-            "sha256": "36695d63e2e4d10727ace60fa8c583a3960a7e3f07349788581f4bddaff81f87"
+            "sha256": "2fa7f3dcf7a99283a80c2b25bc8bf1bea755dc332e518773565898e5ad97351e"
         }
     ]
 }

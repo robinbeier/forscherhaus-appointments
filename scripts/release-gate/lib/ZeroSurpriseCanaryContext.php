@@ -11,6 +11,8 @@ final class ZeroSurpriseCanaryContext
 {
     public const SCHEMA = 'zero_surprise_canary.v1';
     public const DEFAULT_PATH = '/var/lib/fh-zero-surprise-canary/active.json';
+    public const SLOT_PATH = '/var/lib/fh-zero-surprise-canary/selected-slot.json';
+    public const SLOT_OWNER_UID = 0;
 
     /** @return array<string, mixed> */
     public static function loadVerified(string $path = self::DEFAULT_PATH, ?int $now = null): array
