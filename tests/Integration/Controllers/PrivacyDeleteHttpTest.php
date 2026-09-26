@@ -18,6 +18,7 @@ final class PrivacyDeleteHttpTest extends TestCase
 {
     private const ENDPOINT = 'privacy/delete_personal_information';
     private const DIRECT_ENDPOINT = 'index.php/privacy/delete_personal_information';
+    private const ROLLBACK_MARKER = 'privacy rollback after buffer delete';
 
     private ?DefenseCycleFixtures $fixture = null;
     private ?DefenseCycleHttpServer $server = null;
@@ -212,6 +213,13 @@ final class PrivacyDeleteHttpTest extends TestCase
         $created = false;
 
         try {
+            $earlyFailure = $client->post(self::ENDPOINT, [
+                'customer_token' => 'invalid-before-privacy-failpoint-' . $fixture->run,
+            ]);
+            self::assertSame(500, $earlyFailure->statusCode);
+            self::assertStringNotContainsString(self::ROLLBACK_MARKER, $earlyFailure->body);
+            self::assertSame($before, $this->ownedState($appointment, $buffer));
+
             $fixtureAdmin = get_instance()->load->database(
                 [
                     'hostname' => 'mysql',
@@ -236,13 +244,21 @@ final class PrivacyDeleteHttpTest extends TestCase
                             $db->dbprefix('users') .
                             '` FOR EACH ROW BEGIN IF OLD.id = ' .
                             (int) $fixture->customerId .
-                            " THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'synthetic privacy delete failure'; END IF; END",
+                            ' THEN IF EXISTS (SELECT 1 FROM `' .
+                            $db->dbprefix('appointments') .
+                            '` WHERE `id` = ' .
+                            (int) $buffer['id'] .
+                            ") THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'privacy rollback before buffer cleanup'; " .
+                            "ELSE SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '" .
+                            self::ROLLBACK_MARKER .
+                            "'; END IF; END IF; END",
                     ),
                 );
                 $created = true;
 
                 $failed = $client->post(self::ENDPOINT, ['customer_token' => $token]);
                 self::assertSame(500, $failed->statusCode);
+                self::assertStringContainsString(self::ROLLBACK_MARKER, $failed->body);
                 self::assertSame($before, $this->ownedState($appointment, $buffer));
             } finally {
                 try {
