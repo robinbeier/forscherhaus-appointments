@@ -40,9 +40,11 @@ Kundenrolle und führt die abhängigen Änderungen in einer Transaktion aus.
 synthetischen Datenbank: Methoden und direkte Aliase, CSRF, ungültigen,
 abgelaufenen und rollenfremden Token, gültiges POST und anschließende
 Wiederverwendung. Vorher-/Nachher-Snapshots belegen Nichtmutation bei
-Ablehnung; der Test entfernt seine Cache-Keys und stellt die Einstellung wieder
-her. Der Test beweist den kontrollierten lokalen Pfad bei aktivierter
-Einstellung, nicht die Aktivierung oder Ausführung einer Löschung auf Produktion.
+Ablehnung. Ein synthetischer Datenbankfehler nach der Pufferlöschung prüft
+Rollback und erfolgreichen Retry mit demselben Token. Der Test entfernt seine
+Cache-Keys und den temporären Fehler-Trigger und stellt die Einstellung wieder
+her. Er beweist den kontrollierten lokalen Pfad bei aktivierter Einstellung,
+nicht die Aktivierung oder Ausführung einer Löschung auf Produktion.
 
 Die Backoffice-Endpunkte `customers/store` und `services/store` legen nur neue
 Datensätze an. Eine mitgesendete bestehende ID wird abgewiesen; Änderungen laufen

@@ -93,8 +93,9 @@ final class PrivacyDeleteHttpTest extends TestCase
 
         try {
             $directClient = new \ReleaseGate\GateHttpClient($server->baseUrl, '');
+            $matrixGetUrls = [];
             foreach (
-                [[$client, self::ENDPOINT], [$directClient, self::DIRECT_ENDPOINT]]
+                [[$directClient, self::ENDPOINT], [$directClient, self::DIRECT_ENDPOINT]]
                 as [$endpointClient, $endpoint]
             ) {
                 foreach (['GET', 'HEAD', 'PUT', 'PATCH', 'DELETE'] as $method) {
@@ -102,11 +103,18 @@ final class PrivacyDeleteHttpTest extends TestCase
                         $method === 'GET'
                             ? $endpointClient->get($endpoint, ['customer_token' => $token])
                             : $endpointClient->requestApp($method, $endpoint, ['customer_token' => $token]);
+                    if ($method === 'GET') {
+                        $matrixGetUrls[] = $response->url;
+                    }
                     self::assertSame(405, $response->statusCode);
                     self::assertStringContainsString('POST', (string) $response->header('allow'));
+                    $expectedPath = '/' . trim($endpoint, '/');
+                    self::assertStringEndsWith($expectedPath, parse_url($response->url, PHP_URL_PATH) ?: '');
                     self::assertSame($before, $this->ownedState($appointment, $buffer));
                 }
             }
+            self::assertCount(2, $matrixGetUrls);
+            self::assertNotSame($matrixGetUrls[0], $matrixGetUrls[1]);
 
             $options = $client->requestApp('OPTIONS', self::ENDPOINT);
             self::assertSame(200, $options->statusCode);
@@ -180,6 +188,86 @@ final class PrivacyDeleteHttpTest extends TestCase
             self::assertSame([], $fixture->row('users', $fixture->customerId));
             self::assertSame($providerBefore, $fixture->row('users', $fixture->providerId));
             self::assertSame($adminBefore, $fixture->row('users', $fixture->actorId));
+        } finally {
+            $this->deleteCacheKeys([$cacheKey]);
+        }
+    }
+
+    public function testFailedCustomerDeleteRollsBackBufferAndAllowsTokenRetry(): void
+    {
+        $fixture = $this->fixture;
+        $server = $this->server;
+        self::assertNotNull($fixture);
+        self::assertNotNull($server);
+
+        $db = get_instance()->db;
+        $appointment = $fixture->appointment();
+        $buffer = $this->addBuffer($appointment);
+        $before = $this->ownedState($appointment, $buffer);
+        $client = $server->client();
+        $token = $this->customerToken($client, (string) $appointment['hash']);
+        $cacheKey = 'customer-token-' . $token;
+        $trigger = $fixture->run . '_deny_privacy_delete';
+        $fixtureAdmin = null;
+        $created = false;
+
+        try {
+            $fixtureAdmin = get_instance()->load->database(
+                [
+                    'hostname' => 'mysql',
+                    'username' => 'root',
+                    'password' => 'secret',
+                    'database' => 'easyappointments',
+                    'dbdriver' => 'mysqli',
+                    'dbprefix' => $db->dbprefix,
+                    'pconnect' => false,
+                    'db_debug' => false,
+                    'char_set' => 'utf8mb4',
+                    'dbcollat' => 'utf8mb4_general_ci',
+                ],
+                true,
+            );
+            try {
+                self::assertTrue(
+                    $fixtureAdmin->query(
+                        'CREATE TRIGGER `' .
+                            $trigger .
+                            '` BEFORE DELETE ON `' .
+                            $db->dbprefix('users') .
+                            '` FOR EACH ROW BEGIN IF OLD.id = ' .
+                            (int) $fixture->customerId .
+                            " THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'synthetic privacy delete failure'; END IF; END",
+                    ),
+                );
+                $created = true;
+
+                $failed = $client->post(self::ENDPOINT, ['customer_token' => $token]);
+                self::assertSame(500, $failed->statusCode);
+                self::assertSame($before, $this->ownedState($appointment, $buffer));
+            } finally {
+                try {
+                    if ($created) {
+                        self::assertTrue($fixtureAdmin->query('DROP TRIGGER `' . $trigger . '`'));
+                    }
+                    $triggerCount = $fixtureAdmin->query(
+                        'SELECT TRIGGER_NAME FROM information_schema.TRIGGERS ' .
+                            'WHERE TRIGGER_SCHEMA = DATABASE() AND TRIGGER_NAME = ?',
+                        [$trigger],
+                    );
+                    self::assertSame(0, (int) $triggerCount->num_rows());
+                } finally {
+                    $fixtureAdmin->close();
+                }
+            }
+
+            $retry = $client->post(self::ENDPOINT, ['customer_token' => $token]);
+            self::assertSame(200, $retry->statusCode);
+            self::assertSame([], $fixture->row('users', $fixture->customerId));
+            self::assertSame([], $fixture->row('appointments', (int) $appointment['id']));
+            self::assertSame([], $fixture->row('appointments', (int) $buffer['id']));
+            self::assertSame($before['provider'], $fixture->row('users', $fixture->providerId));
+            self::assertSame($before['admin'], $fixture->row('users', $fixture->actorId));
+            self::assertSame($before['service'], $fixture->row('services', $fixture->serviceId));
         } finally {
             $this->deleteCacheKeys([$cacheKey]);
         }
