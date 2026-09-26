@@ -69,6 +69,16 @@ path-specific limits; the general parent ordering is not proof about every
 maintenance or delete path. API response projections must not disclose stored
 integration secrets.
 
+The public personal-information deletion endpoint is a destructive capability
+path. It requires POST with CSRF, an enabled product setting, and a live
+customer token issued from the stored appointment-to-customer relationship.
+Tokens use cryptographically secure randomness and expire after ten minutes;
+the cache mapping alone does not authorize deletion of a non-customer record.
+Wrong methods, missing or invalid authority, and replay after a successful
+deletion must leave customer and dependent records unchanged. See the
+[privacy deletion contract](docs/ci-write-contracts.md#offentliche-datenschutz-loschung)
+for the isolated evidence and its production limit.
+
 For global blocked periods, an authenticated API write must address only the
 URL-selected record and use the declared HTTP method even through a direct
 controller alias. A changed blocked period affects booking availability, so a

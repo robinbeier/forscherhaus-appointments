@@ -24,6 +24,28 @@ freigegebene Umbuchung auslösen oder deren Einmal-Authority verbrauchen.
 Die isolierten HTTP-/DB-Tests in `BookingMethodHttpTest` prüfen beide Fälle samt
 Nichtmutation und anschließendem gültigem POST.
 
+## Öffentliche Datenschutz-Löschung
+
+`privacy/delete_personal_information` akzeptiert ausschließlich POST, auch über
+den direkten Controllerpfad. Andere Methoden erhalten vor Token-Auswertung oder
+Mutation HTTP 405 mit `Allow: POST`; OPTIONS wird vom globalen Preflight ohne
+Controlleraufruf beantwortet. POST benötigt die bestehende CSRF-Prüfung sowie
+die aktivierte Produkteinstellung. Der Lösch-Token entsteht auf der
+Reschedule-Seite aus kryptografisch sicheren 32 Zufallsbytes, ist im Cache für
+600 Sekunden an die gespeicherte Kunden-ID gebunden und kann keine andere ID aus
+dem Request übernehmen. Das Modell prüft beim Löschen weiterhin die aktuelle
+Kundenrolle und führt die abhängigen Änderungen in einer Transaktion aus.
+
+`PrivacyDeleteHttpTest` prüft dies mit echten HTTP-Anfragen und einer eigenen
+synthetischen Datenbank: Methoden und direkte Aliase, CSRF, ungültigen,
+abgelaufenen und rollenfremden Token, gültiges POST und anschließende
+Wiederverwendung. Vorher-/Nachher-Snapshots belegen Nichtmutation bei
+Ablehnung. Ein synthetischer Datenbankfehler nach der Pufferlöschung prüft
+Rollback und erfolgreichen Retry mit demselben Token. Der Test entfernt seine
+Cache-Keys und den temporären Fehler-Trigger und stellt die Einstellung wieder
+her. Er beweist den kontrollierten lokalen Pfad bei aktivierter Einstellung,
+nicht die Aktivierung oder Ausführung einer Löschung auf Produktion.
+
 Die Backoffice-Endpunkte `customers/store` und `services/store` legen nur neue
 Datensätze an. Eine mitgesendete bestehende ID wird abgewiesen; Änderungen laufen
 über `update` mit Bearbeitungsrecht und den bestehenden Zugriffsprüfungen.

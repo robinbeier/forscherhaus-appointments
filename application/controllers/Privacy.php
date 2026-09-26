@@ -35,6 +35,10 @@ class Privacy extends EA_Controller
      */
     public function delete_personal_information(): void
     {
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+            abort(405, 'Method Not Allowed', ['Allow: POST']);
+        }
+
         try {
             $display_delete_personal_information = setting('display_delete_personal_information');
 

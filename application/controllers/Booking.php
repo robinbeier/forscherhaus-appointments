@@ -646,7 +646,7 @@ class Booking extends EA_Controller
 
     private function createCustomerToken(int $customer_id): string|bool
     {
-        $customer_token = md5(uniqid(mt_rand(), true));
+        $customer_token = bin2hex(random_bytes(32));
         $cache = $this->customerTokenCache();
 
         if (!is_object($cache) || !method_exists($cache, 'save')) {
