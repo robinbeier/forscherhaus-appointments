@@ -49,6 +49,11 @@ The isolated replay passes passwords to child checks through standard input.
 The live canary instead passes the fixed root-only context-file path and uses
 its generated fixture identity. Password values are never child process arguments.
 
+The replay binds one `booking_start_date` in the configured timezone before
+the restored-database checks and passes that exact date to both the initial and
+hypothetical booking child. This prevents a midnight or daylight-saving
+boundary during a long restore from changing the tested window.
+
 Required keys:
 
 - `base_url`
@@ -142,6 +147,16 @@ candidates.
 Repository delivery does not activate or run a production cleanup. Any first
 production execution remains a separate live-write gate with the normal
 read-only inventory and post-change validation.
+
+When the initial booking child reports the exact no-slot contract mismatch, the
+replay snapshots the full-window `ea_blocked_periods` identities and boundaries
+immediately after dump import, before migrations or HTTP. The snapshot stays
+in memory and is never written to the report. Before any isolated clone
+deletion, the current snapshot must match exactly; any unavailable or changed
+identity stops the replay. Reports contain only fixed result categories. Only
+rows covering the complete bound window may be removed from the isolated
+clone, and the ordinary booking smoke records its source as
+`hypothetical_unblocked_isolated_clone`.
 
 ## Deploy flow
 
@@ -266,13 +281,43 @@ Response shape stays:
 {"success": false, "message": "..."}
 ```
 
+### Isolated no-slot fallback
+
+The predeploy replay may encounter a restored production dump whose normal
+calendar contains no bookable hour in the configured search window. This is a
+known data-availability condition, not evidence that the booking write path
+works. The replay may select the fallback only when the booking child report
+contains the exact `contract_mismatch` message
+`No booking hours available across N provider/service pairs in D-day window.`
+and `D` equals the configured search window. HTTP failures, missing pairs,
+cleanup failures, changed messages, and runtime errors remain hard failures.
+
+Before using the hypothetical path, the replay performs a read-only query
+inside the isolated restored database. One existing `ea_blocked_periods` row
+must cover the complete window from the first searched day through the
+exclusive end of the configured window. The query returns only `full`,
+`partial`, `absent`, or `unknown`; only `full` permits the isolated change.
+Partial coverage, no row, query failure, or ambiguous output keeps the
+original hard failure.
+
+For `full`, the replay removes only rows covering that complete window inside
+the isolated restored database. It requires a positive, fixed affected count
+and a read-only postcondition with no remaining full-window blocker. The
+ordinary booking smoke then runs against the clone with the normal gate
+account. Its report source is `hypothetical_unblocked_isolated_clone`; it is
+not evidence that the live calendar is bookable. Remaining partial blockers
+are left untouched; if they still prevent a slot, the booking smoke remains a
+hard failure.
+
 ## Outputs
 
 Predeploy reports:
 
 - `storage/logs/release-gate/zero-surprise-<UTC>.json`
 - deploy default override: `storage/logs/release-gate/zero-surprise-predeploy-<REL>-<UTC>.json`
-- `storage/logs/release-gate/zero-surprise-booking-<UTC>.json`
+- `storage/logs/release-gate/zero-surprise-booking-initial-<UTC>.json`
+- `storage/logs/release-gate/zero-surprise-booking-hypothetical-unblocked-<UTC>.json` (only
+  when the exact isolated no-slot path is selected)
 - `storage/logs/release-gate/zero-surprise-dashboard-<UTC>.json`
 
 Postdeploy canary reports:

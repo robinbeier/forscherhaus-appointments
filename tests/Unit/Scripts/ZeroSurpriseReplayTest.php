@@ -201,6 +201,171 @@ class ZeroSurpriseReplayTest extends TestCase
         ]);
     }
 
+    public function testNoLiveSlotFallbackRequiresExactContractMismatchAndConfiguredWindow(): void
+    {
+        $report = [
+            'failure' => [
+                'classification' => 'contract_mismatch',
+                'message' => 'No booking hours available across 12 provider/service pairs in 35-day window.',
+            ],
+            'state' => [
+                'cleanup' => [
+                    'created' => [],
+                    'deleted' => [],
+                    'failures' => [],
+                ],
+            ],
+        ];
+
+        $initialFailure = ['status' => 'fail', 'exit_code' => 1, 'timed_out' => false];
+        self::assertTrue(isNoLiveSlotFailure($report, ['booking_search_days' => 35], $initialFailure));
+        self::assertFalse(isNoLiveSlotFailure($report, ['booking_search_days' => 14], $initialFailure));
+        self::assertFalse(
+            isNoLiveSlotFailure(['failure' => $report['failure']], ['booking_search_days' => 35], $initialFailure),
+        );
+        self::assertFalse(
+            isNoLiveSlotFailure(
+                [
+                    'failure' => [
+                        'classification' => 'runtime_error',
+                        'message' => $report['failure']['message'],
+                    ],
+                ],
+                ['booking_search_days' => 35],
+                $initialFailure,
+            ),
+        );
+        self::assertFalse(
+            isNoLiveSlotFailure(
+                $report,
+                ['booking_search_days' => 35],
+                ['status' => 'fail', 'exit_code' => 2, 'timed_out' => false],
+            ),
+        );
+        self::assertFalse(
+            isNoLiveSlotFailure(
+                [
+                    'failure' => [
+                        'classification' => 'contract_mismatch',
+                        'message' => 'No booking hours available across 12 provider/service pairs in 35-day window',
+                    ],
+                ],
+                ['booking_search_days' => 35],
+                $initialFailure,
+            ),
+        );
+    }
+
+    public function testBlockedWindowCoverageRequiresAFullSinglePeriod(): void
+    {
+        self::assertSame('full', classifyBlockedWindowCoverage("full\n", 0, false));
+        self::assertSame('partial', classifyBlockedWindowCoverage("partial\n", 0, false));
+        self::assertSame('absent', classifyBlockedWindowCoverage("absent\n", 0, false));
+        self::assertSame('unknown', classifyBlockedWindowCoverage("full\npartial\n", 0, false));
+        self::assertSame('unknown', classifyBlockedWindowCoverage('full', 1, false));
+        self::assertSame('unknown', classifyBlockedWindowCoverage('full', 0, true));
+    }
+
+    public function testBlockedWindowCoverageSqlUsesProductionPrefixAndExclusiveEndBoundary(): void
+    {
+        $sql = buildBlockedWindowCoverageSql(
+            new \DateTimeImmutable('2026-09-26 00:00:00'),
+            new \DateTimeImmutable('2026-10-31 00:00:00'),
+        );
+
+        self::assertStringContainsString('FROM ea_blocked_periods', $sql);
+        self::assertStringContainsString("start_datetime <= '2026-09-26 00:00:00'", $sql);
+        self::assertStringContainsString("end_datetime >= '2026-10-31 00:00:00'", $sql);
+        self::assertStringContainsString("end_datetime > '2026-09-26 00:00:00'", $sql);
+        self::assertStringContainsString("start_datetime < '2026-10-31 00:00:00'", $sql);
+        self::assertStringNotContainsString('FROM blocked_periods', $sql);
+    }
+
+    public function testBlockedPeriodSnapshotParserKeepsIdentitiesInMemoryAndRejectsAmbiguity(): void
+    {
+        $snapshot = parseFullWindowBlockedPeriodSnapshot("17\t2026-10-25 00:00:00\t2026-11-29 00:00:00\n", 0, false);
+        self::assertSame([['id' => 17, 'start' => '2026-10-25 00:00:00', 'end' => '2026-11-29 00:00:00']], $snapshot);
+        self::assertSame([], parseFullWindowBlockedPeriodSnapshot('', 0, false));
+        self::assertNull(parseFullWindowBlockedPeriodSnapshot("17\t2026-10-25 00:00:00\tsecret\n", 0, false));
+        self::assertNull(
+            parseFullWindowBlockedPeriodSnapshot("17\t2026-10-25 00:00:00\t2026-11-29 00:00:00\n", 1, false),
+        );
+        self::assertNull(
+            parseFullWindowBlockedPeriodSnapshot("17\t2026-02-30 00:00:00\t2026-11-29 00:00:00\n", 0, false),
+        );
+    }
+
+    public function testBlockedPeriodSnapshotSqlUsesActualPrefixedTableAndBoundaries(): void
+    {
+        $sql = buildFullWindowBlockedPeriodSnapshotSql(
+            new \DateTimeImmutable('2026-10-25 00:00:00'),
+            new \DateTimeImmutable('2026-11-29 00:00:00'),
+        );
+        self::assertStringContainsString('SELECT id, start_datetime, end_datetime FROM ea_blocked_periods', $sql);
+        self::assertStringContainsString("start_datetime <= '2026-10-25 00:00:00'", $sql);
+        self::assertStringContainsString("end_datetime >= '2026-11-29 00:00:00'", $sql);
+        self::assertStringNotContainsString('FROM blocked_periods', $sql);
+    }
+
+    public function testBlockedPeriodBaselineComparisonFailsOnAnyIdentityOrBoundaryDrift(): void
+    {
+        $baseline = [['id' => 17, 'start' => '2026-10-25 00:00:00', 'end' => '2026-11-29 00:00:00']];
+        self::assertSame('baseline_match', classifyBlockedPeriodSnapshotComparison($baseline, $baseline));
+        self::assertSame(
+            'baseline_drift',
+            classifyBlockedPeriodSnapshotComparison($baseline, [
+                ['id' => 18, 'start' => '2026-10-25 00:00:00', 'end' => '2026-11-29 00:00:00'],
+            ]),
+        );
+        self::assertSame(
+            'baseline_drift',
+            classifyBlockedPeriodSnapshotComparison($baseline, [
+                ['id' => 17, 'start' => '2026-10-26 00:00:00', 'end' => '2026-11-29 00:00:00'],
+            ]),
+        );
+        self::assertSame('baseline_unavailable', classifyBlockedPeriodSnapshotComparison(null, $baseline));
+    }
+
+    public function testBlockedWindowRemovalCountsRequirePositiveMatchingCounts(): void
+    {
+        self::assertSame(
+            ['full_count' => 2, 'deleted_count' => 2],
+            parseBlockedWindowRemovalCounts("full_count=2\ndeleted_count=2\n", 0, false),
+        );
+        self::assertFalse(
+            validateBlockedWindowRemovalCounts(
+                parseBlockedWindowRemovalCounts("full_count=2\ndeleted_count=1\n", 0, false),
+            ),
+        );
+        self::assertFalse(
+            validateBlockedWindowRemovalCounts(
+                parseBlockedWindowRemovalCounts("full_count=0\ndeleted_count=0\n", 0, false),
+            ),
+        );
+        self::assertNull(parseBlockedWindowRemovalCounts("full_count=2\n", 0, false));
+        self::assertNull(parseBlockedWindowRemovalCounts("full_count=2\ndeleted_count=2\n", 1, false));
+        self::assertNull(parseBlockedWindowRemovalCounts("full_count=2\ndeleted_count=2\n", 0, true));
+    }
+
+    public function testNormalRealSlotPathDoesNotSelectFixtureFallback(): void
+    {
+        $report = [
+            'failure' => [
+                'classification' => 'contract_mismatch',
+                'message' => 'booking contract mismatch after a real slot was selected.',
+            ],
+            'state' => ['cleanup' => ['created' => [], 'deleted' => [], 'failures' => []]],
+        ];
+
+        self::assertFalse(
+            isNoLiveSlotFailure(
+                $report,
+                ['booking_search_days' => 35],
+                ['status' => 'fail', 'exit_code' => 1, 'timed_out' => false],
+            ),
+        );
+    }
+
     private function report(): ZeroSurpriseReport
     {
         return new ZeroSurpriseReport(

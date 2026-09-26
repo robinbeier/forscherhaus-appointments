@@ -175,6 +175,7 @@ function runBookingContractsAttempt(
         $config['booking_search_days'],
         $config['timezone'],
         $config['canary_context'] !== null,
+        $config['booking_start_date'],
     );
 
     $state = [
@@ -1110,6 +1111,7 @@ function parseCliOptions(): array
         'canary-context-file:',
         'http-timeout::',
         'booking-search-days::',
+        'booking-start-date::',
         'retry-count::',
         'output-json::',
         'run-id::',
@@ -1137,6 +1139,22 @@ function parseCliOptions(): array
     $searchDays = (int) ($options['booking-search-days'] ?? 14);
     $retryCount = (int) ($options['retry-count'] ?? 1);
     $timeout = (int) ($options['http-timeout'] ?? 15);
+    $bookingStartDate = trim((string) ($options['booking-start-date'] ?? ''));
+    if ($bookingStartDate !== '') {
+        $parsedStartDate = \DateTimeImmutable::createFromFormat(
+            '!Y-m-d',
+            $bookingStartDate,
+            new \DateTimeZone((string) ($options['timezone'] ?? (date_default_timezone_get() ?: 'UTC'))),
+        );
+        $dateErrors = \DateTimeImmutable::getLastErrors();
+        if (
+            $parsedStartDate === false ||
+            ($dateErrors !== false && ($dateErrors['warning_count'] > 0 || $dateErrors['error_count'] > 0)) ||
+            $parsedStartDate->format('Y-m-d') !== $bookingStartDate
+        ) {
+            throw new ContractAssertionException('Option --booking-start-date must be a valid YYYY-MM-DD date.');
+        }
+    }
 
     $runId = $canaryContext['run_id'] ?? trim((string) ($options['run-id'] ?? ''));
     if ($runId === '') {
@@ -1156,6 +1174,7 @@ function parseCliOptions(): array
         'password' => $password,
         'http_timeout' => max(1, $timeout),
         'booking_search_days' => max(1, $searchDays),
+        'booking_start_date' => $bookingStartDate === '' ? null : $bookingStartDate,
         'retry_count' => max(0, $retryCount),
         'output_json' => (string) ($options['output-json'] ?? ''),
         'run_id' => $runId,
@@ -1242,6 +1261,7 @@ function printHelpAndExit(): void
 
     Optional:
       --booking-search-days=14
+      --booking-start-date=YYYY-MM-DD (optional fixed window start)
       --retry-count=1
       --http-timeout=15
       --output-json=PATH
