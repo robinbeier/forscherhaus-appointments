@@ -343,6 +343,10 @@ class Booking extends EA_Controller
      */
     public function register(): void
     {
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+            abort(405, 'Method Not Allowed', ['Allow: POST']);
+        }
+
         $transaction_open = false;
         $creation_identity_lock = null;
 
