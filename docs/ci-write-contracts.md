@@ -15,10 +15,12 @@ Einmal-Authority darf das anschliessende Update freigeben. `manage_mode`, IDs
 oder der Route-Hash allein reichen nicht. Der vollstaendige Sicherheitsvertrag
 steht in [Public Reschedule Authority](security/public-reschedule-authority.md).
 
-`/booking/register` akzeptiert ausschließlich POST. Andere Methoden erhalten
-vor der Auswertung von Query-Daten oder einer Reschedule-Authority HTTP 405 mit
-`Allow: POST`; insbesondere darf ein GET weder einen Termin anlegen noch eine
-bereits freigegebene Umbuchung auslösen oder deren Einmal-Authority verbrauchen.
+Der Controller `Booking::register()` akzeptiert ausschließlich POST. Andere
+Methoden, die ihn erreichen, erhalten vor der Auswertung von Query-Daten oder
+einer Reschedule-Authority HTTP 405 mit `Allow: POST`. Der globale CORS-Preflight
+beantwortet OPTIONS bereits vor dem Controller und führt keine Buchung aus.
+Insbesondere darf ein GET weder einen Termin anlegen noch eine bereits
+freigegebene Umbuchung auslösen oder deren Einmal-Authority verbrauchen.
 Die isolierten HTTP-/DB-Tests in `BookingMethodHttpTest` prüfen beide Fälle samt
 Nichtmutation und anschließendem gültigem POST.
 
