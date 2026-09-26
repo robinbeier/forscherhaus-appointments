@@ -15,6 +15,13 @@ Einmal-Authority darf das anschliessende Update freigeben. `manage_mode`, IDs
 oder der Route-Hash allein reichen nicht. Der vollstaendige Sicherheitsvertrag
 steht in [Public Reschedule Authority](security/public-reschedule-authority.md).
 
+`/booking/register` akzeptiert ausschließlich POST. Andere Methoden erhalten
+vor der Auswertung von Query-Daten oder einer Reschedule-Authority HTTP 405 mit
+`Allow: POST`; insbesondere darf ein GET weder einen Termin anlegen noch eine
+bereits freigegebene Umbuchung auslösen oder deren Einmal-Authority verbrauchen.
+Die isolierten HTTP-/DB-Tests in `BookingMethodHttpTest` prüfen beide Fälle samt
+Nichtmutation und anschließendem gültigem POST.
+
 Die Backoffice-Endpunkte `customers/store` und `services/store` legen nur neue
 Datensätze an. Eine mitgesendete bestehende ID wird abgewiesen; Änderungen laufen
 über `update` mit Bearbeitungsrecht und den bestehenden Zugriffsprüfungen.

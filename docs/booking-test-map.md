@@ -19,6 +19,7 @@ ist eine Orientierung, keine vollständige Testliste.
 | Reise/Verhalten | Tests | Ebene und abgedecktes Risiko |
 | --- | --- | --- |
 | Normale Buchung erzeugt Kunde/Termin und Hash | `tests/Integration/Controllers/BookingControllerFlowTest.php::testRegisterSuccessCreatesAppointmentAndReturnsHash` | Verhaltens-Integration mit Datenbank; Persistenz, Zuordnung und Rückgabe-Identität |
+| Register-Aufruf mit GET statt POST | `tests/Integration/Controllers/BookingMethodHttpTest.php::testGetRegisterRejectsValidPublicQueryPayloadWithoutMutation` | FH_DEFENSE_ISOLATED HTTP/DB; 405 und `Allow: POST` vor Query-Auswertung, keine Termin-/Kunden-/Consent-Mutation, Fixture-Cleanup |
 | Späte Überschneidung/Identitäts-Lock | dieselbe Datei: `testCreationIdentityLockSerializesAcrossDatabaseConnections`, `testNormalCreationResolvesCustomerAfterIdentityLockAndRejectsLateOverlap` | Verhaltens-Integration; Doppelbuchung bzw. Race nach Verfügbarkeitsprüfung |
 | DTO-Normalisierung der Register-Daten | `tests/Unit/Libraries/BookingRequestDtoFactoryTest.php` | Unit; verschachtelte Nutzdaten, optionale Kundenfelder und Kompatibilitätswerte |
 | CAPTCHA/fehlende Verfügbarkeit ohne Mutation | `BookingControllerFlowTest` (u. a. `testRegisterReturnsErrorWhenDateTimeUnavailable`, `testCaptchaRejectionDoesNotMutateOrConsumeValidAuthority`) | Verhaltens-Integration; fail-closed Schreibpfad |
@@ -39,6 +40,7 @@ ist eine Orientierung, keine vollständige Testliste.
 | --- | --- | --- |
 | Reschedule-Link öffnet Manage-Modus bzw. sperrt zu kurze Vorläufe | `BookingControllerFlowTest::testRescheduleSetsManageModeForValidHash`, `...::testRescheduleShowsLockedMessageWhenInsideAdvanceTimeout` | Verhaltens-Integration; falscher Kontext oder unzulässige kurzfristige Änderung |
 | Reschedule-Schreibrechte, Fremd-IDs, Ablauf, Replay und Drift | `BookingControllerFlowTest` (Authority-Tests ab `testForgedManageModeWithoutAuthorityRejectsWithoutMutation`) | Verhaltens-Integration; keine Mutation ohne serverseitige Authority |
+| Falsche HTTP-Methode bei bereits autorisierter Umbuchung | `BookingMethodHttpTest::testGetRegisterRejectsSessionAuthorizedReschedulePayloadWithoutMutation` | FH_DEFENSE_ISOLATED HTTP/DB; GET 405 ohne Mutation oder Verbrauch der Einmal-Authority, anschließend gültiger POST-Kontrollpfad und Fixture-Cleanup |
 | Stornieren mit gültigem oder unbekanntem Hash | `tests/Integration/Controllers/BookingCancellationControllerFlowTest.php` | Verhaltens-Integration; Löschung/Status und Not-found-Schutz |
 | Gesamter öffentlicher Schreibvertrag | `scripts/ci/booking_write_contract_smoke.php` (inkl. Register, Reschedule, Cancel; Auswahl in `scripts/ci/run_deep_runtime_suite.php`) | HTTP-Contract-Smoke; verdrahtete Endpunkte und reale Antwortverträge |
 
