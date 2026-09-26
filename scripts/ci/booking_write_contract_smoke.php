@@ -17,12 +17,14 @@ require_once __DIR__ . '/lib/BookedSlotMatcher.php';
 require_once __DIR__ . '/lib/BookingWriteContractState.php';
 require_once __DIR__ . '/lib/BookingWriteReportSanitizer.php';
 require_once __DIR__ . '/lib/DeterministicFixtureFactory.php';
+require_once __DIR__ . '/lib/CanarySlotSearchPolicy.php';
 require_once __DIR__ . '/lib/WriteContractCleanupRegistry.php';
 require_once __DIR__ . '/lib/FlakeRetry.php';
 
 use CiContract\BookedSlotMatcher;
 use CiContract\BookingWriteContractState;
 use CiContract\BookingWriteReportSanitizer;
+use CiContract\CanarySlotSearchPolicy;
 use CiContract\CheckSelection;
 use CiContract\ContractAssertionException;
 use CiContract\DeterministicFixtureFactory;
@@ -214,9 +216,12 @@ function runBookingContractsAttempt(
         }
         $futureBookingLimit = null;
         if ($config['canary_context'] !== null) {
-            $futureBookingLimit = parsePositiveIntValue(
-                $bootstrap['future_booking_limit'] ?? null,
-                'booking bootstrap future_booking_limit',
+            $futureBookingLimit = CanarySlotSearchPolicy::productFutureBookingLimit(
+                $config['resolve_slot_output'] !== null,
+                parsePositiveIntValue(
+                    $bootstrap['future_booking_limit'] ?? null,
+                    'booking bootstrap future_booking_limit',
+                ),
             );
         }
         $slot = $factory->resolveBookableSlot($client, $config['http_timeout'], $pairs, $futureBookingLimit);

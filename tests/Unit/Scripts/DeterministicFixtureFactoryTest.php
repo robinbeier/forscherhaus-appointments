@@ -6,6 +6,7 @@ use CiContract\DeterministicFixtureFactory;
 use PHPUnit\Framework\TestCase;
 
 require_once __DIR__ . '/../../../scripts/ci/lib/DeterministicFixtureFactory.php';
+require_once __DIR__ . '/../../../scripts/ci/lib/CanarySlotSearchPolicy.php';
 require_once __DIR__ . '/../../../scripts/release-gate/lib/GateAssertions.php';
 
 final class DeterministicFixtureFactoryTest extends TestCase
@@ -87,5 +88,11 @@ final class DeterministicFixtureFactoryTest extends TestCase
     {
         $factory = new DeterministicFixtureFactory('ci-write-test', 2, 'UTC', true);
         $this->assertStringEndsWith('@synthetic.invalid', $factory->createBookingCustomerPayload()['email']);
+    }
+
+    public function testProductHorizonIsOnlyUsedForDiscoveryNotReplay(): void
+    {
+        self::assertSame(90, \CiContract\CanarySlotSearchPolicy::productFutureBookingLimit(true, 90));
+        self::assertNull(\CiContract\CanarySlotSearchPolicy::productFutureBookingLimit(false, 90));
     }
 }

@@ -78,6 +78,26 @@ final class DeterministicFixtureFactorySeasonalTest extends TestCase
         $factory->resolveBookableSlot($client, 2, [['provider_id' => 1, 'service_id' => 2]], 3);
     }
 
+    public function testReplayWindowDoesNotExpandToProductHorizonWhenSelectedSlotDisappears(): void
+    {
+        $factory = new DeterministicFixtureFactory(
+            'ci-write-replay-window',
+            1,
+            'Europe/Berlin',
+            true,
+            (new \DateTimeImmutable('tomorrow', new \DateTimeZone('Europe/Berlin')))->format('Y-m-d'),
+        );
+        $start = new \DateTimeImmutable('tomorrow', new \DateTimeZone('Europe/Berlin'));
+        $openDate = $start->modify('+2 days')->format('Y-m-d');
+        $client = $this->startServer([$openDate => ['09:00']]);
+        $client->get('booking');
+
+        $this->expectException(GateAssertionException::class);
+        $this->expectExceptionMessage('1-day window');
+        // A replay must retain its narrow one-day window when the discovered slot vanished.
+        $factory->resolveBookableSlot($client, 2, [['provider_id' => 1, 'service_id' => 2]], null);
+    }
+
     /** @param array<string,array<int,string>> $openSlots */
     private function startServer(array $openSlots): GateHttpClient
     {
@@ -94,7 +114,7 @@ final class DeterministicFixtureFactorySeasonalTest extends TestCase
         $stderr = tempnam(sys_get_temp_dir(), 'rob630-server-');
         self::assertNotFalse($stderr);
         $this->server = proc_open(
-            'php -S 127.0.0.1:' . $port . ' ' . escapeshellarg(basename($this->router)),
+            [PHP_BINARY, '-S', '127.0.0.1:' . $port, basename($this->router)],
             [0 => ['file', '/dev/null', 'r'], 1 => ['file', '/dev/null', 'w'], 2 => ['file', $stderr, 'a']],
             $pipes,
             dirname($this->router),
