@@ -324,6 +324,7 @@ Postdeploy canary reports:
 
 - `storage/logs/release-gate/zero-surprise-live-canary-<UTC>.json`
 - deploy default override: `storage/logs/release-gate/zero-surprise-live-canary-<REL>-<UTC>.json`
+- `storage/logs/release-gate/zero-surprise-live-canary-booking-discovery-<UTC>.json`
 - `storage/logs/release-gate/zero-surprise-live-canary-booking-<UTC>.json`
 - `storage/logs/release-gate/zero-surprise-live-canary-dashboard-<UTC>.json`
 
@@ -350,6 +351,22 @@ The live canary creates a ten-minute fixture through the root-only
 admin identity, and synthetic customers/appointments. The capacity remains one.
 The ordinary isolated replay retains its existing password-stdin contract.
 The live canary uses its generated identity instead of the configured account.
+
+Before the live booking replay, the canary performs a read-only slot discovery
+against its private provider/service pair. The booking page's
+`future_booking_limit` is authoritative for this search, so a seasonal full
+block is not mistaken for a 35-day gate failure and the search never probes
+beyond the product's public booking horizon. The selected date is written to
+the root-owned `/var/lib/fh-zero-surprise-canary/selected-slot.json` receipt
+using exclusive creation and mode 0600. It contains only the schema, canary
+run identity, date, mode, available-hour count, and the search start and
+duration used to validate the product horizon. The subsequent booking
+replay receives that date with a one-day window. A missing, malformed, or
+out-of-horizon selection is a hard canary failure; no blocked-period bypass or
+public-calendar override is performed. The receipt is removed and its absence
+verified after the run; an unverifiable receipt remains a recovery blocker.
+The profile's `booking_search_days` remains only as a compatibility field in
+the report; it does not constrain live-canary discovery.
 
 The fixture journal is `/var/lib/fh-zero-surprise-canary/active.json`, root-owned
 with mode 0600 in a 0700 directory. Its credentials must never be logged or

@@ -18,6 +18,12 @@ final class ZeroSurprisePasswordTransportTest extends TestCase
         $report = $fixture . '/canary-report.json';
         $credentials = $fixture . '/canary.ini';
         $wrapperRecord = $fixture . '/wrapper-record.log';
+        $slotDate = (new \DateTimeImmutable('now', new \DateTimeZone('Europe/Berlin')))
+            ->modify('+1 day')
+            ->format('Y-m-d');
+        $outsideHorizonDate = (new \DateTimeImmutable($slotDate, new \DateTimeZone('Europe/Berlin')))
+            ->modify('+2 days')
+            ->format('Y-m-d');
         $originalPath = getenv('PATH');
 
         mkdir($bin, 0700, true);
@@ -55,16 +61,23 @@ final class ZeroSurprisePasswordTransportTest extends TestCase
         chmod($fixture . '/scripts/ops/zero_surprise_canary_fixture.sh', 0700);
         file_put_contents(
             $fixture . '/scripts/release-gate/lib/ZeroSurpriseCanaryContext.php',
-            <<<'PHP'
-            <?php
-            namespace ReleaseGate;
-            final class ZeroSurpriseCanaryContext {
-             public const DEFAULT_PATH='/var/lib/fh-zero-surprise-canary/active.json';
-             public static function loadVerified(string $path=self::DEFAULT_PATH, ?int $now=null): array { return ['run_id'=>'zs-canary-'.str_repeat('a',32),'actor_id'=>1,'actor_username'=>'__ea_zero_surprise_canary_v1','actor_password'=>str_repeat('a',64),'provider_id'=>2,'service_id'=>3,'token'=>str_repeat('b',64)]; }
-            }
-            PHP
-            ,
+            str_replace(
+                ['__SLOT_PATH__', '__OWNER_UID__'],
+                [$fixture . '/slot-state/selected-slot.json', (string) posix_geteuid()],
+                <<<'PHP'
+                <?php
+                namespace ReleaseGate;
+                final class ZeroSurpriseCanaryContext {
+                 public const DEFAULT_PATH='/var/lib/fh-zero-surprise-canary/active.json';
+                 public const SLOT_PATH='__SLOT_PATH__';
+                 public const SLOT_OWNER_UID=__OWNER_UID__;
+                 public static function loadVerified(string $path=self::DEFAULT_PATH, ?int $now=null): array { return ['run_id'=>'zs-canary-'.str_repeat('a',32),'actor_id'=>1,'actor_username'=>'__ea_zero_surprise_canary_v1','actor_password'=>str_repeat('a',64),'provider_id'=>2,'service_id'=>3,'token'=>str_repeat('b',64)]; }
+                }
+                PHP
+                ,
+            ),
         );
+        mkdir($fixture . '/slot-state', 0700, true);
 
         file_put_contents(
             $credentials,
@@ -91,10 +104,12 @@ final class ZeroSurprisePasswordTransportTest extends TestCase
         shift
         printf 'call=%s\n' "$script" >> "$record"
         output=''
+        slot=''
         for arg in "$@"; do
             printf 'arg=%s\n' "$arg" >> "$record"
             case "$arg" in
                 --output-json=*) output=${arg#*=} ;;
+                --resolve-slot-output=*) slot=${arg#*=} ;;
             esac
         done
 
@@ -103,6 +118,14 @@ final class ZeroSurprisePasswordTransportTest extends TestCase
         mkdir -p "$(dirname "$output")"
         case "$script" in
             scripts/ci/booking_write_contract_smoke.php)
+                if [ -n "$slot" ]; then
+                    mkdir -p "$(dirname "$slot")"
+                    chmod 700 "$(dirname "$slot")"
+                    printf '%s\n' '{"schema":"zero_surprise_booking_slot.v1","run_id":"zs-canary-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","date":"'"${ZERO_SURPRISE_SLOT_DATE:?}"'","mode":"product_future_booking_limit","hours_count":1,"search_window_start":"'"${ZERO_SURPRISE_SLOT_WINDOW_START:?}"'","search_days":1}' > "$slot"
+                    chmod 600 "$slot"
+                    printf '%s\n' '{"state":{"run_id":"zs-canary-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","cleanup":{"created":[],"deleted":[],"failures":[]}}}' > "$output"
+                    exit 0
+                fi
                 cat > "$output" <<'JSON'
         {"checks":[{"name":"booking_register_unavailable_contract","status":"pass","slot_appointments_count":1}]}
         JSON
@@ -124,6 +147,8 @@ final class ZeroSurprisePasswordTransportTest extends TestCase
         putenv('PATH=' . $bin . ':' . (is_string($originalPath) ? $originalPath : ''));
         putenv('ZERO_SURPRISE_STUB_RECORD=' . $record);
         putenv('ZERO_SURPRISE_WRAPPER_RECORD=' . $wrapperRecord);
+        putenv('ZERO_SURPRISE_SLOT_DATE=' . $slotDate);
+        putenv('ZERO_SURPRISE_SLOT_WINDOW_START=' . $slotDate);
 
         try {
             $result = $this->runCanary($fixture, $credentials, $report);
@@ -133,20 +158,33 @@ final class ZeroSurprisePasswordTransportTest extends TestCase
             self::assertJson((string) file_get_contents($report));
 
             $records = (string) file_get_contents($record);
-            self::assertSame(2, substr_count($records, 'call='));
+            self::assertSame(3, substr_count($records, 'call='));
             self::assertSame(
-                2,
+                3,
                 substr_count($records, 'arg=--canary-context-file=/var/lib/fh-zero-surprise-canary/active.json'),
             );
             self::assertStringNotContainsString($password, $records);
             self::assertStringNotContainsString($password, $result['stdout'] . $result['stderr']);
             self::assertSame("activate\nverify\ndeactivate\nverify\n", (string) file_get_contents($wrapperRecord));
+            self::assertFileDoesNotExist($fixture . '/slot-state/selected-slot.json');
 
             $canary = json_decode((string) file_get_contents($report), true, 512, JSON_THROW_ON_ERROR);
             self::assertSame(0, $canary['summary']['exit_code'] ?? null);
             self::assertSame('pass', $canary['invariants']['overbooking']['status'] ?? null);
             self::assertSame('pass', $canary['invariants']['fill_rate_math']['status'] ?? null);
             self::assertSame('pass', $canary['invariants']['pdf_exports']['status'] ?? null);
+
+            file_put_contents($record, '');
+            file_put_contents($wrapperRecord, '');
+            putenv('ZERO_SURPRISE_SLOT_DATE=' . $outsideHorizonDate);
+            $outOfHorizon = $this->runCanary($fixture, $credentials, $fixture . '/out-of-horizon.json');
+            self::assertNotSame(0, $outOfHorizon['exit_code']);
+            self::assertStringNotContainsString(
+                'scripts/release-gate/dashboard_release_gate.php',
+                (string) file_get_contents($record),
+            );
+            self::assertFileDoesNotExist($fixture . '/slot-state/selected-slot.json');
+            self::assertStringNotContainsString($password, $outOfHorizon['stdout'] . $outOfHorizon['stderr']);
 
             file_put_contents($record, '');
             file_put_contents($wrapperRecord, '');
@@ -166,6 +204,8 @@ final class ZeroSurprisePasswordTransportTest extends TestCase
             putenv('PATH=' . (is_string($originalPath) ? $originalPath : ''));
             putenv('ZERO_SURPRISE_STUB_RECORD');
             putenv('ZERO_SURPRISE_WRAPPER_RECORD');
+            putenv('ZERO_SURPRISE_SLOT_DATE');
+            putenv('ZERO_SURPRISE_SLOT_WINDOW_START');
             self::removeTree($fixture);
         }
     }

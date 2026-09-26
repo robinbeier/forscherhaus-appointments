@@ -341,18 +341,25 @@ final class DeterministicFixtureFactory
      *   start_datetime:string,
      *   end_datetime:string,
      *   mode:string,
-     *   hours_count:int
+     *   hours_count:int,
+     *   search_window_start:string,
+     *   search_days:int
      * }
      */
-    public function resolveBookableSlot(GateHttpClient $client, int $httpTimeout, array $providerServicePairs): array
-    {
+    public function resolveBookableSlot(
+        GateHttpClient $client,
+        int $httpTimeout,
+        array $providerServicePairs,
+        ?int $futureBookingLimit = null,
+    ): array {
         if ($providerServicePairs === []) {
             throw new GateAssertionException('Provider/service pairs list is empty.');
         }
 
         $startDate = $this->resolveBookingWindowStart();
+        $searchDays = $this->resolveSearchDays($futureBookingLimit);
 
-        for ($offset = 0; $offset < $this->bookingSearchDays; $offset++) {
+        for ($offset = 0; $offset < $searchDays; $offset++) {
             $candidateDate = $startDate->modify('+' . $offset . ' day')->format('Y-m-d');
 
             foreach ($providerServicePairs as $pair) {
@@ -378,8 +385,10 @@ final class DeterministicFixtureFactory
                     'hour' => $hour,
                     'start_datetime' => $startDateTime,
                     'end_datetime' => $this->deriveEndDateTime($startDateTime),
-                    'mode' => 'searched_window',
+                    'mode' => $futureBookingLimit === null ? 'searched_window' : 'product_future_booking_limit',
                     'hours_count' => count($hours),
+                    'search_window_start' => $startDate->format('Y-m-d'),
+                    'search_days' => $searchDays,
                 ];
             }
         }
@@ -388,7 +397,7 @@ final class DeterministicFixtureFactory
             sprintf(
                 'No booking hours available across %d provider/service pairs in %d-day window.',
                 count($providerServicePairs),
-                $this->bookingSearchDays,
+                $searchDays,
             ),
         );
     }
@@ -406,6 +415,22 @@ final class DeterministicFixtureFactory
         return $this->bookingStartDate !== null
             ? new DateTimeImmutable($this->bookingStartDate . ' 00:00:00', new DateTimeZone($this->timezone))
             : $this->bookingWindowStart($now);
+    }
+
+    private function resolveSearchDays(?int $futureBookingLimit): int
+    {
+        if ($futureBookingLimit === null) {
+            return $this->bookingSearchDays;
+        }
+
+        if ($futureBookingLimit <= 0) {
+            throw new GateAssertionException('future_booking_limit must be a positive integer.');
+        }
+
+        // The public page is authoritative: do not probe beyond its
+        // configured horizon, and do not stop early at an arbitrary gate
+        // window when a seasonal block occupies that window.
+        return $futureBookingLimit;
     }
 
     public function markerMatches(?string $value): bool

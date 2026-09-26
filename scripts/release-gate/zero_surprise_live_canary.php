@@ -24,6 +24,7 @@ $defaultProfile = 'school-day-default';
 $report = null;
 $exitCode = ZERO_SURPRISE_CANARY_EXIT_RUNTIME_ERROR;
 $config = [];
+$slotReceiptIdentity = null;
 
 try {
     $config = parseCliOptions($defaultOutputPath, $defaultProfile, $repoRoot);
@@ -36,6 +37,9 @@ try {
     $credentials = ZeroSurpriseCredentials::resolve($config['credentials_file'], $config['profile_name']);
 
     $bookingReportPath = 'storage/logs/release-gate/zero-surprise-live-canary-booking-' . $timestamp . '.json';
+    $bookingDiscoveryReportPath =
+        'storage/logs/release-gate/zero-surprise-live-canary-booking-discovery-' . $timestamp . '.json';
+    $bookingDiscoverySlotPath = ZeroSurpriseCanaryContext::SLOT_PATH;
     $dashboardReportPath = 'storage/logs/release-gate/zero-surprise-live-canary-dashboard-' . $timestamp . '.json';
 
     $report = new ZeroSurpriseReport(
@@ -50,6 +54,7 @@ try {
             'start_date' => $credentials['start_date'],
             'end_date' => $credentials['end_date'],
             'booking_search_days' => $credentials['booking_search_days'],
+            'booking_search_days_authority' => 'booking bootstrap future_booking_limit',
             'retry_count' => $credentials['retry_count'],
             'max_pdf_duration_ms' => $credentials['max_pdf_duration_ms'],
             'timezone' => $credentials['timezone'],
@@ -103,42 +108,127 @@ try {
 
     $bookingReport = null;
     $dashboardReport = null;
+    $canarySearchStartDate = (new DateTimeImmutable('now', new DateTimeZone($credentials['timezone'])))
+        ->modify('+1 day')
+        ->format('Y-m-d');
+    $slotReceiptPreexisting = @lstat(ZeroSurpriseCanaryContext::SLOT_PATH) !== false;
+    if ($slotReceiptPreexisting) {
+        throw new RuntimeException('A previous canary slot receipt is still present.');
+    }
 
-    $bookingStep = runCanaryStep(
-        'booking_write_replay',
+    $bookingDiscoveryStep = runCanaryStep(
+        'booking_slot_discovery',
         [
             'php',
             'scripts/ci/booking_write_contract_smoke.php',
             '--base-url=' . $credentials['base_url'],
             '--index-page=' . $credentials['index_page'],
-            '--booking-search-days=' . $credentials['booking_search_days'],
+            '--booking-search-days=1',
+            '--booking-start-date=' . $canarySearchStartDate,
             '--retry-count=' . $credentials['retry_count'],
             '--timezone=' . $credentials['timezone'],
             '--run-id=' . $runId,
             '--canary-context-file=' . $fixtureStatePath,
-            '--output-json=' . $bookingReportPath,
+            '--resolve-slot-output=' . $bookingDiscoverySlotPath,
+            '--output-json=' . $bookingDiscoveryReportPath,
         ],
         $repoRoot,
         $deadlineAt,
     );
 
     $report->addStep(
-        'booking_write_replay',
-        $bookingStep['status'],
-        $bookingStep['exit_code'],
-        $bookingStep['duration_ms'],
+        'booking_slot_discovery',
+        $bookingDiscoveryStep['status'],
+        $bookingDiscoveryStep['exit_code'],
+        $bookingDiscoveryStep['duration_ms'],
         [
-            'child_report' => $bookingReportPath,
-            'command' => $bookingStep['command'],
-            'timed_out' => $bookingStep['timed_out'],
-            'stdout_tail' => $bookingStep['stdout_tail'],
-            'stderr_tail' => $bookingStep['stderr_tail'],
+            'child_report' => $bookingDiscoveryReportPath,
+            'command' => $bookingDiscoveryStep['command'],
+            'timed_out' => $bookingDiscoveryStep['timed_out'],
+            'stdout_tail' => $bookingDiscoveryStep['stdout_tail'],
+            'stderr_tail' => $bookingDiscoveryStep['stderr_tail'],
         ],
     );
 
-    $bookingReport = readJsonFile($repoRoot . '/' . $bookingReportPath);
+    $receiptReadIdentity = null;
+    $bookingDate =
+        $bookingDiscoveryStep['status'] === ZeroSurpriseReport::STATUS_PASS
+            ? readResolvedBookingDate($bookingDiscoverySlotPath, $runId, $canarySearchStartDate, $receiptReadIdentity)
+            : null;
+    if (is_array($receiptReadIdentity)) {
+        $currentReceiptIdentity = captureSlotReceiptIdentity($bookingDiscoverySlotPath);
+        if ($currentReceiptIdentity === null || $currentReceiptIdentity !== $receiptReadIdentity) {
+            $report->setFailure(
+                'Canary slot receipt identity changed during discovery; recovery state retained.',
+                RuntimeException::class,
+                'runtime_error',
+            );
+            $bookingDate = null;
+            $slotReceiptIdentity = $receiptReadIdentity;
+        } else {
+            $slotReceiptIdentity = $receiptReadIdentity;
+        }
+    } elseif (!$slotReceiptPreexisting) {
+        $slotReceiptIdentity = captureSlotReceiptIdentity($bookingDiscoverySlotPath);
+        if (@lstat($bookingDiscoverySlotPath) !== false && $slotReceiptIdentity === null) {
+            $report->setFailure(
+                'Canary slot receipt identity could not be verified; recovery state retained.',
+                RuntimeException::class,
+                'runtime_error',
+            );
+        }
+    }
+    if ($bookingDate === null) {
+        $discoveryReport = readJsonFile($repoRoot . '/' . $bookingDiscoveryReportPath);
+        $report->setFailure(
+            'booking_slot_discovery failed or produced no safe date; booking replay was skipped.',
+            RuntimeException::class,
+            classifyBookingDiscoveryFailure($bookingDiscoveryStep, $discoveryReport, $bookingDate),
+        );
+        $bookingStep = null;
+    } else {
+        $bookingStep = runCanaryStep(
+            'booking_write_replay',
+            [
+                'php',
+                'scripts/ci/booking_write_contract_smoke.php',
+                '--base-url=' . $credentials['base_url'],
+                '--index-page=' . $credentials['index_page'],
+                '--booking-search-days=1',
+                '--booking-start-date=' . $bookingDate,
+                '--retry-count=' . $credentials['retry_count'],
+                '--timezone=' . $credentials['timezone'],
+                '--run-id=' . $runId,
+                '--canary-context-file=' . $fixtureStatePath,
+                '--output-json=' . $bookingReportPath,
+            ],
+            $repoRoot,
+            $deadlineAt,
+        );
+    }
 
-    if ($bookingStep['status'] === ZeroSurpriseReport::STATUS_PASS) {
+    if ($bookingStep !== null) {
+        $report->addStep(
+            'booking_write_replay',
+            $bookingStep['status'],
+            $bookingStep['exit_code'],
+            $bookingStep['duration_ms'],
+            [
+                'child_report' => $bookingReportPath,
+                'command' => $bookingStep['command'],
+                'timed_out' => $bookingStep['timed_out'],
+                'stdout_tail' => $bookingStep['stdout_tail'],
+                'stderr_tail' => $bookingStep['stderr_tail'],
+                'bound_booking_date' => $bookingDate,
+            ],
+        );
+    }
+
+    if ($bookingStep !== null) {
+        $bookingReport = readJsonFile($repoRoot . '/' . $bookingReportPath);
+    }
+
+    if ($bookingStep !== null && $bookingStep['status'] === ZeroSurpriseReport::STATUS_PASS) {
         $dashboardCommand = [
             'php',
             'scripts/release-gate/dashboard_release_gate.php',
@@ -182,7 +272,7 @@ try {
                 classifyFailureFromExitCode($dashboardStep['exit_code']),
             );
         }
-    } else {
+    } elseif ($bookingStep !== null) {
         $report->setFailure(
             'booking_write_replay failed, dashboard replay was skipped.',
             RuntimeException::class,
@@ -256,6 +346,28 @@ if (($fixtureActivated ?? false) === true) {
         }
     } catch (Throwable $cleanupException) {
         $report?->setFailure('Canary fixture cleanup failed.', get_class($cleanupException), 'runtime_error');
+        $exitCode = ZERO_SURPRISE_CANARY_EXIT_RUNTIME_ERROR;
+    }
+}
+
+if (is_array($slotReceiptIdentity)) {
+    try {
+        if (
+            !slotReceiptIdentityMatches(ZeroSurpriseCanaryContext::SLOT_PATH, $slotReceiptIdentity) ||
+            !unlink(ZeroSurpriseCanaryContext::SLOT_PATH)
+        ) {
+            $report?->setFailure('Canary slot receipt cleanup failed.', RuntimeException::class, 'runtime_error');
+            $exitCode = ZERO_SURPRISE_CANARY_EXIT_RUNTIME_ERROR;
+        } elseif (lstat(ZeroSurpriseCanaryContext::SLOT_PATH) !== false) {
+            $report?->setFailure(
+                'Canary slot receipt cleanup could not be verified.',
+                RuntimeException::class,
+                'runtime_error',
+            );
+            $exitCode = ZERO_SURPRISE_CANARY_EXIT_RUNTIME_ERROR;
+        }
+    } catch (Throwable $cleanupException) {
+        $report?->setFailure('Canary slot receipt cleanup failed.', get_class($cleanupException), 'runtime_error');
         $exitCode = ZERO_SURPRISE_CANARY_EXIT_RUNTIME_ERROR;
     }
 }
@@ -464,6 +576,35 @@ function classifyFailureFromExitCode(int $exitCode): string
     return $exitCode === ZERO_SURPRISE_CANARY_EXIT_ASSERTION_FAILURE ? 'assertion_failure' : 'runtime_error';
 }
 
+/** @param array<string,mixed> $step @param array<string,mixed>|null $childReport */
+function classifyBookingDiscoveryFailure(array $step, ?array $childReport, ?string $bookingDate): string
+{
+    if (
+        $bookingDate === null &&
+        ($step['exit_code'] ?? null) === ZERO_SURPRISE_CANARY_EXIT_ASSERTION_FAILURE &&
+        ($step['timed_out'] ?? false) === false &&
+        is_array($childReport) &&
+        ($childReport['failure']['classification'] ?? null) === 'contract_mismatch' &&
+        ($childReport['state']['cleanup']['created'] ?? []) === [] &&
+        ($childReport['state']['cleanup']['deleted'] ?? []) === [] &&
+        ($childReport['state']['cleanup']['failures'] ?? []) === []
+    ) {
+        $message = trim((string) ($childReport['failure']['message'] ?? ''));
+        if (
+            preg_match(
+                '/^No booking hours available across \d+ provider\/service pairs in \d+-day window\.$/',
+                $message,
+            ) === 1
+        ) {
+            return 'no_safe_booking_date';
+        }
+    }
+
+    return $step['exit_code'] === ZERO_SURPRISE_CANARY_EXIT_ASSERTION_FAILURE
+        ? 'unknown_booking_slot'
+        : 'runtime_error';
+}
+
 function readJsonFile(string $path): ?array
 {
     if (!is_file($path) || !is_readable($path)) {
@@ -483,6 +624,127 @@ function readJsonFile(string $path): ?array
     }
 
     return is_array($decoded) ? $decoded : null;
+}
+
+/** @param array{dev:int,ino:int,size:int,mtime:int,sha256:string}|null $readIdentity */
+function readResolvedBookingDate(
+    string $path,
+    string $expectedRunId,
+    string $expectedWindowStart,
+    ?array &$readIdentity = null,
+): ?string {
+    $before = captureSlotReceiptIdentity($path);
+    if ($before === null) {
+        return null;
+    }
+    $readIdentity = $before;
+    $raw = @file_get_contents($path);
+    $after = captureSlotReceiptIdentity($path);
+    $rawAfter = @file_get_contents($path);
+    if (
+        !is_string($raw) ||
+        !is_string($rawAfter) ||
+        $after !== $before ||
+        !hash_equals(hash('sha256', $raw), hash('sha256', $rawAfter))
+    ) {
+        return null;
+    }
+    try {
+        $resolved = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
+    } catch (Throwable) {
+        return null;
+    }
+    $date = is_array($resolved) ? trim((string) ($resolved['date'] ?? '')) : '';
+    if (
+        !is_array($resolved) ||
+        array_keys($resolved) !== [
+            'schema',
+            'run_id',
+            'date',
+            'mode',
+            'hours_count',
+            'search_window_start',
+            'search_days',
+        ] ||
+        ($resolved['schema'] ?? null) !== 'zero_surprise_booking_slot.v1' ||
+        ($resolved['run_id'] ?? null) !== $expectedRunId ||
+        ($resolved['mode'] ?? null) !== 'product_future_booking_limit' ||
+        !is_int($resolved['hours_count'] ?? null) ||
+        $resolved['hours_count'] <= 0 ||
+        !is_int($resolved['search_days'] ?? null) ||
+        $resolved['search_days'] <= 0 ||
+        !preg_match('/\A\d{4}-\d{2}-\d{2}\z/', (string) ($resolved['search_window_start'] ?? '')) ||
+        ($resolved['search_window_start'] ?? null) !== $expectedWindowStart ||
+        !preg_match('/\A\d{4}-\d{2}-\d{2}\z/', $date)
+    ) {
+        return null;
+    }
+
+    $parsed = DateTimeImmutable::createFromFormat('!Y-m-d', $date);
+    $windowStart = DateTimeImmutable::createFromFormat('!Y-m-d', (string) $resolved['search_window_start']);
+    $errors = DateTimeImmutable::getLastErrors();
+    $windowEnd =
+        $windowStart instanceof DateTimeImmutable
+            ? $windowStart->modify('+' . $resolved['search_days'] . ' days')
+            : null;
+    if (
+        $parsed === false ||
+        $windowStart === false ||
+        $windowEnd === false ||
+        $windowEnd === null ||
+        ($errors !== false && ($errors['warning_count'] > 0 || $errors['error_count'] > 0)) ||
+        $parsed->format('Y-m-d') !== $date ||
+        $parsed < $windowStart ||
+        $parsed >= $windowEnd
+    ) {
+        return null;
+    }
+
+    return $date;
+}
+
+/** @return array{dev:int,ino:int,size:int,mtime:int,sha256:string}|null */
+function captureSlotReceiptIdentity(string $path): ?array
+{
+    $stat = @lstat($path);
+    $parent = @lstat(dirname($path));
+    if (
+        !is_array($stat) ||
+        !is_array($parent) ||
+        ($stat['nlink'] ?? 0) !== 1 ||
+        ($stat['uid'] ?? -1) !== ZeroSurpriseCanaryContext::SLOT_OWNER_UID ||
+        (($stat['mode'] ?? 0) & 0170000) !== 0100000 ||
+        (($stat['mode'] ?? 0) & 0777) !== 0600 ||
+        ($parent['uid'] ?? -1) !== ZeroSurpriseCanaryContext::SLOT_OWNER_UID ||
+        (($parent['mode'] ?? 0) & 0170000) !== 0040000 ||
+        (($parent['mode'] ?? 0) & 0777) !== 0700
+    ) {
+        return null;
+    }
+
+    $raw = @file_get_contents($path);
+    if (!is_string($raw)) {
+        return null;
+    }
+
+    return [
+        'dev' => (int) ($stat['dev'] ?? -1),
+        'ino' => (int) ($stat['ino'] ?? -1),
+        'size' => (int) ($stat['size'] ?? -1),
+        'mtime' => (int) ($stat['mtime'] ?? -1),
+        'sha256' => hash('sha256', $raw),
+    ];
+}
+
+/** @param array{dev:int,ino:int,size:int,mtime:int,sha256:string} $expected */
+function slotReceiptIdentityMatches(string $path, array $expected): bool
+{
+    $current = captureSlotReceiptIdentity($path);
+    if ($current === null) {
+        return false;
+    }
+
+    return $current === $expected;
 }
 
 function tailText(string $text, int $maxChars): string
