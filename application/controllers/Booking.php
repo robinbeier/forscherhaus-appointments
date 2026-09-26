@@ -371,6 +371,27 @@ class Booking extends EA_Controller
                 return;
             }
 
+            $start_datetime = $appointment['start_datetime'] ?? null;
+            $parsed_start = is_string($start_datetime)
+                ? DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $start_datetime)
+                : false;
+
+            if (
+                !$parsed_start ||
+                $parsed_start->format('Y-m-d H:i:s') !== $start_datetime ||
+                $parsed_start->format('s') !== '00'
+            ) {
+                json_response(
+                    [
+                        'success' => false,
+                        'message' => lang('requested_hour_is_unavailable'),
+                    ],
+                    409,
+                );
+
+                return;
+            }
+
             $authority_claim = null;
 
             if ($request_dto->isExistingAppointmentAttempt()) {
