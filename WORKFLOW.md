@@ -429,16 +429,18 @@ they are explicitly addressed or rejected with a clear rationale.
 For a separately started Codex Security scan, record its scan ID, exact source
 commit, owning task, last observed phase, and eventual report or stop reason in
 the existing workpad. Before the owning task closes, reconcile every scan it
-started: finish a still-relevant scan on its original source version, or cancel
-an obsolete or duplicate scan from that owning task after checking later review
-evidence. Keep the scan artifact and reason for cancellation. A scan that remains
+started: finish a still-relevant scan on its original source version, or, only
+when scan cancellation is explicitly authorized, cancel an obsolete or duplicate
+scan from that owning task after checking later review evidence. Keep the scan
+artifact and reason for cancellation. A scan that remains
 `running`, including one displaying `0 Findings`, is incomplete and never counts
 as a Security Review or final-head evidence. If the owner cannot be reached or
 the scan state is contradictory, record the gap and leave it open; do not route
 the cancellation through another task or silently substitute a newer review.
 For scans predating this rule whose owner task has already closed, inventory
 the same facts in one workpad. Resume the owner only when thread communication
-is authorized, then use that owner's scan action; otherwise record the scan as
+and scan cancellation are authorized, then use that owner's scan action;
+otherwise record the scan as
 unresolved without treating it as a finding-free result.
 
 ### PR follow-up
