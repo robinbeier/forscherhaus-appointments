@@ -999,13 +999,23 @@ class Booking_slot_analytics
         $periods = [];
 
         foreach ($ranges as $range) {
-            if ($range['end'] <= $range['start']) {
+            $start = $range['start'];
+            $end = $range['end'];
+
+            if ((int) $start->format('s') !== 0) {
+                $start = $start->modify('+1 minute');
+                $start = $start->setTime((int) $start->format('H'), (int) $start->format('i'), 0);
+            }
+
+            $end = $end->setTime((int) $end->format('H'), (int) $end->format('i'), 0);
+
+            if ($end <= $start) {
                 continue;
             }
 
             $periods[] = [
-                'start' => $range['start']->format('H:i'),
-                'end' => $range['end']->format('H:i'),
+                'start' => $start->format('H:i'),
+                'end' => $end->format('H:i'),
             ];
         }
 
