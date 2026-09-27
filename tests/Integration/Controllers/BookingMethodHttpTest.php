@@ -14,6 +14,10 @@ final class BookingMethodHttpTest extends TestCase
 {
     private ?DefenseCycleFixtures $fixture = null;
     private ?DefenseCycleHttpServer $server = null;
+    private ?array $privacySetting = null;
+    private ?array $termsSetting = null;
+    /** @var list<string> */
+    private array $ownedConsentEmails = [];
 
     protected function setUp(): void
     {
@@ -24,10 +28,24 @@ final class BookingMethodHttpTest extends TestCase
         try {
             $this->fixture = new DefenseCycleFixtures();
             $this->fixture->create();
+            $db = get_instance()->db;
+            $this->privacySetting =
+                $db->get_where('settings', ['name' => 'display_privacy_policy'])->row_array() ?: null;
+            $this->termsSetting =
+                $db->get_where('settings', ['name' => 'display_terms_and_conditions'])->row_array() ?: null;
+            $db->update('settings', ['value' => '1'], ['name' => 'display_privacy_policy']);
+            $db->update('settings', ['value' => '0'], ['name' => 'display_terms_and_conditions']);
             $this->server = new DefenseCycleHttpServer();
         } catch (Throwable $error) {
-            $this->server?->close();
-            $this->fixture?->cleanup();
+            try {
+                $this->server?->close();
+            } finally {
+                try {
+                    $this->restoreConsentSettings();
+                } finally {
+                    $this->fixture?->cleanup();
+                }
+            }
             throw $error;
         }
     }
@@ -37,8 +55,114 @@ final class BookingMethodHttpTest extends TestCase
         try {
             $this->server?->close();
         } finally {
+            $db = get_instance()->db;
+            foreach ($db->get('consents')->result_array() as $row) {
+                if (in_array((string) $row['email'], $this->ownedConsentEmails, true)) {
+                    $db->delete('consents', ['id' => (int) $row['id']]);
+                }
+            }
+            $this->restoreConsentSettings();
             $this->fixture?->cleanup();
         }
+    }
+
+    private function restoreConsentSettings(): void
+    {
+        $db = get_instance()->db;
+        foreach (
+            [
+                'display_privacy_policy' => $this->privacySetting,
+                'display_terms_and_conditions' => $this->termsSetting,
+            ]
+            as $name => $row
+        ) {
+            if ($row !== null) {
+                $db->update('settings', ['value' => $row['value']], ['name' => $name]);
+            }
+        }
+    }
+
+    public function testNewBookingCreatesOnlyPrivacyConsentWhenPrivacyIsEnabled(): void
+    {
+        $fixture = $this->fixture;
+        $client = $this->server?->client();
+        self::assertNotNull($fixture);
+        self::assertNotNull($client);
+
+        $customer = $fixture->row('users', $fixture->customerId);
+        $this->ownedConsentEmails[] = (string) $customer['email'];
+        $target = (new DateTimeImmutable('today'))->modify('next monday')->modify('+14 days');
+        $appointment = [
+            'start_datetime' => $target->setTime(11, 0)->format('Y-m-d H:i:s'),
+            'end_datetime' => $target->setTime(11, 30)->format('Y-m-d H:i:s'),
+            'id_services' => $fixture->serviceId,
+            'id_users_provider' => $fixture->providerId,
+            'location' => '',
+            'notes' => $fixture->run,
+            'color' => '',
+        ];
+        unset($customer['id']);
+        $payload = [
+            'appointment' => $appointment,
+            'customer' => $customer,
+            'manage_mode' => false,
+        ];
+
+        $beforeAppointmentCount = get_instance()->db->count_all('appointments');
+        self::assertSame(200, $client->get('booking')->statusCode);
+        $response = $client->post('booking/register', ['post_data' => $payload]);
+        self::assertSame(200, $response->statusCode, $response->body);
+        self::assertSame($beforeAppointmentCount + 1, get_instance()->db->count_all('appointments'));
+        $booked = get_instance()
+            ->db->get_where('appointments', [
+                'id_services' => $fixture->serviceId,
+                'id_users_customer' => $fixture->customerId,
+                'notes' => $fixture->run,
+            ])
+            ->result_array();
+        self::assertCount(1, $booked);
+        self::assertSame($appointment['start_datetime'], $booked[0]['start_datetime']);
+        $rows = get_instance()
+            ->db->get_where('consents', ['email' => $customer['email']])
+            ->result_array();
+        self::assertCount(1, $rows);
+        self::assertSame('privacy-policy', $rows[0]['type']);
+        self::assertSame($customer['first_name'], $rows[0]['first_name']);
+        self::assertSame($customer['last_name'], $rows[0]['last_name']);
+        self::assertSame($customer['email'], $rows[0]['email']);
+        self::assertSame('127.0.0.1', $rows[0]['ip']);
+    }
+
+    public function testBookingRegisterCreatesNoConsentWhenPrivacyIsDisabled(): void
+    {
+        $fixture = $this->fixture;
+        $client = $this->server?->client();
+        self::assertNotNull($fixture);
+        self::assertNotNull($client);
+
+        self::assertTrue(
+            get_instance()->db->update('settings', ['value' => '0'], ['name' => 'display_privacy_policy']),
+        );
+        $appointment = $fixture->appointment();
+        $customer = $fixture->row('users', $fixture->customerId);
+        $this->ownedConsentEmails[] = (string) $customer['email'];
+        self::assertSame(200, $client->get('booking/reschedule/' . $appointment['hash'])->statusCode);
+
+        $response = $client->post('booking/register', [
+            'post_data' => [
+                'appointment' => $appointment,
+                'customer' => $customer,
+                'manage_mode' => true,
+            ],
+        ]);
+
+        self::assertSame(200, $response->statusCode, $response->body);
+        self::assertSame(
+            [],
+            get_instance()
+                ->db->get_where('consents', ['email' => $customer['email']])
+                ->result_array(),
+        );
     }
 
     public function testGetRegisterRejectsValidPublicQueryPayloadWithoutMutation(): void
@@ -127,6 +251,7 @@ final class BookingMethodHttpTest extends TestCase
         self::assertSame('POST', $response->header('allow'));
         self::assertSame($before, $this->snapshot($appointment, $fixture->customerId));
 
+        $this->ownedConsentEmails[] = (string) $customer['email'];
         $success = $client->post('booking/register', ['post_data' => $payload]);
         self::assertSame(200, $success->statusCode, $success->body);
         self::assertSame(

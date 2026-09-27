@@ -20,79 +20,9 @@
  */
 class Consents extends EA_Controller
 {
-    /**
-     * Consents constructor.
-     */
-    public function __construct()
-    {
-        parent::__construct();
-
-        $this->load->model('consents_model');
-    }
-
-    /**
-     * Save (insert or update) the consent
-     */
+    /** The public consent write route was retired when booking began recording consent on commit. */
     public function save(): void
     {
-        try {
-            $request_dto = $this->authRequestDtoFactory()->buildConsentSaveRequestDto();
-            $consent = $request_dto->consent;
-
-            $consent['ip'] = $this->input->ip_address();
-
-            $occurrences = $this->consents_model->get(['ip' => $consent['ip']], 1, 0, 'create_datetime DESC');
-
-            if (!empty($occurrences)) {
-                $last_consent = $occurrences[0];
-
-                $last_consent_create_datetime_instance = new DateTime($last_consent['create_datetime']);
-
-                $threshold_datetime_instance = new DateTime('-24 hours');
-
-                if ($last_consent_create_datetime_instance > $threshold_datetime_instance) {
-                    // Do not create a new consent.
-
-                    json_response([
-                        'success' => true,
-                    ]);
-
-                    return;
-                }
-            }
-
-            $consent['id'] = $this->consents_model->save($consent);
-
-            json_response([
-                'success' => true,
-                'id' => $consent['id'],
-            ]);
-        } catch (Throwable $e) {
-            json_exception($e);
-        }
-    }
-
-    private function authRequestDtoFactory(): Auth_request_dto_factory
-    {
-        if (
-            isset($this->auth_request_dto_factory) &&
-            $this->auth_request_dto_factory instanceof Auth_request_dto_factory
-        ) {
-            return $this->auth_request_dto_factory;
-        }
-
-        /** @var EA_Controller|CI_Controller $CI */
-        $CI = &get_instance();
-
-        if (
-            !isset($CI->auth_request_dto_factory) ||
-            !$CI->auth_request_dto_factory instanceof Auth_request_dto_factory
-        ) {
-            $CI->load->library('auth_request_dto_factory');
-        }
-
-        $this->auth_request_dto_factory = $CI->auth_request_dto_factory;
-
-        return $this->auth_request_dto_factory;
+        abort(404, 'Not Found');
     }
 }

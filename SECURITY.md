@@ -79,6 +79,13 @@ deletion must leave customer and dependent records unchanged. See the
 [privacy deletion contract](docs/ci-write-contracts.md#offentliche-datenschutz-loschung)
 for the isolated evidence and its production limit.
 
+The standalone public `consents/save` write route is retired. Public request
+data, including a consent ID or client IP, must not create or change a consent
+there. Successful booking records the configured privacy and terms consents
+server-side when the booking commits. See the
+[consent contract](docs/ci-write-contracts.md#offentliche-consent-erfassung)
+for the HTTP evidence and its limits.
+
 For global blocked periods, an authenticated API write must address only the
 URL-selected record and use the declared HTTP method even through a direct
 controller alias. A changed blocked period affects booking availability, so a
