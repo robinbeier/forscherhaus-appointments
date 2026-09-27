@@ -46,6 +46,28 @@ Cache-Keys und den temporären Fehler-Trigger und stellt die Einstellung wieder
 her. Er beweist den kontrollierten lokalen Pfad bei aktivierter Einstellung,
 nicht die Aktivierung oder Ausführung einer Löschung auf Produktion.
 
+## Öffentliche Consent-Erfassung
+
+Der eigenständige öffentliche Schreibpfad `consents/save` ist stillgelegt. Er
+liefert auch mit gültigem CSRF-Token und über den direkten Controllerpfad 404,
+bevor eine Anfrage-ID, ein Consent-Payload oder eine IP-Adresse einen Datensatz
+auswählen oder verändern kann. Die globale CSRF-Prüfung kann einen POST ohne
+gültiges Token vorher mit 403 ablehnen; OPTIONS bleibt ein globaler Preflight
+ohne Mutation. Die aktive Erfassung der konfigurierten Datenschutz- und
+Nutzungszustimmungen erfolgt ausschließlich serverseitig beim erfolgreichen
+`Booking::register` über das Consent-Modell. Ein CSRF-Token oder eine
+übermittelte Datensatz-ID begründet keine öffentliche Änderungsberechtigung.
+
+`ConsentSaveHttpTest` prüft direkte und Rewrite-Routen, mehrere HTTP-Methoden,
+CSRF-Grenzen, die Ablehnung einer fremden synthetischen Datensatz-ID und
+vollständige Nichtmutation per Datenbank-Snapshot. `BookingMethodHttpTest`
+prüft separat die Zustimmung beim erfolgreichen Buchungsabschluss mit
+aktivierter beziehungsweise deaktivierter Datenschutzeinstellung. Beide Tests
+verwenden isolierte synthetische Daten und bereinigen sie; sie belegen keine
+Nutzung des alten Endpunkts durch unbekannte externe Clients. Die produktive
+Prüfung beschränkt sich auf Release- und Konfigurationsidentität sowie
+nicht schreibende HTTP- und Aggregatnachweise.
+
 Die Backoffice-Endpunkte `customers/store` und `services/store` legen nur neue
 Datensätze an. Eine mitgesendete bestehende ID wird abgewiesen; Änderungen laufen
 über `update` mit Bearbeitungsrecht und den bestehenden Zugriffsprüfungen.
