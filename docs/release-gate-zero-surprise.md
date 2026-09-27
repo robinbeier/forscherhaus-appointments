@@ -386,8 +386,9 @@ The fixture wrapper acquires the shared production lock for each lifecycle
 transition, reusing the deploy runner's inherited lock descriptor when the
 canary is part of deployment. Release admission checks the journal and both
 cleanup units before deployment and again under that lock before reserving a
-release intent. Any present or unknown state blocks the switch, so recovery
-uses the original release.
+release intent. The shared host deploy primitive repeats the in-lock check for
+separately authorized direct recovery deployments. Any present or unknown
+state blocks the switch, so recovery uses the original release.
 
 The state file acts as a pre-commit journal. If activation rolls back after the
 journal is published, verification reports `cleanup_pending`; deactivation can
