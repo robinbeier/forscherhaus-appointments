@@ -31,13 +31,34 @@ class FixtureHelper:
 
     ORCHESTRATOR_ROOT = 'orchestrator'
     MAX_CLASS_SCAN = 10_000
-    MUTATIONS = SimpleNamespace(fields=lambda: {'mutation_count': 0})
+    class _Ledger:
+        def __init__(self):
+            self.count = 0
+            self.in_flight = 0
+
+        def begin(self):
+            self.in_flight += 1
+
+        def confirm(self, _kind):
+            self.in_flight -= 1
+            self.count += 1
+
+        def finish(self):
+            self.in_flight -= 1
+
+        def fields(self):
+            return {'deletion_performed': self.count > 0, 'mutation_count': self.count}
+
+    MUTATIONS = _Ledger()
 
     def __init__(self, root):
         self.root = root
         self.open_candidates = False
         self.active = 0
         self.nonterminal = False
+        self.drift_after_quarantine = False
+        self.open_after_quarantine = False
+        self.drift_during_open_scan = False
 
     @staticmethod
     def _identity(stat_result):
@@ -53,13 +74,20 @@ class FixtureHelper:
     def validate_candidate_tree(self, web_fd, name, owners, device):
         stat_result = os.stat(name, dir_fd=web_fd, follow_symlinks=False)
         candidate = os.path.join(self.root, 'web', name)
+        if not os.path.exists(candidate):
+            candidate = os.path.join(self.root, 'state', name)
         inode_count = sum(1 + len(files) for _, _, files in os.walk(candidate))
-        return {
+        result = {
             'identity': self._identity(stat_result),
             'mtime_ns': stat_result.st_mtime_ns,
             'allocated': stat_result.st_blocks * 512,
             'inodes': inode_count,
         }
+        if self.drift_after_quarantine and os.path.isdir(os.path.join(self.root, 'state', name)):
+            with open(os.path.join(self.root, 'state', name, 'nested', 'race-after-quarantine'), 'w', encoding='ascii') as stream:
+                stream.write('changed-after-quarantine\n')
+            self.drift_after_quarantine = False
+        return result
 
     def open_child_directory(self, parent_fd, name):
         return os.open(name, os.O_RDONLY | os.O_DIRECTORY, dir_fd=parent_fd)
@@ -72,7 +100,15 @@ class FixtureHelper:
             os.close(fd)
 
     def open_file_identities(self, trees):
-        return self.open_candidates
+        if self.drift_during_open_scan:
+            pending_names = [name for name in os.listdir(os.path.join(self.root, 'state'))
+                             if name.startswith('.pending-release-')]
+            if pending_names:
+                pending = os.path.join(self.root, 'state', pending_names[0])
+                with open(os.path.join(pending, 'nested', 'race-during-open-scan'), 'w', encoding='ascii') as stream:
+                    stream.write('changed-during-open-scan\n')
+            self.drift_during_open_scan = False
+        return 1 if self.open_after_quarantine else self.open_candidates
 
     def activity_count(self):
         return self.active
@@ -96,8 +132,8 @@ class FixtureHelper:
     def assert_no_nested_mounts(self, names, orchestrator):
         return None
 
-    def detach_tree(self, web_fd, state_fd, target, kind, owners, mutations):
-        shutil.rmtree(os.path.join(self.root, 'web', target['leaf']))
+    def remove_tree(self, parent, leaf, expected_identity, allowed_uids, expected_device):
+        shutil.rmtree(os.path.join(self.root, 'state', leaf))
 
 
 class ManualReleaseCleanupTest(unittest.TestCase):
@@ -396,6 +432,67 @@ class ManualReleaseCleanupTest(unittest.TestCase):
                 mock.patch.object(CLEANUP.socket, 'gethostname', return_value='booking-server'):
             with self.assertRaisesRegex(CLEANUP.CleanupError, 'active_production_work'):
                 CLEANUP.run('execute', '0' * 64, self.helper)
+
+    def _quarantine_fixture(self, name='easyappointments_prev_race'):
+        for pending in os.listdir(os.path.join(self.root, 'state')):
+            if pending.startswith('.pending-release-'):
+                shutil.rmtree(os.path.join(self.root, 'state', pending))
+        candidate = self._mkdir_release(name, 'race')
+        os.mkdir(os.path.join(candidate, 'nested'))
+        old = int(os.path.getmtime(candidate) - 8 * 86400)
+        os.utime(candidate, (old, old))
+        self._archive('race')
+        _, selected = self._collect()
+        item = selected[0]
+        web = os.open(os.path.join(self.root, 'web'), os.O_RDONLY | os.O_DIRECTORY)
+        state = os.open(os.path.join(self.root, 'state'), os.O_RDONLY | os.O_DIRECTORY)
+        return item, web, state
+
+    def test_quarantine_preserves_pending_on_pre_quarantine_race(self):
+        item, web, state = self._quarantine_fixture()
+        candidate = os.path.join(self.root, 'web', item['name'])
+        original_rename = CLEANUP.os.rename
+
+        def mutate_then_rename(src, dst, **kwargs):
+            with open(os.path.join(candidate, 'race'), 'w', encoding='ascii') as stream:
+                stream.write('changed-before-quarantine\n')
+            return original_rename(src, dst, **kwargs)
+
+        with mock.patch.object(CLEANUP.os, 'rename', side_effect=mutate_then_rename):
+            with self.assertRaisesRegex(CLEANUP.CleanupError, 'quarantined_tree_changed'):
+                CLEANUP.quarantine_and_delete(self.helper, web, state, item, os.geteuid())
+        os.close(state)
+        os.close(web)
+        self.assertTrue(any(name.startswith('.pending-release-') for name in os.listdir(self.root + '/state')))
+        self.assertFalse(os.path.exists(candidate))
+
+    def test_quarantine_preserves_pending_on_post_quarantine_drift_or_open_file(self):
+        for flag in ('drift_after_quarantine', 'open_after_quarantine'):
+            with self.subTest(flag=flag):
+                item, web, state = self._quarantine_fixture('easyappointments_prev_' + flag)
+                setattr(self.helper, flag, True)
+                if flag == 'open_after_quarantine':
+                    self.helper.open_after_quarantine = True
+                reason = 'quarantined_candidate_open' if flag == 'open_after_quarantine' else 'quarantined_tree_changed'
+                with self.assertRaisesRegex(CLEANUP.CleanupError, reason):
+                    CLEANUP.quarantine_and_delete(self.helper, web, state, item, os.geteuid())
+                os.close(state)
+                os.close(web)
+                self.assertTrue(any(name.startswith('.pending-release-') for name in os.listdir(self.root + '/state')))
+                for pending in os.listdir(self.root + '/state'):
+                    if pending.startswith('.pending-release-'):
+                        shutil.rmtree(os.path.join(self.root, 'state', pending))
+                setattr(self.helper, flag, False)
+                self.helper.open_after_quarantine = False
+
+    def test_quarantine_preserves_pending_on_drift_during_open_file_scan(self):
+        item, web, state = self._quarantine_fixture('easyappointments_prev_open_scan')
+        self.helper.drift_during_open_scan = True
+        with self.assertRaisesRegex(CLEANUP.CleanupError, 'quarantined_tree_changed'):
+            CLEANUP.quarantine_and_delete(self.helper, web, state, item, os.geteuid())
+        os.close(state)
+        os.close(web)
+        self.assertTrue(any(name.startswith('.pending-release-') for name in os.listdir(self.root + '/state')))
 
 
 if __name__ == '__main__':

@@ -7,9 +7,16 @@ reactivate that service.
 
 The procedure has two invocations: a read-only plan and an execution that must
 be supplied the exact SHA-256 digest of that plan. The plan binds the selected
-directory identities, contained release IDs, ages, sizes, inode counts,
+directory identities and root change times, contained release IDs, ages, sizes, inode counts,
 metadata fingerprints of every nested path, and archive identities. Any
 change between planning and execution stops the run.
+
+Before any file is unlinked, each selected directory is moved into the
+root-only retention state directory. The tool checks the quarantined tree's
+complete metadata fingerprint and open-file state again. A changed or open
+tree stays quarantined as a pending recovery object and blocks another pass;
+it is never silently deleted or automatically restored. The operator must
+classify that state before any further production change.
 
 The global cleanup lock and the production-change lock must be available. The
 procedure stops on active production work, open candidate files, pending

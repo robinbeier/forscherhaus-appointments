@@ -14,6 +14,7 @@ import json
 import os
 import pwd
 import re
+import secrets
 import socket
 import stat
 import sys
@@ -108,7 +109,11 @@ def tree_metadata_sha256(web, name, expected_identity):
                 digest.update(b'D')
                 digest.update(len(prefix).to_bytes(4, 'big'))
                 digest.update(prefix)
-                digest.update(canonical(metadata_record(before)))
+                # Moving a directory into the root-only quarantine changes its
+                # own ctime. Bind all other root metadata and every descendant
+                # ctime so the post-rename fingerprint remains comparable.
+                record = metadata_record(before)
+                digest.update(canonical((*record[:-1], 0) if prefix == b'' else record))
                 count += 1
                 for entry in sorted(os.listdir(directory), key=os.fsencode):
                     path = prefix + b'/' + os.fsencode(entry)
@@ -174,12 +179,16 @@ def candidate_record(helper, web, releases, name, web_uid, device, now_ns):
     metadata_sha, metadata_count = tree_metadata_sha256(web, name, tree['identity'])
     if metadata_count != tree['inodes']:
         reject('tree_changed', 75)
+    root_stat = os.stat(name, dir_fd=web, follow_symlinks=False)
+    if helper.directory_identity(root_stat) != tree['identity']:
+        reject('tree_changed', 75)
     return {
         'name': name,
         'contained_release': contained_release,
         'age_days': age_ns // (86400 * 1_000_000_000),
         'tree': tree,
         'tree_metadata_sha256': metadata_sha,
+        'root_ctime_ns': root_stat.st_ctime_ns,
         'archive_identity': archive,
     }
 
@@ -226,6 +235,7 @@ def collect(helper, web, releases, state, current, rollback, web_uid):
                 'allocated_bytes': item['tree']['allocated'],
                 'inode_count': item['tree']['inodes'],
                 'tree_metadata_sha256': item['tree_metadata_sha256'],
+                'root_ctime_ns': item['root_ctime_ns'],
                 'archive_identity': item['archive_identity'],
             }
             for item in selected
@@ -245,6 +255,50 @@ def protected_state_unchanged(helper, web, current, rollback_fd, rollback_name,
     return (actual == expected_identities == opened
             and helper.read_release_marker(current) == current_id
             and helper.read_release_marker(rollback_fd) == rollback_id)
+
+
+def quarantine_and_delete(helper, web, state, item, web_uid):
+    """Remove web access first, then verify the exact tree before any unlink."""
+    if os.fstat(web).st_dev != os.fstat(state).st_dev:
+        reject('filesystem_mismatch')
+    pending = '.pending-release-' + secrets.token_hex(16)
+    try:
+        os.stat(pending, dir_fd=state, follow_symlinks=False)
+    except FileNotFoundError:
+        pass
+    else:
+        reject('pending_cleanup_collision')
+    helper.MUTATIONS.begin()
+    os.rename(item['name'], pending, src_dir_fd=web, dst_dir_fd=state)
+    helper.MUTATIONS.confirm('release_dirs')
+    os.fsync(web)
+    os.fsync(state)
+
+    # STATE_ROOT is root-owned mode 0700. A web process cannot reopen this
+    # directory after the rename; an existing directory/file descriptor is
+    # detected by the fresh open-file scan below.
+    quarantined = helper.validate_candidate_tree(state, pending, {0, web_uid},
+                                                 os.fstat(state).st_dev)
+    if (quarantined['identity'] != item['tree']['identity']
+            or quarantined['inodes'] != item['tree']['inodes']
+            or quarantined['allocated'] != item['tree']['allocated']):
+        reject('quarantined_tree_changed', 75)
+    digest, count = tree_metadata_sha256(state, pending, item['tree']['identity'])
+    if digest != item['tree_metadata_sha256'] or count != item['tree']['inodes']:
+        reject('quarantined_tree_changed', 75)
+    if helper.open_file_identities([quarantined]):
+        reject('quarantined_candidate_open', 75)
+    digest, count = tree_metadata_sha256(state, pending, item['tree']['identity'])
+    if digest != item['tree_metadata_sha256'] or count != item['tree']['inodes']:
+        reject('quarantined_tree_changed', 75)
+    if helper.activity_count() != 0:
+        reject('active_production_work', 75)
+    helper.assert_no_nonterminal_runs()
+    helper.MUTATIONS.begin()
+    helper.remove_tree(state, pending, item['tree']['identity'], {0, web_uid},
+                       os.fstat(state).st_dev)
+    helper.MUTATIONS.finish()
+    os.fsync(state)
 
 
 def run(mode, expected_plan_sha=None, helper=None):
@@ -294,7 +348,8 @@ def run(mode, expected_plan_sha=None, helper=None):
                 reject('protected_release_changed', 75)
             current_candidate = os.stat(item['name'], dir_fd=web, follow_symlinks=False)
             if (helper.directory_identity(current_candidate) != item['tree']['identity']
-                    or current_candidate.st_mtime_ns != item['tree']['mtime_ns']):
+                    or current_candidate.st_mtime_ns != item['tree']['mtime_ns']
+                    or current_candidate.st_ctime_ns != item['root_ctime_ns']):
                 reject('candidate_changed', 75)
             if archive_identity(helper, releases, item['contained_release']) != item['archive_identity']:
                 reject('candidate_archive_changed', 75)
@@ -305,10 +360,8 @@ def run(mode, expected_plan_sha=None, helper=None):
                 reject('candidate_open', 75)
             if helper.activity_count() != 0:
                 reject('active_production_work', 75)
-            helper.detach_tree(web, state, {'leaf': item['name'],
-                                             'identity': item['tree']['identity']},
-                               'release', {0, pwd.getpwnam('www-data').pw_uid},
-                               helper.MUTATIONS)
+            quarantine_and_delete(helper, web, state, item,
+                                  pwd.getpwnam('www-data').pw_uid)
             deleted += 1
         os.fsync(web)
         if not protected_state_unchanged(helper, web, current, rollback_fd,
