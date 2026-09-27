@@ -24,14 +24,16 @@ procedure stops on active production work, open candidate files, pending
 cleanup markers, non-terminal runs, missing or unsafe archives, unknown
 previous-release entries, identity drift, or any protected current/rollback change.
 
-Only previous-release directories at least seven days old with a complete,
-canonical archive/provenance pair can be selected. Releases named in the
-permanent host-local legacy hold are preserved. The archive pair is checked
-again after quarantine and before deletion. A missing or invalid pair blocks
-the plan rather than authorizing deletion. At most four oldest candidates are
-selected per plan. The active release and its exact rollback directory are
-protected. Stage and failed directories are
-ignored as deletion classes, even when their contents look unsafe. Archives,
+Only previous-release directories with a complete, canonical
+archive/provenance pair can be selected; the manual release-only procedure has
+no minimum age. A candidate whose directory timestamp is in the future is
+excluded fail-closed. Releases named in the permanent host-local legacy hold
+are preserved. The archive pair is checked again after quarantine and before
+deletion. A missing or invalid pair blocks the plan rather than authorizing
+deletion. At most four oldest candidates are selected per plan. The active
+release and its exact rollback directory are protected. Stage and failed
+directories are ignored as deletion classes, even when their contents look
+unsafe. Archives,
 backups, stages, the active release, and rollback are preserved.
 The listing stops before recursive validation if the web root exceeds the
 retention helper's 10,000-entry class limit or has more than 64 previous-release
