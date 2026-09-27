@@ -68,6 +68,23 @@ Nutzung des alten Endpunkts durch unbekannte externe Clients. Die produktive
 Prüfung beschränkt sich auf Release- und Konfigurationsidentität sowie
 nicht schreibende HTTP- und Aggregatnachweise.
 
+## Öffentliche Sitzungsvergabe
+
+`login/validate` erzeugt eine authentifizierte Sitzung nur über POST mit der
+bestehenden CSRF-Prüfung. Andere Methoden erhalten auch über den direkten
+Controllerpfad HTTP 405 mit `Allow: POST`, bevor Zugangsdaten gelesen, eine
+Sitzungs-ID regeneriert oder Benutzerdaten in der Sitzung gespeichert werden.
+Der globale OPTIONS-Preflight endet vor dem Controller und erzeugt keine
+Anmeldesitzung. Die Anmeldeseite selbst bleibt per GET erreichbar.
+
+`LoginMethodHttpTest` prüft mit einem eigenen synthetischen Benutzer die
+Methodengrenze über Rewrite- und Direktpfad, den fehlenden geschützten Zugriff
+nach Ablehnung sowie den weiterhin erfolgreichen POST-Login. Die Tests laufen
+in einer frischen isolierten Datenbank und belegen keine Browser-spezifische
+Cross-Site-Ausnutzung oder unbekannte externe Clients. Produktiv werden nur
+Release-/Konfigurationsidentität und lesende Gesundheitsklassen geprüft; ein
+Login mit einem echten Konto ist kein Bestandteil dieses Nachweises.
+
 Die Backoffice-Endpunkte `customers/store` und `services/store` legen nur neue
 Datensätze an. Eine mitgesendete bestehende ID wird abgewiesen; Änderungen laufen
 über `update` mit Bearbeitungsrecht und den bestehenden Zugriffsprüfungen.
