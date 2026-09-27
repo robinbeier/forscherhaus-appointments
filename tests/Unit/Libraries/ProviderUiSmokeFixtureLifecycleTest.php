@@ -568,7 +568,7 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
         $controller->ldap_client = $ldap_client;
         $controller->auth_request_dto_factory = $request_factory;
 
-        $controller->validate();
+        $this->validateLoginAsPost($controller);
 
         $this->assertFalse($ldap_client->called);
         $response = json_decode((string) get_instance()->output->get_output(), true);
@@ -617,7 +617,7 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
         $controller->ldap_client = $ldap_client;
         $controller->auth_request_dto_factory = $request_factory;
 
-        $controller->validate();
+        $this->validateLoginAsPost($controller);
 
         $principal = $this->loadPrincipal();
         $response = json_decode((string) get_instance()->output->get_output(), true);
@@ -629,6 +629,22 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
         $this->assertSame(DB_SLUG_PROVIDER, session('role_slug'));
         $this->assertTrue(Provider_ui_smoke_access_policy::isAllowedRoute('dashboard', 'index', 'GET'));
         $this->assertFalse(Provider_ui_smoke_access_policy::isAllowedRoute('customers', 'index', 'GET'));
+    }
+
+    private function validateLoginAsPost(\Login $controller): void
+    {
+        $previousMethod = $_SERVER['REQUEST_METHOD'] ?? null;
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+
+        try {
+            $controller->validate();
+        } finally {
+            if ($previousMethod === null) {
+                unset($_SERVER['REQUEST_METHOD']);
+            } else {
+                $_SERVER['REQUEST_METHOD'] = $previousMethod;
+            }
+        }
     }
 
     /**

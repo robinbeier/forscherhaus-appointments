@@ -60,6 +60,12 @@ class Login extends EA_Controller
      */
     public function validate(): void
     {
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+            json_response(['success' => false, 'message' => 'Method Not Allowed'], 405, ['Allow: POST']);
+
+            return;
+        }
+
         try {
             $request_dto = $this->authRequestDtoFactory()->buildLoginValidateRequestDto();
             $username = $request_dto->username;
