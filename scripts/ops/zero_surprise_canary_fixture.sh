@@ -7,6 +7,24 @@ action=${1:-}
 case "$action" in activate|verify|deactivate) ;; *) echo 'usage: zero_surprise_canary_fixture.sh activate|verify|deactivate' >&2; exit 64 ;; esac
 [[ "$(id -u)" == 0 ]] || { echo 'root required' >&2; exit 77; }
 
+# Serialize every fixture transition with release admission. When the deploy
+# runner already holds the lock, reuse its inherited open file description.
+lock_path='/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock'
+lock_parent="$(dirname -- "$lock_path")"
+[[ -d "$lock_parent" && ! -L "$lock_parent" && "$(stat -c '%a:%u:%g' -- "$lock_parent" 2>/dev/null || true)" == 700:0:0 ]] || exit 75
+[[ -f "$lock_path" && ! -L "$lock_path" && "$(realpath -e -- "$lock_path" 2>/dev/null || true)" == "$lock_path" ]] || exit 75
+lock_before="$(stat -c '%a:%u:%g:%h:%s:%d:%i' -- "$lock_path" 2>/dev/null || true)"
+[[ "$lock_before" =~ ^600:0:0:1:0:[0-9]+:[0-9]+$ ]] || exit 75
+if [[ -n "${ORDINARY_CHANGE_LOCK_FD:-}" ]]; then
+  [[ "$ORDINARY_CHANGE_LOCK_FD" =~ ^[0-9]+$ ]] || exit 75
+  lock_fd="$ORDINARY_CHANGE_LOCK_FD"
+else
+  exec {lock_fd}<"$lock_path" || exit 75
+fi
+[[ "$(stat -Lc '%a:%u:%g:%h:%s:%d:%i' -- "/proc/$$/fd/$lock_fd" 2>/dev/null || true)" == "$lock_before" ]] || exit 75
+flock -n "$lock_fd" || exit 75
+[[ "$(stat -c '%a:%u:%g:%h:%s:%d:%i' -- "$lock_path" 2>/dev/null || true)" == "$lock_before" ]] || exit 75
+
 unit=fh-zero-surprise-canary-cleanup
 if [[ "$action" == activate ]]; then
   for suffix in timer service; do

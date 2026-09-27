@@ -41,6 +41,9 @@ ZERO_SURPRISE_CANARY_REPORT=""
 ZERO_SURPRISE_INCIDENT_WEBHOOK_FILE=""
 ZERO_SURPRISE_INCIDENT_TIMEOUT=10
 RECOVERY_GUARD='/root/fh-deploy-recovery-pending.v1.json'
+ZERO_SURPRISE_CANARY_ACTIVE_STATE_FILE='/var/lib/fh-zero-surprise-canary/active.json'
+ZERO_SURPRISE_CANARY_CLEANUP_TIMER='fh-zero-surprise-canary-cleanup.timer'
+ZERO_SURPRISE_CANARY_CLEANUP_SERVICE='fh-zero-surprise-canary-cleanup.service'
 
 RENDERER_HEALTH_RETRIES=15
 RENDERER_HEALTH_SLEEP_SECONDS=2
@@ -119,7 +122,7 @@ ordinary_production_change_lock() {
     exec {ordinary_fd}>&-
     return 1
   fi
-  ORDINARY_CHANGE_LOCK_FD="$ordinary_fd"
+  export ORDINARY_CHANGE_LOCK_FD="$ordinary_fd"
 }
 
 ordinary_assert_no_pending_probe() {
@@ -144,6 +147,69 @@ ordinary_assert_no_active_csp_report_only_pilot() {
     echo '[!] Active or unresolved CSP report-only pilot lease blocks deployment.' >&2
     return 75
   fi
+}
+
+ordinary_assert_no_active_zero_surprise_canary() {
+  local state="${1:-$ZERO_SURPRISE_CANARY_ACTIVE_STATE_FILE}"
+  local unit observed line value
+  local load_seen=0 active_seen=0 sub_seen=0 file_state_seen=0 result_seen=0
+
+  if [[ -e "$state" || -L "$state" ]]; then
+    echo '[!] Active or unresolved zero-surprise canary blocks deployment.' >&2
+    return 75
+  fi
+
+  for unit in "$ZERO_SURPRISE_CANARY_CLEANUP_TIMER" "$ZERO_SURPRISE_CANARY_CLEANUP_SERVICE"; do
+    observed="$("${SYSTEMCTL_BASE[@]}" show "$unit" \
+      --property=LoadState,ActiveState,SubState,UnitFileState,Result \
+      --no-pager 2>/dev/null)" || {
+      echo "[!] Zero-surprise canary cleanup unit state is unavailable: $unit" >&2
+      return 75
+    }
+    load_seen=0; active_seen=0; sub_seen=0; file_state_seen=0; result_seen=0
+    while IFS= read -r line; do
+      case "$line" in
+        LoadState=*)
+          (( load_seen == 0 )) || { echo "[!] Zero-surprise canary cleanup unit state is duplicated: $unit" >&2; return 75; }
+          value="${line#LoadState=}"
+          [[ "$value" == not-found ]] || { echo "[!] Zero-surprise canary cleanup unit is not exactly absent: $unit" >&2; return 75; }
+          load_seen=1
+          ;;
+        ActiveState=*)
+          (( active_seen == 0 )) || { echo "[!] Zero-surprise canary cleanup unit state is duplicated: $unit" >&2; return 75; }
+          value="${line#ActiveState=}"
+          [[ "$value" == inactive ]] || { echo "[!] Zero-surprise canary cleanup unit is not exactly absent: $unit" >&2; return 75; }
+          active_seen=1
+          ;;
+        SubState=*)
+          (( sub_seen == 0 )) || { echo "[!] Zero-surprise canary cleanup unit state is duplicated: $unit" >&2; return 75; }
+          value="${line#SubState=}"
+          [[ "$value" == dead ]] || { echo "[!] Zero-surprise canary cleanup unit is not exactly absent: $unit" >&2; return 75; }
+          sub_seen=1
+          ;;
+        UnitFileState=*)
+          (( file_state_seen == 0 )) || { echo "[!] Zero-surprise canary cleanup unit state is duplicated: $unit" >&2; return 75; }
+          value="${line#UnitFileState=}"
+          [[ -z "$value" ]] || { echo "[!] Zero-surprise canary cleanup unit is not exactly absent: $unit" >&2; return 75; }
+          file_state_seen=1
+          ;;
+        Result=*)
+          (( result_seen == 0 )) || { echo "[!] Zero-surprise canary cleanup unit state is duplicated: $unit" >&2; return 75; }
+          value="${line#Result=}"
+          [[ "$value" == success ]] || { echo "[!] Zero-surprise canary cleanup unit is not exactly absent: $unit" >&2; return 75; }
+          result_seen=1
+          ;;
+        *)
+          echo "[!] Zero-surprise canary cleanup unit state is malformed: $unit" >&2
+          return 75
+          ;;
+      esac
+    done <<< "$observed"
+    if (( load_seen != 1 || active_seen != 1 || sub_seen != 1 || file_state_seen != 1 || result_seen != 1 )); then
+      echo "[!] Zero-surprise canary cleanup unit state is incomplete: $unit" >&2
+      return 75
+    fi
+  done
 }
 
 ordinary_assert_bound_recovery_guard() {
@@ -2534,6 +2600,8 @@ if [[ "$DRYRUN" -eq 0 ]]; then
     || die "[!] Shared production-change lock is unavailable; deployment refused."
   ordinary_assert_bound_recovery_guard \
     || die "[!] Pending bound-release recovery requires the matching guarded invocation."
+  ordinary_assert_no_active_zero_surprise_canary \
+    || die "[!] Zero-surprise canary cleanup must be absent before deployment."
   deploy_result_receipt_prepare || die "[!] Refusing unsafe deploy result target."
   ordinary_assert_no_pending_probe \
     || die "[!] Ordinary probe recovery must finish before deployment."

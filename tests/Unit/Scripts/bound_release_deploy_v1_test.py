@@ -48,6 +48,11 @@ class BoundReleaseDeployTest(unittest.TestCase):
         self.stack.enter_context(mock.patch.object(MODULE, 'trusted_parent'))
         self.stack.enter_context(mock.patch.object(MODULE, 'bound_hash'))
         self.no_recovery = self.stack.enter_context(mock.patch.object(MODULE, 'no_recovery'))
+        self.systemctl = self.stack.enter_context(mock.patch.object(
+            MODULE.subprocess,
+            'check_output',
+            return_value='LoadState=not-found\nActiveState=inactive\nSubState=dead\nUnitFileState=\nResult=success\n',
+        ))
         self.guard = self.stack.enter_context(mock.patch.object(MODULE, 'reserve_recovery_guard'))
         self.retire_guard = self.stack.enter_context(mock.patch.object(MODULE, 'retire_recovery_guard'))
         self.stack.enter_context(mock.patch.object(MODULE, 'active_release'))
@@ -94,6 +99,31 @@ class BoundReleaseDeployTest(unittest.TestCase):
             with self.assertRaisesRegex(MODULE.AdmissionError, 'receipt_or_intent_occupied'):
                 MODULE.run(arguments())
         self.reserve.assert_not_called()
+        self.child.assert_not_called()
+
+    def test_late_canary_journal_blocks_admission_before_reservation_or_child(self):
+        appeared = {'value': False}
+
+        def earlier_preflight_then_state_appears():
+            appeared['value'] = True
+
+        self.no_recovery.side_effect = earlier_preflight_then_state_appears
+        self.lexists.side_effect = lambda path: appeared['value'] and path == MODULE.CANARY_STATE
+        with self.assertRaisesRegex(MODULE.AdmissionError, 'canary_recovery_pending'):
+            MODULE.run(arguments())
+        self.reserve.assert_not_called()
+        self.guard.assert_not_called()
+        self.child.assert_not_called()
+
+    def test_loaded_canary_cleanup_unit_blocks_admission(self):
+        self.systemctl.return_value = (
+            'LoadState=loaded\nActiveState=inactive\nSubState=dead\n'
+            'UnitFileState=disabled\nResult=success\n'
+        )
+        with self.assertRaisesRegex(MODULE.AdmissionError, 'canary_cleanup_unresolved'):
+            MODULE.run(arguments())
+        self.reserve.assert_not_called()
+        self.guard.assert_not_called()
         self.child.assert_not_called()
 
     def test_new_run_id_cannot_relaunch_reserved_release(self):

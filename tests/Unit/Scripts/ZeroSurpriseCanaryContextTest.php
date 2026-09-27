@@ -23,6 +23,7 @@ final class ZeroSurpriseCanaryContextTest extends TestCase
             'actor_password' => str_repeat('a', 64),
             'provider_id' => 2,
             'service_id' => 3,
+            'consent_floor' => 0,
             'token' => str_repeat('b', 64),
             'expires_at' => 1500,
             'created_at' => 1000,
@@ -63,6 +64,8 @@ final class ZeroSurpriseCanaryContextTest extends TestCase
                 ['actor_password' => 'short'],
                 ['run_id' => 'zs-canary-short'],
                 ['provider_id' => 0],
+                ['consent_floor' => -1],
+                ['consent_floor' => '0'],
                 ['unknown' => true],
             ]
             as $changes

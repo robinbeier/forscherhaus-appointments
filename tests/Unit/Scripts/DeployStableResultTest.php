@@ -10,6 +10,128 @@ use PHPUnit\Framework\TestCase;
 final class DeployStableResultTest extends TestCase
 {
     #[Group('root-deployment')]
+    public function testDirectEntryAdmissionOrderKeepsCanaryRejectionBeforeReceiptMutation(): void
+    {
+        $source = (string) file_get_contents(dirname(__DIR__, 3) . '/deploy_ea.sh');
+        $entryStart = strpos($source, "if [[ \"\$DRYRUN\" -eq 0 ]]; then\n  ordinary_production_change_lock");
+        $entryEnd = strpos($source, "\nARCHIVE=\"\${SRC}/\${REL}.tar.gz\"", $entryStart === false ? 0 : $entryStart);
+
+        self::assertNotFalse($entryStart);
+        self::assertNotFalse($entryEnd);
+        $entry = substr($source, $entryStart, $entryEnd - $entryStart);
+        self::assertIsString($entry);
+
+        $calls = [
+            'lock' => 'ordinary_production_change_lock',
+            'bound' => 'ordinary_assert_bound_recovery_guard',
+            'canary' => 'ordinary_assert_no_active_zero_surprise_canary',
+            'receipt' => 'deploy_result_receipt_prepare',
+        ];
+        $positions = [];
+        foreach ($calls as $name => $call) {
+            self::assertSame(1, substr_count($entry, $call), $name . ' admission call count');
+            $positions[$name] = strpos($entry, $call);
+            self::assertIsInt($positions[$name]);
+        }
+        self::assertLessThan($positions['bound'], $positions['lock']);
+        self::assertLessThan($positions['canary'], $positions['bound']);
+        self::assertLessThan($positions['receipt'], $positions['canary']);
+        self::assertStringContainsString('ordinary_assert_no_active_zero_surprise_canary', $entry);
+        self::assertStringNotContainsString('DEPLOY_RESULT_RECEIPT_ACTIVE=1', $entry);
+    }
+
+    #[Group('root-deployment')]
+    public function testDirectDeployGuardRejectsCanaryJournalOrCleanupUnitsAndAdmitsClearState(): void
+    {
+        $result = $this->runShell(
+            <<<'BASH'
+            set -eu
+            fixture="$(mktemp -d)"
+            trap 'rm -rf "$fixture"' EXIT
+            mkdir -p "$fixture/bin"
+            cat > "$fixture/bin/systemctl" <<'SH'
+            #!/usr/bin/env bash
+            case "${CANARY_MODE:-clear}:$2" in
+              timer:fh-zero-surprise-canary-cleanup.timer|service:fh-zero-surprise-canary-cleanup.service)
+                printf 'LoadState=loaded\nActiveState=active\nSubState=running\nUnitFileState=enabled\nResult=success\n'
+                ;;
+              timer:fh-zero-surprise-canary-cleanup.service|service:fh-zero-surprise-canary-cleanup.timer|clear:fh-zero-surprise-canary-cleanup.timer|clear:fh-zero-surprise-canary-cleanup.service)
+                printf 'Result=success\nSubState=dead\nLoadState=not-found\nUnitFileState=\nActiveState=inactive\n'
+                ;;
+              *) exit 1 ;;
+            esac
+            SH
+            chmod 755 "$fixture/bin/systemctl"
+            source ./deploy_ea.sh
+            ZERO_SURPRISE_CANARY_ACTIVE_STATE_FILE="$fixture/active.json"
+            ZERO_SURPRISE_CANARY_CLEANUP_TIMER='fh-zero-surprise-canary-cleanup.timer'
+            ZERO_SURPRISE_CANARY_CLEANUP_SERVICE='fh-zero-surprise-canary-cleanup.service'
+            SYSTEMCTL_BASE=("$fixture/bin/systemctl")
+
+            printf 'active\n' > "$ZERO_SURPRISE_CANARY_ACTIVE_STATE_FILE"
+            set +e
+            ordinary_assert_no_active_zero_surprise_canary
+            journal_status=$?
+            set -e
+            [[ "$journal_status" -eq 75 ]]
+            rm -f "$ZERO_SURPRISE_CANARY_ACTIVE_STATE_FILE"
+
+            CANARY_MODE=timer
+            export CANARY_MODE
+            set +e
+            ordinary_assert_no_active_zero_surprise_canary
+            timer_status=$?
+            set -e
+            [[ "$timer_status" -eq 75 ]]
+
+            CANARY_MODE=service
+            export CANARY_MODE
+            set +e
+            ordinary_assert_no_active_zero_surprise_canary
+            service_status=$?
+            set -e
+            [[ "$service_status" -eq 75 ]]
+
+            CANARY_MODE=clear
+            export CANARY_MODE
+            ordinary_assert_no_active_zero_surprise_canary
+            BASH
+            ,
+        );
+
+        self::assertSame(0, $result['exit_code'], $result['stdout'] . $result['stderr']);
+    }
+
+    #[Group('root-deployment')]
+    public function testDirectDeployGuardRejectsMalformedCleanupUnitState(): void
+    {
+        $result = $this->runShell(
+            <<<'BASH'
+            set -eu
+            fixture="$(mktemp -d)"
+            trap 'rm -rf "$fixture"' EXIT
+            mkdir -p "$fixture/bin"
+            cat > "$fixture/bin/systemctl" <<'SH'
+            #!/usr/bin/env bash
+            printf 'LoadState=not-found\nActiveState=inactive\nLoadState=not-found\nSubState=dead\nUnitFileState=\nResult=success\n'
+            SH
+            chmod 755 "$fixture/bin/systemctl"
+            source ./deploy_ea.sh
+            ZERO_SURPRISE_CANARY_ACTIVE_STATE_FILE="$fixture/absent.json"
+            SYSTEMCTL_BASE=("$fixture/bin/systemctl")
+            set +e
+            ordinary_assert_no_active_zero_surprise_canary
+            status=$?
+            set -e
+            [[ "$status" -eq 75 ]]
+            BASH
+            ,
+        );
+
+        self::assertSame(0, $result['exit_code'], $result['stdout'] . $result['stderr']);
+    }
+
+    #[Group('root-deployment')]
     public function testPendingRecoveryGuardBlocksDirectPrimitiveWithoutBoundIdentity(): void
     {
         $result = $this->runShell(
@@ -226,6 +348,296 @@ final class DeployStableResultTest extends TestCase
             if ($createdDirectory) {
                 @rmdir($lockDirectory);
                 @rmdir(dirname($lockDirectory));
+            }
+        }
+    }
+
+    #[Group('root-deployment')]
+    public function testFullEntryRejectsActiveCanaryBeforePublishingOrStaging(): void
+    {
+        if (function_exists('posix_geteuid') && posix_geteuid() !== 0) {
+            self::markTestSkipped('root fixture required');
+        }
+        if (
+            (!is_file('/.dockerenv') && getenv('FH_ROOT_HOST_TESTS_REQUIRED') !== '1') ||
+            str_starts_with((string) gethostname(), 'booking-server')
+        ) {
+            self::markTestSkipped('fixed production-path fixture restricted to isolated root test runners');
+        }
+
+        $release = 'ea_canary_full_entry_' . getmypid();
+        $result = '/root/fh-canary-entry-result-' . getmypid() . '.json';
+        $log = '/var/log/deploy_ea_' . $release . '.log';
+        $stage = '/var/www/html/easyappointments_' . $release . '_stage';
+        $previous = '/var/www/html/easyappointments_prev_' . $release;
+        if (
+            is_file($result) ||
+            is_link($result) ||
+            is_file($log) ||
+            is_link($log) ||
+            is_dir($stage) ||
+            is_link($stage) ||
+            is_dir($previous) ||
+            is_link($previous)
+        ) {
+            self::markTestSkipped('fixed deployment artifact path already exists');
+        }
+
+        $state = '/var/lib/fh-zero-surprise-canary/active.json';
+        $stateParent = dirname($state);
+        if (is_file($state) || is_link($state)) {
+            self::markTestSkipped('fixed canary journal already exists');
+        }
+        $createdStateParent = false;
+        $stateParentIdentity = null;
+        $removeStateParent = function () use (&$createdStateParent, &$stateParentIdentity, $stateParent): void {
+            if (!$createdStateParent) {
+                return;
+            }
+            $current = @lstat($stateParent);
+            if (
+                is_array($stateParentIdentity) &&
+                is_array($current) &&
+                $current['dev'] === $stateParentIdentity['dev'] &&
+                $current['ino'] === $stateParentIdentity['ino'] &&
+                $current['uid'] === $stateParentIdentity['uid'] &&
+                $current['gid'] === $stateParentIdentity['gid'] &&
+                $current['mode'] === $stateParentIdentity['mode']
+            ) {
+                @rmdir($stateParent);
+            }
+        };
+        if (!is_dir($stateParent)) {
+            if (!@mkdir($stateParent, 0700, true)) {
+                self::markTestSkipped('fixed canary journal parent unavailable');
+            }
+            $createdStateParent = true;
+            $stateParentIdentity = @lstat($stateParent);
+        }
+        if (
+            !is_dir($stateParent) ||
+            is_link($stateParent) ||
+            fileperms($stateParent) === false ||
+            (fileperms($stateParent) & 0777) !== 0700
+        ) {
+            $removeStateParent();
+            self::markTestSkipped('fixed canary journal parent is not isolated');
+        }
+
+        $lockDirectory = '/var/lib/fh-deploy-orchestrator/locks';
+        $lock = $lockDirectory . '/fh-production-change.lock';
+        $createdDirectory = false;
+        $lockDirectoryIdentity = null;
+        $createdOrchestratorRoot = false;
+        $orchestratorRoot = dirname($lockDirectory);
+        $orchestratorRootIdentity = null;
+        $removeCreatedLockDirectory = function () use (
+            &$createdDirectory,
+            &$lockDirectoryIdentity,
+            &$createdOrchestratorRoot,
+            &$orchestratorRootIdentity,
+            $lockDirectory,
+            $orchestratorRoot,
+        ): void {
+            $currentLockDirectory = $createdDirectory ? @lstat($lockDirectory) : null;
+            if (
+                $createdDirectory &&
+                is_array($lockDirectoryIdentity) &&
+                is_array($currentLockDirectory) &&
+                $currentLockDirectory['dev'] === $lockDirectoryIdentity['dev'] &&
+                $currentLockDirectory['ino'] === $lockDirectoryIdentity['ino'] &&
+                $currentLockDirectory['uid'] === $lockDirectoryIdentity['uid'] &&
+                $currentLockDirectory['gid'] === $lockDirectoryIdentity['gid'] &&
+                $currentLockDirectory['mode'] === $lockDirectoryIdentity['mode']
+            ) {
+                @rmdir($lockDirectory);
+            }
+            if (!$createdOrchestratorRoot) {
+                return;
+            }
+            $current = @lstat($orchestratorRoot);
+            if (
+                is_array($orchestratorRootIdentity) &&
+                is_array($current) &&
+                $current['dev'] === $orchestratorRootIdentity['dev'] &&
+                $current['ino'] === $orchestratorRootIdentity['ino'] &&
+                $current['uid'] === $orchestratorRootIdentity['uid'] &&
+                $current['gid'] === $orchestratorRootIdentity['gid'] &&
+                $current['mode'] === $orchestratorRootIdentity['mode']
+            ) {
+                @rmdir($orchestratorRoot);
+            }
+        };
+        $createdLock = false;
+        $createdLockIdentity = null;
+        $lockIdentity = null;
+        if (!is_dir($lockDirectory)) {
+            $createdOrchestratorRoot = !file_exists($orchestratorRoot) && !is_link($orchestratorRoot);
+            if (!mkdir($lockDirectory, 0700, true)) {
+                $removeStateParent();
+                self::markTestSkipped('production lock fixture directory unavailable');
+            }
+            $createdDirectory = true;
+            $lockDirectoryIdentity = @lstat($lockDirectory);
+            if (!is_array($lockDirectoryIdentity)) {
+                $removeCreatedLockDirectory();
+                $removeStateParent();
+                self::markTestSkipped('production lock fixture directory unavailable');
+            }
+            if ($createdOrchestratorRoot) {
+                $orchestratorRootIdentity = @lstat($orchestratorRoot);
+            }
+        }
+        if (is_link($lock)) {
+            $removeCreatedLockDirectory();
+            $removeStateParent();
+            self::markTestSkipped('production lock fixture is a symlink');
+        }
+        if (!is_file($lock)) {
+            $lockStream = @fopen($lock, 'x+b');
+            if (!is_resource($lockStream)) {
+                $removeCreatedLockDirectory();
+                $removeStateParent();
+                self::markTestSkipped('production lock fixture unavailable');
+            }
+            fclose($lockStream);
+            $createdLockIdentity = @lstat($lock);
+            if (!is_array($createdLockIdentity)) {
+                $removeCreatedLockDirectory();
+                $removeStateParent();
+                self::markTestSkipped('production lock fixture unavailable');
+            }
+            if (!chmod($lock, 0600)) {
+                $currentLock = @lstat($lock);
+                if (
+                    is_array($currentLock) &&
+                    $currentLock['dev'] === $createdLockIdentity['dev'] &&
+                    $currentLock['ino'] === $createdLockIdentity['ino'] &&
+                    $currentLock['uid'] === $createdLockIdentity['uid'] &&
+                    $currentLock['gid'] === $createdLockIdentity['gid'] &&
+                    $currentLock['mode'] === $createdLockIdentity['mode'] &&
+                    $currentLock['nlink'] === $createdLockIdentity['nlink']
+                ) {
+                    @unlink($lock);
+                }
+                $removeCreatedLockDirectory();
+                $removeStateParent();
+                self::markTestSkipped('production lock fixture unavailable');
+            }
+            clearstatcache(true, $lock);
+            $lockIdentity = @lstat($lock);
+            if (!is_array($lockIdentity)) {
+                $removeCreatedLockDirectory();
+                $removeStateParent();
+                self::markTestSkipped('production lock fixture unavailable');
+            }
+            $createdLock = true;
+        }
+
+        $trustedScript = '/root/fh-canary-entry-deploy-' . getmypid() . '.sh';
+        $trustedScriptIdentity = null;
+        $stateIdentity = null;
+        try {
+            $sourceContents = file_get_contents(dirname(__DIR__, 3) . '/deploy_ea.sh');
+            $scriptStream = @fopen($trustedScript, 'x+b');
+            if (!is_string($sourceContents) || !is_resource($scriptStream)) {
+                self::markTestSkipped('root-controlled deploy script fixture unavailable');
+            }
+            fwrite($scriptStream, $sourceContents);
+            fclose($scriptStream);
+            chmod($trustedScript, 0700);
+            $trustedScriptIdentity = lstat($trustedScript);
+
+            $stateStream = @fopen($state, 'x+b');
+            if (!is_resource($stateStream)) {
+                self::markTestSkipped('fixed canary journal became occupied');
+            }
+            fwrite($stateStream, "active\n");
+            fflush($stateStream);
+            fclose($stateStream);
+            chmod($state, 0600);
+            $stateIdentity = lstat($state);
+
+            $run = $this->runCommand([
+                'bash',
+                $trustedScript,
+                '--rel',
+                $release,
+                '--result-file',
+                $result,
+                '--reload',
+                'php8.2-fpm',
+                '--require-zero-surprise',
+                '0',
+                '--zero-surprise-canary-enabled',
+                '0',
+                '--zero-surprise-breakglass-file',
+                '/root/fh-canary-entry-ack.json',
+            ]);
+            self::assertSame(30, $run['exit_code'], $run['stdout'] . $run['stderr']);
+            self::assertStringContainsString(
+                'Active or unresolved zero-surprise canary blocks deployment.',
+                $run['stdout'] . $run['stderr'],
+            );
+            self::assertFileDoesNotExist($result);
+            self::assertFileDoesNotExist($log);
+            self::assertDirectoryDoesNotExist($stage);
+            self::assertDirectoryDoesNotExist($previous);
+        } finally {
+            $currentState = @lstat($state);
+            if (
+                is_array($stateIdentity) &&
+                is_array($currentState) &&
+                $currentState['dev'] === $stateIdentity['dev'] &&
+                $currentState['ino'] === $stateIdentity['ino'] &&
+                $currentState['uid'] === $stateIdentity['uid'] &&
+                $currentState['gid'] === $stateIdentity['gid'] &&
+                $currentState['mode'] === $stateIdentity['mode'] &&
+                $currentState['nlink'] === $stateIdentity['nlink']
+            ) {
+                @unlink($state);
+            }
+            $currentTrustedScript = @lstat($trustedScript);
+            if (
+                is_array($trustedScriptIdentity) &&
+                is_array($currentTrustedScript) &&
+                $currentTrustedScript['dev'] === $trustedScriptIdentity['dev'] &&
+                $currentTrustedScript['ino'] === $trustedScriptIdentity['ino'] &&
+                $currentTrustedScript['uid'] === $trustedScriptIdentity['uid'] &&
+                $currentTrustedScript['gid'] === $trustedScriptIdentity['gid'] &&
+                $currentTrustedScript['mode'] === $trustedScriptIdentity['mode'] &&
+                $currentTrustedScript['nlink'] === $trustedScriptIdentity['nlink']
+            ) {
+                @unlink($trustedScript);
+            }
+            if ($createdLock) {
+                $currentLock = @lstat($lock);
+                if (
+                    is_array($lockIdentity) &&
+                    is_array($currentLock) &&
+                    $currentLock['dev'] === $lockIdentity['dev'] &&
+                    $currentLock['ino'] === $lockIdentity['ino'] &&
+                    $currentLock['uid'] === $lockIdentity['uid'] &&
+                    $currentLock['gid'] === $lockIdentity['gid'] &&
+                    $currentLock['mode'] === $lockIdentity['mode'] &&
+                    $currentLock['nlink'] === $lockIdentity['nlink']
+                ) {
+                    @unlink($lock);
+                }
+            }
+            $removeCreatedLockDirectory();
+            $removeStateParent();
+            if ($createdOrchestratorRoot) {
+                self::assertFalse(
+                    file_exists($orchestratorRoot) || is_link($orchestratorRoot),
+                    'test-created orchestrator root must be absent after teardown',
+                );
+            }
+            if ($createdStateParent) {
+                self::assertFalse(
+                    file_exists($stateParent) || is_link($stateParent),
+                    'test-created canary state parent must be absent after teardown',
+                );
             }
         }
     }

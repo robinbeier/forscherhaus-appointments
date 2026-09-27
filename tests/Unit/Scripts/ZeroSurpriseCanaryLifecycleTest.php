@@ -28,9 +28,19 @@ final class ZeroSurpriseCanaryLifecycleTest extends TestCase
     {
         $dir = sys_get_temp_dir() . '/canary-wrapper-test-' . bin2hex(random_bytes(8));
         self::assertTrue(mkdir($dir, 0700));
+        $lock = $dir . '/production.lock';
+        self::assertSame(0, file_put_contents($lock, ''));
+        $wrapper = $dir . '/zero_surprise_canary_fixture.sh';
+        $source = (string) file_get_contents(dirname(__DIR__, 3) . '/scripts/ops/zero_surprise_canary_fixture.sh');
+        $binding = "lock_path='/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock'";
+        self::assertStringContainsString($binding, $source);
+        file_put_contents($wrapper, str_replace($binding, "lock_path='$lock'", $source));
         $scripts = [
-            'realpath' => "#!/bin/sh\nprintf '/synthetic/canary\\n'\n",
-            'stat' => "#!/bin/sh\nprintf '1:2\\n'\n",
+            'realpath' =>
+                "#!/bin/sh\ncase \"\$*\" in *\"\$CANARY_TEST_LOCK\") printf '%s\\n' \"\$CANARY_TEST_LOCK\" ;; *) printf '/synthetic/canary\\n' ;; esac\n",
+            'stat' =>
+                "#!/bin/sh\ncase \"\$*\" in *'%a:%u:%g:%h:%s:%d:%i'*) printf '600:0:0:1:0:1:2\\n' ;; *'%a:%u:%g'*) printf '700:0:0\\n' ;; *) printf '1:2\\n' ;; esac\n",
+            'flock' => "#!/bin/sh\nexit 0\n",
             'id' => "#!/bin/sh\nprintf '0\\n'\n",
             'php' => "#!/bin/sh\nprintf 'php:%s\\n' \"\$4\" >> \"\$CANARY_TEST_LOG\"\n",
             'systemd-run' => "#!/bin/sh\nprintf 'systemd-run\\n' >> \"\$CANARY_TEST_LOG\"\n",
@@ -45,10 +55,11 @@ final class ZeroSurpriseCanaryLifecycleTest extends TestCase
             $env = array_merge(getenv(), [
                 'PATH' => $dir . ':' . getenv('PATH'),
                 'CANARY_TEST_LOG' => $dir . '/events',
+                'CANARY_TEST_LOCK' => $lock,
                 'APP_ROOT' => '/nonexistent/synthetic-canary',
             ]);
             $process = proc_open(
-                ['bash', dirname(__DIR__, 3) . '/scripts/ops/zero_surprise_canary_fixture.sh', $action],
+                ['bash', $wrapper, $action],
                 [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
                 $pipes,
                 null,
@@ -62,7 +73,10 @@ final class ZeroSurpriseCanaryLifecycleTest extends TestCase
             self::assertSame(0, proc_close($process), $out . $err);
             return file($dir . '/events', FILE_IGNORE_NEW_LINES) ?: [];
         } finally {
-            foreach (array_merge(array_keys($scripts), ['events']) as $name) {
+            foreach (
+                array_merge(array_keys($scripts), ['events', 'production.lock', 'zero_surprise_canary_fixture.sh'])
+                as $name
+            ) {
                 if (is_file($dir . '/' . $name)) {
                     unlink($dir . '/' . $name);
                 }
