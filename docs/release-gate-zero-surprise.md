@@ -382,6 +382,12 @@ rollback rename does not redirect cleanup into another release. Normal cleanup
 stops the pending timer after fixture verification. Cleanup errors fail the
 canary and retain the independent timer. No persistent monitor or cron job is
 installed by this lifecycle.
+The fixture wrapper acquires the shared production lock for each lifecycle
+transition, reusing the deploy runner's inherited lock descriptor when the
+canary is part of deployment. Release admission checks the journal and both
+cleanup units before deployment and again under that lock before reserving a
+release intent. Any present or unknown state blocks the switch, so recovery
+uses the original release.
 
 The state file acts as a pre-commit journal. If activation rolls back after the
 journal is published, verification reports `cleanup_pending`; deactivation can

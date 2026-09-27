@@ -119,7 +119,7 @@ ordinary_production_change_lock() {
     exec {ordinary_fd}>&-
     return 1
   fi
-  ORDINARY_CHANGE_LOCK_FD="$ordinary_fd"
+  export ORDINARY_CHANGE_LOCK_FD="$ordinary_fd"
 }
 
 ordinary_assert_no_pending_probe() {

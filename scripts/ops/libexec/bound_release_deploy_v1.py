@@ -26,6 +26,8 @@ LOCK = '/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock'
 CONTINUITY = '/root/backups/easyappointments/backup_continuity_state.json'
 MARKER = '/var/www/html/easyappointments/_RELEASE'
 RECOVERY_GUARD = '/root/fh-deploy-recovery-pending.v1.json'
+CANARY_STATE = '/var/lib/fh-zero-surprise-canary/active.json'
+CANARY_UNITS = ('fh-zero-surprise-canary-cleanup.timer', 'fh-zero-surprise-canary-cleanup.service')
 CONFIGS = (
     # config.php is intentionally bound to the runtime user's primary group
     # at invocation time.  The other credentials remain root-owned specs.
@@ -172,6 +174,30 @@ def no_recovery():
     for path in RECOVERY:
         if os.path.lexists(path):
             fail('recovery_pending')
+
+
+def no_canary_recovery():
+    if os.path.lexists(CANARY_STATE):
+        fail('canary_recovery_pending')
+    for unit in CANARY_UNITS:
+        try:
+            output = subprocess.check_output(
+                ['systemctl', 'show', unit,
+                 '--property=LoadState,ActiveState,SubState,UnitFileState,Result', '--no-pager'],
+                stderr=subprocess.DEVNULL,
+                text=True,
+            )
+        except (OSError, subprocess.CalledProcessError):
+            fail('canary_cleanup_unit_unknown')
+        state = dict(line.split('=', 1) for line in output.splitlines() if '=' in line)
+        if state != {
+            'LoadState': 'not-found',
+            'ActiveState': 'inactive',
+            'SubState': 'dead',
+            'UnitFileState': '',
+            'Result': 'success',
+        }:
+            fail('canary_cleanup_unresolved')
 
 
 def reserve_recovery_guard(release, expected_active_release, run_id, intent_path, result_path):
@@ -427,6 +453,7 @@ def run(args):
         if config_bindings() != before:
             fail('config_drift')
         no_recovery()
+        no_canary_recovery()
         active_release(args.expected_active_release)
         bound_hash(DEPLOY, 1024 * 1024, 0o700, 0, 0, args.deploy_sha)
         bindings = {

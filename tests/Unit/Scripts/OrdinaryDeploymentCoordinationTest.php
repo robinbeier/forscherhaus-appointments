@@ -187,9 +187,34 @@ final class OrdinaryDeploymentCoordinationTest extends TestCase
     public function testVerifiedInheritedLockSupportsAnExistingMigrationDeploymentWindow(): void
     {
         $result = $this->runShell(
-            'source ./deploy_ea.sh; ordinary_production_change_lock "$1"; export ORDINARY_CHANGE_LOCK_FD; /bin/bash -c \'source ./deploy_ea.sh; ordinary_production_change_lock "$1"\' bash "$1"',
+            'source ./deploy_ea.sh; ordinary_production_change_lock "$1"; /bin/bash -c \'source ./deploy_ea.sh; ordinary_production_change_lock "$1"\' bash "$1"',
             [$this->lock],
         );
+        self::assertSame(0, $result['exit_code'], $result['stderr']);
+    }
+
+    public function testDirectDeploymentPassesItsLockThroughPhpProcessRunner(): void
+    {
+        $probe = $this->directory . '/php-lock-probe.php';
+        file_put_contents(
+            $probe,
+            <<<'PHP'
+            <?php
+            require getcwd() . '/scripts/release-gate/lib/GateProcessRunner.php';
+            $result = \ReleaseGate\GateProcessRunner::run(
+                ['bash', '-c', 'fd="${ORDINARY_CHANGE_LOCK_FD:-}"; [[ "$fd" =~ ^[0-9]+$ ]] && [[ -e "/proc/$$/fd/$fd" ]] && [[ "$(stat -Lc %d:%i -- "/proc/$$/fd/$fd")" == "$(stat -c %d:%i -- "$1")" ]]', 'canary-lock-probe', $argv[1]],
+                getcwd(),
+                null,
+                10,
+            );
+            exit($result['exit_code']);
+            PHP
+            ,
+        );
+        $result = $this->runShell('source ./deploy_ea.sh; ordinary_production_change_lock "$1"; php "$2" "$1"', [
+            $this->lock,
+            $probe,
+        ]);
         self::assertSame(0, $result['exit_code'], $result['stderr']);
     }
 

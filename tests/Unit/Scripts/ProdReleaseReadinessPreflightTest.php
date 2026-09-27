@@ -10,6 +10,7 @@ final class ProdReleaseReadinessPreflightTest extends TestCase
     private string $lockPath = '';
     private string $timerTransitionMarker = '';
     private string $deployRecoveryMarker = '';
+    private string $canaryState = '';
     /** @var list<string> */ private array $helpers = [];
 
     protected function setUp(): void
@@ -21,6 +22,8 @@ final class ProdReleaseReadinessPreflightTest extends TestCase
         $this->app = $this->root . '/app';
         $this->timerTransitionMarker = $this->root . '/backup-timer-transition.v1.json';
         $this->deployRecoveryMarker = $this->root . '/fh-deploy-recovery-pending.v1.json';
+        $this->canaryState = $this->root . '/canary/active.json';
+        mkdir(dirname($this->canaryState), 0700, true);
         mkdir($this->app, 0755, true);
         mkdir($this->root . '/locks', 0700, true);
         chmod($this->root . '/locks', 0700);
@@ -61,6 +64,7 @@ final class ProdReleaseReadinessPreflightTest extends TestCase
             #!/bin/sh
             unit="$*"; name="$2"
             case "$name" in
+              fh-zero-surprise-canary-cleanup.timer|fh-zero-surprise-canary-cleanup.service) if [ "${CANARY_MODE:-clear}" = unresolved ]; then printf 'LoadState=loaded\nActiveState=active\nSubState=running\nUnitFileState=enabled\nResult=success\n'; elif [ "${CANARY_MODE:-clear}" = loaded ]; then printf 'LoadState=loaded\nActiveState=inactive\nSubState=dead\nUnitFileState=disabled\nResult=success\n'; else printf 'LoadState=not-found\nActiveState=inactive\nSubState=dead\nUnitFileState=\nResult=success\n'; fi ;;
               fh-defense-ordinary-cleanup.timer) printf 'LoadState=not-found\nActiveState=inactive\nSubState=dead\nUnitFileState=\nResult=success\n' ;;
               fh-release-archive-dump-retention.timer) printf 'LoadState=loaded\nActiveState=inactive\nSubState=dead\nUnitFileState=disabled\nResult=success\n' ;;
               *) if [ "${SYSTEMCTL_MODE:-ok}" = timer_bad ] && [ "$name" = fh-backup-set-continuity.timer ]; then printf 'LoadState=loaded\nActiveState=inactive\nSubState=dead\nUnitFileState=enabled\nResult=success\n'; else printf 'LoadState=loaded\nActiveState=active\nSubState=waiting\nUnitFileState=enabled\nResult=success\n'; fi ;;
@@ -78,13 +82,16 @@ final class ProdReleaseReadinessPreflightTest extends TestCase
             while [[ $# -gt 0 && "$1" != bash ]]; do shift; done
             [[ "$1" == bash ]] || exit 97
             shift 3
-            base=("${@:1:10}")
+            base=("${@:1:13}")
             base[0]=%s
             base[2]=%s
             base[3]=%s
             base[8]=%s
             base[9]=%s
-            shift 10
+            base[10]=%s
+            base[11]=fh-zero-surprise-canary-cleanup.timer
+            base[12]=fh-zero-surprise-canary-cleanup.service
+            shift 13
             mapped=()
             for spec in "$@"; do
               case "$spec" in
@@ -103,6 +110,7 @@ final class ProdReleaseReadinessPreflightTest extends TestCase
             var_export($this->root . '/ordinary/request-unconfirmed', true),
             var_export($this->timerTransitionMarker, true),
             var_export($this->deployRecoveryMarker, true),
+            var_export($this->canaryState, true),
             $helperFixtures[0],
             $helperFixtures[1],
             $helperFixtures[2],
@@ -188,6 +196,40 @@ final class ProdReleaseReadinessPreflightTest extends TestCase
         [$status, $out] = $this->executePreflight();
         self::assertSame(20, $status);
         self::assertStringContainsString('recovery_pending', $out);
+    }
+
+    public function testUnresolvedCanaryJournalBlocksReadinessWithoutReadingItsContents(): void
+    {
+        file_put_contents($this->canaryState, "not-json\n");
+        chmod($this->canaryState, 0600);
+        [$status, $out] = $this->executePreflight();
+        self::assertSame(20, $status);
+        self::assertStringContainsString('result_class=canary_recovery_pending', $out);
+    }
+
+    public function testUnresolvedCanaryCleanupUnitBlocksReadiness(): void
+    {
+        [$status, $out] = $this->executePreflight(['CANARY_MODE' => 'unresolved']);
+        self::assertSame(20, $status);
+        self::assertStringContainsString('result_class=canary_cleanup_unresolved', $out);
+    }
+
+    public function testPresentInactiveCanaryCleanupUnitAlsoBlocksReadiness(): void
+    {
+        [$status, $out] = $this->executePreflight(['CANARY_MODE' => 'loaded']);
+        self::assertSame(20, $status);
+        self::assertStringContainsString('result_class=canary_cleanup_unresolved', $out);
+    }
+
+    public function testCanaryStateSymlinkBlocksReadiness(): void
+    {
+        $target = $this->root . '/canary-target.json';
+        file_put_contents($target, "opaque\n");
+        chmod($target, 0600);
+        self::assertTrue(symlink($target, $this->canaryState));
+        [$status, $out] = $this->executePreflight();
+        self::assertSame(20, $status);
+        self::assertStringContainsString('result_class=canary_recovery_pending', $out);
     }
 
     public function testNonCanonicalBindingsAreRejectedBeforeAnySshCall(): void

@@ -11,6 +11,9 @@ TIMER_TRANSITION_MARKER='/var/lib/fh-deploy-orchestrator/backup-timer-transition
 DEPLOY_RECOVERY_MARKER='/root/fh-deploy-recovery-pending.v1.json'
 CLEANUP_TIMER='fh-defense-ordinary-cleanup.timer'; RETENTION_TIMER='fh-release-archive-dump-retention.timer'
 BACKUP_TIMER='fh-backup-set-continuity.timer'; SESSION_TIMER='fh-session-retention.timer'
+CANARY_STATE_FILE='/var/lib/fh-zero-surprise-canary/active.json'
+CANARY_CLEANUP_TIMER='fh-zero-surprise-canary-cleanup.timer'
+CANARY_CLEANUP_SERVICE='fh-zero-surprise-canary-cleanup.service'
 HELPERS=()
 usage() { printf '%s\n' 'Usage: prod_release_readiness_preflight.sh --expected-active-release EA_ID [--prod-ssh-target root@booking-server]'; }
 while (( $# > 0 )); do
@@ -50,9 +53,9 @@ done
 prod_require_cmd ssh
 receipt_file="$(mktemp "${TMPDIR:-/tmp}/prod-release-readiness.XXXXXX")"
 trap 'rm -f -- "$receipt_file"' EXIT
-if ssh "${SSH_OPTIONS[@]}" "$PROD_SSH_TARGET" bash -s -- "$APP_ROOT" "$EXPECTED_RELEASE" "$LOCK_PATH" "$RECOVERY_MARKER" "$CLEANUP_TIMER" "$RETENTION_TIMER" "$BACKUP_TIMER" "$SESSION_TIMER" "$TIMER_TRANSITION_MARKER" "$DEPLOY_RECOVERY_MARKER" "${HELPERS[@]}" >"$receipt_file" 2>/dev/null <<'REMOTE'
+if ssh "${SSH_OPTIONS[@]}" "$PROD_SSH_TARGET" bash -s -- "$APP_ROOT" "$EXPECTED_RELEASE" "$LOCK_PATH" "$RECOVERY_MARKER" "$CLEANUP_TIMER" "$RETENTION_TIMER" "$BACKUP_TIMER" "$SESSION_TIMER" "$TIMER_TRANSITION_MARKER" "$DEPLOY_RECOVERY_MARKER" "$CANARY_STATE_FILE" "$CANARY_CLEANUP_TIMER" "$CANARY_CLEANUP_SERVICE" "${HELPERS[@]}" >"$receipt_file" 2>/dev/null <<'REMOTE'
 set -u
-APP_ROOT="$1"; EXPECTED_RELEASE="$2"; LOCK_PATH="$3"; RECOVERY_MARKER="$4"; CLEANUP_TIMER="$5"; RETENTION_TIMER="$6"; BACKUP_TIMER="$7"; SESSION_TIMER="$8"; TIMER_TRANSITION_MARKER="$9"; DEPLOY_RECOVERY_MARKER="${10}"; shift 10
+APP_ROOT="$1"; EXPECTED_RELEASE="$2"; LOCK_PATH="$3"; RECOVERY_MARKER="$4"; CLEANUP_TIMER="$5"; RETENTION_TIMER="$6"; BACKUP_TIMER="$7"; SESSION_TIMER="$8"; TIMER_TRANSITION_MARKER="$9"; DEPLOY_RECOVERY_MARKER="${10}"; CANARY_STATE_FILE="${11}"; CANARY_CLEANUP_TIMER="${12}"; CANARY_CLEANUP_SERVICE="${13}"; shift 13
 result() {
     printf 'schema=production_release_readiness.v1\nstatus=%s\nresult_class=%s\ncaptured_at_utc=%s\nsource_marker=app_root/_RELEASE\nsource_lock=shared_production_lock\nsource_timers=systemctl_show\nsource_tools=tracked_local_vs_installed_sha256\ninvalidation=first_mutation_or_identity_change\n' \
         "$1" "$2" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -132,6 +135,25 @@ timer_state() {
             ;;
     esac
 }
+canary_unit_clear() {
+    local unit="$1" observed line key value
+    local load='' active='' sub='' file_state='' result_state=''
+    observed="$(systemctl show "$unit" \
+        --property=LoadState,ActiveState,SubState,UnitFileState,Result --no-pager 2>/dev/null)" || fail canary_cleanup_unit_unknown
+    while IFS='=' read -r key value; do
+        case "$key" in
+            LoadState) load="$value" ;;
+            ActiveState) active="$value" ;;
+            SubState) sub="$value" ;;
+            UnitFileState) file_state="$value" ;;
+            Result) result_state="$value" ;;
+        esac
+    done <<< "$observed"
+    [[ "$load" == not-found && "$active" == inactive && "$sub" == dead && "$file_state" == '' ]] || fail canary_cleanup_unresolved
+}
+[[ ! -e "$CANARY_STATE_FILE" && ! -L "$CANARY_STATE_FILE" ]] || fail canary_recovery_pending
+canary_unit_clear "$CANARY_CLEANUP_TIMER"
+canary_unit_clear "$CANARY_CLEANUP_SERVICE"
 timer_state "$BACKUP_TIMER" active
 timer_state "$SESSION_TIMER" active
 timer_state "$RETENTION_TIMER" inactive
@@ -176,7 +198,7 @@ if (( valid_receipt )); then
     [[ "${receipt[0]}" == 'schema=production_release_readiness.v1' ]] || valid_receipt=0
     [[ "${receipt[1]}" == 'status=passed' || "${receipt[1]}" == 'status=failed' ]] || valid_receipt=0
     case "${receipt[2]}" in
-        result_class=readiness_verified|result_class=remote_not_root|result_class=app_root_invalid|result_class=app_root_identity_invalid|result_class=marker_missing|result_class=marker_identity_invalid|result_class=marker_unreadable|result_class=marker_identity_changed|result_class=marker_format_unknown|result_class=marker_release_mismatch|result_class=marker_timestamp_invalid|result_class=marker_timestamp_future|result_class=lock_missing|result_class=lock_parent_identity_invalid|result_class=lock_identity_invalid|result_class=recovery_parent_identity_invalid|result_class=recovery_pending|result_class=timer_unknown|result_class=timer_not_active|result_class=timer_unexpected|result_class=helper_spec_invalid|result_class=helper_parent_identity_invalid|result_class=helper_identity_invalid|result_class=helper_unreadable|result_class=helper_identity_changed|result_class=helper_hash_mismatch) ;;
+        result_class=readiness_verified|result_class=remote_not_root|result_class=app_root_invalid|result_class=app_root_identity_invalid|result_class=marker_missing|result_class=marker_identity_invalid|result_class=marker_unreadable|result_class=marker_identity_changed|result_class=marker_format_unknown|result_class=marker_release_mismatch|result_class=marker_timestamp_invalid|result_class=marker_timestamp_future|result_class=lock_missing|result_class=lock_parent_identity_invalid|result_class=lock_identity_invalid|result_class=recovery_parent_identity_invalid|result_class=recovery_pending|result_class=canary_recovery_pending|result_class=canary_cleanup_unit_unknown|result_class=canary_cleanup_unresolved|result_class=timer_unknown|result_class=timer_not_active|result_class=timer_unexpected|result_class=helper_spec_invalid|result_class=helper_parent_identity_invalid|result_class=helper_identity_invalid|result_class=helper_unreadable|result_class=helper_identity_changed|result_class=helper_hash_mismatch) ;;
         *) valid_receipt=0 ;;
     esac
     [[ "${receipt[3]}" =~ ^captured_at_utc=20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || valid_receipt=0

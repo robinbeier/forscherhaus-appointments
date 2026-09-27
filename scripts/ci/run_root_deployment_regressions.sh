@@ -39,4 +39,5 @@ sudo python3 -m unittest tests.Unit.Scripts.release_archive_dump_retention_v1_te
 sudo python3 -B -m unittest \
   tests.Unit.Scripts.backup_handoff_admission_v1_test \
   tests.Unit.Scripts.bound_release_deploy_v1_test \
-  tests.Unit.Scripts.bound_release_recovery_inspect_v1_test
+  tests.Unit.Scripts.bound_release_recovery_inspect_v1_test \
+  tests.Unit.Scripts.zero_surprise_canary_fixture_lock_test
