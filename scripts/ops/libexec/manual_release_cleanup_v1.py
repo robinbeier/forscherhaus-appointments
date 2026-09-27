@@ -89,6 +89,66 @@ def archive_identity(helper, releases, release_id):
     return helper.file_identity(before)
 
 
+def tree_metadata_sha256(web, name, expected_identity):
+    """Bind every nested name and inode metadata without reading application bytes."""
+    root = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                   dir_fd=web)
+    pending = [(root, b'')]
+    digest = hashlib.sha256()
+    count = 0
+    try:
+        while pending:
+            directory, prefix = pending.pop()
+            try:
+                before = os.fstat(directory)
+                if prefix == b'' and (before.st_dev, before.st_ino, before.st_mode,
+                                      before.st_uid, before.st_gid, before.st_nlink) != tuple(expected_identity):
+                    reject('candidate_changed', 75)
+                digest.update(b'D')
+                digest.update(len(prefix).to_bytes(4, 'big'))
+                digest.update(prefix)
+                digest.update(canonical(metadata_record(before)))
+                count += 1
+                for entry in sorted(os.listdir(directory), key=os.fsencode):
+                    path = prefix + b'/' + os.fsencode(entry)
+                    observed = os.stat(entry, dir_fd=directory, follow_symlinks=False)
+                    if stat.S_ISDIR(observed.st_mode):
+                        child = os.open(entry, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                                        dir_fd=directory)
+                        if metadata_record(os.fstat(child)) != metadata_record(observed):
+                            os.close(child)
+                            reject('tree_changed', 75)
+                        pending.append((child, path))
+                    elif stat.S_ISREG(observed.st_mode):
+                        leaf = os.open(entry, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK,
+                                       dir_fd=directory)
+                        try:
+                            if metadata_record(os.fstat(leaf)) != metadata_record(observed):
+                                reject('tree_changed', 75)
+                        finally:
+                            os.close(leaf)
+                        digest.update(b'F')
+                        digest.update(len(path).to_bytes(4, 'big'))
+                        digest.update(path)
+                        digest.update(canonical(metadata_record(observed)))
+                        count += 1
+                    else:
+                        reject('tree_changed', 75)
+                if metadata_record(os.fstat(directory)) != metadata_record(before):
+                    reject('tree_changed', 75)
+            finally:
+                os.close(directory)
+    finally:
+        for directory, _ in pending:
+            os.close(directory)
+    return digest.hexdigest(), count
+
+
+def metadata_record(value):
+    return (value.st_dev, value.st_ino, value.st_mode, value.st_uid, value.st_gid,
+            value.st_nlink, value.st_size, value.st_blocks, value.st_mtime_ns, value.st_ctime_ns)
+
+
 def candidate_record(helper, web, releases, name, web_uid, device, now_ns):
     tree = helper.validate_candidate_tree(web, name, {0, web_uid}, device)
     age_ns = now_ns - tree['mtime_ns']
@@ -100,11 +160,15 @@ def candidate_record(helper, web, releases, name, web_uid, device, now_ns):
     finally:
         os.close(candidate)
     archive = archive_identity(helper, releases, contained_release)
+    metadata_sha, metadata_count = tree_metadata_sha256(web, name, tree['identity'])
+    if metadata_count != tree['inodes']:
+        reject('tree_changed', 75)
     return {
         'name': name,
         'contained_release': contained_release,
         'age_days': age_ns // (86400 * 1_000_000_000),
         'tree': tree,
+        'tree_metadata_sha256': metadata_sha,
         'archive_identity': archive,
     }
 
@@ -148,6 +212,7 @@ def collect(helper, web, releases, state, current, rollback, web_uid):
                 'mtime_ns': item['tree']['mtime_ns'],
                 'allocated_bytes': item['tree']['allocated'],
                 'inode_count': item['tree']['inodes'],
+                'tree_metadata_sha256': item['tree_metadata_sha256'],
                 'archive_identity': item['archive_identity'],
             }
             for item in selected
@@ -220,6 +285,9 @@ def run(mode, expected_plan_sha=None, helper=None):
                 reject('candidate_changed', 75)
             if archive_identity(helper, releases, item['contained_release']) != item['archive_identity']:
                 reject('candidate_archive_changed', 75)
+            metadata_sha, metadata_count = tree_metadata_sha256(web, item['name'], item['tree']['identity'])
+            if metadata_sha != item['tree_metadata_sha256'] or metadata_count != item['tree']['inodes']:
+                reject('tree_changed', 75)
             if helper.open_file_identities([item['tree']]):
                 reject('candidate_open', 75)
             if helper.activity_count() != 0:

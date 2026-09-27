@@ -7,8 +7,9 @@ reactivate that service.
 
 The procedure has two invocations: a read-only plan and an execution that must
 be supplied the exact SHA-256 digest of that plan. The plan binds the selected
-directory identities, contained release IDs, ages, sizes, inode counts, and
-archive identities. Any change between planning and execution stops the run.
+directory identities, contained release IDs, ages, sizes, inode counts,
+metadata fingerprints of every nested path, and archive identities. Any
+change between planning and execution stops the run.
 
 The global cleanup lock and the production-change lock must be available. The
 procedure stops on active production work, open candidate files, pending

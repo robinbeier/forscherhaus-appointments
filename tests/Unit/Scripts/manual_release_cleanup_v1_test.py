@@ -51,11 +51,13 @@ class FixtureHelper:
 
     def validate_candidate_tree(self, web_fd, name, owners, device):
         stat_result = os.stat(name, dir_fd=web_fd, follow_symlinks=False)
+        candidate = os.path.join(self.root, 'web', name)
+        inode_count = sum(1 + len(files) for _, _, files in os.walk(candidate))
         return {
             'identity': self._identity(stat_result),
             'mtime_ns': stat_result.st_mtime_ns,
             'allocated': stat_result.st_blocks * 512,
-            'inodes': 1,
+            'inodes': inode_count,
         }
 
     def open_child_directory(self, parent_fd, name):
@@ -190,6 +192,96 @@ class ManualReleaseCleanupTest(unittest.TestCase):
         digest = hashlib.sha256(CLEANUP.canonical(plan)).hexdigest()
         plan['selected'][0]['name'] = 'easyappointments_prev-other'
         self.assertNotEqual(digest, hashlib.sha256(CLEANUP.canonical(plan)).hexdigest())
+
+    def test_nested_file_replacement_invalidates_original_plan(self):
+        candidate = self._mkdir_release('easyappointments_prev_old', 'old')
+        nested = os.path.join(candidate, 'nested')
+        os.mkdir(nested)
+        target = os.path.join(nested, 'same-size.txt')
+        with open(target, 'wb') as stream:
+            stream.write(b'first')
+        self._archive('old')
+        old = int(os.path.getmtime(candidate) - 8 * 86400)
+        os.utime(candidate, (old, old))
+        plan, _ = self._collect()
+        digest = hashlib.sha256(CLEANUP.canonical(plan)).hexdigest()
+        top_mtime = os.stat(candidate).st_mtime_ns
+
+        replacement = os.path.join(nested, 'replacement')
+        with open(replacement, 'wb') as stream:
+            stream.write(b'later')
+        os.replace(replacement, target)
+        self.assertEqual(top_mtime, os.stat(candidate).st_mtime_ns)
+        revised, _ = self._collect()
+        self.assertEqual(plan['selected'][0]['allocated_bytes'], revised['selected'][0]['allocated_bytes'])
+        self.assertEqual(plan['selected'][0]['inode_count'], revised['selected'][0]['inode_count'])
+        self.assertNotEqual(plan['selected'][0]['tree_metadata_sha256'],
+                            revised['selected'][0]['tree_metadata_sha256'])
+
+        with mock.patch.object(CLEANUP.os, 'geteuid', return_value=0), \
+                mock.patch.object(CLEANUP.socket, 'gethostname', return_value='booking-server'), \
+                mock.patch.object(CLEANUP.pwd, 'getpwnam', return_value=SimpleNamespace(pw_uid=os.geteuid())), \
+                mock.patch.object(CLEANUP.fcntl, 'flock'), \
+                mock.patch.object(CLEANUP, 'archive_identity', side_effect=self._archive_identity):
+            with self.assertRaisesRegex(CLEANUP.CleanupError, 'plan_identity_changed'):
+                CLEANUP.run('execute', digest, self.helper)
+        self.assertTrue(os.path.isfile(target))
+
+    def test_nested_in_place_change_with_restored_mtime_changes_fingerprint(self):
+        candidate = self._mkdir_release('easyappointments_prev_old', 'old')
+        nested = os.path.join(candidate, 'nested')
+        os.mkdir(nested)
+        target = os.path.join(nested, 'same-size.txt')
+        with open(target, 'wb') as stream:
+            stream.write(b'first')
+        web = os.open(os.path.join(self.root, 'web'), os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            identity = self.helper.directory_identity(os.stat(candidate))
+            before, _ = CLEANUP.tree_metadata_sha256(web, 'easyappointments_prev_old', identity)
+            original = os.stat(target)
+            with open(target, 'r+b') as stream:
+                stream.write(b'later')
+            os.utime(target, ns=(original.st_atime_ns, original.st_mtime_ns))
+            after, _ = CLEANUP.tree_metadata_sha256(web, 'easyappointments_prev_old', identity)
+        finally:
+            os.close(web)
+        self.assertNotEqual(before, after)
+
+    def test_nested_change_after_plan_recheck_blocks_before_detach(self):
+        candidate = self._mkdir_release('easyappointments_prev_old', 'old')
+        nested = os.path.join(candidate, 'nested')
+        os.mkdir(nested)
+        target = os.path.join(nested, 'same-size.txt')
+        with open(target, 'wb') as stream:
+            stream.write(b'first')
+        self._archive('old')
+        old = int(os.path.getmtime(candidate) - 8 * 86400)
+        os.utime(candidate, (old, old))
+        plan, _ = self._collect()
+        digest = hashlib.sha256(CLEANUP.canonical(plan)).hexdigest()
+        archive_checks = 0
+
+        def change_after_collect(*args):
+            nonlocal archive_checks
+            archive_checks += 1
+            if archive_checks == 2:
+                replacement = os.path.join(nested, 'replacement')
+                with open(replacement, 'wb') as stream:
+                    stream.write(b'later')
+                os.replace(replacement, target)
+            return self._archive_identity(*args)
+
+        with mock.patch.object(CLEANUP.os, 'geteuid', return_value=0), \
+                mock.patch.object(CLEANUP.socket, 'gethostname', return_value='booking-server'), \
+                mock.patch.object(CLEANUP.pwd, 'getpwnam', return_value=SimpleNamespace(pw_uid=os.geteuid())), \
+                mock.patch.object(CLEANUP.fcntl, 'flock'), \
+                mock.patch.object(CLEANUP, 'archive_identity', side_effect=change_after_collect):
+            with self.assertRaisesRegex(CLEANUP.CleanupError, 'tree_changed'):
+                CLEANUP.run('execute', digest, self.helper)
+        self.assertEqual(2, archive_checks)
+        self.assertTrue(os.path.isdir(candidate))
+        self.assertTrue(os.path.isfile(target))
+        self.assertTrue(os.path.isfile(os.path.join(self.root, 'releases', 'old.tar.gz')))
 
     def test_execute_removes_only_selected_previous_dirs(self):
         self._mkdir_release('easyappointments_prev_old', 'old', age_days=8)
