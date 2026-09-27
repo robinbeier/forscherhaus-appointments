@@ -326,6 +326,7 @@ jobs:
               - 'docs/ops/production-backup-set-producer.md'
               - 'docs/ops/production-dump-producer-admission.md'
               - 'docs/ops/production-release-archive-dump-retention.md'
+              - 'docs/ops/production-manual-release-cleanup.md'
 
   test-routing:
     needs:

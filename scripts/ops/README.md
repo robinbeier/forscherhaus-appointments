@@ -141,6 +141,10 @@ Script inventory:
   releases, backups, sessions, cache, logs, uploads, and cleanup candidate
   classes plus the aggregate dump-producer admission exit class, without
   deleting anything or forwarding admission output
+- `libexec/manual_release_cleanup_v1.py` is a separate, one-pass, hash-bound
+  operator tool for at most four old previous-release directories. It never
+  targets stages, failed releases, archives, or backups; see
+  `docs/ops/production-manual-release-cleanup.md`.
 - `prod_release_readiness_preflight.sh` checks the expected active release
   marker, shared lock/recovery state, timer baseline, and bound installed tool
   hashes entirely read-only before release writes; its classified receipt is a

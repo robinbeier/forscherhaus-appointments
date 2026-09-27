@@ -146,6 +146,23 @@ class TestRoutingGuardTest(unittest.TestCase):
             )
             self.assertFalse(module.has_route(path, workflow, set(), [], root))
 
+    def test_manual_release_cleanup_test_uses_exact_root_wrapper_route(self):
+        path = "tests/Unit/Scripts/manual_release_cleanup_v1_test.py"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            script = root / module.ROOT_DEPLOYMENT_SCRIPT
+            script.parent.mkdir(parents=True)
+            workflow = (
+                "  root-deployment-tests:\n"
+                "    steps:\n"
+                "      - run: bash scripts/ci/run_root_deployment_regressions.sh\n"
+            )
+            self.assertEqual(module.ROOT_DEPLOYMENT_SCRIPT, module.REVIEWED_INDIRECT_PYTHON_ROUTES[path])
+            script.write_text("sudo python3 -B -m unittest tests.Unit.Scripts.manual_release_cleanup_v1_test\n")
+            self.assertTrue(module.has_route(path, workflow, set(), [], root))
+            script.write_text("sudo python3 -B -m unittest tests.Unit.Scripts.manual_release_cleanup_v1_test_extra\n")
+            self.assertFalse(module.has_route(path, workflow, set(), [], root))
+
     def test_reviewed_python_route_rejects_missing_wrapper_or_prefix_match(self):
         path = "tests/Unit/Scripts/bound_release_recovery_inspect_v1_test.py"
         with tempfile.TemporaryDirectory() as directory:
