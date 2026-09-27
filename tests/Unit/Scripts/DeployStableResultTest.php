@@ -389,11 +389,30 @@ final class DeployStableResultTest extends TestCase
             self::markTestSkipped('fixed canary journal already exists');
         }
         $createdStateParent = false;
+        $stateParentIdentity = null;
+        $removeStateParent = function () use (&$createdStateParent, &$stateParentIdentity, $stateParent): void {
+            if (!$createdStateParent) {
+                return;
+            }
+            $current = @lstat($stateParent);
+            if (
+                is_array($stateParentIdentity) &&
+                is_array($current) &&
+                $current['dev'] === $stateParentIdentity['dev'] &&
+                $current['ino'] === $stateParentIdentity['ino'] &&
+                $current['uid'] === $stateParentIdentity['uid'] &&
+                $current['gid'] === $stateParentIdentity['gid'] &&
+                $current['mode'] === $stateParentIdentity['mode']
+            ) {
+                @rmdir($stateParent);
+            }
+        };
         if (!is_dir($stateParent)) {
             if (!@mkdir($stateParent, 0700, true)) {
                 self::markTestSkipped('fixed canary journal parent unavailable');
             }
             $createdStateParent = true;
+            $stateParentIdentity = @lstat($stateParent);
         }
         if (
             !is_dir($stateParent) ||
@@ -401,58 +420,117 @@ final class DeployStableResultTest extends TestCase
             fileperms($stateParent) === false ||
             (fileperms($stateParent) & 0777) !== 0700
         ) {
-            if ($createdStateParent) {
-                @rmdir($stateParent);
-            }
+            $removeStateParent();
             self::markTestSkipped('fixed canary journal parent is not isolated');
         }
 
         $lockDirectory = '/var/lib/fh-deploy-orchestrator/locks';
         $lock = $lockDirectory . '/fh-production-change.lock';
         $createdDirectory = false;
+        $lockDirectoryIdentity = null;
+        $createdOrchestratorRoot = false;
+        $orchestratorRoot = dirname($lockDirectory);
+        $orchestratorRootIdentity = null;
+        $removeCreatedLockDirectory = function () use (
+            &$createdDirectory,
+            &$lockDirectoryIdentity,
+            &$createdOrchestratorRoot,
+            &$orchestratorRootIdentity,
+            $lockDirectory,
+            $orchestratorRoot,
+        ): void {
+            $currentLockDirectory = $createdDirectory ? @lstat($lockDirectory) : null;
+            if (
+                $createdDirectory &&
+                is_array($lockDirectoryIdentity) &&
+                is_array($currentLockDirectory) &&
+                $currentLockDirectory['dev'] === $lockDirectoryIdentity['dev'] &&
+                $currentLockDirectory['ino'] === $lockDirectoryIdentity['ino'] &&
+                $currentLockDirectory['uid'] === $lockDirectoryIdentity['uid'] &&
+                $currentLockDirectory['gid'] === $lockDirectoryIdentity['gid'] &&
+                $currentLockDirectory['mode'] === $lockDirectoryIdentity['mode']
+            ) {
+                @rmdir($lockDirectory);
+            }
+            if (!$createdOrchestratorRoot) {
+                return;
+            }
+            $current = @lstat($orchestratorRoot);
+            if (
+                is_array($orchestratorRootIdentity) &&
+                is_array($current) &&
+                $current['dev'] === $orchestratorRootIdentity['dev'] &&
+                $current['ino'] === $orchestratorRootIdentity['ino'] &&
+                $current['uid'] === $orchestratorRootIdentity['uid'] &&
+                $current['gid'] === $orchestratorRootIdentity['gid'] &&
+                $current['mode'] === $orchestratorRootIdentity['mode']
+            ) {
+                @rmdir($orchestratorRoot);
+            }
+        };
         $createdLock = false;
+        $createdLockIdentity = null;
         $lockIdentity = null;
         if (!is_dir($lockDirectory)) {
+            $createdOrchestratorRoot = !file_exists($orchestratorRoot) && !is_link($orchestratorRoot);
             if (!mkdir($lockDirectory, 0700, true)) {
-                if ($createdStateParent) {
-                    @rmdir($stateParent);
-                }
+                $removeStateParent();
                 self::markTestSkipped('production lock fixture directory unavailable');
             }
             $createdDirectory = true;
+            $lockDirectoryIdentity = @lstat($lockDirectory);
+            if (!is_array($lockDirectoryIdentity)) {
+                $removeCreatedLockDirectory();
+                $removeStateParent();
+                self::markTestSkipped('production lock fixture directory unavailable');
+            }
+            if ($createdOrchestratorRoot) {
+                $orchestratorRootIdentity = @lstat($orchestratorRoot);
+            }
         }
         if (is_link($lock)) {
-            if ($createdDirectory) {
-                @rmdir($lockDirectory);
-            }
-            if ($createdStateParent) {
-                @rmdir($stateParent);
-            }
+            $removeCreatedLockDirectory();
+            $removeStateParent();
             self::markTestSkipped('production lock fixture is a symlink');
         }
         if (!is_file($lock)) {
             $lockStream = @fopen($lock, 'x+b');
             if (!is_resource($lockStream)) {
-                if ($createdDirectory) {
-                    @rmdir($lockDirectory);
-                }
-                if ($createdStateParent) {
-                    @rmdir($stateParent);
-                }
+                $removeCreatedLockDirectory();
+                $removeStateParent();
                 self::markTestSkipped('production lock fixture unavailable');
             }
             fclose($lockStream);
-            if (!chmod($lock, 0600)) {
-                if ($createdDirectory) {
-                    @unlink($lock);
-                    @rmdir($lockDirectory);
-                }
-                if ($createdStateParent) {
-                    @rmdir($stateParent);
-                }
+            $createdLockIdentity = @lstat($lock);
+            if (!is_array($createdLockIdentity)) {
+                $removeCreatedLockDirectory();
+                $removeStateParent();
                 self::markTestSkipped('production lock fixture unavailable');
             }
-            $lockIdentity = lstat($lock);
+            if (!chmod($lock, 0600)) {
+                $currentLock = @lstat($lock);
+                if (
+                    is_array($currentLock) &&
+                    $currentLock['dev'] === $createdLockIdentity['dev'] &&
+                    $currentLock['ino'] === $createdLockIdentity['ino'] &&
+                    $currentLock['uid'] === $createdLockIdentity['uid'] &&
+                    $currentLock['gid'] === $createdLockIdentity['gid'] &&
+                    $currentLock['mode'] === $createdLockIdentity['mode'] &&
+                    $currentLock['nlink'] === $createdLockIdentity['nlink']
+                ) {
+                    @unlink($lock);
+                }
+                $removeCreatedLockDirectory();
+                $removeStateParent();
+                self::markTestSkipped('production lock fixture unavailable');
+            }
+            clearstatcache(true, $lock);
+            $lockIdentity = @lstat($lock);
+            if (!is_array($lockIdentity)) {
+                $removeCreatedLockDirectory();
+                $removeStateParent();
+                self::markTestSkipped('production lock fixture unavailable');
+            }
             $createdLock = true;
         }
 
@@ -512,7 +590,10 @@ final class DeployStableResultTest extends TestCase
                 is_array($currentState) &&
                 $currentState['dev'] === $stateIdentity['dev'] &&
                 $currentState['ino'] === $stateIdentity['ino'] &&
-                $currentState['mode'] === $stateIdentity['mode']
+                $currentState['uid'] === $stateIdentity['uid'] &&
+                $currentState['gid'] === $stateIdentity['gid'] &&
+                $currentState['mode'] === $stateIdentity['mode'] &&
+                $currentState['nlink'] === $stateIdentity['nlink']
             ) {
                 @unlink($state);
             }
@@ -521,7 +602,11 @@ final class DeployStableResultTest extends TestCase
                 is_array($trustedScriptIdentity) &&
                 is_array($currentTrustedScript) &&
                 $currentTrustedScript['dev'] === $trustedScriptIdentity['dev'] &&
-                $currentTrustedScript['ino'] === $trustedScriptIdentity['ino']
+                $currentTrustedScript['ino'] === $trustedScriptIdentity['ino'] &&
+                $currentTrustedScript['uid'] === $trustedScriptIdentity['uid'] &&
+                $currentTrustedScript['gid'] === $trustedScriptIdentity['gid'] &&
+                $currentTrustedScript['mode'] === $trustedScriptIdentity['mode'] &&
+                $currentTrustedScript['nlink'] === $trustedScriptIdentity['nlink']
             ) {
                 @unlink($trustedScript);
             }
@@ -531,16 +616,28 @@ final class DeployStableResultTest extends TestCase
                     is_array($lockIdentity) &&
                     is_array($currentLock) &&
                     $currentLock['dev'] === $lockIdentity['dev'] &&
-                    $currentLock['ino'] === $lockIdentity['ino']
+                    $currentLock['ino'] === $lockIdentity['ino'] &&
+                    $currentLock['uid'] === $lockIdentity['uid'] &&
+                    $currentLock['gid'] === $lockIdentity['gid'] &&
+                    $currentLock['mode'] === $lockIdentity['mode'] &&
+                    $currentLock['nlink'] === $lockIdentity['nlink']
                 ) {
                     @unlink($lock);
                 }
             }
-            if ($createdDirectory) {
-                @rmdir($lockDirectory);
+            $removeCreatedLockDirectory();
+            $removeStateParent();
+            if ($createdOrchestratorRoot) {
+                self::assertFalse(
+                    file_exists($orchestratorRoot) || is_link($orchestratorRoot),
+                    'test-created orchestrator root must be absent after teardown',
+                );
             }
             if ($createdStateParent) {
-                @rmdir($stateParent);
+                self::assertFalse(
+                    file_exists($stateParent) || is_link($stateParent),
+                    'test-created canary state parent must be absent after teardown',
+                );
             }
         }
     }
