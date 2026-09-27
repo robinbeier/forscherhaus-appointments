@@ -214,7 +214,7 @@ class ManualReleaseCleanupTest(unittest.TestCase):
         return {'archive_identity': self.helper.file_identity(stat_result), 'archive_sha256': payload['archive']['sha256'],
                 'archive_size_bytes': payload['archive']['size_bytes'], 'provenance_identity': self.helper.file_identity(sidecar_stat),
                 'provenance_sha256': hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(',', ':')).encode()).hexdigest()}
-    def test_plan_selects_only_old_previous_dirs_and_caps_at_four(self):
+    def test_plan_selects_previous_dirs_regardless_of_age_and_caps_at_four(self):
         for index in range(6):
             release_id = 'old-' + str(index)
             self._mkdir_release('easyappointments_prev_' + release_id, release_id, age_days=8 + index)
@@ -222,12 +222,29 @@ class ManualReleaseCleanupTest(unittest.TestCase):
         self._mkdir_release('easyappointments_prev_recent', 'recent', age_days=2)
         self._archive('recent')
         plan, selected = self._collect()
-        self.assertEqual(6, plan['eligible_count'])
+        self.assertEqual(7, plan['eligible_count'])
         self.assertEqual(4, len(selected))
         self.assertEqual(['old-5', 'old-4', 'old-3', 'old-2'], [item['contained_release'] for item in selected])
         self.assertNotIn('easyappointments_prev_current', [item['name'] for item in selected])
         self.assertNotIn('stage-unsafe', [item['name'] for item in selected])
         self.assertNotIn('failed-unsafe', [item['name'] for item in selected])
+
+    def test_same_day_archived_candidate_is_admitted(self):
+        self._mkdir_release('easyappointments_prev_same-day', 'same-day')
+        self._archive('same-day')
+        plan, selected = self._collect()
+        self.assertEqual(1, plan['eligible_count'])
+        self.assertEqual(['same-day'], [item['contained_release'] for item in selected])
+        self.assertEqual(0, selected[0]['age_days'])
+
+    def test_future_timestamp_is_excluded_fail_closed(self):
+        candidate = self._mkdir_release('easyappointments_prev_future', 'future')
+        self._archive('future')
+        future = int(os.path.getmtime(candidate) + 86400)
+        os.utime(candidate, (future, future))
+        plan, selected = self._collect()
+        self.assertEqual(0, plan['eligible_count'])
+        self.assertEqual([], selected)
 
     def test_missing_archive_and_pending_cleanup_fail_closed(self):
         self._mkdir_release('easyappointments_prev_old', 'old', age_days=8)

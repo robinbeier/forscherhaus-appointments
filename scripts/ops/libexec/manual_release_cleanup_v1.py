@@ -28,7 +28,6 @@ RELEASES_ROOT = '/root/releases'
 STATE_ROOT = '/var/lib/fh-release-retention'
 HELPER_PATH = '/usr/local/libexec/fh-release-archive-dump-retention-v1'
 HELPER_SHA256 = 'e5e29a78eee9d7659df36caac587f194af752e83962edb237912e5da37b493ac'
-MIN_AGE_SECONDS = 7 * 86400
 MAX_PER_PASS = 4
 MAX_PREVIOUS_SCAN = 64
 PREVIOUS = re.compile(r'easyappointments_prev_([A-Za-z0-9._-]{1,128})\Z')
@@ -179,7 +178,10 @@ def candidate_record(helper, web, releases, name, web_uid, device, now_ns,
                      legacy_hold):
     tree = helper.validate_candidate_tree(web, name, {0, web_uid}, device)
     age_ns = now_ns - tree['mtime_ns']
-    if age_ns < MIN_AGE_SECONDS * 1_000_000_000:
+    # Manual release-only cleanup has no arbitrary minimum age. A future
+    # timestamp remains fail-closed because it cannot establish that the
+    # directory is an already-published historical release.
+    if age_ns < 0:
         return None
     candidate = helper.open_child_directory(web, name)
     try:
