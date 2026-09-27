@@ -74,6 +74,7 @@ final class ZeroSurpriseCanaryContext
             'actor_password',
             'provider_id',
             'service_id',
+            'consent_floor',
             'token',
             'expires_at',
             'created_at',
@@ -104,6 +105,9 @@ final class ZeroSurpriseCanaryContext
                 throw new RuntimeException('Canary context field must be a positive integer: ' . $field);
             }
         }
+        if (!is_int($value['consent_floor'] ?? null) || $value['consent_floor'] < 0) {
+            throw new RuntimeException('Canary consent floor must be a nonnegative integer.');
+        }
         $now ??= time();
         if (
             $value['created_at'] > $now ||
@@ -125,6 +129,7 @@ final class ZeroSurpriseCanaryContext
                 'actor_password',
                 'provider_id',
                 'service_id',
+                'consent_floor',
                 'token',
                 'expires_at',
                 'created_at',

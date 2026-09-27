@@ -389,6 +389,19 @@ remove that journal only after confirming complete absence of the fixture
 parents and marked children. Partial ownership or unexpected relationships
 cause an explicit failure rather than deletion of ambiguous data.
 
+The journal also records the highest consent ID present at activation. The
+booking replay can remove its synthetic customer before fixture deactivation,
+so deactivation derives the bounded customer identities from the private run
+ID. It removes only later consent rows with the expected synthetic email,
+customer name, and consent type in the same cleanup transaction. Earlier rows
+are retained; unexpected later rows sharing that email fail the canary rather
+than being deleted. Verification checks for remaining run-bound consent rows.
+The extended journal requires `consent_floor`; a journal written by an older
+release cannot be interpreted as clean by the new fixture. Before switching to
+this release, the read-only preflight must confirm that no old canary journal
+or recovery task is active. Such a state requires explicit recovery on its
+original release rather than an automatic retry with the new reader.
+
 Targeted validation includes pure context/selection/transport tests, a wrapper
 lifecycle test using command doubles, and
 `tests/Integration/ZeroSurpriseCanaryFixtureTest.php` for an explicitly isolated

@@ -77,6 +77,7 @@ final class Zero_surprise_canary_fixture
         $actorPassword = bin2hex(random_bytes(32));
         $now = time();
         $expires = $now + 600;
+        $consentFloor = $this->consentHighWaterId();
         $adminRole = $this->roleId('admin');
         $providerRole = $this->roleId('provider');
         $actorId = $this->insertUser(self::ACTOR_USERNAME, $adminRole, $runId, $now, true);
@@ -114,6 +115,7 @@ final class Zero_surprise_canary_fixture
             'actor_password' => $actorPassword,
             'provider_id' => $providerId,
             'service_id' => $serviceId,
+            'consent_floor' => $consentFloor,
             'token' => $token,
             'expires_at' => $expires,
             'created_at' => $now,
@@ -145,13 +147,13 @@ final class Zero_surprise_canary_fixture
         }
         $state = $this->readState($stateFile);
         if (!$this->stateHasNoRows($state)) {
-            $this->cleanupState($state);
+            $this->cleanupState($state, (int) $state['consent_floor']);
         }
         $remove = true;
         return 'clean';
     }
 
-    private function cleanupState(array $s): void
+    private function cleanupState(array $s, int $consentFloor): void
     {
         $this->validateState($s);
         $customerRows = $this->CI->db->get_where('users', ['notes' => 'run:' . $s['run_id']])->result_array();
@@ -237,6 +239,44 @@ final class Zero_surprise_canary_fixture
         $customers = $this->CI->db
             ->get_where('users', ['notes' => 'run:' . $run, 'id_roles' => $customerRole])
             ->result_array();
+        $customerEmails = array_values(
+            array_unique(
+                array_merge(
+                    $this->syntheticCustomerEmails($run),
+                    array_filter(
+                        array_map(
+                            static fn(array $customer): string => (string) ($customer['email'] ?? ''),
+                            $customers,
+                        ),
+                        static fn(string $email): bool => $email !== '',
+                    ),
+                ),
+            ),
+        );
+        $consentRows = [];
+        if ($customerEmails !== []) {
+            $consentRows = $this->CI->db
+                ->where_in('email', $customerEmails)
+                ->order_by('id', 'ASC')
+                ->get('consents')
+                ->result_array();
+        }
+        $expectedNames = $this->syntheticCustomerNames($run);
+        foreach ($consentRows as $consent) {
+            if ((int) $consent['id'] <= $consentFloor) {
+                continue;
+            }
+            $email = (string) ($consent['email'] ?? '');
+            if (
+                !isset($expectedNames[$email]) ||
+                (string) ($consent['first_name'] ?? '') !== 'CI' ||
+                (string) ($consent['last_name'] ?? '') !== $expectedNames[$email] ||
+                !in_array((string) ($consent['type'] ?? ''), ['privacy-policy', 'terms-and-conditions'], true)
+            ) {
+                throw new RuntimeException('Canary consent ownership is ambiguous.');
+            }
+            $this->dbDelete('consents', ['id' => (int) $consent['id']]);
+        }
         foreach ($customers as $customer) {
             $references = $this->CI->db
                 ->get_where('appointments', ['id_users_customer' => (int) $customer['id']])
@@ -250,6 +290,16 @@ final class Zero_surprise_canary_fixture
                 'id_roles' => $customerRole,
                 'notes' => 'run:' . $run,
             ]);
+        }
+        if (
+            $customerEmails !== [] &&
+            $this->CI->db
+                ->where('id >', $consentFloor)
+                ->where_in('email', $customerEmails)
+                ->get('consents')
+                ->num_rows() !== 0
+        ) {
+            throw new RuntimeException('Canary consent rows remain after cleanup.');
         }
         $this->dbDelete('services_providers', [
             'id_users' => (int) $s['provider_id'],
@@ -370,6 +420,15 @@ final class Zero_surprise_canary_fixture
         ) {
             throw new RuntimeException('Orphaned canary children require investigation.');
         }
+        if (
+            $this->CI->db
+                ->where('id >', (int) $state['consent_floor'])
+                ->where_in('email', $this->syntheticCustomerEmails($state['run_id']))
+                ->get('consents')
+                ->num_rows() !== 0
+        ) {
+            throw new RuntimeException('Orphaned canary consents require investigation.');
+        }
         return true;
     }
 
@@ -383,6 +442,7 @@ final class Zero_surprise_canary_fixture
             'actor_password',
             'provider_id',
             'service_id',
+            'consent_floor',
             'token',
             'expires_at',
             'created_at',
@@ -406,6 +466,9 @@ final class Zero_surprise_canary_fixture
             if (!is_int($state[$key] ?? null) || $state[$key] < 1) {
                 throw new RuntimeException('Invalid canary state identifier.');
             }
+        }
+        if (!is_int($state['consent_floor'] ?? null) || $state['consent_floor'] < 0) {
+            throw new RuntimeException('Invalid canary consent floor.');
         }
         if ($state['actor_id'] === $state['provider_id'] || $state['expires_at'] - $state['created_at'] !== 600) {
             throw new RuntimeException('Invalid canary state lease.');
@@ -450,6 +513,39 @@ final class Zero_surprise_canary_fixture
         ]);
         return (int) $this->CI->db->insert_id();
     }
+
+    /** @return list<string> */
+    private function syntheticCustomerEmails(string $run): array
+    {
+        $emails = [];
+        foreach ([1, 2] as $counter) {
+            $marker = 'booking-customer-' . $run . '-' . str_pad((string) $counter, 2, '0', STR_PAD_LEFT);
+            $normalized = preg_replace('/[^a-z0-9]+/', '-', strtolower($marker)) ?: 'ci-write';
+            $emails[] = 'ci-' . substr(hash('sha256', $normalized), 0, 20) . '@synthetic.invalid';
+        }
+        return $emails;
+    }
+
+    /** @return array<string,string> */
+    private function syntheticCustomerNames(string $run): array
+    {
+        $names = [];
+        foreach ([1, 2] as $counter) {
+            $marker = 'booking-customer-' . $run . '-' . str_pad((string) $counter, 2, '0', STR_PAD_LEFT);
+            $normalized = preg_replace('/[^a-z0-9]+/', '-', strtolower($marker)) ?: 'ci-write';
+            $names['ci-' . substr(hash('sha256', $normalized), 0, 20) . '@synthetic.invalid'] = strtoupper(
+                substr($marker, -6),
+            );
+        }
+        return $names;
+    }
+
+    private function consentHighWaterId(): int
+    {
+        $row = $this->CI->db->select_max('id', 'max_id')->get('consents')->row_array();
+        return max(0, (int) ($row['max_id'] ?? 0));
+    }
+
     private function insertSettings(int $id, string $username, string $password, string $plan): void
     {
         $salt = $password === '' ? null : generate_salt();
