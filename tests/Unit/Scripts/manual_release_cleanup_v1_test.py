@@ -352,6 +352,8 @@ class ManualReleaseCleanupTest(unittest.TestCase):
         self.assertEqual('pass', result['status'])
         self.assertEqual(1, result['deleted_release_dirs'])
         self.assertFalse(os.path.exists(os.path.join(self.root, 'web', 'easyappointments_prev_old')))
+        self.assertFalse(any(name.startswith('.pending-release-')
+                             for name in os.listdir(os.path.join(self.root, 'state'))))
         for leaf in ('easyappointments', 'easyappointments_prev_current', 'stage-unsafe', 'failed-unsafe'):
             self.assertTrue(os.path.exists(os.path.join(self.root, 'web', leaf)))
         self.assertTrue(os.path.exists(os.path.join(self.root, 'releases', 'old.tar.gz')))
