@@ -35,7 +35,11 @@ appointment and customer remained unchanged.
 ## Authority source
 
 The route hash remains a lookup capability, but never becomes write authority
-by itself. A reschedule page load must:
+by itself. Only GET may load the reschedule page and issue its authority, even
+through the direct controller path. Other methods that reach the controller
+return 405 with `Allow: GET` before replacing an existing authority or issuing
+a customer privacy token; the global OPTIONS preflight remains inert. A
+reschedule page load must:
 
 - resolve the hash server-side to one canonical, non-unavailability
   appointment;

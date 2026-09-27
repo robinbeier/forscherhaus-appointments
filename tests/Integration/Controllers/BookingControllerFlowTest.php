@@ -977,7 +977,7 @@ class BookingControllerFlowTest extends TestCase
         $this->assertNotNull($appointment);
 
         $controller = $this->createBookingControllerWithForcedAvailability($pair['provider_id']);
-        $controller->reschedule($appointment['hash']);
+        $this->visitReschedule($controller, $appointment['hash']);
 
         $this->assertTrue((bool) script_vars('manage_mode'));
         $this->assertTrue((bool) html_vars('manage_mode'));
@@ -1040,7 +1040,7 @@ class BookingControllerFlowTest extends TestCase
             $this->assertNotNull($appointment);
 
             $controller = $this->createBookingControllerWithForcedAvailability($pair['provider_id']);
-            $controller->reschedule($appointment['hash']);
+            $this->visitReschedule($controller, $appointment['hash']);
 
             foreach ([script_vars('provider_data'), html_vars('provider_data')] as $providerData) {
                 $this->assertIsArray($providerData);
@@ -1097,7 +1097,7 @@ class BookingControllerFlowTest extends TestCase
         $this->assertNotNull($appointment);
 
         $controller = $this->createBookingControllerWithForcedAvailability($pair['provider_id'], false);
-        $controller->reschedule($appointment['hash']);
+        $this->visitReschedule($controller, $appointment['hash']);
 
         $this->assertTrue((bool) script_vars('manage_mode'));
         $this->assertTrue((bool) html_vars('manage_mode'));
@@ -1122,7 +1122,7 @@ class BookingControllerFlowTest extends TestCase
         $this->assertNotNull($appointment);
 
         $controller = $this->createBookingControllerWithForcedAvailability($pair['provider_id']);
-        $controller->reschedule($appointment['hash']);
+        $this->visitReschedule($controller, $appointment['hash']);
 
         $this->assertTrue((bool) html_vars('show_message'));
         $this->assertSame(lang('appointment_locked'), html_vars('message_title'));
@@ -1231,7 +1231,7 @@ class BookingControllerFlowTest extends TestCase
     private function issueRescheduleAuthority(Booking $controller, string $appointmentHash): void
     {
         $this->resetRuntimeState('GET');
-        $controller->reschedule($appointmentHash);
+        $this->visitReschedule($controller, $appointmentHash);
         $this->resetRuntimeState('POST');
     }
 
@@ -1314,6 +1314,22 @@ class BookingControllerFlowTest extends TestCase
 
         get_instance()->output->set_output('');
         http_response_code(200);
+    }
+
+    private function visitReschedule(Booking $controller, string $appointmentHash): void
+    {
+        $priorMethod = $_SERVER['REQUEST_METHOD'] ?? null;
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+
+        try {
+            $controller->reschedule($appointmentHash);
+        } finally {
+            if ($priorMethod === null) {
+                unset($_SERVER['REQUEST_METHOD']);
+            } else {
+                $_SERVER['REQUEST_METHOD'] = $priorMethod;
+            }
+        }
     }
 
     /** @param array<string, mixed> $response */

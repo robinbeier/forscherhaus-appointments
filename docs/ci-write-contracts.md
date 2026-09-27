@@ -24,6 +24,16 @@ freigegebene Umbuchung auslösen oder deren Einmal-Authority verbrauchen.
 Die isolierten HTTP-/DB-Tests in `BookingMethodHttpTest` prüfen beide Fälle samt
 Nichtmutation und anschließendem gültigem POST.
 
+Die Ausgabe einer Umbuchungsberechtigung über `booking/reschedule/{hash}` ist
+auf GET beschränkt, auch über den direkten Controllerpfad. Andere Methoden,
+die den Controller erreichen, erhalten vor Authority- oder Kundentoken-Erzeugung
+HTTP 405 mit `Allow: GET`; OPTIONS endet im globalen Preflight ohne diese
+Seiteneffekte. Eine abgewiesene Anfrage darf insbesondere die noch gültige
+Authority einer anderen Sitzung für denselben Termin nicht ersetzen.
+`RescheduleMethodHttpTest` prüft diese Grenze mit zwei getrennten Sitzungen,
+eigenem Termin, Authority-Datensatz und Cache-Dateien. Der gültige GET bleibt
+der positive Kontrollpfad.
+
 ## Öffentliche Datenschutz-Löschung
 
 `privacy/delete_personal_information` akzeptiert ausschließlich POST, auch über

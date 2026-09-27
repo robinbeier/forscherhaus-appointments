@@ -90,6 +90,10 @@ class Booking extends EA_Controller
      */
     public function reschedule(string $appointment_hash): void
     {
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'GET') {
+            abort(405, 'Method Not Allowed', ['Allow: GET']);
+        }
+
         html_vars(['appointment_hash' => $appointment_hash]);
 
         $this->index();

@@ -49,6 +49,13 @@ session boundary with synthetic accounts; it does not establish browser-specific
 cross-site behavior or the presence of real-world GET-login clients. See the
 [login contract](docs/ci-write-contracts.md#öffentliche-sitzungsvergabe).
 
+The public reschedule link may issue a short-lived, session-bound authority
+only on GET. A different HTTP method must not rotate an existing authority or
+create a customer privacy token, including through a direct controller alias.
+The isolated two-session HTTP regression establishes this boundary with own
+synthetic records; it does not establish possession or secrecy of real links.
+See the [reschedule authority contract](docs/security/public-reschedule-authority.md).
+
 Anonymous booking-confirmation and ICS downloads require a nonempty stored
 appointment hash. Reject a missing capability before looking up appointment or
 related data; nullable or empty historical hash fields do not grant access.

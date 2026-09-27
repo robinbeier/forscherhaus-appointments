@@ -39,6 +39,7 @@ ist eine Orientierung, keine vollständige Testliste.
 | Reise/Verhalten | Tests | Ebene und abgedecktes Risiko |
 | --- | --- | --- |
 | Reschedule-Link öffnet Manage-Modus bzw. sperrt zu kurze Vorläufe | `BookingControllerFlowTest::testRescheduleSetsManageModeForValidHash`, `...::testRescheduleShowsLockedMessageWhenInsideAdvanceTimeout` | Verhaltens-Integration; falscher Kontext oder unzulässige kurzfristige Änderung |
+| Nicht-GET-Aufruf des Reschedule-Links ersetzt keine Berechtigung | `tests/Integration/Controllers/RescheduleMethodHttpTest.php` | FH_DEFENSE_ISOLATED HTTP/DB mit zwei Sitzungen; gültiger GET vergibt Authority, HEAD/POST auf Rewrite-/Direktpfad erhalten 405/`Allow: GET` ohne Authority- oder Cache-Änderung, eigenes Fixture-Cleanup |
 | Reschedule-Schreibrechte, Fremd-IDs, Ablauf, Replay und Drift | `BookingControllerFlowTest` (Authority-Tests ab `testForgedManageModeWithoutAuthorityRejectsWithoutMutation`) | Verhaltens-Integration; keine Mutation ohne serverseitige Authority |
 | Falsche HTTP-Methode bei bereits autorisierter Umbuchung | `BookingMethodHttpTest::testGetRegisterRejectsSessionAuthorizedReschedulePayloadWithoutMutation` | FH_DEFENSE_ISOLATED HTTP/DB; GET 405 ohne Mutation oder Verbrauch der Einmal-Authority, anschließend gültiger POST-Kontrollpfad und Fixture-Cleanup |
 | Stornieren mit gültigem oder unbekanntem Hash | `tests/Integration/Controllers/BookingCancellationControllerFlowTest.php` | Verhaltens-Integration; Löschung/Status und Not-found-Schutz |
