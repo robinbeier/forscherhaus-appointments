@@ -59,6 +59,7 @@ class FixtureHelper:
         self.drift_after_quarantine = False
         self.open_after_quarantine = False
         self.drift_during_open_scan = False
+        self.held_ids = set()
 
     @staticmethod
     def _identity(stat_result):
@@ -113,6 +114,9 @@ class FixtureHelper:
     def activity_count(self):
         return self.active
 
+    def read_legacy_hold(self):
+        return {release_id: {'sha256': 'a' * 64, 'size_bytes': 7} for release_id in self.held_ids}
+
     def assert_no_nonterminal_runs(self):
         if self.nonterminal:
             CLEANUP.reject('nonterminal_run')
@@ -166,13 +170,24 @@ class ManualReleaseCleanupTest(unittest.TestCase):
         with open(path, 'wb') as stream:
             stream.write(b'archive')
         os.chmod(path, 0o600)
+        sidecar = os.path.join(self.root, 'releases', release_id + '.build-provenance.json')
+        payload = {
+            'archive': {'name': release_id + '.tar.gz', 'sha256': hashlib.sha256(b'archive').hexdigest(), 'size_bytes': 7},
+            'capacity_bounds': {'stage_file_count': 1, 'stage_inode_count': 1, 'stage_unpacked_bytes': 1, 'temp_scratch_bytes': 1},
+            'expected_commit': 'a' * 40, 'observed_commit': 'a' * 40,
+            'release_id': release_id, 'schema': 'release_build_provenance.v1',
+            'source': {field: 'b' * 64 for field in ('build_script_sha256', 'composer_lock_sha256', 'deploy_ea_sha256', 'package_lock_sha256')},
+        }
+        with open(sidecar, 'w', encoding='ascii') as stream:
+            json.dump(payload, stream, sort_keys=True, separators=(',', ':'))
+        os.chmod(sidecar, 0o600)
 
     def _collect(self):
         web = os.open(os.path.join(self.root, 'web'), os.O_RDONLY | os.O_DIRECTORY)
         releases = os.open(os.path.join(self.root, 'releases'), os.O_RDONLY | os.O_DIRECTORY)
         state = os.open(os.path.join(self.root, 'state'), os.O_RDONLY | os.O_DIRECTORY)
         try:
-            with mock.patch.object(CLEANUP, 'archive_identity', side_effect=self._archive_identity):
+            with mock.patch.object(CLEANUP, 'archive_pair_identity', side_effect=self._archive_identity):
                 return CLEANUP.collect(self.helper, web, releases, state, 'current', 'rollback', os.geteuid())
         finally:
             os.close(state)
@@ -187,7 +202,18 @@ class ManualReleaseCleanupTest(unittest.TestCase):
             CLEANUP.reject('candidate_archive_missing')
         if stat_result.st_mode & 0o777 != 0o600:
             CLEANUP.reject('candidate_archive_invalid')
-        return self.helper.file_identity(stat_result)
+        sidecar = release_id + '.build-provenance.json'
+        try:
+            sidecar_stat = os.stat(sidecar, dir_fd=releases_fd, follow_symlinks=False)
+            with open(os.path.join(self.root, 'releases', sidecar), encoding='ascii') as stream:
+                payload = json.load(stream)
+        except (FileNotFoundError, ValueError, TypeError):
+            CLEANUP.reject('candidate_archive_provenance_missing')
+        if payload['archive']['sha256'] != hashlib.sha256(b'archive').hexdigest() or payload['archive']['size_bytes'] != 7:
+            CLEANUP.reject('candidate_archive_provenance_invalid')
+        return {'archive_identity': self.helper.file_identity(stat_result), 'archive_sha256': payload['archive']['sha256'],
+                'archive_size_bytes': payload['archive']['size_bytes'], 'provenance_identity': self.helper.file_identity(sidecar_stat),
+                'provenance_sha256': hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(',', ':')).encode()).hexdigest()}
     def test_plan_selects_only_old_previous_dirs_and_caps_at_four(self):
         for index in range(6):
             release_id = 'old-' + str(index)
@@ -207,6 +233,45 @@ class ManualReleaseCleanupTest(unittest.TestCase):
         self._mkdir_release('easyappointments_prev_old', 'old', age_days=8)
         with self.assertRaisesRegex(CLEANUP.CleanupError, 'candidate_archive_missing'):
             self._collect()
+
+    def test_archive_without_provenance_sidecar_blocks_unheld_candidate(self):
+        self._mkdir_release('easyappointments_prev_unprovenanced', 'unprovenanced', age_days=8)
+        self._archive('unprovenanced')
+        os.unlink(os.path.join(self.root, 'releases', 'unprovenanced.build-provenance.json'))
+        with self.assertRaisesRegex(CLEANUP.CleanupError, 'candidate_archive_provenance_missing'):
+            self._collect()
+
+    def test_wrong_provenance_digest_or_size_blocks_candidate(self):
+        self._mkdir_release('easyappointments_prev_bad-provenance', 'bad-provenance', age_days=8)
+        self._archive('bad-provenance')
+        path = os.path.join(self.root, 'releases', 'bad-provenance.build-provenance.json')
+        with open(path, encoding='ascii') as stream:
+            payload = json.load(stream)
+        payload['archive']['sha256'] = 'f' * 64
+        payload['archive']['size_bytes'] = 999
+        with open(path, 'w', encoding='ascii') as stream:
+            json.dump(payload, stream, sort_keys=True, separators=(',', ':'))
+        with self.assertRaisesRegex(CLEANUP.CleanupError, 'candidate_archive_provenance_invalid'):
+            self._collect()
+
+    def test_valid_archive_pair_binds_archive_and_provenance_identities_in_plan(self):
+        self._mkdir_release('easyappointments_prev_valid-pair', 'valid-pair', age_days=8)
+        self._archive('valid-pair')
+        plan, selected = self._collect()
+        pair = plan['selected'][0]['archive_pair']
+        self.assertEqual(1, len(selected))
+        self.assertEqual(hashlib.sha256(b'archive').hexdigest(), pair['archive_sha256'])
+        self.assertEqual(7, pair['archive_size_bytes'])
+        self.assertIn('archive_identity', pair)
+        self.assertIn('provenance_identity', pair)
+
+    def test_held_release_with_archive_is_preserved_and_excluded(self):
+        self._mkdir_release('easyappointments_prev_held-release', 'held-release', age_days=8)
+        self._archive('held-release')
+        self.helper.held_ids.add('held-release')
+        plan, selected = self._collect()
+        self.assertEqual(0, plan['eligible_count'])
+        self.assertEqual([], selected)
         os.mkdir(os.path.join(self.root, 'state', '.pending-cleanup'))
         with self.assertRaisesRegex(CLEANUP.CleanupError, 'pending_cleanup_unresolved'):
             self._collect()
@@ -275,7 +340,7 @@ class ManualReleaseCleanupTest(unittest.TestCase):
                 mock.patch.object(CLEANUP.socket, 'gethostname', return_value='booking-server'), \
                 mock.patch.object(CLEANUP.pwd, 'getpwnam', return_value=SimpleNamespace(pw_uid=os.geteuid())), \
                 mock.patch.object(CLEANUP.fcntl, 'flock'), \
-                mock.patch.object(CLEANUP, 'archive_identity', side_effect=self._archive_identity):
+                mock.patch.object(CLEANUP, 'archive_pair_identity', side_effect=self._archive_identity):
             with self.assertRaisesRegex(CLEANUP.CleanupError, 'plan_identity_changed'):
                 CLEANUP.run('execute', digest, self.helper)
         self.assertTrue(os.path.isfile(target))
@@ -328,7 +393,7 @@ class ManualReleaseCleanupTest(unittest.TestCase):
                 mock.patch.object(CLEANUP.socket, 'gethostname', return_value='booking-server'), \
                 mock.patch.object(CLEANUP.pwd, 'getpwnam', return_value=SimpleNamespace(pw_uid=os.geteuid())), \
                 mock.patch.object(CLEANUP.fcntl, 'flock'), \
-                mock.patch.object(CLEANUP, 'archive_identity', side_effect=change_after_collect):
+                mock.patch.object(CLEANUP, 'archive_pair_identity', side_effect=change_after_collect):
             with self.assertRaisesRegex(CLEANUP.CleanupError, 'tree_changed'):
                 CLEANUP.run('execute', digest, self.helper)
         self.assertEqual(2, archive_checks)
@@ -345,7 +410,7 @@ class ManualReleaseCleanupTest(unittest.TestCase):
                 mock.patch.object(CLEANUP.socket, 'gethostname', return_value='booking-server'), \
                 mock.patch.object(CLEANUP.pwd, 'getpwnam', return_value=SimpleNamespace(pw_uid=os.geteuid())), \
                 mock.patch.object(CLEANUP.fcntl, 'flock'), \
-                mock.patch.object(CLEANUP, 'archive_identity', side_effect=self._archive_identity):
+                mock.patch.object(CLEANUP, 'archive_pair_identity', side_effect=self._archive_identity):
             with self.assertRaisesRegex(CLEANUP.CleanupError, 'plan_identity_changed'):
                 CLEANUP.run('execute', '0' * 64, self.helper)
             result = CLEANUP.run('execute', digest, self.helper)
@@ -361,6 +426,51 @@ class ManualReleaseCleanupTest(unittest.TestCase):
     def test_pinned_helper_sha_matches_real_retention_source(self):
         with open(os.path.join(ROOT, 'scripts/ops/libexec/release_archive_dump_retention_v1.py'), 'rb') as source:
             self.assertEqual(CLEANUP.HELPER_SHA256, hashlib.sha256(source.read()).hexdigest())
+
+    @unittest.skipUnless(os.geteuid() == 0, 'root-owned archive pair fixture required')
+    def test_real_archive_pair_identity_validates_sidecar_and_declared_digest(self):
+        releases = os.path.join(self.root, 'real-releases')
+        os.mkdir(releases, 0o700)
+        os.chown(releases, 0, 0)
+        release_id = 'real-pair'
+        archive = os.path.join(releases, release_id + '.tar.gz')
+        sidecar = os.path.join(releases, release_id + '.build-provenance.json')
+        archive_bytes = b'root-owned archive fixture\n'
+        with open(archive, 'wb') as stream:
+            stream.write(archive_bytes)
+        os.chown(archive, 0, 0)
+        os.chmod(archive, 0o600)
+        payload = {
+            'archive': {'name': release_id + '.tar.gz', 'sha256': hashlib.sha256(archive_bytes).hexdigest(), 'size_bytes': len(archive_bytes)},
+            'capacity_bounds': {'stage_file_count': 1, 'stage_inode_count': 1, 'stage_unpacked_bytes': 1, 'temp_scratch_bytes': 1},
+            'expected_commit': 'a' * 40, 'observed_commit': 'a' * 40,
+            'release_id': release_id, 'schema': 'release_build_provenance.v1',
+            'source': {field: 'b' * 64 for field in ('build_script_sha256', 'composer_lock_sha256', 'deploy_ea_sha256', 'package_lock_sha256')},
+        }
+        sidecar_bytes = (json.dumps(payload, sort_keys=True, separators=(',', ':')) + '\n').encode('ascii')
+        with open(sidecar, 'wb') as stream:
+            stream.write(sidecar_bytes)
+        os.chown(sidecar, 0, 0)
+        os.chmod(sidecar, 0o600)
+        fd = os.open(releases, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            pair = CLEANUP.archive_pair_identity(RETENTION, fd, release_id)
+            self.assertEqual(hashlib.sha256(archive_bytes).hexdigest(), pair['archive_sha256'])
+            self.assertEqual(len(archive_bytes), pair['archive_size_bytes'])
+            self.assertEqual(hashlib.sha256(sidecar_bytes).hexdigest(), pair['provenance_sha256'])
+            os.unlink(sidecar)
+            with self.assertRaisesRegex(CLEANUP.CleanupError, 'candidate_provenance_missing'):
+                CLEANUP.archive_pair_identity(RETENTION, fd, release_id)
+            with open(sidecar, 'wb') as stream:
+                broken = dict(payload)
+                broken['archive'] = dict(payload['archive'], sha256='f' * 64, size_bytes=999)
+                stream.write((json.dumps(broken, sort_keys=True, separators=(',', ':')) + '\n').encode('ascii'))
+            os.chown(sidecar, 0, 0)
+            os.chmod(sidecar, 0o600)
+            with self.assertRaisesRegex(RETENTION.RetentionError, 'invalid_release_sidecar'):
+                CLEANUP.archive_pair_identity(RETENTION, fd, release_id)
+        finally:
+            os.close(fd)
 
     @unittest.skipUnless(os.geteuid() == 0, 'root-owned helper fixture required')
     def test_pinned_helper_loads_real_source_without_running_its_cli(self):
@@ -448,10 +558,11 @@ class ManualReleaseCleanupTest(unittest.TestCase):
         item = selected[0]
         web = os.open(os.path.join(self.root, 'web'), os.O_RDONLY | os.O_DIRECTORY)
         state = os.open(os.path.join(self.root, 'state'), os.O_RDONLY | os.O_DIRECTORY)
-        return item, web, state
+        releases = os.open(os.path.join(self.root, 'releases'), os.O_RDONLY | os.O_DIRECTORY)
+        return item, web, state, releases
 
     def test_quarantine_preserves_pending_on_pre_quarantine_race(self):
-        item, web, state = self._quarantine_fixture()
+        item, web, state, releases = self._quarantine_fixture()
         candidate = os.path.join(self.root, 'web', item['name'])
         original_rename = CLEANUP.os.rename
 
@@ -462,24 +573,26 @@ class ManualReleaseCleanupTest(unittest.TestCase):
 
         with mock.patch.object(CLEANUP.os, 'rename', side_effect=mutate_then_rename):
             with self.assertRaisesRegex(CLEANUP.CleanupError, 'quarantined_tree_changed'):
-                CLEANUP.quarantine_and_delete(self.helper, web, state, item, os.geteuid())
+                CLEANUP.quarantine_and_delete(self.helper, web, state, releases, item, os.geteuid())
         os.close(state)
         os.close(web)
+        os.close(releases)
         self.assertTrue(any(name.startswith('.pending-release-') for name in os.listdir(self.root + '/state')))
         self.assertFalse(os.path.exists(candidate))
 
     def test_quarantine_preserves_pending_on_post_quarantine_drift_or_open_file(self):
         for flag in ('drift_after_quarantine', 'open_after_quarantine'):
             with self.subTest(flag=flag):
-                item, web, state = self._quarantine_fixture('easyappointments_prev_' + flag)
+                item, web, state, releases = self._quarantine_fixture('easyappointments_prev_' + flag)
                 setattr(self.helper, flag, True)
                 if flag == 'open_after_quarantine':
                     self.helper.open_after_quarantine = True
                 reason = 'quarantined_candidate_open' if flag == 'open_after_quarantine' else 'quarantined_tree_changed'
                 with self.assertRaisesRegex(CLEANUP.CleanupError, reason):
-                    CLEANUP.quarantine_and_delete(self.helper, web, state, item, os.geteuid())
+                    CLEANUP.quarantine_and_delete(self.helper, web, state, releases, item, os.geteuid())
                 os.close(state)
                 os.close(web)
+                os.close(releases)
                 self.assertTrue(any(name.startswith('.pending-release-') for name in os.listdir(self.root + '/state')))
                 for pending in os.listdir(self.root + '/state'):
                     if pending.startswith('.pending-release-'):
@@ -488,13 +601,27 @@ class ManualReleaseCleanupTest(unittest.TestCase):
                 self.helper.open_after_quarantine = False
 
     def test_quarantine_preserves_pending_on_drift_during_open_file_scan(self):
-        item, web, state = self._quarantine_fixture('easyappointments_prev_open_scan')
+        item, web, state, releases = self._quarantine_fixture('easyappointments_prev_open_scan')
         self.helper.drift_during_open_scan = True
         with self.assertRaisesRegex(CLEANUP.CleanupError, 'quarantined_tree_changed'):
-            CLEANUP.quarantine_and_delete(self.helper, web, state, item, os.geteuid())
+            CLEANUP.quarantine_and_delete(self.helper, web, state, releases, item, os.geteuid())
         os.close(state)
         os.close(web)
+        os.close(releases)
         self.assertTrue(any(name.startswith('.pending-release-') for name in os.listdir(self.root + '/state')))
+
+    def test_quarantine_rechecks_archive_pair_after_move_and_preserves_pending_on_drift(self):
+        item, web, state, releases = self._quarantine_fixture('easyappointments_prev_archive_drift')
+        changed_pair = dict(item['archive_pair'], archive_sha256='f' * 64)
+        with mock.patch.object(CLEANUP, 'archive_pair_identity', return_value=changed_pair):
+            with self.assertRaisesRegex(CLEANUP.CleanupError, 'candidate_archive_changed'):
+                CLEANUP.quarantine_and_delete(self.helper, web, state, releases, item, os.geteuid())
+        os.close(releases)
+        os.close(state)
+        os.close(web)
+        pending = [name for name in os.listdir(self.root + '/state') if name.startswith('.pending-release-')]
+        self.assertEqual(1, len(pending))
+        self.assertTrue(os.path.isdir(os.path.join(self.root, 'state', pending[0])))
 
 
 if __name__ == '__main__':

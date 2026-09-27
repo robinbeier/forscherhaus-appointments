@@ -78,17 +78,27 @@ def load_pinned_helper(path=HELPER_PATH):
     return helper
 
 
-def archive_identity(helper, releases, release_id):
-    leaf = release_id + '.tar.gz'
+def archive_pair_identity(helper, releases, release_id):
+    archive_leaf = release_id + '.tar.gz'
+    sidecar_leaf = release_id + '.build-provenance.json'
     try:
-        before = os.stat(leaf, dir_fd=releases, follow_symlinks=False)
+        archive_sha, archive_size, archive_identity, _ = helper.stable_hash(
+            releases, archive_leaf, 0, 0, {0o600}, helper.MAX_ARCHIVE_BYTES)
     except FileNotFoundError:
         reject('candidate_archive_missing')
-    if (not stat.S_ISREG(before.st_mode) or before.st_uid != 0 or before.st_gid != 0
-            or stat.S_IMODE(before.st_mode) != 0o600 or before.st_nlink != 1
-            or before.st_size < 1):
-        reject('candidate_archive_invalid')
-    return helper.file_identity(before)
+    try:
+        sidecar, sidecar_identity, _ = helper.stable_regular(
+            releases, sidecar_leaf, 0, 0, {0o600}, helper.MAX_SIDECAR_BYTES)
+    except FileNotFoundError:
+        reject('candidate_provenance_missing')
+    helper.validate_provenance(sidecar, release_id, archive_sha, archive_size)
+    return {
+        'archive_identity': archive_identity,
+        'archive_sha256': archive_sha,
+        'archive_size_bytes': archive_size,
+        'provenance_identity': sidecar_identity,
+        'provenance_sha256': hashlib.sha256(sidecar).hexdigest(),
+    }
 
 
 def tree_metadata_sha256(web, name, expected_identity):
@@ -165,7 +175,8 @@ def bounded_web_names(web, helper):
     return names
 
 
-def candidate_record(helper, web, releases, name, web_uid, device, now_ns):
+def candidate_record(helper, web, releases, name, web_uid, device, now_ns,
+                     legacy_hold):
     tree = helper.validate_candidate_tree(web, name, {0, web_uid}, device)
     age_ns = now_ns - tree['mtime_ns']
     if age_ns < MIN_AGE_SECONDS * 1_000_000_000:
@@ -175,7 +186,11 @@ def candidate_record(helper, web, releases, name, web_uid, device, now_ns):
         contained_release = helper.read_release_marker(candidate)
     finally:
         os.close(candidate)
-    archive = archive_identity(helper, releases, contained_release)
+    # The permanent host-local legacy hold substitutes for a canonical
+    # provenance sidecar. Preserve such releases instead of deleting them.
+    if contained_release in legacy_hold:
+        return None
+    archive_pair = archive_pair_identity(helper, releases, contained_release)
     metadata_sha, metadata_count = tree_metadata_sha256(web, name, tree['identity'])
     if metadata_count != tree['inodes']:
         reject('tree_changed', 75)
@@ -189,7 +204,7 @@ def candidate_record(helper, web, releases, name, web_uid, device, now_ns):
         'tree': tree,
         'tree_metadata_sha256': metadata_sha,
         'root_ctime_ns': root_stat.st_ctime_ns,
-        'archive_identity': archive,
+        'archive_pair': archive_pair,
     }
 
 
@@ -202,6 +217,7 @@ def collect(helper, web, releases, state, current, rollback, web_uid):
     now_ns = int(datetime.datetime.now(datetime.timezone.utc).timestamp() * 1_000_000_000)
     protected = 'easyappointments_prev_' + current
     records = []
+    legacy_hold = helper.read_legacy_hold() or {}
     names = bounded_web_names(web, helper)
     if protected not in names:
         reject('rollback_missing')
@@ -213,7 +229,8 @@ def collect(helper, web, releases, state, current, rollback, web_uid):
             continue
         if PREVIOUS.fullmatch(name) is None:
             reject('foreign_previous_entry')
-        record = candidate_record(helper, web, releases, name, web_uid, device, now_ns)
+        record = candidate_record(helper, web, releases, name, web_uid, device, now_ns,
+                                  legacy_hold)
         if record is not None:
             records.append(record)
     records.sort(key=lambda item: (item['tree']['mtime_ns'], item['name']))
@@ -236,7 +253,7 @@ def collect(helper, web, releases, state, current, rollback, web_uid):
                 'inode_count': item['tree']['inodes'],
                 'tree_metadata_sha256': item['tree_metadata_sha256'],
                 'root_ctime_ns': item['root_ctime_ns'],
-                'archive_identity': item['archive_identity'],
+                'archive_pair': item['archive_pair'],
             }
             for item in selected
         ],
@@ -257,7 +274,7 @@ def protected_state_unchanged(helper, web, current, rollback_fd, rollback_name,
             and helper.read_release_marker(rollback_fd) == rollback_id)
 
 
-def quarantine_and_delete(helper, web, state, item, web_uid):
+def quarantine_and_delete(helper, web, state, releases, item, web_uid):
     """Remove web access first, then verify the exact tree before any unlink."""
     if os.fstat(web).st_dev != os.fstat(state).st_dev:
         reject('filesystem_mismatch')
@@ -294,6 +311,8 @@ def quarantine_and_delete(helper, web, state, item, web_uid):
     if helper.activity_count() != 0:
         reject('active_production_work', 75)
     helper.assert_no_nonterminal_runs()
+    if archive_pair_identity(helper, releases, item['contained_release']) != item['archive_pair']:
+        reject('candidate_archive_changed', 75)
     helper.MUTATIONS.begin()
     helper.remove_tree(state, pending, item['tree']['identity'], {0, web_uid},
                        os.fstat(state).st_dev)
@@ -351,7 +370,7 @@ def run(mode, expected_plan_sha=None, helper=None):
                     or current_candidate.st_mtime_ns != item['tree']['mtime_ns']
                     or current_candidate.st_ctime_ns != item['root_ctime_ns']):
                 reject('candidate_changed', 75)
-            if archive_identity(helper, releases, item['contained_release']) != item['archive_identity']:
+            if archive_pair_identity(helper, releases, item['contained_release']) != item['archive_pair']:
                 reject('candidate_archive_changed', 75)
             metadata_sha, metadata_count = tree_metadata_sha256(web, item['name'], item['tree']['identity'])
             if metadata_sha != item['tree_metadata_sha256'] or metadata_count != item['tree']['inodes']:
@@ -360,7 +379,7 @@ def run(mode, expected_plan_sha=None, helper=None):
                 reject('candidate_open', 75)
             if helper.activity_count() != 0:
                 reject('active_production_work', 75)
-            quarantine_and_delete(helper, web, state, item,
+            quarantine_and_delete(helper, web, state, releases, item,
                                   pwd.getpwnam('www-data').pw_uid)
             deleted += 1
         os.fsync(web)

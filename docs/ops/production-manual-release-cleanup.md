@@ -8,7 +8,8 @@ reactivate that service.
 The procedure has two invocations: a read-only plan and an execution that must
 be supplied the exact SHA-256 digest of that plan. The plan binds the selected
 directory identities and root change times, contained release IDs, ages, sizes, inode counts,
-metadata fingerprints of every nested path, and archive identities. Any
+metadata fingerprints of every nested path, and the complete archive/provenance
+pair's identities and hashes. Any
 change between planning and execution stops the run.
 
 Before any file is unlinked, each selected directory is moved into the
@@ -23,9 +24,13 @@ procedure stops on active production work, open candidate files, pending
 cleanup markers, non-terminal runs, missing or unsafe archives, unknown
 previous-release entries, identity drift, or any protected current/rollback change.
 
-Only previous-release directories at least seven days old can be selected,
-with a maximum of four oldest candidates per plan. The active release and its
-exact rollback directory are protected. Stage and failed directories are
+Only previous-release directories at least seven days old with a complete,
+canonical archive/provenance pair can be selected. Releases named in the
+permanent host-local legacy hold are preserved. The archive pair is checked
+again after quarantine and before deletion. A missing or invalid pair blocks
+the plan rather than authorizing deletion. At most four oldest candidates are
+selected per plan. The active release and its exact rollback directory are
+protected. Stage and failed directories are
 ignored as deletion classes, even when their contents look unsafe. Archives,
 backups, stages, the active release, and rollback are preserved.
 The listing stops before recursive validation if the web root exceeds the
