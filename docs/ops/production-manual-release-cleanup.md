@@ -21,6 +21,9 @@ with a maximum of four oldest candidates per plan. The active release and its
 exact rollback directory are protected. Stage and failed directories are
 ignored as deletion classes, even when their contents look unsafe. Archives,
 backups, stages, the active release, and rollback are preserved.
+The listing stops before recursive validation if the web root exceeds the
+retention helper's 10,000-entry class limit or has more than 64 previous-release
+entries; a larger backlog requires a separate decision.
 
 The script is an operator-only production path. Production installation,
 ownership and mode checks, lock setup, and post-run health verification are

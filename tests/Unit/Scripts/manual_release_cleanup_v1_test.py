@@ -30,6 +30,7 @@ class FixtureHelper:
     """Small controlled double for the audited filesystem primitives."""
 
     ORCHESTRATOR_ROOT = 'orchestrator'
+    MAX_CLASS_SCAN = 10_000
     MUTATIONS = SimpleNamespace(fields=lambda: {'mutation_count': 0})
 
     def __init__(self, root):
@@ -173,6 +174,22 @@ class ManualReleaseCleanupTest(unittest.TestCase):
         os.mkdir(os.path.join(self.root, 'state', '.pending-cleanup'))
         with self.assertRaisesRegex(CLEANUP.CleanupError, 'pending_cleanup_unresolved'):
             self._collect()
+
+    def test_scan_limits_stop_before_recursive_candidate_validation(self):
+        self.helper.MAX_CLASS_SCAN = 3
+        with mock.patch.object(self.helper, 'validate_candidate_tree') as validate:
+            with self.assertRaisesRegex(CLEANUP.CleanupError, 'release_directory_scan_limit'):
+                self._collect()
+            validate.assert_not_called()
+
+        self.helper.MAX_CLASS_SCAN = 10_000
+        self._mkdir_release('easyappointments_prev_old1', 'old1', age_days=8)
+        self._mkdir_release('easyappointments_prev_old2', 'old2', age_days=8)
+        with mock.patch.object(CLEANUP, 'MAX_PREVIOUS_SCAN', 2), \
+                mock.patch.object(self.helper, 'validate_candidate_tree') as validate:
+            with self.assertRaisesRegex(CLEANUP.CleanupError, 'previous_scan_limit'):
+                self._collect()
+            validate.assert_not_called()
 
     def test_open_candidate_and_missing_rollback_are_blocked(self):
         self._mkdir_release('easyappointments_prev_old', 'old', age_days=8)

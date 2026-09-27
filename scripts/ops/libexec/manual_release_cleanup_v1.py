@@ -29,6 +29,7 @@ HELPER_PATH = '/usr/local/libexec/fh-release-archive-dump-retention-v1'
 HELPER_SHA256 = 'e5e29a78eee9d7659df36caac587f194af752e83962edb237912e5da37b493ac'
 MIN_AGE_SECONDS = 7 * 86400
 MAX_PER_PASS = 4
+MAX_PREVIOUS_SCAN = 64
 PREVIOUS = re.compile(r'easyappointments_prev_([A-Za-z0-9._-]{1,128})\Z')
 SHA256 = re.compile(r'[0-9a-f]{64}\Z')
 
@@ -149,6 +150,16 @@ def metadata_record(value):
             value.st_nlink, value.st_size, value.st_blocks, value.st_mtime_ns, value.st_ctime_ns)
 
 
+def bounded_web_names(web, helper):
+    names = []
+    with os.scandir(web) as entries:
+        for entry in entries:
+            names.append(entry.name)
+            if len(names) > helper.MAX_CLASS_SCAN:
+                reject('release_directory_scan_limit')
+    return names
+
+
 def candidate_record(helper, web, releases, name, web_uid, device, now_ns):
     tree = helper.validate_candidate_tree(web, name, {0, web_uid}, device)
     age_ns = now_ns - tree['mtime_ns']
@@ -182,18 +193,20 @@ def collect(helper, web, releases, state, current, rollback, web_uid):
     now_ns = int(datetime.datetime.now(datetime.timezone.utc).timestamp() * 1_000_000_000)
     protected = 'easyappointments_prev_' + current
     records = []
-    names = os.listdir(web)
+    names = bounded_web_names(web, helper)
     if protected not in names:
         reject('rollback_missing')
-    for name in names:
+    previous_names = [name for name in names if name.startswith('easyappointments_prev_')]
+    if len(previous_names) > MAX_PREVIOUS_SCAN:
+        reject('previous_scan_limit')
+    for name in previous_names:
         if name == protected:
             continue
-        if name.startswith('easyappointments_prev_'):
-            if PREVIOUS.fullmatch(name) is None:
-                reject('foreign_previous_entry')
-            record = candidate_record(helper, web, releases, name, web_uid, device, now_ns)
-            if record is not None:
-                records.append(record)
+        if PREVIOUS.fullmatch(name) is None:
+            reject('foreign_previous_entry')
+        record = candidate_record(helper, web, releases, name, web_uid, device, now_ns)
+        if record is not None:
+            records.append(record)
     records.sort(key=lambda item: (item['tree']['mtime_ns'], item['name']))
     selected = records[:MAX_PER_PASS]
     if helper.open_file_identities([item['tree'] for item in selected]):
@@ -255,7 +268,7 @@ def run(mode, expected_plan_sha=None, helper=None):
         releases = helper.open_absolute_directory(RELEASES_ROOT, exact_mode=0o700)
         state = helper.open_absolute_directory(STATE_ROOT, exact_mode=0o700)
         orchestrator = helper.open_absolute_directory(helper.ORCHESTRATOR_ROOT, exact_mode=0o700)
-        helper.assert_no_nested_mounts(os.listdir(web), orchestrator)
+        helper.assert_no_nested_mounts(bounded_web_names(web, helper), orchestrator)
         try:
             fcntl.flock(state, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
