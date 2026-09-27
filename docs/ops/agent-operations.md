@@ -262,6 +262,10 @@ Disk, memory, or swap pressure:
   read-only; helper installation, execute approval, monitoring activation, and
   timer enablement remain separate production changes. See
   `docs/ops/production-release-archive-dump-retention.md`.
+- When an unrelated unsafe stage blocks general retention, use the separately
+  reviewed release-only manual path in
+  `docs/ops/production-manual-release-cleanup.md`; do not bypass a blocked
+  helper with a broad filesystem delete.
 - Retain ordinary probe bundles and matching `.provenance` files under
   `/root/fh-ordinary-probe-bundles`; keep `/root/releases` for application
   release pairs and legacy holds. This path rule does not authorize moving or
