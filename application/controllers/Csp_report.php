@@ -37,7 +37,7 @@ class Csp_report extends CI_Controller
         }
 
         $config = Csp_report_only::load();
-        if (!is_array($config) || ($config['enabled'] ?? false) !== true) {
+        if (!is_array($config) || !Csp_report_only::effectiveEnabled($config)) {
             $this->output->set_status_header(404)->set_output('');
             return;
         }

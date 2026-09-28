@@ -22,8 +22,10 @@ function activationReceipt(
     ?string $hash,
     ?string $releaseBinding = null,
     ?string $runId = null,
+    ?int $startsAt = null,
+    ?int $expiresAt = null,
 ): array {
-    return [
+    $receipt = [
         'schema' => CSP_ACTIVATION_SCHEMA,
         'action' => $action,
         'status' => $status,
@@ -32,6 +34,11 @@ function activationReceipt(
         'release_binding' => $releaseBinding,
         'run_id' => $runId,
     ];
+    if ($startsAt !== null && $expiresAt !== null) {
+        $receipt['starts_at_unix'] = $startsAt;
+        $receipt['expires_at_unix'] = $expiresAt;
+    }
+    return $receipt;
 }
 
 /** @param array<string,mixed> $receipt */
@@ -59,6 +66,38 @@ function readActivationCandidate(string $path): ?array
         return null;
     }
     return ['bytes' => $bytes, 'sha256' => $hash];
+}
+
+/** @return array{bytes:string,sha256:string,source_sha256:string,starts_at_unix:int,expires_at_unix:int}|null */
+function readActivationSegmentCandidate(string $path, int $durationSeconds, ?int $startsAt = null): ?array
+{
+    if ($durationSeconds < 900 || $durationSeconds > 14400) {
+        return null;
+    }
+    $source = readActivationCandidate($path);
+    if ($source === null) {
+        return null;
+    }
+    $config = Csp_report_only::parseConfig($source['bytes']);
+    if (!is_array($config) || ($config['schema'] ?? null) !== Csp_report_only::CONFIG_SCHEMA) {
+        return null;
+    }
+    $startsAt ??= time();
+    $config['schema'] = Csp_report_only::CONFIG_SCHEMA_V2;
+    $config['starts_at_unix'] = $startsAt;
+    $config['expires_at_unix'] = $startsAt + $durationSeconds;
+    try {
+        $bytes = json_encode($config, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n";
+    } catch (Throwable) {
+        return null;
+    }
+    return [
+        'bytes' => $bytes,
+        'sha256' => hash('sha256', $bytes),
+        'source_sha256' => $source['sha256'],
+        'starts_at_unix' => $startsAt,
+        'expires_at_unix' => $startsAt + $durationSeconds,
+    ];
 }
 
 function validateRootDirectory(string $directory, int $mode): bool
@@ -164,6 +203,38 @@ function readRunState(string $path): ?array
         return null;
     }
     return $state;
+}
+
+/** @return array{sha256:string,starts_at_unix:int,expires_at_unix:int}|null */
+function inspectSegmentActivation(string $path, string $expectedHash): ?array
+{
+    $opened = CspReportOnlyProductionContext::openRootFile($path, 0644, 1, 8192);
+    if ($opened === null) {
+        return null;
+    }
+    [$handle] = $opened;
+    try {
+        $bytes = stream_get_contents($handle, 8193);
+    } finally {
+        fclose($handle);
+    }
+    if (!is_string($bytes) || strlen($bytes) > 8192 || !hash_equals($expectedHash, hash('sha256', $bytes))) {
+        return null;
+    }
+    $config = Csp_report_only::parseConfig($bytes);
+    if (
+        !is_array($config) ||
+        ($config['schema'] ?? null) !== Csp_report_only::CONFIG_SCHEMA_V2 ||
+        !is_int($config['starts_at_unix'] ?? null) ||
+        !is_int($config['expires_at_unix'] ?? null)
+    ) {
+        return null;
+    }
+    return [
+        'sha256' => $expectedHash,
+        'starts_at_unix' => $config['starts_at_unix'],
+        'expires_at_unix' => $config['expires_at_unix'],
+    ];
 }
 
 /** @return array{status:string,result_class:string} */
@@ -432,6 +503,9 @@ function runActivation(array $argv): never
     $actionSeen = false;
     $runId = null;
     $expectedBinding = null;
+    $durationSeconds = null;
+    $segmentStartsAt = null;
+    $segmentExpiresAt = null;
     foreach (array_slice($argv, 1) as $argument) {
         if (str_starts_with($argument, '--action=')) {
             if ($actionSeen) {
@@ -455,10 +529,21 @@ function runActivation(array $argv): never
             $expectedBinding = substr($argument, strlen('--expected-release-binding='));
             continue;
         }
+        if (str_starts_with($argument, '--duration-seconds=')) {
+            if ($durationSeconds !== null) {
+                emitActivationReceipt(activationReceipt($action ?: 'unknown', 'failed', 'input_invalid', null), 2);
+            }
+            $rawDuration = substr($argument, strlen('--duration-seconds='));
+            if ($rawDuration === '' || preg_match('/\A[0-9]+\z/', $rawDuration) !== 1) {
+                emitActivationReceipt(activationReceipt($action ?: 'unknown', 'failed', 'input_invalid', null), 2);
+            }
+            $durationSeconds = (int) $rawDuration;
+            continue;
+        }
         emitActivationReceipt(activationReceipt('unknown', 'failed', 'input_invalid', null), 2);
     }
     if (
-        !in_array($action, ['install', 'remove', 'preflight'], true) ||
+        !in_array($action, ['install', 'install-segment', 'inspect-segment', 'remove', 'preflight'], true) ||
         !function_exists('posix_geteuid') ||
         posix_geteuid() !== 0
     ) {
@@ -468,7 +553,17 @@ function runActivation(array $argv): never
         );
     }
 
-    if ($action === 'remove') {
+    if (
+        in_array($action, ['install-segment', 'inspect-segment'], true) !== ($durationSeconds !== null) ||
+        ($durationSeconds !== null && ($durationSeconds < 900 || $durationSeconds > 14400))
+    ) {
+        emitActivationReceipt(
+            activationReceipt($action ?: 'unknown', 'failed', 'input_invalid', null, $expectedBinding, $runId),
+            2,
+        );
+    }
+
+    if ($action === 'remove' || $action === 'inspect-segment') {
         if (!validRunId($runId) || !validReleaseBinding($expectedBinding)) {
             emitActivationReceipt(
                 activationReceipt($action, 'failed', 'input_invalid', null, $expectedBinding, $runId),
@@ -492,6 +587,19 @@ function runActivation(array $argv): never
                 !hash_equals($state['release_binding'], $expectedBinding)
             ) {
                 $result = ['status' => 'failed', 'result_class' => 'run_state_mismatch'];
+            } elseif ($action === 'inspect-segment') {
+                $release = CspReportOnlyProductionContext::releaseBinding($repoRoot);
+                if ($release === null) {
+                    $result = ['status' => 'failed', 'result_class' => 'release_binding_unavailable'];
+                } elseif (!hash_equals($expectedBinding, $release['binding'])) {
+                    $result = ['status' => 'failed', 'result_class' => 'release_binding_mismatch'];
+                } else {
+                    $segment = inspectSegmentActivation(CSP_ACTIVATION_TARGET, $state['candidate_sha256']);
+                    $result =
+                        $segment === null
+                            ? ['status' => 'failed', 'result_class' => 'activation_identity_mismatch']
+                            : ['status' => 'passed', 'result_class' => 'segment_inspected'];
+                }
             } else {
                 $result = removeActivation(CSP_ACTIVATION_TARGET, $state['candidate_sha256']);
                 if ($result['status'] === 'passed') {
@@ -513,6 +621,8 @@ function runActivation(array $argv): never
                 is_array($state) ? $state['candidate_sha256'] : null,
                 $expectedBinding,
                 $runId,
+                $segment['starts_at_unix'] ?? null,
+                $segment['expires_at_unix'] ?? null,
             ),
             $result['status'] === 'passed' ? 0 : 1,
         );
@@ -525,8 +635,9 @@ function runActivation(array $argv): never
             1,
         );
     }
-    $candidate = readActivationCandidate(CSP_ACTIVATION_CANDIDATE);
-    if ($candidate === null) {
+    $sourceCandidate = readActivationCandidate(CSP_ACTIVATION_CANDIDATE);
+    $candidate = $sourceCandidate;
+    if ($sourceCandidate === null) {
         emitActivationReceipt(
             activationReceipt($action, 'failed', 'candidate_invalid', null, $release['binding'], $runId),
             2,
@@ -538,7 +649,7 @@ function runActivation(array $argv): never
                 $action,
                 'failed',
                 'release_binding_mismatch',
-                $candidate['sha256'],
+                $sourceCandidate['sha256'],
                 $release['binding'],
                 $runId,
             ),
@@ -552,7 +663,7 @@ function runActivation(array $argv): never
                     $action,
                     'failed',
                     'input_invalid',
-                    $candidate['sha256'],
+                    $sourceCandidate['sha256'],
                     $release['binding'],
                     $runId,
                 ),
@@ -580,7 +691,10 @@ function runActivation(array $argv): never
                 $result = ['status' => 'failed', 'result_class' => 'release_binding_unavailable'];
             } elseif (!hash_equals($expectedBinding, $lockedRelease['binding'])) {
                 $result = ['status' => 'failed', 'result_class' => 'release_binding_mismatch'];
-            } elseif ($lockedCandidate === null || !hash_equals($candidate['sha256'], $lockedCandidate['sha256'])) {
+            } elseif (
+                $lockedCandidate === null ||
+                !hash_equals($sourceCandidate['sha256'], $lockedCandidate['sha256'])
+            ) {
                 $result = ['status' => 'failed', 'result_class' => 'candidate_identity_changed'];
             } else {
                 $result = preflightActivation(CSP_ACTIVATION_TARGET, CSP_ACTIVATION_STATE);
@@ -594,7 +708,7 @@ function runActivation(array $argv): never
                 $action,
                 $result['status'],
                 $result['result_class'],
-                $candidate['sha256'],
+                $sourceCandidate['sha256'],
                 is_array($lockedRelease) ? $lockedRelease['binding'] : null,
             ),
             $result['status'] === 'passed' ? 0 : 1,
@@ -627,12 +741,32 @@ function runActivation(array $argv): never
             $result = ['status' => 'failed', 'result_class' => 'release_binding_unavailable'];
         } elseif (!hash_equals($expectedBinding, $lockedRelease['binding'])) {
             $result = ['status' => 'failed', 'result_class' => 'release_binding_mismatch'];
-        } elseif ($lockedCandidate === null || !hash_equals($candidate['sha256'], $lockedCandidate['sha256'])) {
+        } elseif ($lockedCandidate === null || !hash_equals($sourceCandidate['sha256'], $lockedCandidate['sha256'])) {
             $result = ['status' => 'failed', 'result_class' => 'candidate_identity_changed'];
         } elseif (@lstat(CSP_ACTIVATION_STATE) !== false) {
             $result = ['status' => 'failed', 'result_class' => 'run_state_already_present'];
         } else {
-            $result = writeRunState(CSP_ACTIVATION_STATE, $runId, $candidate['sha256'], $release['binding']);
+            if ($action === 'install-segment') {
+                $segmentCandidate = readActivationSegmentCandidate(CSP_ACTIVATION_CANDIDATE, $durationSeconds);
+                if (
+                    $segmentCandidate === null ||
+                    !hash_equals($sourceCandidate['sha256'], $segmentCandidate['source_sha256'])
+                ) {
+                    $result = ['status' => 'failed', 'result_class' => 'candidate_identity_changed'];
+                } else {
+                    $candidate = $segmentCandidate;
+                    $segmentStartsAt = $candidate['starts_at_unix'];
+                    $segmentExpiresAt = $candidate['expires_at_unix'];
+                }
+            }
+            if (
+                ($result['status'] ?? 'failed') === 'failed' &&
+                ($result['result_class'] ?? '') === 'candidate_identity_changed'
+            ) {
+                // Keep the lock held and leave both target and state untouched.
+            } else {
+                $result = writeRunState(CSP_ACTIVATION_STATE, $runId, $candidate['sha256'], $release['binding']);
+            }
             if ($result['status'] === 'passed') {
                 $result = installActivation(CSP_ACTIVATION_TARGET, $candidate['bytes'], $candidate['sha256']);
                 if ($result['status'] !== 'passed') {
@@ -652,6 +786,8 @@ function runActivation(array $argv): never
             $candidate['sha256'],
             is_array($lockedRelease) ? $lockedRelease['binding'] : null,
             $runId,
+            $segmentStartsAt,
+            $segmentExpiresAt,
         ),
         $result['status'] === 'passed' ? 0 : 1,
     );

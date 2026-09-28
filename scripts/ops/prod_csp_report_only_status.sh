@@ -16,6 +16,8 @@ STATE_VALIDATOR_SCRIPT="${SCRIPT_DIR}/csp_report_only_validate_receipt.php"
 RUNTIME_VALIDATOR_SCRIPT="${SCRIPT_DIR}/csp_report_only_runtime_validate_receipt.php"
 ACTIVATION_VALIDATOR_SCRIPT="${SCRIPT_DIR}/csp_report_only_activation_validate_receipt.php"
 PHASE=''
+EXPECTATION=''
+PROBE_RUNTIME=0
 EXPECTED_RELEASE_BINDING=''
 CURRENT_RELEASE_BINDING=''
 
@@ -56,8 +58,10 @@ parse_args() {
                 case "$2" in
                     inactive) PHASE='preflight' ;;
                     active) PHASE='active' ;;
-                    *) printf 'ERROR: --expect must be inactive or active.\n' >&2; exit 1 ;;
+                    segment-active|segment-observe|segment-expired) PHASE='segment' ;;
+                    *) printf 'ERROR: --expect must be inactive, active, segment-active, segment-observe or segment-expired.\n' >&2; exit 1 ;;
                 esac
+                EXPECTATION="$2"
                 shift 2
                 ;;
             --expected-release-binding)
@@ -66,6 +70,11 @@ parse_args() {
                 binding_seen=1
                 EXPECTED_RELEASE_BINDING="$2"
                 shift 2
+                ;;
+            --probe-runtime)
+                (( PROBE_RUNTIME == 0 )) || { printf 'ERROR: --probe-runtime supplied more than once.\n' >&2; exit 1; }
+                PROBE_RUNTIME=1
+                shift
                 ;;
             --prod-ssh-target)
                 (( target_seen == 0 )) || { printf 'ERROR: --prod-ssh-target supplied more than once.\n' >&2; exit 1; }
@@ -85,10 +94,15 @@ parse_args() {
         esac
     done
 
-    [[ "$PHASE" == 'preflight' || "$PHASE" == 'active' ]] || {
+    [[ "$PHASE" == 'preflight' || "$PHASE" == 'active' || "$PHASE" == 'segment' ]] || {
         printf 'ERROR: --phase must be preflight or active.\n' >&2
         exit 1
     }
+    [[ -n "$EXPECTATION" ]] || { [[ "$PHASE" == 'active' ]] && EXPECTATION='active' || EXPECTATION='inactive'; }
+    if (( PROBE_RUNTIME == 1 )) && [[ "$EXPECTATION" != 'segment-active' ]]; then
+        printf 'ERROR: --probe-runtime is allowed only with --expect segment-active.\n' >&2
+        exit 1
+    fi
     [[ -z "$EXPECTED_RELEASE_BINDING" || "$EXPECTED_RELEASE_BINDING" =~ ^[a-f0-9]{64}$ ]] || {
         printf 'ERROR: --expected-release-binding must be a lowercase SHA-256 value.\n' >&2
         exit 1
@@ -129,7 +143,7 @@ verify_header_classes() {
     local failures=0
     local surface
 
-    if [[ "$PHASE" == 'active' ]]; then
+    if [[ "$EXPECTATION" == 'active' || "$EXPECTATION" == 'segment-active' || "$EXPECTATION" == 'segment-observe' ]]; then
         expected_app_www='present'
     fi
     for surface in app_https www_https; do
@@ -238,7 +252,7 @@ run_activation_prerequisites() {
     local validated_output=''
     local validator_exit=0
 
-    if [[ "$PHASE" == 'active' ]]; then
+    if [[ "$PHASE" == 'active' || "$PHASE" == 'segment' ]]; then
         printf 'csp_evidence.activation_prerequisites.status=not_run\n'
         printf 'csp_evidence.activation_prerequisites.result_class=active_state\n'
         return 0
@@ -284,7 +298,7 @@ run_runtime_evidence() {
     local validated_output=''
     local validator_exit=0
 
-    if [[ "$PHASE" == 'preflight' ]]; then
+    if [[ "$PHASE" == 'preflight' || ( "$PHASE" == 'segment' && "$PROBE_RUNTIME" == '0' ) ]]; then
         printf 'csp_evidence.runtime_write_readiness.status=not_run\n'
         printf 'csp_evidence.runtime_write_readiness.result_class=preactivation_read_only\n'
         return 0
@@ -324,14 +338,14 @@ run_runtime_evidence() {
 
 run_status() {
     local doctor_output
-    local expectation='inactive'
+    local expectation="$EXPECTATION"
     local header_status=0
     local health_status=0
     local state_status=0
     local prerequisite_status=0
     local runtime_status=0
 
-    [[ "$PHASE" == 'active' ]] && expectation='active'
+    [[ -n "$expectation" ]] || { [[ "$PHASE" == 'active' ]] && expectation='active' || expectation='inactive'; }
     doctor_output="$(mktemp)"
 
     printf 'csp_evidence.schema=csp_report_only_evidence.v2\n'
@@ -384,7 +398,7 @@ main() {
     prod_require_cmd php
     prod_require_cmd ssh
     prod_print_plan 'prod-csp-report-only-status' "$PROD_SSH_TARGET" \
-        "$([[ "$PHASE" == 'preflight' ]] && printf 'fully read-only preactivation evidence' || printf 'active evidence plus one bounded web-runtime write probe')"
+        "$([[ "$PHASE" == 'preflight' || "$PHASE" == 'segment' ]] && printf 'fully read-only segment/state evidence' || printf 'active evidence plus one bounded web-runtime write probe')"
     run_status
 }
 

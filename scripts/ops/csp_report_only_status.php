@@ -60,7 +60,13 @@ function parseOptions(array $argv): array
         throw new InvalidArgumentException('Unknown option.');
     }
 
-    if (!in_array($options['expect'], ['inactive', 'active'], true)) {
+    if (
+        !in_array(
+            $options['expect'],
+            ['inactive', 'active', 'segment-active', 'segment-observe', 'segment-expired'],
+            true,
+        )
+    ) {
         throw new InvalidArgumentException('Invalid expectation.');
     }
     foreach (['config_path', 'aggregate_path', 'release_root'] as $key) {
@@ -82,20 +88,41 @@ function canonicalAbsolutePath(string $path): bool
         !in_array('..', explode('/', $path), true);
 }
 
-/** @return array{status:string,sha256:?string,result_class:?string,config:?array} */
+/** @return array{status:string,sha256:?string,result_class:?string,config:?array,starts_at_unix:?int,expires_at_unix:?int} */
 function inspectActivation(string $path): array
 {
     if (@lstat($path) === false) {
-        return ['status' => 'inactive', 'sha256' => null, 'result_class' => null, 'config' => null];
+        return [
+            'status' => 'inactive',
+            'sha256' => null,
+            'result_class' => null,
+            'config' => null,
+            'starts_at_unix' => null,
+            'expires_at_unix' => null,
+        ];
     }
 
     $config = Csp_report_only::load($path);
     if (!is_array($config)) {
-        return ['status' => 'invalid', 'sha256' => null, 'result_class' => 'activation_invalid', 'config' => null];
+        return [
+            'status' => 'invalid',
+            'sha256' => null,
+            'result_class' => 'activation_invalid',
+            'config' => null,
+            'starts_at_unix' => null,
+            'expires_at_unix' => null,
+        ];
     }
 
     if (($config['enabled'] ?? false) !== true) {
-        return ['status' => 'disabled', 'sha256' => null, 'result_class' => 'activation_disabled', 'config' => $config];
+        return [
+            'status' => 'disabled',
+            'sha256' => null,
+            'result_class' => 'activation_disabled',
+            'config' => $config,
+            'starts_at_unix' => $config['starts_at_unix'] ?? null,
+            'expires_at_unix' => $config['expires_at_unix'] ?? null,
+        ];
     }
 
     $hash = @hash_file('sha256', $path);
@@ -105,10 +132,22 @@ function inspectActivation(string $path): array
             'sha256' => null,
             'result_class' => 'activation_identity_unavailable',
             'config' => null,
+            'starts_at_unix' => null,
+            'expires_at_unix' => null,
         ];
     }
 
-    return ['status' => 'active', 'sha256' => $hash, 'result_class' => null, 'config' => $config];
+    $isSegment = ($config['schema'] ?? null) === Csp_report_only::CONFIG_SCHEMA_V2;
+    $now = time();
+    $segmentActive = !$isSegment || Csp_report_only::effectiveEnabled($config, $now);
+    return [
+        'status' => $isSegment && !$segmentActive ? 'expired' : 'active',
+        'sha256' => $hash,
+        'result_class' => $isSegment && !$segmentActive ? 'activation_expired' : null,
+        'config' => $config,
+        'starts_at_unix' => $config['starts_at_unix'] ?? null,
+        'expires_at_unix' => $config['expires_at_unix'] ?? null,
+    ];
 }
 
 function safeDirectoryChain(string $directory): bool
@@ -256,13 +295,34 @@ function runStatusCli(array $argv): never
         $activation = inspectActivation($options['config_path']);
         $aggregate = inspectAggregate($options['aggregate_path'], $activation['config']);
 
-        $resultClass = $activation['result_class'] ?? $aggregate['result_class'];
+        $resultClass = $activation['result_class'];
+        if (
+            $options['expect'] === 'segment-expired' &&
+            $activation['status'] === 'expired' &&
+            $resultClass === 'activation_expired'
+        ) {
+            $resultClass = null;
+        }
+        $resultClass ??= $aggregate['result_class'];
         if ($resultClass === null) {
-            if ($options['expect'] === 'active' && $activation['status'] !== 'active') {
+            if (
+                in_array($options['expect'], ['active', 'segment-active', 'segment-observe'], true) &&
+                $activation['status'] !== 'active'
+            ) {
                 $resultClass = 'activation_missing';
             } elseif ($options['expect'] === 'inactive' && $activation['status'] !== 'inactive') {
                 $resultClass = 'activation_unexpected';
+            } elseif ($options['expect'] === 'segment-expired' && $activation['status'] !== 'expired') {
+                $resultClass = 'activation_unexpected';
             }
+        }
+        $segmentExpectation = in_array(
+            $options['expect'],
+            ['segment-active', 'segment-observe', 'segment-expired'],
+            true,
+        );
+        if ($segmentExpectation && ($activation['config']['schema'] ?? null) !== Csp_report_only::CONFIG_SCHEMA_V2) {
+            $resultClass = 'activation_unexpected';
         }
         $passed = $resultClass === null && in_array($aggregate['status'], ['missing', 'valid'], true);
 
@@ -273,8 +333,21 @@ function runStatusCli(array $argv): never
                 'status' => $passed ? 'passed' : 'failed',
                 'result_class' => $passed ? 'state_verified' : $resultClass ?? 'aggregate_unavailable',
                 'release_binding' => $release['binding'],
-                'activation' => ['status' => $activation['status'], 'sha256' => $activation['sha256']],
-                'aggregate' => ['status' => $aggregate['status'], 'summary' => $aggregate['summary']],
+                'activation' => [
+                    'status' => $activation['status'],
+                    'sha256' => $activation['sha256'],
+                    ...$segmentExpectation
+                        ? [
+                            'starts_at_unix' => $activation['starts_at_unix'],
+                            'expires_at_unix' => $activation['expires_at_unix'],
+                        ]
+                        : [],
+                ],
+                'aggregate' => [
+                    'status' => $aggregate['status'],
+                    'summary' => $aggregate['summary'],
+                    ...$segmentExpectation ? ['scope' => 'cumulative_retention_window'] : [],
+                ],
             ],
             $passed ? 0 : 1,
         );

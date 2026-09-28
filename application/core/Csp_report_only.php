@@ -13,6 +13,7 @@ final class Csp_report_only
     public const CONFIG_PATH = '/var/lib/fh-app-config/csp-report-only.json';
     public const AGGREGATE_FILENAME = 'csp-report-only-aggregate-v1.json';
     public const CONFIG_SCHEMA = 'csp_report_only_config.v1';
+    public const CONFIG_SCHEMA_V2 = 'csp_report_only_config.v2';
     public const AGGREGATE_SCHEMA = 'csp_report_only_aggregate.v1';
     public const MAX_BODY_BYTES = 32768;
     public const MAX_REPORTS_PER_BATCH = 20;
@@ -41,6 +42,19 @@ final class Csp_report_only
         'matomo_origin',
         'max_reports_per_minute',
         'retention_hours',
+    ];
+
+    private const ALLOWED_CONFIG_KEYS_V2 = [
+        'schema',
+        'enabled',
+        'app_host',
+        'www_host',
+        'google_analytics_enabled',
+        'matomo_origin',
+        'max_reports_per_minute',
+        'retention_hours',
+        'starts_at_unix',
+        'expires_at_unix',
     ];
 
     private const REPORT_DIRECTIVES = [
@@ -238,14 +252,18 @@ final class Csp_report_only
         }
 
         $keys = array_keys($decoded);
-        $allowedKeys = self::ALLOWED_CONFIG_KEYS;
+        $schema = $decoded['schema'] ?? null;
+        $allowedKeys = $schema === self::CONFIG_SCHEMA_V2 ? self::ALLOWED_CONFIG_KEYS_V2 : self::ALLOWED_CONFIG_KEYS;
         sort($keys);
         sort($allowedKeys);
         if ($keys !== $allowedKeys) {
             return null;
         }
 
-        if (($decoded['schema'] ?? null) !== self::CONFIG_SCHEMA || !is_bool($decoded['enabled'] ?? null)) {
+        if (
+            !in_array($schema, [self::CONFIG_SCHEMA, self::CONFIG_SCHEMA_V2], true) ||
+            !is_bool($decoded['enabled'] ?? null)
+        ) {
             return null;
         }
 
@@ -275,8 +293,26 @@ final class Csp_report_only
             return null;
         }
 
+        $segment = [];
+        if ($schema === self::CONFIG_SCHEMA_V2) {
+            $startsAt = $decoded['starts_at_unix'];
+            $expiresAt = $decoded['expires_at_unix'];
+            if (
+                !is_int($startsAt) ||
+                !is_int($expiresAt) ||
+                $expiresAt - $startsAt < 900 ||
+                $expiresAt - $startsAt > 14400
+            ) {
+                return null;
+            }
+            $segment = [
+                'starts_at_unix' => $startsAt,
+                'expires_at_unix' => $expiresAt,
+            ];
+        }
+
         return [
-            'schema' => self::CONFIG_SCHEMA,
+            'schema' => $schema,
             'enabled' => $decoded['enabled'],
             'app_host' => $appHost,
             'www_host' => $wwwHost,
@@ -284,7 +320,32 @@ final class Csp_report_only
             'matomo_origin' => $matomo,
             'max_reports_per_minute' => $rate,
             'retention_hours' => $retention,
-        ];
+        ] + $segment;
+    }
+
+    /**
+     * Return whether a parsed configuration is active at the supplied instant.
+     * v1 keeps its existing enabled semantics; v2 additionally has a bounded
+     * half-open [start, expiry) activation window.
+     */
+    public static function effectiveEnabled(array $config, ?int $now = null): bool
+    {
+        if (($config['enabled'] ?? false) !== true) {
+            return false;
+        }
+        if (($config['schema'] ?? null) === self::CONFIG_SCHEMA) {
+            return true;
+        }
+
+        if (($config['schema'] ?? null) !== self::CONFIG_SCHEMA_V2) {
+            return false;
+        }
+
+        $now ??= time();
+        return is_int($config['starts_at_unix'] ?? null) &&
+            is_int($config['expires_at_unix'] ?? null) &&
+            $config['starts_at_unix'] <= $now &&
+            $now < $config['expires_at_unix'];
     }
 
     public static function canonicalHost(mixed $host): ?string
@@ -338,7 +399,7 @@ final class Csp_report_only
     public static function policyForRequest(array $server, array $config, ?string $contentType = 'text/html'): ?array
     {
         $contentType = $contentType === null ? null : strtolower(trim(explode(';', $contentType, 2)[0]));
-        if (($config['enabled'] ?? false) !== true || $contentType !== 'text/html') {
+        if (!self::effectiveEnabled($config) || $contentType !== 'text/html') {
             return null;
         }
 
@@ -624,13 +685,24 @@ final class Csp_report_only
             return ['status' => 'error', 'reason' => 'invalid_report'];
         }
         $path = $path ?? self::aggregatePath();
-        $now = $now ?? time();
         $handle = self::openAggregateLock($path);
         if (!is_resource($handle)) {
             return ['status' => 'error', 'reason' => 'storage_unavailable'];
         }
 
         try {
+            // The controller performs an early gate, but a request can cross a
+            // v2 segment boundary while waiting for the aggregate lock. Keep
+            // the mutation itself inside the activation window as well.
+            // A supplied time is only for deterministic tests. Production
+            // samples the clock after acquiring the lock, not before waiting.
+            $now ??= time();
+            if (
+                ($config['schema'] ?? self::CONFIG_SCHEMA) === self::CONFIG_SCHEMA_V2 &&
+                !self::effectiveEnabled($config, $now)
+            ) {
+                return ['status' => 'inactive', 'reason' => 'activation_expired'];
+            }
             $raw = self::readAggregate($path);
             if ($raw === false) {
                 return ['status' => 'error', 'reason' => 'storage_unavailable'];

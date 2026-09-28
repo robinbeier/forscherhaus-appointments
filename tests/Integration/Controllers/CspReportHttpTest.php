@@ -144,7 +144,67 @@ final class CspReportHttpTest extends TestCase
         self::assertFileDoesNotExist($aggregatePath . '.lock');
     }
 
-    private function prepareOwnedRateLimitState(): void
+    public function testExpiredV2CollectorRejectsWithoutCreatingAggregate(): void
+    {
+        self::assertNotNull($this->server);
+        $this->prepareOwnedRateLimitState([
+            'schema' => \Csp_report_only::CONFIG_SCHEMA_V2,
+            'enabled' => true,
+            'app_host' => 'app.example.test',
+            'www_host' => 'www.example.test',
+            'google_analytics_enabled' => false,
+            'matomo_origin' => null,
+            'max_reports_per_minute' => 1,
+            'retention_hours' => 48,
+            'starts_at_unix' => time() - 7200,
+            'expires_at_unix' => time() - 3600,
+        ]);
+        $response = $this->server->client()->requestRawApp(
+            'POST',
+            'csp-report',
+            json_encode(
+                [
+                    [
+                        'type' => 'csp-violation',
+                        'body' => [
+                            'document-uri' => 'https://app.example.test/calendar',
+                            'effective-directive' => 'script-src',
+                            'blocked-uri' => 'inline',
+                            'disposition' => 'report',
+                        ],
+                    ],
+                ],
+                JSON_THROW_ON_ERROR,
+            ),
+            'application/csp-report',
+        );
+        self::assertSame(404, $response->statusCode, $response->body);
+        self::assertFileDoesNotExist(\Csp_report_only::aggregatePath());
+        self::assertFileDoesNotExist(\Csp_report_only::aggregatePath() . '.lock');
+    }
+
+    public function testFutureV2CollectorRejectsWithoutCreatingAggregate(): void
+    {
+        self::assertNotNull($this->server);
+        $this->prepareOwnedRateLimitState([
+            'schema' => \Csp_report_only::CONFIG_SCHEMA_V2,
+            'enabled' => true,
+            'app_host' => 'app.example.test',
+            'www_host' => 'www.example.test',
+            'google_analytics_enabled' => false,
+            'matomo_origin' => null,
+            'max_reports_per_minute' => 1,
+            'retention_hours' => 48,
+            'starts_at_unix' => time() + 3600,
+            'expires_at_unix' => time() + 7200,
+        ]);
+        $response = $this->server->client()->requestRawApp('POST', 'csp-report', '{}', 'application/csp-report');
+        self::assertSame(404, $response->statusCode, $response->body);
+        self::assertFileDoesNotExist(\Csp_report_only::aggregatePath());
+        self::assertFileDoesNotExist(\Csp_report_only::aggregatePath() . '.lock');
+    }
+
+    private function prepareOwnedRateLimitState(?array $config = null): void
     {
         $configDirectory = dirname(\Csp_report_only::CONFIG_PATH);
         $configPath = \Csp_report_only::CONFIG_PATH;
@@ -172,7 +232,7 @@ final class CspReportHttpTest extends TestCase
             throw new RuntimeException('CSP config directory is not a safe directory.');
         }
 
-        $config = $this->rateLimitConfig();
+        $config ??= $this->rateLimitConfig();
         $handle = @fopen($configPath, 'x');
         if (!is_resource($handle)) {
             $this->cleanupOwnedRateLimitState();
