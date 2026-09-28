@@ -59,6 +59,103 @@ final class CspReportOnlyTest extends TestCase
         );
     }
 
+    public function testV2ConfigRequiresAnExactBoundedActivationWindow(): void
+    {
+        $now = 1_700_000_000;
+        $config = $this->config([
+            'schema' => Csp_report_only::CONFIG_SCHEMA_V2,
+            'starts_at_unix' => $now,
+            'expires_at_unix' => $now + 3600,
+        ]);
+
+        $parsed = Csp_report_only::parseConfig(json_encode($config, JSON_THROW_ON_ERROR));
+        self::assertIsArray($parsed);
+        self::assertTrue(Csp_report_only::effectiveEnabled($parsed, $now));
+        self::assertFalse(Csp_report_only::effectiveEnabled($parsed, $now - 1));
+        self::assertFalse(Csp_report_only::effectiveEnabled($parsed, $now + 3600));
+
+        foreach (
+            [
+                ['starts_at_unix' => $now, 'expires_at_unix' => $now],
+                ['starts_at_unix' => $now, 'expires_at_unix' => $now + 899],
+                ['starts_at_unix' => $now, 'expires_at_unix' => $now + 14401],
+                ['starts_at_unix' => (string) $now, 'expires_at_unix' => $now + 1],
+            ]
+            as $invalidWindow
+        ) {
+            self::assertNull(
+                Csp_report_only::parseConfig(json_encode(array_merge($config, $invalidWindow), JSON_THROW_ON_ERROR)),
+            );
+        }
+
+        self::assertNull(
+            Csp_report_only::parseConfig(json_encode($config + ['unexpected' => true], JSON_THROW_ON_ERROR)),
+        );
+    }
+
+    public function testV1EnabledSemanticsRemainUnchanged(): void
+    {
+        $config = Csp_report_only::parseConfig(json_encode($this->config(), JSON_THROW_ON_ERROR));
+        self::assertIsArray($config);
+        self::assertTrue(Csp_report_only::effectiveEnabled($config, 0));
+        self::assertFalse(Csp_report_only::effectiveEnabled(array_replace($config, ['enabled' => false]), 0));
+    }
+
+    public function testV2WindowControlsHeaderGeneration(): void
+    {
+        $now = time();
+        $config = Csp_report_only::parseConfig(
+            json_encode(
+                $this->config([
+                    'schema' => Csp_report_only::CONFIG_SCHEMA_V2,
+                    'starts_at_unix' => $now - 60,
+                    'expires_at_unix' => $now + 3600,
+                ]),
+                JSON_THROW_ON_ERROR,
+            ),
+        );
+        self::assertIsArray($config);
+        $server = ['HTTP_HOST' => 'app.example.test', 'HTTPS' => 'on', 'REQUEST_URI' => '/booking'];
+        self::assertIsArray(Csp_report_only::policyForRequest($server, $config, 'text/html'));
+
+        $expired = $config;
+        $expired['expires_at_unix'] = $now - 1;
+        self::assertNull(Csp_report_only::policyForRequest($server, $expired, 'text/html'));
+    }
+
+    public function testExpiredV2RecordDoesNotMutateAggregateAfterLockBoundary(): void
+    {
+        $directory = $this->temporaryRoot() . '/csp-report-only-expired-' . bin2hex(random_bytes(4));
+        mkdir($directory, 0700, true);
+        $path = $directory . '/aggregate.json';
+        $config = $this->config([
+            'schema' => Csp_report_only::CONFIG_SCHEMA_V2,
+            'starts_at_unix' => 1_700_000_000,
+            'expires_at_unix' => 1_700_000_900,
+        ]);
+        $before = '{"sentinel":true}';
+        file_put_contents($path, $before);
+        try {
+            $result = Csp_report_only::record(
+                [
+                    'surface' => 'app',
+                    'directive' => 'script-src',
+                    'blocked_origin' => 'inline',
+                    'disposition' => 'report',
+                ],
+                $config,
+                $path,
+                1_700_001_000,
+            );
+            self::assertSame(['status' => 'inactive', 'reason' => 'activation_expired'], $result);
+            self::assertSame($before, (string) file_get_contents($path));
+        } finally {
+            @unlink($path . '.lock');
+            @unlink($path);
+            @rmdir($directory);
+        }
+    }
+
     public function testInactiveProductionCandidateHasTheExpectedContract(): void
     {
         $path = dirname(__DIR__, 3) . '/scripts/ops/config/csp_report_only.production.v1.json';
