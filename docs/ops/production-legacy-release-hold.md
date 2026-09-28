@@ -30,8 +30,15 @@ When a valid hold is present, retention treats an exact held archive as
 `legacy_unverifiable_hold`. It remains protected after marker rotation and
 never appears in a deletion set. An archive-only prefix that does not exactly
 match a hold target by release ID, name, SHA-256, and size fails closed. A
-missing or unsafe held archive, target, or hold file also fails closed. No
-commit, release provenance, or caller-supplied identity is accepted.
+missing or unsafe archive or target named by an installed hold also fails
+closed. Absence of both the hold file and archive-only legacy artifacts is
+a valid no-hold state. No commit, release provenance, or caller-supplied
+identity is accepted.
+
+The hash-pinned helper comments call this protection "permanent": that means a
+valid installed hold is never pruned by ordinary retention. It does not
+assert that every host must keep a hold after separately authorized retirement.
+This documentation correction does not change the installed helper or its hash.
 
 For every held archive, retention re-hashes and re-runs the same bounded safe
 Tar contract on one stable file descriptor. The live capacity bounds must match
