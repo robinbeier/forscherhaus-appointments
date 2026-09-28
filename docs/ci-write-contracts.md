@@ -478,7 +478,8 @@ fail-closed fehl; ausfuehrungsrelevante Inhalte bleiben vollstaendig gebunden.
 Jeder Workflow-/Job-/Step-`shell`-Override und jede nicht ausdruecklich
 ausgenommene `continue-on-error`-Deklaration lassen die Readiness-Pruefung
 fehlschlagen. `strict-v2` erlaubt ausschliesslich den optionalen Archivtransport:
-`actions/cache/restore@v4` und `actions/cache/save@v4` im Defense-Job duerfen
+`actions/cache/restore@v4` und `actions/cache/save@v4` in den Defense- und
+Calendar-Canary-Jobs duerfen
 mit literalem `continue-on-error: true`, exakt einer Minute Timeout und ohne
 `run` ausgefuehrt werden. Build, Tests und Bereinigung bleiben blocking; der
 vollstaendige Job-Fingerprint bindet auch Cache-Keys, Pfade und Conditions. Advisory-Signal-Jobs gehoeren nicht zum

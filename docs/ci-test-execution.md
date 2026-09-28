@@ -67,7 +67,9 @@ cache import may recover in the same cache-free way; other unknown build
 errors fail closed. The job publishes the `php-build` receipt with cache
 state, image identity, and build phase timings; this receipt documents
 preparation behavior and does not establish a warm-hit performance claim by
-itself.
+itself. Calendar uses a job-specific `-calendar` save-key suffix so parallel
+Defense and Calendar saves cannot collide while both retain the shared recipe
+restore prefix.
 
 ## Per-test receipts and skips
 

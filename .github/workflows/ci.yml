@@ -400,15 +400,15 @@ jobs:
         continue-on-error: true
         timeout-minutes: 1
         with:
-          path: ${{ runner.temp }}/calendar-php-cache/import
-          key: ${{ steps.php-cache-key.outputs.prefix }}${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/defense-php-cache/import
+          key: ${{ steps.php-cache-key.outputs.prefix }}${{ github.run_id }}-${{ github.run_attempt }}-calendar
           restore-keys: ${{ steps.php-cache-key.outputs.prefix }}
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: 1
       - name: Build PHP with bounded layer cache
         id: php-build
         env:
-          PHP_CACHE_DIR: ${{ runner.temp }}/calendar-php-cache
+          PHP_CACHE_DIR: ${{ runner.temp }}/defense-php-cache
           RESTORE_OUTCOME: ${{ steps.php-cache-restore.outcome }}
           RESTORED_KEY: ${{ steps.php-cache-restore.outputs.cache-matched-key }}
         run: |
@@ -421,10 +421,17 @@ jobs:
             --cache-dir "$PHP_CACHE_DIR" --report storage/logs/ci/php-build/summary.json
           php_image="$(python3 -c 'import json, pathlib; print(json.loads(pathlib.Path("storage/logs/ci/php-build/summary.json").read_text())["image"])')"
           docker tag "$php_image" "${COMPOSE_PROJECT_NAME}-php-fpm"
+          cat > storage/logs/ci/calendar-php-image.yml <<EOF
+          services:
+            php-fpm:
+              image: ${COMPOSE_PROJECT_NAME}-php-fpm
+              build: !reset null
+          EOF
+          echo "COMPOSE_FILE=docker-compose.yml:docker/compose.zero-surprise.yml:storage/logs/ci/calendar-php-image.yml" >> "$GITHUB_ENV"
       - name: Prepare complete PHP layer archive
         id: php-cache-save-preparation
         env:
-          PHP_CACHE_DIR: ${{ runner.temp }}/calendar-php-cache
+          PHP_CACHE_DIR: ${{ runner.temp }}/defense-php-cache
         run: |
           python3 - <<'PY'
           import json, os, pathlib, shutil
@@ -447,15 +454,25 @@ jobs:
         continue-on-error: true
         timeout-minutes: 1
         with:
-          path: ${{ runner.temp }}/calendar-php-cache/import
-          key: ${{ steps.php-cache-key.outputs.prefix }}${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/defense-php-cache/import
+          key: ${{ steps.php-cache-key.outputs.prefix }}${{ github.run_id }}-${{ github.run_attempt }}-calendar
       - name: Run isolated application root suites
         run: |
           set -o pipefail
           mkdir -p storage/logs/ci
+          docker compose config --format json > storage/logs/ci/calendar-effective-compose.json
+          python3 - <<'PY'
+          import json, os, pathlib
+
+          services = json.loads(pathlib.Path('storage/logs/ci/calendar-effective-compose.json').read_text()).get('services', {})
+          php_fpm = services.get('php-fpm', {})
+          expected_image = f"{os.environ['COMPOSE_PROJECT_NAME']}-php-fpm"
+          if php_fpm.get('image') != expected_image or 'build' in php_fpm:
+              raise SystemExit('Calendar PHP Compose service must be image-only')
+          PY
           docker compose up -d mysql
           bash scripts/ci/wait_for_mysql_readiness.sh
-          docker compose run --no-build --rm --user root -T php-fpm bash -lc '
+          docker compose run --rm --user root -T php-fpm bash -lc '
             set -euo pipefail
             composer install --no-interaction --no-progress
             test ! -e config.php

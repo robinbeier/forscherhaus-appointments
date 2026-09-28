@@ -396,6 +396,13 @@ class CiWorkflowContractTest extends TestCase
         );
         self::assertStringContainsString('--cache-dir "$PHP_CACHE_DIR"', $build);
         self::assertStringContainsString('docker tag "$php_image" "${COMPOSE_PROJECT_NAME}-php-fpm"', $build);
+        self::assertStringContainsString('cat > storage/logs/ci/calendar-php-image.yml <<EOF', $build);
+        self::assertStringContainsString('image: ${COMPOSE_PROJECT_NAME}-php-fpm', $build);
+        self::assertStringContainsString('build: !reset null', $build);
+        self::assertStringContainsString(
+            'COMPOSE_FILE=docker-compose.yml:docker/compose.zero-surprise.yml:storage/logs/ci/calendar-php-image.yml',
+            $build,
+        );
         self::assertStringContainsString(
             'if [[ "$RESTORE_OUTCOME" != success || -z "$RESTORED_KEY" ]]; then' .
                 "\n" .
@@ -407,10 +414,26 @@ class CiWorkflowContractTest extends TestCase
         self::assertSame('docker/setup-buildx-action@v4', $steps['Set up PHP layer-cache builder']['uses']);
         $restore = $steps['Restore complete PHP layer archive'];
         $save = $steps['Save complete PHP layer archive'];
+        $defenseSteps = $this->namedSteps($this->workflowJob('defense-cycle-ordinary-flows'));
+        $defenseRestore = $defenseSteps['Restore complete PHP layer archive'];
+        $defenseSave = $defenseSteps['Save complete PHP layer archive'];
         self::assertTrue($restore['continue-on-error']);
         self::assertTrue($save['continue-on-error']);
         self::assertSame($restore['with']['path'], $save['with']['path']);
         self::assertSame($restore['with']['key'], $save['with']['key']);
+        self::assertSame($defenseRestore['with']['path'], $restore['with']['path']);
+        self::assertSame($defenseSave['with']['path'], $save['with']['path']);
+        self::assertNotSame($defenseRestore['with']['key'], $restore['with']['key']);
+        self::assertStringContainsString('-calendar', $restore['with']['key']);
+        self::assertStringContainsString('-calendar', $save['with']['key']);
+        self::assertSame(
+            $defenseSteps['Build PHP with bounded layer cache']['env']['PHP_CACHE_DIR'],
+            $steps['Build PHP with bounded layer cache']['env']['PHP_CACHE_DIR'],
+        );
+        self::assertSame(
+            '${{ runner.temp }}/defense-php-cache',
+            $steps['Build PHP with bounded layer cache']['env']['PHP_CACHE_DIR'],
+        );
         self::assertStringContainsString('${{ github.run_id }}-${{ github.run_attempt }}', $restore['with']['key']);
         self::assertSame('${{ steps.php-cache-key.outputs.prefix }}', $restore['with']['restore-keys']);
         self::assertSame("steps.php-cache-save-preparation.outputs.cache_export_ready == 'true'", $save['if']);
@@ -421,7 +444,14 @@ class CiWorkflowContractTest extends TestCase
         self::assertStringContainsString('except OSError:', $prepare);
         self::assertStringContainsString('ready = False', $prepare);
         self::assertStringContainsString('output.write(f"cache_export_ready={str(ready).lower()}\\n")', $prepare);
-        self::assertStringContainsString('--no-build', $run);
+        self::assertStringNotContainsString('--no-build', $run);
+        $effectiveConfig = 'docker compose config --format json > storage/logs/ci/calendar-effective-compose.json';
+        self::assertStringContainsString($effectiveConfig, $run);
+        self::assertStringContainsString("expected_image = f\"{os.environ['COMPOSE_PROJECT_NAME']}-php-fpm\"", $run);
+        self::assertStringContainsString("php_fpm.get('image') != expected_image or 'build' in php_fpm", $run);
+        self::assertLessThan(strpos($run, 'docker compose up -d mysql'), strpos($run, $effectiveConfig));
+        self::assertLessThan(strpos($run, 'docker compose run --rm'), strpos($run, 'docker compose up -d mysql'));
+        self::assertStringContainsString('docker compose run --rm --user root -T php-fpm bash -lc', $run);
 
         foreach (
             [
