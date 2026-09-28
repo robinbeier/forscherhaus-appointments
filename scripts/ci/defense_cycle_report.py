@@ -87,6 +87,7 @@ def main() -> int:
     parser.add_argument("--dirty", required=True, choices=("true", "false"))
     parser.add_argument("--runner-status", required=True, type=int)
     parser.add_argument("--cleanup-status", required=True, type=int)
+    parser.add_argument("--shard", choices=("1", "2"))
     args = parser.parse_args()
     junit_available, tests = parse_junit(Path(args.junit))
     phases = parse_events(Path(args.events))
@@ -111,6 +112,8 @@ def main() -> int:
         "runner_exit_code": args.runner_status,
         "overall_status": overall,
     }
+    if args.shard is not None:
+        report["shard"] = int(args.shard)
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")

@@ -94,7 +94,9 @@
             "test-routing": "c6fb9740798f36179e1a11abeb488ce8149be4181071a041b1d5f16aa571ce35",
             "typed-request-contracts": "91555da0ee339465906f5779ce4023ec53df037fa1c8f72ea8e69a7ccf586094",
             "typed-request-dto": "ccd16fdafb2c6ac1f2b311e39f064c1d3ba1a1fe56b2a8f8333635ab97ce7e47",
-            "defense-cycle-ordinary-flows": "0285d8b642474469536d2dd2c95b3e22c0f82ccf842023f3029c685a16729aca"
+            "defense-cycle-ordinary-flows": "11d61e4c9675fcaa3df2c2f812401f2a44fb6184cf1ea431d11c12c3a3c8dec4",
+            "defense-cycle-ordinary-flows-shard-1": "6d116045d669186656f0357830454321e5c9245555bdd10340f4df15767e1ded",
+            "defense-cycle-ordinary-flows-shard-2": "54a9c8bd7a2da578d96f177a3033b57b1d59c6ec691779b32d75a171acf4abfe"
         },
         "condition_grammar": {
             "version": 1,
@@ -276,6 +278,12 @@
                 "kind": "fingerprinted_execution"
             },
             "defense-cycle-ordinary-flows": {
+                "kind": "fingerprinted_execution"
+            },
+            "defense-cycle-ordinary-flows-shard-1": {
+                "kind": "fingerprinted_execution"
+            },
+            "defense-cycle-ordinary-flows-shard-2": {
                 "kind": "fingerprinted_execution"
             }
         }

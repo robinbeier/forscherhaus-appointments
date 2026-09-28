@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/10.5/phpunit.xsd"
+    bootstrap="tests/bootstrap.php" colors="true" cacheResult="false">
+    <testsuites>
+        <testsuite name="DefenseCycleOrdinaryFlowsShard1">
+            <file>./tests/Integration/Controllers/DefenseCycleOrdinaryFlowTest.php</file>
+            <file>./tests/Integration/Controllers/ProviderApiHttpAuthTest.php</file>
+            <file>./tests/Integration/Controllers/ProviderApiHttpWriteTest.php</file>
+            <file>./tests/Integration/Controllers/CustomersApiHttpWriteTest.php</file>
+            <file>./tests/Integration/Controllers/ServicesApiHttpWriteTest.php</file>
+            <file>./tests/Integration/Controllers/UnavailabilitiesApiHttpWriteTest.php</file>
+            <file>./tests/Integration/Controllers/ServiceCategoriesApiHttpWriteTest.php</file>
+            <file>./tests/Integration/Controllers/ServiceCategoriesApiPostWriteFailureTest.php</file>
+            <file>./tests/Integration/Controllers/AppointmentsApiHttpWriteTest.php</file>
+            <file>./tests/Integration/Controllers/StaffSettingsApiHttpTest.php</file>
+            <file>./tests/Integration/Controllers/RescheduleCutoffHttpTest.php</file>
+            <file>./tests/Integration/Controllers/RescheduleMethodHttpTest.php</file>
+            <file>./tests/Integration/Controllers/BookingMethodHttpTest.php</file>
+            <file>./tests/Integration/Controllers/BookingCancellationHttpTest.php</file>
+            <file>./tests/Integration/Controllers/BookingCancellationRaceHttpTest.php</file>
+            <file>./tests/Integration/Controllers/BackofficeWriteHttpTest.php</file>
+            <file>./tests/Integration/Controllers/BackofficeHttpContractTest.php</file>
+            <file>./tests/Integration/OrdinaryLiveFixtureTest.php</file>
+            <file>./tests/Integration/OrdinaryAccountProbeTest.php</file>
+            <file>./tests/Integration/OrdinarySessionProbeTest.php</file>
+            <file>./tests/Integration/OrdinaryProbeEvidenceTest.php</file>
+        </testsuite>
+    </testsuites>
+    <php><server name="APP_ENV" value="testing"/></php>
+</phpunit>

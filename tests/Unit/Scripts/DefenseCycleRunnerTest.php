@@ -8,12 +8,32 @@ use PHPUnit\Framework\TestCase;
 
 final class DefenseCycleRunnerTest extends TestCase
 {
+    public function testInvalidShardArgumentsFailBeforeDockerLifecycle(): void
+    {
+        $process = proc_open(
+            ['/bin/bash', 'scripts/ci/run_defense_cycle.sh', '--shard', '3'],
+            [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            $pipes,
+            dirname(__DIR__, 3),
+        );
+        self::assertIsResource($process);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        self::assertSame(1, proc_close($process));
+        self::assertSame('', $stdout);
+        self::assertStringContainsString('expected 1 or 2', $stderr);
+    }
+
     public function testInstrumentationPreservesErrexitAndCleanupOnEveryFailure(): void
     {
         foreach (
             [
                 'success' => 0,
                 'real_phpunit' => 0,
+                'real_phpunit_shard_1' => 0,
+                'real_phpunit_shard_2' => 0,
                 'seed_failure' => 1,
                 'phpunit_failure' => 23,
                 'entrypoint_failure' => 29,
@@ -71,7 +91,8 @@ final class DefenseCycleRunnerTest extends TestCase
                     fi
                     if [[ "$*" == *vendor/bin/phpunit* ]]; then
                         printf 'phpunit\n' >> "$FIXTURE_ROOT/lifecycle"
-                        if [[ "$FIXTURE_MODE" == real_phpunit || "$FIXTURE_MODE" == report_failure ]]; then
+                        if [[ "$FIXTURE_MODE" == real_phpunit || "$FIXTURE_MODE" == real_phpunit_shard_1 || "$FIXTURE_MODE" == real_phpunit_shard_2 || "$FIXTURE_MODE" == report_failure ]]; then
+                            printf 'phpunit:%s\n' "$*" >> "$FIXTURE_ROOT/lifecycle"
                             local previous="" option
                             local phpunit_command=(php "$FIXTURE_PHPUNIT" --no-configuration --do-not-cache-result --bootstrap "$FIXTURE_AUTOLOAD")
                             for option in "$@"; do
@@ -128,7 +149,14 @@ final class DefenseCycleRunnerTest extends TestCase
             }
             try {
                 $process = proc_open(
-                    ['/bin/bash', 'scripts/ci/run_defense_cycle.sh'],
+                    array_merge(
+                        ['/bin/bash', 'scripts/ci/run_defense_cycle.sh'],
+                        str_ends_with($mode, '_shard_1')
+                            ? ['--shard', '1']
+                            : (str_ends_with($mode, '_shard_2')
+                                ? ['--shard', '2']
+                                : []),
+                    ),
                     [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
                     $pipes,
                     $directory,
@@ -156,9 +184,21 @@ final class DefenseCycleRunnerTest extends TestCase
                     self::assertCount(1, $paths, $mode);
                     $report = json_decode(file_get_contents($paths[0]), true, flags: JSON_THROW_ON_ERROR);
                     self::assertSame(
-                        in_array($mode, ['success', 'real_phpunit'], true) ? 'passed' : 'failed',
+                        in_array(
+                            $mode,
+                            ['success', 'real_phpunit', 'real_phpunit_shard_1', 'real_phpunit_shard_2'],
+                            true,
+                        )
+                            ? 'passed'
+                            : 'failed',
                         $report['overall_status'],
                     );
+                    if (str_ends_with($mode, '_shard_1') || str_ends_with($mode, '_shard_2')) {
+                        $expectedShard = str_ends_with($mode, '_shard_1') ? 1 : 2;
+                        self::assertSame($expectedShard, $report['shard']);
+                    } else {
+                        self::assertArrayNotHasKey('shard', $report);
+                    }
                     self::assertSame(
                         in_array($mode, ['cleanup_failure', 'both_fail'], true) ? 'failed' : 'passed',
                         $report['cleanup']['status'],
@@ -171,6 +211,10 @@ final class DefenseCycleRunnerTest extends TestCase
                             ),
                         );
                         self::assertSame('failed', $entrypoint[0]['status']);
+                    }
+                    if (str_ends_with($mode, '_shard_1') || str_ends_with($mode, '_shard_2')) {
+                        $shard = str_ends_with($mode, '_shard_1') ? '1' : '2';
+                        self::assertStringContainsString("phpunit.defense-cycle-shard-{$shard}.xml", $events);
                     }
                     foreach ($report['phases'] as $phase) {
                         self::assertIsInt($phase['duration_ms']);

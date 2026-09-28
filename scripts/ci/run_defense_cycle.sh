@@ -2,6 +2,17 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 source scripts/ci/docker_compose_helpers.sh
+
+DEFENSE_CYCLE_SHARD=""
+if [[ "${1:-}" == "--shard" && -n "${2:-}" && "${3:-}" == "" ]]; then
+    case "$2" in
+        1|2) DEFENSE_CYCLE_SHARD="$2" ;;
+        *) echo 'Refusing unknown Defense cycle shard; expected 1 or 2.' >&2; exit 1 ;;
+    esac
+elif [[ "${1:-}" != "" ]]; then
+    echo 'Usage: bash scripts/ci/run_defense_cycle.sh [--shard 1|2]' >&2
+    exit 1
+fi
 # No existing database, external target, dump, project or data path can be adopted.
 if [[ -n "${CI_DOCKER_COMPOSE_PROJECT_NAME:-}${COMPOSE_PROJECT_NAME:-}${COMPOSE_FILE:-}${EA_MYSQL_DATA_PATH:-}${EA_LOCAL_CI_COMPOSE_OVERRIDE_PATH:-}${DOCKER_HOST:-}${DOCKER_CONTEXT:-}" || "${EA_LOCAL_CI_PORTLESS_COMPOSE:-1}" != "1" ]]; then
     echo 'Refusing caller-owned Docker runtime configuration.' >&2
@@ -37,7 +48,7 @@ export DOCKER_HOST="$docker_endpoint"
 CI_DOCKER_COMPOSE_PROJECT_NAME="fh-defense-$(python3 -c 'import uuid; print(uuid.uuid4().hex[:16])')"
 export CI_DOCKER_COMPOSE_PROJECT_NAME
 export EA_SKIP_NPM_BOOTSTRAP=1 EA_SKIP_ASSET_BUILD_BOOTSTRAP=1
-CI_DOCKER_LOG_PREFIX=defense-cycle
+CI_DOCKER_LOG_PREFIX=defense-cycle${DEFENSE_CYCLE_SHARD:+-shard-$DEFENSE_CYCLE_SHARD}
 DEFENSE_CYCLE_ID="$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
 DEFENSE_CYCLE_DIR="$PWD/storage/logs/ci/defense-cycle"
 DEFENSE_CYCLE_EVENTS="$DEFENSE_CYCLE_DIR/${DEFENSE_CYCLE_ID}.events"
@@ -73,7 +84,9 @@ cleanup() {
         printf 'cleanup|%s|failed\n' "$(defense_cycle_now)" >> "$DEFENSE_CYCLE_EVENTS" 2>/dev/null || true
         DEFENSE_CYCLE_CURRENT_PHASE=""
     fi
-    python3 scripts/ci/defense_cycle_report.py --events "$DEFENSE_CYCLE_EVENTS" --junit "$DEFENSE_CYCLE_JUNIT" --output "$DEFENSE_CYCLE_SUMMARY" --commit "$DEFENSE_CYCLE_COMMIT" --dirty "$DEFENSE_CYCLE_DIRTY" --runner-status "$result" --cleanup-status "$cleanup_result" >/dev/null 2>&1 || printf '[defense-cycle] summary report unavailable\n' >&2
+    report_args=(--events "$DEFENSE_CYCLE_EVENTS" --junit "$DEFENSE_CYCLE_JUNIT" --output "$DEFENSE_CYCLE_SUMMARY" --commit "$DEFENSE_CYCLE_COMMIT" --dirty "$DEFENSE_CYCLE_DIRTY" --runner-status "$result" --cleanup-status "$cleanup_result")
+    if [[ -n "$DEFENSE_CYCLE_SHARD" ]]; then report_args+=(--shard "$DEFENSE_CYCLE_SHARD"); fi
+    python3 scripts/ci/defense_cycle_report.py "${report_args[@]}" >/dev/null 2>&1 || printf '[defense-cycle] summary report unavailable\n' >&2
     if [[ "$result" -ne 0 ]]; then exit "$result"; fi
     exit "$cleanup_result"
 }
@@ -108,7 +121,9 @@ defense_cycle_begin seed_install
 ci_docker_install_seed_instance defense-cycle exec -T php-fpm php index.php console install
 defense_cycle_end seed_install
 # Do not enable an optional PHPUnit logger when its destination is unavailable.
-DEFENSE_CYCLE_PHPUNIT=(php vendor/bin/phpunit --configuration phpunit.defense-cycle.xml)
+DEFENSE_CYCLE_PHPUNIT_CONFIG=phpunit.defense-cycle.xml
+if [[ -n "$DEFENSE_CYCLE_SHARD" ]]; then DEFENSE_CYCLE_PHPUNIT_CONFIG="phpunit.defense-cycle-shard-${DEFENSE_CYCLE_SHARD}.xml"; fi
+DEFENSE_CYCLE_PHPUNIT=(php vendor/bin/phpunit --configuration "$DEFENSE_CYCLE_PHPUNIT_CONFIG")
 if { : > "$DEFENSE_CYCLE_JUNIT"; } 2>/dev/null; then
     DEFENSE_CYCLE_PHPUNIT+=(--log-junit "/var/www/html/storage/logs/ci/defense-cycle/${DEFENSE_CYCLE_ID}.junit.xml")
 else
