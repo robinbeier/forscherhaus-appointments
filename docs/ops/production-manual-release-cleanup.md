@@ -27,9 +27,9 @@ previous-release entries, identity drift, or any protected current/rollback chan
 Only previous-release directories with a complete, canonical
 archive/provenance pair can be selected; the manual release-only procedure has
 no minimum age. A candidate whose directory timestamp is in the future is
-excluded fail-closed. Releases named in the permanent host-local legacy hold
-are preserved. The archive pair is checked again after quarantine and before
-deletion. A missing or invalid pair blocks the plan rather than authorizing
+excluded fail-closed. Releases named in a valid host-local legacy hold, if
+present, are preserved. The archive pair is checked again after quarantine
+and before deletion. A missing or invalid pair blocks the plan rather than authorizing
 deletion. At most four oldest candidates are selected per plan. The active
 release and its exact rollback directory are protected. Stage and failed
 directories are ignored as deletion classes, even when their contents look

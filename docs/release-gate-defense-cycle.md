@@ -198,7 +198,7 @@ verified installed release. Stage and retain each bundle *archive* and
 its matching `.provenance` file under `/root/fh-ordinary-probe-bundles`, a
 root-owned `0700` directory whose artifacts are root-owned `0600`;
 `/root/releases` remains reserved for application release archive pairs and
-its legacy holds. This path rule retains
+any valid legacy holds. This path rule retains
 the existing bundle evidence; it does not authorize moving or deleting
 production files or enabling a retention timer. The wrapper pins the tool inode
 and resolves the original application directory by inode before each call and

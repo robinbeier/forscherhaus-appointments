@@ -22,8 +22,8 @@ The helper recognizes only these protected roots and identities:
 - exact archive pairs `/root/releases/<release>.tar.gz` and
   `<release>.build-provenance.json` validated against canonical
   `release_build_provenance.v1` bytes;
-- the fixed `/etc/fh/legacy-release-hold.v1.json` for the two explicitly held
-  legacy archives; see `production-legacy-release-hold.md`.
+- a valid `/etc/fh/legacy-release-hold.v1.json`, if present, for its two
+  explicitly held legacy archives; see `production-legacy-release-hold.md`.
 - root-owned backup sets below `/root/backups/easyappointments` whose
   exact canonical `meta/backup.env` is admitted by the compile-time-pinned
   `dump_producer_registry.v1`, and whose `db/easyappointments.sql.gz` has an
@@ -45,7 +45,7 @@ printed.
 The ordinary probe bundle path is a path rule only. Existing bundle evidence
 must be retained there; this document does not authorize moving or deleting
 production files, and it does not enable the retention timer. Keep the
-`/root/releases` archive-only contract and legacy holds unchanged.
+`/root/releases` archive-only contract and any valid legacy hold unchanged.
 
 The same helper exposes the separate read-only `admission-status` command
 documented in `production-dump-producer-admission.md`. It acquires the shared
@@ -153,7 +153,7 @@ marker remains `prod_release_archive_dump_retention_marker.v1`.
 | complete archive/provenance pairs | 30 days | current, rollback, then newest complete pairs until 4 release IDs are protected | 8 pairs |
 | verified backup sets | 30 days from attestation | newest 2 independently restore-verified dump SHA-256 values | 4 sets |
 
-An archive-only prefix must exactly match a valid permanent legacy hold by
+An archive-only prefix must exactly match a valid host-local legacy hold by
 release ID, archive name, full hash, and size; otherwise it is corruption and
 blocks. Held archives are never deletion candidates, including after marker
 rotation. A sidecar without its archive is corruption and blocks.

@@ -268,8 +268,8 @@ Disk, memory, or swap pressure:
   helper with a broad filesystem delete.
 - Retain ordinary probe bundles and matching `.provenance` files under
   `/root/fh-ordinary-probe-bundles`; keep `/root/releases` for application
-  release pairs and legacy holds. This path rule does not authorize moving or
-  deleting production files, and the new directory is outside automatic
+  release pairs and any valid legacy holds. This path rule does not authorize
+  moving or deleting production files, and the new directory is outside automatic
   retention and deletion.
 - For native journal rotation, aggregate inspection, and approved manual cleanup,
   see `docs/ops/production-journald-retention.md`.
@@ -278,11 +278,11 @@ Disk, memory, or swap pressure:
 - Avoid broad cleanup commands. Identify the path or service causing growth.
 - Do not delete backup, release, or Kuma data paths without explicit approval.
 
-Legacy current/rollback archives lack canonical provenance:
+If an older host snapshot contains unverifiable archive-only releases:
 
-- Keep their existing hold record and archive protection as described in
-  `docs/ops/production-legacy-release-hold.md`.
-- Do not reconstruct historical provenance. New release artifacts continue to
+- Keep any valid hold record with its exact archives until separately authorized
+  disposition; see `docs/ops/production-legacy-release-hold.md`.
+- Never reconstruct historical provenance. New release artifacts continue to
   receive provenance through the normal build path.
 
 Certbot or TLS issue:
