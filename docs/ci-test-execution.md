@@ -59,6 +59,18 @@ On a push, the check compares the full range from the event's previous commit;
 renamed test destinations are checked as new paths.
 The hosted receipts, rather than this static check, establish actual execution.
 
+The calendar job reuses the bounded PHP layer archive keyed from the same
+`docker/php-fpm` build input as the Defense job. A cold cache, a missing
+restore, or a failed restore discards the import and performs a normal
+cache-free PHP build before the root suites run. A classified missing-layer
+cache import may recover in the same cache-free way; other unknown build
+errors fail closed. The job publishes the `php-build` receipt with cache
+state, image identity, and build phase timings; this receipt documents
+preparation behavior and does not establish a warm-hit performance claim by
+itself. Calendar uses a job-specific `-calendar` save-key suffix so parallel
+Defense and Calendar saves cannot collide while both retain the shared recipe
+restore prefix.
+
 ## Per-test receipts and skips
 
 The `build-test`, `root-deployment-tests`, and

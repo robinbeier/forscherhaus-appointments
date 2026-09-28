@@ -593,8 +593,8 @@ function agentHarnessReadinessEvaluateBlockingJobFailureMasks(
                 // and the enclosing job retain strict failure propagation.
                 if (
                     $key === 'continue-on-error' &&
-                    ($failureControls['allow_defense_archive_transport'] ?? false) &&
-                    $jobName === 'defense-cycle-ordinary-flows' &&
+                    ($failureControls['allow_bounded_cache_transport'] ?? false) &&
+                    in_array($jobName, ['defense-cycle-ordinary-flows', 'calendar-canary-regressions'], true) &&
                     ($step[$key] ?? null) === true &&
                     in_array($step['uses'] ?? null, ['actions/cache/restore@v4', 'actions/cache/save@v4'], true) &&
                     ($step['timeout-minutes'] ?? null) === 1 &&
@@ -623,7 +623,7 @@ function agentHarnessReadinessFailureControlsForPolicy(string $policy): array
         'forbidden_job_keys' => ['continue-on-error'],
         'forbidden_job_run_default_keys' => ['shell'],
         'forbidden_step_keys' => ['continue-on-error', 'shell'],
-        'allow_defense_archive_transport' => $policy === 'strict-v2',
+        'allow_bounded_cache_transport' => $policy === 'strict-v2',
     ];
 }
 
