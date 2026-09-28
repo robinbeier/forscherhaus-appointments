@@ -594,7 +594,15 @@ function agentHarnessReadinessEvaluateBlockingJobFailureMasks(
                 if (
                     $key === 'continue-on-error' &&
                     ($failureControls['allow_bounded_cache_transport'] ?? false) &&
-                    in_array($jobName, ['defense-cycle-ordinary-flows', 'calendar-canary-regressions'], true) &&
+                    in_array(
+                        $jobName,
+                        [
+                            'defense-cycle-ordinary-flows-shard-1',
+                            'defense-cycle-ordinary-flows-shard-2',
+                            'calendar-canary-regressions',
+                        ],
+                        true,
+                    ) &&
                     ($step[$key] ?? null) === true &&
                     in_array($step['uses'] ?? null, ['actions/cache/restore@v4', 'actions/cache/save@v4'], true) &&
                     ($step['timeout-minutes'] ?? null) === 1 &&

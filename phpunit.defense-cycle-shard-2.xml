@@ -1,0 +1,36 @@
+<?xml version="1.0"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/10.5/phpunit.xsd"
+    bootstrap="tests/bootstrap.php" colors="true" cacheResult="false">
+    <testsuites>
+        <testsuite name="DefenseCycleOrdinaryFlowsShard2">
+            <file>./tests/Integration/AccountSecurityMatrixProbeTest.php</file>
+            <file>./tests/Integration/CustomerRoleBoundaryProbeTest.php</file>
+            <file>./tests/Integration/CustomersApiWriteProbeTest.php</file>
+            <file>./tests/Integration/StaffApiPutProbeTest.php</file>
+            <file>./tests/Integration/SessionLifecycleTest.php</file>
+            <file>./tests/Integration/SecretariesApiAliasProbeTest.php</file>
+            <file>./tests/Integration/ServicesApiWriteProbeTest.php</file>
+            <file>./tests/Integration/UnavailabilitiesApiWriteProbeTest.php</file>
+            <file>./tests/Integration/BlockedPeriodsApiWriteProbeTest.php</file>
+            <file>./tests/Integration/Controllers/BlockedPeriodsApiHttpWriteTest.php</file>
+            <file>./tests/Integration/ServiceCategoriesApiWriteProbeTest.php</file>
+            <file>./tests/Integration/CalendarResponsibilityRaceProbeTest.php</file>
+            <file>./tests/Integration/AppointmentsApiWriteProbeTest.php</file>
+            <file>./tests/Integration/Controllers/BookingDownloadHttpTest.php</file>
+            <file>./tests/Integration/Controllers/PrivacyDeleteHttpTest.php</file>
+            <file>./tests/Integration/Controllers/BookingBlockedPeriodsHttpTest.php</file>
+            <file>./tests/Integration/Controllers/ProviderPdfExportHttpTest.php</file>
+            <file>./tests/Integration/Controllers/ReadOnlyProbeHttpTest.php</file>
+            <file>./tests/Integration/Controllers/CspReportHttpTest.php</file>
+            <file>./tests/Integration/Controllers/ConsentSaveHttpTest.php</file>
+            <file>./tests/Integration/Controllers/LoginMethodHttpTest.php</file>
+            <file>./tests/Unit/Controllers/ServiceCategoriesApiDeleteStatusTest.php</file>
+            <file>./tests/Integration/DefenseVerificationFixtureTest.php</file>
+            <file>./tests/Unit/Scripts/GateHttpClientTest.php</file>
+            <file>./tests/Unit/Scripts/OrdinaryLiveProbeWrapperTest.php</file>
+            <file>./tests/Unit/Scripts/OrdinaryDeploymentCoordinationTest.php</file>
+        </testsuite>
+    </testsuites>
+    <php><server name="APP_ENV" value="testing"/></php>
+</phpunit>

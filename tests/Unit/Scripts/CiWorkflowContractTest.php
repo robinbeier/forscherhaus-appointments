@@ -11,51 +11,112 @@ class CiWorkflowContractTest extends TestCase
 {
     public function testDefenseCachePreparationPreservesBlockingSuiteAndEvidence(): void
     {
-        $job = $this->workflowJob('defense-cycle-ordinary-flows');
-        self::assertSame(['changes'], $job['needs']);
-        self::assertSame("needs.changes.outputs.runtime_checks_required == 'true'", $job['if']);
-        self::assertArrayNotHasKey('continue-on-error', $job);
-        self::assertSame(['contents' => 'read'], $job['permissions']);
-        $steps = $this->namedSteps($job);
-        $optional = ['Restore complete PHP layer archive', 'Save complete PHP layer archive'];
-        foreach ($steps as $name => $step) {
-            if (in_array($name, $optional, true)) {
-                self::assertTrue($step['continue-on-error']);
-                self::assertSame(1, $step['timeout-minutes']);
-            } else {
-                self::assertArrayNotHasKey('continue-on-error', $step);
+        $restoreKeys = [];
+        $saveKeys = [];
+        foreach ([1, 2] as $shard) {
+            $jobName = "defense-cycle-ordinary-flows-shard-{$shard}";
+            $job = $this->workflowJob($jobName);
+            self::assertSame(['changes'], $job['needs']);
+            self::assertSame("needs.changes.outputs.runtime_checks_required == 'true'", $job['if']);
+            self::assertArrayNotHasKey('continue-on-error', $job);
+            self::assertSame(['contents' => 'read'], $job['permissions']);
+            $steps = $this->namedSteps($job);
+            $optional = ['Restore complete PHP layer archive', 'Save complete PHP layer archive'];
+            foreach ($steps as $name => $step) {
+                if (in_array($name, $optional, true)) {
+                    self::assertTrue($step['continue-on-error']);
+                    self::assertSame(1, $step['timeout-minutes']);
+                } else {
+                    self::assertArrayNotHasKey('continue-on-error', $step);
+                }
             }
+            $restore = $steps['Restore complete PHP layer archive'];
+            $save = $steps['Save complete PHP layer archive'];
+            self::assertSame($restore['with']['path'], $save['with']['path']);
+            self::assertSame($restore['with']['key'], $save['with']['key']);
+            self::assertSame(
+                '${{ steps.php-cache-key.outputs.shard-prefix }}' . "\n" . '${{ steps.php-cache-key.outputs.prefix }}',
+                trim($restore['with']['restore-keys']),
+            );
+            self::assertStringContainsString(
+                'shard-prefix=defense-php-oci-v1-${image##*:}-shard-' . $shard . '-',
+                $this->stepRun($steps, 'Resolve PHP cache recipe'),
+            );
+            self::assertStringContainsString('github.run_id', $save['with']['key']);
+            self::assertStringContainsString('steps.php-cache-key.outputs.shard-prefix', $save['with']['key']);
+            self::assertSame("steps.php-cache-save-preparation.outputs.cache_export_ready == 'true'", $save['if']);
+            $restoreKeys[] = $restore['with']['key'];
+            $saveKeys[] = $this->stepRun($steps, 'Resolve PHP cache recipe');
+            $builder = $steps['Set up PHP layer-cache builder'];
+            self::assertSame('docker/setup-buildx-action@v4', $builder['uses']);
+            self::assertFalse($builder['with']['cache-binary']);
+            self::assertTrue($builder['with']['cleanup']);
+            $build = $steps['Build PHP with bounded layer cache'];
+            self::assertStringContainsString(
+                'python3 -B scripts/ci/defense_php_cache.py --resolve-compose --cache-dir "$PHP_CACHE_DIR" --report storage/logs/ci/php-build/summary.json',
+                $build['run'],
+            );
+            self::assertStringContainsString(
+                'if [[ "$RESTORE_OUTCOME" != success || -z "$RESTORED_KEY" ]]',
+                $build['run'],
+            );
+            self::assertStringContainsString(
+                "--label defense-cycle-shard-{$shard} -- bash scripts/ci/run_defense_cycle.sh --shard {$shard}",
+                $this->stepRun($steps, 'Run isolated ordinary application and session lifecycle checks'),
+            );
+            foreach (['Upload PHP build timing evidence', 'Upload gate diagnostic evidence'] as $name) {
+                self::assertSame('always()', $steps[$name]['if']);
+                self::assertSame('actions/upload-artifact@v7', $steps[$name]['uses']);
+            }
+            $receipt = $steps['Upload Defense phase and testcase evidence'];
+            self::assertSame('always()', $receipt['if']);
+            self::assertSame('storage/logs/ci/defense-cycle/*.summary.json', $receipt['with']['path']);
+            self::assertSame('storage/logs/ci/php-build/', $steps['Upload PHP build timing evidence']['with']['path']);
+            self::assertSame(
+                'storage/logs/ci/gate-summary/',
+                $steps['Upload gate diagnostic evidence']['with']['path'],
+            );
         }
-        $restore = $steps['Restore complete PHP layer archive'];
-        $save = $steps['Save complete PHP layer archive'];
-        self::assertSame($restore['with']['path'], $save['with']['path']);
-        self::assertSame($restore['with']['key'], $save['with']['key']);
-        self::assertSame('${{ steps.php-cache-key.outputs.prefix }}', $restore['with']['restore-keys']);
-        self::assertStringContainsString('github.run_id', $save['with']['key']);
-        self::assertSame("steps.php-cache-save-preparation.outputs.cache_export_ready == 'true'", $save['if']);
-        $builder = $steps['Set up PHP layer-cache builder'];
-        self::assertSame('docker/setup-buildx-action@v4', $builder['uses']);
-        self::assertFalse($builder['with']['cache-binary']);
-        self::assertTrue($builder['with']['cleanup']);
-        $build = $steps['Build PHP with bounded layer cache'];
-        self::assertStringContainsString(
-            'python3 -B scripts/ci/defense_php_cache.py --resolve-compose --cache-dir "$PHP_CACHE_DIR" --report storage/logs/ci/php-build/summary.json',
-            $build['run'],
-        );
-        self::assertStringContainsString('if [[ "$RESTORE_OUTCOME" != success || -z "$RESTORED_KEY" ]]', $build['run']);
+        self::assertSame($restoreKeys[0], $restoreKeys[1]);
+        self::assertNotSame($saveKeys[0], $saveKeys[1]);
+        $aggregator = $this->workflowJob('defense-cycle-ordinary-flows');
         self::assertSame(
-            'python3 -B scripts/ci/run_gate_with_summary.py --label defense-cycle -- bash scripts/ci/run_defense_cycle.sh',
-            $this->stepRun($steps, 'Run isolated ordinary application and session lifecycle checks'),
+            ['changes', 'defense-cycle-ordinary-flows-shard-1', 'defense-cycle-ordinary-flows-shard-2'],
+            $aggregator['needs'],
         );
-        foreach (['Upload PHP build timing evidence', 'Upload gate diagnostic evidence'] as $name) {
-            self::assertSame('always()', $steps[$name]['if']);
-            self::assertSame('actions/upload-artifact@v7', $steps[$name]['uses']);
+        self::assertSame("always() && needs.changes.outputs.runtime_checks_required == 'true'", $aggregator['if']);
+        $aggregatorSteps = $this->namedSteps($aggregator);
+        self::assertStringContainsString(
+            'needs.defense-cycle-ordinary-flows-shard-1.result',
+            $this->stepRun($aggregatorSteps, 'Assert both Defense shards passed with receipts'),
+        );
+        self::assertStringContainsString(
+            'needs.defense-cycle-ordinary-flows-shard-2.result',
+            $this->stepRun($aggregatorSteps, 'Assert both Defense shards passed with receipts'),
+        );
+        self::assertStringContainsString(
+            'report.get(\'shard\') != shard',
+            $this->stepRun($aggregatorSteps, 'Assert both Defense shards passed with receipts'),
+        );
+        self::assertStringContainsString(
+            "report.get('source', {}).get('commit') != '\${{ github.sha }}'",
+            $this->stepRun($aggregatorSteps, 'Assert both Defense shards passed with receipts'),
+        );
+        self::assertStringContainsString(
+            "report.get('source', {}).get('dirty') is not False",
+            $this->stepRun($aggregatorSteps, 'Assert both Defense shards passed with receipts'),
+        );
+        self::assertStringContainsString(
+            'set(canonical) != set(shard_1) | set(shard_2)',
+            $this->stepRun($aggregatorSteps, 'Assert Defense shard configs partition canonical suite'),
+        );
+        foreach ([1, 2] as $shard) {
+            $download = $aggregatorSteps["Download Defense shard {$shard} receipts"];
+            self::assertSame(
+                "defense-cycle-receipts-defense-cycle-ordinary-flows-shard-{$shard}",
+                $download['with']['name'],
+            );
         }
-        $receipt = $steps['Upload Defense phase and testcase evidence'];
-        self::assertSame('always()', $receipt['if']);
-        self::assertSame('storage/logs/ci/defense-cycle/*.summary.json', $receipt['with']['path']);
-        self::assertSame('storage/logs/ci/php-build/', $steps['Upload PHP build timing evidence']['with']['path']);
-        self::assertSame('storage/logs/ci/gate-summary/', $steps['Upload gate diagnostic evidence']['with']['path']);
     }
 
     public function testDefenseSelectionRetainsPullRequestAndMainPushDiffSemantics(): void
@@ -84,6 +145,44 @@ class CiWorkflowContractTest extends TestCase
             '${{ steps.filter.outputs.runtime_checks_required }}',
             $changes['outputs']['runtime_checks_required'],
         );
+    }
+
+    public function testDefenseShardConfigsPartitionTheCompleteSuiteWithoutSplittingMovedClasses(): void
+    {
+        $filesFrom = static function (string $path): array {
+            $xml = simplexml_load_file($path);
+            self::assertNotFalse($xml);
+            $files = [];
+            foreach ($xml->testsuites->testsuite->file as $file) {
+                $files[] = trim((string) $file);
+            }
+            self::assertCount(count(array_unique($files)), $files, $path . ' contains duplicate files');
+            return $files;
+        };
+        $canonical = $filesFrom(__DIR__ . '/../../../phpunit.defense-cycle.xml');
+        $shards = [];
+        foreach ([1, 2] as $shard) {
+            $shards[$shard] = $filesFrom(__DIR__ . "/../../../phpunit.defense-cycle-shard-{$shard}.xml");
+        }
+        $canonicalSet = array_values(array_unique($canonical));
+        sort($canonicalSet);
+        $union = array_values(array_unique(array_merge($shards[1], $shards[2])));
+        sort($union);
+        self::assertSame($canonicalSet, $union);
+        self::assertCount(21, $shards[1]);
+        self::assertCount(26, $shards[2]);
+        self::assertSame([], array_intersect($shards[1], $shards[2]));
+        foreach (
+            [
+                './tests/Integration/SessionLifecycleTest.php',
+                './tests/Integration/Controllers/BlockedPeriodsApiHttpWriteTest.php',
+            ]
+            as $moved
+        ) {
+            self::assertNotContains($moved, $shards[1]);
+            self::assertContains($moved, $shards[2]);
+        }
+        self::assertContains('./tests/Integration/DefenseVerificationFixtureTest.php', $shards[2]);
     }
 
     public function testJavaScriptLintSelectsChangesBeforeInstallingDependencies(): void
@@ -414,7 +513,7 @@ class CiWorkflowContractTest extends TestCase
         self::assertSame('docker/setup-buildx-action@v4', $steps['Set up PHP layer-cache builder']['uses']);
         $restore = $steps['Restore complete PHP layer archive'];
         $save = $steps['Save complete PHP layer archive'];
-        $defenseSteps = $this->namedSteps($this->workflowJob('defense-cycle-ordinary-flows'));
+        $defenseSteps = $this->namedSteps($this->workflowJob('defense-cycle-ordinary-flows-shard-1'));
         $defenseRestore = $defenseSteps['Restore complete PHP layer archive'];
         $defenseSave = $defenseSteps['Save complete PHP layer archive'];
         self::assertTrue($restore['continue-on-error']);

@@ -87,6 +87,8 @@ class CiPathFilterMatrixTest extends TestCase
                 'tests/Bootstrap.php',
                 'tests/Unit/Scripts/DefensePhpCacheTest.php',
                 'phpunit.defense-cycle.xml',
+                'phpunit.defense-cycle-shard-1.xml',
+                'phpunit.defense-cycle-shard-2.xml',
                 'docker/php-fpm/Dockerfile',
                 'docker-compose.yml',
                 'scripts/ci/run_defense_cycle.sh',

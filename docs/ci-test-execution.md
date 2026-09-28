@@ -186,8 +186,16 @@ Do not describe two runs as an established statistical baseline.
 
 ## Defense job selection and build timing
 
-`defense-cycle-ordinary-flows` depends on `changes` and reuses its existing
-`runtime_checks_required` output without a separate allowlist or draft exception.
+The `defense-cycle-ordinary-flows-shard-1` and
+`defense-cycle-ordinary-flows-shard-2` jobs each depend on `changes`, claim a
+fresh Docker/MySQL stack, and run disjoint halves of the ordinary Defense
+suite. The required `defense-cycle-ordinary-flows` aggregator fails closed
+unless both shard jobs succeed and each supplies one passing receipt. Each
+shard uses its own cache-save key and receipt artifact; the aggregator retains
+the existing required-check name and publishes the combined receipts.
+
+Both shards reuse the existing `runtime_checks_required` output without a
+separate allowlist or draft exception.
 Ordinary Markdown under `docs/` skips the complete job; runtime, contract,
 unknown and mixed changes select it. The same filter includes both rename paths
 and deleted files. A scope like PR #571 remains selected.
@@ -206,10 +214,10 @@ Measure the `changes` dependency and the complete workflow as well as the
 selected Defense job. A local selector matrix verifies routing, not a real
 hosted prose skip: retain that evidence gap until a regular prose change occurs.
 
-The Defense job retains its complete isolated application/session suite and
-fresh Docker data lifecycle. Only its PHP image preparation uses the
-[bounded layer cache](docker.md#defense-ci-php-layer-cache). Its additional
-`php-build-defense-cycle-ordinary-flows` artifact contains the cache state,
+Each Defense shard retains its isolated application/session checks and fresh
+Docker data lifecycle. Only PHP image preparation uses the
+[bounded layer cache](docker.md#defense-ci-php-layer-cache). The shard-specific
+`php-build-defense-cycle-ordinary-flows-shard-*` artifact contains the cache state,
 recipe key, loaded image ID and measured phase times. Existing gate evidence
 and cleanup failure handling are unchanged.
 

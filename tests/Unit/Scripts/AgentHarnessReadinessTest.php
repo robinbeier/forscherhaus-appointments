@@ -33,7 +33,7 @@ class AgentHarnessReadinessTest extends TestCase
     {
         $controls = agentHarnessReadinessFailureControlsForPolicy('strict-v2');
         $step = ['uses' => 'actions/cache/restore@v4', 'continue-on-error' => true, 'timeout-minutes' => 1];
-        $jobName = 'defense-cycle-ordinary-flows';
+        $jobName = 'defense-cycle-ordinary-flows-shard-1';
         foreach (['actions/cache/restore@v4', 'actions/cache/save@v4'] as $action) {
             $candidate = array_replace($step, ['uses' => $action]);
             self::assertSame(

@@ -21,6 +21,8 @@ ACTIVE_PHPUNIT_CONFIGS = (
     "phpunit.coverage.integration.xml",
     "phpunit.coverage.unit.xml",
     "phpunit.defense-cycle.xml",
+    "phpunit.defense-cycle-shard-1.xml",
+    "phpunit.defense-cycle-shard-2.xml",
     "phpunit.request-contracts.xml",
     "phpunit.request-dto.xml",
 )

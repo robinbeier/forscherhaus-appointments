@@ -1836,7 +1836,7 @@ jobs:
           path: storage/logs/ci/gate-summary/
           retention-days: 7
 
-  defense-cycle-ordinary-flows:
+  defense-cycle-ordinary-flows-shard-1:
     needs:
       - changes
     if: needs.changes.outputs.runtime_checks_required == 'true'
@@ -1859,6 +1859,7 @@ jobs:
           image="$(docker compose -f docker-compose.yml -f docker/compose.ci-local.yml config --format json | python3 -B scripts/ci/local_php_image_key.py --platform "$platform")"
           [[ "$image" =~ ^forscherhaus-local/php-fpm:[0-9a-f]{64}$ ]]
           echo "prefix=defense-php-oci-v1-${image##*:}-" >> "$GITHUB_OUTPUT"
+          echo "shard-prefix=defense-php-oci-v1-${image##*:}-shard-1-" >> "$GITHUB_OUTPUT"
       - name: Restore complete PHP layer archive
         id: php-cache-restore
         uses: actions/cache/restore@v4
@@ -1866,8 +1867,10 @@ jobs:
         timeout-minutes: 1
         with:
           path: ${{ runner.temp }}/defense-php-cache/import
-          key: ${{ steps.php-cache-key.outputs.prefix }}${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: ${{ steps.php-cache-key.outputs.prefix }}
+          key: ${{ steps.php-cache-key.outputs.shard-prefix }}${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            ${{ steps.php-cache-key.outputs.shard-prefix }}
+            ${{ steps.php-cache-key.outputs.prefix }}
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: 1
       - name: Build PHP with bounded layer cache
@@ -1909,7 +1912,7 @@ jobs:
         timeout-minutes: 1
         with:
           path: ${{ runner.temp }}/defense-php-cache/import
-          key: ${{ steps.php-cache-key.outputs.prefix }}${{ github.run_id }}-${{ github.run_attempt }}
+          key: ${{ steps.php-cache-key.outputs.shard-prefix }}${{ github.run_id }}-${{ github.run_attempt }}
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
@@ -1927,7 +1930,7 @@ jobs:
           install -m 0600 config-sample.php config.php
       - name: Run isolated ordinary application and session lifecycle checks
         run: |
-          python3 -B scripts/ci/run_gate_with_summary.py --label defense-cycle -- bash scripts/ci/run_defense_cycle.sh
+          python3 -B scripts/ci/run_gate_with_summary.py --label defense-cycle-shard-1 -- bash scripts/ci/run_defense_cycle.sh --shard 1
       - name: Upload Defense phase and testcase evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -1948,4 +1951,198 @@ jobs:
         with:
           name: gate-summary-${{ github.job }}
           path: storage/logs/ci/gate-summary/
+          retention-days: 7
+
+  defense-cycle-ordinary-flows-shard-2:
+    needs:
+      - changes
+    if: needs.changes.outputs.runtime_checks_required == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Git clone
+        uses: actions/checkout@v6
+      - name: Set up PHP layer-cache builder
+        uses: docker/setup-buildx-action@v4
+        with:
+          cache-binary: false
+          cleanup: true
+      - name: Resolve PHP cache recipe
+        id: php-cache-key
+        run: |
+          platform="$(docker info --format '{{.OSType}}/{{.Architecture}}')"
+          image="$(docker compose -f docker-compose.yml -f docker/compose.ci-local.yml config --format json | python3 -B scripts/ci/local_php_image_key.py --platform "$platform")"
+          [[ "$image" =~ ^forscherhaus-local/php-fpm:[0-9a-f]{64}$ ]]
+          echo "prefix=defense-php-oci-v1-${image##*:}-" >> "$GITHUB_OUTPUT"
+          echo "shard-prefix=defense-php-oci-v1-${image##*:}-shard-2-" >> "$GITHUB_OUTPUT"
+      - name: Restore complete PHP layer archive
+        id: php-cache-restore
+        uses: actions/cache/restore@v4
+        continue-on-error: true
+        timeout-minutes: 1
+        with:
+          path: ${{ runner.temp }}/defense-php-cache/import
+          key: ${{ steps.php-cache-key.outputs.shard-prefix }}${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            ${{ steps.php-cache-key.outputs.shard-prefix }}
+            ${{ steps.php-cache-key.outputs.prefix }}
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: 1
+      - name: Build PHP with bounded layer cache
+        id: php-build
+        env:
+          PHP_CACHE_DIR: ${{ runner.temp }}/defense-php-cache
+          RESTORE_OUTCOME: ${{ steps.php-cache-restore.outcome }}
+          RESTORED_KEY: ${{ steps.php-cache-restore.outputs.cache-matched-key }}
+        run: |
+          # Never consume a partially extracted archive after a failed restore.
+          if [[ "$RESTORE_OUTCOME" != success || -z "$RESTORED_KEY" ]]; then
+            rm -rf -- "$PHP_CACHE_DIR/import"
+          fi
+          python3 -B scripts/ci/defense_php_cache.py --resolve-compose --cache-dir "$PHP_CACHE_DIR" --report storage/logs/ci/php-build/summary.json
+      - name: Prepare complete PHP layer archive
+        id: php-cache-save-preparation
+        env:
+          PHP_CACHE_DIR: ${{ runner.temp }}/defense-php-cache
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, shutil
+          report = json.loads(pathlib.Path('storage/logs/ci/php-build/summary.json').read_text())
+          root = pathlib.Path(os.environ['PHP_CACHE_DIR'])
+          ready = report.get('cache_export_ready') is True
+          if ready:
+              try:
+                  shutil.rmtree(root / 'import', ignore_errors=True)
+                  (root / 'export').rename(root / 'import')
+              except OSError:
+                  ready = False
+                  print('PHP cache archive preparation unavailable')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f"cache_export_ready={str(ready).lower()}\n")
+          PY
+      - name: Save complete PHP layer archive
+        if: steps.php-cache-save-preparation.outputs.cache_export_ready == 'true'
+        uses: actions/cache/save@v4
+        continue-on-error: true
+        timeout-minutes: 1
+        with:
+          path: ${{ runner.temp }}/defense-php-cache/import
+          key: ${{ steps.php-cache-key.outputs.shard-prefix }}${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          coverage: none
+          extensions: gd
+          tools: composer:v2
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress
+      - name: Prepare synthetic Docker configuration
+        run: |
+          if [[ -e config.php ]]; then
+            cmp -s config.php config-sample.php
+          fi
+          install -m 0600 config-sample.php config.php
+      - name: Run isolated ordinary application and session lifecycle checks
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label defense-cycle-shard-2 -- bash scripts/ci/run_defense_cycle.sh --shard 2
+      - name: Upload Defense phase and testcase evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: defense-cycle-receipts-${{ github.job }}
+          path: storage/logs/ci/defense-cycle/*.summary.json
+          retention-days: 7
+      - name: Upload PHP build timing evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: php-build-${{ github.job }}
+          path: storage/logs/ci/php-build/
+          retention-days: 7
+      - name: Upload gate diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gate-summary-${{ github.job }}
+          path: storage/logs/ci/gate-summary/
+          retention-days: 7
+
+  defense-cycle-ordinary-flows:
+    needs:
+      - changes
+      - defense-cycle-ordinary-flows-shard-1
+      - defense-cycle-ordinary-flows-shard-2
+    if: always() && needs.changes.outputs.runtime_checks_required == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Git clone
+        uses: actions/checkout@v6
+      - name: Assert Defense shard configs partition canonical suite
+        run: |
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          def files(path):
+              return [node.text for node in ET.parse(path).findall('.//testsuite/file') if node.text]
+
+          canonical = files('phpunit.defense-cycle.xml')
+          shard_1 = files('phpunit.defense-cycle-shard-1.xml')
+          shard_2 = files('phpunit.defense-cycle-shard-2.xml')
+          if len(canonical) != len(set(canonical)):
+              raise SystemExit('canonical Defense suite contains duplicate files')
+          if len(shard_1) != len(set(shard_1)) or len(shard_2) != len(set(shard_2)):
+              raise SystemExit('Defense shard contains duplicate files')
+          if set(shard_1) & set(shard_2):
+              raise SystemExit('Defense shards overlap')
+          if set(canonical) != set(shard_1) | set(shard_2):
+              raise SystemExit('Defense shards do not equal the canonical suite')
+          print(f'Defense shard partition verified: {len(canonical)} files')
+          PY
+      - name: Download Defense shard 1 receipts
+        uses: actions/download-artifact@v8
+        with:
+          name: defense-cycle-receipts-defense-cycle-ordinary-flows-shard-1
+          path: storage/logs/ci/defense-cycle/shard-1
+      - name: Download Defense shard 2 receipts
+        uses: actions/download-artifact@v8
+        with:
+          name: defense-cycle-receipts-defense-cycle-ordinary-flows-shard-2
+          path: storage/logs/ci/defense-cycle/shard-2
+      - name: Assert both Defense shards passed with receipts
+        run: |
+          if [[ "${{ needs.defense-cycle-ordinary-flows-shard-1.result }}" != success || \
+                "${{ needs.defense-cycle-ordinary-flows-shard-2.result }}" != success ]]; then
+            echo 'Defense shard job did not complete successfully.' >&2
+            exit 1
+          fi
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          for shard in (1, 2):
+              receipts = sorted(Path(f'storage/logs/ci/defense-cycle/shard-{shard}').glob('*.summary.json'))
+              if len(receipts) != 1:
+                  raise SystemExit(f'expected exactly one receipt for Defense shard {shard}')
+              report = json.loads(receipts[0].read_text())
+              if (
+                  report.get('shard') != shard
+                  or report.get('overall_status') != 'passed'
+                  or report.get('source', {}).get('commit') != '${{ github.sha }}'
+                  or report.get('source', {}).get('dirty') is not False
+              ):
+                  raise SystemExit(f'Defense shard {shard} receipt is not a passing shard receipt')
+          PY
+      - name: Upload combined Defense receipts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: defense-cycle-receipts-${{ github.job }}
+          path: storage/logs/ci/defense-cycle/
           retention-days: 7

@@ -53,8 +53,11 @@ complete passing receipt. The cleanup field describes the owned Docker stack;
 it does not substitute for a test's own row-level cleanup assertions or establish
 production cleanup.
 
-The CI artifact `defense-cycle-receipts-defense-cycle-ordinary-flows` contains
-only these JSON receipts. Private raw JUnit XML and event files remain local;
+The CI artifacts `defense-cycle-receipts-defense-cycle-ordinary-flows-shard-1`
+and `defense-cycle-receipts-defense-cycle-ordinary-flows-shard-2` contain the
+per-shard JSON receipts. The required `defense-cycle-ordinary-flows` check
+also publishes a combined receipt artifact after verifying both shards.
+Private raw JUnit XML and event files remain local;
 failure text, stdout and testcase properties are excluded from the summary.
 Diagnostics never replace the original test exit code or prevent stack cleanup.
 A missing receipt is an evidence gap even if the gate itself passed. Compare
