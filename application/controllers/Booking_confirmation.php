@@ -183,6 +183,7 @@ class Booking_confirmation extends EA_Controller
             'share_payload' => $share_payload,
         ]);
 
+        $this->output->set_header('Cache-Control: no-store');
         $this->load->view('pages/booking_confirmation');
     }
 
