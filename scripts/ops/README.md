@@ -103,6 +103,14 @@ Script inventory:
   only their remaining time. A portable mkdir-based pilot lock serializes the
   entire pilot lifecycle; a stale lock after an untrappable process death is a
   deliberate manual-stop condition and must be investigated before removal.
+- `prod_csp_report_only_segment.sh` prepares ROB-590's separate natural-traffic
+  campaign with expiring segments of 15 minutes to four hours. `preflight` and
+  `observe` are read-only; `start` performs one activation and one immediately
+  cleaned runtime probe, and `finish` removes the bound activation once. The
+  private run journal remains after completion. Use a unique
+  `CSP_SEGMENT_STATE_FILE` for each segment and follow
+  [`docs/security/ROB-590-csp-natural-traffic-observation.md`](../../docs/security/ROB-590-csp-natural-traffic-observation.md).
+  First production activation requires separate concrete approval.
 - `run_read_only_http_probe.sh` performs four bounded anonymous GET checks through
   the fixed loopback ingress for modern and legacy booking-confirmation and ICS
   capability routes. The application recognizes only those exact loopback GET

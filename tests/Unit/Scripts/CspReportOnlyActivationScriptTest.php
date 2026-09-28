@@ -58,6 +58,204 @@ final class CspReportOnlyActivationScriptTest extends TestCase
         }
     }
 
+    public function testInstallSegmentDerivesBoundV2CandidateAndRejectsInvalidDurations(): void
+    {
+        if (!function_exists('posix_geteuid') || posix_geteuid() !== 0) {
+            self::markTestSkipped('Root-owned activation identity is verified in the CI container.');
+        }
+        $directory = '/var/lib/fh-csp-segment-candidate-' . bin2hex(random_bytes(6));
+        mkdir($directory, 0700, true);
+        chmod($directory, 0755);
+        chown($directory, 0);
+        chgrp($directory, 0);
+        $candidatePath = $directory . '/candidate.json';
+        try {
+            self::assertTrue(
+                copy($this->repoRoot() . '/scripts/ops/config/csp_report_only.production.v1.json', $candidatePath),
+            );
+            self::assertNull(\readActivationSegmentCandidate($candidatePath, 899, 1_700_000_000));
+            self::assertNull(\readActivationSegmentCandidate($candidatePath, 14_401, 1_700_000_000));
+            $candidate = \readActivationSegmentCandidate($candidatePath, 900, 1_700_000_000);
+            self::assertIsArray($candidate);
+            self::assertNotSame(hash_file('sha256', $candidatePath), $candidate['sha256']);
+            $parsed = \Csp_report_only::parseConfig($candidate['bytes']);
+            self::assertIsArray($parsed);
+            self::assertSame(1_700_000_000, $parsed['starts_at_unix']);
+            self::assertSame(1_700_000_900, $parsed['expires_at_unix']);
+            self::assertSame(\Csp_report_only::CONFIG_SCHEMA_V2, $parsed['schema']);
+            $target = $directory . '/segment.json';
+            self::assertSame(
+                ['status' => 'passed', 'result_class' => 'activation_installed'],
+                \installActivation($target, $candidate['bytes'], $candidate['sha256']),
+            );
+            self::assertSame(
+                [
+                    'sha256' => $candidate['sha256'],
+                    'starts_at_unix' => 1_700_000_000,
+                    'expires_at_unix' => 1_700_000_900,
+                ],
+                \inspectSegmentActivation($target, $candidate['sha256']),
+            );
+            self::assertNull(\inspectSegmentActivation($target, str_repeat('0', 64)));
+        } finally {
+            @unlink($directory . '/segment.json');
+            @unlink($candidatePath);
+            @rmdir($directory);
+        }
+    }
+
+    public function testSegmentReceiptValidatorAcceptsDynamicHashAndRejectsWrongOptions(): void
+    {
+        $runId = str_repeat('a', 32);
+        $binding = str_repeat('b', 64);
+        $template = json_decode(
+            (string) file_get_contents($this->repoRoot() . '/scripts/ops/config/csp_report_only.production.v1.json'),
+            true,
+            8,
+            JSON_THROW_ON_ERROR,
+        );
+        $template['schema'] = 'csp_report_only_config.v2';
+        $template['starts_at_unix'] = 1_700_000_000;
+        $template['expires_at_unix'] = 1_700_000_900;
+        $segmentHash = hash('sha256', json_encode($template, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n");
+        $receipt = json_encode(
+            [
+                'schema' => 'csp_report_only_activation.v2',
+                'action' => 'install-segment',
+                'status' => 'passed',
+                'result_class' => 'activation_installed',
+                'candidate_sha256' => $segmentHash,
+                'release_binding' => $binding,
+                'run_id' => $runId,
+                'starts_at_unix' => 1_700_000_000,
+                'expires_at_unix' => 1_700_000_900,
+            ],
+            JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
+        );
+        $validator = $this->repoRoot() . '/scripts/ops/csp_report_only_activation_validate_receipt.php';
+        $valid = $this->runCommand(
+            [
+                PHP_BINARY,
+                $validator,
+                '--action=install-segment',
+                '--duration-seconds=900',
+                '--run-id=' . $runId,
+                '--expected-release-binding=' . $binding,
+            ],
+            [],
+            $receipt,
+        );
+        self::assertSame(0, $valid['exit_code'], $valid['stderr']);
+        $missingWindow = json_decode($receipt, true, 8, JSON_THROW_ON_ERROR);
+        unset($missingWindow['starts_at_unix'], $missingWindow['expires_at_unix']);
+        self::assertSame(
+            1,
+            $this->runCommand(
+                [
+                    PHP_BINARY,
+                    $validator,
+                    '--action=install-segment',
+                    '--duration-seconds=900',
+                    '--run-id=' . $runId,
+                    '--expected-release-binding=' . $binding,
+                ],
+                [],
+                json_encode($missingWindow, JSON_THROW_ON_ERROR),
+            )['exit_code'],
+        );
+        $inspect = json_decode($receipt, true, 8, JSON_THROW_ON_ERROR);
+        $inspect['action'] = 'inspect-segment';
+        $inspect['result_class'] = 'segment_inspected';
+        self::assertSame(
+            0,
+            $this->runCommand(
+                [
+                    PHP_BINARY,
+                    $validator,
+                    '--action=inspect-segment',
+                    '--duration-seconds=900',
+                    '--run-id=' . $runId,
+                    '--expected-release-binding=' . $binding,
+                ],
+                [],
+                json_encode($inspect, JSON_THROW_ON_ERROR),
+            )['exit_code'],
+        );
+
+        $removeReceipt = json_encode(
+            [
+                'schema' => 'csp_report_only_activation.v2',
+                'action' => 'remove',
+                'status' => 'passed',
+                'result_class' => 'activation_removed',
+                'candidate_sha256' => $segmentHash,
+                'release_binding' => $binding,
+                'run_id' => $runId,
+            ],
+            JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
+        );
+        $removeArgs = [
+            PHP_BINARY,
+            $validator,
+            '--action=remove',
+            '--run-id=' . $runId,
+            '--expected-release-binding=' . $binding,
+        ];
+        self::assertSame(1, $this->runCommand($removeArgs, [], $removeReceipt)['exit_code']);
+        self::assertSame(
+            0,
+            $this->runCommand([...$removeArgs, '--expected-candidate-sha256=' . $segmentHash], [], $removeReceipt)[
+                'exit_code'
+            ],
+        );
+        self::assertSame(
+            1,
+            $this->runCommand(
+                [...$removeArgs, '--expected-candidate-sha256=' . str_repeat('0', 64)],
+                [],
+                $removeReceipt,
+            )['exit_code'],
+        );
+
+        foreach (
+            [
+                ['--action=install', '--duration-seconds=900'],
+                ['--action=install-segment'],
+                ['--action=install-segment', '--duration-seconds=899'],
+            ]
+            as $arguments
+        ) {
+            $result = $this->runCommand(
+                array_merge([PHP_BINARY, $validator], $arguments, [
+                    '--run-id=' . $runId,
+                    '--expected-release-binding=' . $binding,
+                ]),
+                [],
+                $receipt,
+            );
+            self::assertSame(2, $result['exit_code'], $result['stderr']);
+        }
+    }
+
+    public function testInspectSegmentCliAcceptsDurationBeforeCheckingProductionState(): void
+    {
+        if (!function_exists('posix_geteuid') || posix_geteuid() !== 0) {
+            self::markTestSkipped('Root-side inspection is verified in the CI container.');
+        }
+        $result = $this->runCommand([
+            PHP_BINARY,
+            $this->repoRoot() . '/scripts/ops/csp_report_only_activation.php',
+            '--action=inspect-segment',
+            '--duration-seconds=900',
+            '--run-id=' . str_repeat('a', 32),
+            '--expected-release-binding=' . str_repeat('b', 64),
+        ]);
+        $receipt = json_decode(trim($result['stdout']), true, 8, JSON_THROW_ON_ERROR);
+        self::assertSame('inspect-segment', $receipt['action']);
+        self::assertNotSame('input_invalid', $receipt['result_class']);
+        self::assertSame(1, $result['exit_code']);
+    }
+
     public function testRunStateLeaseIsRootOwnedExactAndRunBound(): void
     {
         if (!function_exists('posix_geteuid') || posix_geteuid() !== 0) {
@@ -981,7 +1179,7 @@ final class CspReportOnlyActivationScriptTest extends TestCase
     }
 
     /** @param list<string> $command @param array<string,string> $env */
-    private function runCommand(array $command, array $env = []): array
+    private function runCommand(array $command, array $env = [], string $stdin = ''): array
     {
         $process = proc_open(
             $command,
@@ -991,6 +1189,9 @@ final class CspReportOnlyActivationScriptTest extends TestCase
             array_merge($_ENV, $env),
         );
         self::assertIsResource($process);
+        if ($stdin !== '') {
+            fwrite($pipes[0], $stdin);
+        }
         fclose($pipes[0]);
         $stdout = stream_get_contents($pipes[1]);
         $stderr = stream_get_contents($pipes[2]);

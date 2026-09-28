@@ -84,6 +84,43 @@ final class CspReportOnlyStatusScriptTest extends TestCase
         }
     }
 
+    public function testV2SegmentStatusDistinguishesActiveAndExpiredWindows(): void
+    {
+        if (!function_exists('posix_geteuid') || posix_geteuid() !== 0) {
+            self::markTestSkipped('The root-controlled activation identity is verified in the CI container.');
+        }
+        $directory = '/var/lib/fh-csp-status-segment-' . bin2hex(random_bytes(6));
+        mkdir($directory, 0755, true);
+        $path = $directory . '/config.json';
+        $config = json_decode(
+            (string) file_get_contents($this->repoRoot() . '/scripts/ops/config/csp_report_only.production.v1.json'),
+            true,
+            8,
+            JSON_THROW_ON_ERROR,
+        );
+        $config['schema'] = Csp_report_only::CONFIG_SCHEMA_V2;
+        $config['starts_at_unix'] = time() - 60;
+        $config['expires_at_unix'] = time() + 900;
+        file_put_contents($path, json_encode($config, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n");
+        chmod($path, 0644);
+        try {
+            $active = \inspectActivation($path);
+            self::assertSame('active', $active['status']);
+            self::assertIsInt($active['starts_at_unix']);
+            self::assertIsInt($active['expires_at_unix']);
+            $config['starts_at_unix'] = time() - 1800;
+            $config['expires_at_unix'] = time() - 900;
+            file_put_contents($path, json_encode($config, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n");
+            chmod($path, 0644);
+            $expired = \inspectActivation($path);
+            self::assertSame('expired', $expired['status']);
+            self::assertSame('activation_expired', $expired['result_class']);
+        } finally {
+            unlink($path);
+            rmdir($directory);
+        }
+    }
+
     public function testReadOnlyStateSummarizesAClassifiedAggregate(): void
     {
         $directory = $this->createReleaseRoot('aggregate');
@@ -317,6 +354,53 @@ final class CspReportOnlyStatusScriptTest extends TestCase
         );
         self::assertSame(1, $runtime['exit_code']);
         self::assertSame('', $runtime['stdout']);
+
+        $segment = json_decode(
+            (string) file_get_contents($this->repoRoot() . '/scripts/ops/config/csp_report_only.production.v1.json'),
+            true,
+            8,
+            JSON_THROW_ON_ERROR,
+        );
+        $segment['schema'] = Csp_report_only::CONFIG_SCHEMA_V2;
+        $segment['starts_at_unix'] = time() - 60;
+        $segment['expires_at_unix'] = time() + 900;
+        $segmentReceipt = [
+            'schema' => 'csp_report_only_state.v2',
+            'expectation' => 'segment-active',
+            'status' => 'passed',
+            'result_class' => 'state_verified',
+            'release_binding' => str_repeat('a', 64),
+            'activation' => [
+                'status' => 'active',
+                'sha256' => hash('sha256', json_encode($segment, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n"),
+                'starts_at_unix' => $segment['starts_at_unix'],
+                'expires_at_unix' => $segment['expires_at_unix'],
+            ],
+            'aggregate' => ['status' => 'missing', 'summary' => null],
+        ];
+        $segmentResult = $this->runCommand(
+            [PHP_BINARY, 'scripts/ops/csp_report_only_validate_receipt.php', '--expect=segment-active'],
+            [],
+            json_encode($segmentReceipt, JSON_THROW_ON_ERROR),
+        );
+        self::assertSame(0, $segmentResult['exit_code'], $segmentResult['stderr']);
+
+        $stale = $segmentReceipt;
+        $stale['activation']['starts_at_unix'] = time() - 20000;
+        $stale['activation']['expires_at_unix'] = time() - 19000;
+        $staleSegment = $segment;
+        $staleSegment['starts_at_unix'] = $stale['activation']['starts_at_unix'];
+        $staleSegment['expires_at_unix'] = $stale['activation']['expires_at_unix'];
+        $stale['activation']['sha256'] = hash(
+            'sha256',
+            json_encode($staleSegment, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n",
+        );
+        $staleResult = $this->runCommand(
+            [PHP_BINARY, 'scripts/ops/csp_report_only_validate_receipt.php', '--expect=segment-active'],
+            [],
+            json_encode($stale, JSON_THROW_ON_ERROR),
+        );
+        self::assertSame(1, $staleResult['exit_code']);
     }
 
     public function testRuntimePayloadContractAcceptsOnlyFixedClasses(): void
