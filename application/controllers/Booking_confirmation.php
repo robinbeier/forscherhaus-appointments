@@ -111,16 +111,13 @@ class Booking_confirmation extends EA_Controller
 
         $manage_url = public_site_url('booking/reschedule/' . $appointment['hash']);
 
-        $event_description = trim(lang('calendar_event_manage_hint') . ' ' . $manage_url);
-
+        // External calendar URLs are sent to third parties; keep the management capability and contact data local.
         $event = [
             'title' => $service['name'],
-            'description' => $event_description ?: $manage_url,
             'location' => $location_label,
             'start' => $start_at,
             'end' => $calendar_end_at,
             'timezone' => $provider['timezone'],
-            'attendees' => array_values(array_filter([$provider['email'] ?? null, $customer['email'] ?? null])),
         ];
 
         $calendar_links = [

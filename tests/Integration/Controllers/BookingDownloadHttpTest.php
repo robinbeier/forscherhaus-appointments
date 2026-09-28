@@ -81,6 +81,79 @@ final class BookingDownloadHttpTest extends TestCase
         }
     }
 
+    public function testExternalCalendarLinksKeepEventDataWithoutCapabilityOrAttendeeDisclosure(): void
+    {
+        $fixture = $this->fixture;
+        $appointment = $fixture->appointment();
+        $hash = (string) $appointment['hash'];
+        $provider = $fixture->row('users', $fixture->providerId);
+        $customer = $fixture->row('users', $fixture->customerId);
+        $client = $this->anonymousClient();
+
+        $response = $client->get('booking_confirmation/of/' . $hash);
+        self::assertSame(200, $response->statusCode, 'Owned confirmation must be available.');
+
+        $links = $this->externalCalendarLinks($response->body);
+        self::assertArrayHasKey('google', $links, 'Confirmation must expose the Google calendar link.');
+        self::assertArrayHasKey('outlook', $links, 'Confirmation must expose the Outlook calendar link.');
+
+        $start = new DateTimeImmutable((string) $appointment['start_datetime'], new DateTimeZone('UTC'));
+        $end = new DateTimeImmutable((string) $appointment['end_datetime'], new DateTimeZone('UTC'));
+        $googleQuery = $this->queryParameters($links['google']);
+        $outlookQuery = $this->queryParameters($links['outlook']);
+
+        self::assertTrue(
+            parse_url($links['google'], PHP_URL_HOST) === 'calendar.google.com',
+            'Google link must use the external calendar host.',
+        );
+        self::assertTrue(
+            parse_url($links['outlook'], PHP_URL_HOST) === 'outlook.office.com',
+            'Outlook link must use the external calendar host.',
+        );
+        self::assertTrue(($googleQuery['action'] ?? null) === 'TEMPLATE', 'Google link must retain its event action.');
+        self::assertTrue(
+            ($googleQuery['dates'] ?? null) === $start->format('Ymd\THis\Z') . '/' . $end->format('Ymd\THis\Z'),
+            'Google link must retain the appointment interval.',
+        );
+        self::assertTrue(
+            ($outlookQuery['path'] ?? null) === '/calendar/action/compose',
+            'Outlook link must retain its compose path.',
+        );
+        self::assertTrue(
+            ($outlookQuery['startdt'] ?? null) === $start->format(DateTimeInterface::ATOM),
+            'Outlook link must retain the appointment start.',
+        );
+        self::assertTrue(
+            ($outlookQuery['enddt'] ?? null) === $end->format(DateTimeInterface::ATOM),
+            'Outlook link must retain the appointment end.',
+        );
+        self::assertTrue(
+            ($googleQuery['text'] ?? null) === (string) $fixture->run,
+            'Google link must retain the synthetic event title.',
+        );
+        self::assertTrue(
+            ($outlookQuery['subject'] ?? null) === (string) $fixture->run,
+            'Outlook link must retain the synthetic event title.',
+        );
+
+        foreach ($links as $link) {
+            $decodedLink = rawurldecode($link);
+            self::assertTrue(
+                !str_contains($decodedLink, $hash) && !str_contains($decodedLink, '/booking/reschedule/'),
+                'External calendar links must not contain the appointment management capability.',
+            );
+            foreach ([(string) ($provider['email'] ?? ''), (string) ($customer['email'] ?? '')] as $email) {
+                if ($email === '') {
+                    continue;
+                }
+                self::assertTrue(
+                    !str_contains($decodedLink, $email),
+                    'External calendar links must not disclose attendee email addresses.',
+                );
+            }
+        }
+    }
+
     public function testConfirmationJsonRoundTripsOwnedNamesWithoutScriptBreakout(): void
     {
         $fixture = $this->fixture;
@@ -197,6 +270,34 @@ final class BookingDownloadHttpTest extends TestCase
     {
         // Additional headers disable redirect-following in GateHttpClient, exposing the denial response.
         return new GateHttpClient($this->server->baseUrl, additionalHeaders: ['Accept' => 'text/html']);
+    }
+
+    /** @return array{google?: string, outlook?: string} */
+    private function externalCalendarLinks(string $html): array
+    {
+        preg_match_all('~href="(https://(?:calendar\.google\.com|outlook\.office\.com)[^"]+)"~i', $html, $matches);
+        $links = [];
+        foreach ($matches[1] ?? [] as $rawLink) {
+            $link = html_entity_decode($rawLink, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $host = parse_url($link, PHP_URL_HOST);
+            if ($host === 'calendar.google.com') {
+                self::assertArrayNotHasKey('google', $links, 'Confirmation must not render a second Google link.');
+                $links['google'] = $link;
+            } elseif ($host === 'outlook.office.com') {
+                self::assertArrayNotHasKey('outlook', $links, 'Confirmation must not render a second Outlook link.');
+                $links['outlook'] = $link;
+            }
+        }
+        return $links;
+    }
+
+    /** @return array<string, string> */
+    private function queryParameters(string $link): array
+    {
+        $query = parse_url($link, PHP_URL_QUERY);
+        $parameters = [];
+        parse_str(is_string($query) ? $query : '', $parameters);
+        return array_map(static fn($value): string => (string) $value, $parameters);
     }
 
     private function moveAppointmentToDistinctSlot(int $id, string $dayOffset): void
