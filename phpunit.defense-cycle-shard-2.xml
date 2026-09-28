@@ -7,6 +7,7 @@
             <file>./tests/Integration/AccountSecurityMatrixProbeTest.php</file>
             <file>./tests/Integration/CustomerRoleBoundaryProbeTest.php</file>
             <file>./tests/Integration/CustomersApiWriteProbeTest.php</file>
+            <file>./tests/Integration/Controllers/CustomersApiHttpReadTest.php</file>
             <file>./tests/Integration/StaffApiPutProbeTest.php</file>
             <file>./tests/Integration/SessionLifecycleTest.php</file>
             <file>./tests/Integration/SecretariesApiAliasProbeTest.php</file>

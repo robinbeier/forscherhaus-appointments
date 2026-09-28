@@ -84,6 +84,14 @@ path-specific limits; the general parent ordering is not proof about every
 maintenance or delete path. API response projections must not disclose stored
 integration secrets.
 
+The Customers API v1 collection and detail actions are GET-only, including
+through direct controller aliases; other methods must return 405 with
+`Allow: GET` without disclosing customer data or changing customer records,
+while global OPTIONS preflight behavior remains unchanged. The controller's
+source-level guard is placed before its model access. The isolated synthetic
+HTTP regression proves the external rejection and preservation of its fixture
+row; it does not establish behavior in production.
+
 The public personal-information deletion endpoint is a destructive capability
 path. It requires POST with CSRF, an enabled product setting, and a live
 customer token issued from the stored appointment-to-customer relationship.
