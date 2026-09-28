@@ -363,8 +363,65 @@ class CiWorkflowContractTest extends TestCase
 
     public function testRootDependentApplicationFixturesRunWithSeparateReceiptsAndCleanup(): void
     {
+        $base = Yaml::parseFile(__DIR__ . '/../../../docker-compose.yml');
+        $ci = Yaml::parseFile(__DIR__ . '/../../../docker/compose.ci-local.yml', Yaml::PARSE_CUSTOM_TAGS);
+        $zeroSurprise = Yaml::parseFile(
+            __DIR__ . '/../../../docker/compose.zero-surprise.yml',
+            Yaml::PARSE_CUSTOM_TAGS,
+        );
+        self::assertSame('docker/php-fpm', $base['services']['php-fpm']['build']);
+        self::assertArrayNotHasKey('php-fpm', $ci['services'] ?? []);
+        self::assertArrayNotHasKey('build', $zeroSurprise['services']['php-fpm'] ?? []);
+
         $steps = $this->namedSteps($this->workflowJob('calendar-canary-regressions'));
         $run = $this->stepRun($steps, 'Run isolated application root suites');
+        self::assertSame(
+            'calendar-canary-regressions',
+            $this->workflowJob('calendar-canary-regressions')['env']['COMPOSE_PROJECT_NAME'],
+        );
+        $resolve = $this->stepRun($steps, 'Resolve PHP cache recipe');
+        self::assertStringContainsString(
+            'python3 -B scripts/ci/local_php_image_key.py --platform "$platform"',
+            $resolve,
+        );
+        self::assertStringContainsString('[[ "$image" =~ ^forscherhaus-local/php-fpm:[0-9a-f]{64}$ ]]', $resolve);
+        self::assertStringContainsString(
+            'echo "prefix=defense-php-oci-v1-${image##*:}-" >> "$GITHUB_OUTPUT"',
+            $resolve,
+        );
+        $build = $this->stepRun($steps, 'Build PHP with bounded layer cache');
+        self::assertStringContainsString(
+            'docker compose config --format json | python3 -B scripts/ci/defense_php_cache.py',
+            $build,
+        );
+        self::assertStringContainsString('--cache-dir "$PHP_CACHE_DIR"', $build);
+        self::assertStringContainsString('docker tag "$php_image" "${COMPOSE_PROJECT_NAME}-php-fpm"', $build);
+        self::assertStringContainsString(
+            'if [[ "$RESTORE_OUTCOME" != success || -z "$RESTORED_KEY" ]]; then' .
+                "\n" .
+                '  rm -rf -- "$PHP_CACHE_DIR/import"' .
+                "\n" .
+                'fi',
+            $build,
+        );
+        self::assertSame('docker/setup-buildx-action@v4', $steps['Set up PHP layer-cache builder']['uses']);
+        $restore = $steps['Restore complete PHP layer archive'];
+        $save = $steps['Save complete PHP layer archive'];
+        self::assertTrue($restore['continue-on-error']);
+        self::assertTrue($save['continue-on-error']);
+        self::assertSame($restore['with']['path'], $save['with']['path']);
+        self::assertSame($restore['with']['key'], $save['with']['key']);
+        self::assertStringContainsString('${{ github.run_id }}-${{ github.run_attempt }}', $restore['with']['key']);
+        self::assertSame('${{ steps.php-cache-key.outputs.prefix }}', $restore['with']['restore-keys']);
+        self::assertSame("steps.php-cache-save-preparation.outputs.cache_export_ready == 'true'", $save['if']);
+        $prepare = $this->stepRun($steps, 'Prepare complete PHP layer archive');
+        self::assertStringContainsString("ready = report.get('cache_export_ready') is True", $prepare);
+        self::assertStringContainsString("shutil.rmtree(root / 'import', ignore_errors=True)", $prepare);
+        self::assertStringContainsString("(root / 'export').rename(root / 'import')", $prepare);
+        self::assertStringContainsString('except OSError:', $prepare);
+        self::assertStringContainsString('ready = False', $prepare);
+        self::assertStringContainsString('output.write(f"cache_export_ready={str(ready).lower()}\\n")', $prepare);
+        self::assertStringContainsString('--no-build', $run);
 
         foreach (
             [
@@ -394,6 +451,10 @@ class CiWorkflowContractTest extends TestCase
         );
         self::assertStringContainsString('--bootstrap tests/bootstrap.php', $run);
         self::assertSame('always()', $steps['Cleanup isolated database and canary fixture']['if']);
+        self::assertSame(
+            'docker compose down -v --remove-orphans',
+            $this->stepRun($steps, 'Cleanup isolated database and canary fixture'),
+        );
 
         $receipt = $steps['Upload per-test receipt'];
         self::assertSame('always()', $receipt['if']);
@@ -410,6 +471,7 @@ class CiWorkflowContractTest extends TestCase
             'storage/logs/ci/calendar-canary-regressions.cases.json',
             $receipt['with']['path'],
         );
+        self::assertStringContainsString('storage/logs/ci/php-build/', $receipt['with']['path']);
     }
 
     public function testDeepRuntimeWorkloadProfileInputsStayExplicitInTheWorkflow(): void

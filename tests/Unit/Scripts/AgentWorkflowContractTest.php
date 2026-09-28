@@ -271,6 +271,42 @@ class AgentWorkflowContractTest extends TestCase
         self::assertTrue(is_executable($this->repoRoot . '/scripts/setup-worktree.sh'));
     }
 
+    public function testStrictV2AllowsOnlyBoundedCacheTransportForNamedJobs(): void
+    {
+        $controls = agentHarnessReadinessFailureControlsForPolicy('strict-v2');
+        $cacheStep = [
+            'uses' => 'actions/cache/restore@v4',
+            'continue-on-error' => true,
+            'timeout-minutes' => 1,
+        ];
+
+        self::assertSame(
+            [],
+            agentHarnessReadinessEvaluateBlockingJobFailureMasks(
+                ['steps' => [$cacheStep]],
+                'calendar-canary-regressions',
+                $controls,
+            ),
+        );
+        self::assertNotEmpty(
+            agentHarnessReadinessEvaluateBlockingJobFailureMasks(['steps' => [$cacheStep]], 'build-test', $controls),
+        );
+        self::assertNotEmpty(
+            agentHarnessReadinessEvaluateBlockingJobFailureMasks(
+                ['steps' => [array_merge($cacheStep, ['run' => 'echo unsafe'])]],
+                'calendar-canary-regressions',
+                $controls,
+            ),
+        );
+        self::assertNotEmpty(
+            agentHarnessReadinessEvaluateBlockingJobFailureMasks(
+                ['steps' => [array_merge($cacheStep, ['timeout-minutes' => 2])]],
+                'calendar-canary-regressions',
+                $controls,
+            ),
+        );
+    }
+
     private function readRepoFile(string $relativePath): string
     {
         $contents = file_get_contents($this->repoRoot . '/' . $relativePath);
