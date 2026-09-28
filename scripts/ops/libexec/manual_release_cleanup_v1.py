@@ -188,7 +188,7 @@ def candidate_record(helper, web, releases, name, web_uid, device, now_ns,
         contained_release = helper.read_release_marker(candidate)
     finally:
         os.close(candidate)
-    # The permanent host-local legacy hold substitutes for a canonical
+    # A valid host-local legacy hold, when present, substitutes for a canonical
     # provenance sidecar. Preserve such releases instead of deleting them.
     if contained_release in legacy_hold:
         return None

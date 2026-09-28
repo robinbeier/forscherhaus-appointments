@@ -689,7 +689,7 @@ def validate_provenance(data, expected_release, archive_sha, archive_size):
 
 
 def read_legacy_hold():
-    """Read the permanent host-local hold, without exposing its identities."""
+    """Read a valid host-local hold if present, without exposing identities."""
     try:
         parent = open_absolute_directory('/etc/fh', exact_mode=0o700)
     except FileNotFoundError:
