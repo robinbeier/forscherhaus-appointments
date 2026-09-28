@@ -918,6 +918,28 @@ class BookingControllerFlowTest extends TestCase
         $this->assertSame($scenario['appointment_id'], (int) ($success['appointment_id'] ?? 0));
     }
 
+    public function testEmptyCaptchaPhraseAndInputRejectBeforeMutationOrAuthorityConsumption(): void
+    {
+        $scenario = $this->createRescheduleScenario(19);
+        $controller = $this->createBookingControllerWithForcedAvailability($scenario['provider_id']);
+        $this->fixtures->setSetting('require_captcha', '1');
+        $this->issueRescheduleAuthority($controller, $scenario['hash']);
+        $beforeAppointment = $this->fixtures->findAppointmentById($scenario['appointment_id']);
+        $beforeCustomer = $this->fixtures->findCustomerById($scenario['customer_id']);
+        $beforeAuthority = session('public_reschedule_authority');
+        session(['captcha_phrase' => '']);
+        $this->setReschedulePayload($scenario);
+        $_POST['captcha'] = '';
+
+        $controller->register();
+
+        $response = json_decode(get_instance()->output->get_output(), true);
+        $this->assertFalse($response['captcha_verification'] ?? true);
+        $this->assertSame($beforeAppointment, $this->fixtures->findAppointmentById($scenario['appointment_id']));
+        $this->assertSame($beforeCustomer, $this->fixtures->findCustomerById($scenario['customer_id']));
+        $this->assertSame($beforeAuthority, session('public_reschedule_authority'));
+    }
+
     public function testRegisterReturnsErrorWhenDateTimeUnavailable(): void
     {
         $pair = $this->fixtures->resolveProviderServicePair();

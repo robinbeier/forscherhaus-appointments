@@ -74,6 +74,14 @@ provider email addresses into third-party URL parameters. The confirmation page,
 its PDF, and the local ICS download retain their existing management paths;
 `BookingDownloadHttpTest` checks the external-link boundary with own fixtures.
 
+When public booking CAPTCHA is enabled, registration requires both a nonempty
+server-generated challenge in the current session and a nonempty matching
+request value before any booking or consent write. The booking UI's CAPTCHA
+image request is not a substitute for this server-side check. The isolated
+`BookingCaptchaHttpTest` covers direct HTTP rejection without mutation and a
+matching generated challenge that creates an own booking and consent. It does
+not establish browser CAPTCHA usability or current production configuration.
+
 Provider parent-appointment and preparation PDFs contain personal appointment
 data. Only GET may reach either export, including through direct controller
 aliases. The authenticated session must identify a provider whose role is still
