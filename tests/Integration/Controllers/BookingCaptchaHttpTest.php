@@ -328,11 +328,21 @@ final class BookingCaptchaHttpTest extends TestCase
         self::assertTrue(get_instance()->db->update('settings', ['value' => '1'], ['name' => 'require_captcha']));
         $existingAppointment = $fixture->appointment();
         $before = $this->snapshot($existingAppointment, $fixture->customerId);
+        $ownedConsentEmail = (string) $fixture->row('users', $fixture->customerId)['email'];
+        $this->baselineConsentIds = array_map(
+            static fn(array $row): int => (int) $row['id'],
+            get_instance()
+                ->db->get_where('consents', ['email' => $ownedConsentEmail])
+                ->result_array(),
+        );
+        $this->ownedConsentEmail = $ownedConsentEmail;
         $challenge = $client->get('captcha');
         self::assertSame(200, $challenge->statusCode, $challenge->body);
+        $captcha = $this->readGeneratedCaptcha($client);
+        self::assertNotSame('', $captcha);
 
         $response = $client->post('booking/register', [
-            'post_data' => $this->payload($fixture),
+            'post_data' => $this->payloadForFixtureCustomer($fixture),
             'captcha' => 'WRONG-SYNTHETIC-CAPTCHA',
         ]);
 
@@ -340,13 +350,16 @@ final class BookingCaptchaHttpTest extends TestCase
         self::assertSame(['captcha_verification' => false], json_decode($response->body, true));
         self::assertSame($before, $this->snapshot($existingAppointment, $fixture->customerId));
 
-        $blank = $client->post('booking/register', [
-            'post_data' => $this->payload($fixture),
-            'captcha' => '   ',
+        $success = $client->post('booking/register', [
+            'post_data' => $this->payloadForFixtureCustomer($fixture),
+            'captcha' => $captcha,
         ]);
-        self::assertSame(200, $blank->statusCode, $blank->body);
-        self::assertSame(['captcha_verification' => false], json_decode($blank->body, true));
-        self::assertSame($before, $this->snapshot($existingAppointment, $fixture->customerId));
+        self::assertSame(200, $success->statusCode, $success->body);
+        $result = json_decode($success->body, true, 512, JSON_THROW_ON_ERROR);
+        self::assertGreaterThan(0, (int) ($result['appointment_id'] ?? 0));
+        self::assertSame($before['appointments'] + 1, get_instance()->db->count_all('appointments'));
+        self::assertSame($before['users'], get_instance()->db->count_all('users'));
+        self::assertSame($before['consents'] + 1, get_instance()->db->count_all('consents'));
     }
 
     /** @return array<string, mixed> */
