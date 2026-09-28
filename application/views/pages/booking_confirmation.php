@@ -576,7 +576,8 @@ $copy_link_button = lang('copy_link_button') ?: 'Copy booking link';
 $share_link_button = lang('share_link_button') ?: 'Share';
 $pdf_save_button = lang('save_pdf_button') ?: 'Save PDF';
 $add_to_calendar_grouped = lang('add_to_calendar_grouped') ?: 'Add to calendar';
-$add_to_calendar_hint = lang('add_to_calendar_hint') ?: 'The booking link is stored in the calendar event.';
+$add_to_calendar_hint =
+    lang('add_to_calendar_hint') ?: 'Use the link on this page or in the confirmation PDF to manage your appointment.';
 $book_another_link = lang('book_another_appointment_link') ?: lang('go_to_booking_page');
 $pdf_export_preparing_message = lang('pdf_export_preparing') ?: 'Preparing PDF download...';
 $pdf_export_ready_message = lang('pdf_export_ready') ?: 'PDF download started.';

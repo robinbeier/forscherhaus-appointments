@@ -68,6 +68,12 @@ manage URL. The isolated HTTP regression disables PHP's session cache limiter
 to prove that this header is application-owned; proxy, browser, and production
 cache behavior remain outside that local test.
 
+External Google and Outlook calendar links must carry only event details needed
+to create the appointment. Do not put the reschedule capability or customer and
+provider email addresses into third-party URL parameters. The confirmation page,
+its PDF, and the local ICS download retain their existing management paths;
+`BookingDownloadHttpTest` checks the external-link boundary with own fixtures.
+
 Provider parent-appointment and preparation PDFs contain personal appointment
 data. Only GET may reach either export, including through direct controller
 aliases. The authenticated session must identify a provider whose role is still
