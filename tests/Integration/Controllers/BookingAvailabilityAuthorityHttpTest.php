@@ -64,12 +64,11 @@ final class BookingAvailabilityAuthorityHttpTest extends TestCase
         $appointment = $fixture->appointment();
         $appointmentId = (int) $appointment['id'];
         $scenario = $this->occupyEverySlot($fixture, $appointment);
-        $foreign = $this->createAppointmentAt(
-            $fixture,
-            (new DateTimeImmutable($scenario['date']))->modify('+1 day')->format('Y-m-d'),
-            $scenario['hour'],
-        );
+        $foreignDate = (new DateTimeImmutable($scenario['date']))->modify('+1 day')->format('Y-m-d');
+        $foreign = $this->createAppointmentAt($fixture, $foreignDate, $scenario['hour']);
+        $foreignScenario = [...$scenario, 'date' => $foreignDate];
         $beforeAppointment = $fixture->row('appointments', $appointmentId);
+        $beforeForeign = $fixture->row('appointments', (int) $foreign['id']);
 
         $untrusted = $server->client();
         $authorized = $server->client();
@@ -99,7 +98,7 @@ final class BookingAvailabilityAuthorityHttpTest extends TestCase
         foreach ($variants as $name => $extra) {
             $this->assertUnavailableWithoutAuthority(
                 $untrusted,
-                $scenario,
+                $name === 'foreign id' ? $foreignScenario : $scenario,
                 $extra,
                 $name . ' must not exclude the booked slot',
             );
@@ -108,7 +107,7 @@ final class BookingAvailabilityAuthorityHttpTest extends TestCase
         foreach (['omitted id', 'malformed id', 'foreign id'] as $name) {
             $this->assertUnavailableWithoutAuthority(
                 $authorized,
-                $scenario,
+                $name === 'foreign id' ? $foreignScenario : $scenario,
                 $variants[$name],
                 $name . ' must not bypass exact ID binding in an authorized session',
             );
@@ -118,6 +117,7 @@ final class BookingAvailabilityAuthorityHttpTest extends TestCase
         $this->assertDateAvailableWithAuthority($authorized, $scenario, $appointmentId);
 
         self::assertSame($beforeAppointment, $fixture->row('appointments', $appointmentId));
+        self::assertSame($beforeForeign, $fixture->row('appointments', (int) $foreign['id']));
         self::assertSame($beforeAuthority, $this->authorityRow($db, $appointmentId));
     }
 
@@ -205,13 +205,8 @@ final class BookingAvailabilityAuthorityHttpTest extends TestCase
         $this->providerSettingsBefore = $settings;
         $plan = [];
         foreach (['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as $day) {
-            $plan[$day] = ['start' => '00:00', 'end' => '00:00', 'breaks' => []];
+            $plan[$day] = ['start' => '08:00', 'end' => '08:30', 'breaks' => []];
         }
-        $plan[strtolower((new DateTimeImmutable($date))->format('l'))] = [
-            'start' => '08:00',
-            'end' => '08:30',
-            'breaks' => [],
-        ];
         self::assertTrue(
             $ci->db->update(
                 'user_settings',
