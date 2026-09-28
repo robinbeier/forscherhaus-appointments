@@ -16,7 +16,7 @@ final class DefenseCycleHttpServer
     public readonly string $baseUrl;
     private mixed $process = null;
 
-    public function __construct(int $expiration = 7200)
+    public function __construct(int $expiration = 7200, bool $disableSessionCacheLimiter = false)
     {
         if (getenv('FH_DEFENSE_ISOLATED') !== '1' || !is_file('/.dockerenv')) {
             throw new RuntimeException('Only available in the owned isolated Docker run.');
@@ -47,17 +47,16 @@ final class DefenseCycleHttpServer
                 var_export($root . '/index.php', true) .
                 ';';
             file_put_contents($this->directory . '/router.php', $router);
+            $phpArguments = [PHP_BINARY, '-d', 'session.gc_probability=0', '-d', 'sendmail_path=/bin/false'];
+            if ($disableSessionCacheLimiter) {
+                $phpArguments[] = '-d';
+                $phpArguments[] = 'session.cache_limiter=';
+            }
+            $phpArguments[] = '-S';
+            $phpArguments[] = $address;
+            $phpArguments[] = $this->directory . '/router.php';
             $this->process = proc_open(
-                [
-                    PHP_BINARY,
-                    '-d',
-                    'session.gc_probability=0',
-                    '-d',
-                    'sendmail_path=/bin/false',
-                    '-S',
-                    $address,
-                    $this->directory . '/router.php',
-                ],
+                $phpArguments,
                 [
                     0 => ['file', '/dev/null', 'r'],
                     1 => ['file', $this->directory . '/server.log', 'a'],

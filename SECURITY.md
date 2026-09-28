@@ -62,6 +62,12 @@ related data; nullable or empty historical hash fields do not grant access.
 Keep existing nonempty legacy hashes compatible. The isolated HTTP regression
 in `BookingDownloadHttpTest` covers these routes, not every booking operation.
 
+Successful booking-confirmation HTML sets `Cache-Control: no-store` at the
+application layer because it carries appointment details and the reschedule
+manage URL. The isolated HTTP regression disables PHP's session cache limiter
+to prove that this header is application-owned; proxy, browser, and production
+cache behavior remain outside that local test.
+
 Provider parent-appointment and preparation PDFs contain personal appointment
 data. Only GET may reach either export, including through direct controller
 aliases. The authenticated session must identify a provider whose role is still

@@ -24,7 +24,7 @@ final class BookingDownloadHttpTest extends TestCase
         try {
             $this->fixture = new DefenseCycleFixtures();
             $this->fixture->create();
-            $this->server = new DefenseCycleHttpServer();
+            $this->server = new DefenseCycleHttpServer(disableSessionCacheLimiter: true);
         } catch (Throwable $error) {
             $this->server?->close();
             $this->fixture?->cleanup();
@@ -59,6 +59,7 @@ final class BookingDownloadHttpTest extends TestCase
             $confirmation = $client->get('booking_confirmation/of/' . $hash);
             self::assertSame(200, $confirmation->statusCode, $hash . ' confirmation must succeed.');
             self::assertStringStartsWith('text/html', strtolower((string) $confirmation->header('content-type')));
+            self::assertSame('no-store', strtolower((string) $confirmation->header('cache-control')));
             self::assertStringContainsString('data-generate-pdf', $confirmation->body);
             self::assertStringContainsString($fixture->run, $confirmation->body);
             self::assertStringContainsString('/booking/reschedule/' . $hash, $confirmation->body);
