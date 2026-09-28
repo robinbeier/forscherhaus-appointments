@@ -17,6 +17,7 @@
             <file>./tests/Integration/Controllers/RescheduleCutoffHttpTest.php</file>
             <file>./tests/Integration/Controllers/RescheduleMethodHttpTest.php</file>
             <file>./tests/Integration/Controllers/BookingMethodHttpTest.php</file>
+            <file>./tests/Integration/Controllers/BookingAvailabilityAuthorityHttpTest.php</file>
             <file>./tests/Integration/Controllers/BookingCancellationHttpTest.php</file>
             <file>./tests/Integration/Controllers/BookingCancellationRaceHttpTest.php</file>
             <file>./tests/Integration/Controllers/BackofficeWriteHttpTest.php</file>
