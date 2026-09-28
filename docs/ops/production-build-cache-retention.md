@@ -16,17 +16,23 @@ The fixed initial policy is deliberately conservative:
   the execute path validates, acquires, and holds it as well;
 - image, container, and volume inventories must remain exactly unchanged.
 
-## Proposed Native Docker GC Configuration
+## Native Docker GC Configuration: Policy And Dated Observation
 
 The repository includes
 [`scripts/ops/config/docker-build-cache-gc.json`](../../scripts/ops/config/docker-build-cache-gc.json)
-as a proposed native Docker builder-GC policy. It is a sample only: it is not
-installed, activated, scheduled, or an authorization to change a host. The
-policy enables builder GC with a 2 GiB reserved space and a 168-hour unused
+as the native Docker builder-GC policy. The repository JSON is configuration
+documentation only: it has no activation authority and is not itself an
+installed or scheduled host configuration. The [ROB-521 read-only production check](https://linear.app/robins-beiers-workspace/issue/ROB-521/06-speicherentwicklung-nach-deployments-und-cache-aufbewahrungsfrist)
+on 2026-09-28 found the same `builder.gc` object in `/etc/docker/daemon.json`.
+That dated observation confirms the host configuration contained the expected
+object at that time; it does not prove that the effective builder uses it or
+that native GC has run. Recheck the live configuration before any host action.
+The policy enables builder GC with a 2 GiB reserved space and a 168-hour unused
 cache duration. The 2 GiB value is a reserve, not a hard total-size cap; recent
-cache can exceed it, and the proposal imposes no hard fresh-cache cap.
+cache can exceed it, and the policy imposes no hard fresh-cache cap.
 
-An operator evaluating this proposal must confirm that the effective Docker
+The following is historical and future reconfiguration guidance. An operator
+evaluating or changing this configuration must confirm that the effective Docker
 builder uses the default Docker driver; this daemon setting does not configure
 a separate custom BuildKit daemon. Merge its `builder.gc` object with the
 existing daemon configuration, preserve unrelated settings, and save the exact
