@@ -385,6 +385,23 @@ final class CspReportOnlyStatusScriptTest extends TestCase
         );
         self::assertSame(0, $segmentResult['exit_code'], $segmentResult['stderr']);
 
+        $classifiedFailure = $segmentReceipt;
+        $classifiedFailure['status'] = 'failed';
+        $classifiedFailure['result_class'] = 'activation_unexpected';
+        $classifiedFailure['activation']['sha256'] = hash_file(
+            'sha256',
+            $this->repoRoot() . '/scripts/ops/config/csp_report_only.production.v1.json',
+        );
+        $classifiedFailure['activation']['starts_at_unix'] = null;
+        $classifiedFailure['activation']['expires_at_unix'] = null;
+        $failedResult = $this->runCommand(
+            [PHP_BINARY, 'scripts/ops/csp_report_only_validate_receipt.php', '--expect=segment-active'],
+            [],
+            json_encode($classifiedFailure, JSON_THROW_ON_ERROR),
+        );
+        self::assertSame(3, $failedResult['exit_code'], $failedResult['stderr']);
+        self::assertStringContainsString('activation_unexpected', $failedResult['stdout']);
+
         $stale = $segmentReceipt;
         $stale['activation']['starts_at_unix'] = time() - 20000;
         $stale['activation']['expires_at_unix'] = time() - 19000;

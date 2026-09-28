@@ -234,7 +234,12 @@ function validateReceipt(array $receipt, string $expectation, ?string $expectedR
     $activation = $receipt['activation'];
     $aggregate = $receipt['aggregate'];
     $segmentExpectation = in_array($expectation, ['segment-active', 'segment-observe', 'segment-expired'], true);
-    $segmentReceiptFields = $segmentExpectation && ($receipt['status'] ?? null) === 'passed';
+    $segmentReceiptFields =
+        $segmentExpectation &&
+        (array_key_exists('starts_at_unix', $activation) || array_key_exists('expires_at_unix', $activation));
+    if ($segmentExpectation && ($receipt['status'] ?? null) === 'passed' && !$segmentReceiptFields) {
+        return false;
+    }
     $activationKeys = $segmentReceiptFields
         ? ['status', 'sha256', 'starts_at_unix', 'expires_at_unix']
         : ['status', 'sha256'];
@@ -262,27 +267,44 @@ function validateReceipt(array $receipt, string $expectation, ?string $expectedR
         return false;
     }
     if ($segmentReceiptFields) {
-        if (
-            !is_int($activation['starts_at_unix'] ?? null) ||
-            !is_int($activation['expires_at_unix'] ?? null) ||
-            $activation['expires_at_unix'] <= $activation['starts_at_unix'] ||
-            $activation['expires_at_unix'] - $activation['starts_at_unix'] > 14400
-        ) {
-            return false;
-        }
-        $now = time();
-        if (
-            in_array($expectation, ['segment-active', 'segment-observe'], true) &&
-            !($activation['starts_at_unix'] <= $now && $now < $activation['expires_at_unix'])
-        ) {
-            return false;
-        }
-        if ($expectation === 'segment-expired' && $now < $activation['expires_at_unix']) {
-            return false;
-        }
-        $expectedSegmentHash = expectedSegmentConfigHash($activation['starts_at_unix'], $activation['expires_at_unix']);
-        if (!is_string($expectedSegmentHash) || !hash_equals($expectedSegmentHash, $activation['sha256'])) {
-            return false;
+        if (($receipt['status'] ?? null) === 'failed') {
+            $startsAt = $activation['starts_at_unix'];
+            $expiresAt = $activation['expires_at_unix'];
+            if (($startsAt === null) !== ($expiresAt === null)) {
+                return false;
+            }
+            if (
+                $startsAt !== null &&
+                (!is_int($startsAt) || !is_int($expiresAt) || $expiresAt <= $startsAt || $expiresAt - $startsAt > 14400)
+            ) {
+                return false;
+            }
+        } else {
+            if (
+                !is_int($activation['starts_at_unix'] ?? null) ||
+                !is_int($activation['expires_at_unix'] ?? null) ||
+                $activation['expires_at_unix'] <= $activation['starts_at_unix'] ||
+                $activation['expires_at_unix'] - $activation['starts_at_unix'] > 14400
+            ) {
+                return false;
+            }
+            $now = time();
+            if (
+                in_array($expectation, ['segment-active', 'segment-observe'], true) &&
+                !($activation['starts_at_unix'] <= $now && $now < $activation['expires_at_unix'])
+            ) {
+                return false;
+            }
+            if ($expectation === 'segment-expired' && $now < $activation['expires_at_unix']) {
+                return false;
+            }
+            $expectedSegmentHash = expectedSegmentConfigHash(
+                $activation['starts_at_unix'],
+                $activation['expires_at_unix'],
+            );
+            if (!is_string($expectedSegmentHash) || !hash_equals($expectedSegmentHash, $activation['sha256'])) {
+                return false;
+            }
         }
     }
     if (!in_array($aggregate['status'] ?? null, ['valid', 'missing', 'failed', 'not_checked'], true)) {

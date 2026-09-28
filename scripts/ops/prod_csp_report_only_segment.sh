@@ -100,9 +100,17 @@ write_journal() {
           "checkpoint"=>$checkpoint,"terminal"=>$terminal,"removal_attempted"=>$attempted];
         $allow=(int)$argv[12]; $dir=dirname($path); if (!is_dir($dir) && !mkdir($dir,0700,true)) exit(2);
         if (is_link($path) || (!$allow && lstat($path)!==false)) exit(3); $tmp=tempnam($dir,".segment-"); if (!is_string($tmp)) exit(4);
-        $bytes=json_encode($value,JSON_THROW_ON_ERROR|JSON_UNESCAPED_SLASHES)."\n"; chmod($tmp,0600);
-        if (file_put_contents($tmp,$bytes,LOCK_EX)!==strlen($bytes)) { @unlink($tmp); exit(5); }
-        if ($allow ? @rename($tmp,$path) : @link($tmp,$path)) { @unlink($tmp); } else { @unlink($tmp); exit(6); }
+        $bytes=json_encode($value,JSON_THROW_ON_ERROR|JSON_UNESCAPED_SLASHES)."\n";
+        $handle=@fopen($tmp,"wb");
+        $saved=is_resource($handle) && @chmod($tmp,0600) && @fwrite($handle,$bytes)===strlen($bytes) && @fflush($handle) && (!function_exists("fsync") || @fsync($handle));
+        if (is_resource($handle)) fclose($handle);
+        if (!$saved) { @unlink($tmp); exit(5); }
+        if (!($allow ? @rename($tmp,$path) : @link($tmp,$path))) { @unlink($tmp); exit(6); }
+        @unlink($tmp);
+        $directory=@fopen($dir,"rb");
+        $synced=is_resource($directory) && (!function_exists("fsync") || @fsync($directory));
+        if (is_resource($directory)) fclose($directory);
+        if (!$synced) exit(7);
     ' "$STATE_PATH" "$RUN_ID" "$RELEASE_BINDING" "$(target_binding)" "$DURATION_SECONDS" "${CANDIDATE_SHA256:-}" "${STARTS_AT_UNIX:-}" "${EXPIRES_AT_UNIX:-}" "$CHECKPOINT" "$TERMINAL" "$REMOVAL_ATTEMPTED" "$allow_update")" || return 1
 }
 
@@ -137,7 +145,7 @@ remote_activation() {
     local validator_args=("--action=$action" "--expected-release-binding=$RELEASE_BINDING" "--run-id=$RUN_ID")
     local duration_arg=''
     [[ "$action" == 'install-segment' || "$action" == 'inspect-segment' ]] && validator_args+=("--duration-seconds=$DURATION_SECONDS")
-    [[ "$action" == 'install-segment' ]] && duration_arg=" --duration-seconds=$DURATION_SECONDS"
+    [[ "$action" == 'install-segment' || "$action" == 'inspect-segment' ]] && duration_arg=" --duration-seconds=$DURATION_SECONDS"
     [[ "$action" == 'remove' ]] && validator_args+=("--expected-candidate-sha256=$CANDIDATE_SHA256")
     output="$(ssh "${SSH_OPTIONS[@]}" "$PROD_SSH_TARGET" "/usr/bin/php /var/www/html/easyappointments/scripts/ops/csp_report_only_activation.php --action=$action --expected-release-binding=$RELEASE_BINDING --run-id=$RUN_ID$duration_arg")" || exit_code=$?
     local validated

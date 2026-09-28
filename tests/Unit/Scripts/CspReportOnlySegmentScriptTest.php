@@ -281,6 +281,7 @@ final class CspReportOnlySegmentScriptTest extends TestCase
             if [[ "$*" == *"--action=install-segment"* ]]; then
                 action=install-segment; result=activation_installed
             elif [[ "$*" == *"--action=inspect-segment"* ]]; then
+                [[ "$*" == *"--duration-seconds=900"* ]] || exit 2
                 action=inspect-segment; result=segment_inspected
             elif [[ "$*" == *"--action=remove"* ]]; then
                 printf '{"schema":"csp_report_only_activation.v2","action":"remove","status":"passed","result_class":"activation_removed","candidate_sha256":"%s","release_binding":"%s","run_id":"%s"}\n' "$FAKE_HASH" "$FAKE_BINDING" "$run_id"
@@ -305,7 +306,8 @@ final class CspReportOnlySegmentScriptTest extends TestCase
             SH
             ,
         );
-        foreach ([$status, $directory . '/bin/ssh', $directory . '/bin/php'] as $script) {
+        file_put_contents($directory . '/bin/uname', "#!/usr/bin/env bash\nprintf 'Linux\\n'\n");
+        foreach ([$status, $directory . '/bin/ssh', $directory . '/bin/php', $directory . '/bin/uname'] as $script) {
             chmod($script, 0755);
         }
         $env = [
@@ -359,6 +361,7 @@ final class CspReportOnlySegmentScriptTest extends TestCase
                     $directory . '/write-count',
                     $directory . '/bin/ssh',
                     $directory . '/bin/php',
+                    $directory . '/bin/uname',
                 ]
                 as $file
             ) {
