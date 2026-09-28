@@ -170,7 +170,7 @@ class CiWorkflowContractTest extends TestCase
         sort($union);
         self::assertSame($canonicalSet, $union);
         self::assertCount(21, $shards[1]);
-        self::assertCount(26, $shards[2]);
+        self::assertCount(27, $shards[2]);
         self::assertSame([], array_intersect($shards[1], $shards[2]));
         foreach (
             [
@@ -183,6 +183,7 @@ class CiWorkflowContractTest extends TestCase
             self::assertContains($moved, $shards[2]);
         }
         self::assertContains('./tests/Integration/DefenseVerificationFixtureTest.php', $shards[2]);
+        self::assertContains('./tests/Integration/Controllers/CustomersApiHttpReadTest.php', $shards[2]);
     }
 
     public function testJavaScriptLintSelectsChangesBeforeInstallingDependencies(): void
