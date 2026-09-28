@@ -23,7 +23,8 @@ ist eine Orientierung, keine vollständige Testliste.
 | Register-Aufruf mit GET statt POST | `tests/Integration/Controllers/BookingMethodHttpTest.php::testGetRegisterRejectsValidPublicQueryPayloadWithoutMutation` | FH_DEFENSE_ISOLATED HTTP/DB; 405 und `Allow: POST` vor Query-Auswertung, keine Termin-/Kunden-/Consent-Mutation, Fixture-Cleanup |
 | Späte Überschneidung/Identitäts-Lock | dieselbe Datei: `testCreationIdentityLockSerializesAcrossDatabaseConnections`, `testNormalCreationResolvesCustomerAfterIdentityLockAndRejectsLateOverlap` | Verhaltens-Integration; Doppelbuchung bzw. Race nach Verfügbarkeitsprüfung |
 | DTO-Normalisierung der Register-Daten | `tests/Unit/Libraries/BookingRequestDtoFactoryTest.php` | Unit; verschachtelte Nutzdaten, optionale Kundenfelder und Kompatibilitätswerte |
-| CAPTCHA/fehlende Verfügbarkeit ohne Mutation | `BookingControllerFlowTest` (u. a. `testRegisterReturnsErrorWhenDateTimeUnavailable`, `testCaptchaRejectionDoesNotMutateOrConsumeValidAuthority`) | Verhaltens-Integration; fail-closed Schreibpfad |
+| CAPTCHA ohne Sitzungs-Challenge bzw. mit falscher Eingabe | `tests/Integration/Controllers/BookingCaptchaHttpTest.php`, `BookingControllerFlowTest::testCaptchaRejectionDoesNotMutateOrConsumeValidAuthority`, `::testEmptyCaptchaPhraseAndInputRejectBeforeMutationOrAuthorityConsumption` | FH_DEFENSE_ISOLATED HTTP/DB belegt fehlende/leere Eingabe ohne Challenge, falsche Eingabe nach Bildabruf und die eigene erfolgreiche Buchung samt Consent mit gültiger Challenge. Abgelehnte Requests verändern Termin, Kunde, Consent und Authority nicht; der Controller-Test deckt auch eine ausdrücklich leere Sitzungsphrase ab. Kein Browser-Usability- oder aktueller Produktionskonfigurationsnachweis. |
+| Fehlende Verfügbarkeit ohne Mutation | `BookingControllerFlowTest::testRegisterReturnsErrorWhenDateTimeUnavailable` | Verhaltens-Integration; keine Buchung bei fehlendem Slot |
 
 ## Bestätigung
 

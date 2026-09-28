@@ -371,7 +371,14 @@ class Booking extends EA_Controller
 
             // CAPTCHA remains a prerequisite and is checked before a one-time
             // authority can be consumed.
-            if ($require_captcha && strtoupper((string) $captcha_phrase) !== strtoupper((string) $captcha)) {
+            if (
+                $require_captcha &&
+                (!is_string($captcha_phrase) ||
+                    $captcha_phrase === '' ||
+                    !is_string($captcha) ||
+                    $captcha === '' ||
+                    strtoupper($captcha_phrase) !== strtoupper($captcha))
+            ) {
                 json_response([
                     'captcha_verification' => false,
                 ]);
