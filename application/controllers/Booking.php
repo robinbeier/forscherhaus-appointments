@@ -386,6 +386,12 @@ class Booking extends EA_Controller
                 return;
             }
 
+            if ($require_captcha) {
+                // A solved challenge permits one booking attempt only. The UI
+                // refreshes the image and clears the answer after a later error.
+                get_instance()->session->unset_userdata('captcha_phrase');
+            }
+
             $start_datetime = $appointment['start_datetime'] ?? null;
             $parsed_start = is_string($start_datetime)
                 ? DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $start_datetime)
