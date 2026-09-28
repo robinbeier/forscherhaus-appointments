@@ -133,7 +133,8 @@ read_journal() {
 
 status_check() {
     local expectation="$1" output
-    output="$(bash "$STATUS_SCRIPT" --expect "$expectation" --prod-ssh-target "$PROD_SSH_TARGET")" || {
+    shift
+    output="$(bash "$STATUS_SCRIPT" --expect "$expectation" --expected-release-binding "$RELEASE_BINDING" "$@" --prod-ssh-target "$PROD_SSH_TARGET")" || {
         printf '%s\n' "$output"; return 1;
     }
     printf '%s\n' "$output"
@@ -236,7 +237,7 @@ run_start() {
     CANDIDATE_SHA256="$(printf '%s' "$receipt" | extract_receipt candidate_sha256)"; STARTS_AT_UNIX="$(printf '%s' "$receipt" | extract_receipt starts_at_unix)"; EXPIRES_AT_UNIX="$(printf '%s' "$receipt" | extract_receipt expires_at_unix)"
     [[ "$receipt_status" == 'passed' && "$receipt_binding" == "$RELEASE_BINDING" && "$CANDIDATE_SHA256" =~ ^[a-f0-9]{64}$ && "$STARTS_AT_UNIX" =~ ^[0-9]+$ && "$EXPIRES_AT_UNIX" =~ ^[0-9]+$ && $((EXPIRES_AT_UNIX-STARTS_AT_UNIX)) -eq "$DURATION_SECONDS" ]] || { TERMINAL='activation_receipt_binding_mismatch'; write_journal || true; printf 'csp_segment.result_class=%s\n' "$TERMINAL"; return 1; }
     CHECKPOINT='active'; write_journal || { printf '%s\n' "$receipt"; printf 'csp_segment.result_class=postinstall_journal_unavailable\n'; return 1; }
-    output="$(bash "$STATUS_SCRIPT" --expect segment-active --probe-runtime --prod-ssh-target "$PROD_SSH_TARGET")" || { cleanup_after_start_failure 'active_probe_failed'; return 1; }
+    output="$(status_check segment-active --probe-runtime)" || { cleanup_after_start_failure 'active_probe_failed'; return 1; }
     if ! verify_segment_status segment-active "$output"; then
         cleanup_after_start_failure 'active_state_mismatch'; return 1
     fi

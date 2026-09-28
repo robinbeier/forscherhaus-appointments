@@ -153,6 +153,7 @@ final class CspReportOnlySegmentScriptTest extends TestCase
                 exit 1
             fi
             if [[ "$*" == *"--expect inactive"* ]]; then
+                [[ "$*" == *"--expected-release-binding $FAKE_BINDING"* ]] || exit 1
                 printf 'csp_evidence.status=passed\n'
                 exit 0
             fi
@@ -265,6 +266,7 @@ final class CspReportOnlySegmentScriptTest extends TestCase
                 [[ "${FAKE_STATUS_FAIL:-0}" == 0 ]] || exit 1
                 printf '{"schema":"csp_report_only_state.v2","status":"passed","release_binding":"%s","activation":{"status":"active","sha256":"%s","starts_at_unix":%s,"expires_at_unix":%s},"aggregate":{"status":"missing","summary":null,"scope":"cumulative_retention_window"}}\n' "$FAKE_BINDING" "$FAKE_HASH" "$FAKE_STARTS" "$FAKE_EXPIRES"
             elif [[ "$*" == *"--expect inactive"* ]]; then
+                [[ "$*" == *"--expected-release-binding $FAKE_BINDING"* ]] || exit 1
                 printf 'csp_evidence.status=passed\n'
             else
                 exit 2
