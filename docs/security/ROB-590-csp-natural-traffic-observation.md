@@ -24,7 +24,7 @@ cannot extend a segment.
 | `preflight` | Read-only | Inactive CSP, exact release, healthy App/WWW/Monitor, activation prerequisites |
 | `start` | One activation and one bounded runtime write-readiness probe | Private no-clobber journal created before installation; exact run, target, release, dynamic hash and server time window; active header and aggregate classes |
 | `recover` | Read-only on production; reconstruct a local journal after a lost post-install update | Root-owned lease and activation must match the original run ID and release; derived hash, exact window, target and current public state must agree; this never repeats installation |
-| `observe` | Read-only; repeatable after a transport interruption | Same release, activation hash/window, App/WWW header and health classes, classified aggregate; expired is distinct from active |
+| `observe` | Read-only; repeatable after a transport interruption | Same release, activation hash/window, App/WWW header and health classes; expired is distinct from active. The aggregate is cumulative and unattributed to this segment. |
 | `finish` | At most one lease-bound removal | Current activation checked against the journal before removal; inactive postflight; terminal journal retained |
 
 Use a **unique** `CSP_SEGMENT_STATE_FILE` path for each planned segment. The
@@ -42,6 +42,9 @@ root lease and activation without changing production. It writes a finishable
 journal only when run, release, candidate hash, exact window and public state
 agree. A storage failure or contradictory evidence remains a manual recovery
 state. Neither activation nor removal is blindly retried.
+An interrupted public-state check keeps the pre-install journal checkpoint;
+`recover` can re-inspect without repeating installation. The journal becomes
+finishable only after public state also verifies.
 The server-side expiry stops CSP effects even if the client disappears, but
 the activation file and root lease can remain after expiry. That is a recovery
 state: inspect it, remove it only through the verified run-bound path, and
@@ -66,9 +69,16 @@ Assess App and WWW separately. Correlate classified CSP signals with
 privacy-preserving evidence that public WWW, real booking paths, and naturally
 used App/administration paths were exercised. Distinguish known synthetic
 signals, expected resource classes, and unknown external violations. The
-collector stores only fixed aggregate classes and counts; never paste raw CSP
-payloads, complete URLs, customer data, secrets, or response bodies into
-Linear. A zero-violation aggregate alone does not prove route coverage.
+collector stores only fixed aggregate classes and counts. Its summary spans
+up to 48 hours and can include earlier pilots, other segments, and synthetic
+probes. Receipts label it `cumulative_retention_window`; the operator labels
+it `cumulative_unattributed`. `segment_functional_observed` confirms bounded
+activation, headers, collector readiness and health, **not** a segment-specific
+violation count or absence of violations. Phase B requires a separate reliable
+baseline before attributing changes to a segment; until then a segment-specific
+CSP conclusion is inconclusive. Never paste raw CSP payloads, complete URLs,
+customer data, secrets, or response bodies into Linear. A zero-violation
+aggregate alone does not prove route coverage.
 
 If traffic is too sparse or a needed path was not naturally used, record
 `inconclusive_insufficient_traffic`; do not use the campaign as evidence for

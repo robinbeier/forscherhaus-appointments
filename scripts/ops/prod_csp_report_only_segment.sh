@@ -175,14 +175,15 @@ status_receipt() {
 }
 
 verify_segment_status() {
-    local expectation="$1" output="$2" receipt status hash starts expires binding
+    local expectation="$1" output="$2" receipt status hash starts expires binding scope
     receipt="$(printf '%s\n' "$output" | status_receipt)" || return 1
     status="$(printf '%s' "$receipt" | extract_receipt status)"
     hash="$(printf '%s' "$receipt" | php -r '$r=json_decode(stream_get_contents(STDIN),true); echo $r["activation"]["sha256"]??"";')"
     starts="$(printf '%s' "$receipt" | php -r '$r=json_decode(stream_get_contents(STDIN),true); echo $r["activation"]["starts_at_unix"]??"";')"
     expires="$(printf '%s' "$receipt" | php -r '$r=json_decode(stream_get_contents(STDIN),true); echo $r["activation"]["expires_at_unix"]??"";')"
     binding="$(printf '%s' "$receipt" | extract_receipt release_binding)"
-    [[ "$status" == 'passed' && "$binding" == "$RELEASE_BINDING" && "$hash" == "$CANDIDATE_SHA256" && "$starts" == "$STARTS_AT_UNIX" && "$expires" == "$EXPIRES_AT_UNIX" ]] || return 1
+    scope="$(printf '%s' "$receipt" | php -r '$r=json_decode(stream_get_contents(STDIN),true); echo $r["aggregate"]["scope"]??"";')"
+    [[ "$status" == 'passed' && "$binding" == "$RELEASE_BINDING" && "$hash" == "$CANDIDATE_SHA256" && "$starts" == "$STARTS_AT_UNIX" && "$expires" == "$EXPIRES_AT_UNIX" && "$scope" == 'cumulative_retention_window' ]] || return 1
     [[ "$expectation" == 'segment-expired' && "$(printf '%s' "$receipt" | php -r '$r=json_decode(stream_get_contents(STDIN),true); echo $r["activation"]["status"]??"";')" == 'expired' ]] ||
         [[ "$expectation" != 'segment-expired' && "$(printf '%s' "$receipt" | php -r '$r=json_decode(stream_get_contents(STDIN),true); echo $r["activation"]["status"]??"";')" == 'active' ]]
 }
@@ -240,6 +241,7 @@ run_start() {
         cleanup_after_start_failure 'active_state_mismatch'; return 1
     fi
     printf '%s\n' "$output"; CHECKPOINT='observe'; write_journal || return 1
+    printf 'csp_segment.aggregate_scope=cumulative_unattributed\n'
     printf 'csp_segment.status=passed\n'; printf 'csp_segment.result_class=segment_started\n'
 }
 
@@ -264,13 +266,14 @@ run_recover() {
        "$EXPIRES_AT_UNIX" =~ ^[0-9]+$ && $((EXPIRES_AT_UNIX-STARTS_AT_UNIX)) -eq "$DURATION_SECONDS" ]] || {
         printf 'csp_segment.result_class=recovery_receipt_mismatch\n'; return 1;
     }
-    CHECKPOINT='active'; TERMINAL=''
-    write_journal || { printf '%s\n' "$receipt"; printf 'csp_segment.result_class=recovery_journal_unavailable\n'; return 1; }
     local expectation='segment-observe' output
     [[ "$(date +%s)" -ge "$EXPIRES_AT_UNIX" ]] && expectation='segment-expired'
     output="$(status_check "$expectation")" || { printf 'csp_segment.result_class=recovery_state_unknown\n'; return 1; }
     verify_segment_status "$expectation" "$output" || { printf 'csp_segment.result_class=recovery_state_mismatch\n'; return 1; }
+    CHECKPOINT='active'; TERMINAL=''
+    write_journal || { printf '%s\n' "$receipt"; printf 'csp_segment.result_class=recovery_journal_unavailable\n'; return 1; }
     printf '%s\n' "$receipt"; printf '%s\n' "$output"
+    printf 'csp_segment.aggregate_scope=cumulative_unattributed\n'
     printf 'csp_segment.status=passed\n'; printf 'csp_segment.result_class=segment_recovered\n'
 }
 
@@ -282,7 +285,8 @@ run_observe() {
     local output receipt status hash starts expires binding
     output="$(status_check "$expectation")" || { printf 'csp_segment.result_class=observe_unknown\n'; return 1; }
     verify_segment_status "$expectation" "$output" || { printf 'csp_segment.result_class=observe_binding_mismatch\n'; return 1; }
-    printf '%s\n' "$output"; printf 'csp_segment.status=passed\n'; printf 'csp_segment.result_class=segment_observed\n'
+    printf '%s\n' "$output"; printf 'csp_segment.aggregate_scope=cumulative_unattributed\n'
+    printf 'csp_segment.status=passed\n'; printf 'csp_segment.result_class=segment_functional_observed\n'
 }
 
 run_finish() {

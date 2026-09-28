@@ -234,6 +234,13 @@ function validateReceipt(array $receipt, string $expectation, ?string $expectedR
     $activation = $receipt['activation'];
     $aggregate = $receipt['aggregate'];
     $segmentExpectation = in_array($expectation, ['segment-active', 'segment-observe', 'segment-expired'], true);
+    $aggregateScoped = $segmentExpectation && array_key_exists('scope', $aggregate);
+    if ($segmentExpectation && ($receipt['status'] ?? null) === 'passed' && !$aggregateScoped) {
+        return false;
+    }
+    if ($aggregateScoped && $aggregate['scope'] !== 'cumulative_retention_window') {
+        return false;
+    }
     $segmentReceiptFields =
         $segmentExpectation &&
         (array_key_exists('starts_at_unix', $activation) || array_key_exists('expires_at_unix', $activation));
@@ -243,7 +250,8 @@ function validateReceipt(array $receipt, string $expectation, ?string $expectedR
     $activationKeys = $segmentReceiptFields
         ? ['status', 'sha256', 'starts_at_unix', 'expires_at_unix']
         : ['status', 'sha256'];
-    if (!hasExactKeys($activation, $activationKeys) || !hasExactKeys($aggregate, ['status', 'summary'])) {
+    $aggregateKeys = $aggregateScoped ? ['status', 'summary', 'scope'] : ['status', 'summary'];
+    if (!hasExactKeys($activation, $activationKeys) || !hasExactKeys($aggregate, $aggregateKeys)) {
         return false;
     }
 

@@ -343,7 +343,11 @@ function runStatusCli(array $argv): never
                         ]
                         : [],
                 ],
-                'aggregate' => ['status' => $aggregate['status'], 'summary' => $aggregate['summary']],
+                'aggregate' => [
+                    'status' => $aggregate['status'],
+                    'summary' => $aggregate['summary'],
+                    ...$segmentExpectation ? ['scope' => 'cumulative_retention_window'] : [],
+                ],
             ],
             $passed ? 0 : 1,
         );

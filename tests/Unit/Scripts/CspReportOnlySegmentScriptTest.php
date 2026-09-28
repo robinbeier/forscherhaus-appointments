@@ -262,7 +262,8 @@ final class CspReportOnlySegmentScriptTest extends TestCase
             if [[ "$*" == *"--phase preflight"* ]]; then
                 printf 'csp_evidence.release_binding=%s\n' "$FAKE_BINDING"
             elif [[ "$*" == *"--expect segment-observe"* ]]; then
-                printf '{"schema":"csp_report_only_state.v2","status":"passed","release_binding":"%s","activation":{"status":"active","sha256":"%s","starts_at_unix":%s,"expires_at_unix":%s}}\n' "$FAKE_BINDING" "$FAKE_HASH" "$FAKE_STARTS" "$FAKE_EXPIRES"
+                [[ "${FAKE_STATUS_FAIL:-0}" == 0 ]] || exit 1
+                printf '{"schema":"csp_report_only_state.v2","status":"passed","release_binding":"%s","activation":{"status":"active","sha256":"%s","starts_at_unix":%s,"expires_at_unix":%s},"aggregate":{"status":"missing","summary":null,"scope":"cumulative_retention_window"}}\n' "$FAKE_BINDING" "$FAKE_HASH" "$FAKE_STARTS" "$FAKE_EXPIRES"
             elif [[ "$*" == *"--expect inactive"* ]]; then
                 printf 'csp_evidence.status=passed\n'
             else
@@ -333,6 +334,16 @@ final class CspReportOnlySegmentScriptTest extends TestCase
                 'activation',
                 json_decode((string) file_get_contents($state), true, 8, JSON_THROW_ON_ERROR)['checkpoint'],
             );
+            $interrupted = $this->runCommand(
+                ['bash', 'scripts/ops/prod_csp_report_only_segment.sh', '--phase', 'recover'],
+                [...$env, 'FAKE_STATUS_FAIL' => '1'],
+            );
+            self::assertSame(1, $interrupted['exit_code']);
+            self::assertStringContainsString('recovery_state_unknown', $interrupted['stdout']);
+            self::assertSame(
+                'activation',
+                json_decode((string) file_get_contents($state), true, 8, JSON_THROW_ON_ERROR)['checkpoint'],
+            );
             $recovered = $this->runCommand(
                 ['bash', 'scripts/ops/prod_csp_report_only_segment.sh', '--phase', 'recover'],
                 $env,
@@ -350,7 +361,7 @@ final class CspReportOnlySegmentScriptTest extends TestCase
             self::assertSame(0, $finish['exit_code'], $finish['stdout'] . $finish['stderr']);
             $calls = (string) file_get_contents($sshLog);
             self::assertSame(1, substr_count($calls, '--action=install-segment'));
-            self::assertSame(1, substr_count($calls, '--action=inspect-segment'));
+            self::assertSame(2, substr_count($calls, '--action=inspect-segment'));
             self::assertSame(1, substr_count($calls, '--action=remove'));
         } finally {
             foreach (

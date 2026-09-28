@@ -376,7 +376,7 @@ final class CspReportOnlyStatusScriptTest extends TestCase
                 'starts_at_unix' => $segment['starts_at_unix'],
                 'expires_at_unix' => $segment['expires_at_unix'],
             ],
-            'aggregate' => ['status' => 'missing', 'summary' => null],
+            'aggregate' => ['status' => 'missing', 'summary' => null, 'scope' => 'cumulative_retention_window'],
         ];
         $segmentResult = $this->runCommand(
             [PHP_BINARY, 'scripts/ops/csp_report_only_validate_receipt.php', '--expect=segment-active'],
@@ -384,6 +384,16 @@ final class CspReportOnlyStatusScriptTest extends TestCase
             json_encode($segmentReceipt, JSON_THROW_ON_ERROR),
         );
         self::assertSame(0, $segmentResult['exit_code'], $segmentResult['stderr']);
+        $unscoped = $segmentReceipt;
+        unset($unscoped['aggregate']['scope']);
+        self::assertSame(
+            1,
+            $this->runCommand(
+                [PHP_BINARY, 'scripts/ops/csp_report_only_validate_receipt.php', '--expect=segment-active'],
+                [],
+                json_encode($unscoped, JSON_THROW_ON_ERROR),
+            )['exit_code'],
+        );
 
         $classifiedFailure = $segmentReceipt;
         $classifiedFailure['status'] = 'failed';
