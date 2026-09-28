@@ -77,13 +77,14 @@ its PDF, and the local ICS download retain their existing management paths;
 When public booking CAPTCHA is enabled, registration requires both a nonempty
 server-generated challenge in the current session and a nonempty matching
 request value before any booking or consent write. A correct challenge is
-consumed before the booking attempt continues, so it cannot authorize another
+consumed before the booking attempt continues, so it cannot authorize a later
 request in that session without a newly generated challenge. An incorrect value
 does not consume the challenge. The booking UI's CAPTCHA image request is not a
 substitute for this server-side check. The isolated `BookingCaptchaHttpTest`
 covers direct HTTP rejection without mutation, one successful own booking and
-consent, replay rejection, and a fresh-challenge recovery. It does not establish
-browser CAPTCHA usability or current production configuration.
+consent, sequential replay rejection, and a fresh-challenge recovery. It does
+not establish simultaneous-request behavior, full browser CAPTCHA usability,
+or current production configuration.
 
 Provider parent-appointment and preparation PDFs contain personal appointment
 data. Only GET may reach either export, including through direct controller

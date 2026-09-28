@@ -226,6 +226,71 @@ final class BookingCaptchaHttpTest extends TestCase
         );
     }
 
+    public function testValidCaptchaIsConsumedBeforeDownstreamBookingRejection(): void
+    {
+        $fixture = $this->fixture;
+        $client = $this->server?->client();
+        self::assertNotNull($fixture);
+        self::assertNotNull($client);
+
+        self::assertTrue(get_instance()->db->update('settings', ['value' => '1'], ['name' => 'require_captcha']));
+        $ownedConsentEmail = (string) $fixture->row('users', $fixture->customerId)['email'];
+        $this->baselineConsentIds = array_map(
+            static fn(array $row): int => (int) $row['id'],
+            get_instance()
+                ->db->get_where('consents', ['email' => $ownedConsentEmail])
+                ->result_array(),
+        );
+        $this->ownedConsentEmail = $ownedConsentEmail;
+        self::assertSame(200, $client->get('booking')->statusCode);
+        self::assertSame(200, $client->get('captcha')->statusCode);
+        $captcha = $this->readGeneratedCaptcha($client);
+        self::assertNotSame('', $captcha);
+
+        $validPayload = $this->payloadForFixtureCustomer($fixture);
+        $invalidPayload = $validPayload;
+        $invalidPayload['appointment']['start_datetime'] = 'not-a-datetime';
+        $beforeAppointments = get_instance()->db->count_all('appointments');
+        $beforeUsers = get_instance()->db->count_all('users');
+        $beforeConsents = get_instance()->db->count_all('consents');
+        $beforeCustomer = $fixture->row('users', $fixture->customerId);
+        $rejected = $client->post('booking/register', [
+            'post_data' => $invalidPayload,
+            'captcha' => $captcha,
+        ]);
+
+        self::assertSame(409, $rejected->statusCode, $rejected->body);
+        self::assertSame($beforeAppointments, get_instance()->db->count_all('appointments'));
+        self::assertSame($beforeUsers, get_instance()->db->count_all('users'));
+        self::assertSame($beforeConsents, get_instance()->db->count_all('consents'));
+        self::assertSame($beforeCustomer, $fixture->row('users', $fixture->customerId));
+
+        $oldPhraseRetry = $client->post('booking/register', [
+            'post_data' => $validPayload,
+            'captcha' => $captcha,
+        ]);
+        self::assertSame(200, $oldPhraseRetry->statusCode, $oldPhraseRetry->body);
+        self::assertSame(['captcha_verification' => false], json_decode($oldPhraseRetry->body, true));
+        self::assertSame($beforeAppointments, get_instance()->db->count_all('appointments'));
+        self::assertSame($beforeUsers, get_instance()->db->count_all('users'));
+        self::assertSame($beforeConsents, get_instance()->db->count_all('consents'));
+
+        self::assertSame(200, $client->get('captcha')->statusCode);
+        $replacementCaptcha = $this->readGeneratedCaptcha($client);
+        self::assertNotSame('', $replacementCaptcha);
+        $success = $client->post('booking/register', [
+            'post_data' => $validPayload,
+            'captcha' => $replacementCaptcha,
+        ]);
+
+        self::assertSame(200, $success->statusCode, $success->body);
+        $result = json_decode($success->body, true, 512, JSON_THROW_ON_ERROR);
+        self::assertGreaterThan(0, (int) ($result['appointment_id'] ?? 0));
+        self::assertSame($beforeAppointments + 1, get_instance()->db->count_all('appointments'));
+        self::assertSame($beforeUsers, get_instance()->db->count_all('users'));
+        self::assertSame($beforeConsents + 1, get_instance()->db->count_all('consents'));
+    }
+
     public function testMissingSessionChallengeAndCaptchaInputRejectBeforeMutation(): void
     {
         $fixture = $this->fixture;

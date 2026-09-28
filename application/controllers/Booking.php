@@ -388,7 +388,7 @@ class Booking extends EA_Controller
 
             if ($require_captcha) {
                 // A solved challenge permits one booking attempt only. The UI
-                // refreshes the image after a later validation or server error.
+                // refreshes the image and clears the answer after a later error.
                 get_instance()->session->unset_userdata('captcha_phrase');
             }
 

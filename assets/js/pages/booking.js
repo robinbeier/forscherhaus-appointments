@@ -828,6 +828,9 @@ App.Pages.Booking = (function () {
          * Event: Refresh captcha image.
          */
         $captchaTitle.on('click', 'button', () => {
+            // Refreshing the image replaces the session challenge, so the old
+            // answer must not remain in the form after a failed booking.
+            $('.captcha-text').val('').removeClass('is-invalid');
             $('.captcha-image').attr('src', App.Utils.Url.siteUrl('captcha?' + Date.now()));
         });
 

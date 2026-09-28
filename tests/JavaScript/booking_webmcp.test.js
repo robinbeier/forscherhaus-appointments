@@ -413,6 +413,9 @@ function createBookingSelectionHarness(options = {}) {
     let nextTimerId = 1;
     const timers = new Map();
     let rejectDateSelection = false;
+    let refreshCaptcha;
+    let captchaAnswer = 'STALE-ANSWER';
+    let captchaImageSource = 'captcha?old';
     function createRequest() {
         let resolvePromise;
         let rejectPromise;
@@ -700,6 +703,9 @@ function createBookingSelectionHarness(options = {}) {
                     queryParam() {
                         return null;
                     },
+                    siteUrl(value) {
+                        return value;
+                    },
                 },
                 UI: {
                     setDateTimePickerValue(unusedTarget, value) {
@@ -748,6 +754,36 @@ function createBookingSelectionHarness(options = {}) {
         },
         window: {moment, tippy() {}},
         $: (selector) => {
+            if (selector === '.captcha-title') {
+                return {
+                    on(event, target, callback) {
+                        if (event === 'click' && target === 'button') refreshCaptcha = callback;
+                        return this;
+                    },
+                };
+            }
+            if (selector === '.captcha-text') {
+                return {
+                    val(value) {
+                        if (arguments.length) {
+                            captchaAnswer = value;
+                            return this;
+                        }
+                        return captchaAnswer;
+                    },
+                    removeClass() {
+                        return this;
+                    },
+                };
+            }
+            if (selector === '.captcha-image') {
+                return {
+                    attr(name, value) {
+                        if (name === 'src') captchaImageSource = value;
+                        return this;
+                    },
+                };
+            }
             if (selector === '#select-service') return serviceControl;
             if (selector === '#select-provider') return providerControl;
             if (selector === '#select-date') return dateControl;
@@ -829,6 +865,15 @@ function createBookingSelectionHarness(options = {}) {
         },
         get step2Active() {
             return step2Active;
+        },
+        refreshCaptcha() {
+            refreshCaptcha();
+        },
+        get captchaAnswer() {
+            return captchaAnswer;
+        },
+        get captchaImageSource() {
+            return captchaImageSource;
         },
         resolveUnavailableRequest,
         resolveAvailableRequest,
@@ -1490,6 +1535,16 @@ test('an invalid retry does not supersede an active valid preparation', async ()
     assert.equal(harness.preparationCalls[0].signal.aborted, false);
     finishPreparation();
     assert.equal((await valid).prepared, true);
+});
+
+test('refreshing a booking CAPTCHA clears the answer to the replaced challenge', () => {
+    const harness = createBookingSelectionHarness();
+
+    assert.equal(harness.captchaAnswer, 'STALE-ANSWER');
+    harness.refreshCaptcha();
+
+    assert.equal(harness.captchaAnswer, '');
+    assert.match(harness.captchaImageSource, /^captcha\?\d+$/);
 });
 
 test('booking preparation aborts after a visible provider change during unavailable-date wait', async () => {
