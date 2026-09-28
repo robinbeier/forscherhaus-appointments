@@ -384,6 +384,22 @@ final class CspReportOnlyStatusScriptTest extends TestCase
             json_encode($segmentReceipt, JSON_THROW_ON_ERROR),
         );
         self::assertSame(0, $segmentResult['exit_code'], $segmentResult['stderr']);
+        $shortWindow = $segmentReceipt;
+        $shortWindow['activation']['expires_at_unix'] = $shortWindow['activation']['starts_at_unix'] + 899;
+        $shortConfig = $segment;
+        $shortConfig['expires_at_unix'] = $shortWindow['activation']['expires_at_unix'];
+        $shortWindow['activation']['sha256'] = hash(
+            'sha256',
+            json_encode($shortConfig, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n",
+        );
+        self::assertSame(
+            1,
+            $this->runCommand(
+                [PHP_BINARY, 'scripts/ops/csp_report_only_validate_receipt.php', '--expect=segment-active'],
+                [],
+                json_encode($shortWindow, JSON_THROW_ON_ERROR),
+            )['exit_code'],
+        );
         $unscoped = $segmentReceipt;
         unset($unscoped['aggregate']['scope']);
         self::assertSame(

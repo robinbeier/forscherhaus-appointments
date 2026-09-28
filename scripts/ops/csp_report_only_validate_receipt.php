@@ -283,7 +283,10 @@ function validateReceipt(array $receipt, string $expectation, ?string $expectedR
             }
             if (
                 $startsAt !== null &&
-                (!is_int($startsAt) || !is_int($expiresAt) || $expiresAt <= $startsAt || $expiresAt - $startsAt > 14400)
+                (!is_int($startsAt) ||
+                    !is_int($expiresAt) ||
+                    $expiresAt - $startsAt < 900 ||
+                    $expiresAt - $startsAt > 14400)
             ) {
                 return false;
             }
@@ -291,7 +294,7 @@ function validateReceipt(array $receipt, string $expectation, ?string $expectedR
             if (
                 !is_int($activation['starts_at_unix'] ?? null) ||
                 !is_int($activation['expires_at_unix'] ?? null) ||
-                $activation['expires_at_unix'] <= $activation['starts_at_unix'] ||
+                $activation['expires_at_unix'] - $activation['starts_at_unix'] < 900 ||
                 $activation['expires_at_unix'] - $activation['starts_at_unix'] > 14400
             ) {
                 return false;

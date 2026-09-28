@@ -77,6 +77,7 @@ final class CspReportOnlyTest extends TestCase
         foreach (
             [
                 ['starts_at_unix' => $now, 'expires_at_unix' => $now],
+                ['starts_at_unix' => $now, 'expires_at_unix' => $now + 899],
                 ['starts_at_unix' => $now, 'expires_at_unix' => $now + 14401],
                 ['starts_at_unix' => (string) $now, 'expires_at_unix' => $now + 1],
             ]

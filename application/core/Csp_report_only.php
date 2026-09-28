@@ -300,7 +300,7 @@ final class Csp_report_only
             if (
                 !is_int($startsAt) ||
                 !is_int($expiresAt) ||
-                $expiresAt <= $startsAt ||
+                $expiresAt - $startsAt < 900 ||
                 $expiresAt - $startsAt > 14400
             ) {
                 return null;
