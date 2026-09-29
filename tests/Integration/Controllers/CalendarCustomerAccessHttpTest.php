@@ -136,6 +136,23 @@ final class CalendarCustomerAccessHttpTest extends TestCase
         self::assertSame(200, $adminForeign->statusCode, $adminForeign->body);
         self::assertStringContainsString($this->customerEmail($foreignCustomer), $adminForeign->body);
         $this->assertEditProjection($this->scriptVars($adminForeign->body), $foreignAppointment, $foreignCustomer);
+
+        $adminRoleId = (int) get_instance()
+            ->db->get_where('users', ['id' => $fixture->actorId])
+            ->row('id_roles');
+        $providerRoleId = (int) get_instance()
+            ->db->get_where('users', ['id' => $fixture->providerId])
+            ->row('id_roles');
+        try {
+            self::assertTrue(
+                get_instance()->db->update('users', ['id_roles' => $providerRoleId], ['id' => $fixture->actorId]),
+            );
+            $staleAdmin = $admin->get('calendar/index');
+            self::assertSame(200, $staleAdmin->statusCode, $staleAdmin->body);
+            self::assertStringNotContainsString($this->customerEmail($foreignCustomer), $staleAdmin->body);
+        } finally {
+            get_instance()->db->update('users', ['id_roles' => $adminRoleId], ['id' => $fixture->actorId]);
+        }
     }
 
     public function testLimitedSecretarySeesAssignedCustomerAndDeniesUnassignedCustomerHash(): void

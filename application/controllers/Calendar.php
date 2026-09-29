@@ -154,9 +154,15 @@ class Calendar extends EA_Controller
             return;
         }
 
-        $role_slug = session('role_slug');
-
         $user = $this->users_model->find($user_id);
+        $role_slug = $this->roles_model->value((int) $user['id_roles'], 'slug');
+        $privileges = $this->roles_model->get_permissions_by_slug($role_slug);
+
+        if (empty($privileges[PRIV_APPOINTMENTS]['view'])) {
+            abort(403, 'Forbidden');
+
+            return;
+        }
 
         $secretary_providers = [];
 
@@ -201,8 +207,6 @@ class Calendar extends EA_Controller
             }
         }
 
-        $privileges = $this->roles_model->get_permissions_by_slug($role_slug);
-
         $available_providers = $this->providers_model->get_available_providers();
 
         if ($role_slug === DB_SLUG_PROVIDER) {
@@ -228,8 +232,35 @@ class Calendar extends EA_Controller
         $recent_customers = [];
 
         if (!cannot('view', PRIV_CUSTOMERS)) {
-            foreach ($this->customers_model->get(null, 50, null, 'update_datetime DESC') as $customer) {
-                if (!$this->permissions->has_customer_access((int) $user_id, (int) $customer['id'])) {
+            $customers = $this->customers_model->get(null, 50, null, 'update_datetime DESC');
+            $accessible_customer_ids = null;
+
+            if ($role_slug !== DB_SLUG_ADMIN && setting('limit_customer_access')) {
+                $provider_ids = match ($role_slug) {
+                    DB_SLUG_PROVIDER => [(int) $user_id],
+                    DB_SLUG_SECRETARY => array_map('intval', $secretary_providers),
+                    default => [],
+                };
+                $accessible_customer_ids = [];
+
+                if ($provider_ids && $customers) {
+                    $appointments = $this->db
+                        ->distinct()
+                        ->select('id_users_customer')
+                        ->from('appointments')
+                        ->where_in('id_users_provider', $provider_ids)
+                        ->where_in('id_users_customer', array_column($customers, 'id'))
+                        ->get()
+                        ->result_array();
+                    $accessible_customer_ids = array_fill_keys(
+                        array_map('intval', array_column($appointments, 'id_users_customer')),
+                        true,
+                    );
+                }
+            }
+
+            foreach ($customers as $customer) {
+                if ($accessible_customer_ids !== null && !isset($accessible_customer_ids[(int) $customer['id']])) {
                     continue;
                 }
 
