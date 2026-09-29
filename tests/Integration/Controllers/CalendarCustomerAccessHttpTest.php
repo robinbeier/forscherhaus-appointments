@@ -20,6 +20,7 @@ final class CalendarCustomerAccessHttpTest extends TestCase
     private ?int $foreignCustomerId = null;
     private ?int $foreignAppointmentId = null;
     private ?int $secretaryId = null;
+    private ?array $providerRolePermissionSnapshot = null;
 
     protected function setUp(): void
     {
@@ -55,14 +56,63 @@ final class CalendarCustomerAccessHttpTest extends TestCase
             $this->server?->close();
         } finally {
             try {
-                $this->deleteForeignRows();
+                $this->restoreProviderRolePermissions();
             } finally {
                 try {
-                    $this->restoreLimitCustomerAccess();
+                    $this->deleteForeignRows();
                 } finally {
-                    $this->fixture?->cleanup();
+                    try {
+                        $this->restoreLimitCustomerAccess();
+                    } finally {
+                        $this->fixture?->cleanup();
+                    }
                 }
             }
+        }
+    }
+
+    public function testProviderWithoutCustomersViewCannotPreloadOrOpenOwnAppointment(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $role = get_instance()
+            ->db->get_where('roles', ['slug' => DB_SLUG_PROVIDER])
+            ->row_array();
+        self::assertNotEmpty($role['id'] ?? null, 'Synthetic provider role is required.');
+        self::assertGreaterThanOrEqual(PRIV_VIEW, (int) ($role['appointments'] ?? 0));
+        $this->providerRolePermissionSnapshot = [
+            'id' => (int) $role['id'],
+            'appointments' => (int) $role['appointments'],
+            'customers' => (int) $role['customers'],
+        ];
+
+        $beforeCustomer = $fixture->row('users', $fixture->customerId);
+        $beforeAppointment = $fixture->row('appointments', (int) $fixture->appointment()['id']);
+        $client = $this->login($this->credentials['provider_username'], $this->credentials['password']);
+
+        try {
+            self::assertTrue(
+                get_instance()->db->update(
+                    'roles',
+                    ['customers' => 0],
+                    ['id' => $this->providerRolePermissionSnapshot['id']],
+                ),
+            );
+            $initial = $client->get('calendar/index');
+            self::assertSame(200, $initial->statusCode, $initial->body);
+            $initialVars = $this->scriptVars($initial->body);
+            self::assertSame([], $initialVars['customers'] ?? null);
+            self::assertStringNotContainsString($this->customerEmail($fixture->customerId), $initial->body);
+
+            $ownHash = rawurlencode((string) $beforeAppointment['hash']);
+            $own = $client->get('calendar/index/' . $ownHash);
+            self::assertSame(403, $own->statusCode, $own->body);
+            $ownAlias = $client->get('calendar/reschedule/' . $ownHash);
+            self::assertSame(403, $ownAlias->statusCode, $ownAlias->body);
+            self::assertSame($beforeCustomer, $fixture->row('users', $fixture->customerId));
+            self::assertSame($beforeAppointment, $fixture->row('appointments', (int) $beforeAppointment['id']));
+        } finally {
+            $this->restoreProviderRolePermissions();
         }
     }
 
@@ -493,5 +543,29 @@ final class CalendarCustomerAccessHttpTest extends TestCase
             ->row_array();
         self::assertSame($this->limitCustomerAccessSnapshot['value'], $restored['value'] ?? null);
         $this->limitCustomerAccessSnapshot = null;
+    }
+
+    private function restoreProviderRolePermissions(): void
+    {
+        if ($this->providerRolePermissionSnapshot === null) {
+            return;
+        }
+        get_instance()->db->update(
+            'roles',
+            [
+                'appointments' => $this->providerRolePermissionSnapshot['appointments'],
+                'customers' => $this->providerRolePermissionSnapshot['customers'],
+            ],
+            ['id' => $this->providerRolePermissionSnapshot['id']],
+        );
+        $restored = get_instance()
+            ->db->get_where('roles', ['id' => $this->providerRolePermissionSnapshot['id']])
+            ->row_array();
+        self::assertSame(
+            $this->providerRolePermissionSnapshot['appointments'],
+            (int) ($restored['appointments'] ?? -1),
+        );
+        self::assertSame($this->providerRolePermissionSnapshot['customers'], (int) ($restored['customers'] ?? -1));
+        $this->providerRolePermissionSnapshot = null;
     }
 }

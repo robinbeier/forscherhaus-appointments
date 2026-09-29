@@ -191,6 +191,7 @@ class Calendar extends EA_Controller
                 if (
                     !$provider_in_scope ||
                     !$customer_id ||
+                    empty($privileges[PRIV_CUSTOMERS]['view']) ||
                     !$this->permissions->has_customer_access((int) $user_id, $customer_id)
                 ) {
                     abort(403, 'Forbidden');
@@ -231,7 +232,7 @@ class Calendar extends EA_Controller
 
         $recent_customers = [];
 
-        if (!cannot('view', PRIV_CUSTOMERS)) {
+        if (!empty($privileges[PRIV_CUSTOMERS]['view'])) {
             $customers = $this->customers_model->get(null, 50, null, 'update_datetime DESC');
             $accessible_customer_ids = null;
 
