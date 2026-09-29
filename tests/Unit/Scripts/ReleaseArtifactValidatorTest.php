@@ -106,6 +106,7 @@ final class ReleaseArtifactValidatorTest extends TestCase
             'scripts/release-gate/lib/PlaywrightCookieRecords.php',
             'scripts/release-gate/lib/ProviderUiSmokeContract.php',
             'scripts/release-gate/lib/ProviderUiSmokeCredentials.php',
+            'scripts/release-gate/lib/ProviderUiSmokeDiagnostics.php',
             'scripts/release-gate/lib/ProviderUiSmokePdfInspector.php',
             'scripts/release-gate/lib/ProviderUiSmokeRunCodeResult.php',
             'scripts/release-gate/playwright/playwright_cli.sh',
@@ -125,6 +126,16 @@ final class ReleaseArtifactValidatorTest extends TestCase
         );
 
         self::assertSame([$missingPath], ReleaseArtifactValidator::missingArchivePaths($entries));
+
+        $missingHelper = 'scripts/release-gate/lib/ProviderUiSmokeDiagnostics.php';
+        $entries = array_values(
+            array_filter(
+                $this->completeStaticRequiredPaths(),
+                static fn(string $path): bool => $path !== $missingHelper,
+            ),
+        );
+
+        self::assertSame([$missingHelper], ReleaseArtifactValidator::missingArchivePaths($entries));
     }
 
     public function testRequiredPathsIncludeZeroSurpriseImageCleanupRuntime(): void

@@ -263,27 +263,39 @@ try {
         }
 
         $sessionId = ProviderUiSmokeContract::buildBrowserSessionId();
-        $open = providerUiSmokeRunPwcli(
-            $config,
-            $sessionId,
-            ['open', 'about:blank'],
-            $repoRoot,
-            $config['open_timeout'],
-        );
-        providerUiSmokeAssertProcessSucceeded($open, 'Open provider UI smoke browser');
-
         try {
-            $stateLoad = providerUiSmokeRunPwcli(
+            $open = providerUiSmokeRunPwcli(
                 $config,
                 $sessionId,
-                ['state-load', $statePath],
+                ['open', 'about:blank'],
                 $repoRoot,
                 $config['open_timeout'],
             );
-            providerUiSmokeAssertProcessSucceeded($stateLoad, 'Load provider UI smoke browser storage state');
+        } catch (Throwable) {
+            throw ProviderUiSmokeBrowserFlowException::browserOpenLaunchFailure();
+        }
+        if (!providerUiSmokeProcessSucceeded($open)) {
+            throw ProviderUiSmokeBrowserFlowException::browserOpenProcessFailure($open);
+        }
+
+        try {
+            try {
+                $stateLoad = providerUiSmokeRunPwcli(
+                    $config,
+                    $sessionId,
+                    ['state-load', $statePath],
+                    $repoRoot,
+                    $config['open_timeout'],
+                );
+            } catch (Throwable) {
+                throw ProviderUiSmokeBrowserFlowException::stateLoadLaunchFailure();
+            }
+            if (!providerUiSmokeProcessSucceeded($stateLoad)) {
+                throw ProviderUiSmokeBrowserFlowException::stateLoadProcessFailure($stateLoad);
+            }
         } finally {
             if (is_file($statePath) && !unlink($statePath)) {
-                throw new RuntimeException('Provider UI smoke browser storage state could not be removed.');
+                throw ProviderUiSmokeBrowserFlowException::stateLoadCleanupFailure();
             }
         }
 

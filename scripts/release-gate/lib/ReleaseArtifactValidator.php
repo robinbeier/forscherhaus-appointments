@@ -160,6 +160,7 @@ final class ReleaseArtifactValidator
             'scripts/release-gate/lib/PlaywrightCookieRecords.php',
             'scripts/release-gate/lib/ProviderUiSmokeContract.php',
             'scripts/release-gate/lib/ProviderUiSmokeCredentials.php',
+            'scripts/release-gate/lib/ProviderUiSmokeDiagnostics.php',
             'scripts/release-gate/lib/ProviderUiSmokePdfInspector.php',
             'scripts/release-gate/lib/ProviderUiSmokeRunCodeResult.php',
             'scripts/release-gate/lib/ZeroSurpriseImageCleanup.php',

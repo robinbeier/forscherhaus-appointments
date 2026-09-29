@@ -64,6 +64,9 @@ final class ProviderUiSmokeDiagnosticsTest extends TestCase
      */
     public static function stageFailureProvider(): iterable
     {
+        yield 'browser open launch' => ['browserOpenLaunchFailure', 'browser_open_launch', 'browser_open', false];
+        yield 'state load launch' => ['stateLoadLaunchFailure', 'state_load_launch', 'state_load', false];
+        yield 'state load cleanup' => ['stateLoadCleanupFailure', 'state_load_cleanup', 'state_load', false];
         yield 'structured result parse' => [
             'structuredResultParseFailure',
             'structured_result_parse',
@@ -98,6 +101,91 @@ final class ProviderUiSmokeDiagnosticsTest extends TestCase
             ],
             $failure->reportFields(),
         );
+    }
+
+    public function testEveryDiagnosticReportMappingIsExactAndPiiFree(): void
+    {
+        $cases = [
+            [
+                \ProviderUiSmokeBrowserFlowException::browserOpenProcessFailure([
+                    'exit_code' => 9,
+                    'timed_out' => false,
+                    'stdout' => 'secret stdout',
+                ]),
+                'browser_open_process_exit',
+                'browser_open',
+            ],
+            [
+                \ProviderUiSmokeBrowserFlowException::stateLoadProcessFailure([
+                    'exit_code' => 124,
+                    'timed_out' => true,
+                    'stdout' => 'secret stdout',
+                ]),
+                'state_load_timeout',
+                'state_load',
+            ],
+            [\ProviderUiSmokeBrowserFlowException::browserOpenLaunchFailure(), 'browser_open_launch', 'browser_open'],
+            [\ProviderUiSmokeBrowserFlowException::stateLoadLaunchFailure(), 'state_load_launch', 'state_load'],
+            [\ProviderUiSmokeBrowserFlowException::stateLoadCleanupFailure(), 'state_load_cleanup', 'state_load'],
+            [
+                \ProviderUiSmokeBrowserFlowException::runCodeProcessFailure([
+                    'exit_code' => 9,
+                    'timed_out' => false,
+                    'stdout' => 'secret stdout',
+                ]),
+                'run_code_process_exit',
+                'run_code',
+            ],
+            [
+                \ProviderUiSmokeBrowserFlowException::runCodeProcessFailure([
+                    'exit_code' => 124,
+                    'timed_out' => true,
+                    'stdout' => 'secret stdout',
+                ]),
+                'run_code_timeout',
+                'run_code',
+            ],
+            [
+                \ProviderUiSmokeBrowserFlowException::runCodeProcessFailure([
+                    'exit_code' => 0,
+                    'timed_out' => false,
+                    'stdout' => "### Error\nsecret stdout",
+                ]),
+                'run_code_cli_error',
+                'run_code',
+            ],
+            [\ProviderUiSmokeBrowserFlowException::runCodeLaunchFailure(), 'run_code_launch', 'run_code'],
+            [
+                \ProviderUiSmokeBrowserFlowException::structuredResultParseFailure(),
+                'structured_result_parse',
+                'structured_result',
+            ],
+            [
+                \ProviderUiSmokeBrowserFlowException::structuredResultAssertion([
+                    'ok' => false,
+                    'flow_error_count' => 1,
+                ]),
+                'structured_result_assertion',
+                'structured_result',
+            ],
+            [\ProviderUiSmokeBrowserFlowException::browserCloseFailure(), 'browser_close', 'browser_close'],
+            [
+                \ProviderUiSmokeBrowserFlowException::pdfFilePermissionsFailure(),
+                'pdf_file_permissions',
+                'pdf_permissions',
+            ],
+        ];
+
+        foreach ($cases as [$failure, $diagnosticClass, $stage]) {
+            self::assertSame(
+                [
+                    'diagnostic_class' => $diagnosticClass,
+                    'stage' => $stage,
+                ],
+                $failure->reportFields(),
+            );
+            self::assertStringNotContainsString('secret', json_encode($failure->reportFields(), JSON_THROW_ON_ERROR));
+        }
     }
 
     private static function assertReportFieldsAreSafe(\ProviderUiSmokeBrowserFlowException $failure): void
