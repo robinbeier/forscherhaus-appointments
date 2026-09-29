@@ -69,6 +69,7 @@ class Booking_cancellation extends EA_Controller
                 html_vars([
                     'page_title' => lang('appointment_not_found'),
                     'company_color' => setting('company_color'),
+                    'render_analytics' => false,
                     'message_title' => lang('appointment_not_found'),
                     'message_text' => lang('appointment_does_not_exist_in_db'),
                     'message_icon' => base_url('assets/img/error.png'),
@@ -162,6 +163,7 @@ class Booking_cancellation extends EA_Controller
         html_vars([
             'page_title' => lang('appointment_cancelled_title'),
             'company_color' => setting('company_color'),
+            'render_analytics' => false,
             'google_analytics_code' => setting('google_analytics_code'),
             'matomo_analytics_url' => setting('matomo_analytics_url'),
             'matomo_analytics_site_id' => setting('matomo_analytics_site_id'),

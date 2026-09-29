@@ -74,6 +74,13 @@ provider email addresses into third-party URL parameters. The confirmation page,
 its PDF, and the local ICS download retain their existing management paths;
 `BookingDownloadHttpTest` checks the external-link boundary with own fixtures.
 
+Do not render third-party analytics scripts on public responses whose URL carries
+an appointment hash, including reschedule, confirmation, and cancellation
+responses. A sanitized pageview URL alone is insufficient because the external
+script executes in the capability-bearing page. Ordinary booking without a
+hash may retain configured analytics; the isolated HTTP regression checks both
+sides with synthetic analytics settings.
+
 When public booking CAPTCHA is enabled, registration requires both a nonempty
 server-generated challenge in the current session and a nonempty matching
 request value before any booking or consent write. A correct challenge is
