@@ -75,6 +75,7 @@ final class CustomersIndexScriptVarsSecurityTest extends TestCase
             public object $roles_model;
             public object $secretaries_model;
             public object $timezones;
+            public object $users_model;
 
             public function __construct(string $providerCredential)
             {
@@ -110,9 +111,20 @@ final class CustomersIndexScriptVarsSecurityTest extends TestCase
                     }
                 };
                 $this->roles_model = new class {
+                    public function value(int $roleId, string $field): string
+                    {
+                        return DB_SLUG_ADMIN;
+                    }
+
                     public function get_permissions_by_slug(string $roleSlug): array
                     {
                         return [];
+                    }
+                };
+                $this->users_model = new class {
+                    public function value(int $userId, string $field): int
+                    {
+                        return 1;
                     }
                 };
                 $this->secretaries_model = new class {

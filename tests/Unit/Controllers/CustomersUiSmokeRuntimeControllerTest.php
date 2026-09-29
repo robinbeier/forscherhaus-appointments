@@ -62,11 +62,25 @@ final class CustomersUiSmokeRuntimeControllerTest extends TestCase
         $controller = new class ($factory, $customersModel) extends Customers {
             public Backoffice_request_dto_factory $backoffice_request_dto_factory;
             public object $customers_model;
+            public object $roles_model;
+            public object $users_model;
 
             public function __construct(Backoffice_request_dto_factory $factory, object $customersModel)
             {
                 $this->backoffice_request_dto_factory = $factory;
                 $this->customers_model = $customersModel;
+                $this->roles_model = new class {
+                    public function value(int $roleId, string $field): string
+                    {
+                        return DB_SLUG_PROVIDER;
+                    }
+                };
+                $this->users_model = new class {
+                    public function value(int $userId, string $field): int
+                    {
+                        return 2;
+                    }
+                };
             }
         };
 
@@ -202,10 +216,24 @@ final class CustomersUiSmokeRuntimeControllerTest extends TestCase
         $controller = new class ($factory, $searchMarkerPath) extends Customers {
             public Backoffice_request_dto_factory $backoffice_request_dto_factory;
             public object $customers_model;
+            public object $roles_model;
+            public object $users_model;
 
             public function __construct(Backoffice_request_dto_factory $factory, string $searchMarkerPath)
             {
                 $this->backoffice_request_dto_factory = $factory;
+                $this->roles_model = new class {
+                    public function value(int $roleId, string $field): string
+                    {
+                        return DB_SLUG_PROVIDER;
+                    }
+                };
+                $this->users_model = new class {
+                    public function value(int $userId, string $field): int
+                    {
+                        return 2;
+                    }
+                };
                 $this->customers_model = new class ($searchMarkerPath) {
                     public function __construct(private readonly string $searchMarkerPath) {}
 
@@ -238,6 +266,8 @@ final class CustomersUiSmokeRuntimeControllerTest extends TestCase
 
             $this->assertSame(1, $result['exit_code']);
             $this->assertFileDoesNotExist($searchMarkerPath);
+            $this->assertSame('', $result['stderr']);
+            $this->assertStringContainsString('Forbidden', (string) file_get_contents($outputPath));
         } finally {
             if (is_file($scriptPath)) {
                 unlink($scriptPath);

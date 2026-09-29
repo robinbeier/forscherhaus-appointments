@@ -104,9 +104,11 @@ final class CustomersReadProjectionHttpTest extends TestCase
         $secretaryRole = $this->snapshotRole(DB_SLUG_SECRETARY, 'secretary');
         $foreignProviderId = $this->foreignProviderId($fixture->providerId);
         $foreignCustomerId = $this->createCustomer($fixture->run . '_foreign');
-        $this->createAppointment($fixture->providerId, $fixture->customerId);
+        $ownedAppointmentId = $this->createAppointment($fixture->providerId, $fixture->customerId);
         $foreignAppointmentId = $this->createAppointment($foreignProviderId, $fixture->customerId);
         $this->createAppointment($foreignProviderId, $foreignCustomerId);
+        $ownedAppointmentHash = (string) $fixture->row('appointments', $ownedAppointmentId)['hash'];
+        $foreignAppointmentHash = (string) $fixture->row('appointments', $foreignAppointmentId)['hash'];
         $beforeOwnedCustomer = $fixture->row('users', $fixture->customerId);
         $beforeForeignCustomer = $fixture->row('users', $foreignCustomerId);
         $beforeAppointments = array_map(
@@ -117,7 +119,15 @@ final class CustomersReadProjectionHttpTest extends TestCase
 
         $provider = $this->login($this->credentials['provider_username'], $this->credentials['password']);
         $rows = $this->decodeJson($provider->post('customers/search', ['keyword' => $fixture->run]));
-        $this->assertScopedSearchRows($rows, $fixture->customerId, $foreignCustomerId, $foreignAppointmentId, true);
+        $this->assertScopedSearchRows(
+            $rows,
+            $fixture->customerId,
+            $foreignCustomerId,
+            $foreignAppointmentId,
+            $ownedAppointmentHash,
+            $foreignAppointmentHash,
+            true,
+        );
 
         $limitedRows = $this->decodeJson(
             $provider->post('customers/search', [
@@ -131,6 +141,8 @@ final class CustomersReadProjectionHttpTest extends TestCase
             $fixture->customerId,
             $foreignCustomerId,
             $foreignAppointmentId,
+            $ownedAppointmentHash,
+            $foreignAppointmentHash,
             true,
         );
 
@@ -148,6 +160,8 @@ final class CustomersReadProjectionHttpTest extends TestCase
             $fixture->customerId,
             $foreignCustomerId,
             $foreignAppointmentId,
+            $ownedAppointmentHash,
+            $foreignAppointmentHash,
             false,
         );
 
@@ -158,6 +172,8 @@ final class CustomersReadProjectionHttpTest extends TestCase
             $fixture->customerId,
             $foreignCustomerId,
             $foreignAppointmentId,
+            $ownedAppointmentHash,
+            $foreignAppointmentHash,
             true,
         );
 
@@ -335,6 +351,8 @@ final class CustomersReadProjectionHttpTest extends TestCase
         int $ownedCustomerId,
         int $foreignCustomerId,
         int $foreignAppointmentId,
+        string $ownedAppointmentHash,
+        string $foreignAppointmentHash,
         bool $withAppointments,
     ): void {
         $owned = array_values(
@@ -355,6 +373,10 @@ final class CustomersReadProjectionHttpTest extends TestCase
                 self::assertArrayHasKey('appointments', $row);
                 self::assertCount(1, $row['appointments']);
                 self::assertNotSame($foreignAppointmentId, (int) ($row['appointments'][0]['id'] ?? 0));
+                self::assertNotSame('', $ownedAppointmentHash);
+                self::assertNotSame('', $foreignAppointmentHash);
+                self::assertSame($ownedAppointmentHash, $row['appointments'][0]['hash'] ?? null);
+                self::assertNotSame($foreignAppointmentHash, $row['appointments'][0]['hash'] ?? null);
                 $expectedAppointment = [
                     'end_datetime',
                     'hash',
