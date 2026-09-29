@@ -515,17 +515,51 @@ class Customers_model extends EA_Model
      * @param int|null $limit Record limit.
      * @param int|null $offset Record offset.
      * @param string|null $order_by Order by.
+     * @param array<int>|null $visible_provider_ids Restrict customers to those with an appointment for these providers.
      *
      * @return array Returns an array of customers.
      */
-    public function search(string $keyword, ?int $limit = null, ?int $offset = null, ?string $order_by = null): array
-    {
+    public function search(
+        string $keyword,
+        ?int $limit = null,
+        ?int $offset = null,
+        ?string $order_by = null,
+        ?array $visible_provider_ids = null,
+    ): array {
         $role_id = $this->get_customer_role_id();
 
-        $customers = $this->db
-            ->select()
-            ->from('users')
-            ->where('id_roles', $role_id)
+        if ($visible_provider_ids !== null) {
+            $visible_provider_ids = array_values(
+                array_unique(array_filter(array_map('intval', $visible_provider_ids))),
+            );
+            if ($visible_provider_ids === []) {
+                return [];
+            }
+        }
+
+        $query = $this->db->select()->from('users')->where('id_roles', $role_id);
+
+        if ($visible_provider_ids !== null) {
+            // Apply relationship scope before pagination; the IDs are server-derived integers.
+            $users_table = $this->db->dbprefix('users');
+            $appointments_table = $this->db->dbprefix('appointments');
+            $provider_ids_sql = implode(', ', $visible_provider_ids);
+            $query->where(
+                'EXISTS (SELECT 1 FROM `' .
+                    $appointments_table .
+                    '` AS `visible_appointment`' .
+                    ' WHERE `visible_appointment`.`id_users_customer` = `' .
+                    $users_table .
+                    '`.`id`' .
+                    ' AND `visible_appointment`.`id_users_provider` IN (' .
+                    $provider_ids_sql .
+                    '))',
+                null,
+                false,
+            );
+        }
+
+        $customers = $query
             ->group_start()
             ->like('first_name', $keyword)
             ->or_like('last_name', $keyword)
