@@ -102,6 +102,18 @@ final class BookingCancellationHttpTest extends TestCase
         self::assertSame($providerBefore, $fixture->row('users', $fixture->providerId));
         self::assertSame($serviceBefore, $fixture->row('services', $fixture->serviceId));
 
+        $replayResponse = $client->requestApp('POST', 'booking_cancellation/of/' . $future['hash'], [], 15);
+        self::assertSame(200, $replayResponse->statusCode);
+        self::assertStringContainsString(lang('appointment_not_found'), $replayResponse->body);
+        self::assertStringContainsString(lang('appointment_does_not_exist_in_db'), $replayResponse->body);
+        self::assertSame([], $fixture->row('appointments', (int) $future['id']));
+        self::assertSame([], $fixture->row('appointments', (int) $futureBuffer['id']));
+        self::assertSame($near, $fixture->row('appointments', (int) $near['id']));
+        self::assertSame($nearBuffer, $fixture->row('appointments', (int) $nearBuffer['id']));
+        self::assertSame($customerBefore, $fixture->row('users', $fixture->customerId));
+        self::assertSame($providerBefore, $fixture->row('users', $fixture->providerId));
+        self::assertSame($serviceBefore, $fixture->row('services', $fixture->serviceId));
+
         $unknownResponse = $client->requestApp('POST', 'booking_cancellation/of/' . str_repeat('unknown-', 8), [], 15);
         self::assertSame(200, $unknownResponse->statusCode);
         self::assertStringContainsString(lang('appointment_not_found'), $unknownResponse->body);
