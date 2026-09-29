@@ -293,6 +293,31 @@ final class CalendarCustomerAccessHttpTest extends TestCase
             self::assertTrue(
                 get_instance()->db->update('users', ['id_roles' => $adminRoleId], ['id' => $fixture->providerId]),
             );
+
+            // The protected mutation follows the role change while this
+            // session still carries the provider role.
+            $createAfterPromotion = $staleProvider->post('calendar/save_appointment', [
+                'appointment_data' => [
+                    'start_datetime' => date('Y-m-d 12:00:00', strtotime('+14 days')),
+                    'end_datetime' => date('Y-m-d 12:30:00', strtotime('+14 days')),
+                    'notes' => $fixture->run . '-promoted-create',
+                    'id_users_provider' => $foreignProviderId,
+                    'id_users_customer' => $fixture->customerId,
+                    'id_services' => $fixture->serviceId,
+                    'is_unavailability' => false,
+                ],
+                'customer_data' => [],
+            ]);
+            self::assertSame(200, $createAfterPromotion->statusCode, $createAfterPromotion->body);
+            self::assertTrue(
+                (bool) (json_decode($createAfterPromotion->body, true, 512, JSON_THROW_ON_ERROR)['success'] ?? false),
+            );
+            $createdAfterPromotion = get_instance()
+                ->db->get_where('appointments', ['notes' => $fixture->run . '-promoted-create'])
+                ->row_array();
+            self::assertNotEmpty($createdAfterPromotion);
+            $this->foreignAppointmentIds[] = (int) $createdAfterPromotion['id'];
+
             $deleteForeignAfterPromotion = $staleProvider->post('calendar/delete_appointment', [
                 'appointment_id' => (string) $foreignAppointment['id'],
             ]);

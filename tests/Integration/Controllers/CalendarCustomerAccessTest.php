@@ -374,6 +374,88 @@ class CalendarCustomerAccessTest extends TestCase
         }
     }
 
+    public function testCalendarCreateRejectsRoleChangeBeforeAppointmentTransaction(): void
+    {
+        $pair = $this->fixtures->resolveProviderServicePair();
+        $providerId = $pair['provider_id'];
+        $customerId = $this->fixtures->createCustomer();
+        $this->fixtures->createAppointment(
+            $providerId,
+            $customerId,
+            $pair['service_id'],
+            new DateTimeImmutable('2035-02-18 09:00:00'),
+        );
+        $providerRole = get_instance()
+            ->db->get_where('roles', ['slug' => DB_SLUG_PROVIDER])
+            ->row_array();
+        $customerRole = get_instance()
+            ->db->get_where('roles', ['slug' => DB_SLUG_CUSTOMER])
+            ->row_array();
+        $this->assertNotEmpty($providerRole);
+        $this->assertNotEmpty($customerRole);
+        $secondary = get_instance()->load->database('', true);
+        $marker = 'calendar-role-race-' . bin2hex(random_bytes(5));
+
+        $permissions = new class (get_instance()->permissions, $secondary, $providerId, (int) $customerRole['id']) {
+            public bool $roleChanged = false;
+            public bool $roleUpdateSucceeded = false;
+
+            public function __construct(
+                private readonly object $permissions,
+                private readonly object $secondary,
+                private readonly int $actorId,
+                private readonly int $replacementRoleId,
+            ) {}
+
+            public function has_customer_access(int $userId, int $customerId): bool
+            {
+                $allowed = $this->permissions->has_customer_access($userId, $customerId);
+                if (!$this->roleChanged) {
+                    $this->roleChanged = true;
+                    $this->roleUpdateSucceeded = $this->secondary->update(
+                        'users',
+                        ['id_roles' => $this->replacementRoleId],
+                        ['id' => $this->actorId],
+                    );
+                }
+
+                return $allowed;
+            }
+        };
+
+        $this->fixtures->setSetting('limit_customer_access', '1');
+        $this->authenticateAsUser($providerId, DB_SLUG_PROVIDER);
+        $payload = $this->newAppointmentPayload($providerId, $pair['service_id']);
+        $payload['id_users_customer'] = $customerId;
+        $payload['notes'] = $marker;
+        $this->postCalendarSavePayload([], $payload);
+        $controller = $this->createCalendarController();
+        $controller->permissions = $permissions;
+
+        try {
+            $controller->save_appointment();
+
+            $this->assertDeniedResponse();
+            $this->assertTrue($permissions->roleChanged);
+            $this->assertTrue($permissions->roleUpdateSucceeded);
+            $this->assertSame(
+                0,
+                get_instance()
+                    ->db->get_where('appointments', ['notes' => $marker])
+                    ->num_rows(),
+            );
+            $this->assertSame(
+                (int) $customerRole['id'],
+                (int) get_instance()
+                    ->db->get_where('users', ['id' => $providerId])
+                    ->row('id_roles'),
+            );
+        } finally {
+            $secondary->update('users', ['id_roles' => (int) $providerRole['id']], ['id' => $providerId]);
+            $secondary->close();
+        }
+    }
+
     public function testLimitedProviderCanCreateUniqueCustomerThroughCalendarSave(): void
     {
         $pair = $this->fixtures->resolveProviderServicePair();

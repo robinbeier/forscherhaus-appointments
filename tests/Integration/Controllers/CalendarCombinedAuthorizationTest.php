@@ -349,6 +349,135 @@ final class CalendarCombinedAuthorizationTest extends TestCase
         );
     }
 
+    public function testProviderRoleChangeBeforeProtectedMutationIsDeniedAndRowStaysUnchanged(): void
+    {
+        $pair = $this->fixtures->resolveProviderServicePair();
+        $customer = $this->fixtures->createCustomer(['last_name' => 'Before']);
+        $appointment = $this->fixtures->createAppointment(
+            $pair['provider_id'],
+            $customer,
+            $pair['service_id'],
+            new DateTimeImmutable('2035-05-07 09:00:00'),
+        );
+        $customerRole = get_instance()
+            ->db->get_where('roles', ['slug' => DB_SLUG_CUSTOMER])
+            ->row_array();
+        $this->assertNotEmpty($customerRole);
+        $secondary = get_instance()->load->database('', true);
+        $this->fixtures->setSetting('limit_customer_access', '0');
+        $this->setRolePrivileges(DB_SLUG_PROVIDER, 'appointments', PRIV_VIEW | PRIV_EDIT);
+        $this->authenticate($pair['provider_id'], DB_SLUG_PROVIDER);
+        $before = $this->storedAppointment($appointment);
+        $switched = false;
+        $switchSucceeded = false;
+        $controller = $this->controller();
+        $controller->beforeParentLock = function () use (
+            &$switched,
+            &$switchSucceeded,
+            $secondary,
+            $pair,
+            $customerRole,
+        ): void {
+            $switched = true;
+            $switchSucceeded = $secondary->update(
+                'users',
+                ['id_roles' => (int) $customerRole['id']],
+                ['id' => $pair['provider_id']],
+            );
+        };
+        $this->post(
+            [],
+            $this->appointmentPayload(
+                $appointment,
+                $pair['provider_id'],
+                $pair['service_id'],
+                $customer,
+                '2035-05-07 10:00:00',
+            ),
+        );
+
+        try {
+            $controller->save_appointment();
+
+            $this->assertTrue($switched);
+            $this->assertTrue($switchSucceeded);
+            $this->assertDenied();
+            $this->assertSame($before, $this->storedAppointment($appointment));
+        } finally {
+            $secondary->update(
+                'users',
+                [
+                    'id_roles' => (int) get_instance()
+                        ->db->get_where('roles', ['slug' => DB_SLUG_PROVIDER])
+                        ->row('id'),
+                ],
+                ['id' => $pair['provider_id']],
+            );
+            $secondary->close();
+        }
+    }
+
+    public function testProviderRoleChangeBeforeDeleteLockIsDeniedAndRowStaysUnchanged(): void
+    {
+        $pair = $this->fixtures->resolveProviderServicePair();
+        $customer = $this->fixtures->createCustomer(['last_name' => 'Delete Before']);
+        $appointment = $this->fixtures->createAppointment(
+            $pair['provider_id'],
+            $customer,
+            $pair['service_id'],
+            new DateTimeImmutable('2035-05-08 09:00:00'),
+        );
+        $customerRole = get_instance()
+            ->db->get_where('roles', ['slug' => DB_SLUG_CUSTOMER])
+            ->row_array();
+        $this->assertNotEmpty($customerRole);
+        $secondary = get_instance()->load->database('', true);
+        $this->fixtures->setSetting('limit_customer_access', '0');
+        $this->setRolePrivileges(DB_SLUG_PROVIDER, 'appointments', PRIV_VIEW | PRIV_DELETE);
+        $this->authenticate($pair['provider_id'], DB_SLUG_PROVIDER);
+        $before = $this->storedAppointment($appointment);
+        $switched = false;
+        $switchSucceeded = false;
+        $controller = $this->controller();
+        $controller->beforeParentLock = function () use (
+            &$switched,
+            &$switchSucceeded,
+            $secondary,
+            $pair,
+            $customerRole,
+        ): void {
+            $switched = true;
+            $switchSucceeded = $secondary->update(
+                'users',
+                ['id_roles' => (int) $customerRole['id']],
+                ['id' => $pair['provider_id']],
+            );
+        };
+        $_POST = ['appointment_id' => (string) $appointment];
+        get_instance()->output->set_output('');
+
+        try {
+            $controller->delete_appointment();
+
+            $this->assertTrue($switched);
+            $this->assertTrue($switchSucceeded);
+            $this->assertSame(403, get_instance()->output->statusCode);
+            $this->assertDenied();
+            $this->assertSame($before, $this->storedAppointment($appointment));
+        } finally {
+            $secondary->update(
+                'users',
+                [
+                    'id_roles' => (int) get_instance()
+                        ->db->get_where('roles', ['slug' => DB_SLUG_PROVIDER])
+                        ->row('id'),
+                ],
+                ['id' => $pair['provider_id']],
+            );
+            $secondary->close();
+        }
+    }
+
     public function testAdminStructuralParentDriftIsConflictAndDoesNotNotify(): void
     {
         $pair = $this->fixtures->resolveProviderServicePair();
@@ -523,6 +652,7 @@ final class CalendarCombinedAuthorizationTest extends TestCase
             /** @var list<int> */
             public array $lockedParentIds = [];
             public bool $parentLockTransactionActive = false;
+            public ?\Closure $beforeParentLock = null;
 
             public function __construct() {}
 
@@ -533,6 +663,9 @@ final class CalendarCombinedAuthorizationTest extends TestCase
             ): void {
                 $this->lockOrder[] = 'parents';
                 $this->parentLockTransactionActive = get_instance()->db->trans_active();
+                if ($this->beforeParentLock !== null) {
+                    ($this->beforeParentLock)();
+                }
                 $this->lockedParentIds = array_values(
                     array_unique(
                         array_filter(

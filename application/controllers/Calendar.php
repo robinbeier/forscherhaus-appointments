@@ -362,37 +362,40 @@ class Calendar extends EA_Controller
             }
 
             try {
+                $this->lock_calendar_update_parents($stored_appointment ?? [], $appointment_data, [
+                    $customer_data['id'] ?? null,
+                    (int) session('user_id'),
+                ]);
+
                 if ($manage_mode) {
                     if ($stored_appointment === null) {
                         throw new RuntimeException('The appointment state could not be loaded.');
                     }
 
-                    $this->lock_calendar_update_parents($stored_appointment, $appointment_data, [
-                        $customer_data['id'] ?? null,
-                    ]);
                     $locked_appointment = $this->lock_appointment((int) $appointment_data['id']);
 
-                    if (
-                        !$this->has_event_permissions((int) $locked_appointment['id_users_provider']) ||
-                        !$this->has_event_permissions((int) $appointment_data['id_users_provider'])
-                    ) {
+                    if (!$this->has_event_permissions((int) $locked_appointment['id_users_provider'])) {
                         throw new RuntimeException('You do not have the required permissions for this task.', 403);
                     }
 
                     if ($this->appointment_parent_ids_changed($stored_appointment, $locked_appointment)) {
                         throw new RuntimeException(lang('requested_hour_is_unavailable'));
                     }
+                }
 
-                    foreach (
-                        [$customer_data['id'] ?? null, $appointment_data['id_users_customer'] ?? null]
-                        as $customer_id
+                if (!$this->has_event_permissions((int) $appointment_data['id_users_provider'])) {
+                    throw new RuntimeException('You do not have the required permissions for this task.', 403);
+                }
+
+                foreach (
+                    [$customer_data['id'] ?? null, $appointment_data['id_users_customer'] ?? null]
+                    as $customer_id
+                ) {
+                    if (
+                        !empty($customer_id) &&
+                        !$this->permissions->has_customer_access((int) session('user_id'), $customer_id)
                     ) {
-                        if (
-                            !empty($customer_id) &&
-                            !$this->permissions->has_customer_access((int) session('user_id'), $customer_id)
-                        ) {
-                            throw new RuntimeException('You do not have the required permissions for this task.', 403);
-                        }
+                        throw new RuntimeException('You do not have the required permissions for this task.', 403);
                     }
                 }
 
@@ -584,7 +587,7 @@ class Calendar extends EA_Controller
     {
         try {
             if (!$this->currentCalendarCan('delete', PRIV_APPOINTMENTS)) {
-                throw new RuntimeException('You do not have the required permissions for this task.');
+                throw new RuntimeException('You do not have the required permissions for this task.', 403);
             }
 
             $request_dto = $this->calendarRequestDtoFactory()->buildDeleteAppointmentRequestDto();
@@ -599,18 +602,53 @@ class Calendar extends EA_Controller
 
             $this->check_event_permissions((int) $appointment['id_users_provider']);
 
-            $provider = $this->providers_model->find($appointment['id_users_provider']);
-            $customer = $this->customers_model->find($appointment['id_users_customer']);
-            $service = $this->services_model->find($appointment['id_services']);
+            if (!$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start appointment transaction.');
+            }
 
-            // Delete appointment record from the database.
-            $this->appointments_model->delete($appointment_id);
+            try {
+                $this->lock_calendar_update_parents($appointment, [], [(int) session('user_id')]);
+                $locked_appointment = $this->lock_appointment($appointment_id);
+
+                if ($this->appointment_parent_ids_changed($appointment, $locked_appointment)) {
+                    throw new RuntimeException('You do not have the required permissions for this task.', 403);
+                }
+
+                if (
+                    !$this->currentCalendarCan('delete', PRIV_APPOINTMENTS) ||
+                    !$this->has_event_permissions((int) $locked_appointment['id_users_provider'])
+                ) {
+                    throw new RuntimeException('You do not have the required permissions for this task.', 403);
+                }
+
+                $this->providers_model->find($locked_appointment['id_users_provider']);
+                $this->customers_model->find($locked_appointment['id_users_customer']);
+                $this->services_model->find($locked_appointment['id_services']);
+
+                // The model's nested transaction retains the parent and appointment locks.
+                $this->appointments_model->delete($appointment_id);
+
+                if (!$this->db->trans_commit()) {
+                    throw new RuntimeException('Could not commit appointment transaction.');
+                }
+            } catch (Throwable $e) {
+                $this->db->trans_rollback();
+
+                throw $e;
+            }
 
             json_response([
                 'success' => true,
             ]);
         } catch (Throwable $e) {
-            json_exception($e);
+            if (
+                $e->getCode() === 403 &&
+                $e->getMessage() === 'You do not have the required permissions for this task.'
+            ) {
+                json_response(['success' => false, 'message' => $e->getMessage()], 403);
+            } else {
+                json_exception($e);
+            }
         }
     }
 
