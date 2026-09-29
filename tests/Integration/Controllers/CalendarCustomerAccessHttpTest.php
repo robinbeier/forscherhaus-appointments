@@ -17,7 +17,11 @@ final class CalendarCustomerAccessHttpTest extends TestCase
     private ?DefenseCycleHttpServer $server = null;
     private array $credentials = [];
     private ?array $limitCustomerAccessSnapshot = null;
+    /** @var list<int> */
+    private array $foreignCustomerIds = [];
     private ?int $foreignCustomerId = null;
+    /** @var list<int> */
+    private array $foreignAppointmentIds = [];
     private ?int $foreignAppointmentId = null;
     private ?int $secretaryId = null;
     private ?array $providerRolePermissionSnapshot = null;
@@ -193,15 +197,76 @@ final class CalendarCustomerAccessHttpTest extends TestCase
         $providerRoleId = (int) get_instance()
             ->db->get_where('users', ['id' => $fixture->providerId])
             ->row('id_roles');
+        $actorAppointment = $this->createForeignAppointment(
+            $fixture->actorId,
+            $fixture->customerId,
+            $fixture->serviceId,
+            $fixture->run . '-actor-provider',
+        );
         try {
+            self::assertTrue(
+                get_instance()->db->insert('services_providers', [
+                    'id_users' => $fixture->actorId,
+                    'id_services' => $fixture->serviceId,
+                ]),
+            );
             self::assertTrue(
                 get_instance()->db->update('users', ['id_roles' => $providerRoleId], ['id' => $fixture->actorId]),
             );
             $staleAdmin = $admin->get('calendar/index');
             self::assertSame(200, $staleAdmin->statusCode, $staleAdmin->body);
             self::assertStringNotContainsString($this->customerEmail($foreignCustomer), $staleAdmin->body);
+            $staleAdminVars = $this->scriptVars($staleAdmin->body);
+            $availableProviderIds = array_map(
+                static fn(array $provider): int => (int) ($provider['id'] ?? 0),
+                $staleAdminVars['available_providers'] ?? [],
+            );
+            self::assertSame([$fixture->actorId], $availableProviderIds);
+
+            foreach (
+                ['calendar/get_calendar_appointments', 'calendar/get_calendar_appointments_for_table_view']
+                as $path
+            ) {
+                $response = $this->calendarRead($admin, $path);
+                $appointmentIds = array_map(
+                    static fn(array $appointment): int => (int) ($appointment['id'] ?? 0),
+                    $response['appointments'] ?? [],
+                );
+                self::assertSame([(int) $actorAppointment['id']], $appointmentIds, $path);
+                foreach ($response['appointments'] ?? [] as $appointment) {
+                    self::assertSame($fixture->actorId, (int) ($appointment['id_users_provider'] ?? 0), $path);
+                }
+            }
         } finally {
             get_instance()->db->update('users', ['id_roles' => $adminRoleId], ['id' => $fixture->actorId]);
+            get_instance()->db->delete('services_providers', [
+                'id_users' => $fixture->actorId,
+                'id_services' => $fixture->serviceId,
+            ]);
+        }
+    }
+
+    public function testLimitedProviderScopesBeforeTopFiftyCustomerLimit(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $ownedCustomer = $fixture->customerId;
+        $fixture->appointment();
+
+        for ($index = 0; $index < 51; $index++) {
+            $this->createForeignCustomer(
+                $fixture->run . '-top50-' . $index,
+                date('Y-m-d H:i:s', strtotime('2099-01-01 +' . $index . ' seconds')),
+            );
+        }
+
+        $client = $this->login($this->credentials['provider_username'], $this->credentials['password']);
+        $initial = $client->get('calendar/index');
+        self::assertSame(200, $initial->statusCode, $initial->body);
+        $initialVars = $this->scriptVars($initial->body);
+        $this->assertSafeCustomerProjection($initialVars, $this->customerEmail($ownedCustomer));
+        foreach ($this->foreignCustomerIds as $foreignCustomerId) {
+            self::assertStringNotContainsString($this->customerEmail($foreignCustomerId), $initial->body);
         }
     }
 
@@ -269,7 +334,7 @@ final class CalendarCustomerAccessHttpTest extends TestCase
         return (int) $row['id'];
     }
 
-    private function createForeignCustomer(string $run): int
+    private function createForeignCustomer(string $run, ?string $updateDatetime = null): int
     {
         $role = get_instance()
             ->db->get_where('roles', ['slug' => DB_SLUG_CUSTOMER])
@@ -288,10 +353,11 @@ final class CalendarCustomerAccessHttpTest extends TestCase
                 'language' => 'english',
                 'id_roles' => (int) $role['id'],
                 'create_datetime' => $now,
-                'update_datetime' => $now,
+                'update_datetime' => $updateDatetime ?? $now,
             ]),
         );
         $this->foreignCustomerId = (int) get_instance()->db->insert_id();
+        $this->foreignCustomerIds[] = $this->foreignCustomerId;
 
         return $this->foreignCustomerId;
     }
@@ -315,6 +381,7 @@ final class CalendarCustomerAccessHttpTest extends TestCase
             ]),
         );
         $this->foreignAppointmentId = (int) get_instance()->db->insert_id();
+        $this->foreignAppointmentIds[] = $this->foreignAppointmentId;
 
         return get_instance()
             ->db->get_where('appointments', ['id' => $this->foreignAppointmentId])
@@ -364,6 +431,23 @@ final class CalendarCustomerAccessHttpTest extends TestCase
         );
 
         return [$username, $password];
+    }
+
+    /** @return array<string, mixed> */
+    private function calendarRead(GateHttpClient $client, string $path): array
+    {
+        $response = $client->post($path, [
+            'start_date' => date('Y-m-d', strtotime('+13 days')),
+            'end_date' => date('Y-m-d', strtotime('+15 days')),
+            'record_id' => FILTER_TYPE_ALL,
+            'filter_type' => '',
+            'is_all' => '1',
+        ]);
+        self::assertSame(200, $response->statusCode, $response->body);
+        $decoded = json_decode($response->body, true, 512, JSON_THROW_ON_ERROR);
+        self::assertIsArray($decoded);
+
+        return $decoded;
     }
 
     private function customerEmail(int $customerId): string
@@ -464,14 +548,14 @@ final class CalendarCustomerAccessHttpTest extends TestCase
     private function deleteForeignRows(): void
     {
         try {
-            if ($this->foreignAppointmentId !== null) {
-                get_instance()->db->delete('reschedule_authorities', ['appointment_id' => $this->foreignAppointmentId]);
-                get_instance()->db->delete('appointments', ['id' => $this->foreignAppointmentId]);
+            foreach (array_unique($this->foreignAppointmentIds) as $foreignAppointmentId) {
+                get_instance()->db->delete('reschedule_authorities', ['appointment_id' => $foreignAppointmentId]);
+                get_instance()->db->delete('appointments', ['id' => $foreignAppointmentId]);
             }
         } finally {
             try {
-                if ($this->foreignCustomerId !== null) {
-                    get_instance()->db->delete('users', ['id' => $this->foreignCustomerId]);
+                foreach (array_unique($this->foreignCustomerIds) as $foreignCustomerId) {
+                    get_instance()->db->delete('users', ['id' => $foreignCustomerId]);
                 }
             } finally {
                 if ($this->secretaryId !== null) {
@@ -482,23 +566,19 @@ final class CalendarCustomerAccessHttpTest extends TestCase
             }
         }
 
-        if ($this->foreignAppointmentId !== null) {
+        foreach (array_unique($this->foreignAppointmentIds) as $foreignAppointmentId) {
             self::assertSame(
                 0,
                 get_instance()
-                    ->db->get_where('appointments', [
-                        'id' => $this->foreignAppointmentId,
-                    ])
+                    ->db->get_where('appointments', ['id' => $foreignAppointmentId])
                     ->num_rows(),
             );
         }
-        if ($this->foreignCustomerId !== null) {
+        foreach (array_unique($this->foreignCustomerIds) as $foreignCustomerId) {
             self::assertSame(
                 0,
                 get_instance()
-                    ->db->get_where('users', [
-                        'id' => $this->foreignCustomerId,
-                    ])
+                    ->db->get_where('users', ['id' => $foreignCustomerId])
                     ->num_rows(),
             );
         }
@@ -523,6 +603,8 @@ final class CalendarCustomerAccessHttpTest extends TestCase
                     ->num_rows(),
             );
         }
+        $this->foreignAppointmentIds = [];
+        $this->foreignCustomerIds = [];
         $this->foreignAppointmentId = null;
         $this->foreignCustomerId = null;
         $this->secretaryId = null;

@@ -81,11 +81,13 @@ must not supply a hash for saving. `RescheduleMethodHttpTest` checks the rendere
 projection and its authority/customer-token binding with synthetic data; it
 does not establish who obtained a valid management link.
 
-The authenticated calendar page may preload only customers the current staff
-member may view and access according to the persisted role. A calendar URL
+The authenticated calendar page may preload up to 50 recent customers the
+current staff member may view and access according to the persisted role;
+apply provider scope before the limit. A calendar URL
 carrying an appointment hash may open an edit dialog only for an appointment
 within the staff member's provider scope when the current role may view the
-accessible customer. Both the initial customer list and the edit
+accessible customer. Calendar data requests use that current role for provider
+scope and appointment-view permission as well. Both the initial customer list and the edit
 dialog use UI-specific read projections; write allowlists do not determine the
 fields sent to the browser. `CalendarCustomerAccessHttpTest` checks these
 boundaries with synthetic records and roles. It does not prove the safety of

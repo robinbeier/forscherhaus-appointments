@@ -115,6 +115,19 @@ class Calendar extends EA_Controller
         $this->load->library('timezones');
     }
 
+    private function currentCalendarReadRole(int $user_id): string
+    {
+        $role_id = (int) $this->users_model->value($user_id, 'id_roles');
+        $role_slug = (string) $this->roles_model->value($role_id, 'slug');
+        $privileges = $this->roles_model->get_permissions_by_slug($role_slug);
+
+        if (empty($privileges[PRIV_APPOINTMENTS]['view'])) {
+            throw new RuntimeException('You do not have the required permissions for this task.', 403);
+        }
+
+        return $role_slug;
+    }
+
     /**
      * Render the calendar page and display the selected appointment.
      *
@@ -233,38 +246,32 @@ class Calendar extends EA_Controller
         $recent_customers = [];
 
         if (!empty($privileges[PRIV_CUSTOMERS]['view'])) {
-            $customers = $this->customers_model->get(null, 50, null, 'update_datetime DESC');
-            $accessible_customer_ids = null;
-
             if ($role_slug !== DB_SLUG_ADMIN && setting('limit_customer_access')) {
                 $provider_ids = match ($role_slug) {
                     DB_SLUG_PROVIDER => [(int) $user_id],
                     DB_SLUG_SECRETARY => array_map('intval', $secretary_providers),
                     default => [],
                 };
-                $accessible_customer_ids = [];
-
-                if ($provider_ids && $customers) {
-                    $appointments = $this->db
+                $customer_role_id = $this->customers_model->get_customer_role_id();
+                $customers = $provider_ids
+                    ? $this->db
                         ->distinct()
-                        ->select('id_users_customer')
-                        ->from('appointments')
-                        ->where_in('id_users_provider', $provider_ids)
-                        ->where_in('id_users_customer', array_column($customers, 'id'))
+                        ->select('users.*')
+                        ->from('users')
+                        ->join('appointments', 'appointments.id_users_customer = users.id')
+                        ->where('users.id_roles', $customer_role_id)
+                        ->where_in('appointments.id_users_provider', $provider_ids)
+                        ->order_by('users.update_datetime', 'DESC')
+                        ->limit(50)
                         ->get()
-                        ->result_array();
-                    $accessible_customer_ids = array_fill_keys(
-                        array_map('intval', array_column($appointments, 'id_users_customer')),
-                        true,
-                    );
-                }
+                        ->result_array()
+                    : [];
+            } else {
+                $customers = $this->customers_model->get(null, 50, null, 'update_datetime DESC');
             }
 
             foreach ($customers as $customer) {
-                if ($accessible_customer_ids !== null && !isset($accessible_customer_ids[(int) $customer['id']])) {
-                    continue;
-                }
-
+                $customer['id'] = (int) $customer['id'];
                 $this->customers_model->only($customer, self::CUSTOMER_READ_FIELDS);
                 $recent_customers[] = $customer;
             }
@@ -853,6 +860,9 @@ class Calendar extends EA_Controller
                 throw new RuntimeException('You do not have the required permissions for this task.');
             }
 
+            $user_id = (int) session('user_id');
+            $role_slug = $this->currentCalendarReadRole($user_id);
+
             $range_request = $this->calendarRequestDtoFactory()->buildRangeRequestDto();
             $range_start_date = (string) $range_request->startDate;
             $range_end_date = (string) $range_request->endDate;
@@ -879,10 +889,6 @@ class Calendar extends EA_Controller
             }
 
             unset($appointment);
-
-            $user_id = session('user_id');
-
-            $role_slug = session('role_slug');
 
             // If the current user is a provider he must only see his own appointments.
             if ($role_slug === DB_SLUG_PROVIDER) {
@@ -953,6 +959,9 @@ class Calendar extends EA_Controller
             if (cannot('view', PRIV_APPOINTMENTS)) {
                 throw new RuntimeException('You do not have the required permissions for this task.');
             }
+
+            $user_id = (int) session('user_id');
+            $role_slug = $this->currentCalendarReadRole($user_id);
 
             $filter_request = $this->calendarRequestDtoFactory()->buildFilterRequestDto();
             $record_id = $filter_request->recordId;
@@ -1049,10 +1058,6 @@ class Calendar extends EA_Controller
 
                 $response['unavailabilities'] = $this->unavailabilities_model->get($where_clause);
             }
-
-            $user_id = session('user_id');
-
-            $role_slug = session('role_slug');
 
             // If the current user is a provider he must only see his own appointments.
             if ($role_slug === DB_SLUG_PROVIDER) {

@@ -556,6 +556,8 @@ class CalendarEventPermissionsTest extends TestCase
                 'secretaries_model',
                 'unavailabilities_model',
                 'blocked_periods_model',
+                'users_model',
+                'roles_model',
             ]
             as $model
         ) {
@@ -575,6 +577,8 @@ class CalendarEventPermissionsTest extends TestCase
         $controller->secretaries_model = $CI->secretaries_model;
         $controller->unavailabilities_model = $CI->unavailabilities_model;
         $controller->blocked_periods_model = $CI->blocked_periods_model;
+        $controller->users_model = $CI->users_model;
+        $controller->roles_model = $CI->roles_model;
         $controller->permissions = $CI->permissions;
         return $controller;
     }
