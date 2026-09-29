@@ -125,6 +125,17 @@ The operator defaults to Chrome on macOS and Firefox elsewhere. Use
 `--browser=firefox|chrome|webkit|msedge` only when the selected operator
 runtime has been prepared and verified.
 
+An operator-only diagnostic revision may run from a later clean, reviewed
+`main` without redeploying the application only if the diff from the deployed
+commit contains **only** the local gate, its diagnostic helper, the release
+artifact validator's required-path list, their tests, and this documentation.
+Bind both commits, verify that the active release and its
+preparation-template SHA-256 still match the existing preflight, and keep the
+remote wrapper, browser snippet, fixture contract, and application bytes
+unchanged. Any wider diff or identity mismatch requires a new release review
+or stops the probe. A successful local diagnostic change is not itself a
+production proof.
+
 The orchestrator:
 
 1. checks local runtime dependencies and prepares Playwright;
@@ -191,8 +202,14 @@ logs, response bodies, cookies, names, contact fields, appointment notes,
 database IDs, or bearer URLs.
 
 The optional JSON report contains only pass/fail booleans, bounded counts,
-durations, PDF metadata, and stable assertion labels. It is evidence of the
-gate result, not a credential or fixture snapshot.
+durations, PDF metadata, and stable assertion labels. For a browser-flow
+failure it adds a fixed `stage` and `diagnostic_class`: browser open, storage
+state load, or run-code process launch, exit, timeout or CLI error;
+structured-result parsing or assertion; browser close; or downloaded-file
+permissions. It never records raw process output, command
+arguments, exception text, URLs, cookies, or browser artifacts. A historical
+report with only `runtime_error` cannot be retroactively classified. The
+report is evidence of the gate result, not a credential or fixture snapshot.
 
 The smoke uses one reserved provider with stronger route and role containment
 than an ordinary provider session. It checks real rendering and cleanup for
