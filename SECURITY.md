@@ -68,6 +68,12 @@ manage URL. The isolated HTTP regression disables PHP's session cache limiter
 to prove that this header is application-owned; proxy, browser, and production
 cache behavior remain outside that local test.
 
+Public reschedule HTML also sets `Cache-Control: no-store` at the application
+layer because it displays appointment and customer details and issues management
+authority. `RescheduleCacheHttpTest` disables PHP's session cache limiter and
+checks valid, locked, and unknown hashes; it does not prove downstream cache
+behavior.
+
 External Google and Outlook calendar links must carry only event details needed
 to create the appointment. Do not put the reschedule capability or customer and
 provider email addresses into third-party URL parameters. The confirmation page,

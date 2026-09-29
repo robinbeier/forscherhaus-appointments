@@ -94,6 +94,8 @@ class Booking extends EA_Controller
             abort(405, 'Method Not Allowed', ['Allow: GET']);
         }
 
+        $this->output->set_header('Cache-Control: no-store');
+
         html_vars([
             'appointment_hash' => $appointment_hash,
             'render_analytics' => false,
