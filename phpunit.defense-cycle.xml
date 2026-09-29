@@ -9,6 +9,7 @@
             <file>./tests/Integration/Controllers/ProviderApiHttpWriteTest.php</file>
             <file>./tests/Integration/Controllers/CustomersApiHttpWriteTest.php</file>
             <file>./tests/Integration/Controllers/CustomersApiHttpReadTest.php</file>
+            <file>./tests/Integration/Controllers/CustomersReadProjectionHttpTest.php</file>
             <file>./tests/Integration/Controllers/ServicesApiHttpWriteTest.php</file>
             <file>./tests/Integration/Controllers/UnavailabilitiesApiHttpWriteTest.php</file>
             <file>./tests/Integration/Controllers/BlockedPeriodsApiHttpWriteTest.php</file>

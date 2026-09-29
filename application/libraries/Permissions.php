@@ -69,6 +69,10 @@ class Permissions
 
         $role_slug = $this->CI->roles_model->value($role_id, 'slug');
 
+        if (!in_array($role_slug, [DB_SLUG_ADMIN, DB_SLUG_PROVIDER, DB_SLUG_SECRETARY], true)) {
+            return false;
+        }
+
         $limit_customer_access = setting('limit_customer_access');
 
         if ($role_slug === DB_SLUG_ADMIN || !$limit_customer_access) {

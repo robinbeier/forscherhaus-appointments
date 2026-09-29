@@ -20,6 +20,37 @@
  */
 class Customers extends EA_Controller
 {
+    private const CUSTOMER_READ_FIELDS = [
+        'id',
+        'first_name',
+        'last_name',
+        'email',
+        'phone_number',
+        'address',
+        'city',
+        'zip_code',
+        'notes',
+        'timezone',
+        'language',
+        'ldap_dn',
+        'custom_field_1',
+        'custom_field_2',
+        'custom_field_3',
+        'custom_field_4',
+        'custom_field_5',
+    ];
+
+    // The customer page links only appointments the current staff member may open.
+    private const CUSTOMER_APPOINTMENT_READ_FIELDS = [
+        'id',
+        'start_datetime',
+        'end_datetime',
+        'hash',
+        'id_users_provider',
+        'service',
+        'provider',
+    ];
+
     public array $allowed_customer_fields = [
         'id',
         'first_name',
@@ -54,8 +85,11 @@ class Customers extends EA_Controller
 
         $this->load->model('appointments_model');
         $this->load->model('customers_model');
+        $this->load->model('providers_model');
+        $this->load->model('services_model');
         $this->load->model('secretaries_model');
         $this->load->model('roles_model');
+        $this->load->model('users_model');
 
         $this->load->library('accounts');
         $this->load->library('permissions');
@@ -72,19 +106,15 @@ class Customers extends EA_Controller
     {
         session(['dest_url' => site_url('customers')]);
 
-        $user_id = session('user_id');
+        $user_id = (int) session('user_id');
 
-        if (cannot('view', PRIV_CUSTOMERS)) {
-            if ($user_id) {
-                abort(403, 'Forbidden');
-            }
-
+        if ($user_id <= 0) {
             redirect('login');
 
             return;
         }
 
-        $role_slug = session('role_slug');
+        $role_slug = $this->currentCustomerReadRole($user_id);
 
         $date_format = setting('date_format');
         $time_format = setting('time_format');
@@ -141,11 +171,8 @@ class Customers extends EA_Controller
     public function find(): void
     {
         try {
-            if (cannot('view', PRIV_CUSTOMERS)) {
-                abort(403, 'Forbidden');
-            }
-
-            $user_id = session('user_id');
+            $user_id = (int) session('user_id');
+            $this->currentCustomerReadRole($user_id);
 
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityIdRequestDto('customer_id');
             $customer_id = $request_dto->id;
@@ -155,6 +182,7 @@ class Customers extends EA_Controller
             }
 
             $customer = $this->customers_model->find($customer_id);
+            $this->customers_model->only($customer, self::CUSTOMER_READ_FIELDS);
 
             json_response($customer);
         } catch (Throwable $e) {
@@ -168,9 +196,8 @@ class Customers extends EA_Controller
     public function search(): void
     {
         try {
-            if (cannot('view', PRIV_CUSTOMERS)) {
-                abort(403, 'Forbidden');
-            }
+            $user_id = (int) session('user_id');
+            $role_slug = $this->currentCustomerReadRole($user_id);
 
             $request_dto = $this->backofficeRequestDtoFactory()->buildSearchRequestDto();
 
@@ -186,14 +213,22 @@ class Customers extends EA_Controller
                 return;
             }
 
+            $visible_provider_ids = match ($role_slug) {
+                DB_SLUG_PROVIDER => [$user_id],
+                DB_SLUG_SECRETARY => array_map('intval', $this->secretaries_model->find($user_id)['providers']),
+                default => null, // Admin may see all appointments.
+            };
+            $customer_scope_provider_ids = setting('limit_customer_access') ? $visible_provider_ids : null;
+
             $customers = $this->customers_model->search(
                 $request_dto->keyword,
                 $request_dto->limit,
                 $request_dto->offset,
                 $request_dto->orderBy,
+                $customer_scope_provider_ids,
             );
 
-            $user_id = session('user_id');
+            $can_view_appointments = can('view', PRIV_APPOINTMENTS, $user_id);
 
             foreach ($customers as $index => &$customer) {
                 if (!$this->permissions->has_customer_access($user_id, $customer['id'])) {
@@ -202,19 +237,53 @@ class Customers extends EA_Controller
                     continue;
                 }
 
-                $appointments = $this->appointments_model->get(['id_users_customer' => $customer['id']]);
+                $this->customers_model->only($customer, self::CUSTOMER_READ_FIELDS);
+                $customer['appointments'] = [];
 
-                foreach ($appointments as &$appointment) {
-                    $this->appointments_model->load($appointment, ['service', 'provider']);
+                if (!$can_view_appointments) {
+                    continue;
                 }
 
-                $customer['appointments'] = $appointments;
+                $appointments = $this->appointments_model->get(['id_users_customer' => $customer['id']]);
+
+                foreach ($appointments as $appointment) {
+                    if (
+                        $visible_provider_ids !== null &&
+                        !in_array((int) $appointment['id_users_provider'], $visible_provider_ids, true)
+                    ) {
+                        continue;
+                    }
+
+                    $this->appointments_model->load($appointment, ['service', 'provider']);
+                    $this->services_model->only($appointment['service'], ['name']);
+                    $this->providers_model->only($appointment['provider'], ['first_name', 'last_name', 'timezone']);
+                    $this->appointments_model->only($appointment, self::CUSTOMER_APPOINTMENT_READ_FIELDS);
+                    $customer['appointments'][] = $appointment;
+                }
             }
+            unset($customer);
 
             json_response(array_values($customers));
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    /** Read the actor's current database role, never the role cached at login. */
+    private function currentCustomerReadRole(int $user_id): string
+    {
+        if ($user_id <= 0 || cannot('view', PRIV_CUSTOMERS, $user_id)) {
+            abort(403, 'Forbidden');
+        }
+
+        $role_id = (int) $this->users_model->value($user_id, 'id_roles');
+        $role_slug = (string) $this->roles_model->value($role_id, 'slug');
+
+        if (!in_array($role_slug, [DB_SLUG_ADMIN, DB_SLUG_PROVIDER, DB_SLUG_SECRETARY], true)) {
+            abort(403, 'Forbidden');
+        }
+
+        return $role_slug;
     }
 
     /**

@@ -108,6 +108,18 @@ visible with an empty customer value. The isolated HTTP regression checks both
 feeds with synthetic records and a post-login permission change. It does not
 establish production browser behavior or the safety of other backoffice feeds.
 
+The authenticated customer find and search responses use the actor's persisted
+role and current `customers.view` permission. Customer search applies the
+configured relationship scope before pagination, and includes appointments
+only when the actor currently has `appointments.view`. Provider and secretary
+appointment scope is enforced before related records are loaded or serialized;
+customer, appointment, provider, and service data use UI-specific projections.
+The customer page still needs an appointment hash for its existing edit link,
+so only an in-scope appointment may carry that public management capability.
+`CustomersReadProjectionHttpTest` checks these boundaries and the legacy search
+alias with synthetic records. It does not establish production browser behavior
+or secrecy of an otherwise authorized management link.
+
 External Google and Outlook calendar links must carry only event details needed
 to create the appointment. Do not put the reschedule capability or customer and
 provider email addresses into third-party URL parameters. The confirmation page,
