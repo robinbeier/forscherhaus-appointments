@@ -94,7 +94,10 @@ class Booking extends EA_Controller
             abort(405, 'Method Not Allowed', ['Allow: GET']);
         }
 
-        html_vars(['appointment_hash' => $appointment_hash]);
+        html_vars([
+            'appointment_hash' => $appointment_hash,
+            'render_analytics' => false,
+        ]);
 
         $this->index();
     }
