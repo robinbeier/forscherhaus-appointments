@@ -167,7 +167,7 @@ class BookingControllerFlowTest extends TestCase
         }
     }
 
-    public function testNormalCreationResolvesCustomerAfterIdentityLockAndRejectsLateOverlap(): void
+    public function testNormalCreationRejectsCustomerInsertedAfterIdentityLockWithoutMutation(): void
     {
         $pair = $this->fixtures->resolveProviderServicePair();
         $customerEmail = 'late-customer-' . bin2hex(random_bytes(4)) . '@example.invalid';
@@ -280,7 +280,7 @@ class BookingControllerFlowTest extends TestCase
 
         $this->assertIsArray($response);
         $this->assertFalse($response['success'] ?? true);
-        $this->assertConflictResponse($response);
+        $this->assertSame(['success' => false, 'message' => lang('unexpected_issues_message')], $response);
         $this->assertSame(409, get_instance()->output->statusCode);
         $this->assertTrue($controller->reschedule_authority->acquired);
         $this->assertTrue($controller->reschedule_authority->released);

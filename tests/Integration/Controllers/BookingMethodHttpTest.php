@@ -16,8 +16,12 @@ final class BookingMethodHttpTest extends TestCase
     private ?DefenseCycleHttpServer $server = null;
     private ?array $privacySetting = null;
     private ?array $termsSetting = null;
+    private ?array $displayEmailSetting = null;
+    private ?array $requireEmailSetting = null;
     /** @var list<string> */
     private array $ownedConsentEmails = [];
+    /** @var list<int> */
+    private array $baselineConsentIds = [];
 
     protected function setUp(): void
     {
@@ -33,8 +37,16 @@ final class BookingMethodHttpTest extends TestCase
                 $db->get_where('settings', ['name' => 'display_privacy_policy'])->row_array() ?: null;
             $this->termsSetting =
                 $db->get_where('settings', ['name' => 'display_terms_and_conditions'])->row_array() ?: null;
+            $this->displayEmailSetting = $db->get_where('settings', ['name' => 'display_email'])->row_array() ?: null;
+            $this->requireEmailSetting = $db->get_where('settings', ['name' => 'require_email'])->row_array() ?: null;
             $db->update('settings', ['value' => '1'], ['name' => 'display_privacy_policy']);
             $db->update('settings', ['value' => '0'], ['name' => 'display_terms_and_conditions']);
+            $db->update('settings', ['value' => '0'], ['name' => 'display_email']);
+            $db->update('settings', ['value' => '0'], ['name' => 'require_email']);
+            $this->baselineConsentIds = array_map(
+                static fn(array $row): int => (int) $row['id'],
+                $db->get('consents')->result_array(),
+            );
             $this->server = new DefenseCycleHttpServer();
         } catch (Throwable $error) {
             try {
@@ -57,10 +69,14 @@ final class BookingMethodHttpTest extends TestCase
         } finally {
             $db = get_instance()->db;
             foreach ($db->get('consents')->result_array() as $row) {
-                if (in_array((string) $row['email'], $this->ownedConsentEmails, true)) {
+                if (
+                    !in_array((int) $row['id'], $this->baselineConsentIds, true) ||
+                    in_array((string) $row['email'], $this->ownedConsentEmails, true)
+                ) {
                     $db->delete('consents', ['id' => (int) $row['id']]);
                 }
             }
+            $this->cleanupNameOnlyBookings();
             $this->restoreConsentSettings();
             $this->fixture?->cleanup();
         }
@@ -73,6 +89,8 @@ final class BookingMethodHttpTest extends TestCase
             [
                 'display_privacy_policy' => $this->privacySetting,
                 'display_terms_and_conditions' => $this->termsSetting,
+                'display_email' => $this->displayEmailSetting,
+                'require_email' => $this->requireEmailSetting,
             ]
             as $name => $row
         ) {
@@ -90,7 +108,6 @@ final class BookingMethodHttpTest extends TestCase
         self::assertNotNull($client);
 
         $customer = $fixture->row('users', $fixture->customerId);
-        $this->ownedConsentEmails[] = (string) $customer['email'];
         $target = (new DateTimeImmutable('today'))->modify('next monday')->modify('+14 days');
         $appointment = [
             'start_datetime' => $target->setTime(11, 0)->format('Y-m-d H:i:s'),
@@ -102,6 +119,7 @@ final class BookingMethodHttpTest extends TestCase
             'color' => '',
         ];
         unset($customer['id']);
+        unset($customer['email']);
         $payload = [
             'appointment' => $appointment,
             'customer' => $customer,
@@ -116,21 +134,44 @@ final class BookingMethodHttpTest extends TestCase
         $booked = get_instance()
             ->db->get_where('appointments', [
                 'id_services' => $fixture->serviceId,
-                'id_users_customer' => $fixture->customerId,
+                'start_datetime' => $appointment['start_datetime'],
                 'notes' => $fixture->run,
             ])
             ->result_array();
         self::assertCount(1, $booked);
+        self::assertNotSame($fixture->customerId, (int) $booked[0]['id_users_customer']);
         self::assertSame($appointment['start_datetime'], $booked[0]['start_datetime']);
         $rows = get_instance()
-            ->db->get_where('consents', ['email' => $customer['email']])
+            ->db->get_where('consents', ['email' => '-', 'last_name' => $customer['last_name']])
             ->result_array();
         self::assertCount(1, $rows);
         self::assertSame('privacy-policy', $rows[0]['type']);
         self::assertSame($customer['first_name'], $rows[0]['first_name']);
         self::assertSame($customer['last_name'], $rows[0]['last_name']);
-        self::assertSame($customer['email'], $rows[0]['email']);
+        self::assertSame('-', $rows[0]['email']);
         self::assertSame('127.0.0.1', $rows[0]['ip']);
+    }
+
+    private function cleanupNameOnlyBookings(): void
+    {
+        $fixture = $this->fixture;
+        if ($fixture === null) {
+            return;
+        }
+        $db = get_instance()->db;
+        foreach ($db->get_where('appointments', ['id_services' => $fixture->serviceId])->result_array() as $row) {
+            if ((int) $row['id_users_customer'] === $fixture->customerId) {
+                continue;
+            }
+            self::assertSame($fixture->run, $row['notes']);
+            $customerId = (int) $row['id_users_customer'];
+            $customer = $db->get_where('users', ['id' => $customerId])->row_array();
+            self::assertNotEmpty($customer);
+            self::assertEmpty($customer['email']);
+            $db->delete('reschedule_authorities', ['appointment_id' => (int) $row['id']]);
+            $db->delete('appointments', ['id' => (int) $row['id']]);
+            $db->delete('users', ['id' => $customerId]);
+        }
     }
 
     public function testBookingRegisterCreatesNoConsentWhenPrivacyIsDisabled(): void

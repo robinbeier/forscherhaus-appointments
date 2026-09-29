@@ -16,9 +16,10 @@ final class BookingCaptchaHttpTest extends TestCase
     private ?DefenseCycleHttpServer $server = null;
     private ?array $privacySetting = null;
     private ?array $termsSetting = null;
+    private ?array $displayEmailSetting = null;
+    private ?array $requireEmailSetting = null;
     /** @var list<int> */
     private array $baselineConsentIds = [];
-    private ?string $ownedConsentEmail = null;
 
     protected function setUp(): void
     {
@@ -34,8 +35,16 @@ final class BookingCaptchaHttpTest extends TestCase
                 $db->get_where('settings', ['name' => 'display_privacy_policy'])->row_array() ?: null;
             $this->termsSetting =
                 $db->get_where('settings', ['name' => 'display_terms_and_conditions'])->row_array() ?: null;
+            $this->displayEmailSetting = $db->get_where('settings', ['name' => 'display_email'])->row_array() ?: null;
+            $this->requireEmailSetting = $db->get_where('settings', ['name' => 'require_email'])->row_array() ?: null;
             $db->update('settings', ['value' => '1'], ['name' => 'display_privacy_policy']);
             $db->update('settings', ['value' => '0'], ['name' => 'display_terms_and_conditions']);
+            $db->update('settings', ['value' => '0'], ['name' => 'display_email']);
+            $db->update('settings', ['value' => '0'], ['name' => 'require_email']);
+            $this->baselineConsentIds = array_map(
+                static fn(array $row): int => (int) $row['id'],
+                $db->get('consents')->result_array(),
+            );
             $this->server = new DefenseCycleHttpServer();
         } catch (Throwable $error) {
             try {
@@ -58,6 +67,7 @@ final class BookingCaptchaHttpTest extends TestCase
         } finally {
             try {
                 $this->cleanupOwnedConsents();
+                $this->cleanupNameOnlyBookings();
             } finally {
                 $this->restoreConsentSettings();
                 $this->fixture?->cleanup();
@@ -73,15 +83,7 @@ final class BookingCaptchaHttpTest extends TestCase
         self::assertNotNull($client);
 
         self::assertTrue(get_instance()->db->update('settings', ['value' => '1'], ['name' => 'require_captcha']));
-        $ownedConsentEmail = (string) $fixture->row('users', $fixture->customerId)['email'];
-        $beforeConsentIds = array_map(
-            static fn(array $row): int => (int) $row['id'],
-            get_instance()
-                ->db->get_where('consents', ['email' => $ownedConsentEmail])
-                ->result_array(),
-        );
-        $this->baselineConsentIds = $beforeConsentIds;
-        $this->ownedConsentEmail = $ownedConsentEmail;
+        $beforeConsentIds = $this->baselineConsentIds;
         self::assertSame(200, $client->get('booking')->statusCode);
         self::assertSame(200, $client->get('captcha')->statusCode);
         $captcha = $this->readGeneratedCaptcha($client);
@@ -90,20 +92,7 @@ final class BookingCaptchaHttpTest extends TestCase
         $beforeAppointments = get_instance()->db->count_all('appointments');
         $beforeUsers = get_instance()->db->count_all('users');
         $beforeConsents = get_instance()->db->count_all('consents');
-        $payload = $this->payload($fixture);
-        $customer = $fixture->row('users', $fixture->customerId);
-        $payload['customer'] = array_merge($payload['customer'], [
-            'first_name' => $customer['first_name'],
-            'last_name' => $customer['last_name'],
-            'email' => $customer['email'],
-            'phone_number' => $customer['phone_number'],
-            'address' => $customer['address'],
-            'city' => $customer['city'],
-            'zip_code' => $customer['zip_code'],
-            'timezone' => $customer['timezone'],
-            'language' => $customer['language'],
-            'notes' => $customer['notes'],
-        ]);
+        $payload = $this->payloadForFixtureCustomer($fixture);
 
         $response = $client->post('booking/register', [
             'post_data' => $payload,
@@ -115,18 +104,18 @@ final class BookingCaptchaHttpTest extends TestCase
         self::assertGreaterThan(0, (int) ($result['appointment_id'] ?? 0));
         self::assertNotEmpty($result['appointment_hash'] ?? null);
         self::assertSame($beforeAppointments + 1, get_instance()->db->count_all('appointments'));
-        self::assertSame($beforeUsers, get_instance()->db->count_all('users'));
+        self::assertSame($beforeUsers + 1, get_instance()->db->count_all('users'));
         self::assertSame($beforeConsents + 1, get_instance()->db->count_all('consents'));
 
         $booked = get_instance()
             ->db->get_where('appointments', ['id' => (int) $result['appointment_id']])
             ->row_array();
-        self::assertSame($fixture->customerId, (int) $booked['id_users_customer']);
+        self::assertNotSame($fixture->customerId, (int) $booked['id_users_customer']);
         self::assertSame($fixture->serviceId, (int) $booked['id_services']);
         self::assertSame($payload['appointment']['start_datetime'], $booked['start_datetime']);
         $consentRows = get_instance()
             ->db->get_where('consents', [
-                'email' => $this->ownedConsentEmail,
+                'email' => '-',
                 'type' => 'privacy-policy',
             ])
             ->result_array();
@@ -148,14 +137,6 @@ final class BookingCaptchaHttpTest extends TestCase
         self::assertNotNull($client);
 
         self::assertTrue(get_instance()->db->update('settings', ['value' => '1'], ['name' => 'require_captcha']));
-        $ownedConsentEmail = (string) $fixture->row('users', $fixture->customerId)['email'];
-        $this->baselineConsentIds = array_map(
-            static fn(array $row): int => (int) $row['id'],
-            get_instance()
-                ->db->get_where('consents', ['email' => $ownedConsentEmail])
-                ->result_array(),
-        );
-        $this->ownedConsentEmail = $ownedConsentEmail;
         self::assertSame(200, $client->get('booking')->statusCode);
         self::assertSame(200, $client->get('captcha')->statusCode);
         $captcha = $this->readGeneratedCaptcha($client);
@@ -174,7 +155,7 @@ final class BookingCaptchaHttpTest extends TestCase
         $firstAppointmentId = (int) ($firstResult['appointment_id'] ?? 0);
         self::assertGreaterThan(0, $firstAppointmentId);
         self::assertSame($beforeAppointments + 1, get_instance()->db->count_all('appointments'));
-        self::assertSame($beforeUsers, get_instance()->db->count_all('users'));
+        self::assertSame($beforeUsers + 1, get_instance()->db->count_all('users'));
         self::assertSame($beforeConsents + 1, get_instance()->db->count_all('consents'));
         $firstAppointment = get_instance()
             ->db->get_where('appointments', ['id' => $firstAppointmentId])
@@ -193,7 +174,7 @@ final class BookingCaptchaHttpTest extends TestCase
         self::assertSame(200, $second->statusCode, $second->body);
         self::assertSame(['captcha_verification' => false], json_decode($second->body, true));
         self::assertSame($beforeAppointments + 1, get_instance()->db->count_all('appointments'));
-        self::assertSame($beforeUsers, get_instance()->db->count_all('users'));
+        self::assertSame($beforeUsers + 1, get_instance()->db->count_all('users'));
         self::assertSame($beforeConsents + 1, get_instance()->db->count_all('consents'));
         self::assertSame(
             $firstAppointment,
@@ -216,7 +197,7 @@ final class BookingCaptchaHttpTest extends TestCase
         $thirdResult = json_decode($third->body, true, 512, JSON_THROW_ON_ERROR);
         self::assertGreaterThan(0, (int) ($thirdResult['appointment_id'] ?? 0));
         self::assertSame($beforeAppointments + 2, get_instance()->db->count_all('appointments'));
-        self::assertSame($beforeUsers, get_instance()->db->count_all('users'));
+        self::assertSame($beforeUsers + 2, get_instance()->db->count_all('users'));
         self::assertSame($beforeConsents + 2, get_instance()->db->count_all('consents'));
         self::assertSame(
             $thirdPayload['appointment']['start_datetime'],
@@ -234,14 +215,6 @@ final class BookingCaptchaHttpTest extends TestCase
         self::assertNotNull($client);
 
         self::assertTrue(get_instance()->db->update('settings', ['value' => '1'], ['name' => 'require_captcha']));
-        $ownedConsentEmail = (string) $fixture->row('users', $fixture->customerId)['email'];
-        $this->baselineConsentIds = array_map(
-            static fn(array $row): int => (int) $row['id'],
-            get_instance()
-                ->db->get_where('consents', ['email' => $ownedConsentEmail])
-                ->result_array(),
-        );
-        $this->ownedConsentEmail = $ownedConsentEmail;
         self::assertSame(200, $client->get('booking')->statusCode);
         self::assertSame(200, $client->get('captcha')->statusCode);
         $captcha = $this->readGeneratedCaptcha($client);
@@ -287,7 +260,7 @@ final class BookingCaptchaHttpTest extends TestCase
         $result = json_decode($success->body, true, 512, JSON_THROW_ON_ERROR);
         self::assertGreaterThan(0, (int) ($result['appointment_id'] ?? 0));
         self::assertSame($beforeAppointments + 1, get_instance()->db->count_all('appointments'));
-        self::assertSame($beforeUsers, get_instance()->db->count_all('users'));
+        self::assertSame($beforeUsers + 1, get_instance()->db->count_all('users'));
         self::assertSame($beforeConsents + 1, get_instance()->db->count_all('consents'));
     }
 
@@ -328,14 +301,6 @@ final class BookingCaptchaHttpTest extends TestCase
         self::assertTrue(get_instance()->db->update('settings', ['value' => '1'], ['name' => 'require_captcha']));
         $existingAppointment = $fixture->appointment();
         $before = $this->snapshot($existingAppointment, $fixture->customerId);
-        $ownedConsentEmail = (string) $fixture->row('users', $fixture->customerId)['email'];
-        $this->baselineConsentIds = array_map(
-            static fn(array $row): int => (int) $row['id'],
-            get_instance()
-                ->db->get_where('consents', ['email' => $ownedConsentEmail])
-                ->result_array(),
-        );
-        $this->ownedConsentEmail = $ownedConsentEmail;
         $challenge = $client->get('captcha');
         self::assertSame(200, $challenge->statusCode, $challenge->body);
         $captcha = $this->readGeneratedCaptcha($client);
@@ -358,7 +323,7 @@ final class BookingCaptchaHttpTest extends TestCase
         $result = json_decode($success->body, true, 512, JSON_THROW_ON_ERROR);
         self::assertGreaterThan(0, (int) ($result['appointment_id'] ?? 0));
         self::assertSame($before['appointments'] + 1, get_instance()->db->count_all('appointments'));
-        self::assertSame($before['users'], get_instance()->db->count_all('users'));
+        self::assertSame($before['users'] + 1, get_instance()->db->count_all('users'));
         self::assertSame($before['consents'] + 1, get_instance()->db->count_all('consents'));
     }
 
@@ -379,7 +344,6 @@ final class BookingCaptchaHttpTest extends TestCase
             'customer' => [
                 'first_name' => 'Captcha',
                 'last_name' => 'Synthetic',
-                'email' => $fixture->run . '@synthetic.invalid',
                 'phone_number' => '0000000000',
                 'address' => '',
                 'city' => '',
@@ -400,7 +364,6 @@ final class BookingCaptchaHttpTest extends TestCase
         $payload['customer'] = array_merge($payload['customer'], [
             'first_name' => $customer['first_name'],
             'last_name' => $customer['last_name'],
-            'email' => $customer['email'],
             'phone_number' => $customer['phone_number'],
             'address' => $customer['address'],
             'city' => $customer['city'],
@@ -429,17 +392,14 @@ final class BookingCaptchaHttpTest extends TestCase
 
     private function cleanupOwnedConsents(): void
     {
-        if ($this->ownedConsentEmail === null) {
-            return;
-        }
         $db = get_instance()->db;
-        $rows = $db->get_where('consents', ['email' => $this->ownedConsentEmail])->result_array();
+        $rows = $db->get('consents')->result_array();
         foreach ($rows as $row) {
             $id = (int) $row['id'];
             if (in_array($id, $this->baselineConsentIds, true)) {
                 continue;
             }
-            if (!$db->delete('consents', ['id' => $id, 'email' => $this->ownedConsentEmail])) {
+            if (!$db->delete('consents', ['id' => $id])) {
                 throw new RuntimeException('Owned CAPTCHA consent cleanup failed.');
             }
             self::assertSame(
@@ -447,13 +407,34 @@ final class BookingCaptchaHttpTest extends TestCase
                 $db
                     ->get_where('consents', [
                         'id' => $id,
-                        'email' => $this->ownedConsentEmail,
                     ])
                     ->row_array() ?:
                 [],
             );
         }
         $this->baselineConsentIds = [];
+    }
+
+    private function cleanupNameOnlyBookings(): void
+    {
+        $fixture = $this->fixture;
+        if ($fixture === null) {
+            return;
+        }
+        $db = get_instance()->db;
+        foreach ($db->get_where('appointments', ['id_services' => $fixture->serviceId])->result_array() as $row) {
+            if ((int) $row['id_users_customer'] === $fixture->customerId) {
+                continue;
+            }
+            self::assertSame($fixture->run, $row['notes']);
+            $customerId = (int) $row['id_users_customer'];
+            $customer = $db->get_where('users', ['id' => $customerId])->row_array();
+            self::assertNotEmpty($customer);
+            self::assertEmpty($customer['email']);
+            $db->delete('reschedule_authorities', ['appointment_id' => (int) $row['id']]);
+            $db->delete('appointments', ['id' => (int) $row['id']]);
+            $db->delete('users', ['id' => $customerId]);
+        }
     }
 
     /** @return array<string, mixed> */
@@ -477,6 +458,8 @@ final class BookingCaptchaHttpTest extends TestCase
             [
                 'display_privacy_policy' => $this->privacySetting,
                 'display_terms_and_conditions' => $this->termsSetting,
+                'display_email' => $this->displayEmailSetting,
+                'require_email' => $this->requireEmailSetting,
             ]
             as $name => $row
         ) {

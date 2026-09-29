@@ -145,6 +145,17 @@ consent, sequential replay rejection, and a fresh-challenge recovery. It does
 not establish simultaneous-request behavior, full browser CAPTCHA usability,
 or current production configuration.
 
+An ordinary public booking creates a new customer record. The submitted email
+is not proof of ownership of an existing customer: when the email field is
+hidden, a nonempty email in a direct POST is rejected; when it is displayed,
+an email collision is rejected without updating the old record. The insertion
+path must not silently fall back to email-based update if another writer adds
+that email after the collision check. A valid one-time reschedule claim may
+update only its bound customer. The server-verified zero-surprise canary lease
+may reuse only its own synthetic customer. Isolated HTTP/database regressions
+cover rejection without partial writes, repeated name-only booking, and the
+link-authorized reschedule control; they do not prove natural production use.
+
 Provider parent-appointment and preparation PDFs contain personal appointment
 data. Only GET may reach either export, including through direct controller
 aliases. The authenticated session must identify a provider whose role is still
