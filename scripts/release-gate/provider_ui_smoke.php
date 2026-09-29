@@ -11,6 +11,7 @@ require_once __DIR__ . '/lib/ProviderUiSmokeContract.php';
 require_once __DIR__ . '/lib/ProviderUiSmokeCredentials.php';
 require_once __DIR__ . '/lib/ProviderUiSmokePdfInspector.php';
 require_once __DIR__ . '/lib/ProviderUiSmokeRunCodeResult.php';
+require_once __DIR__ . '/lib/ProviderUiSmokeDiagnostics.php';
 
 use ReleaseGate\GateAssertionException;
 use ReleaseGate\GateAssertions;
@@ -34,16 +35,6 @@ const PROVIDER_UI_SMOKE_EXIT_SUCCESS = 0;
 const PROVIDER_UI_SMOKE_EXIT_ASSERTION_FAILURE = 1;
 const PROVIDER_UI_SMOKE_EXIT_RUNTIME_ERROR = 2;
 
-final class ProviderUiSmokeBrowserFlowException extends RuntimeException
-{
-    /**
-     * @param array<string, mixed> $safeDetails
-     */
-    public function __construct(public readonly array $safeDetails)
-    {
-        parent::__construct('Provider UI smoke browser flow assertions failed.');
-    }
-}
 $repoRoot = dirname(__DIR__, 2);
 $startedAt = microtime(true);
 $startedAtUtc = gmdate('c');
@@ -99,6 +90,7 @@ try {
 
             if ($exception instanceof ProviderUiSmokeBrowserFlowException) {
                 $failedCheck['details'] = providerUiSmokeSafeDetails($exception->safeDetails);
+                $failedCheck = [...$failedCheck, ...$exception->reportFields()];
             }
 
             $checks[] = $failedCheck;
@@ -367,33 +359,48 @@ try {
             'restore_end_date' => ProviderUiSmokeContract::RESTORE_END_DATE,
         ];
         $snippet = providerUiSmokeResolveSnippet($snippetPath, $snippetConfig);
-        $runCode = providerUiSmokeRunPwcli(
-            $config,
-            $sessionId,
-            ['run-code', $snippet],
-            $repoRoot,
-            max($config['open_timeout'] * 3 + $config['download_timeout'] * 3, 120),
-        );
-        providerUiSmokeAssertProcessSucceeded($runCode, 'Provider UI smoke browser flow');
-        $browserResult = parseProviderUiSmokeRunCodeResult($runCode);
-
-        if (($browserResult['ok'] ?? false) !== true) {
-            throw new ProviderUiSmokeBrowserFlowException($browserResult);
+        try {
+            $runCode = providerUiSmokeRunPwcli(
+                $config,
+                $sessionId,
+                ['run-code', $snippet],
+                $repoRoot,
+                max($config['open_timeout'] * 3 + $config['download_timeout'] * 3, 120),
+            );
+        } catch (Throwable) {
+            throw ProviderUiSmokeBrowserFlowException::runCodeLaunchFailure();
+        }
+        if (!providerUiSmokeProcessSucceeded($runCode)) {
+            throw ProviderUiSmokeBrowserFlowException::runCodeProcessFailure($runCode);
         }
 
-        $close = providerUiSmokeRunPwcli(
-            $config,
-            $sessionId,
-            ['close'],
-            $repoRoot,
-            max(15, (int) $config['open_timeout']),
-        );
-        providerUiSmokeAssertProcessSucceeded($close, 'Close provider UI smoke browser');
+        try {
+            $browserResult = parseProviderUiSmokeRunCodeResult($runCode);
+        } catch (GateAssertionException) {
+            throw ProviderUiSmokeBrowserFlowException::structuredResultParseFailure();
+        }
+
+        if (($browserResult['ok'] ?? false) !== true) {
+            throw ProviderUiSmokeBrowserFlowException::structuredResultAssertion($browserResult);
+        }
+
+        try {
+            $close = providerUiSmokeRunPwcli(
+                $config,
+                $sessionId,
+                ['close'],
+                $repoRoot,
+                max(15, (int) $config['open_timeout']),
+            );
+            providerUiSmokeAssertProcessSucceeded($close, 'Close provider UI smoke browser');
+        } catch (Throwable) {
+            throw ProviderUiSmokeBrowserFlowException::browserCloseFailure();
+        }
         $sessionId = null;
 
         foreach ([$preparationPdfPath, $parentPdfPath, $emptyPreparationPdfPath] as $pdfPath) {
             if (!is_file($pdfPath) || !chmod($pdfPath, 0600) || (((int) fileperms($pdfPath)) & 0777) !== 0600) {
-                throw new RuntimeException('Provider UI smoke PDF permissions could not be secured.');
+                throw ProviderUiSmokeBrowserFlowException::pdfFilePermissionsFailure();
             }
         }
 
@@ -556,13 +563,18 @@ try {
     });
 } catch (Throwable $exception) {
     $exitCode =
-        $exception instanceof GateAssertionException || $exception instanceof ProviderUiSmokeBrowserFlowException
+        $exception instanceof GateAssertionException ||
+        ($exception instanceof ProviderUiSmokeBrowserFlowException && $exception->assertionFailure)
             ? PROVIDER_UI_SMOKE_EXIT_ASSERTION_FAILURE
             : PROVIDER_UI_SMOKE_EXIT_RUNTIME_ERROR;
     $failure = [
         'check' => $currentCheck,
         'error_code' => providerUiSmokeErrorCode($exception),
     ];
+
+    if ($exception instanceof ProviderUiSmokeBrowserFlowException) {
+        $failure = [...$failure, ...$exception->reportFields()];
+    }
 }
 
 if (is_string($sessionId) && is_array($config)) {
@@ -957,13 +969,19 @@ function providerUiSmokeRunPwcli(
  */
 function providerUiSmokeAssertProcessSucceeded(array $result, string $context): void
 {
-    if (
-        (int) ($result['exit_code'] ?? 1) !== 0 ||
-        (bool) ($result['timed_out'] ?? false) ||
-        preg_match('/(?:^|\R)### Error(?:\R|\z)/', (string) ($result['stdout'] ?? '')) === 1
-    ) {
+    if (!providerUiSmokeProcessSucceeded($result)) {
         throw new RuntimeException($context . ' failed.');
     }
+}
+
+/**
+ * @param array<string, mixed> $result
+ */
+function providerUiSmokeProcessSucceeded(array $result): bool
+{
+    return (int) ($result['exit_code'] ?? 1) === 0 &&
+        !(bool) ($result['timed_out'] ?? false) &&
+        preg_match('/(?:^|\R)### Error(?:\R|\z)/', (string) ($result['stdout'] ?? '')) !== 1;
 }
 
 /**
@@ -1022,7 +1040,7 @@ function providerUiSmokeErrorCode(Throwable $exception): string
 {
     return match (true) {
         $exception instanceof GateAssertionException,
-        $exception instanceof ProviderUiSmokeBrowserFlowException
+        $exception instanceof ProviderUiSmokeBrowserFlowException && $exception->assertionFailure
             => 'assertion_failed',
         $exception instanceof InvalidArgumentException => 'invalid_configuration',
         default => 'runtime_error',
