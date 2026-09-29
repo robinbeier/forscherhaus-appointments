@@ -55,7 +55,7 @@ final class ProviderUiSmokeGateExecutionTest extends TestCase
         ];
 
         foreach ($cases as $mode => [$expectedExit, $expectedError, $expectedCheck, $expectedClass, $expectedStage]) {
-            [$report, $result] = $this->runGate($mode);
+            [$report, $result, $commands] = $this->runGate($mode);
 
             self::assertSame($expectedExit, $result['exit_code'], $result['stderr']);
             self::assertSame($expectedError, $report['failure']['error_code']);
@@ -79,6 +79,11 @@ final class ProviderUiSmokeGateExecutionTest extends TestCase
 
             self::assertSame('pass', $report['cleanup']['status']);
             self::assertTrue($report['cleanup']['temporary_artifacts_removed']);
+            self::assertSame('close', end($commands));
+            self::assertSame(
+                1,
+                count(array_filter($commands, static fn(string $command): bool => $command === 'close')),
+            );
             $encoded = json_encode($report, JSON_THROW_ON_ERROR);
             self::assertStringNotContainsString('secret', $encoded);
             self::assertStringNotContainsString('stdout', $encoded);
@@ -88,12 +93,13 @@ final class ProviderUiSmokeGateExecutionTest extends TestCase
     }
 
     /**
-     * @return array{0: array<string, mixed>, 1: array{exit_code: int, stdout: string, stderr: string}}
+     * @return array{0: array<string, mixed>, 1: array{exit_code: int, stdout: string, stderr: string}, 2: list<string>}
      */
     private function runGate(string $mode): array
     {
         $routerPath = $this->workspace . '/router.php';
         $pwcliPath = $this->workspace . '/pwcli.sh';
+        $commandsPath = $this->workspace . '/pwcli-commands-' . $mode . '.txt';
         $reportPath = $this->workspace . '/report.json';
         $binPath = $this->workspace . '/bin';
         if (!is_dir($binPath)) {
@@ -111,7 +117,7 @@ final class ProviderUiSmokeGateExecutionTest extends TestCase
             self::assertTrue(chmod($binPath . '/' . $binary, 0700));
         }
         self::assertNotFalse(file_put_contents($routerPath, $this->routerSource()));
-        self::assertNotFalse(file_put_contents($pwcliPath, $this->pwcliSource($mode)));
+        self::assertNotFalse(file_put_contents($pwcliPath, $this->pwcliSource($mode, $commandsPath)));
         self::assertTrue(chmod($pwcliPath, 0700));
         [$server, $baseUrl] = $this->startServer($routerPath);
 
@@ -147,7 +153,10 @@ final class ProviderUiSmokeGateExecutionTest extends TestCase
         $report = json_decode((string) file_get_contents($reportPath), true, 512, JSON_THROW_ON_ERROR);
         self::assertIsArray($report);
 
-        return [$report, $result];
+        self::assertFileExists($commandsPath);
+        $commands = array_values(array_filter(explode("\n", trim((string) file_get_contents($commandsPath)))));
+
+        return [$report, $result, $commands];
     }
 
     private function routerSource(): string
@@ -182,7 +191,7 @@ final class ProviderUiSmokeGateExecutionTest extends TestCase
         PHP;
     }
 
-    private function pwcliSource(string $mode): string
+    private function pwcliSource(string $mode, string $commandsPath): string
     {
         $payload = json_encode(
             [
@@ -222,6 +231,9 @@ final class ProviderUiSmokeGateExecutionTest extends TestCase
             "set -eu\n" .
             "command_name=''\n" .
             "for argument in \"\$@\"; do case \"\$argument\" in install-browser|open|state-load|run-code|close) command_name=\"\$argument\" ;; esac; done\n" .
+            'printf "%s\\n" "$command_name" >> ' .
+            escapeshellarg($commandsPath) .
+            "\n" .
             "if [[ \"\$command_name\" == {$failureCommand} ]]; then {$action}; fi\n" .
             "exit 0\n";
     }
