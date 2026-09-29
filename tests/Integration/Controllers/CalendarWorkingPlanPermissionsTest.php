@@ -150,6 +150,7 @@ class CalendarWorkingPlanPermissionsTest extends TestCase
 
         $this->assertNotEmpty($role, 'Missing role ' . $roleSlug);
         $userId = $this->fixtures->createCustomer(['id_roles' => (int) $role['id']]);
+        $this->assertTrue(get_instance()->db->insert('user_settings', ['id_users' => $userId]));
 
         session([
             'user_id' => $userId,

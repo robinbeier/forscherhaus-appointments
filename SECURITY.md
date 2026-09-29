@@ -88,6 +88,9 @@ carrying an appointment hash may open an edit dialog only for an appointment
 within the staff member's provider scope when the current role may view the
 accessible customer. Calendar data requests use that current role for provider
 scope, appointment-view permission, and private blocked-period notes as well.
+Calendar mutations recheck the persisted role and action permission, including
+the stored and requested provider, so a stale session role cannot retain write
+authority after reassignment.
 Both the initial customer list and the edit
 dialog use UI-specific read projections; write allowlists do not determine the
 fields sent to the browser. `CalendarCustomerAccessHttpTest` checks these

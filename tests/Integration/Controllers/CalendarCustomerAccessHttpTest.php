@@ -234,6 +234,16 @@ final class CalendarCustomerAccessHttpTest extends TestCase
             );
             self::assertSame([$fixture->actorId], $availableProviderIds);
 
+            // The browser session still carries the former admin role. A current
+            // provider role must nevertheless prevent mutation of another
+            // provider's appointment, without changing the stored row.
+            $beforeForeignMutation = $fixture->row('appointments', (int) $foreignAppointment['id']);
+            $deleteForeign = $admin->post('calendar/delete_appointment', [
+                'appointment_id' => (string) $foreignAppointment['id'],
+            ]);
+            self::assertSame(403, $deleteForeign->statusCode, $deleteForeign->body);
+            self::assertSame($beforeForeignMutation, $fixture->row('appointments', (int) $foreignAppointment['id']));
+
             foreach (
                 ['calendar/get_calendar_appointments', 'calendar/get_calendar_appointments_for_table_view']
                 as $path
@@ -271,6 +281,37 @@ final class CalendarCustomerAccessHttpTest extends TestCase
                         ->num_rows(),
                 );
             }
+        }
+
+        // The inverse transition must also use the persisted role: a provider
+        // session promoted to admin must be allowed to delete the foreign
+        // appointment it could not mutate before the promotion.
+        $staleProvider = $this->login($this->credentials['provider_username'], $this->credentials['password']);
+        $beforePromotedMutation = $fixture->row('appointments', (int) $foreignAppointment['id']);
+        self::assertNotEmpty($beforePromotedMutation);
+        try {
+            self::assertTrue(
+                get_instance()->db->update('users', ['id_roles' => $adminRoleId], ['id' => $fixture->providerId]),
+            );
+            $deleteForeignAfterPromotion = $staleProvider->post('calendar/delete_appointment', [
+                'appointment_id' => (string) $foreignAppointment['id'],
+            ]);
+            self::assertSame(200, $deleteForeignAfterPromotion->statusCode, $deleteForeignAfterPromotion->body);
+            self::assertTrue(
+                (bool) (json_decode($deleteForeignAfterPromotion->body, true, 512, JSON_THROW_ON_ERROR)['success'] ??
+                    false),
+            );
+            self::assertSame([], $fixture->row('appointments', (int) $foreignAppointment['id']));
+        } finally {
+            self::assertTrue(
+                get_instance()->db->update('users', ['id_roles' => $providerRoleId], ['id' => $fixture->providerId]),
+            );
+            self::assertSame(
+                $providerRoleId,
+                (int) get_instance()
+                    ->db->get_where('users', ['id' => $fixture->providerId])
+                    ->row('id_roles'),
+            );
         }
     }
 

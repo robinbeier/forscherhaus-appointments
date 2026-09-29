@@ -401,8 +401,8 @@ class Calendar extends EA_Controller
                     $customer = $customer_data;
 
                     $required_permissions = !empty($customer['id'])
-                        ? can('edit', PRIV_CUSTOMERS)
-                        : can('add', PRIV_CUSTOMERS);
+                        ? $this->currentCalendarCan('edit', PRIV_CUSTOMERS)
+                        : $this->currentCalendarCan('add', PRIV_CUSTOMERS);
 
                     if (!$required_permissions) {
                         throw new RuntimeException('You do not have the required permissions for this task.', 403);
@@ -420,8 +420,8 @@ class Calendar extends EA_Controller
                     $appointment = $appointment_data;
 
                     $required_permissions = !empty($appointment['id'])
-                        ? can('edit', PRIV_APPOINTMENTS)
-                        : can('add', PRIV_APPOINTMENTS);
+                        ? $this->currentCalendarCan('edit', PRIV_APPOINTMENTS)
+                        : $this->currentCalendarCan('add', PRIV_APPOINTMENTS);
 
                     if (!$required_permissions) {
                         throw new RuntimeException('You do not have the required permissions for this task.', 403);
@@ -509,16 +509,29 @@ class Calendar extends EA_Controller
     private function has_event_permissions(int $provider_id): bool
     {
         $user_id = (int) session('user_id');
-        $role_slug = session('role_slug');
-
-        if (
-            $role_slug === DB_SLUG_SECRETARY &&
-            !$this->secretaries_model->is_provider_supported($user_id, $provider_id)
-        ) {
+        if ($user_id <= 0) {
             return false;
         }
 
-        return $role_slug !== DB_SLUG_PROVIDER || $user_id === $provider_id;
+        $CI = &get_instance();
+        $CI->load->model('users_model');
+        $CI->load->model('roles_model');
+        $role_id = (int) $CI->users_model->value($user_id, 'id_roles');
+        $role_slug = (string) $CI->roles_model->value($role_id, 'slug');
+
+        return match ($role_slug) {
+            DB_SLUG_ADMIN => true,
+            DB_SLUG_PROVIDER => $user_id === $provider_id,
+            DB_SLUG_SECRETARY => $this->secretaries_model->is_provider_supported($user_id, $provider_id),
+            default => false,
+        };
+    }
+
+    private function currentCalendarCan(string $action, string $resource): bool
+    {
+        $user_id = (int) session('user_id');
+
+        return $user_id > 0 && can($action, $resource, $user_id);
     }
 
     protected function lock_calendar_update_parents(
@@ -570,7 +583,7 @@ class Calendar extends EA_Controller
     public function delete_appointment(): void
     {
         try {
-            if (cannot('delete', 'appointments')) {
+            if (!$this->currentCalendarCan('delete', PRIV_APPOINTMENTS)) {
                 throw new RuntimeException('You do not have the required permissions for this task.');
             }
 
@@ -627,8 +640,8 @@ class Calendar extends EA_Controller
             ]);
 
             $required_permissions = empty($unavailability['id'])
-                ? can('add', PRIV_APPOINTMENTS)
-                : can('edit', PRIV_APPOINTMENTS);
+                ? $this->currentCalendarCan('add', PRIV_APPOINTMENTS)
+                : $this->currentCalendarCan('edit', PRIV_APPOINTMENTS);
 
             if (!$required_permissions) {
                 throw new RuntimeException('You do not have the required permissions for this task.');
@@ -705,7 +718,7 @@ class Calendar extends EA_Controller
     public function delete_unavailability(): void
     {
         try {
-            if (cannot('delete', PRIV_APPOINTMENTS)) {
+            if (!$this->currentCalendarCan('delete', PRIV_APPOINTMENTS)) {
                 throw new RuntimeException('You do not have the required permissions for this task.');
             }
 
@@ -793,7 +806,7 @@ class Calendar extends EA_Controller
     public function save_working_plan_exception(): void
     {
         try {
-            if (cannot('edit', PRIV_USERS)) {
+            if (!$this->currentCalendarCan('edit', PRIV_USERS)) {
                 throw new RuntimeException('You do not have the required permissions for this task.');
             }
 
@@ -828,7 +841,7 @@ class Calendar extends EA_Controller
     public function delete_working_plan_exception(): void
     {
         try {
-            if (cannot('edit', PRIV_USERS)) {
+            if (!$this->currentCalendarCan('edit', PRIV_USERS)) {
                 throw new RuntimeException('You do not have the required permissions for this task.');
             }
 
