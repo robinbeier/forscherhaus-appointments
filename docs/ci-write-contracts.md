@@ -15,6 +15,17 @@ Einmal-Authority darf das anschliessende Update freigeben. `manage_mode`, IDs
 oder der Route-Hash allein reichen nicht. Der vollstaendige Sicherheitsvertrag
 steht in [Public Reschedule Authority](security/public-reschedule-authority.md).
 
+Eine normale anonyme Neuanlage darf keine bestehende Kundenzeile anhand einer
+mitgesendeten E-Mail aktualisieren. Bei ausgeblendetem E-Mail-Feld weist der
+Server eine dennoch gesendete nichtleere E-Mail vor der Datenmutation zurück.
+Auch bei angezeigtem Feld begründet E-Mail allein keine Update-Berechtigung:
+Kollisionen werden abgelehnt, und die Neuanlage bleibt insert-only, sodass ein
+konkurrierender Schreibpfad keinen stillen Update-Fallback auslösen kann.
+Namenbasierte Mehrfachbuchungen bleiben möglich; bestehende Kundenzeilen darf
+nur die gültige, sitzungsgebundene Umbuchungs-Authority bearbeiten. Der
+serverseitig verifizierte Zero-Surprise-Canary darf ausschließlich seinen
+eigenen synthetischen Kunden wiederverwenden.
+
 Der Controller `Booking::register()` akzeptiert ausschließlich POST. Andere
 Methoden, die ihn erreichen, erhalten vor der Auswertung von Query-Daten oder
 einer Reschedule-Authority HTTP 405 mit `Allow: POST`. Der globale CORS-Preflight

@@ -76,6 +76,18 @@ class Customers_model extends EA_Model
         }
     }
 
+    /** Insert a new customer without turning an email match into update authority. */
+    public function insert_new(array $customer): int
+    {
+        if (array_key_exists('id', $customer)) {
+            throw new InvalidArgumentException('A new customer must not include an ID.');
+        }
+
+        $this->validate($customer);
+
+        return $this->insert($customer);
+    }
+
     /**
      * Validate the customer data.
      *

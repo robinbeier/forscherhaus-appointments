@@ -18,6 +18,8 @@ final class BookingBlockedPeriodsHttpTest extends TestCase
     private ?GateHttpClient $client = null;
     /** @var list<int> */
     private array $blockedPeriodIds = [];
+    private ?array $displayEmailSetting = null;
+    private ?array $requireEmailSetting = null;
 
     protected function setUp(): void
     {
@@ -28,12 +30,21 @@ final class BookingBlockedPeriodsHttpTest extends TestCase
         try {
             $this->fixture = new DefenseCycleFixtures();
             $this->fixture->create();
+            $db = get_instance()->db;
+            $this->displayEmailSetting = $db->get_where('settings', ['name' => 'display_email'])->row_array() ?: null;
+            $this->requireEmailSetting = $db->get_where('settings', ['name' => 'require_email'])->row_array() ?: null;
+            $db->update('settings', ['value' => '0'], ['name' => 'display_email']);
+            $db->update('settings', ['value' => '0'], ['name' => 'require_email']);
             $this->server = new DefenseCycleHttpServer();
             $this->client = $this->server->client();
             self::assertSame(200, $this->client->get('booking')->statusCode);
         } catch (Throwable $error) {
             $this->server?->close();
-            $this->fixture?->cleanup();
+            try {
+                $this->restoreEmailSettings();
+            } finally {
+                $this->fixture?->cleanup();
+            }
             throw $error;
         }
     }
@@ -50,7 +61,15 @@ final class BookingBlockedPeriodsHttpTest extends TestCase
                     self::assertSame([], $this->fixture?->blockedPeriodRow($id));
                 }
             } finally {
-                $this->fixture?->cleanup();
+                try {
+                    $this->cleanupNameOnlyBookings();
+                } finally {
+                    try {
+                        $this->restoreEmailSettings();
+                    } finally {
+                        $this->fixture?->cleanup();
+                    }
+                }
             }
         }
     }
@@ -107,7 +126,7 @@ final class BookingBlockedPeriodsHttpTest extends TestCase
         self::assertSame(
             0,
             get_instance()
-                ->db->get_where('users', ['email' => $this->customerEmail('blocked')])
+                ->db->get_where('users', ['last_name' => 'Blocked blocked'])
                 ->num_rows(),
         );
 
@@ -159,7 +178,7 @@ final class BookingBlockedPeriodsHttpTest extends TestCase
         self::assertSame(
             0,
             get_instance()
-                ->db->get_where('users', ['email' => $this->customerEmail('sub-minute')])
+                ->db->get_where('users', ['last_name' => 'Blocked sub-minute'])
                 ->num_rows(),
         );
         self::assertTrue(get_instance()->db->delete('blocked_periods', ['id' => $block]));
@@ -278,7 +297,6 @@ final class BookingBlockedPeriodsHttpTest extends TestCase
             'customer' => [
                 'first_name' => 'Synthetic',
                 'last_name' => 'Blocked ' . $case,
-                'email' => $this->customerEmail($case),
                 'phone_number' => '000000000',
                 'address' => '',
                 'city' => '',
@@ -320,12 +338,40 @@ final class BookingBlockedPeriodsHttpTest extends TestCase
         ];
     }
 
-    private function customerEmail(string $case): string
+    private function cleanupNameOnlyBookings(): void
     {
-        if ($case === 'boundary') {
-            return $this->fixture?->run . '_customer@synthetic.invalid';
+        $fixture = $this->fixture;
+        if ($fixture === null) {
+            return;
         }
-        return $this->fixture?->run . '_booking_' . $case . '@synthetic.invalid';
+        $db = get_instance()->db;
+        foreach ($db->get_where('appointments', ['id_services' => $fixture->serviceId])->result_array() as $row) {
+            if ((int) $row['id_users_customer'] === $fixture->customerId) {
+                continue;
+            }
+            self::assertSame($fixture->run, $row['notes']);
+            $customerId = (int) $row['id_users_customer'];
+            $customer = $db->get_where('users', ['id' => $customerId])->row_array();
+            self::assertNotEmpty($customer);
+            self::assertSame('Blocked boundary', $customer['last_name']);
+            self::assertEmpty($customer['email']);
+            $db->delete('reschedule_authorities', ['appointment_id' => (int) $row['id']]);
+            $db->delete('appointments', ['id' => (int) $row['id']]);
+            $db->delete('users', ['id' => $customerId]);
+        }
+    }
+
+    private function restoreEmailSettings(): void
+    {
+        $db = get_instance()->db;
+        foreach (
+            ['display_email' => $this->displayEmailSetting, 'require_email' => $this->requireEmailSetting]
+            as $name => $row
+        ) {
+            if ($row !== null) {
+                $db->update('settings', ['value' => $row['value']], ['name' => $name]);
+            }
+        }
     }
 
     /** @return array{appointments:int,users:int,consents:int} */

@@ -447,14 +447,41 @@ class Booking extends EA_Controller
             $existing_customer_id = null;
 
             if (!($authority_claim instanceof RescheduleAuthorityClaim)) {
-                $creation_identity_lock = $this->rescheduleAuthority()->acquireCreationIdentityLock(
-                    $customer['email'] ?? null,
-                );
+                $submitted_email = $customer['email'] ?? null;
+                if (
+                    ($submitted_email !== null && !is_string($submitted_email)) ||
+                    (!$this->zero_surprise_canary->active() &&
+                        !setting('display_email') &&
+                        $submitted_email !== null &&
+                        $submitted_email !== '')
+                ) {
+                    json_response(
+                        [
+                            'success' => false,
+                            'message' => lang('unexpected_issues_message'),
+                        ],
+                        409,
+                    );
+
+                    return;
+                }
+
+                $creation_identity_lock = $this->rescheduleAuthority()->acquireCreationIdentityLock($submitted_email);
 
                 if ($this->customers_model->exists($customer)) {
                     $existing_customer_id = $this->customers_model->find_record_id($customer);
                     if ($this->zero_surprise_canary->active()) {
                         $this->zero_surprise_canary->assertCustomer($existing_customer_id);
+                    } else {
+                        json_response(
+                            [
+                                'success' => false,
+                                'message' => lang('unexpected_issues_message'),
+                            ],
+                            409,
+                        );
+
+                        return;
                     }
                 }
             }
@@ -620,7 +647,11 @@ class Booking extends EA_Controller
                 $customer['notes'] = 'run:' . $this->zero_surprise_canary->context()['run_id'];
             }
 
-            $customer_id = $this->customers_model->save($customer);
+            $customer_id =
+                $authority_claim instanceof RescheduleAuthorityClaim ||
+                ($this->zero_surprise_canary->active() && $existing_customer_id !== null)
+                    ? $this->customers_model->save($customer)
+                    : $this->customers_model->insert_new($customer);
             $customer = $this->customers_model->find($customer_id);
 
             $appointment['id_users_customer'] = $customer_id;

@@ -22,6 +22,7 @@
             <file>./tests/Integration/Controllers/RescheduleMethodHttpTest.php</file>
             <file>./tests/Integration/Controllers/BookingMethodHttpTest.php</file>
             <file>./tests/Integration/Controllers/BookingCaptchaHttpTest.php</file>
+            <file>./tests/Integration/Controllers/PublicBookingExistingCustomerIdentityHttpTest.php</file>
             <file>./tests/Integration/Controllers/BookingCancellationHttpTest.php</file>
             <file>./tests/Integration/Controllers/BookingCancellationRaceHttpTest.php</file>
             <file>./tests/Integration/Controllers/BackofficeWriteHttpTest.php</file>
