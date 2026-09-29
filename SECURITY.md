@@ -87,7 +87,8 @@ apply provider scope before the limit. A calendar URL
 carrying an appointment hash may open an edit dialog only for an appointment
 within the staff member's provider scope when the current role may view the
 accessible customer. Calendar data requests use that current role for provider
-scope and appointment-view permission as well. Both the initial customer list and the edit
+scope, appointment-view permission, and private blocked-period notes as well.
+Both the initial customer list and the edit
 dialog use UI-specific read projections; write allowlists do not determine the
 fields sent to the browser. `CalendarCustomerAccessHttpTest` checks these
 boundaries with synthetic records and roles. It does not prove the safety of

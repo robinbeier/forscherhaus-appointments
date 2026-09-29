@@ -203,7 +203,18 @@ final class CalendarCustomerAccessHttpTest extends TestCase
             $fixture->serviceId,
             $fixture->run . '-actor-provider',
         );
+        $blockedPeriodId = 0;
         try {
+            $blockedStart = date('Y-m-d 12:00:00', strtotime('+14 days'));
+            self::assertTrue(
+                get_instance()->db->insert('blocked_periods', [
+                    'name' => $fixture->run . '-private-block',
+                    'start_datetime' => $blockedStart,
+                    'end_datetime' => date('Y-m-d 13:00:00', strtotime('+14 days')),
+                    'notes' => $fixture->run . '-private-block-notes',
+                ]),
+            );
+            $blockedPeriodId = (int) get_instance()->db->insert_id();
             self::assertTrue(
                 get_instance()->db->insert('services_providers', [
                     'id_users' => $fixture->actorId,
@@ -236,6 +247,14 @@ final class CalendarCustomerAccessHttpTest extends TestCase
                 foreach ($response['appointments'] ?? [] as $appointment) {
                     self::assertSame($fixture->actorId, (int) ($appointment['id_users_provider'] ?? 0), $path);
                 }
+                $blockedPeriods = array_values(
+                    array_filter(
+                        $response['blocked_periods'] ?? [],
+                        static fn(array $period): bool => (int) ($period['id'] ?? 0) === $blockedPeriodId,
+                    ),
+                );
+                self::assertCount(1, $blockedPeriods, $path);
+                self::assertArrayNotHasKey('notes', $blockedPeriods[0], $path);
             }
         } finally {
             get_instance()->db->update('users', ['id_roles' => $adminRoleId], ['id' => $fixture->actorId]);
@@ -243,6 +262,15 @@ final class CalendarCustomerAccessHttpTest extends TestCase
                 'id_users' => $fixture->actorId,
                 'id_services' => $fixture->serviceId,
             ]);
+            if ($blockedPeriodId > 0) {
+                get_instance()->db->delete('blocked_periods', ['id' => $blockedPeriodId]);
+                self::assertSame(
+                    0,
+                    get_instance()
+                        ->db->get_where('blocked_periods', ['id' => $blockedPeriodId])
+                        ->num_rows(),
+                );
+            }
         }
     }
 

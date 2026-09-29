@@ -939,7 +939,7 @@ class Calendar extends EA_Controller
             unset($unavailability);
 
             // Add blocked periods to the response.
-            $response['blocked_periods'] = $this->calendarBlockedPeriods($range_start_date, $range_end_date);
+            $response['blocked_periods'] = $this->calendarBlockedPeriods($range_start_date, $range_end_date, $user_id);
 
             json_response($response);
         } catch (Throwable $e) {
@@ -1110,7 +1110,7 @@ class Calendar extends EA_Controller
             unset($unavailability);
 
             // Add blocked periods to the response.
-            $response['blocked_periods'] = $this->calendarBlockedPeriods($range_start_date, $range_end_date);
+            $response['blocked_periods'] = $this->calendarBlockedPeriods($range_start_date, $range_end_date, $user_id);
 
             json_response($response);
         } catch (Throwable $e) {
@@ -1130,11 +1130,11 @@ class Calendar extends EA_Controller
     }
 
     /** Calendar visibility does not grant access to private blocked-period notes. */
-    private function calendarBlockedPeriods(string $startDate, string $endDate): array
+    private function calendarBlockedPeriods(string $startDate, string $endDate, int $userId): array
     {
         $periods = $this->blocked_periods_model->get_for_period($startDate, $endDate);
 
-        if (cannot('view', PRIV_BLOCKED_PERIODS)) {
+        if (cannot('view', PRIV_BLOCKED_PERIODS, $userId)) {
             foreach ($periods as &$period) {
                 unset($period['notes']);
             }
