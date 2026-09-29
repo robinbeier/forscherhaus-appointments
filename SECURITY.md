@@ -74,6 +74,13 @@ authority. `RescheduleCacheHttpTest` disables PHP's session cache limiter and
 checks valid, locked, and unknown hashes; it does not prove downstream cache
 behavior.
 
+The public reschedule response exposes only the appointment fields needed by
+the booking UI and cancellation form. Keep this read projection separate from
+the appointment write allowlist: the page needs the existing hash, but a caller
+must not supply a hash for saving. `RescheduleMethodHttpTest` checks the rendered
+projection and its authority/customer-token binding with synthetic data; it
+does not establish who obtained a valid management link.
+
 External Google and Outlook calendar links must carry only event details needed
 to create the appointment. Do not put the reschedule capability or customer and
 provider email addresses into third-party URL parameters. The confirmation page,
