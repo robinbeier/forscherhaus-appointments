@@ -20,6 +20,39 @@
  */
 class Calendar extends EA_Controller
 {
+    private const CUSTOMER_READ_FIELDS = [
+        'id',
+        'first_name',
+        'last_name',
+        'email',
+        'phone_number',
+        'address',
+        'city',
+        'zip_code',
+        'language',
+        'timezone',
+        'notes',
+        'custom_field_1',
+        'custom_field_2',
+        'custom_field_3',
+        'custom_field_4',
+        'custom_field_5',
+    ];
+
+    private const APPOINTMENT_READ_FIELDS = [
+        'id',
+        'start_datetime',
+        'end_datetime',
+        'location',
+        'notes',
+        'color',
+        'status',
+        'id_users_provider',
+        'id_users_customer',
+        'id_services',
+        'customer',
+    ];
+
     public array $allowed_customer_fields = [
         'id',
         'first_name',
@@ -82,6 +115,23 @@ class Calendar extends EA_Controller
         $this->load->library('timezones');
     }
 
+    private function currentCalendarReadRole(int $user_id): string
+    {
+        if ($user_id <= 0) {
+            throw new RuntimeException('You do not have the required permissions for this task.', 403);
+        }
+
+        $role_id = (int) $this->users_model->value($user_id, 'id_roles');
+        $role_slug = (string) $this->roles_model->value($role_id, 'slug');
+        $privileges = $this->roles_model->get_permissions_by_slug($role_slug);
+
+        if (empty($privileges[PRIV_APPOINTMENTS]['view'])) {
+            throw new RuntimeException('You do not have the required permissions for this task.', 403);
+        }
+
+        return $role_slug;
+    }
+
     /**
      * Render the calendar page and display the selected appointment.
      *
@@ -111,19 +161,21 @@ class Calendar extends EA_Controller
 
         $user_id = session('user_id');
 
-        if (cannot('view', PRIV_APPOINTMENTS)) {
-            if ($user_id) {
-                abort(403, 'Forbidden');
-            }
-
+        if (!$user_id) {
             redirect('login');
 
             return;
         }
 
-        $role_slug = session('role_slug');
-
         $user = $this->users_model->find($user_id);
+        $role_slug = $this->roles_model->value((int) $user['id_roles'], 'slug');
+        $privileges = $this->roles_model->get_permissions_by_slug($role_slug);
+
+        if (empty($privileges[PRIV_APPOINTMENTS]['view'])) {
+            abort(403, 'Forbidden');
+
+            return;
+        }
 
         $secretary_providers = [];
 
@@ -141,11 +193,33 @@ class Calendar extends EA_Controller
             if ($appointment_hash !== '' && !empty($occurrences)) {
                 $edit_appointment = $occurrences[0];
 
+                $provider_id = (int) ($edit_appointment['id_users_provider'] ?? 0);
+                $customer_id = (int) ($edit_appointment['id_users_customer'] ?? 0);
+                $provider_in_scope =
+                    $role_slug === DB_SLUG_ADMIN ||
+                    ($role_slug === DB_SLUG_PROVIDER && $provider_id === (int) $user_id) ||
+                    ($role_slug === DB_SLUG_SECRETARY &&
+                        in_array($provider_id, array_map('intval', $secretary_providers), true));
+
+                if (
+                    !$provider_in_scope ||
+                    !$customer_id ||
+                    empty($privileges[PRIV_CUSTOMERS]['view']) ||
+                    !$this->permissions->has_customer_access((int) $user_id, $customer_id)
+                ) {
+                    abort(403, 'Forbidden');
+
+                    return;
+                }
+
                 $this->appointments_model->load($edit_appointment, ['customer']);
+
+                $customer = $edit_appointment['customer'];
+                $this->customers_model->only($customer, self::CUSTOMER_READ_FIELDS);
+                $edit_appointment['customer'] = $customer;
+                $this->appointments_model->only($edit_appointment, self::APPOINTMENT_READ_FIELDS);
             }
         }
-
-        $privileges = $this->roles_model->get_permissions_by_slug($role_slug);
 
         $available_providers = $this->providers_model->get_available_providers();
 
@@ -169,6 +243,40 @@ class Calendar extends EA_Controller
 
         $available_services = $this->services_model->get_available_services();
 
+        $recent_customers = [];
+
+        if (!empty($privileges[PRIV_CUSTOMERS]['view'])) {
+            if ($role_slug !== DB_SLUG_ADMIN && setting('limit_customer_access')) {
+                $provider_ids = match ($role_slug) {
+                    DB_SLUG_PROVIDER => [(int) $user_id],
+                    DB_SLUG_SECRETARY => array_map('intval', $secretary_providers),
+                    default => [],
+                };
+                $customer_role_id = $this->customers_model->get_customer_role_id();
+                $customers = $provider_ids
+                    ? $this->db
+                        ->distinct()
+                        ->select('users.*')
+                        ->from('users')
+                        ->join('appointments', 'appointments.id_users_customer = users.id')
+                        ->where('users.id_roles', $customer_role_id)
+                        ->where_in('appointments.id_users_provider', $provider_ids)
+                        ->order_by('users.update_datetime', 'DESC')
+                        ->limit(50)
+                        ->get()
+                        ->result_array()
+                    : [];
+            } else {
+                $customers = $this->customers_model->get(null, 50, null, 'update_datetime DESC');
+            }
+
+            foreach ($customers as $customer) {
+                $customer['id'] = (int) $customer['id'];
+                $this->customers_model->only($customer, self::CUSTOMER_READ_FIELDS);
+                $recent_customers[] = $customer;
+            }
+        }
+
         $calendar_view_request = $this->calendarRequestDtoFactory()->buildViewRequestDto(
             $user['settings']['calendar_view'],
         );
@@ -190,7 +298,7 @@ class Calendar extends EA_Controller
             'available_services' => $available_services,
             'secretary_providers' => $secretary_providers,
             'edit_appointment' => $edit_appointment,
-            'customers' => $this->customers_model->get(null, 50, null, 'update_datetime DESC'),
+            'customers' => $recent_customers,
             'default_language' => setting('default_language'),
             'default_timezone' => setting('default_timezone'),
         ]);
@@ -203,6 +311,9 @@ class Calendar extends EA_Controller
             'timezones' => $this->timezones->to_array(),
             'grouped_timezones' => $this->timezones->to_grouped_array(),
             'privileges' => $privileges,
+            'role_slug' => $role_slug,
+            'calendar_can_add' => !empty($privileges[PRIV_APPOINTMENTS]['add']),
+            'calendar_can_edit_users' => !empty($privileges[PRIV_USERS]['edit']),
             'calendar_view' => $calendar_view,
             'available_providers' => $available_providers,
             'available_services' => $available_services,
@@ -254,37 +365,40 @@ class Calendar extends EA_Controller
             }
 
             try {
+                $this->lock_calendar_update_parents($stored_appointment ?? [], $appointment_data, [
+                    $customer_data['id'] ?? null,
+                    (int) session('user_id'),
+                ]);
+
                 if ($manage_mode) {
                     if ($stored_appointment === null) {
                         throw new RuntimeException('The appointment state could not be loaded.');
                     }
 
-                    $this->lock_calendar_update_parents($stored_appointment, $appointment_data, [
-                        $customer_data['id'] ?? null,
-                    ]);
                     $locked_appointment = $this->lock_appointment((int) $appointment_data['id']);
 
-                    if (
-                        !$this->has_event_permissions((int) $locked_appointment['id_users_provider']) ||
-                        !$this->has_event_permissions((int) $appointment_data['id_users_provider'])
-                    ) {
+                    if (!$this->has_event_permissions((int) $locked_appointment['id_users_provider'])) {
                         throw new RuntimeException('You do not have the required permissions for this task.', 403);
                     }
 
                     if ($this->appointment_parent_ids_changed($stored_appointment, $locked_appointment)) {
                         throw new RuntimeException(lang('requested_hour_is_unavailable'));
                     }
+                }
 
-                    foreach (
-                        [$customer_data['id'] ?? null, $appointment_data['id_users_customer'] ?? null]
-                        as $customer_id
+                if (!$this->has_event_permissions((int) $appointment_data['id_users_provider'])) {
+                    throw new RuntimeException('You do not have the required permissions for this task.', 403);
+                }
+
+                foreach (
+                    [$customer_data['id'] ?? null, $appointment_data['id_users_customer'] ?? null]
+                    as $customer_id
+                ) {
+                    if (
+                        !empty($customer_id) &&
+                        !$this->permissions->has_customer_access((int) session('user_id'), $customer_id)
                     ) {
-                        if (
-                            !empty($customer_id) &&
-                            !$this->permissions->has_customer_access((int) session('user_id'), $customer_id)
-                        ) {
-                            throw new RuntimeException('You do not have the required permissions for this task.', 403);
-                        }
+                        throw new RuntimeException('You do not have the required permissions for this task.', 403);
                     }
                 }
 
@@ -293,8 +407,8 @@ class Calendar extends EA_Controller
                     $customer = $customer_data;
 
                     $required_permissions = !empty($customer['id'])
-                        ? can('edit', PRIV_CUSTOMERS)
-                        : can('add', PRIV_CUSTOMERS);
+                        ? $this->currentCalendarCan('edit', PRIV_CUSTOMERS)
+                        : $this->currentCalendarCan('add', PRIV_CUSTOMERS);
 
                     if (!$required_permissions) {
                         throw new RuntimeException('You do not have the required permissions for this task.', 403);
@@ -312,8 +426,8 @@ class Calendar extends EA_Controller
                     $appointment = $appointment_data;
 
                     $required_permissions = !empty($appointment['id'])
-                        ? can('edit', PRIV_APPOINTMENTS)
-                        : can('add', PRIV_APPOINTMENTS);
+                        ? $this->currentCalendarCan('edit', PRIV_APPOINTMENTS)
+                        : $this->currentCalendarCan('add', PRIV_APPOINTMENTS);
 
                     if (!$required_permissions) {
                         throw new RuntimeException('You do not have the required permissions for this task.', 403);
@@ -401,16 +515,29 @@ class Calendar extends EA_Controller
     private function has_event_permissions(int $provider_id): bool
     {
         $user_id = (int) session('user_id');
-        $role_slug = session('role_slug');
-
-        if (
-            $role_slug === DB_SLUG_SECRETARY &&
-            !$this->secretaries_model->is_provider_supported($user_id, $provider_id)
-        ) {
+        if ($user_id <= 0) {
             return false;
         }
 
-        return $role_slug !== DB_SLUG_PROVIDER || $user_id === $provider_id;
+        $CI = &get_instance();
+        $CI->load->model('users_model');
+        $CI->load->model('roles_model');
+        $role_id = (int) $CI->users_model->value($user_id, 'id_roles');
+        $role_slug = (string) $CI->roles_model->value($role_id, 'slug');
+
+        return match ($role_slug) {
+            DB_SLUG_ADMIN => true,
+            DB_SLUG_PROVIDER => $user_id === $provider_id,
+            DB_SLUG_SECRETARY => $this->secretaries_model->is_provider_supported($user_id, $provider_id),
+            default => false,
+        };
+    }
+
+    private function currentCalendarCan(string $action, string $resource): bool
+    {
+        $user_id = (int) session('user_id');
+
+        return $user_id > 0 && can($action, $resource, $user_id);
     }
 
     protected function lock_calendar_update_parents(
@@ -462,8 +589,8 @@ class Calendar extends EA_Controller
     public function delete_appointment(): void
     {
         try {
-            if (cannot('delete', 'appointments')) {
-                throw new RuntimeException('You do not have the required permissions for this task.');
+            if (!$this->currentCalendarCan('delete', PRIV_APPOINTMENTS)) {
+                throw new RuntimeException('You do not have the required permissions for this task.', 403);
             }
 
             $request_dto = $this->calendarRequestDtoFactory()->buildDeleteAppointmentRequestDto();
@@ -478,18 +605,53 @@ class Calendar extends EA_Controller
 
             $this->check_event_permissions((int) $appointment['id_users_provider']);
 
-            $provider = $this->providers_model->find($appointment['id_users_provider']);
-            $customer = $this->customers_model->find($appointment['id_users_customer']);
-            $service = $this->services_model->find($appointment['id_services']);
+            if (!$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start appointment transaction.');
+            }
 
-            // Delete appointment record from the database.
-            $this->appointments_model->delete($appointment_id);
+            try {
+                $this->lock_calendar_update_parents($appointment, [], [(int) session('user_id')]);
+                $locked_appointment = $this->lock_appointment($appointment_id);
+
+                if ($this->appointment_parent_ids_changed($appointment, $locked_appointment)) {
+                    throw new RuntimeException('You do not have the required permissions for this task.', 403);
+                }
+
+                if (
+                    !$this->currentCalendarCan('delete', PRIV_APPOINTMENTS) ||
+                    !$this->has_event_permissions((int) $locked_appointment['id_users_provider'])
+                ) {
+                    throw new RuntimeException('You do not have the required permissions for this task.', 403);
+                }
+
+                $this->providers_model->find($locked_appointment['id_users_provider']);
+                $this->customers_model->find($locked_appointment['id_users_customer']);
+                $this->services_model->find($locked_appointment['id_services']);
+
+                // The model's nested transaction retains the parent and appointment locks.
+                $this->appointments_model->delete($appointment_id);
+
+                if (!$this->db->trans_commit()) {
+                    throw new RuntimeException('Could not commit appointment transaction.');
+                }
+            } catch (Throwable $e) {
+                $this->db->trans_rollback();
+
+                throw $e;
+            }
 
             json_response([
                 'success' => true,
             ]);
         } catch (Throwable $e) {
-            json_exception($e);
+            if (
+                $e->getCode() === 403 &&
+                $e->getMessage() === 'You do not have the required permissions for this task.'
+            ) {
+                json_response(['success' => false, 'message' => $e->getMessage()], 403);
+            } else {
+                json_exception($e);
+            }
         }
     }
 
@@ -519,8 +681,8 @@ class Calendar extends EA_Controller
             ]);
 
             $required_permissions = empty($unavailability['id'])
-                ? can('add', PRIV_APPOINTMENTS)
-                : can('edit', PRIV_APPOINTMENTS);
+                ? $this->currentCalendarCan('add', PRIV_APPOINTMENTS)
+                : $this->currentCalendarCan('edit', PRIV_APPOINTMENTS);
 
             if (!$required_permissions) {
                 throw new RuntimeException('You do not have the required permissions for this task.');
@@ -597,7 +759,7 @@ class Calendar extends EA_Controller
     public function delete_unavailability(): void
     {
         try {
-            if (cannot('delete', PRIV_APPOINTMENTS)) {
+            if (!$this->currentCalendarCan('delete', PRIV_APPOINTMENTS)) {
                 throw new RuntimeException('You do not have the required permissions for this task.');
             }
 
@@ -685,7 +847,7 @@ class Calendar extends EA_Controller
     public function save_working_plan_exception(): void
     {
         try {
-            if (cannot('edit', PRIV_USERS)) {
+            if (!$this->currentCalendarCan('edit', PRIV_USERS)) {
                 throw new RuntimeException('You do not have the required permissions for this task.');
             }
 
@@ -720,7 +882,7 @@ class Calendar extends EA_Controller
     public function delete_working_plan_exception(): void
     {
         try {
-            if (cannot('edit', PRIV_USERS)) {
+            if (!$this->currentCalendarCan('edit', PRIV_USERS)) {
                 throw new RuntimeException('You do not have the required permissions for this task.');
             }
 
@@ -746,11 +908,8 @@ class Calendar extends EA_Controller
     public function get_calendar_appointments_for_table_view(): void
     {
         try {
-            $required_permissions = can('view', PRIV_APPOINTMENTS);
-
-            if (!$required_permissions) {
-                throw new RuntimeException('You do not have the required permissions for this task.');
-            }
+            $user_id = (int) session('user_id');
+            $role_slug = $this->currentCalendarReadRole($user_id);
 
             $range_request = $this->calendarRequestDtoFactory()->buildRangeRequestDto();
             $range_start_date = (string) $range_request->startDate;
@@ -778,10 +937,6 @@ class Calendar extends EA_Controller
             }
 
             unset($appointment);
-
-            $user_id = session('user_id');
-
-            $role_slug = session('role_slug');
 
             // If the current user is a provider he must only see his own appointments.
             if ($role_slug === DB_SLUG_PROVIDER) {
@@ -832,7 +987,7 @@ class Calendar extends EA_Controller
             unset($unavailability);
 
             // Add blocked periods to the response.
-            $response['blocked_periods'] = $this->calendarBlockedPeriods($range_start_date, $range_end_date);
+            $response['blocked_periods'] = $this->calendarBlockedPeriods($range_start_date, $range_end_date, $user_id);
 
             json_response($response);
         } catch (Throwable $e) {
@@ -849,9 +1004,8 @@ class Calendar extends EA_Controller
     public function get_calendar_appointments(): void
     {
         try {
-            if (cannot('view', PRIV_APPOINTMENTS)) {
-                throw new RuntimeException('You do not have the required permissions for this task.');
-            }
+            $user_id = (int) session('user_id');
+            $role_slug = $this->currentCalendarReadRole($user_id);
 
             $filter_request = $this->calendarRequestDtoFactory()->buildFilterRequestDto();
             $record_id = $filter_request->recordId;
@@ -949,10 +1103,6 @@ class Calendar extends EA_Controller
                 $response['unavailabilities'] = $this->unavailabilities_model->get($where_clause);
             }
 
-            $user_id = session('user_id');
-
-            $role_slug = session('role_slug');
-
             // If the current user is a provider he must only see his own appointments.
             if ($role_slug === DB_SLUG_PROVIDER) {
                 foreach ($response['appointments'] as $index => $appointment) {
@@ -1004,7 +1154,7 @@ class Calendar extends EA_Controller
             unset($unavailability);
 
             // Add blocked periods to the response.
-            $response['blocked_periods'] = $this->calendarBlockedPeriods($range_start_date, $range_end_date);
+            $response['blocked_periods'] = $this->calendarBlockedPeriods($range_start_date, $range_end_date, $user_id);
 
             json_response($response);
         } catch (Throwable $e) {
@@ -1024,11 +1174,11 @@ class Calendar extends EA_Controller
     }
 
     /** Calendar visibility does not grant access to private blocked-period notes. */
-    private function calendarBlockedPeriods(string $startDate, string $endDate): array
+    private function calendarBlockedPeriods(string $startDate, string $endDate, int $userId): array
     {
         $periods = $this->blocked_periods_model->get_for_period($startDate, $endDate);
 
-        if (cannot('view', PRIV_BLOCKED_PERIODS)) {
+        if (cannot('view', PRIV_BLOCKED_PERIODS, $userId)) {
             foreach ($periods as &$period) {
                 unset($period['notes']);
             }

@@ -81,6 +81,23 @@ must not supply a hash for saving. `RescheduleMethodHttpTest` checks the rendere
 projection and its authority/customer-token binding with synthetic data; it
 does not establish who obtained a valid management link.
 
+The authenticated calendar page may preload up to 50 recent customers the
+current staff member may view and access according to the persisted role;
+apply provider scope before the limit. A calendar URL
+carrying an appointment hash may open an edit dialog only for an appointment
+within the staff member's provider scope when the current role may view the
+accessible customer. Calendar data requests use that current role for provider
+scope, appointment-view permission, and private blocked-period notes as well.
+Calendar mutations recheck the persisted role and action permission, including
+the stored and requested provider, so a stale session role cannot retain write
+authority after reassignment. Appointment create, update, and delete hold the
+actor and affected parent rows while rechecking authority before mutation.
+Both the initial customer list and the edit
+dialog use UI-specific read projections; write allowlists do not determine the
+fields sent to the browser. `CalendarCustomerAccessHttpTest` checks these
+boundaries with synthetic records and roles. It does not prove the safety of
+real shared hashes or every other backoffice read endpoint.
+
 External Google and Outlook calendar links must carry only event details needed
 to create the appointment. Do not put the reschedule capability or customer and
 provider email addresses into third-party URL parameters. The confirmation page,

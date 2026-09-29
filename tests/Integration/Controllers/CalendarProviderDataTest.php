@@ -175,6 +175,8 @@ final class CalendarProviderDataTest extends TestCase
                 'providers_model',
                 'services_model',
                 'customers_model',
+                'users_model',
+                'roles_model',
             ]
             as $model
         ) {
@@ -194,6 +196,8 @@ final class CalendarProviderDataTest extends TestCase
         $controller->providers_model = $CI->providers_model;
         $controller->services_model = $CI->services_model;
         $controller->customers_model = $CI->customers_model;
+        $controller->users_model = $CI->users_model;
+        $controller->roles_model = $CI->roles_model;
 
         return $controller;
     }
@@ -209,7 +213,7 @@ final class CalendarProviderDataTest extends TestCase
             'customers_model',
             'appointments_model',
         ]);
-        $CI->load->library(['accounts', 'timezones']);
+        $CI->load->library(['accounts', 'timezones', 'permissions']);
 
         $controller = new class extends Calendar {
             public function __construct() {}
@@ -228,6 +232,7 @@ final class CalendarProviderDataTest extends TestCase
         $controller->appointments_model = $CI->appointments_model;
         $controller->accounts = $CI->accounts;
         $controller->timezones = $CI->timezones;
+        $controller->permissions = $CI->permissions;
 
         return $controller;
     }
