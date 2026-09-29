@@ -117,6 +117,10 @@ class Calendar extends EA_Controller
 
     private function currentCalendarReadRole(int $user_id): string
     {
+        if ($user_id <= 0) {
+            throw new RuntimeException('You do not have the required permissions for this task.', 403);
+        }
+
         $role_id = (int) $this->users_model->value($user_id, 'id_roles');
         $role_slug = (string) $this->roles_model->value($role_id, 'slug');
         $privileges = $this->roles_model->get_permissions_by_slug($role_slug);
@@ -157,11 +161,7 @@ class Calendar extends EA_Controller
 
         $user_id = session('user_id');
 
-        if (cannot('view', PRIV_APPOINTMENTS)) {
-            if ($user_id) {
-                abort(403, 'Forbidden');
-            }
-
+        if (!$user_id) {
             redirect('login');
 
             return;
@@ -311,6 +311,9 @@ class Calendar extends EA_Controller
             'timezones' => $this->timezones->to_array(),
             'grouped_timezones' => $this->timezones->to_grouped_array(),
             'privileges' => $privileges,
+            'role_slug' => $role_slug,
+            'calendar_can_add' => !empty($privileges[PRIV_APPOINTMENTS]['add']),
+            'calendar_can_edit_users' => !empty($privileges[PRIV_USERS]['edit']),
             'calendar_view' => $calendar_view,
             'available_providers' => $available_providers,
             'available_services' => $available_services,
@@ -905,12 +908,6 @@ class Calendar extends EA_Controller
     public function get_calendar_appointments_for_table_view(): void
     {
         try {
-            $required_permissions = can('view', PRIV_APPOINTMENTS);
-
-            if (!$required_permissions) {
-                throw new RuntimeException('You do not have the required permissions for this task.');
-            }
-
             $user_id = (int) session('user_id');
             $role_slug = $this->currentCalendarReadRole($user_id);
 
@@ -1007,10 +1004,6 @@ class Calendar extends EA_Controller
     public function get_calendar_appointments(): void
     {
         try {
-            if (cannot('view', PRIV_APPOINTMENTS)) {
-                throw new RuntimeException('You do not have the required permissions for this task.');
-            }
-
             $user_id = (int) session('user_id');
             $role_slug = $this->currentCalendarReadRole($user_id);
 

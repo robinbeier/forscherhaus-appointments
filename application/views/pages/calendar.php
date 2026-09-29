@@ -16,7 +16,7 @@
         </div>
 
         <div id="calendar-actions" class="col-md-9">
-            <?php if (can('add', PRIV_APPOINTMENTS)): ?>
+            <?php if (vars('calendar_can_add')): ?>
                 <div class="dropdown d-sm-inline-block">
                     <button class="btn btn-light" type="button" data-bs-toggle="dropdown">
                         <i class="fas fa-plus-square"></i>
@@ -34,7 +34,8 @@
                         </li>
                         <li>
                             <a class="dropdown-item" href="#"
-                               id="insert-working-plan-exception" <?= session('role_slug') !== DB_SLUG_ADMIN
+                               id="insert-working-plan-exception" <?= vars('role_slug') !== DB_SLUG_ADMIN ||
+                               !vars('calendar_can_edit_users')
                                    ? 'hidden'
                                    : '' ?>>
                                 <?= lang('working_plan_exception') ?>

@@ -120,6 +120,65 @@ final class CalendarCustomerAccessHttpTest extends TestCase
         }
     }
 
+    public function testPromotedNoViewSessionCanReadCalendarUsingPersistedRole(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $appointment = $fixture->appointment();
+        $originalRoleId = (int) get_instance()
+            ->db->get_where('users', ['id' => $fixture->providerId])
+            ->row('id_roles');
+        $customerRole = get_instance()
+            ->db->get_where('roles', ['slug' => DB_SLUG_CUSTOMER])
+            ->row_array();
+        $adminRole = get_instance()
+            ->db->get_where('roles', ['slug' => DB_SLUG_ADMIN])
+            ->row_array();
+        self::assertNotEmpty($customerRole);
+        self::assertNotEmpty($adminRole);
+        self::assertSame(0, (int) $customerRole['appointments'] & PRIV_VIEW);
+
+        try {
+            self::assertTrue(
+                get_instance()->db->update(
+                    'users',
+                    ['id_roles' => (int) $customerRole['id']],
+                    ['id' => $fixture->providerId],
+                ),
+            );
+            $staleCustomer = $this->login($this->credentials['provider_username'], $this->credentials['password']);
+            self::assertSame(403, $staleCustomer->get('calendar/index')->statusCode);
+
+            self::assertTrue(
+                get_instance()->db->update(
+                    'users',
+                    ['id_roles' => (int) $adminRole['id']],
+                    ['id' => $fixture->providerId],
+                ),
+            );
+            $promoted = $staleCustomer->get('calendar/index');
+            self::assertSame(200, $promoted->statusCode, $promoted->body);
+            self::assertStringContainsString('id="insert-appointment"', $promoted->body);
+            self::assertStringNotContainsString('id="insert-working-plan-exception" hidden', $promoted->body);
+
+            foreach (
+                ['calendar/get_calendar_appointments', 'calendar/get_calendar_appointments_for_table_view']
+                as $path
+            ) {
+                $response = $this->calendarRead($staleCustomer, $path);
+                $appointmentIds = array_map(
+                    static fn(array $row): int => (int) ($row['id'] ?? 0),
+                    $response['appointments'] ?? [],
+                );
+                self::assertContains((int) $appointment['id'], $appointmentIds, $path);
+            }
+        } finally {
+            self::assertTrue(
+                get_instance()->db->update('users', ['id_roles' => $originalRoleId], ['id' => $fixture->providerId]),
+            );
+        }
+    }
+
     public function testLimitedProviderSeesOnlyPermittedCustomersAndAppointmentHashes(): void
     {
         $fixture = $this->fixture;
@@ -185,6 +244,8 @@ final class CalendarCustomerAccessHttpTest extends TestCase
         $admin = $this->login($this->credentials['admin_username'], $this->credentials['password']);
         $adminInitial = $admin->get('calendar/index');
         self::assertSame(200, $adminInitial->statusCode, $adminInitial->body);
+        self::assertStringContainsString('id="insert-appointment"', $adminInitial->body);
+        self::assertStringNotContainsString('id="insert-working-plan-exception" hidden', $adminInitial->body);
         self::assertStringContainsString($this->customerEmail($foreignCustomer), $adminInitial->body);
         $adminForeign = $admin->get('calendar/index/' . rawurlencode((string) $foreignAppointment['hash']));
         self::assertSame(200, $adminForeign->statusCode, $adminForeign->body);
@@ -197,6 +258,15 @@ final class CalendarCustomerAccessHttpTest extends TestCase
         $providerRoleId = (int) get_instance()
             ->db->get_where('users', ['id' => $fixture->providerId])
             ->row('id_roles');
+        $providerRole = get_instance()
+            ->db->get_where('roles', ['id' => $providerRoleId])
+            ->row_array();
+        self::assertNotEmpty($providerRole);
+        $this->providerRolePermissionSnapshot = [
+            'id' => $providerRoleId,
+            'appointments' => (int) $providerRole['appointments'],
+            'customers' => (int) $providerRole['customers'],
+        ];
         $actorAppointment = $this->createForeignAppointment(
             $fixture->actorId,
             $fixture->customerId,
@@ -224,8 +294,17 @@ final class CalendarCustomerAccessHttpTest extends TestCase
             self::assertTrue(
                 get_instance()->db->update('users', ['id_roles' => $providerRoleId], ['id' => $fixture->actorId]),
             );
+            self::assertTrue(
+                get_instance()->db->update(
+                    'roles',
+                    ['appointments' => $this->providerRolePermissionSnapshot['appointments'] & ~PRIV_ADD],
+                    ['id' => $providerRoleId],
+                ),
+            );
             $staleAdmin = $admin->get('calendar/index');
             self::assertSame(200, $staleAdmin->statusCode, $staleAdmin->body);
+            self::assertStringNotContainsString('id="insert-appointment"', $staleAdmin->body);
+            self::assertStringNotContainsString('id="insert-working-plan-exception"', $staleAdmin->body);
             self::assertStringNotContainsString($this->customerEmail($foreignCustomer), $staleAdmin->body);
             $staleAdminVars = $this->scriptVars($staleAdmin->body);
             $availableProviderIds = array_map(
@@ -233,6 +312,18 @@ final class CalendarCustomerAccessHttpTest extends TestCase
                 $staleAdminVars['available_providers'] ?? [],
             );
             self::assertSame([$fixture->actorId], $availableProviderIds);
+
+            self::assertTrue(
+                get_instance()->db->update(
+                    'roles',
+                    ['appointments' => $this->providerRolePermissionSnapshot['appointments']],
+                    ['id' => $providerRoleId],
+                ),
+            );
+            $providerWithAdd = $admin->get('calendar/index');
+            self::assertSame(200, $providerWithAdd->statusCode, $providerWithAdd->body);
+            self::assertStringContainsString('id="insert-appointment"', $providerWithAdd->body);
+            self::assertStringContainsString('id="insert-working-plan-exception" hidden', $providerWithAdd->body);
 
             // The browser session still carries the former admin role. A current
             // provider role must nevertheless prevent mutation of another
@@ -293,6 +384,11 @@ final class CalendarCustomerAccessHttpTest extends TestCase
             self::assertTrue(
                 get_instance()->db->update('users', ['id_roles' => $adminRoleId], ['id' => $fixture->providerId]),
             );
+
+            $promoted = $staleProvider->get('calendar/index');
+            self::assertSame(200, $promoted->statusCode, $promoted->body);
+            self::assertStringContainsString('id="insert-appointment"', $promoted->body);
+            self::assertStringNotContainsString('id="insert-working-plan-exception" hidden', $promoted->body);
 
             // The protected mutation follows the role change while this
             // session still carries the provider role.
