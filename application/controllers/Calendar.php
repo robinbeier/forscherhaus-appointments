@@ -20,6 +20,39 @@
  */
 class Calendar extends EA_Controller
 {
+    private const CUSTOMER_READ_FIELDS = [
+        'id',
+        'first_name',
+        'last_name',
+        'email',
+        'phone_number',
+        'address',
+        'city',
+        'zip_code',
+        'language',
+        'timezone',
+        'notes',
+        'custom_field_1',
+        'custom_field_2',
+        'custom_field_3',
+        'custom_field_4',
+        'custom_field_5',
+    ];
+
+    private const APPOINTMENT_READ_FIELDS = [
+        'id',
+        'start_datetime',
+        'end_datetime',
+        'location',
+        'notes',
+        'color',
+        'status',
+        'id_users_provider',
+        'id_users_customer',
+        'id_services',
+        'customer',
+    ];
+
     public array $allowed_customer_fields = [
         'id',
         'first_name',
@@ -141,7 +174,30 @@ class Calendar extends EA_Controller
             if ($appointment_hash !== '' && !empty($occurrences)) {
                 $edit_appointment = $occurrences[0];
 
+                $provider_id = (int) ($edit_appointment['id_users_provider'] ?? 0);
+                $customer_id = (int) ($edit_appointment['id_users_customer'] ?? 0);
+                $provider_in_scope =
+                    $role_slug === DB_SLUG_ADMIN ||
+                    ($role_slug === DB_SLUG_PROVIDER && $provider_id === (int) $user_id) ||
+                    ($role_slug === DB_SLUG_SECRETARY &&
+                        in_array($provider_id, array_map('intval', $secretary_providers), true));
+
+                if (
+                    !$provider_in_scope ||
+                    !$customer_id ||
+                    !$this->permissions->has_customer_access((int) $user_id, $customer_id)
+                ) {
+                    abort(403, 'Forbidden');
+
+                    return;
+                }
+
                 $this->appointments_model->load($edit_appointment, ['customer']);
+
+                $customer = $edit_appointment['customer'];
+                $this->customers_model->only($customer, self::CUSTOMER_READ_FIELDS);
+                $edit_appointment['customer'] = $customer;
+                $this->appointments_model->only($edit_appointment, self::APPOINTMENT_READ_FIELDS);
             }
         }
 
@@ -169,6 +225,19 @@ class Calendar extends EA_Controller
 
         $available_services = $this->services_model->get_available_services();
 
+        $recent_customers = [];
+
+        if (!cannot('view', PRIV_CUSTOMERS)) {
+            foreach ($this->customers_model->get(null, 50, null, 'update_datetime DESC') as $customer) {
+                if (!$this->permissions->has_customer_access((int) $user_id, (int) $customer['id'])) {
+                    continue;
+                }
+
+                $this->customers_model->only($customer, self::CUSTOMER_READ_FIELDS);
+                $recent_customers[] = $customer;
+            }
+        }
+
         $calendar_view_request = $this->calendarRequestDtoFactory()->buildViewRequestDto(
             $user['settings']['calendar_view'],
         );
@@ -190,7 +259,7 @@ class Calendar extends EA_Controller
             'available_services' => $available_services,
             'secretary_providers' => $secretary_providers,
             'edit_appointment' => $edit_appointment,
-            'customers' => $this->customers_model->get(null, 50, null, 'update_datetime DESC'),
+            'customers' => $recent_customers,
             'default_language' => setting('default_language'),
             'default_timezone' => setting('default_timezone'),
         ]);
