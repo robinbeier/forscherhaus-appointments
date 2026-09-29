@@ -106,6 +106,67 @@ final class RescheduleMethodHttpTest extends TestCase
         }
     }
 
+    public function testGetRescheduleProjectsOnlyThePublicAppointmentFields(): void
+    {
+        $fixture = $this->fixture;
+        $client = $this->server?->client();
+        self::assertNotNull($fixture);
+        self::assertNotNull($client);
+
+        $appointment = $fixture->appointment();
+        $appointmentId = (int) $appointment['id'];
+        $db = get_instance()->db;
+        $before = $fixture->row('appointments', $appointmentId);
+        $internal = [
+            'id_google_calendar' => $fixture->run . '_google_internal',
+            'id_caldav_calendar' => $fixture->run . '_caldav_internal',
+        ];
+        $withInternal = array_replace($before, $internal);
+
+        $this->cacheBeforeTest = $this->ownedCacheFiles();
+
+        try {
+            self::assertTrue($db->where('id', $appointmentId)->update('appointments', $internal));
+
+            $page = $client->get('booking/reschedule/' . rawurlencode((string) $appointment['hash']));
+
+            self::assertSame(200, $page->statusCode, $page->body);
+            $vars = $this->scriptVars($page->body);
+            self::assertIsArray($vars['appointment_data'] ?? null);
+
+            $projected = $vars['appointment_data'];
+            $projectedKeys = array_keys($projected);
+            sort($projectedKeys);
+            self::assertSame(
+                ['hash', 'id', 'id_services', 'id_users_provider', 'notes', 'start_datetime'],
+                $projectedKeys,
+                'The public reschedule page must receive only the fields used by its UI.',
+            );
+            self::assertSame($appointmentId, (int) $projected['id']);
+            self::assertSame((string) $appointment['hash'], $projected['hash']);
+            self::assertSame((int) $appointment['id_services'], (int) $projected['id_services']);
+            self::assertSame((int) $appointment['id_users_provider'], (int) $projected['id_users_provider']);
+            self::assertSame((string) $appointment['start_datetime'], $projected['start_datetime']);
+            self::assertSame((string) $appointment['notes'], $projected['notes']);
+            self::assertArrayNotHasKey('id_google_calendar', $projected);
+            self::assertArrayNotHasKey('id_caldav_calendar', $projected);
+            self::assertStringNotContainsString($internal['id_google_calendar'], $page->body);
+            self::assertStringNotContainsString($internal['id_caldav_calendar'], $page->body);
+
+            $customerToken = (string) ($vars['customer_token'] ?? '');
+            self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/', $customerToken);
+            self::assertSame($fixture->customerId, $this->customerTokenValue($customerToken));
+
+            $authority = $this->authorityRow($appointmentId);
+            self::assertSame($appointmentId, (int) ($authority['appointment_id'] ?? 0));
+            self::assertSame($fixture->customerId, (int) ($authority['customer_id'] ?? 0));
+            self::assertSame($withInternal, $fixture->row('appointments', $appointmentId));
+        } finally {
+            self::assertTrue($db->where('id', $appointmentId)->update('appointments', $before));
+            self::assertSame($before, $fixture->row('appointments', $appointmentId));
+        }
+    }
+
     /** @return array<string, mixed> */
     private function authorityRow(int $appointmentId): array
     {

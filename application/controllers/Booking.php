@@ -262,6 +262,17 @@ class Booking extends EA_Controller
             $appointment = $results[0];
             $customer = $this->customers_model->find($appointment['id_users_customer']);
 
+            // Keep the public read projection separate from the write allowlist:
+            // the cancellation form needs the hash, but callers must not save one.
+            $this->appointments_model->only($appointment, [
+                'id',
+                'hash',
+                'start_datetime',
+                'notes',
+                'id_users_provider',
+                'id_services',
+            ]);
+
             // Only expose the fields required by the public booking page.
             $this->providers_model->only($provider, $this->allowed_provider_fields);
             $this->customers_model->only($customer, $this->allowed_customer_fields);
