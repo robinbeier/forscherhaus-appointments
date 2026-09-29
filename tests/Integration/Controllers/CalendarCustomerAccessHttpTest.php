@@ -547,6 +547,7 @@ final class CalendarCustomerAccessHttpTest extends TestCase
         $appointment = $fixture->appointment();
         $appointmentInternal = $fixture->run . '-appointment-internal';
         $customerInternal = $fixture->run . '-customer-internal';
+        $customerState = $fixture->run . '-region';
         self::assertTrue(
             get_instance()->db->update(
                 'appointments',
@@ -559,7 +560,11 @@ final class CalendarCustomerAccessHttpTest extends TestCase
             ),
         );
         self::assertTrue(
-            get_instance()->db->update('users', ['ldap_dn' => $customerInternal], ['id' => $fixture->customerId]),
+            get_instance()->db->update(
+                'users',
+                ['ldap_dn' => $customerInternal, 'state' => $customerState],
+                ['id' => $fixture->customerId],
+            ),
         );
         $client = $this->login($this->credentials['provider_username'], $this->credentials['password']);
 
@@ -570,6 +575,7 @@ final class CalendarCustomerAccessHttpTest extends TestCase
             $this->assertCalendarUiAppointmentProjection($row, $path);
             self::assertSame((int) $appointment['id'], (int) $row['id'], $path);
             self::assertSame($this->customerEmail($fixture->customerId), $row['customer']['email'], $path);
+            self::assertSame($customerState, $row['customer']['state'], $path);
             self::assertStringNotContainsString($appointmentInternal, json_encode($row, JSON_THROW_ON_ERROR), $path);
             self::assertStringNotContainsString($customerInternal, json_encode($row, JSON_THROW_ON_ERROR), $path);
         }
@@ -906,7 +912,7 @@ final class CalendarCustomerAccessHttpTest extends TestCase
     }
 
     /** @param array<string, mixed> $customer */
-    private function assertCustomerReadKeys(array $customer): void
+    private function assertCustomerReadKeys(array $customer, bool $includeState = false): void
     {
         $expected = [
             'id',
@@ -927,6 +933,9 @@ final class CalendarCustomerAccessHttpTest extends TestCase
             'custom_field_5',
         ];
         $actual = array_keys($customer);
+        if ($includeState) {
+            $expected[] = 'state';
+        }
         sort($expected);
         sort($actual);
         self::assertSame($expected, $actual);
@@ -956,7 +965,7 @@ final class CalendarCustomerAccessHttpTest extends TestCase
         sort($actual);
         self::assertSame($expected, $actual, $path);
         self::assertIsArray($appointment['customer'] ?? null, $path);
-        $this->assertCustomerReadKeys($appointment['customer']);
+        $this->assertCustomerReadKeys($appointment['customer'], true);
         self::assertIsArray($appointment['provider'] ?? null, $path);
         $providerKeys = array_keys($appointment['provider']);
         sort($providerKeys);

@@ -1201,7 +1201,7 @@ class Calendar extends EA_Controller
 
         if ($can_view_customers) {
             $customer = $this->customers_model->find((int) $appointment['id_users_customer']);
-            $this->customers_model->only($customer, self::CUSTOMER_READ_FIELDS);
+            $this->customers_model->only($customer, [...self::CUSTOMER_READ_FIELDS, 'state']);
             $appointment['customer'] = $customer;
         } else {
             $appointment['customer'] = [];
