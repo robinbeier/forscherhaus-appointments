@@ -9,6 +9,7 @@
             <file>./tests/Integration/CustomersApiWriteProbeTest.php</file>
             <file>./tests/Integration/Controllers/CustomersApiHttpReadTest.php</file>
             <file>./tests/Integration/Controllers/CustomersReadProjectionHttpTest.php</file>
+            <file>./tests/Integration/Controllers/ProvidersReadProjectionHttpTest.php</file>
             <file>./tests/Integration/StaffApiPutProbeTest.php</file>
             <file>./tests/Integration/SessionLifecycleTest.php</file>
             <file>./tests/Integration/SecretariesApiAliasProbeTest.php</file>

@@ -20,6 +20,30 @@
  */
 class Providers extends EA_Controller
 {
+    private const READ_FIELDS = [
+        'id',
+        'first_name',
+        'last_name',
+        'email',
+        'mobile_number',
+        'phone_number',
+        'address',
+        'city',
+        'state',
+        'zip_code',
+        'notes',
+        'room',
+        'class_size_default',
+        'timezone',
+        'language',
+        'is_private',
+        'ldap_dn',
+        'settings',
+        'services',
+    ];
+
+    private const READ_SETTING_FIELDS = ['username', 'working_plan', 'working_plan_exceptions', 'calendar_view'];
+
     public array $allowed_provider_fields = [
         'id',
         'first_name',
@@ -91,7 +115,7 @@ class Providers extends EA_Controller
 
         $user_id = session('user_id');
 
-        if (cannot('view', PRIV_USERS)) {
+        if (!$user_id || cannot('view', PRIV_USERS, (int) $user_id)) {
             if ($user_id) {
                 abort(403, 'Forbidden');
             }
@@ -101,7 +125,8 @@ class Providers extends EA_Controller
             return;
         }
 
-        $role_slug = session('role_slug');
+        $this->load->model('users_model');
+        $role_slug = $this->roles_model->value($this->users_model->value((int) $user_id, 'id_roles'), 'slug');
 
         $services = $this->services_model->get();
 
@@ -141,7 +166,7 @@ class Providers extends EA_Controller
     public function search(): void
     {
         try {
-            if (cannot('view', PRIV_USERS)) {
+            if (!session('user_id') || cannot('view', PRIV_USERS, (int) session('user_id'))) {
                 abort(403, 'Forbidden');
             }
 
@@ -153,6 +178,10 @@ class Providers extends EA_Controller
                 $request_dto->offset,
                 $request_dto->orderBy,
             );
+
+            foreach ($providers as &$provider) {
+                $this->projectReadProvider($provider);
+            }
 
             json_response($providers);
         } catch (Throwable $e) {
@@ -204,19 +233,36 @@ class Providers extends EA_Controller
     public function find(): void
     {
         try {
-            if (cannot('view', PRIV_USERS)) {
+            if (!session('user_id') || cannot('view', PRIV_USERS, (int) session('user_id'))) {
                 abort(403, 'Forbidden');
             }
 
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityIdRequestDto('provider_id');
             $provider_id = $request_dto->id;
 
-            $provider = $this->providers_model->find($provider_id);
+            $providers = $this->providers_model->get(['id' => $provider_id], 1);
+
+            if (!$providers) {
+                abort(404, 'Not Found');
+            }
+
+            $provider = $providers[0];
+
+            $this->projectReadProvider($provider);
 
             json_response($provider);
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    /** Keep backoffice read responses limited to fields used by the provider form. */
+    private function projectReadProvider(array &$provider): void
+    {
+        $this->providers_model->only($provider, self::READ_FIELDS);
+        $settings = $provider['settings'] ?? [];
+        $this->providers_model->only($settings, self::READ_SETTING_FIELDS);
+        $provider['settings'] = $settings;
     }
 
     /**
