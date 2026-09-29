@@ -98,6 +98,16 @@ fields sent to the browser. `CalendarCustomerAccessHttpTest` checks these
 boundaries with synthetic records and roles. It does not prove the safety of
 real shared hashes or every other backoffice read endpoint.
 
+The two authenticated calendar JSON feeds likewise return only the event fields
+used by the calendar UI. They must not send an appointment's public management
+hash, integration identifiers, or raw related model rows. The current persisted
+role limits visible appointments to the provider or secretary scope before
+related records are loaded. Customer details use the calendar read projection
+only when that role may view customers; otherwise the appointment remains
+visible with an empty customer value. The isolated HTTP regression checks both
+feeds with synthetic records and a post-login permission change. It does not
+establish production browser behavior or the safety of other backoffice feeds.
+
 External Google and Outlook calendar links must carry only event details needed
 to create the appointment. Do not put the reschedule capability or customer and
 provider email addresses into third-party URL parameters. The confirmation page,

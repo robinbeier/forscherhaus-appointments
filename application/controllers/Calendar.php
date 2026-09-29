@@ -53,6 +53,48 @@ class Calendar extends EA_Controller
         'customer',
     ];
 
+    private const CALENDAR_APPOINTMENT_READ_FIELDS = [
+        'id',
+        'start_datetime',
+        'end_datetime',
+        'location',
+        'notes',
+        'color',
+        'status',
+        'is_unavailability',
+        'id_users_provider',
+        'id_users_customer',
+        'id_services',
+        'provider',
+        'service',
+        'customer',
+    ];
+
+    private const CALENDAR_UNAVAILABILITY_READ_FIELDS = [
+        'id',
+        'start_datetime',
+        'end_datetime',
+        'notes',
+        'is_unavailability',
+        'id_users_provider',
+        'id_parent_appointment',
+        'provider',
+    ];
+
+    private const CALENDAR_PROVIDER_READ_FIELDS = [
+        'id',
+        'first_name',
+        'last_name',
+        'address',
+        'city',
+        'state',
+        'zip_code',
+        'timezone',
+        'settings',
+    ];
+
+    private const CALENDAR_SERVICE_READ_FIELDS = ['id', 'name'];
+
     public array $allowed_customer_fields = [
         'id',
         'first_name',
@@ -910,6 +952,7 @@ class Calendar extends EA_Controller
         try {
             $user_id = (int) session('user_id');
             $role_slug = $this->currentCalendarReadRole($user_id);
+            $can_view_customers = can('view', PRIV_CUSTOMERS, $user_id);
 
             $range_request = $this->calendarRequestDtoFactory()->buildRangeRequestDto();
             $range_start_date = (string) $range_request->startDate;
@@ -927,16 +970,6 @@ class Calendar extends EA_Controller
                     'end_datetime <=' => $end_date,
                 ]),
             ];
-
-            foreach ($response['appointments'] as &$appointment) {
-                $appointment['provider'] = $this->calendarProviderData(
-                    $this->providers_model->find($appointment['id_users_provider']),
-                );
-                $appointment['service'] = $this->services_model->find($appointment['id_services']);
-                $appointment['customer'] = $this->customers_model->find($appointment['id_users_customer']);
-            }
-
-            unset($appointment);
 
             // If the current user is a provider he must only see his own appointments.
             if ($role_slug === DB_SLUG_PROVIDER) {
@@ -978,13 +1011,14 @@ class Calendar extends EA_Controller
                 $response['unavailabilities'] = array_values($response['unavailabilities']);
             }
 
-            foreach ($response['unavailabilities'] as &$unavailability) {
-                $unavailability['provider'] = $this->calendarProviderData(
-                    $this->providers_model->find($unavailability['id_users_provider']),
-                );
-            }
-
-            unset($unavailability);
+            $response['appointments'] = array_map(
+                fn(array $appointment): array => $this->calendarAppointmentData($appointment, $can_view_customers),
+                $response['appointments'],
+            );
+            $response['unavailabilities'] = array_map(
+                $this->calendarUnavailabilityData(...),
+                $response['unavailabilities'],
+            );
 
             // Add blocked periods to the response.
             $response['blocked_periods'] = $this->calendarBlockedPeriods($range_start_date, $range_end_date, $user_id);
@@ -1006,6 +1040,7 @@ class Calendar extends EA_Controller
         try {
             $user_id = (int) session('user_id');
             $role_slug = $this->currentCalendarReadRole($user_id);
+            $can_view_customers = can('view', PRIV_CUSTOMERS, $user_id);
 
             $filter_request = $this->calendarRequestDtoFactory()->buildFilterRequestDto();
             $record_id = $filter_request->recordId;
@@ -1062,16 +1097,6 @@ class Calendar extends EA_Controller
             ';
 
             $response['appointments'] = $this->appointments_model->get($where_clause);
-
-            foreach ($response['appointments'] as &$appointment) {
-                $appointment['provider'] = $this->calendarProviderData(
-                    $this->providers_model->find($appointment['id_users_provider']),
-                );
-                $appointment['service'] = $this->services_model->find($appointment['id_services']);
-                $appointment['customer'] = $this->customers_model->find($appointment['id_users_customer']);
-            }
-
-            unset($appointment);
 
             // Get unavailability periods (only for provider).
             $response['unavailabilities'] = [];
@@ -1145,13 +1170,14 @@ class Calendar extends EA_Controller
                 $response['unavailabilities'] = array_values($response['unavailabilities']);
             }
 
-            foreach ($response['unavailabilities'] as &$unavailability) {
-                $unavailability['provider'] = $this->calendarProviderData(
-                    $this->providers_model->find($unavailability['id_users_provider']),
-                );
-            }
-
-            unset($unavailability);
+            $response['appointments'] = array_map(
+                fn(array $appointment): array => $this->calendarAppointmentData($appointment, $can_view_customers),
+                $response['appointments'],
+            );
+            $response['unavailabilities'] = array_map(
+                $this->calendarUnavailabilityData(...),
+                $response['unavailabilities'],
+            );
 
             // Add blocked periods to the response.
             $response['blocked_periods'] = $this->calendarBlockedPeriods($range_start_date, $range_end_date, $user_id);
@@ -1160,6 +1186,43 @@ class Calendar extends EA_Controller
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    /** Keep calendar JSON event data separate from model records and public management capabilities. */
+    private function calendarAppointmentData(array $appointment, bool $can_view_customers): array
+    {
+        $provider = $this->calendarProviderData($this->providers_model->find((int) $appointment['id_users_provider']));
+        $this->providers_model->only($provider, self::CALENDAR_PROVIDER_READ_FIELDS);
+        $appointment['provider'] = $provider;
+
+        $service = $this->services_model->find((int) $appointment['id_services']);
+        $this->services_model->only($service, self::CALENDAR_SERVICE_READ_FIELDS);
+        $appointment['service'] = $service;
+
+        if ($can_view_customers) {
+            $customer = $this->customers_model->find((int) $appointment['id_users_customer']);
+            $this->customers_model->only($customer, self::CUSTOMER_READ_FIELDS);
+            $appointment['customer'] = $customer;
+        } else {
+            $appointment['customer'] = [];
+        }
+
+        $this->appointments_model->only($appointment, self::CALENDAR_APPOINTMENT_READ_FIELDS);
+
+        return $appointment;
+    }
+
+    /** Preserve the generated-buffer relationship without sending unavailability model internals. */
+    private function calendarUnavailabilityData(array $unavailability): array
+    {
+        $provider = $this->calendarProviderData(
+            $this->providers_model->find((int) $unavailability['id_users_provider']),
+        );
+        $this->providers_model->only($provider, self::CALENDAR_PROVIDER_READ_FIELDS);
+        $unavailability['provider'] = $provider;
+        $this->unavailabilities_model->only($unavailability, self::CALENDAR_UNAVAILABILITY_READ_FIELDS);
+
+        return $unavailability;
     }
 
     /** Keep provider configuration sent to the calendar limited to its working-plan needs. */

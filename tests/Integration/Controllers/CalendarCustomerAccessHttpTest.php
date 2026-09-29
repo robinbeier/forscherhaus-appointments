@@ -495,6 +495,203 @@ final class CalendarCustomerAccessHttpTest extends TestCase
         self::assertStringContainsString($this->customerEmail($fixture->customerId), $own->body);
     }
 
+    public function testPersistedCustomerRevocationRedactsOwnAppointmentFromBothCalendarFeeds(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $appointment = $fixture->appointment();
+        $beforeCustomer = $fixture->row('users', $fixture->customerId);
+        $beforeAppointment = $fixture->row('appointments', (int) $appointment['id']);
+        $role = get_instance()
+            ->db->get_where('roles', ['slug' => DB_SLUG_PROVIDER])
+            ->row_array();
+        self::assertNotEmpty($role['id'] ?? null);
+        self::assertGreaterThanOrEqual(PRIV_VIEW, (int) ($role['appointments'] ?? 0));
+        $this->providerRolePermissionSnapshot = [
+            'id' => (int) $role['id'],
+            'appointments' => (int) $role['appointments'],
+            'customers' => (int) $role['customers'],
+        ];
+
+        $client = $this->login($this->credentials['provider_username'], $this->credentials['password']);
+        try {
+            self::assertTrue(
+                get_instance()->db->update(
+                    'roles',
+                    ['customers' => 0],
+                    ['id' => $this->providerRolePermissionSnapshot['id']],
+                ),
+            );
+
+            foreach (
+                ['calendar/get_calendar_appointments', 'calendar/get_calendar_appointments_for_table_view']
+                as $path
+            ) {
+                $response = $this->calendarRead($client, $path);
+                self::assertCount(1, $response['appointments'] ?? [], $path);
+                $row = $response['appointments'][0];
+                self::assertSame((int) $appointment['id'], (int) ($row['id'] ?? 0), $path);
+                self::assertSame([], $row['customer'] ?? null, $path);
+                self::assertSame($beforeCustomer, $fixture->row('users', $fixture->customerId), $path);
+                self::assertSame($beforeAppointment, $fixture->row('appointments', (int) $appointment['id']), $path);
+            }
+        } finally {
+            $this->restoreProviderRolePermissions();
+        }
+    }
+
+    public function testPermittedProviderCalendarFeedsUseUiAppointmentAndCustomerProjections(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $appointment = $fixture->appointment();
+        $appointmentInternal = $fixture->run . '-appointment-internal';
+        $customerInternal = $fixture->run . '-customer-internal';
+        self::assertTrue(
+            get_instance()->db->update(
+                'appointments',
+                [
+                    'hash' => $fixture->run . '-calendar-sensitive-hash',
+                    'id_google_calendar' => $appointmentInternal,
+                    'id_caldav_calendar' => $fixture->run . '-caldav-internal',
+                ],
+                ['id' => (int) $appointment['id']],
+            ),
+        );
+        self::assertTrue(
+            get_instance()->db->update('users', ['ldap_dn' => $customerInternal], ['id' => $fixture->customerId]),
+        );
+        $client = $this->login($this->credentials['provider_username'], $this->credentials['password']);
+
+        foreach (['calendar/get_calendar_appointments', 'calendar/get_calendar_appointments_for_table_view'] as $path) {
+            $response = $this->calendarRead($client, $path);
+            self::assertCount(1, $response['appointments'] ?? [], $path);
+            $row = $response['appointments'][0];
+            $this->assertCalendarUiAppointmentProjection($row, $path);
+            self::assertSame((int) $appointment['id'], (int) $row['id'], $path);
+            self::assertSame($this->customerEmail($fixture->customerId), $row['customer']['email'], $path);
+            self::assertStringNotContainsString($appointmentInternal, json_encode($row, JSON_THROW_ON_ERROR), $path);
+            self::assertStringNotContainsString($customerInternal, json_encode($row, JSON_THROW_ON_ERROR), $path);
+        }
+    }
+
+    public function testCalendarFeedsProjectGeneratedUnavailabilityWithoutCapabilityFields(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $parent = $fixture->appointment();
+        get_instance()->load->model('unavailabilities_model');
+        $unavailabilityId = (int) get_instance()->unavailabilities_model->save([
+            'start_datetime' => date('Y-m-d 11:00:00', strtotime('+14 days')),
+            'end_datetime' => date('Y-m-d 11:30:00', strtotime('+14 days')),
+            'notes' => $fixture->run . '-unavailability',
+            'id_users_provider' => $fixture->providerId,
+        ]);
+
+        try {
+            self::assertTrue(
+                get_instance()->db->update(
+                    'appointments',
+                    [
+                        'id_parent_appointment' => (int) $parent['id'],
+                        'id_google_calendar' => $fixture->run . '-internal-calendar-id',
+                    ],
+                    ['id' => $unavailabilityId],
+                ),
+            );
+            $client = $this->login($this->credentials['provider_username'], $this->credentials['password']);
+
+            foreach (
+                ['calendar/get_calendar_appointments', 'calendar/get_calendar_appointments_for_table_view']
+                as $path
+            ) {
+                $response = $this->calendarRead($client, $path);
+                $rows = array_values(
+                    array_filter(
+                        $response['unavailabilities'] ?? [],
+                        static fn(array $row): bool => (int) ($row['id'] ?? 0) === $unavailabilityId,
+                    ),
+                );
+                self::assertCount(1, $rows, $path);
+                $keys = array_keys($rows[0]);
+                sort($keys);
+                self::assertSame(
+                    [
+                        'end_datetime',
+                        'id',
+                        'id_parent_appointment',
+                        'id_users_provider',
+                        'is_unavailability',
+                        'notes',
+                        'provider',
+                        'start_datetime',
+                    ],
+                    $keys,
+                    $path,
+                );
+                self::assertSame((int) $parent['id'], (int) $rows[0]['id_parent_appointment'], $path);
+            }
+        } finally {
+            get_instance()->db->delete('appointments', [
+                'id' => $unavailabilityId,
+                'id_users_provider' => $fixture->providerId,
+                'is_unavailability' => true,
+            ]);
+            self::assertSame([], $fixture->row('appointments', $unavailabilityId));
+        }
+    }
+
+    public function testLegacyCalendarFeedAliasesDoNotExposeAppointmentOrCustomerData(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $appointment = $fixture->appointment();
+        $beforeAppointment = $fixture->row('appointments', (int) $appointment['id']);
+        $beforeCustomer = $fixture->row('users', $fixture->customerId);
+        $client = $this->login($this->credentials['provider_username'], $this->credentials['password']);
+
+        foreach (['backend_api/ajax_get_calendar_appointments', 'backend_api/ajax_get_calendar_events'] as $path) {
+            // The legacy POST redirects to the canonical route. The redirected
+            // request currently fails the rotated CSRF token before data access.
+            $response = $client->post($path, [
+                'start_date' => date('Y-m-d', strtotime('+13 days')),
+                'end_date' => date('Y-m-d', strtotime('+15 days')),
+                'record_id' => FILTER_TYPE_ALL,
+                'filter_type' => '',
+                'is_all' => '1',
+            ]);
+            self::assertSame(403, $response->statusCode, $path);
+            self::assertStringNotContainsString((string) $appointment['hash'], $response->body, $path);
+            self::assertStringNotContainsString($this->customerEmail($fixture->customerId), $response->body, $path);
+            self::assertSame($beforeAppointment, $fixture->row('appointments', (int) $appointment['id']), $path);
+            self::assertSame($beforeCustomer, $fixture->row('users', $fixture->customerId), $path);
+        }
+    }
+
+    public function testSecretaryCalendarFeedsIncludeAssignedProviderOnly(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $fixture->appointment();
+        $foreignProviderId = $this->foreignProviderId($fixture->providerId);
+        $foreignCustomerId = $this->createForeignCustomer($fixture->run . '-secretary-feed');
+        $foreignAppointment = $this->createForeignAppointment(
+            $foreignProviderId,
+            $foreignCustomerId,
+            $fixture->serviceId,
+            $fixture->run . '-secretary-feed',
+        );
+        [$username, $password] = $this->createSecretary($fixture->providerId, $fixture->run . '-feed');
+        $client = $this->login($username, $password);
+
+        foreach (['calendar/get_calendar_appointments', 'calendar/get_calendar_appointments_for_table_view'] as $path) {
+            $response = $this->calendarRead($client, $path);
+            $ids = array_map(static fn(array $row): int => (int) ($row['id'] ?? 0), $response['appointments'] ?? []);
+            self::assertNotContains((int) $foreignAppointment['id'], $ids, $path);
+            self::assertCount(1, $ids, $path);
+        }
+    }
+
     private function login(string $username, string $password): GateHttpClient
     {
         $client = $this->server?->client();
@@ -733,6 +930,45 @@ final class CalendarCustomerAccessHttpTest extends TestCase
         sort($expected);
         sort($actual);
         self::assertSame($expected, $actual);
+    }
+
+    /** @param array<string, mixed> $appointment */
+    private function assertCalendarUiAppointmentProjection(array $appointment, string $path): void
+    {
+        $expected = [
+            'color',
+            'customer',
+            'end_datetime',
+            'id',
+            'id_services',
+            'id_users_customer',
+            'id_users_provider',
+            'is_unavailability',
+            'location',
+            'notes',
+            'provider',
+            'service',
+            'start_datetime',
+            'status',
+        ];
+        $actual = array_keys($appointment);
+        sort($expected);
+        sort($actual);
+        self::assertSame($expected, $actual, $path);
+        self::assertIsArray($appointment['customer'] ?? null, $path);
+        $this->assertCustomerReadKeys($appointment['customer']);
+        self::assertIsArray($appointment['provider'] ?? null, $path);
+        $providerKeys = array_keys($appointment['provider']);
+        sort($providerKeys);
+        self::assertSame(
+            ['address', 'city', 'first_name', 'id', 'last_name', 'settings', 'state', 'timezone', 'zip_code'],
+            $providerKeys,
+            $path,
+        );
+        $settingKeys = array_keys($appointment['provider']['settings']);
+        sort($settingKeys);
+        self::assertSame(['working_plan', 'working_plan_exceptions'], $settingKeys, $path);
+        self::assertSame(['id', 'name'], array_keys($appointment['service']), $path);
     }
 
     private function deleteForeignRows(): void
