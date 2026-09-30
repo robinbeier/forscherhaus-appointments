@@ -95,13 +95,7 @@ final class CalendarMethodProbe
                         if (!in_array($response->statusCode, [301, 302, 303, 307, 308], true)) {
                             throw new RuntimeException($operation . ' was not redirect-only.');
                         }
-                        $location = (string) $response->header('location');
-                        if (
-                            !str_ends_with(parse_url($location, PHP_URL_PATH) ?: $location, '/' . $route['path']) ||
-                            parse_url($location, PHP_URL_QUERY) !== null
-                        ) {
-                            throw new RuntimeException($operation . ' redirected to an unexpected calendar route.');
-                        }
+                        $this->expectAliasLocation($response, $route['alias'], $route['path'], $operation);
                         $this->assertSnapshot($before, $operation);
                         $aliasStatuses[$name][strtolower($method)] = $response->statusCode;
                     }
@@ -216,6 +210,43 @@ final class CalendarMethodProbe
     {
         if (strtoupper((string) $response->header('allow')) !== $expected) {
             throw new RuntimeException($phase . ' did not advertise Allow: ' . $expected . '.');
+        }
+    }
+
+    private function expectAliasLocation(GateHttpResponse $response, string $alias, string $target, string $phase): void
+    {
+        $requested = parse_url($response->url);
+        $location = (string) $response->header('location');
+        $redirected = parse_url($location);
+        $suffix = '/backend_api/' . $alias;
+        if (
+            !is_array($requested) ||
+            !is_array($redirected) ||
+            !str_ends_with((string) ($requested['path'] ?? ''), $suffix) ||
+            !isset($requested['scheme'], $requested['host'])
+        ) {
+            throw new RuntimeException($phase . ' has no trustworthy redirect context.');
+        }
+        $expectedPath = substr((string) $requested['path'], 0, -strlen($suffix)) . '/' . $target;
+        if (
+            ($redirected['path'] ?? null) !== $expectedPath ||
+            isset($redirected['query']) ||
+            isset($redirected['fragment']) ||
+            isset($redirected['user']) ||
+            isset($redirected['pass'])
+        ) {
+            throw new RuntimeException($phase . ' redirected to an unexpected calendar route.');
+        }
+        if (isset($redirected['scheme']) || isset($redirected['host']) || isset($redirected['port'])) {
+            if (
+                strtolower((string) ($redirected['scheme'] ?? '')) !== strtolower((string) $requested['scheme']) ||
+                strtolower((string) ($redirected['host'] ?? '')) !== strtolower((string) $requested['host']) ||
+                ($redirected['port'] ?? null) !== ($requested['port'] ?? null)
+            ) {
+                throw new RuntimeException($phase . ' redirected outside the request origin.');
+            }
+        } elseif (!str_starts_with($location, '/') || str_starts_with($location, '//')) {
+            throw new RuntimeException($phase . ' has an ambiguous relative redirect.');
         }
     }
 }

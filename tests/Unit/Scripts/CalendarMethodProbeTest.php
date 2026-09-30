@@ -141,6 +141,56 @@ final class CalendarMethodProbeTest extends TestCase
         $this->expectExceptionMessage('was not redirect-only');
         $probe->run();
     }
+
+    public function testAliasRejectsOffOriginAndMisleadingLocations(): void
+    {
+        foreach (
+            [
+                'https://unrelated.invalid/prefix/calendar/save_appointment',
+                '/prefix/calendar/save_appointment',
+                '/index.php/calendar/save_appointment?appointment_id=41',
+            ]
+            as $location
+        ) {
+            $client = new FakeCalendarMethodClient(aliasLocationOverride: $location);
+            $probe = new CalendarMethodProbe(
+                $client->request(...),
+                static function (): void {},
+                static function (): void {},
+                static fn(): array => [
+                    'appointment_id' => 41,
+                    'provider_id' => 17,
+                    'customer_id' => 23,
+                    'marker' => 'owned',
+                ],
+                static fn(): array => ['owned' => ['id' => 41], 'totals' => ['appointments' => 1]],
+            );
+            try {
+                $probe->run();
+                self::fail('An unexpected alias redirect was accepted: ' . $location);
+            } catch (RuntimeException $error) {
+                self::assertStringContainsString('redirect', $error->getMessage());
+            }
+        }
+    }
+
+    public function testAbsoluteSameOriginAliasRedirectsPass(): void
+    {
+        $client = new FakeCalendarMethodClient(absoluteAliasLocation: true);
+        $probe = new CalendarMethodProbe(
+            $client->request(...),
+            static function (): void {},
+            static function (): void {},
+            static fn(): array => [
+                'appointment_id' => 41,
+                'provider_id' => 17,
+                'customer_id' => 23,
+                'marker' => 'owned',
+            ],
+            static fn(): array => ['owned' => ['id' => 41], 'totals' => ['appointments' => 1]],
+        );
+        self::assertSame('verified', $probe->run()['status']);
+    }
 }
 
 final class FakeCalendarMethodClient
@@ -148,7 +198,12 @@ final class FakeCalendarMethodClient
     /** @var array<int,array{method:string,path:string}> */
     public array $requests = [];
 
-    public function __construct(private readonly int $status = 405, private readonly int $aliasStatus = 302) {}
+    public function __construct(
+        private readonly int $status = 405,
+        private readonly int $aliasStatus = 302,
+        private readonly ?string $aliasLocationOverride = null,
+        private readonly bool $absoluteAliasLocation = false,
+    ) {}
 
     public function request(
         string $method,
@@ -159,15 +214,13 @@ final class FakeCalendarMethodClient
     ): GateHttpResponse {
         $this->requests[] = ['method' => strtoupper($method), 'path' => $path];
         $alias = str_starts_with($path, 'backend_api/');
+        $redirectPath = '/index.php/' . str_replace('backend_api/ajax_', 'calendar/', explode('?', $path, 2)[0]);
+        $location =
+            $this->aliasLocationOverride ??
+            ($this->absoluteAliasLocation ? 'http://localhost' . $redirectPath : $redirectPath);
         return new GateHttpResponse(
             $alias ? $this->aliasStatus : $this->status,
-            $alias
-                ? [
-                    'location' => [
-                        '/index.php/' . str_replace('backend_api/ajax_', 'calendar/', explode('?', $path, 2)[0]),
-                    ],
-                ]
-                : ['allow' => ['POST']],
+            $alias ? ['location' => [$location]] : ['allow' => ['POST']],
             '',
             0.0,
             'http://localhost/index.php/' . $path,
