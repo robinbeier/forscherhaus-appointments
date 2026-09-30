@@ -54,6 +54,15 @@ The direct `dashboard/index` path has the same boundary as `dashboard`.
 isolated synthetic HTTP and database requests; it does not establish a live
 production role-revocation race or browser behavior.
 
+Legacy Admin backoffice reads (`admins`, `admins/index`, `admins/search`,
+`admins/find`, and the search alias) require the actor's current stored
+`users` view permission on every request. `find` addresses Admin records only;
+search and detail responses expose only fields needed by the Admin form, never
+stored integration credentials or unrelated shared-user fields. A denied page
+read must not change the session destination. `AdminsReadProjectionHttpTest`
+checks these boundaries with isolated synthetic HTTP and database records; it
+does not prove a live production role-change race.
+
 ## Required security properties
 
 The first cycle sharpened the following six properties. They are examples of

@@ -20,6 +20,26 @@
  */
 class Admins extends EA_Controller
 {
+    private const READ_FIELDS = [
+        'id',
+        'first_name',
+        'last_name',
+        'email',
+        'mobile_number',
+        'phone_number',
+        'address',
+        'city',
+        'state',
+        'zip_code',
+        'notes',
+        'timezone',
+        'language',
+        'ldap_dn',
+        'settings',
+    ];
+
+    private const READ_SETTING_FIELDS = ['username', 'calendar_view'];
+
     public array $allowed_admin_fields = [
         'id',
         'first_name',
@@ -70,11 +90,9 @@ class Admins extends EA_Controller
      */
     public function index(): void
     {
-        session(['dest_url' => site_url('admins')]);
+        $user_id = (int) session('user_id');
 
-        $user_id = session('user_id');
-
-        if (cannot('view', PRIV_USERS)) {
+        if (!$user_id || cannot('view', PRIV_USERS, $user_id)) {
             if ($user_id) {
                 abort(403, 'Forbidden');
             }
@@ -84,7 +102,10 @@ class Admins extends EA_Controller
             return;
         }
 
-        $role_slug = session('role_slug');
+        session(['dest_url' => site_url('admins')]);
+
+        $this->load->model('users_model');
+        $role_slug = $this->roles_model->value($this->users_model->value($user_id, 'id_roles'), 'slug');
 
         script_vars([
             'user_id' => $user_id,
@@ -112,7 +133,9 @@ class Admins extends EA_Controller
     public function search(): void
     {
         try {
-            if (cannot('view', PRIV_USERS)) {
+            $user_id = (int) session('user_id');
+
+            if (!$user_id || cannot('view', PRIV_USERS, $user_id)) {
                 abort(403, 'Forbidden');
             }
 
@@ -124,6 +147,10 @@ class Admins extends EA_Controller
                 $request_dto->offset,
                 $request_dto->orderBy,
             );
+
+            foreach ($admins as &$admin) {
+                $this->projectReadAdmin($admin);
+            }
 
             json_response($admins);
         } catch (Throwable $e) {
@@ -175,19 +202,38 @@ class Admins extends EA_Controller
     public function find(): void
     {
         try {
-            if (cannot('view', PRIV_USERS)) {
+            $user_id = (int) session('user_id');
+
+            if (!$user_id || cannot('view', PRIV_USERS, $user_id)) {
                 abort(403, 'Forbidden');
             }
 
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityIdRequestDto('admin_id');
             $admin_id = $request_dto->id;
 
-            $admin = $this->admins_model->find($admin_id);
+            $admins = $this->admins_model->get(['id' => $admin_id], 1);
+
+            if (!$admins) {
+                abort(404, 'Not Found');
+            }
+
+            $admin = $admins[0];
+
+            $this->projectReadAdmin($admin);
 
             json_response($admin);
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    /** Keep backoffice read responses limited to fields used by the admin form. */
+    private function projectReadAdmin(array &$admin): void
+    {
+        $this->admins_model->only($admin, self::READ_FIELDS);
+        $settings = $admin['settings'] ?? [];
+        $this->admins_model->only($settings, self::READ_SETTING_FIELDS);
+        $admin['settings'] = $settings;
     }
 
     /**
