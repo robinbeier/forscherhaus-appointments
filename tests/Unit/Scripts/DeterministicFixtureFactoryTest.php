@@ -11,16 +11,13 @@ require_once __DIR__ . '/../../../scripts/release-gate/lib/GateAssertions.php';
 
 final class DeterministicFixtureFactoryTest extends TestCase
 {
-    public function testBookingCustomerPayloadUsesValidatorSafeReservedEmailDomain(): void
+    public function testBookingCustomerPayloadOmitsEmailOutsideSyntheticCanary(): void
     {
         $factory = new DeterministicFixtureFactory('ci-write-20260314T000000Z-aaaa', 30, 'Europe/Berlin');
 
         $payload = $factory->createBookingCustomerPayload();
 
-        $this->assertArrayHasKey('email', $payload);
-        $this->assertStringEndsWith('@example.org', (string) $payload['email']);
-        $this->assertNotFalse(filter_var((string) $payload['email'], FILTER_VALIDATE_EMAIL));
-        $this->assertLessThanOrEqual(254, strlen((string) $payload['email']));
+        $this->assertArrayNotHasKey('email', $payload);
     }
 
     public function testAvailableHoursRetryDecisionOnlyRetries429BeforeFinalAttempt(): void
@@ -87,7 +84,34 @@ final class DeterministicFixtureFactoryTest extends TestCase
     public function testCanaryCustomerUsesSyntheticDomain(): void
     {
         $factory = new DeterministicFixtureFactory('ci-write-test', 2, 'UTC', true);
-        $this->assertStringEndsWith('@synthetic.invalid', $factory->createBookingCustomerPayload()['email']);
+        $payload = $factory->createBookingCustomerPayload();
+
+        $this->assertArrayHasKey('email', $payload);
+        $this->assertStringEndsWith('@synthetic.invalid', $payload['email']);
+        $this->assertNotFalse(filter_var($payload['email'], FILTER_VALIDATE_EMAIL));
+        $this->assertLessThanOrEqual(254, strlen($payload['email']));
+    }
+
+    public function testBookingCustomerPayloadIncludesValidatorSafeEmailWhenRequested(): void
+    {
+        $factory = new DeterministicFixtureFactory('ci-write-20260314T000000Z-aaaa', 30, 'Europe/Berlin');
+
+        $payload = $factory->createBookingCustomerPayload([], true);
+
+        $this->assertArrayHasKey('email', $payload);
+        $this->assertStringEndsWith('@example.org', $payload['email']);
+        $this->assertNotFalse(filter_var($payload['email'], FILTER_VALIDATE_EMAIL));
+        $this->assertLessThanOrEqual(254, strlen($payload['email']));
+    }
+
+    public function testBookingCustomerPayloadPreservesExplicitEmailOverride(): void
+    {
+        $factory = new DeterministicFixtureFactory('ci-write-test');
+
+        $this->assertSame(
+            'parent@example.org',
+            $factory->createBookingCustomerPayload(['email' => 'parent@example.org'])['email'],
+        );
     }
 
     public function testProductHorizonIsOnlyUsedForDiscoveryNotReplay(): void

@@ -17,11 +17,13 @@ require_once __DIR__ . '/lib/BookedSlotMatcher.php';
 require_once __DIR__ . '/lib/BookingWriteContractState.php';
 require_once __DIR__ . '/lib/BookingWriteReportSanitizer.php';
 require_once __DIR__ . '/lib/DeterministicFixtureFactory.php';
+require_once __DIR__ . '/lib/BookingEmailFieldPolicy.php';
 require_once __DIR__ . '/lib/CanarySlotSearchPolicy.php';
 require_once __DIR__ . '/lib/WriteContractCleanupRegistry.php';
 require_once __DIR__ . '/lib/FlakeRetry.php';
 
 use CiContract\BookedSlotMatcher;
+use CiContract\BookingEmailFieldPolicy;
 use CiContract\BookingWriteContractState;
 use CiContract\BookingWriteReportSanitizer;
 use CiContract\CanarySlotSearchPolicy;
@@ -238,11 +240,30 @@ function runBookingContractsAttempt(
             return;
         }
 
+        $includeBookingEmail = BookingEmailFieldPolicy::resolve($config['canary_context'] !== null, static function (
+            string $method,
+            string $path,
+            bool $authenticated,
+            array $expected,
+        ) use ($config): string {
+            $response = apiJsonRequest($method, $config, $path, null, $authenticated, $expected);
+
+            return $response['body'];
+        });
+
         if (shouldRunConfiguredCheck($config, 'booking_register_success_contract')) {
             runCheck(
                 'booking_register_success_contract',
-                static function () use ($client, $config, $factory, &$state, $slot, $cleanup): array {
-                    $customerPayload = $factory->createBookingCustomerPayload();
+                static function () use (
+                    $client,
+                    $config,
+                    $factory,
+                    &$state,
+                    $slot,
+                    $cleanup,
+                    $includeBookingEmail,
+                ): array {
+                    $customerPayload = $factory->createBookingCustomerPayload([], $includeBookingEmail);
                     $appointmentPayload = $factory->createBookingAppointmentPayload(
                         $slot['provider_id'],
                         $slot['service_id'],
@@ -405,8 +426,8 @@ function runBookingContractsAttempt(
         if (shouldRunConfiguredCheck($config, 'booking_register_unavailable_contract')) {
             runCheck(
                 'booking_register_unavailable_contract',
-                static function () use ($client, $config, $factory, &$state, $slot): array {
-                    $customerPayload = $factory->createBookingCustomerPayload();
+                static function () use ($client, $config, $factory, &$state, $slot, $includeBookingEmail): array {
+                    $customerPayload = $factory->createBookingCustomerPayload([], $includeBookingEmail);
                     $appointmentPayload = $factory->createBookingAppointmentPayload(
                         $slot['provider_id'],
                         $slot['service_id'],
