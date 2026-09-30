@@ -144,6 +144,28 @@ class Appointments extends EA_Controller
             throw new InvalidArgumentException('Appointment datetime is invalid.');
         }
 
+        // A stored wall time has no UTC offset. During fall-back it can name two
+        // instants, so choosing either one could extend a public link's lifetime.
+        $offsets = [$parsed->getOffset()];
+        $transitions = $timezone->getTransitions($parsed->getTimestamp() - 604800, $parsed->getTimestamp() + 604800);
+        if (is_array($transitions)) {
+            foreach ($transitions as $transition) {
+                $offsets[] = (int) $transition['offset'];
+            }
+        }
+
+        $wall_as_utc = DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $value, new DateTimeZone('UTC'));
+        $matching_instants = 0;
+        foreach (array_unique($offsets) as $offset) {
+            $instant = $wall_as_utc->getTimestamp() - $offset;
+            if ((new DateTimeImmutable('@' . $instant))->setTimezone($timezone)->format('Y-m-d H:i:s') === $value) {
+                $matching_instants++;
+            }
+        }
+        if ($matching_instants !== 1) {
+            throw new InvalidArgumentException('Appointment datetime is ambiguous.');
+        }
+
         return $parsed;
     }
 }

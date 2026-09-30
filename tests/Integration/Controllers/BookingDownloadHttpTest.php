@@ -208,6 +208,51 @@ final class BookingDownloadHttpTest extends TestCase
         self::assertStringNotContainsString($fixture->run, $ics->body);
     }
 
+    public function testRepeatedFallBackEndTimeFailsClosedBeforeItsCalendarDate(): void
+    {
+        $fixture = $this->fixture;
+        $appointment = $fixture->appointment();
+        $timezone = new DateTimeZone('Europe/Berlin');
+        $transitions = $timezone->getTransitions(time() + 86400, time() + 3 * 366 * 86400);
+        self::assertIsArray($transitions);
+
+        $previousOffset = (int) $transitions[0]['offset'];
+        $fallBack = null;
+        foreach (array_slice($transitions, 1) as $transition) {
+            if ((int) $transition['offset'] < $previousOffset) {
+                $fallBack = $transition;
+                break;
+            }
+            $previousOffset = (int) $transition['offset'];
+        }
+        self::assertIsArray($fallBack, 'Europe/Berlin needs a future fall-back transition for this fixture.');
+
+        $newOffset = (int) $fallBack['offset'];
+        $startWallTime = gmdate('Y-m-d H:i:s', (int) $fallBack['ts'] + $newOffset - 1800);
+        $ambiguousEndWallTime = gmdate('Y-m-d H:i:s', (int) $fallBack['ts'] + $newOffset + 1800);
+        self::assertTrue(
+            get_instance()->db->update('users', ['timezone' => 'Europe/Berlin'], ['id' => $fixture->providerId]),
+        );
+        self::assertTrue(
+            get_instance()->db->update(
+                'appointments',
+                ['start_datetime' => $startWallTime, 'end_datetime' => $ambiguousEndWallTime],
+                ['id' => $appointment['id']],
+            ),
+        );
+
+        $hash = (string) $appointment['hash'];
+        $client = $this->anonymousClient();
+        $confirmation = $client->get('booking_confirmation/of/' . $hash);
+        self::assertSame(404, $confirmation->statusCode);
+        self::assertStringNotContainsString($fixture->run, $confirmation->body);
+
+        $ics = $client->get('appointments/ics/' . $hash);
+        self::assertSame(404, $ics->statusCode);
+        self::assertNull($ics->header('content-disposition'));
+        self::assertStringNotContainsString($fixture->run, $ics->body);
+    }
+
     public function testAmbiguousStoredHashFailsClosedForBothPublicLinks(): void
     {
         $fixture = $this->fixture;
