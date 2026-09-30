@@ -44,20 +44,25 @@ class Dashboard extends EA_Controller
      */
     public function index(): void
     {
-        session(['dest_url' => site_url('dashboard')]);
-
-        $user_id = session('user_id');
+        $user_id = (int) session('user_id');
         $role_slug = session('role_slug');
 
         if (!in_array($role_slug, [DB_SLUG_ADMIN, DB_SLUG_PROVIDER], true)) {
-            if ($user_id) {
+            if ($user_id > 0) {
                 abort(403, 'Forbidden');
             }
 
+            session(['dest_url' => site_url('dashboard')]);
             redirect('login');
 
             return;
         }
+
+        if (!$this->hasCurrentDashboardRole($role_slug)) {
+            abort(403, 'Forbidden');
+        }
+
+        session(['dest_url' => site_url('dashboard')]);
 
         if ($role_slug === DB_SLUG_PROVIDER) {
             $saved_range = $this->getStoredProviderDashboardRange((int) $user_id);
@@ -121,7 +126,7 @@ class Dashboard extends EA_Controller
     public function provider_metrics(): void
     {
         try {
-            if (session('role_slug') !== DB_SLUG_PROVIDER) {
+            if (!$this->hasCurrentDashboardRole(DB_SLUG_PROVIDER)) {
                 json_response(['success' => false, 'message' => 'Forbidden'], 403);
 
                 return;
@@ -162,7 +167,7 @@ class Dashboard extends EA_Controller
     public function metrics(): void
     {
         try {
-            if (session('role_slug') !== DB_SLUG_ADMIN) {
+            if (!$this->hasCurrentDashboardRole(DB_SLUG_ADMIN)) {
                 json_response(['success' => false, 'message' => 'Forbidden'], 403);
 
                 return;
@@ -207,7 +212,7 @@ class Dashboard extends EA_Controller
     public function threshold(): void
     {
         try {
-            if (session('role_slug') !== DB_SLUG_ADMIN) {
+            if (!$this->hasCurrentDashboardRole(DB_SLUG_ADMIN)) {
                 json_response(['success' => false, 'message' => 'Forbidden'], 403);
 
                 return;
@@ -316,7 +321,7 @@ class Dashboard extends EA_Controller
     public function heatmap(): void
     {
         try {
-            if (session('role_slug') !== DB_SLUG_ADMIN) {
+            if (!$this->hasCurrentDashboardRole(DB_SLUG_ADMIN)) {
                 json_response(['success' => false, 'message' => 'Forbidden'], 403);
 
                 return;
@@ -344,6 +349,28 @@ class Dashboard extends EA_Controller
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    /**
+     * A retained session role does not grant access after the stored role changes.
+     */
+    protected function hasCurrentDashboardRole(string $expected_role): bool
+    {
+        $user_id = (int) session('user_id');
+
+        if ($user_id <= 0 || session('role_slug') !== $expected_role) {
+            return false;
+        }
+
+        $current_role = $this->db
+            ->select('roles.slug')
+            ->from('users')
+            ->join('roles', 'roles.id = users.id_roles')
+            ->where('users.id', $user_id)
+            ->get()
+            ->row_array();
+
+        return ($current_role['slug'] ?? null) === $expected_role;
     }
 
     /**

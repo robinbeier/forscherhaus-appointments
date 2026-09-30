@@ -46,6 +46,14 @@ Dashboard PDFs must not persist rendered HTML debug dumps. The isolated
 recording renderer; it does not prove production PDF bytes or downstream file
 handling.
 
+The interactive Dashboard page and its metrics, heatmap, provider-metrics and
+threshold endpoints must check the actor's current stored Admin or Provider role
+before loading dashboard data or changing a saved range or session threshold.
+The direct `dashboard/index` path has the same boundary as `dashboard`.
+`DashboardRoleRevocationHttpTest` checks post-login role changes through
+isolated synthetic HTTP and database requests; it does not establish a live
+production role-revocation race or browser behavior.
+
 ## Required security properties
 
 The first cycle sharpened the following six properties. They are examples of

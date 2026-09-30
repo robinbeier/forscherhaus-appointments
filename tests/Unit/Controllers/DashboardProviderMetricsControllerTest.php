@@ -556,6 +556,11 @@ class DashboardProviderMetricsControllerTest extends TestCase
                 $this->payload = $payload;
             }
 
+            protected function hasCurrentDashboardRole(string $expected_role): bool
+            {
+                return session('role_slug') === $expected_role && (int) session('user_id') > 0;
+            }
+
             protected function buildProviderDashboardPayload(
                 int $provider_id,
                 DateTimeImmutable $start,
