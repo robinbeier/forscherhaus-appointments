@@ -77,8 +77,168 @@ final class BookingDownloadHttpTest extends TestCase
             $unfoldedIcs = preg_replace("/\r?\n[ \t]/", '', $ics->body);
             self::assertIsString($unfoldedIcs);
             self::assertStringContainsString($hash, $unfoldedIcs);
+            self::assertStringNotContainsString($fixture->run . '_customer@synthetic.invalid', $unfoldedIcs);
+            self::assertStringNotContainsString($fixture->run . '_provider@synthetic.invalid', $unfoldedIcs);
+            self::assertStringNotContainsString('ATTENDEE:', $unfoldedIcs);
+            self::assertStringNotContainsString('ORGANIZER:', $unfoldedIcs);
+            self::assertSame(2, substr_count($unfoldedIcs, 'BEGIN:VALARM'));
+            self::assertSame(2, substr_count($unfoldedIcs, 'ACTION:DISPLAY'));
+            self::assertStringNotContainsString('ACTION:EMAIL', $unfoldedIcs);
             $this->assertOwnedSnapshotsUnchanged($ownedSnapshots);
         }
+    }
+
+    public function testEndedModernAndLegacyLinksNoLongerServeAppointmentData(): void
+    {
+        $fixture = $this->fixture;
+        $modern = $fixture->appointment();
+        $legacy = $fixture->appointment(true);
+        self::assertTrue(
+            get_instance()->db->update('appointments', ['hash' => 'legacyCodeG1'], ['id' => $legacy['id']]),
+        );
+        $legacy = $fixture->row('appointments', (int) $legacy['id']);
+        $historical32 = $fixture->appointment();
+        self::assertTrue(
+            get_instance()->db->update(
+                'appointments',
+                ['hash' => '0123456789abcdef0123456789abcdef'],
+                ['id' => $historical32['id']],
+            ),
+        );
+        $historical32 = $fixture->row('appointments', (int) $historical32['id']);
+        self::assertSame(32, strlen((string) $historical32['hash']));
+        self::assertSame(12, strlen((string) $legacy['hash']));
+        self::assertMatchesRegularExpression('/^[A-Za-z0-9]{12}$/D', (string) $legacy['hash']);
+        self::assertMatchesRegularExpression('/[G-Zg-z]/', (string) $legacy['hash']);
+        $endedAt = date('Y-m-d H:i:s', time() - 60);
+        self::assertTrue(
+            get_instance()->db->update(
+                'appointments',
+                ['start_datetime' => date('Y-m-d H:i:s', time() - 1800), 'end_datetime' => $endedAt],
+                ['id' => $modern['id']],
+            ),
+        );
+        self::assertTrue(
+            get_instance()->db->update(
+                'appointments',
+                ['start_datetime' => date('Y-m-d H:i:s', time() - 1800), 'end_datetime' => $endedAt],
+                ['id' => $legacy['id']],
+            ),
+        );
+        self::assertTrue(
+            get_instance()->db->update(
+                'appointments',
+                ['start_datetime' => date('Y-m-d H:i:s', time() - 1800), 'end_datetime' => $endedAt],
+                ['id' => $historical32['id']],
+            ),
+        );
+
+        $client = $this->anonymousClient();
+        foreach ([$modern, $legacy, $historical32] as $appointment) {
+            $hash = (string) $appointment['hash'];
+            $confirmation = $client->get('booking_confirmation/of/' . $hash);
+            self::assertSame(307, $confirmation->statusCode, 'Ended confirmation must redirect without data.');
+            self::assertStringContainsString('/appointments', (string) $confirmation->header('location'));
+            self::assertStringNotContainsString($fixture->run, $confirmation->body);
+            self::assertStringNotContainsString('/booking/reschedule/', $confirmation->body);
+
+            $ics = $client->get('appointments/ics/' . $hash);
+            self::assertSame(404, $ics->statusCode, 'Ended ICS must be unavailable.');
+            self::assertStringNotContainsString('text/calendar', strtolower((string) $ics->header('content-type')));
+            self::assertNull($ics->header('content-disposition'));
+            self::assertStringNotContainsString($fixture->run, $ics->body);
+        }
+    }
+
+    public function testExactEndDatetimeBoundaryIsExpired(): void
+    {
+        $fixture = $this->fixture;
+        $appointment = $fixture->appointment();
+        $provider = $fixture->row('users', $fixture->providerId);
+        $timezone = new DateTimeZone((string) $provider['timezone']);
+        $nearEnd = (new DateTimeImmutable('now', $timezone))->modify('+60 seconds');
+        self::assertTrue(
+            get_instance()->db->update(
+                'appointments',
+                [
+                    'start_datetime' => $nearEnd->modify('-1800 seconds')->format('Y-m-d H:i:s'),
+                    'end_datetime' => $nearEnd->format('Y-m-d H:i:s'),
+                ],
+                ['id' => $appointment['id']],
+            ),
+        );
+
+        $hash = (string) $appointment['hash'];
+        $client = $this->anonymousClient();
+        self::assertSame(200, $client->get('booking_confirmation/of/' . $hash)->statusCode);
+        self::assertSame(200, $client->get('appointments/ics/' . $hash)->statusCode);
+
+        $atEnd = new DateTimeImmutable('now', $timezone);
+        self::assertTrue(
+            get_instance()->db->update(
+                'appointments',
+                [
+                    'start_datetime' => $atEnd->modify('-1800 seconds')->format('Y-m-d H:i:s'),
+                    'end_datetime' => $atEnd->format('Y-m-d H:i:s'),
+                ],
+                ['id' => $appointment['id']],
+            ),
+        );
+        self::assertSame(307, $client->get('booking_confirmation/of/' . $hash)->statusCode);
+        self::assertSame(404, $client->get('appointments/ics/' . $hash)->statusCode);
+    }
+
+    public function testMalformedAppointmentTimeZoneFailsClosedForBothPublicLinks(): void
+    {
+        $fixture = $this->fixture;
+        $appointment = $fixture->appointment();
+        self::assertTrue(
+            get_instance()->db->update('users', ['timezone' => 'not/a-timezone'], ['id' => $fixture->providerId]),
+        );
+
+        $hash = (string) $appointment['hash'];
+        $client = $this->anonymousClient();
+        $confirmation = $client->get('booking_confirmation/of/' . $hash);
+        self::assertSame(404, $confirmation->statusCode);
+        self::assertStringNotContainsString($fixture->run, $confirmation->body);
+
+        $ics = $client->get('appointments/ics/' . $hash);
+        self::assertSame(404, $ics->statusCode);
+        self::assertStringNotContainsString('text/calendar', strtolower((string) $ics->header('content-type')));
+        self::assertStringNotContainsString($fixture->run, $ics->body);
+    }
+
+    public function testAmbiguousStoredHashFailsClosedForBothPublicLinks(): void
+    {
+        $fixture = $this->fixture;
+        $current = $fixture->appointment();
+        $ended = $fixture->appointment();
+        $provider = $fixture->row('users', $fixture->providerId);
+        $timezone = new DateTimeZone((string) $provider['timezone']);
+        $endedAt = new DateTimeImmutable('-1 hour', $timezone);
+
+        self::assertTrue(
+            get_instance()->db->update(
+                'appointments',
+                [
+                    'hash' => $current['hash'],
+                    'start_datetime' => $endedAt->modify('-30 minutes')->format('Y-m-d H:i:s'),
+                    'end_datetime' => $endedAt->format('Y-m-d H:i:s'),
+                ],
+                ['id' => $ended['id']],
+            ),
+        );
+
+        $client = $this->anonymousClient();
+        $hash = (string) $current['hash'];
+        $confirmation = $client->get('booking_confirmation/of/' . $hash);
+        self::assertSame(307, $confirmation->statusCode);
+        self::assertStringNotContainsString($fixture->run, $confirmation->body);
+        $ics = $client->get('appointments/ics/' . $hash);
+        self::assertSame(404, $ics->statusCode);
+        self::assertStringNotContainsString('text/calendar', strtolower((string) $ics->header('content-type')));
+        self::assertNull($ics->header('content-disposition'));
+        self::assertStringNotContainsString($fixture->run, $ics->body);
     }
 
     public function testExternalCalendarLinksKeepEventDataWithoutCapabilityOrAttendeeDisclosure(): void

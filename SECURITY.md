@@ -68,8 +68,11 @@ See the [reschedule authority contract](docs/security/public-reschedule-authorit
 
 Anonymous booking-confirmation and ICS downloads require a nonempty stored
 appointment hash. Reject a missing capability before looking up appointment or
-related data; nullable or empty historical hash fields do not grant access.
-Keep existing nonempty legacy hashes compatible. The isolated HTTP regression
+related data; nullable, empty, or ambiguous historical hash fields do not grant access.
+Current and future appointments may use existing nonempty legacy hashes. Once
+an appointment ends, its public confirmation and ICS links must not disclose
+appointment data. Calendar files must omit customer and provider email
+addresses, including organizer and attendee fields. The isolated HTTP regression
 in `BookingDownloadHttpTest` covers these routes, not every booking operation.
 
 Successful booking-confirmation HTML sets `Cache-Control: no-store` at the
@@ -132,9 +135,10 @@ or secrecy of an otherwise authorized management link.
 
 External Google and Outlook calendar links must carry only event details needed
 to create the appointment. Do not put the reschedule capability or customer and
-provider email addresses into third-party URL parameters. The confirmation page,
-its PDF, and the local ICS download retain their existing management paths;
-`BookingDownloadHttpTest` checks the external-link boundary with own fixtures.
+provider email addresses into third-party URL parameters. While the appointment
+is current or future, the confirmation page, its PDF, and the local ICS download
+retain their existing management paths; expired public links disclose no
+appointment data. `BookingDownloadHttpTest` checks these boundaries with own fixtures.
 
 Do not render third-party analytics scripts on public responses whose URL carries
 an appointment hash, including reschedule, confirmation, and cancellation

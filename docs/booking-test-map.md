@@ -35,7 +35,7 @@ ist eine Orientierung, keine vollständige Testliste.
 | Bestätigung bewahrt gemischte Script-Tags, Sonderzeichen und Unicode in Share-/PDF-Daten | `tests/Integration/Controllers/BookingDownloadHttpTest.php::testConfirmationJsonRoundTripsOwnedNamesWithoutScriptBreakout` | FH_DEFENSE_ISOLATED HTTP/DB; echte Fixture, eigener Hash, Status/Payload, Button-/Link-Erreichbarkeit, JSON-Roundtrip und kein ausführbarer Script-Ausbruch; Fixture-Cleanup |
 | Download-Sentinel bleibt stabil | `tests/Unit/Scripts/BookingConfirmationDownloadSnippetTest.php`, `BookingConfirmationRunCodeResultTest.php` | Source-/Parser-Unit; Marker, Fallback-Ausgabe und ungültige Playwright-Ausgabe |
 
-| Kalenderdatei und Download | `tests/Unit/Libraries/IcsFileTest.php` plus `Appointments::ics` coverage | Unit/HTTP; ICS generation and parent download remain available; application mail is intentionally absent |
+| Kalenderdatei und Download | `tests/Unit/Libraries/IcsFileTest.php` plus `BookingDownloadHttpTest.php` | Unit/isoliertes HTTP mit eigenen Datensätzen; aktuelle und künftige moderne/alte Links bleiben nutzbar, beendete Termine liefern keine Bestätigungs- oder ICS-Daten, und ICS enthält keine Eltern- oder Anbieter-E-Mail-Adresse. Zwei lokale Display-Erinnerungen bleiben erhalten; kein Nachweis für externes Kalenderverhalten. |
 
 ## Verwalten, verschieben, stornieren
 

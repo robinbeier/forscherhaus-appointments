@@ -58,7 +58,7 @@ class Appointments extends EA_Controller
 
         $occurrences = $this->appointments_model->get(['hash' => $appointment_hash]);
 
-        if (!$occurrences) {
+        if (count($occurrences) !== 1) {
             show_404('', !Read_only_probe_request::is());
 
             return;
@@ -71,8 +71,28 @@ class Appointments extends EA_Controller
         $this->load->model('customers_model');
 
         try {
-            $service = $this->services_model->find((int) $appointment['id_services']);
             $provider = $this->providers_model->find((int) $appointment['id_users_provider']);
+            $provider_timezone = new DateTimeZone((string) $provider['timezone']);
+            $calendar_start = $this->parsePublicAppointmentDate($appointment['start_datetime'], $provider_timezone);
+            $calendar_end = $this->parsePublicAppointmentDate($appointment['end_datetime'], $provider_timezone);
+        } catch (Throwable $exception) {
+            log_message('error', 'ICS download failed to validate appointment dates: ' . $exception->getMessage());
+
+            show_404('', !Read_only_probe_request::is());
+
+            return;
+        }
+
+        // Calendar links are public capabilities and must stop serving appointment data
+        // as soon as the appointment has ended.
+        if ($calendar_end <= new DateTimeImmutable('now', $provider_timezone)) {
+            show_404('', !Read_only_probe_request::is());
+
+            return;
+        }
+
+        try {
+            $service = $this->services_model->find((int) $appointment['id_services']);
             $customer = $this->customers_model->find((int) $appointment['id_users_customer']);
         } catch (InvalidArgumentException $exception) {
             log_message('error', 'ICS download failed to resolve related entities: ' . $exception->getMessage());
@@ -83,10 +103,6 @@ class Appointments extends EA_Controller
         }
 
         $this->load->library('ics_file');
-
-        $provider_timezone = new DateTimeZone($provider['timezone']);
-        $calendar_start = new DateTimeImmutable($appointment['start_datetime'], $provider_timezone);
-        $calendar_end = new DateTimeImmutable($appointment['end_datetime'], $provider_timezone);
 
         $calendar_appointment = $appointment;
         $calendar_appointment['start_datetime'] = $calendar_start->format('Y-m-d H:i:s');
@@ -109,5 +125,25 @@ class Appointments extends EA_Controller
             ->set_header('Content-Disposition: attachment; filename="' . $filename . '"')
             ->set_header('Cache-Control: no-store')
             ->set_output($ics_stream);
+    }
+
+    private function parsePublicAppointmentDate(mixed $value, DateTimeZone $timezone): DateTimeImmutable
+    {
+        if (!is_string($value) || !preg_match('/^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$/D', $value)) {
+            throw new InvalidArgumentException('Appointment datetime is not canonical.');
+        }
+
+        $parsed = DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $value, $timezone);
+        $errors = DateTimeImmutable::getLastErrors();
+
+        if (
+            $parsed === false ||
+            ($errors !== false && ($errors['warning_count'] > 0 || $errors['error_count'] > 0)) ||
+            $parsed->format('Y-m-d H:i:s') !== $value
+        ) {
+            throw new InvalidArgumentException('Appointment datetime is invalid.');
+        }
+
+        return $parsed;
     }
 }
