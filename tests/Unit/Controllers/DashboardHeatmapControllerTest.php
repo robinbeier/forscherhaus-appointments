@@ -5,7 +5,6 @@ namespace Tests\Unit\Controllers;
 use Dashboard;
 use Dashboard_heatmap;
 use DateTimeImmutable;
-use ReflectionClass;
 use Tests\TestCase;
 
 require_once APPPATH . 'controllers/Dashboard.php';
@@ -107,11 +106,13 @@ class DashboardHeatmapControllerTest extends TestCase
 
     private function createControllerWithoutConstructor(): Dashboard
     {
-        $reflection = new ReflectionClass(Dashboard::class);
+        return new class extends Dashboard {
+            public function __construct() {}
 
-        /** @var Dashboard $controller */
-        $controller = $reflection->newInstanceWithoutConstructor();
-
-        return $controller;
+            protected function hasCurrentDashboardRole(string $expected_role): bool
+            {
+                return session('role_slug') === $expected_role && (int) session('user_id') > 0;
+            }
+        };
     }
 }

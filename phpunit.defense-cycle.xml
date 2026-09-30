@@ -54,6 +54,7 @@
             <file>./tests/Integration/Controllers/BookingAvailabilityAuthorityHttpTest.php</file>
             <file>./tests/Integration/Controllers/ProviderPdfExportHttpTest.php</file>
             <file>./tests/Integration/Controllers/DashboardExportHttpTest.php</file>
+            <file>./tests/Integration/Controllers/DashboardRoleRevocationHttpTest.php</file>
             <file>./tests/Integration/Controllers/ReadOnlyProbeHttpTest.php</file>
             <file>./tests/Integration/Controllers/CspReportHttpTest.php</file>
             <file>./tests/Integration/Controllers/ConsentSaveHttpTest.php</file>

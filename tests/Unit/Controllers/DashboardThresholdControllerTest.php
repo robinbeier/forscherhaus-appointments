@@ -195,8 +195,11 @@ class DashboardThresholdControllerTest extends TestCase
         return new class extends Dashboard {
             public array $savedThresholds = [];
 
-            public function __construct()
+            public function __construct() {}
+
+            protected function hasCurrentDashboardRole(string $expected_role): bool
             {
+                return session('role_slug') === $expected_role && (int) session('user_id') > 0;
             }
 
             protected function persistThreshold(float $threshold): void
@@ -209,8 +212,11 @@ class DashboardThresholdControllerTest extends TestCase
     private function createSessionPersistingController(): object
     {
         return new class extends Dashboard {
-            public function __construct()
+            public function __construct() {}
+
+            protected function hasCurrentDashboardRole(string $expected_role): bool
             {
+                return session('role_slug') === $expected_role && (int) session('user_id') > 0;
             }
         };
     }

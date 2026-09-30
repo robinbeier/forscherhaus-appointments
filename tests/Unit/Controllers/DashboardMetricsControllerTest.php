@@ -288,6 +288,11 @@ class DashboardMetricsControllerTest extends TestCase
 
             public function __construct() {}
 
+            protected function hasCurrentDashboardRole(string $expected_role): bool
+            {
+                return session('role_slug') === $expected_role && (int) session('user_id') > 0;
+            }
+
             protected function persistProviderDashboardRange(
                 int $provider_id,
                 DateTimeImmutable $start,
