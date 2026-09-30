@@ -352,11 +352,11 @@ try {
                         'username' => (string) $context['username'],
                         'password' => (string) $context['password'],
                     ]);
-                    $sessions->remember($client->getCookie('ea_session'));
                     $data = json_decode($login->body, true);
                     if ($login->statusCode !== 200 || !is_array($data) || ($data['success'] ?? false) !== true) {
                         throw new RuntimeException('Calendar method probe login failed.');
                     }
+                    $sessions->remember($client->getCookie('ea_session'));
                 },
                 static function () use ($client, $sessions): void {
                     $logout = $client->get('logout');
@@ -403,19 +403,26 @@ try {
                             ->get_where('services', ['id' => (int) ($supplemental['ids']['service'] ?? 0)])
                             ->row_array(),
                         'provider_settings_sha256' => hash('sha256', serialize($providerSettings)),
+                        'provider_appointments' => $ci->db
+                            ->order_by('id', 'asc')
+                            ->get_where('appointments', ['id_users_provider' => (int) ($supplemental['actor_id'] ?? 0)])
+                            ->result_array(),
+                        'marker_users' => $ci->db
+                            ->select('id')
+                            ->order_by('id', 'asc')
+                            ->get_where('users', ['notes' => (string) ($supplemental['marker'] ?? '')])
+                            ->result_array(),
+                        'marker_services' => $ci->db
+                            ->select('id')
+                            ->order_by('id', 'asc')
+                            ->get_where('services', ['description' => (string) ($supplemental['marker'] ?? '')])
+                            ->result_array(),
                         'service_relationships' => $ci->db
                             ->order_by('id_services', 'asc')
-                            ->get_where('services_providers', [
-                                'id_users' => (int) ($supplemental['actor_id'] ?? 0),
-                                'id_services' => (int) ($supplemental['ids']['service'] ?? 0),
-                            ])
+                            ->get_where('services_providers', ['id_users' => (int) ($supplemental['actor_id'] ?? 0)])
                             ->result_array(),
                     ];
-                    $counts = [];
-                    foreach (['appointments', 'users', 'user_settings', 'services_providers'] as $table) {
-                        $counts[$table] = (int) $ci->db->count_all($table);
-                    }
-                    return ['owned' => $owned, 'totals' => $counts];
+                    return ['owned' => $owned];
                 },
             ))->run($evidence->step(...));
         } elseif ($action === 'customers-api') {

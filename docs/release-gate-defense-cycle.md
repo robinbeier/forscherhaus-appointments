@@ -255,8 +255,9 @@ bash scripts/ops/run_ordinary_live_probe.sh cleanup EXPECTED_RELEASE
 The `calendar-methods` action uses only its own synthetic provider, customer,
 service and appointment. It requires all six direct calendar write routes to
 reject GET and HEAD with `405` and `Allow: POST`, and all six legacy aliases to
-redirect on GET, HEAD and CSRF-authenticated POST without changing the owned
-rows or bounded table totals. The shared production lock, independent cleanup
+redirect on GET and HEAD; CSRF-authenticated POST aliases must use a safe
+method-switching `303` redirect. Every request must leave the owned synthetic
+rows unchanged. The shared production lock, independent cleanup
 timer and fixture/session verification apply to this action as to the other
 ordinary probes. The journal records one bounded phase per direct route and per
 alias while the result records each HTTP method separately. This is a method

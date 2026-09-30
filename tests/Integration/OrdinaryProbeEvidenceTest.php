@@ -59,7 +59,7 @@ final class OrdinaryProbeEvidenceTest extends TestCase
                 $alias = str_starts_with($path, 'backend_api/');
                 $target = str_replace('backend_api/ajax_', 'calendar/', explode('?', $path, 2)[0]);
                 return new \ReleaseGate\GateHttpResponse(
-                    $alias ? 302 : 405,
+                    $alias ? ($method === 'POST' ? 303 : 302) : 405,
                     $alias ? ['location' => ['/index.php/' . $target]] : ['allow' => ['POST']],
                     '',
                     0.0,
@@ -74,7 +74,7 @@ final class OrdinaryProbeEvidenceTest extends TestCase
                 'customer_id' => 23,
                 'marker' => 'owned',
             ],
-            static fn(): array => ['owned' => ['id' => 41], 'totals' => ['appointments' => 1]],
+            static fn(): array => ['owned' => ['id' => 41]],
         );
 
         self::assertSame('verified', $probe->run($evidence->step(...))['status']);

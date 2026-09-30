@@ -55,10 +55,8 @@ final class CalendarMethodProbe
     public function run(?callable $observe = null): array
     {
         $observe ??= static function (string $phase, string $outcome): void {};
-        $authenticated = false;
         try {
             ($this->authenticate)();
-            $authenticated = true;
             $context = ($this->context)();
             $this->assertContext($context);
             $before = ($this->snapshot)();
@@ -92,7 +90,8 @@ final class CalendarMethodProbe
                     foreach (['GET', 'HEAD', 'POST'] as $method) {
                         $operation = $phase . '_' . strtolower($method);
                         $response = ($this->request)($method, 'backend_api/' . $route['alias'] . '?' . $route['query']);
-                        if (!in_array($response->statusCode, [301, 302, 303, 307, 308], true)) {
+                        $allowedStatuses = $method === 'POST' ? [303] : [301, 302, 303, 307, 308];
+                        if (!in_array($response->statusCode, $allowedStatuses, true)) {
                             throw new RuntimeException($operation . ' was not redirect-only.');
                         }
                         $this->expectAliasLocation($response, $route['alias'], $route['path'], $operation);
@@ -108,12 +107,12 @@ final class CalendarMethodProbe
                 'method_statuses' => $methodStatuses,
                 'alias_statuses' => $aliasStatuses,
                 'observed' =>
-                    'Every GET and HEAD request returned 405 with Allow: POST; legacy aliases redirected without changing owned rows or bounded table totals.',
+                    'Every GET and HEAD request returned 405 with Allow: POST; legacy aliases redirected without changing owned synthetic rows.',
             ];
         } finally {
-            if ($authenticated) {
-                ($this->close)();
-            }
+            // A login can succeed before session journaling fails. Always try
+            // logout; the wrapper retains recovery state if closure is unproved.
+            ($this->close)();
         }
     }
 
@@ -195,7 +194,7 @@ final class CalendarMethodProbe
     private function assertSnapshot(array $expected, string $phase): void
     {
         if (($this->snapshot)() !== $expected) {
-            throw new RuntimeException($phase . ' changed owned rows or bounded totals.');
+            throw new RuntimeException($phase . ' changed owned synthetic rows.');
         }
     }
 

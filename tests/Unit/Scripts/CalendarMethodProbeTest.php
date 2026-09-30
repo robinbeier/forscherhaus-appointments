@@ -97,7 +97,36 @@ final class CalendarMethodProbeTest extends TestCase
         self::assertSame(['login', 'logout'], $lifecycle);
     }
 
-    public function testAuthenticationFailureDoesNotAttemptLogout(): void
+    public function testNewOwnedRowFailsEvenWhenTheResponseIsMethodDenied(): void
+    {
+        $client = new FakeCalendarMethodClient();
+        $snapshots = 0;
+        $probe = new CalendarMethodProbe(
+            $client->request(...),
+            static function (): void {},
+            static function (): void {},
+            static fn(): array => [
+                'appointment_id' => 41,
+                'provider_id' => 17,
+                'customer_id' => 23,
+                'marker' => 'owned',
+            ],
+            static function () use (&$snapshots): array {
+                $snapshots++;
+                $rows = [['id' => 41]];
+                if ($snapshots > 1) {
+                    $rows[] = ['id' => 42];
+                }
+                return ['owned' => ['provider_appointments' => $rows]];
+            },
+        );
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('changed owned synthetic rows');
+        $probe->run();
+    }
+
+    public function testAuthenticationFailureStillAttemptsLogoutBecauseSessionMayBeActive(): void
     {
         $client = new FakeCalendarMethodClient();
         $logoutCalls = 0;
@@ -117,7 +146,7 @@ final class CalendarMethodProbeTest extends TestCase
         try {
             $probe->run();
         } finally {
-            self::assertSame(0, $logoutCalls);
+            self::assertSame(1, $logoutCalls);
         }
     }
 
@@ -140,6 +169,32 @@ final class CalendarMethodProbeTest extends TestCase
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('was not redirect-only');
         $probe->run();
+    }
+
+    public function testPostAliasRejectsMethodPreservingRedirects(): void
+    {
+        foreach ([307, 308] as $status) {
+            $client = new FakeCalendarMethodClient(aliasStatus: 302, aliasPostStatus: $status);
+            $probe = new CalendarMethodProbe(
+                $client->request(...),
+                static function (): void {},
+                static function (): void {},
+                static fn(): array => [
+                    'appointment_id' => 41,
+                    'provider_id' => 17,
+                    'customer_id' => 23,
+                    'marker' => 'owned',
+                ],
+                static fn(): array => ['owned' => ['id' => 41]],
+            );
+
+            try {
+                $probe->run();
+                self::fail('A method-preserving POST alias redirect was accepted: ' . $status);
+            } catch (RuntimeException $error) {
+                self::assertStringContainsString('was not redirect-only', $error->getMessage());
+            }
+        }
     }
 
     public function testAliasRejectsOffOriginAndMisleadingLocations(): void
@@ -201,6 +256,7 @@ final class FakeCalendarMethodClient
     public function __construct(
         private readonly int $status = 405,
         private readonly int $aliasStatus = 302,
+        private readonly ?int $aliasPostStatus = 303,
         private readonly ?string $aliasLocationOverride = null,
         private readonly bool $absoluteAliasLocation = false,
     ) {}
@@ -218,8 +274,10 @@ final class FakeCalendarMethodClient
         $location =
             $this->aliasLocationOverride ??
             ($this->absoluteAliasLocation ? 'http://localhost' . $redirectPath : $redirectPath);
+        $responseStatus =
+            $alias && $method === 'POST' ? $this->aliasPostStatus ?? $this->aliasStatus : $this->aliasStatus;
         return new GateHttpResponse(
-            $alias ? $this->aliasStatus : $this->status,
+            $alias ? $responseStatus : $this->status,
             $alias ? ['location' => [$location]] : ['allow' => ['POST']],
             '',
             0.0,
