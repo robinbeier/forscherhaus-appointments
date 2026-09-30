@@ -106,6 +106,22 @@ Cross-Site-Ausnutzung oder unbekannte externe Clients. Produktiv werden nur
 Release-/Konfigurationsidentität und lesende Gesundheitsklassen geprüft; ein
 Login mit einem echten Konto ist kein Bestandteil dieses Nachweises.
 
+## Authentifizierte Kalender-Schreibaktionen
+
+Die sechs Kalender-Aktionen zum Speichern und Löschen von Terminen,
+Sperrzeiten und Arbeitsplan-Ausnahmen akzeptieren ausschließlich POST. Andere
+Methoden erhalten vor der Auswertung von Query-Daten und vor jeder Mutation
+HTTP 405 mit `Allow: POST`. Anmeldung, Rollenrechte und Provider-Zuordnung
+bleiben zusätzliche Voraussetzungen; sie ersetzen die Methodengrenze nicht.
+Die alten `backend_api/ajax_*`-Aliase leiten lediglich zu diesen geschützten
+Zielaktionen weiter und führen selbst keine Änderung aus.
+
+`CalendarMutationMethodHttpTest` prüft GET und HEAD mit echten Query-Parametern
+für alle sechs direkten Aktionen, die Nichtmutation eigener synthetischer
+Datensätze, gültige POST-Kontrollpfade und die Weiterleitungen der alten
+Aliase. Die isolierte HTTP-/Datenbankprüfung belegt weder eine Browser-CSRF-
+Ausnutzung noch den Zustand unbekannter externer Clients oder Produktion.
+
 Die Backoffice-Endpunkte `customers/store` und `services/store` legen nur neue
 Datensätze an. Eine mitgesendete bestehende ID wird abgewiesen; Änderungen laufen
 über `update` mit Bearbeitungsrecht und den bestehenden Zugriffsprüfungen.
