@@ -86,14 +86,13 @@ final class DeterministicFixtureFactory
     /**
      * @return array<string, mixed>
      */
-    public function createBookingCustomerPayload(array $overrides = []): array
+    public function createBookingCustomerPayload(array $overrides = [], bool $includeEmail = false): array
     {
         $marker = $this->nextMarker('booking-customer');
 
         $payload = [
             'first_name' => 'CI',
             'last_name' => strtoupper(substr($marker, -6)),
-            'email' => $this->markerEmail($marker),
             'phone_number' => '+49123456789',
             'address' => 'CI Write Contract',
             'city' => 'Berlin',
@@ -101,6 +100,10 @@ final class DeterministicFixtureFactory
             'timezone' => $this->timezone,
             'notes' => 'run:' . $this->runId,
         ];
+
+        if ($this->syntheticCanary || $includeEmail) {
+            $payload['email'] = $this->markerEmail($marker);
+        }
 
         return array_merge($payload, $overrides);
     }

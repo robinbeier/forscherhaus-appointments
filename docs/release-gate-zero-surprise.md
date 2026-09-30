@@ -275,6 +275,13 @@ Notifier failures are non-blocking. They never change deploy or rollback exit co
 
 `POST /booking/register` returns `409 Conflict` for slot collisions.
 
+The ordinary isolated booking replay reads `display_email` through the
+authenticated settings API before its write checks. It includes a synthetic
+customer email only when that setting is enabled; an unknown response fails
+the replay before a booking write. Slot discovery remains read-only and does
+not require this settings lookup. The live canary keeps its separately bound
+synthetic email identity.
+
 Response shape stays:
 
 ```json
