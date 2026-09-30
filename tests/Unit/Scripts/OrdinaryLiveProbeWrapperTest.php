@@ -64,6 +64,7 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
                 'SecretariesApiAliasProbe.php',
                 'StaffApiPutProbe.php',
                 'CalendarResponsibilityRaceProbe.php',
+                'CalendarMethodProbe.php',
                 'AppointmentsApiWriteProbe.php',
                 'DefenseVerificationFixture.php',
             ]
@@ -218,6 +219,7 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
                 'secretaries-api' => 'admin',
                 'staff-api' => 'admin',
                 'calendar-race' => 'provider',
+                'calendar-methods' => 'provider',
                 'appointments-api' => 'provider',
                 'appointments-api-overlap' => 'provider',
             ]

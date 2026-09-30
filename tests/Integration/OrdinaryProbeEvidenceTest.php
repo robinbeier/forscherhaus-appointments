@@ -11,6 +11,8 @@ use Tests\Integration\Support\OrdinaryJournalSyncFault;
 require_once __DIR__ . '/Support/OrdinaryJournalSyncFault.php';
 require_once dirname(__DIR__, 2) . '/scripts/release-gate/lib/OrdinaryProbeEvidence.php';
 require_once dirname(__DIR__, 2) . '/scripts/release-gate/lib/OrdinaryProbeSessions.php';
+require_once dirname(__DIR__, 2) . '/scripts/release-gate/lib/GateHttpClient.php';
+require_once dirname(__DIR__, 2) . '/scripts/release-gate/lib/CalendarMethodProbe.php';
 
 final class OrdinaryProbeEvidenceTest extends TestCase
 {
@@ -40,6 +42,48 @@ final class OrdinaryProbeEvidenceTest extends TestCase
             unlink($path);
         }
         rmdir($this->directory);
+    }
+
+    public function testCalendarMethodProbeFitsTheBoundedPersistentJournal(): void
+    {
+        $evidence = new OrdinaryProbeEvidence($this->directory);
+        $evidence->begin('ea_synthetic');
+        foreach (['activate', 'verify', 'supplemental_activate'] as $setup) {
+            $evidence->step($setup, 'started');
+            $evidence->step($setup, 'passed');
+        }
+        $requests = 0;
+        $probe = new \ReleaseGate\CalendarMethodProbe(
+            static function (string $method, string $path) use (&$requests): \ReleaseGate\GateHttpResponse {
+                $requests++;
+                $alias = str_starts_with($path, 'backend_api/');
+                $target = str_replace('backend_api/ajax_', 'calendar/', explode('?', $path, 2)[0]);
+                return new \ReleaseGate\GateHttpResponse(
+                    $alias ? 302 : 405,
+                    $alias ? ['location' => ['/index.php/' . $target]] : ['allow' => ['POST']],
+                    '',
+                    0.0,
+                    'http://localhost/index.php/' . $path,
+                );
+            },
+            static function (): void {},
+            static function (): void {},
+            static fn(): array => [
+                'appointment_id' => 41,
+                'provider_id' => 17,
+                'customer_id' => 23,
+                'marker' => 'owned',
+            ],
+            static fn(): array => ['owned' => ['id' => 41], 'totals' => ['appointments' => 1]],
+        );
+
+        self::assertSame('verified', $probe->run($evidence->step(...))['status']);
+        $evidence->step('verify', 'started');
+        $evidence->step('verify', 'passed');
+        $evidence->step('deactivate', 'started');
+        $evidence->step('deactivate', 'passed');
+        self::assertSame(30, $requests);
+        self::assertCount(34, $evidence->read()['events']);
     }
 
     public function testReceiptPrecedesJournalRetirementAndPreservesFailureStep(): void

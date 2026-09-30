@@ -3,9 +3,11 @@
 declare(strict_types=1);
 
 use ReleaseGate\GateHttpClient;
+use ReleaseGate\GateHttpResponse;
 use ReleaseGate\AccountSecurityMatrixProbe;
 use ReleaseGate\AppointmentsApiWriteProbe;
 use ReleaseGate\CalendarResponsibilityRaceProbe;
+use ReleaseGate\CalendarMethodProbe;
 use ReleaseGate\CustomerRoleBoundaryProbe;
 use ReleaseGate\CustomersApiWriteProbe;
 use ReleaseGate\StaffApiPutProbe;
@@ -58,6 +60,7 @@ if (
             'service-categories-api',
             'secretaries-api',
             'calendar-race',
+            'calendar-methods',
             'appointments-api',
             'appointments-api-overlap',
             'session',
@@ -174,6 +177,7 @@ try {
     require_once dirname(__DIR__) . '/release-gate/lib/ServiceCategoriesApiWriteProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/SecretariesApiAliasProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/CalendarResponsibilityRaceProbe.php';
+    require_once dirname(__DIR__) . '/release-gate/lib/CalendarMethodProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/AppointmentsApiWriteProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/DefenseVerificationFixture.php';
     if (
@@ -329,6 +333,91 @@ try {
                 }
                 throw $error;
             }
+        } elseif ($action === 'calendar-methods') {
+            $supplemental = $evidence->run(
+                'supplemental_activate',
+                fn(): array => $verificationFixture->activate('calendar_race', $context),
+            );
+            $result['evidence'] = (new CalendarMethodProbe(
+                static fn(string $method, string $path): GateHttpResponse => $method === 'POST'
+                    ? $client->post($path)
+                    : $client->requestApp($method, $path),
+                static function () use ($client, $context, $sessions): void {
+                    $loginPage = $client->get('login');
+                    $sessions->remember($client->getCookie('ea_session'));
+                    if ($loginPage->statusCode !== 200) {
+                        throw new RuntimeException('Calendar method probe login page failed.');
+                    }
+                    $login = $client->post('login/validate', [
+                        'username' => (string) $context['username'],
+                        'password' => (string) $context['password'],
+                    ]);
+                    $sessions->remember($client->getCookie('ea_session'));
+                    $data = json_decode($login->body, true);
+                    if ($login->statusCode !== 200 || !is_array($data) || ($data['success'] ?? false) !== true) {
+                        throw new RuntimeException('Calendar method probe login failed.');
+                    }
+                },
+                static function () use ($client, $sessions): void {
+                    $logout = $client->get('logout');
+                    $sessions->remember($client->getCookie('ea_session'));
+                    if ($logout->statusCode !== 200) {
+                        throw new RuntimeException('Calendar method probe logout failed.');
+                    }
+                    $afterLogout = $client->get('account');
+                    $sessions->remember($client->getCookie('ea_session'));
+                    if ($afterLogout->statusCode !== 307) {
+                        throw new RuntimeException('Calendar method probe session remained authenticated.');
+                    }
+                },
+                static function () use ($supplemental): array {
+                    return [
+                        'appointment_id' => (int) ($supplemental['ids']['appointment'] ?? 0),
+                        'provider_id' => (int) ($supplemental['actor_id'] ?? 0),
+                        'customer_id' => (int) ($supplemental['ids']['calendar_customer'] ?? 0),
+                        'marker' => (string) ($supplemental['marker'] ?? ''),
+                    ];
+                },
+                static function () use ($supplemental, $ci): array {
+                    $appointmentId = (int) ($supplemental['ids']['appointment'] ?? 0);
+                    $appointment = $ci->db->get_where('appointments', ['id' => $appointmentId])->row_array();
+                    if (!is_array($appointment) || $appointment === []) {
+                        throw new RuntimeException('Calendar method probe appointment snapshot is unavailable.');
+                    }
+                    $appointment['hash'] = hash('sha256', (string) ($appointment['hash'] ?? ''));
+                    $providerSettings = $ci->db
+                        ->get_where('user_settings', ['id_users' => (int) ($supplemental['actor_id'] ?? 0)])
+                        ->row_array();
+                    if (!is_array($providerSettings) || $providerSettings === []) {
+                        throw new RuntimeException('Calendar method probe provider settings snapshot is unavailable.');
+                    }
+                    $owned = [
+                        'appointment' => $appointment,
+                        'provider' => $ci->db
+                            ->get_where('users', ['id' => (int) ($supplemental['actor_id'] ?? 0)])
+                            ->row_array(),
+                        'customer' => $ci->db
+                            ->get_where('users', ['id' => (int) ($supplemental['ids']['calendar_customer'] ?? 0)])
+                            ->row_array(),
+                        'service' => $ci->db
+                            ->get_where('services', ['id' => (int) ($supplemental['ids']['service'] ?? 0)])
+                            ->row_array(),
+                        'provider_settings_sha256' => hash('sha256', serialize($providerSettings)),
+                        'service_relationships' => $ci->db
+                            ->order_by('id_services', 'asc')
+                            ->get_where('services_providers', [
+                                'id_users' => (int) ($supplemental['actor_id'] ?? 0),
+                                'id_services' => (int) ($supplemental['ids']['service'] ?? 0),
+                            ])
+                            ->result_array(),
+                    ];
+                    $counts = [];
+                    foreach (['appointments', 'users', 'user_settings', 'services_providers'] as $table) {
+                        $counts[$table] = (int) $ci->db->count_all($table);
+                    }
+                    return ['owned' => $owned, 'totals' => $counts];
+                },
+            ))->run($evidence->step(...));
         } elseif ($action === 'customers-api') {
             $evidence->run(
                 'supplemental_activate',
@@ -476,6 +565,7 @@ try {
                     'service-categories-api',
                     'secretaries-api',
                     'calendar-race',
+                    'calendar-methods',
                     'appointments-api',
                     'appointments-api-overlap',
                 ],
