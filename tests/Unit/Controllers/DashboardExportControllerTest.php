@@ -868,6 +868,36 @@ class DashboardExportControllerTest extends TestCase
         $this->assertSame('Klassengröße', $mapped[1]['target_origin_label']);
     }
 
+    public function testMapMetricsForViewReplacesContactLikeProviderNameButPreservesOrdinaryName(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+
+        $mapped = $controller->callMapMetricsForView(
+            [
+                [
+                    'provider_id' => 42,
+                    'provider_name' => 'unnamed.teacher@example.org',
+                    'target' => 10,
+                    'booked' => 4,
+                    'open' => 6,
+                    'fill_rate' => 0.4,
+                ],
+                [
+                    'provider_id' => 43,
+                    'provider_name' => 'Ada Lovelace',
+                    'target' => 10,
+                    'booked' => 10,
+                    'open' => 0,
+                    'fill_rate' => 1.0,
+                ],
+            ],
+            0.9,
+        );
+
+        self::assertSame('Lehrkraft 42', $mapped[0]['provider_name']);
+        self::assertSame('Ada Lovelace', $mapped[1]['provider_name']);
+    }
+
     public function testMapMetricsForViewPreservesReliableAppointmentCountSeparatelyFromBookedMetric(): void
     {
         $controller = $this->createControllerWithThreshold(0.9);

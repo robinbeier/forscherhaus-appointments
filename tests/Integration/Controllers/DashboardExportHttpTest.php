@@ -302,7 +302,7 @@ final class DashboardExportHttpTest extends TestCase
                 );
                 foreach (array_slice($calls, $callsBefore) as $call) {
                     $html = (string) ($call['html'] ?? '');
-                    $selectedName = (string) $fixture->providerId;
+                    $selectedName = 'Lehrkraft ' . $fixture->providerId;
                     self::assertTrue(
                         str_contains($html, '<div class="name">' . $selectedName . '</div>') ||
                             str_contains($html, '<h2 class="teacher__name">' . $selectedName . '</h2>'),

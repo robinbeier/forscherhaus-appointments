@@ -655,8 +655,14 @@ class Dashboard_export extends EA_Controller
                 $status_label = lang('dashboard_no_target') ?: 'Kein Ziel';
             }
 
+            $provider_id = (int) ($metric['provider_id'] ?? 0);
+            $provider_name = trim((string) ($metric['provider_name'] ?? ''));
+            if ($provider_name === '' || str_contains($provider_name, '@')) {
+                $provider_name = $provider_id > 0 ? 'Lehrkraft ' . $provider_id : '—';
+            }
+
             return [
-                'provider_name' => (string) ($metric['provider_name'] ?? ''),
+                'provider_name' => $provider_name,
                 'target' => $this->formatNumber($target),
                 'booked' => $this->formatNumber($booked),
                 'open' => $this->formatNumber($open),
@@ -694,7 +700,7 @@ class Dashboard_export extends EA_Controller
                 'after_15_percent' => $after_15_percent,
                 'after_15_target_met' => $after_15_target_met,
                 'after_15_evaluable' => $after_15_evaluable,
-                'provider_id' => (int) ($metric['provider_id'] ?? 0),
+                'provider_id' => $provider_id,
             ];
         }, $metrics);
     }
