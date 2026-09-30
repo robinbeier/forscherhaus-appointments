@@ -146,11 +146,11 @@ final class CalendarMethodProbeTest extends TestCase
     {
         foreach (
             [
-                'https://unrelated.invalid/prefix/calendar/save_appointment',
-                '/prefix/calendar/save_appointment',
-                '/index.php/calendar/save_appointment?appointment_id=41',
+                ['https://unrelated.invalid/index.php/calendar/save_appointment', 'outside the request origin'],
+                ['/prefix/calendar/save_appointment', 'unexpected calendar route'],
+                ['/index.php/calendar/save_appointment?appointment_id=41', 'unexpected calendar route'],
             ]
-            as $location
+            as [$location, $expectedFailure]
         ) {
             $client = new FakeCalendarMethodClient(aliasLocationOverride: $location);
             $probe = new CalendarMethodProbe(
@@ -169,7 +169,7 @@ final class CalendarMethodProbeTest extends TestCase
                 $probe->run();
                 self::fail('An unexpected alias redirect was accepted: ' . $location);
             } catch (RuntimeException $error) {
-                self::assertStringContainsString('redirect', $error->getMessage());
+                self::assertStringContainsString($expectedFailure, $error->getMessage());
             }
         }
     }
