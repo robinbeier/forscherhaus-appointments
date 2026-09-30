@@ -26,6 +26,16 @@ Ownership labels do not demonstrate an independent security review.
   credentials, and evidence have their own trust boundary and require review.
   A successful tool run does not establish the application's security by itself.
 
+The product is used through its own website. Browser access from another origin
+is not supported for public, backoffice, or API routes. Application responses
+must not grant a foreign origin access through `Access-Control-Allow-*`, including
+for `Origin: null` or requests carrying credentials. Same-origin browser requests
+need no CORS grant, and server-to-server Basic/Bearer API clients do not use
+browser CORS. Global OPTIONS handling ends before controller logic but does not
+approve a cross-origin preflight. A simple cross-origin request can still reach
+the server, so authentication, CSRF, and capability checks remain essential.
+Any future foreign-browser integration needs an explicit, reviewed policy.
+
 ## Required security properties
 
 The first cycle sharpened the following six properties. They are examples of

@@ -76,28 +76,9 @@ $route['translate_uri_dashes'] = false;
 
 // header('X-Frame-Options: SAMEORIGIN');
 
-/*
-| -------------------------------------------------------------------------
-| CORS HEADERS
-| -------------------------------------------------------------------------
-| Set the appropriate headers so that CORS requirements are met and any 
-| incoming preflight options request succeeds. 
-|
-*/
-
-header('Access-Control-Allow-Origin: ' . ($_SERVER['HTTP_ORIGIN'] ?? '*')); // NOTICE: Change this header to restrict CORS access.
-
-header('Access-Control-Allow-Credentials: "true"');
-
-if (isset($_SERVER['HTTP_ACCESS_CONTROL_REQUEST_METHOD'])) {
-    // May also be using PUT, PATCH, HEAD etc
-    header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD');
-}
-
-if (isset($_SERVER['HTTP_ACCESS_CONTROL_REQUEST_HEADERS'])) {
-    header('Access-Control-Allow-Headers: ' . $_SERVER['HTTP_ACCESS_CONTROL_REQUEST_HEADERS']);
-}
-
+// Browser clients use this application on its own origin. No route grants
+// cross-origin browser access, regardless of the supplied Origin or preflight
+// headers. An OPTIONS request must still end before any controller runs.
 if (isset($_SERVER['REQUEST_METHOD']) && $_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit(0);
 }

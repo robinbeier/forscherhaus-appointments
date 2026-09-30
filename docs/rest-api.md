@@ -20,6 +20,11 @@ Additionally you can configure your own API key in the settings page and pass it
 
 The API follows the REST structure which means that the client can use various HTTP verbs in order to perform various operations to the resources. For example you should use a GET request for fetching resources, a POST for creating new and PUT for updating existing ones in the database. Finally a DELETE request will remove a resource from the system.
 
+Browser access from a different origin is not supported. The application is
+used through its own website; server-to-server API clients can continue to use
+Basic or Bearer authentication without CORS response headers. OPTIONS requests
+end before controller logic but receive no cross-origin browser permission.
+
 ### Public Booking Boundary
 
 The public `POST /booking/register` route is not part of the authenticated REST
