@@ -590,35 +590,20 @@ class DashboardExportControllerTest extends TestCase
         $this->assertSame(2, $controller->formatterFactoryCalls);
     }
 
-    public function testBuildPdfStreamOptionsDisablesDebugDumpByDefault(): void
+    public function testBuildPdfStreamOptionsDoNotPersistHtml(): void
     {
         $controller = $this->createControllerWithThreshold(0.9);
 
-        $options = $controller->callBuildPdfStreamOptions('/tmp/dashboard-debug.html');
+        $options = $controller->callBuildPdfStreamOptions();
 
         $this->assertSame(['attachment' => true], $options);
-    }
-
-    public function testBuildPdfStreamOptionsEnablesDebugDumpWhenFlagIsTrue(): void
-    {
-        $controller = $this->createControllerWithThreshold(0.9, 'true');
-
-        $options = $controller->callBuildPdfStreamOptions('/tmp/dashboard-debug.html');
-
-        $this->assertSame(
-            [
-                'attachment' => true,
-                'debug_dump_path' => '/tmp/dashboard-debug.html',
-            ],
-            $options,
-        );
     }
 
     public function testBuildProviderPreparationPdfStreamOptionsUsesA4Landscape(): void
     {
         $controller = $this->createControllerWithThreshold(0.9);
 
-        $options = $controller->callBuildProviderPreparationPdfStreamOptions('/tmp/provider-preparation.html');
+        $options = $controller->callBuildProviderPreparationPdfStreamOptions();
 
         $this->assertSame(
             [
@@ -876,24 +861,18 @@ class DashboardExportControllerTest extends TestCase
         $this->assertSame('99', $mapped[0]['booked_appointments_formatted']);
     }
 
-    private function createControllerWithThreshold(float $configuredThreshold, mixed $pdfDebugDumpFlag = false): object
+    private function createControllerWithThreshold(float $configuredThreshold): object
     {
         $dashboardMetrics = new class extends Dashboard_metrics {
             public function __construct() {}
         };
 
-        return new class ($configuredThreshold, $pdfDebugDumpFlag, $dashboardMetrics) extends Dashboard_export {
+        return new class ($configuredThreshold, $dashboardMetrics) extends Dashboard_export {
             private float $configuredThreshold;
 
-            private mixed $pdfDebugDumpFlag;
-
-            public function __construct(
-                float $configuredThreshold,
-                mixed $pdfDebugDumpFlag,
-                Dashboard_metrics $dashboardMetrics,
-            ) {
+            public function __construct(float $configuredThreshold, Dashboard_metrics $dashboardMetrics)
+            {
                 $this->configuredThreshold = $configuredThreshold;
-                $this->pdfDebugDumpFlag = $pdfDebugDumpFlag;
                 $this->dashboardMetrics = $dashboardMetrics;
                 $this->dashboard_metrics = $dashboardMetrics;
             }
@@ -923,14 +902,14 @@ class DashboardExportControllerTest extends TestCase
                 return $this->buildProviderPreparationAppointmentPages($appointments);
             }
 
-            public function callBuildPdfStreamOptions(string $debugDumpPath): array
+            public function callBuildPdfStreamOptions(): array
             {
-                return $this->buildPdfStreamOptions($debugDumpPath);
+                return $this->buildPdfStreamOptions();
             }
 
-            public function callBuildProviderPreparationPdfStreamOptions(string $debugDumpPath): array
+            public function callBuildProviderPreparationPdfStreamOptions(): array
             {
-                return $this->buildProviderPreparationPdfStreamOptions($debugDumpPath);
+                return $this->buildProviderPreparationPdfStreamOptions();
             }
 
             public function callBuildSummary(array $metrics, float $threshold): array
@@ -971,11 +950,6 @@ class DashboardExportControllerTest extends TestCase
             protected function getConfiguredThreshold(): float
             {
                 return $this->configuredThreshold;
-            }
-
-            protected function resolvePdfDebugDumpFlag(): mixed
-            {
-                return $this->pdfDebugDumpFlag;
             }
         };
     }

@@ -127,7 +127,7 @@ class Dashboard_export extends EA_Controller
                 'exports/dashboard_principal_pdf',
                 $view_data,
                 $this->buildFilename($period->start, $period->end),
-                $this->buildPdfStreamOptions(APPPATH . '../storage/logs/dashboard_principal_pdf_dump.html'),
+                $this->buildPdfStreamOptions(),
             );
         } catch (Throwable $exception) {
             log_message('error', 'Failed to render principal dashboard export: ' . $exception->getMessage());
@@ -186,7 +186,7 @@ class Dashboard_export extends EA_Controller
                 'exports/dashboard_teacher_pdf',
                 $view_data,
                 $this->buildTeacherPdfFilename($period->start, $period->end),
-                $this->buildPdfStreamOptions(APPPATH . '../storage/logs/dashboard_teacher_pdf_dump.html'),
+                $this->buildPdfStreamOptions(),
             );
         } catch (Throwable $exception) {
             log_message('error', 'Failed to render teacher dashboard export: ' . $exception->getMessage());
@@ -332,7 +332,25 @@ class Dashboard_export extends EA_Controller
      */
     protected function assertAdmin(): void
     {
-        if (session('role_slug') !== DB_SLUG_ADMIN) {
+        if (strtoupper($this->input->method(true)) !== 'GET') {
+            abort(405, 'Method Not Allowed', ['Allow: GET']);
+        }
+
+        $user_id = (int) session('user_id');
+
+        if (session('role_slug') !== DB_SLUG_ADMIN || $user_id <= 0) {
+            abort(403, 'Forbidden');
+        }
+
+        $current_role = $this->db
+            ->select('roles.slug')
+            ->from('users')
+            ->join('roles', 'roles.id = users.id_roles')
+            ->where('users.id', $user_id)
+            ->get()
+            ->row_array();
+
+        if (($current_role['slug'] ?? null) !== DB_SLUG_ADMIN) {
             abort(403, 'Forbidden');
         }
     }
@@ -366,68 +384,24 @@ class Dashboard_export extends EA_Controller
     }
 
     /**
-     * Build PDF stream options with optional debug dump output.
+     * Build PDF stream options without a persistent HTML dump.
      */
-    protected function buildPdfStreamOptions(?string $debug_dump_path = null): array
+    protected function buildPdfStreamOptions(): array
     {
-        $options = [
+        return [
             'attachment' => true,
         ];
-
-        if ($debug_dump_path !== null && $debug_dump_path !== '' && $this->isPdfDebugDumpEnabled()) {
-            $options['debug_dump_path'] = $debug_dump_path;
-        }
-
-        return $options;
     }
 
     /**
      * Build explicit A4 landscape renderer options for the provider preparation PDF.
      */
-    protected function buildProviderPreparationPdfStreamOptions(?string $debug_dump_path = null): array
+    protected function buildProviderPreparationPdfStreamOptions(): array
     {
-        return array_merge($this->buildPdfStreamOptions($debug_dump_path), [
+        return array_merge($this->buildPdfStreamOptions(), [
             'paper' => 'A4',
             'orientation' => 'landscape',
         ]);
-    }
-
-    /**
-     * Determine whether PDF HTML debug dumps are enabled.
-     */
-    protected function isPdfDebugDumpEnabled(): bool
-    {
-        $value = $this->resolvePdfDebugDumpFlag();
-
-        if (is_bool($value)) {
-            return $value;
-        }
-
-        if (is_int($value) || is_float($value)) {
-            return (float) $value !== 0.0;
-        }
-
-        if (is_string($value)) {
-            $normalized = trim($value);
-
-            if ($normalized === '') {
-                return false;
-            }
-
-            $parsed = filter_var($normalized, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
-
-            return $parsed ?? false;
-        }
-
-        return false;
-    }
-
-    /**
-     * Resolve the PDF debug dump flag from environment variables.
-     */
-    protected function resolvePdfDebugDumpFlag(): mixed
-    {
-        return env('PDF_RENDERER_DEBUG_DUMP', false);
     }
 
     /**
@@ -1755,8 +1729,6 @@ class Dashboard_export extends EA_Controller
                 'appointments.end_datetime',
                 'customers.first_name AS customer_first_name',
                 'customers.last_name AS customer_last_name',
-                'customers.email AS customer_email',
-                'customers.phone_number AS customer_phone_number',
             ])
             ->join('users AS customers', 'customers.id = appointments.id_users_customer', 'left')
             ->where('appointments.is_unavailability', false)
@@ -1881,18 +1853,6 @@ class Dashboard_export extends EA_Controller
 
         if ($first_name !== '') {
             return $first_name;
-        }
-
-        $email = trim((string) ($appointment['customer_email'] ?? ''));
-
-        if ($email !== '') {
-            return $email;
-        }
-
-        $phone = trim((string) ($appointment['customer_phone_number'] ?? ''));
-
-        if ($phone !== '') {
-            return $phone;
         }
 
         return '—';

@@ -36,6 +36,16 @@ approve a cross-origin preflight. A simple cross-origin request can still reach
 the server, so authentication, CSRF, and capability checks remain essential.
 Any future foreign-browser integration needs an explicit, reviewed policy.
 
+Administrative dashboard PDF and ZIP exports must authorize the actor's current
+stored administrator role on every request, including direct controller paths.
+Only GET may reach export data loading or rendering. Teacher reports use parent
+names but never substitute contact email or phone when a name is missing;
+provider email is likewise not a display-name fallback in these reports.
+Dashboard PDFs must not persist rendered HTML debug dumps. The isolated
+`DashboardExportHttpTest` checks these properties with synthetic records and a
+recording renderer; it does not prove production PDF bytes or downstream file
+handling.
+
 ## Required security properties
 
 The first cycle sharpened the following six properties. They are examples of

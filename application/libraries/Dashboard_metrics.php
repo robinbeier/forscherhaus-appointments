@@ -701,7 +701,7 @@ class Dashboard_metrics
         $display_name = trim(($provider['first_name'] ?? '') . ' ' . ($provider['last_name'] ?? ''));
 
         if ($display_name === '') {
-            $display_name = $provider['email'] ?? (string) ($provider['id'] ?? '');
+            $display_name = (string) ($provider['id'] ?? '');
         }
 
         return [

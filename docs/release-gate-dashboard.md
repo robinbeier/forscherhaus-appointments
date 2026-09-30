@@ -12,6 +12,8 @@ This release gate runs a strict end-to-end replay of the critical dashboard chai
 
 It is designed to catch runtime regressions that unit tests can miss, without changing production request handlers.
 
+The separate isolated `DashboardExportHttpTest` covers friendly and direct export routes, current stored admin role after session creation, GET-only methods, contact-data minimization, and absence of persistent HTML debug dumps. It uses only disposable synthetic accounts and appointments. The release gate's successful export chain alone does not establish those negative-path properties.
+
 Dashboard periods must stay within one Monday-to-Friday school week; single weekdays are supported.
 
 ## Scope
