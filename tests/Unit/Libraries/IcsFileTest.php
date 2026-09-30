@@ -39,8 +39,13 @@ class IcsFileTest extends TestCase
         $this->assertStringContainsString(rtrim(\Config::BASE_URL, '/'), $description);
         $this->assertStringNotContainsString('attacker.example', $description);
         $this->assertStringContainsString('booking/reschedule/abc123', $description);
-        $this->assertStringNotContainsString(lang('provider'), $description);
+        $this->assertStringContainsString(lang('provider'), $description);
+        $this->assertStringContainsString('Ada Lovelace', $description);
         $this->assertStringNotContainsString(lang('customer'), $description);
+        $this->assertStringNotContainsString('ada@example.org', $stream);
+        $this->assertStringNotContainsString('alan@example.org', $stream);
+        $this->assertStringNotContainsString('ATTENDEE:', $stream);
+        $this->assertStringNotContainsString('ORGANIZER:', $stream);
     }
 
     public function testGetStreamUsesDetailedDescriptionWhenHashMissing(): void
@@ -60,6 +65,41 @@ class IcsFileTest extends TestCase
         $this->assertStringContainsString(lang('provider'), $description);
         $this->assertStringContainsString(lang('customer'), $description);
         $this->assertStringContainsString('Bring materials', $description);
+        $this->assertStringNotContainsString('ada@example.org', $stream);
+        $this->assertStringNotContainsString('alan@example.org', $stream);
+        $this->assertStringNotContainsString('ATTENDEE:', $stream);
+        $this->assertStringNotContainsString('ORGANIZER:', $stream);
+    }
+
+    public function testAppointmentRemindersStayDisplayOnlyAndUnavailabilityHasNoOrganizer(): void
+    {
+        $library = new Ics_file();
+
+        $stream = $library->get_stream(
+            $this->makeAppointment(['hash' => 'abc123']),
+            $this->makeService(),
+            $this->makeProvider(),
+            $this->makeCustomer(),
+        );
+
+        $this->assertSame(2, substr_count($stream, 'BEGIN:VALARM'));
+        $this->assertSame(2, substr_count($stream, 'ACTION:DISPLAY'));
+        $this->assertStringNotContainsString('ACTION:EMAIL', $stream);
+
+        $unavailability = $library->get_unavailability_stream(
+            [
+                'id' => 12,
+                'id_caldav_calendar' => '',
+                'start_datetime' => '2035-02-20 10:00:00',
+                'end_datetime' => '2035-02-20 11:00:00',
+                'notes' => 'Closed',
+            ],
+            $this->makeProvider(),
+        );
+
+        $this->assertStringNotContainsString('ada@example.org', $unavailability);
+        $this->assertStringNotContainsString('ORGANIZER:', $unavailability);
+        $this->assertStringContainsString('Ada Lovelace', $unavailability);
     }
 
     private function extractDescription(string $stream): string

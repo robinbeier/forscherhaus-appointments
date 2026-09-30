@@ -12,7 +12,7 @@ the active root and marker remain the authority.
 The application classifies only `GET` requests from loopback clients to the
 exact 12- or 64-character lowercase capability routes. Those requests use a
 non-persistent session driver, pass the existing loopback rate-limit guard, and
-silence only the empty ICS 404 log path. Public requests keep the normal file
+silence only classified ICS 404 log paths. Public requests keep the normal file
 session driver, rate limiting, and error logging.
 
 The wrapper reuses one cookie context and removes its local cookie jar and

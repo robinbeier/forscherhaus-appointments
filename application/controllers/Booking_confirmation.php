@@ -50,8 +50,8 @@ class Booking_confirmation extends EA_Controller
 
         $occurrences = $this->appointments_model->get(['hash' => $appointment_hash]);
 
-        if (empty($occurrences)) {
-            redirect('appointments'); // The appointment does not exist.
+        if (count($occurrences) !== 1) {
+            redirect('appointments'); // Missing or ambiguous public link.
 
             return;
         }
@@ -62,8 +62,31 @@ class Booking_confirmation extends EA_Controller
         $this->load->helper('date');
 
         try {
-            $service = $this->services_model->find((int) $appointment['id_services']);
             $provider = $this->providers_model->find((int) $appointment['id_users_provider']);
+            $provider_timezone = new DateTimeZone((string) $provider['timezone']);
+            $start_at = $this->parsePublicAppointmentDate($appointment['start_datetime'], $provider_timezone);
+            $end_at = $this->parsePublicAppointmentDate($appointment['end_datetime'], $provider_timezone);
+        } catch (Throwable $exception) {
+            log_message(
+                'error',
+                'Booking confirmation failed to validate appointment dates: ' . $exception->getMessage(),
+            );
+
+            show_404();
+
+            return;
+        }
+
+        // A public confirmation link is a capability to appointment data. Once the appointment
+        // has ended, do not render the confirmation page or any of its embedded personal data.
+        if ($end_at <= new DateTimeImmutable('now', $provider_timezone)) {
+            redirect('appointments');
+
+            return;
+        }
+
+        try {
+            $service = $this->services_model->find((int) $appointment['id_services']);
             $customer = $this->customers_model->find((int) $appointment['id_users_customer']);
         } catch (InvalidArgumentException $exception) {
             log_message(
@@ -75,11 +98,6 @@ class Booking_confirmation extends EA_Controller
 
             return;
         }
-
-        $provider_timezone = new DateTimeZone($provider['timezone']);
-
-        $start_at = new DateTimeImmutable($appointment['start_datetime'], $provider_timezone);
-        $end_at = new DateTimeImmutable($appointment['end_datetime'], $provider_timezone);
 
         $duration_minutes = (int) round(($end_at->getTimestamp() - $start_at->getTimestamp()) / 60);
         $display_duration_minutes = max($duration_minutes, 1);
@@ -163,8 +181,6 @@ class Booking_confirmation extends EA_Controller
 
         $is_manageable = !isset($manage_limit) || $start_at >= $manage_limit;
 
-        $is_past_event = $end_at <= new DateTimeImmutable('now', $provider_timezone);
-
         html_vars([
             'page_title' => lang('success'),
             'company_color' => setting('company_color'),
@@ -174,7 +190,7 @@ class Booking_confirmation extends EA_Controller
             'matomo_analytics_site_id' => setting('matomo_analytics_site_id'),
             'appointment_summary' => $appointment_summary,
             'calendar_links' => $calendar_links,
-            'is_past_event' => $is_past_event,
+            'is_past_event' => false,
             'manage_url' => $manage_url,
             'is_manageable' => $is_manageable,
             'appointment_pdf_data' => $appointment_pdf_data,
@@ -196,6 +212,48 @@ class Booking_confirmation extends EA_Controller
         }
 
         return $language_code;
+    }
+
+    private function parsePublicAppointmentDate(mixed $value, DateTimeZone $timezone): DateTimeImmutable
+    {
+        if (!is_string($value) || !preg_match('/^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$/D', $value)) {
+            throw new InvalidArgumentException('Appointment datetime is not canonical.');
+        }
+
+        $parsed = DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $value, $timezone);
+        $errors = DateTimeImmutable::getLastErrors();
+
+        if (
+            $parsed === false ||
+            ($errors !== false && ($errors['warning_count'] > 0 || $errors['error_count'] > 0)) ||
+            $parsed->format('Y-m-d H:i:s') !== $value
+        ) {
+            throw new InvalidArgumentException('Appointment datetime is invalid.');
+        }
+
+        // A stored wall time has no UTC offset. During fall-back it can name two
+        // instants, so choosing either one could extend a public link's lifetime.
+        $offsets = [$parsed->getOffset()];
+        $transitions = $timezone->getTransitions($parsed->getTimestamp() - 604800, $parsed->getTimestamp() + 604800);
+        if (is_array($transitions)) {
+            foreach ($transitions as $transition) {
+                $offsets[] = (int) $transition['offset'];
+            }
+        }
+
+        $wall_as_utc = DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $value, new DateTimeZone('UTC'));
+        $matching_instants = 0;
+        foreach (array_unique($offsets) as $offset) {
+            $instant = $wall_as_utc->getTimestamp() - $offset;
+            if ((new DateTimeImmutable('@' . $instant))->setTimezone($timezone)->format('Y-m-d H:i:s') === $value) {
+                $matching_instants++;
+            }
+        }
+        if ($matching_instants !== 1) {
+            throw new InvalidArgumentException('Appointment datetime is ambiguous.');
+        }
+
+        return $parsed;
     }
 
     protected function formatAppointmentStartLabel(DateTimeInterface $start_at, string $locale): string

@@ -61,7 +61,11 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
     {
         $source = (string) file_get_contents(__DIR__ . '/../../../application/controllers/Appointments.php');
 
-        self::assertSame(3, substr_count($source, "show_404('', !Read_only_probe_request::is());"));
+        $all404Paths = substr_count($source, 'show_404(');
+        $classified404Paths = substr_count($source, "show_404('', !Read_only_probe_request::is());");
+
+        self::assertGreaterThan(0, $all404Paths);
+        self::assertSame($all404Paths, $classified404Paths);
     }
 
     public function testCodeIgniterLoaderUsesNullSessionDriverWithoutFiles(): void

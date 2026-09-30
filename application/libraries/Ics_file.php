@@ -17,8 +17,6 @@ use Jsvrcek\ICS\Exception\CalendarEventException;
 use Jsvrcek\ICS\Model\CalendarAlarm;
 use Jsvrcek\ICS\Model\CalendarEvent;
 use Jsvrcek\ICS\Model\Description\Location;
-use Jsvrcek\ICS\Model\Relationship\Attendee;
-use Jsvrcek\ICS\Model\Relationship\Organizer;
 use Jsvrcek\ICS\Utility\Formatter;
 
 /**
@@ -99,14 +97,16 @@ class Ics_file
                 $manage_hint = 'Manage appointment:';
             }
 
-            $event->setDescription(trim($manage_hint . ' ' . $manage_url));
+            $provider_name = trim((string) $provider['first_name'] . ' ' . (string) $provider['last_name']);
+            $event->setDescription(
+                trim($manage_hint . ' ' . $manage_url) . '\\n' . lang('provider') . ': ' . $provider_name,
+            );
         } else {
             $description = [
                 '',
                 lang('provider'),
                 '',
                 lang('name') . ': ' . $provider['first_name'] . ' ' . $provider['last_name'],
-                lang('email') . ': ' . $provider['email'],
                 lang('phone_number') . ': ' . $provider['phone_number'],
                 lang('address') . ': ' . $provider['address'],
                 lang('city') . ': ' . $provider['city'],
@@ -115,7 +115,6 @@ class Ics_file
                 lang('customer'),
                 '',
                 lang('name') . ': ' . $customer['first_name'] . ' ' . $customer['last_name'],
-                lang('email') . ': ' . $customer['email'],
                 lang('phone_number') . ': ' . ($customer['phone_number'] ?? '-'),
                 lang('address') . ': ' . $customer['address'],
                 lang('city') . ': ' . $customer['city'],
@@ -129,59 +128,15 @@ class Ics_file
             $event->setDescription(implode("\\n", $description));
         }
 
-        $attendee = new Attendee(new Formatter());
-
-        if (isset($customer['email']) && !empty($customer['email'])) {
-            $attendee->setValue($customer['email']);
+        // Preserve local calendar reminders without creating email recipients.
+        foreach (['-15 minutes', '-60 minutes'] as $offset) {
+            $alarm = new CalendarAlarm();
+            $alarm
+                ->setTrigger((clone $appointment_start)->modify($offset))
+                ->setAction('DISPLAY')
+                ->setDescription('Appointment reminder');
+            $event->addAlarm($alarm);
         }
-
-        // Add the event attendees.
-        $attendee->setName($customer['first_name'] . ' ' . $customer['last_name']);
-        $attendee
-            ->setCalendarUserType('INDIVIDUAL')
-            ->setRole('REQ-PARTICIPANT')
-            ->setParticipationStatus('NEEDS-ACTION')
-            ->setRsvp('TRUE');
-        $event->addAttendee($attendee);
-
-        $alarm = new CalendarAlarm();
-        $alarm_datetime = clone $appointment_start;
-        $alarm->setTrigger($alarm_datetime->modify('-15 minutes'));
-        $alarm->setSummary('Alarm notification');
-        $alarm->setDescription('This is an event reminder');
-        $alarm->setAction('EMAIL');
-        $alarm->addAttendee($attendee);
-        $event->addAlarm($alarm);
-
-        $alarm = new CalendarAlarm();
-        $alarm_datetime = clone $appointment_start;
-        $alarm->setTrigger($alarm_datetime->modify('-60 minutes'));
-        $alarm->setSummary('Alarm notification');
-        $alarm->setDescription('This is an event reminder');
-        $alarm->setAction('EMAIL');
-        $alarm->addAttendee($attendee);
-        $event->addAlarm($alarm);
-
-        $attendee = new Attendee(new Formatter());
-
-        if (isset($provider['email']) && !empty($provider['email'])) {
-            $attendee->setValue($provider['email']);
-        }
-
-        $attendee->setName($provider['first_name'] . ' ' . $provider['last_name']);
-        $attendee
-            ->setCalendarUserType('INDIVIDUAL')
-            ->setRole('REQ-PARTICIPANT')
-            ->setParticipationStatus('ACCEPTED')
-            ->setRsvp('FALSE');
-        $event->addAttendee($attendee);
-
-        // Set the organizer.
-        $organizer = new Organizer(new Formatter());
-
-        $organizer->setValue($provider['email'])->setName($provider['first_name'] . ' ' . $provider['last_name']);
-
-        $event->setOrganizer($organizer);
 
         // Setup calendar.
         $calendar = new Ics_calendar();
@@ -217,14 +172,14 @@ class Ics_file
             ->setSummary('Unavailability')
             ->setUid($unavailability['id_caldav_calendar'] ?: $this->generate_uid($unavailability['id']));
 
-        $event->setDescription(str_replace("\n", "\\n", (string) $unavailability['notes']));
-
-        // Set the organizer.
-        $organizer = new Organizer(new Formatter());
-
-        $organizer->setValue($provider['email'])->setName($provider['first_name'] . ' ' . $provider['last_name']);
-
-        $event->setOrganizer($organizer);
+        $provider_name = trim((string) $provider['first_name'] . ' ' . (string) $provider['last_name']);
+        $event->setDescription(
+            str_replace("\n", "\\n", (string) $unavailability['notes']) .
+                '\\n' .
+                lang('provider') .
+                ': ' .
+                $provider_name,
+        );
 
         // Setup calendar.
         $calendar = new Ics_calendar();
