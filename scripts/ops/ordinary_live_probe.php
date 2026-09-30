@@ -343,32 +343,29 @@ try {
                     ? $client->post($path)
                     : $client->requestApp($method, $path),
                 static function () use ($client, $context, $sessions): void {
-                    $loginPage = $client->get('login');
-                    $sessions->remember($client->getCookie('ea_session'));
-                    if ($loginPage->statusCode !== 200) {
-                        throw new RuntimeException('Calendar method probe login page failed.');
-                    }
-                    $login = $client->post('login/validate', [
-                        'username' => (string) $context['username'],
-                        'password' => (string) $context['password'],
-                    ]);
-                    $data = json_decode($login->body, true);
-                    if ($login->statusCode !== 200 || !is_array($data) || ($data['success'] ?? false) !== true) {
-                        throw new RuntimeException('Calendar method probe login failed.');
-                    }
-                    $sessions->remember($client->getCookie('ea_session'));
+                    CalendarMethodProbe::authenticateSession(
+                        static fn(): GateHttpResponse => $client->get('login'),
+                        static fn(string $username, string $password): GateHttpResponse => $client->post(
+                            'login/validate',
+                            [
+                                'username' => $username,
+                                'password' => $password,
+                            ],
+                        ),
+                        static function () use ($client, $sessions): void {
+                            $sessions->remember($client->getCookie('ea_session'));
+                        },
+                        $context,
+                    );
                 },
                 static function () use ($client, $sessions): void {
-                    $logout = $client->get('logout');
-                    $sessions->remember($client->getCookie('ea_session'));
-                    if ($logout->statusCode !== 200) {
-                        throw new RuntimeException('Calendar method probe logout failed.');
-                    }
-                    $afterLogout = $client->get('account');
-                    $sessions->remember($client->getCookie('ea_session'));
-                    if ($afterLogout->statusCode !== 307) {
-                        throw new RuntimeException('Calendar method probe session remained authenticated.');
-                    }
+                    CalendarMethodProbe::closeSession(
+                        static fn(): GateHttpResponse => $client->get('logout'),
+                        static function () use ($client, $sessions): void {
+                            $sessions->remember($client->getCookie('ea_session'));
+                        },
+                        static fn(): GateHttpResponse => $client->get('account'),
+                    );
                 },
                 static function () use ($supplemental): array {
                     return [
@@ -379,50 +376,10 @@ try {
                     ];
                 },
                 static function () use ($supplemental, $ci): array {
-                    $appointmentId = (int) ($supplemental['ids']['appointment'] ?? 0);
-                    $appointment = $ci->db->get_where('appointments', ['id' => $appointmentId])->row_array();
-                    if (!is_array($appointment) || $appointment === []) {
-                        throw new RuntimeException('Calendar method probe appointment snapshot is unavailable.');
-                    }
-                    $appointment['hash'] = hash('sha256', (string) ($appointment['hash'] ?? ''));
-                    $providerSettings = $ci->db
-                        ->get_where('user_settings', ['id_users' => (int) ($supplemental['actor_id'] ?? 0)])
-                        ->row_array();
-                    if (!is_array($providerSettings) || $providerSettings === []) {
-                        throw new RuntimeException('Calendar method probe provider settings snapshot is unavailable.');
-                    }
-                    $owned = [
-                        'appointment' => $appointment,
-                        'provider' => $ci->db
-                            ->get_where('users', ['id' => (int) ($supplemental['actor_id'] ?? 0)])
-                            ->row_array(),
-                        'customer' => $ci->db
-                            ->get_where('users', ['id' => (int) ($supplemental['ids']['calendar_customer'] ?? 0)])
-                            ->row_array(),
-                        'service' => $ci->db
-                            ->get_where('services', ['id' => (int) ($supplemental['ids']['service'] ?? 0)])
-                            ->row_array(),
-                        'provider_settings_sha256' => hash('sha256', serialize($providerSettings)),
-                        'provider_appointments' => $ci->db
-                            ->order_by('id', 'asc')
-                            ->get_where('appointments', ['id_users_provider' => (int) ($supplemental['actor_id'] ?? 0)])
-                            ->result_array(),
-                        'marker_users' => $ci->db
-                            ->select('id')
-                            ->order_by('id', 'asc')
-                            ->get_where('users', ['notes' => (string) ($supplemental['marker'] ?? '')])
-                            ->result_array(),
-                        'marker_services' => $ci->db
-                            ->select('id')
-                            ->order_by('id', 'asc')
-                            ->get_where('services', ['description' => (string) ($supplemental['marker'] ?? '')])
-                            ->result_array(),
-                        'service_relationships' => $ci->db
-                            ->order_by('id_services', 'asc')
-                            ->get_where('services_providers', ['id_users' => (int) ($supplemental['actor_id'] ?? 0)])
-                            ->result_array(),
-                    ];
-                    return ['owned' => $owned];
+                    return CalendarMethodProbe::snapshotOwnedRows($ci->db, $supplemental);
+                },
+                static function () use ($client, $sessions): void {
+                    $sessions->remember($client->getCookie('ea_session'));
                 },
             ))->run($evidence->step(...));
         } elseif ($action === 'customers-api') {

@@ -15,6 +15,93 @@ use RuntimeException;
  */
 final class CalendarMethodProbe
 {
+    /** Keep the authenticated login and its provenance journal in one tested order. */
+    public static function authenticateSession(
+        callable $loginPage,
+        callable $login,
+        callable $remember,
+        array $context,
+    ): void {
+        $page = $loginPage();
+        $remember();
+        if (!$page instanceof GateHttpResponse || $page->statusCode !== 200) {
+            throw new RuntimeException('Calendar method probe login page failed.');
+        }
+        $response = $login((string) $context['username'], (string) $context['password']);
+        $data = $response instanceof GateHttpResponse ? json_decode($response->body, true) : null;
+        if (
+            !$response instanceof GateHttpResponse ||
+            $response->statusCode !== 200 ||
+            !is_array($data) ||
+            ($data['success'] ?? false) !== true
+        ) {
+            throw new RuntimeException('Calendar method probe login failed.');
+        }
+        $remember();
+    }
+
+    /** Logout must be attempted before its final session provenance journal write. */
+    public static function closeSession(callable $logout, callable $remember, callable $afterLogout): void
+    {
+        $response = $logout();
+        $remember();
+        if (!$response instanceof GateHttpResponse || $response->statusCode !== 200) {
+            throw new RuntimeException('Calendar method probe logout failed.');
+        }
+        $after = $afterLogout();
+        $remember();
+        if (!$after instanceof GateHttpResponse || $after->statusCode !== 307) {
+            throw new RuntimeException('Calendar method probe session remained authenticated.');
+        }
+    }
+
+    /** Build the bounded snapshot used by the live probe from the owned fixture rows. */
+    public static function snapshotOwnedRows(object $db, array $supplemental): array
+    {
+        $appointmentId = (int) ($supplemental['ids']['appointment'] ?? 0);
+        $actorId = (int) ($supplemental['actor_id'] ?? 0);
+        $customerId = (int) ($supplemental['ids']['calendar_customer'] ?? 0);
+        $serviceId = (int) ($supplemental['ids']['service'] ?? 0);
+        $marker = (string) ($supplemental['marker'] ?? '');
+        $appointment = $db->get_where('appointments', ['id' => $appointmentId])->row_array();
+        if (!is_array($appointment) || $appointment === []) {
+            throw new RuntimeException('Calendar method probe appointment snapshot is unavailable.');
+        }
+        $appointment['hash'] = hash('sha256', (string) ($appointment['hash'] ?? ''));
+        $providerSettings = $db->get_where('user_settings', ['id_users' => $actorId])->row_array();
+        if (!is_array($providerSettings) || $providerSettings === []) {
+            throw new RuntimeException('Calendar method probe provider settings snapshot is unavailable.');
+        }
+
+        return [
+            'owned' => [
+                'appointment' => $appointment,
+                'provider' => $db->get_where('users', ['id' => $actorId])->row_array(),
+                'customer' => $db->get_where('users', ['id' => $customerId])->row_array(),
+                'service' => $db->get_where('services', ['id' => $serviceId])->row_array(),
+                'provider_settings_sha256' => hash('sha256', serialize($providerSettings)),
+                'provider_appointments' => $db
+                    ->order_by('id', 'asc')
+                    ->get_where('appointments', ['id_users_provider' => $actorId])
+                    ->result_array(),
+                'marker_users' => $db
+                    ->select('id')
+                    ->order_by('id', 'asc')
+                    ->get_where('users', ['notes' => $marker])
+                    ->result_array(),
+                'marker_services' => $db
+                    ->select('id')
+                    ->order_by('id', 'asc')
+                    ->get_where('services', ['description' => $marker])
+                    ->result_array(),
+                'service_relationships' => $db
+                    ->order_by('id_services', 'asc')
+                    ->get_where('services_providers', ['id_users' => $actorId])
+                    ->result_array(),
+            ],
+        ];
+    }
+
     /** @var callable(string,string):GateHttpResponse */
     private $request;
     /** @var callable():void */
@@ -27,12 +114,16 @@ final class CalendarMethodProbe
     /** @var callable():array<string,mixed> */
     private $snapshot;
 
+    /** @var callable():void|null */
+    private $rememberSession;
+
     /**
      * @param callable(string,string):GateHttpResponse $request
      * @param callable():void $authenticate
      * @param callable():void $close
      * @param callable():array<string,mixed> $context
      * @param callable():array<string,mixed> $snapshot
+     * @param callable():void|null $rememberSession
      */
     public function __construct(
         callable $request,
@@ -40,12 +131,14 @@ final class CalendarMethodProbe
         callable $close,
         callable $context,
         callable $snapshot,
+        ?callable $rememberSession = null,
     ) {
         $this->request = $request;
         $this->authenticate = $authenticate;
         $this->close = $close;
         $this->context = $context;
         $this->snapshot = $snapshot;
+        $this->rememberSession = $rememberSession ?? static function (): void {};
     }
 
     /**
@@ -76,6 +169,7 @@ final class CalendarMethodProbe
                     foreach (['GET', 'HEAD'] as $method) {
                         $operation = $phase . '_' . strtolower($method);
                         $response = ($this->request)($method, $route['path'] . '?' . $route['query']);
+                        ($this->rememberSession)();
                         $this->expectStatus($response, 405, $operation);
                         $this->expectAllow($response, 'POST', $operation);
                         $this->assertSnapshot($before, $operation);
@@ -90,6 +184,7 @@ final class CalendarMethodProbe
                     foreach (['GET', 'HEAD', 'POST'] as $method) {
                         $operation = $phase . '_' . strtolower($method);
                         $response = ($this->request)($method, 'backend_api/' . $route['alias'] . '?' . $route['query']);
+                        ($this->rememberSession)();
                         $allowedStatuses = $method === 'POST' ? [303] : [301, 302, 303, 307, 308];
                         if (!in_array($response->statusCode, $allowedStatuses, true)) {
                             throw new RuntimeException($operation . ' was not redirect-only.');
