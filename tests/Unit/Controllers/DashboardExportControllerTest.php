@@ -266,6 +266,37 @@ class DashboardExportControllerTest extends TestCase
         );
     }
 
+    public function testResolveCustomerLastNameUsesNamesAndNeverEmailOrPhoneFallbacks(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+
+        $this->assertSame(
+            'Rossmeisl',
+            $controller->callResolveCustomerLastName([
+                'customer_first_name' => 'Adina',
+                'customer_last_name' => 'Rossmeisl',
+                'customer_email' => 'adina@example.test',
+                'customer_phone_number' => '123456',
+            ]),
+        );
+        $this->assertSame(
+            'Adina',
+            $controller->callResolveCustomerLastName([
+                'customer_first_name' => 'Adina',
+                'customer_last_name' => '',
+                'customer_email' => 'adina@example.test',
+                'customer_phone_number' => '123456',
+            ]),
+        );
+        $this->assertSame(
+            '—',
+            $controller->callResolveCustomerLastName([
+                'customer_email' => 'adina@example.test',
+                'customer_phone_number' => '123456',
+            ]),
+        );
+    }
+
     public function testMapProviderParentAppointmentsForViewUsesCustomerNameAndDropsExtraPii(): void
     {
         $controller = $this->createControllerWithThreshold(0.9);
@@ -590,35 +621,20 @@ class DashboardExportControllerTest extends TestCase
         $this->assertSame(2, $controller->formatterFactoryCalls);
     }
 
-    public function testBuildPdfStreamOptionsDisablesDebugDumpByDefault(): void
+    public function testBuildPdfStreamOptionsDoNotPersistHtml(): void
     {
         $controller = $this->createControllerWithThreshold(0.9);
 
-        $options = $controller->callBuildPdfStreamOptions('/tmp/dashboard-debug.html');
+        $options = $controller->callBuildPdfStreamOptions();
 
         $this->assertSame(['attachment' => true], $options);
-    }
-
-    public function testBuildPdfStreamOptionsEnablesDebugDumpWhenFlagIsTrue(): void
-    {
-        $controller = $this->createControllerWithThreshold(0.9, 'true');
-
-        $options = $controller->callBuildPdfStreamOptions('/tmp/dashboard-debug.html');
-
-        $this->assertSame(
-            [
-                'attachment' => true,
-                'debug_dump_path' => '/tmp/dashboard-debug.html',
-            ],
-            $options,
-        );
     }
 
     public function testBuildProviderPreparationPdfStreamOptionsUsesA4Landscape(): void
     {
         $controller = $this->createControllerWithThreshold(0.9);
 
-        $options = $controller->callBuildProviderPreparationPdfStreamOptions('/tmp/provider-preparation.html');
+        $options = $controller->callBuildProviderPreparationPdfStreamOptions();
 
         $this->assertSame(
             [
@@ -852,6 +868,36 @@ class DashboardExportControllerTest extends TestCase
         $this->assertSame('Klassengröße', $mapped[1]['target_origin_label']);
     }
 
+    public function testMapMetricsForViewReplacesContactLikeProviderNameButPreservesOrdinaryName(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+
+        $mapped = $controller->callMapMetricsForView(
+            [
+                [
+                    'provider_id' => 42,
+                    'provider_name' => 'unnamed.teacher@example.org',
+                    'target' => 10,
+                    'booked' => 4,
+                    'open' => 6,
+                    'fill_rate' => 0.4,
+                ],
+                [
+                    'provider_id' => 43,
+                    'provider_name' => 'Ada Lovelace',
+                    'target' => 10,
+                    'booked' => 10,
+                    'open' => 0,
+                    'fill_rate' => 1.0,
+                ],
+            ],
+            0.9,
+        );
+
+        self::assertSame('Lehrkraft 42', $mapped[0]['provider_name']);
+        self::assertSame('Ada Lovelace', $mapped[1]['provider_name']);
+    }
+
     public function testMapMetricsForViewPreservesReliableAppointmentCountSeparatelyFromBookedMetric(): void
     {
         $controller = $this->createControllerWithThreshold(0.9);
@@ -876,24 +922,18 @@ class DashboardExportControllerTest extends TestCase
         $this->assertSame('99', $mapped[0]['booked_appointments_formatted']);
     }
 
-    private function createControllerWithThreshold(float $configuredThreshold, mixed $pdfDebugDumpFlag = false): object
+    private function createControllerWithThreshold(float $configuredThreshold): object
     {
         $dashboardMetrics = new class extends Dashboard_metrics {
             public function __construct() {}
         };
 
-        return new class ($configuredThreshold, $pdfDebugDumpFlag, $dashboardMetrics) extends Dashboard_export {
+        return new class ($configuredThreshold, $dashboardMetrics) extends Dashboard_export {
             private float $configuredThreshold;
 
-            private mixed $pdfDebugDumpFlag;
-
-            public function __construct(
-                float $configuredThreshold,
-                mixed $pdfDebugDumpFlag,
-                Dashboard_metrics $dashboardMetrics,
-            ) {
+            public function __construct(float $configuredThreshold, Dashboard_metrics $dashboardMetrics)
+            {
                 $this->configuredThreshold = $configuredThreshold;
-                $this->pdfDebugDumpFlag = $pdfDebugDumpFlag;
                 $this->dashboardMetrics = $dashboardMetrics;
                 $this->dashboard_metrics = $dashboardMetrics;
             }
@@ -923,14 +963,14 @@ class DashboardExportControllerTest extends TestCase
                 return $this->buildProviderPreparationAppointmentPages($appointments);
             }
 
-            public function callBuildPdfStreamOptions(string $debugDumpPath): array
+            public function callBuildPdfStreamOptions(): array
             {
-                return $this->buildPdfStreamOptions($debugDumpPath);
+                return $this->buildPdfStreamOptions();
             }
 
-            public function callBuildProviderPreparationPdfStreamOptions(string $debugDumpPath): array
+            public function callBuildProviderPreparationPdfStreamOptions(): array
             {
-                return $this->buildProviderPreparationPdfStreamOptions($debugDumpPath);
+                return $this->buildProviderPreparationPdfStreamOptions();
             }
 
             public function callBuildSummary(array $metrics, float $threshold): array
@@ -963,6 +1003,11 @@ class DashboardExportControllerTest extends TestCase
                 return $this->resolveCustomerDisplayNameForParentExport($appointment);
             }
 
+            public function callResolveCustomerLastName(array $appointment): string
+            {
+                return $this->resolveCustomerLastName($appointment);
+            }
+
             public function callMapProviderParentAppointmentsForView(array $appointments): array
             {
                 return $this->mapProviderParentAppointmentsForView($appointments);
@@ -971,11 +1016,6 @@ class DashboardExportControllerTest extends TestCase
             protected function getConfiguredThreshold(): float
             {
                 return $this->configuredThreshold;
-            }
-
-            protected function resolvePdfDebugDumpFlag(): mixed
-            {
-                return $this->pdfDebugDumpFlag;
             }
         };
     }

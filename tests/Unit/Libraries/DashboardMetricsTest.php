@@ -22,6 +22,27 @@ require_once APPPATH . 'libraries/Dashboard_metrics.php';
 
 class DashboardMetricsTest extends TestCase
 {
+    public function testFormatRowUsesProviderEmailWhenProviderHasNoDisplayName(): void
+    {
+        $library = new class extends Dashboard_metrics {
+            public function __construct() {}
+
+            public function callFormatRow(array $provider): array
+            {
+                return $this->formatRow($provider, ['has_plan' => false], 10, 4, 4, 0.9, false, 10, [], false);
+            }
+        };
+
+        $row = $library->callFormatRow([
+            'id' => 42,
+            'first_name' => '',
+            'last_name' => '',
+            'email' => 'unnamed.teacher@example.org',
+        ]);
+
+        self::assertSame('unnamed.teacher@example.org', $row['provider_name']);
+    }
+
     public function testExplicitZeroClassSizeIsAnExplicitZeroTarget(): void
     {
         $library = new class (
