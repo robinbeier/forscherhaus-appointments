@@ -28,7 +28,7 @@ eigenen synthetischen Kunden wiederverwenden.
 
 Der Controller `Booking::register()` akzeptiert ausschließlich POST. Andere
 Methoden, die ihn erreichen, erhalten vor der Auswertung von Query-Daten oder
-einer Reschedule-Authority HTTP 405 mit `Allow: POST`. Der globale CORS-Preflight
+einer Reschedule-Authority HTTP 405 mit `Allow: POST`. Der globale OPTIONS-Kurzschluss
 beantwortet OPTIONS bereits vor dem Controller und führt keine Buchung aus.
 Insbesondere darf ein GET weder einen Termin anlegen noch eine bereits
 freigegebene Umbuchung auslösen oder deren Einmal-Authority verbrauchen.
@@ -38,7 +38,7 @@ Nichtmutation und anschließendem gültigem POST.
 Die Ausgabe einer Umbuchungsberechtigung über `booking/reschedule/{hash}` ist
 auf GET beschränkt, auch über den direkten Controllerpfad. Andere Methoden,
 die den Controller erreichen, erhalten vor Authority- oder Kundentoken-Erzeugung
-HTTP 405 mit `Allow: GET`; OPTIONS endet im globalen Preflight ohne diese
+HTTP 405 mit `Allow: GET`; OPTIONS endet im globalen Kurzschluss ohne diese
 Seiteneffekte. Eine abgewiesene Anfrage darf insbesondere die noch gültige
 Authority einer anderen Sitzung für denselben Termin nicht ersetzen.
 `RescheduleMethodHttpTest` prüft diese Grenze mit zwei getrennten Sitzungen,
@@ -49,7 +49,7 @@ der positive Kontrollpfad.
 
 `privacy/delete_personal_information` akzeptiert ausschließlich POST, auch über
 den direkten Controllerpfad. Andere Methoden erhalten vor Token-Auswertung oder
-Mutation HTTP 405 mit `Allow: POST`; OPTIONS wird vom globalen Preflight ohne
+Mutation HTTP 405 mit `Allow: POST`; OPTIONS wird vom globalen Kurzschluss ohne
 Controlleraufruf beantwortet. POST benötigt die bestehende CSRF-Prüfung sowie
 die aktivierte Produkteinstellung. Der Lösch-Token entsteht auf der
 Reschedule-Seite aus kryptografisch sicheren 32 Zufallsbytes, ist im Cache für
@@ -73,7 +73,7 @@ Der eigenständige öffentliche Schreibpfad `consents/save` ist stillgelegt. Er
 liefert auch mit gültigem CSRF-Token und über den direkten Controllerpfad 404,
 bevor eine Anfrage-ID, ein Consent-Payload oder eine IP-Adresse einen Datensatz
 auswählen oder verändern kann. Die globale CSRF-Prüfung kann einen POST ohne
-gültiges Token vorher mit 403 ablehnen; OPTIONS bleibt ein globaler Preflight
+gültiges Token vorher mit 403 ablehnen; OPTIONS bleibt ein globaler Kurzschluss
 ohne Mutation. Die aktive Erfassung der konfigurierten Datenschutz- und
 Nutzungszustimmungen erfolgt ausschließlich serverseitig beim erfolgreichen
 `Booking::register` über das Consent-Modell. Ein CSRF-Token oder eine
@@ -95,7 +95,7 @@ nicht schreibende HTTP- und Aggregatnachweise.
 bestehenden CSRF-Prüfung. Andere Methoden erhalten auch über den direkten
 Controllerpfad HTTP 405 mit `Allow: POST`, bevor Zugangsdaten gelesen, eine
 Sitzungs-ID regeneriert oder Benutzerdaten in der Sitzung gespeichert werden.
-Der globale OPTIONS-Preflight endet vor dem Controller und erzeugt keine
+Der globale OPTIONS-Kurzschluss endet vor dem Controller und erzeugt keine
 Anmeldesitzung. Die Anmeldeseite selbst bleibt per GET erreichbar.
 
 `LoginMethodHttpTest` prüft mit einem eigenen synthetischen Benutzer die
