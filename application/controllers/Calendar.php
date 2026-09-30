@@ -157,6 +157,17 @@ class Calendar extends EA_Controller
         $this->load->library('timezones');
     }
 
+    private function requirePostForCalendarWrite(): bool
+    {
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) === 'POST') {
+            return true;
+        }
+
+        json_response(['success' => false, 'message' => 'Method Not Allowed'], 405, ['Allow: POST']);
+
+        return false;
+    }
+
     private function currentCalendarReadRole(int $user_id): string
     {
         if ($user_id <= 0) {
@@ -379,6 +390,10 @@ class Calendar extends EA_Controller
      */
     public function save_appointment(): void
     {
+        if (!$this->requirePostForCalendarWrite()) {
+            return;
+        }
+
         try {
             $request_dto = $this->calendarRequestDtoFactory()->buildSaveAppointmentRequestDto();
             $customer_data = $request_dto->customerData;
@@ -630,6 +645,10 @@ class Calendar extends EA_Controller
      */
     public function delete_appointment(): void
     {
+        if (!$this->requirePostForCalendarWrite()) {
+            return;
+        }
+
         try {
             if (!$this->currentCalendarCan('delete', PRIV_APPOINTMENTS)) {
                 throw new RuntimeException('You do not have the required permissions for this task.', 403);
@@ -702,6 +721,10 @@ class Calendar extends EA_Controller
      */
     public function save_unavailability(): void
     {
+        if (!$this->requirePostForCalendarWrite()) {
+            return;
+        }
+
         try {
             $warnings = [];
 
@@ -800,6 +823,10 @@ class Calendar extends EA_Controller
      */
     public function delete_unavailability(): void
     {
+        if (!$this->requirePostForCalendarWrite()) {
+            return;
+        }
+
         try {
             if (!$this->currentCalendarCan('delete', PRIV_APPOINTMENTS)) {
                 throw new RuntimeException('You do not have the required permissions for this task.');
@@ -888,6 +915,10 @@ class Calendar extends EA_Controller
      */
     public function save_working_plan_exception(): void
     {
+        if (!$this->requirePostForCalendarWrite()) {
+            return;
+        }
+
         try {
             if (!$this->currentCalendarCan('edit', PRIV_USERS)) {
                 throw new RuntimeException('You do not have the required permissions for this task.');
@@ -923,6 +954,10 @@ class Calendar extends EA_Controller
      */
     public function delete_working_plan_exception(): void
     {
+        if (!$this->requirePostForCalendarWrite()) {
+            return;
+        }
+
         try {
             if (!$this->currentCalendarCan('edit', PRIV_USERS)) {
                 throw new RuntimeException('You do not have the required permissions for this task.');
