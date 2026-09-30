@@ -6,7 +6,7 @@ action=${1:-preflight}
 release=${2:-}
 app_root=${APP_ROOT:-/var/www/html/easyappointments}
 case "$action" in
-    preflight|account|methods|customer-boundary|customers-api|staff-api|services-api|unavailabilities-api|blocked-periods-api|service-categories-api|secretaries-api|calendar-race|appointments-api|appointments-api-overlap|session|cleanup|verify) ;;
+    preflight|account|methods|customer-boundary|customers-api|staff-api|services-api|unavailabilities-api|blocked-periods-api|service-categories-api|secretaries-api|calendar-race|calendar-methods|appointments-api|appointments-api-overlap|session|cleanup|verify) ;;
     *) echo 'unsupported action' >&2; exit 64 ;;
 esac
 [[ $# == 2 && "$release" =~ ^ea_[a-zA-Z0-9_]+$ ]] || { echo 'action and expected release required' >&2; exit 64; }
@@ -32,6 +32,7 @@ for path in "$probe" "$script_dir/../release-gate/lib/OrdinaryLiveFixture.php" \
     "$script_dir/../release-gate/lib/ServiceCategoriesApiWriteProbe.php" \
     "$script_dir/../release-gate/lib/SecretariesApiAliasProbe.php" \
     "$script_dir/../release-gate/lib/CalendarResponsibilityRaceProbe.php" \
+    "$script_dir/../release-gate/lib/CalendarMethodProbe.php" \
     "$script_dir/../release-gate/lib/AppointmentsApiWriteProbe.php" \
     "$script_dir/../release-gate/lib/DefenseVerificationFixture.php" \
     "$script_dir/../release-gate/lib/GateHttpClient.php" \
@@ -210,6 +211,9 @@ case "$action" in
         ;;
     calendar-race)
         invoke calendar-race
+        ;;
+    calendar-methods)
+        invoke calendar-methods
         ;;
     appointments-api)
         invoke appointments-api

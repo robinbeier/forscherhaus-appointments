@@ -34,6 +34,7 @@
             <file>./tests/Unit/Controllers/ServiceCategoriesApiDeleteStatusTest.php</file>
             <file>./tests/Integration/DefenseVerificationFixtureTest.php</file>
             <file>./tests/Unit/Scripts/GateHttpClientTest.php</file>
+            <file>./tests/Unit/Scripts/CalendarMethodProbeTest.php</file>
             <file>./tests/Unit/Scripts/OrdinaryLiveProbeWrapperTest.php</file>
             <file>./tests/Unit/Scripts/OrdinaryDeploymentCoordinationTest.php</file>
         </testsuite>

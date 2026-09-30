@@ -3,9 +3,11 @@
 declare(strict_types=1);
 
 use ReleaseGate\GateHttpClient;
+use ReleaseGate\GateHttpResponse;
 use ReleaseGate\AccountSecurityMatrixProbe;
 use ReleaseGate\AppointmentsApiWriteProbe;
 use ReleaseGate\CalendarResponsibilityRaceProbe;
+use ReleaseGate\CalendarMethodProbe;
 use ReleaseGate\CustomerRoleBoundaryProbe;
 use ReleaseGate\CustomersApiWriteProbe;
 use ReleaseGate\StaffApiPutProbe;
@@ -58,6 +60,7 @@ if (
             'service-categories-api',
             'secretaries-api',
             'calendar-race',
+            'calendar-methods',
             'appointments-api',
             'appointments-api-overlap',
             'session',
@@ -174,6 +177,7 @@ try {
     require_once dirname(__DIR__) . '/release-gate/lib/ServiceCategoriesApiWriteProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/SecretariesApiAliasProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/CalendarResponsibilityRaceProbe.php';
+    require_once dirname(__DIR__) . '/release-gate/lib/CalendarMethodProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/AppointmentsApiWriteProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/DefenseVerificationFixture.php';
     if (
@@ -329,6 +333,55 @@ try {
                 }
                 throw $error;
             }
+        } elseif ($action === 'calendar-methods') {
+            $supplemental = $evidence->run(
+                'supplemental_activate',
+                fn(): array => $verificationFixture->activate('calendar_race', $context),
+            );
+            $result['evidence'] = (new CalendarMethodProbe(
+                static fn(string $method, string $path): GateHttpResponse => $method === 'POST'
+                    ? $client->post($path)
+                    : $client->requestApp($method, $path),
+                static function () use ($client, $context, $sessions): void {
+                    CalendarMethodProbe::authenticateSession(
+                        static fn(): GateHttpResponse => $client->get('login'),
+                        static fn(string $username, string $password): GateHttpResponse => $client->post(
+                            'login/validate',
+                            [
+                                'username' => $username,
+                                'password' => $password,
+                            ],
+                        ),
+                        static function () use ($client, $sessions): void {
+                            $sessions->remember($client->getCookie('ea_session'));
+                        },
+                        $context,
+                    );
+                },
+                static function () use ($client, $sessions): void {
+                    CalendarMethodProbe::closeSession(
+                        static fn(): GateHttpResponse => $client->get('logout'),
+                        static function () use ($client, $sessions): void {
+                            $sessions->remember($client->getCookie('ea_session'));
+                        },
+                        static fn(): GateHttpResponse => $client->get('account'),
+                    );
+                },
+                static function () use ($supplemental): array {
+                    return [
+                        'appointment_id' => (int) ($supplemental['ids']['appointment'] ?? 0),
+                        'provider_id' => (int) ($supplemental['actor_id'] ?? 0),
+                        'customer_id' => (int) ($supplemental['ids']['calendar_customer'] ?? 0),
+                        'marker' => (string) ($supplemental['marker'] ?? ''),
+                    ];
+                },
+                static function () use ($supplemental, $ci): array {
+                    return CalendarMethodProbe::snapshotOwnedRows($ci->db, $supplemental);
+                },
+                static function () use ($client, $sessions): void {
+                    $sessions->remember($client->getCookie('ea_session'));
+                },
+            ))->run($evidence->step(...));
         } elseif ($action === 'customers-api') {
             $evidence->run(
                 'supplemental_activate',
@@ -476,6 +529,7 @@ try {
                     'service-categories-api',
                     'secretaries-api',
                     'calendar-race',
+                    'calendar-methods',
                     'appointments-api',
                     'appointments-api-overlap',
                 ],

@@ -245,11 +245,23 @@ bash scripts/ops/run_ordinary_live_probe.sh blocked-periods-api EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh service-categories-api EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh secretaries-api EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh calendar-race EXPECTED_RELEASE
+bash scripts/ops/run_ordinary_live_probe.sh calendar-methods EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh appointments-api EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh appointments-api-overlap EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh session EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh cleanup EXPECTED_RELEASE
 ```
+
+The `calendar-methods` action uses only its own synthetic provider, customer,
+service and appointment. It requires all six direct calendar write routes to
+reject GET and HEAD with `405` and `Allow: POST`, and all six legacy aliases to
+redirect on GET and HEAD; CSRF-authenticated POST aliases must use a safe
+method-switching `303` redirect. Every request must leave the owned synthetic
+rows unchanged. The shared production lock, independent cleanup
+timer and fixture/session verification apply to this action as to the other
+ordinary probes. The journal records one bounded phase per direct route and per
+alias while the result records each HTTP method separately. This is a method
+and alias proof, not a general authorization or browser-CSRF proof.
 
 ### Staff API v1 live evidence boundary
 

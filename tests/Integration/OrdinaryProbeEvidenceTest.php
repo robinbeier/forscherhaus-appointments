@@ -11,6 +11,8 @@ use Tests\Integration\Support\OrdinaryJournalSyncFault;
 require_once __DIR__ . '/Support/OrdinaryJournalSyncFault.php';
 require_once dirname(__DIR__, 2) . '/scripts/release-gate/lib/OrdinaryProbeEvidence.php';
 require_once dirname(__DIR__, 2) . '/scripts/release-gate/lib/OrdinaryProbeSessions.php';
+require_once dirname(__DIR__, 2) . '/scripts/release-gate/lib/GateHttpClient.php';
+require_once dirname(__DIR__, 2) . '/scripts/release-gate/lib/CalendarMethodProbe.php';
 
 final class OrdinaryProbeEvidenceTest extends TestCase
 {
@@ -40,6 +42,242 @@ final class OrdinaryProbeEvidenceTest extends TestCase
             unlink($path);
         }
         rmdir($this->directory);
+    }
+
+    public function testCalendarMethodProbeFitsTheBoundedPersistentJournal(): void
+    {
+        $evidence = new OrdinaryProbeEvidence($this->directory);
+        $evidence->begin('ea_synthetic');
+        foreach (['activate', 'verify', 'supplemental_activate'] as $setup) {
+            $evidence->step($setup, 'started');
+            $evidence->step($setup, 'passed');
+        }
+        $requests = 0;
+        $remembered = 0;
+        $probe = new \ReleaseGate\CalendarMethodProbe(
+            static function (string $method, string $path) use (&$requests): \ReleaseGate\GateHttpResponse {
+                $requests++;
+                $alias = str_starts_with($path, 'backend_api/');
+                $target = str_replace('backend_api/ajax_', 'calendar/', explode('?', $path, 2)[0]);
+                return new \ReleaseGate\GateHttpResponse(
+                    $alias ? ($method === 'POST' ? 303 : 302) : 405,
+                    $alias ? ['location' => ['/index.php/' . $target]] : ['allow' => ['POST']],
+                    '',
+                    0.0,
+                    'http://localhost/index.php/' . $path,
+                );
+            },
+            static function (): void {},
+            static function (): void {},
+            static fn(): array => [
+                'appointment_id' => 41,
+                'provider_id' => 17,
+                'customer_id' => 23,
+                'marker' => 'owned',
+            ],
+            static fn(): array => ['owned' => ['id' => 41]],
+            static function () use (&$remembered): void {
+                $remembered++;
+            },
+        );
+
+        self::assertSame('verified', $probe->run($evidence->step(...))['status']);
+        $evidence->step('verify', 'started');
+        $evidence->step('verify', 'passed');
+        $evidence->step('deactivate', 'started');
+        $evidence->step('deactivate', 'passed');
+        self::assertSame(30, $requests);
+        self::assertSame(30, $remembered);
+        self::assertCount(34, $evidence->read()['events']);
+    }
+
+    public function testCalendarMethodProbeRecordsEveryResponseAndClosesAfterJournalFailure(): void
+    {
+        $order = [];
+        $sessions = new OrdinaryProbeSessions($this->directory, $this->directory . '/sessions');
+        $cookie = str_repeat('a', 22);
+        $probe = new \ReleaseGate\CalendarMethodProbe(
+            function (string $method, string $path) use ($cookie, &$order): \ReleaseGate\GateHttpResponse {
+                $order[] = 'request';
+                file_put_contents($this->directory . '/sessions/ea_session' . $cookie, 'synthetic');
+                return new \ReleaseGate\GateHttpResponse(
+                    405,
+                    ['allow' => ['POST']],
+                    '',
+                    0.0,
+                    'http://localhost/index.php/' . $path,
+                );
+            },
+            function () use (&$order, $cookie): void {
+                $order[] = 'login';
+                file_put_contents($this->directory . '/sessions/ea_session' . $cookie, 'authenticated');
+            },
+            static function () use (&$order): void {
+                $order[] = 'close';
+            },
+            static fn(): array => [
+                'appointment_id' => 41,
+                'provider_id' => 17,
+                'customer_id' => 23,
+                'marker' => 'owned',
+            ],
+            static fn(): array => ['owned' => ['id' => 41]],
+            function () use (&$order, $sessions, $cookie): void {
+                $order[] = 'remember';
+                OrdinaryJournalSyncFault::failFile($this->directory . '/sessions.json.tmp');
+                $sessions->remember($cookie);
+            },
+        );
+
+        try {
+            $probe->run();
+            self::fail('A journal failure must propagate.');
+        } catch (RuntimeException $error) {
+            self::assertStringContainsString('persist private session journal', strtolower($error->getMessage()));
+        }
+        self::assertSame(['login', 'request', 'remember', 'close'], $order);
+    }
+
+    public function testProductionCloseOrderAttemptsLogoutBeforeItsJournalCanFail(): void
+    {
+        $sessions = new OrdinaryProbeSessions($this->directory, $this->directory . '/sessions');
+        $cookie = str_repeat('b', 22);
+        $path = $this->directory . '/sessions/ea_session' . $cookie;
+        file_put_contents($path, 'authenticated');
+        $sessions->remember($cookie);
+        $order = ['login'];
+        OrdinaryJournalSyncFault::failFile($this->directory . '/sessions.json.tmp');
+        try {
+            \ReleaseGate\CalendarMethodProbe::closeSession(
+                static function () use (&$order): \ReleaseGate\GateHttpResponse {
+                    $order[] = 'logout';
+                    return new \ReleaseGate\GateHttpResponse(200, [], '', 0.0, 'http://localhost/logout');
+                },
+                static function () use (&$order, $sessions, $cookie): void {
+                    $order[] = 'close_remember';
+                    $sessions->remember($cookie);
+                },
+                static function () use (&$order): \ReleaseGate\GateHttpResponse {
+                    $order[] = 'after_logout';
+                    return new \ReleaseGate\GateHttpResponse(307, [], '', 0.0, 'http://localhost/account');
+                },
+            );
+            self::fail('The injected close journal failure must propagate.');
+        } catch (RuntimeException $error) {
+            self::assertStringContainsString('persist private session journal', strtolower($error->getMessage()));
+        }
+        self::assertSame(['login', 'logout', 'close_remember'], $order);
+    }
+
+    public function testProductionAuthenticateOrderJournalsSuccessfulLoginResponse(): void
+    {
+        $order = [];
+        $remembered = 0;
+        try {
+            \ReleaseGate\CalendarMethodProbe::authenticateSession(
+                static function () use (&$order): \ReleaseGate\GateHttpResponse {
+                    $order[] = 'login_page';
+                    return new \ReleaseGate\GateHttpResponse(200, [], '', 0.0, 'http://localhost/login');
+                },
+                static function (string $username, string $password) use (&$order): \ReleaseGate\GateHttpResponse {
+                    $order[] = 'login';
+                    return new \ReleaseGate\GateHttpResponse(
+                        200,
+                        [],
+                        '{"success":true}',
+                        0.0,
+                        'http://localhost/login/validate',
+                    );
+                },
+                static function () use (&$order, &$remembered): void {
+                    $order[] = 'remember';
+                    if (++$remembered === 2) {
+                        throw new RuntimeException('synthetic login journal failure');
+                    }
+                },
+                ['username' => 'synthetic', 'password' => 'secret'],
+            );
+            self::fail('The login response journal failure must propagate.');
+        } catch (RuntimeException $error) {
+            self::assertSame('synthetic login journal failure', $error->getMessage());
+        }
+        self::assertSame(['login_page', 'remember', 'login', 'remember'], $order);
+    }
+
+    public function testCalendarMethodSnapshotUsesOwnedQueriesAndHashesOnlyAppointmentSecret(): void
+    {
+        $db = new class {
+            private string $table = '';
+            private string $select = '*';
+            private array $rows = [
+                'appointments' => [
+                    ['id' => 40, 'id_users_provider' => 99, 'hash' => 'unrelated'],
+                    ['id' => 41, 'id_users_provider' => 17, 'hash' => 'secret'],
+                ],
+                'user_settings' => [['id_users' => 17, 'timezone' => 'Europe/Berlin']],
+                'users' => [
+                    ['id' => 17, 'notes' => 'provider'],
+                    ['id' => 23, 'notes' => 'owned'],
+                    ['id' => 99, 'notes' => 'unrelated'],
+                ],
+                'services' => [['id' => 31, 'description' => 'owned'], ['id' => 32, 'description' => 'unrelated']],
+                'services_providers' => [
+                    ['id_users' => 17, 'id_services' => 31],
+                    ['id_users' => 99, 'id_services' => 32],
+                ],
+            ];
+            public function get_where(string $table, array $where): self
+            {
+                $this->table = $table;
+                $this->where = $where;
+                return $this;
+            }
+            public function order_by(string $column, string $direction): self
+            {
+                return $this;
+            }
+            public function select(string $columns): self
+            {
+                $this->select = $columns;
+                return $this;
+            }
+            public function row_array(): array
+            {
+                return $this->result_array()[0] ?? [];
+            }
+            public function result_array(): array
+            {
+                $rows = array_values(
+                    array_filter($this->rows[$this->table] ?? [], function (array $row): bool {
+                        foreach ($this->where as $key => $value) {
+                            if (($row[$key] ?? null) !== $value) {
+                                return false;
+                            }
+                        }
+                        return true;
+                    }),
+                );
+                if ($this->select === 'id') {
+                    $rows = array_map(static fn(array $row): array => ['id' => $row['id']], $rows);
+                }
+                $this->select = '*';
+                return $rows;
+            }
+            private array $where = [];
+        };
+        $result = \ReleaseGate\CalendarMethodProbe::snapshotOwnedRows($db, [
+            'actor_id' => 17,
+            'marker' => 'owned',
+            'ids' => ['appointment' => 41, 'calendar_customer' => 23, 'service' => 31],
+        ]);
+        self::assertSame(hash('sha256', 'secret'), $result['owned']['appointment']['hash']);
+        self::assertSame(
+            [['id' => 41, 'id_users_provider' => 17, 'hash' => 'secret']],
+            $result['owned']['provider_appointments'],
+        );
+        self::assertSame([['id' => 23]], $result['owned']['marker_users']);
+        self::assertSame([['id' => 31]], $result['owned']['marker_services']);
+        self::assertSame([['id_users' => 17, 'id_services' => 31]], $result['owned']['service_relationships']);
     }
 
     public function testReceiptPrecedesJournalRetirementAndPreservesFailureStep(): void
