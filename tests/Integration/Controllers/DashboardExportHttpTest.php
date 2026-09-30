@@ -26,6 +26,9 @@ final class DashboardExportHttpTest extends TestCase
     private string $originalProviderEmail = '';
     private string $sensitiveProviderEmail = '';
     private int $baseAppointmentId = 0;
+    private string $baseAppointmentDate = '';
+    private string $baseAppointmentStart = '13:37';
+    private string $baseAppointmentEnd = '14:07';
 
     protected function setUp(): void
     {
@@ -70,6 +73,18 @@ final class DashboardExportHttpTest extends TestCase
             $appointmentDate = (string) ($appointment['start_datetime'] ?? '');
             self::assertNotSame('', $appointmentDate);
             $monday = (new DateTimeImmutable($appointmentDate))->modify('monday this week');
+            $baseDate = $monday->modify('+1 day')->format('Y-m-d');
+            self::assertTrue(
+                get_instance()->db->update(
+                    'appointments',
+                    [
+                        'start_datetime' => $baseDate . ' ' . $this->baseAppointmentStart . ':00',
+                        'end_datetime' => $baseDate . ' ' . $this->baseAppointmentEnd . ':00',
+                    ],
+                    ['id' => $this->baseAppointmentId],
+                ),
+            );
+            $this->baseAppointmentDate = format_date($baseDate);
             $this->periodStart = $monday->format('Y-m-d');
             $this->periodEnd = $monday->modify('+4 days')->format('Y-m-d');
             self::assertTrue(
@@ -101,10 +116,38 @@ final class DashboardExportHttpTest extends TestCase
 
     public function testAdminExportsExcludeContactFieldsFromRendererInput(): void
     {
-        foreach ($this->adminExportRendererCalls() as $call) {
-            $html = (string) ($call['html'] ?? '');
-            self::assertStringNotContainsString($this->sensitiveCustomerEmail, $html);
-            self::assertStringNotContainsString($this->sensitiveCustomerPhone, $html);
+        $client = $this->login($this->fixture->run . '_actor', $this->fixture->password);
+        $appointmentDate = (new DateTimeImmutable($this->periodStart))->modify('+1 day');
+        $startDisplay = $appointmentDate->setTime(13, 37)->format(get_time_format());
+        $endDisplay = $appointmentDate->setTime(14, 7)->format(get_time_format());
+        $appointmentRow =
+            '~<tr>\s*<td>—</td>\s*<td>' .
+            preg_quote($this->baseAppointmentDate, '~') .
+            '</td>\s*<td>' .
+            preg_quote($startDisplay, '~') .
+            '(?:\s+[^<]+)?</td>\s*<td>' .
+            preg_quote($endDisplay, '~') .
+            '(?:\s+[^<]+)?</td>\s*</tr>~u';
+        foreach (
+            ['dashboard/export/principal.pdf', 'dashboard/export/teacher.pdf', 'dashboard/export/teacher.zip']
+            as $route
+        ) {
+            $callsBefore = count($this->renderer->calls());
+            self::assertSame(200, $client->get($route, $this->periodQuery())->statusCode, $route);
+            $calls = array_slice($this->renderer->calls(), $callsBefore);
+            self::assertNotEmpty($calls, $route . ' must reach the recording renderer.');
+            $sawOwnedAppointment = false;
+            foreach ($calls as $call) {
+                $html = (string) ($call['html'] ?? '');
+                if (in_array($route, ['dashboard/export/teacher.pdf', 'dashboard/export/teacher.zip'], true)) {
+                    $sawOwnedAppointment = $sawOwnedAppointment || preg_match($appointmentRow, $html) === 1;
+                }
+                self::assertStringNotContainsString($this->sensitiveCustomerEmail, $html);
+                self::assertStringNotContainsString($this->sensitiveCustomerPhone, $html);
+            }
+            if (in_array($route, ['dashboard/export/teacher.pdf', 'dashboard/export/teacher.zip'], true)) {
+                self::assertTrue($sawOwnedAppointment, $route . ' must render the owned appointment row.');
+            }
         }
     }
 

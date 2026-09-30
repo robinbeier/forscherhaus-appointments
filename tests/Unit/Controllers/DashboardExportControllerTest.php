@@ -266,6 +266,37 @@ class DashboardExportControllerTest extends TestCase
         );
     }
 
+    public function testResolveCustomerLastNameUsesNamesAndNeverEmailOrPhoneFallbacks(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+
+        $this->assertSame(
+            'Rossmeisl',
+            $controller->callResolveCustomerLastName([
+                'customer_first_name' => 'Adina',
+                'customer_last_name' => 'Rossmeisl',
+                'customer_email' => 'adina@example.test',
+                'customer_phone_number' => '123456',
+            ]),
+        );
+        $this->assertSame(
+            'Adina',
+            $controller->callResolveCustomerLastName([
+                'customer_first_name' => 'Adina',
+                'customer_last_name' => '',
+                'customer_email' => 'adina@example.test',
+                'customer_phone_number' => '123456',
+            ]),
+        );
+        $this->assertSame(
+            '—',
+            $controller->callResolveCustomerLastName([
+                'customer_email' => 'adina@example.test',
+                'customer_phone_number' => '123456',
+            ]),
+        );
+    }
+
     public function testMapProviderParentAppointmentsForViewUsesCustomerNameAndDropsExtraPii(): void
     {
         $controller = $this->createControllerWithThreshold(0.9);
@@ -940,6 +971,11 @@ class DashboardExportControllerTest extends TestCase
             public function callResolveCustomerDisplayNameForParentExport(array $appointment): string
             {
                 return $this->resolveCustomerDisplayNameForParentExport($appointment);
+            }
+
+            public function callResolveCustomerLastName(array $appointment): string
+            {
+                return $this->resolveCustomerLastName($appointment);
             }
 
             public function callMapProviderParentAppointmentsForView(array $appointments): array
