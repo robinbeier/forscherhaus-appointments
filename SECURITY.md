@@ -159,6 +159,14 @@ authenticated denial does not change the session destination.
 synthetic HTTP/database stack; it does not prove a live production role-change
 race or activate Google Analytics in production.
 
+The classic `update` page and its direct `index` alias require the actor's
+current stored `system_settings` edit permission before the migration library
+is initialized. Anonymous and demoted sessions must not reach migration work;
+GET displays the confirmation page, HEAD cannot initiate migration, and other
+methods must be rejected. A POST additionally requires the framework's CSRF
+check. Isolated HTTP/database checks may verify denial and unchanged
+migration tracking, but must not use production to exercise migrations.
+
 ## Required security properties
 
 The first cycle sharpened the following six properties. They are examples of
