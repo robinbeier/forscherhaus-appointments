@@ -117,20 +117,17 @@ final class LegalSettingsLegacyHttpTest extends TestCase
         self::assertNotNull($fixture);
         $db = get_instance()->db;
         $marker = $fixture->run . '_unrelated_projection_marker';
-        $unrelated = $fixture->ownedSetting('projection_marker', $marker);
+        $fixture->ownedSetting('projection_marker', $marker);
         $apiToken = $db->get_where('settings', ['name' => 'api_token'])->row_array();
         $ldapSecret = $db->get_where('settings', ['name' => 'ldap_password'])->row_array();
-        $ldapHost = $db->get_where('settings', ['name' => 'ldap_host'])->row_array();
         self::assertNotEmpty($apiToken);
         self::assertNotEmpty($ldapSecret);
-        self::assertNotEmpty($ldapHost);
         $apiMarker = $fixture->run . '_api_projection_secret';
         $ldapMarker = $fixture->run . '_ldap_projection_secret';
-        $db->update('settings', ['value' => $apiMarker], ['id' => $apiToken['id']]);
-        $db->update('settings', ['value' => $ldapMarker], ['id' => $ldapSecret['id']]);
-        $db->update('settings', ['value' => $marker], ['id' => $unrelated['id']]);
         $admin = $this->login($this->credentials['admin_username']);
         try {
+            self::assertTrue($db->update('settings', ['value' => $apiMarker], ['id' => $apiToken['id']]));
+            self::assertTrue($db->update('settings', ['value' => $ldapMarker], ['id' => $ldapSecret['id']]));
             foreach (['legal_settings', 'legal_settings/index'] as $path) {
                 $response = $admin->get($path);
                 self::assertSame(200, $response->statusCode, $path . ' ' . $response->body);
@@ -153,9 +150,10 @@ final class LegalSettingsLegacyHttpTest extends TestCase
                 self::assertStringNotContainsString($ldapMarker, $response->body, $path);
             }
         } finally {
-            $db->update('settings', $apiToken, ['id' => $apiToken['id']]);
-            $db->update('settings', $ldapSecret, ['id' => $ldapSecret['id']]);
-            $db->update('settings', $ldapHost, ['id' => $ldapHost['id']]);
+            $apiRestored = $db->update('settings', $apiToken, ['id' => $apiToken['id']]);
+            $ldapRestored = $db->update('settings', $ldapSecret, ['id' => $ldapSecret['id']]);
+            self::assertTrue($apiRestored);
+            self::assertTrue($ldapRestored);
         }
     }
 
