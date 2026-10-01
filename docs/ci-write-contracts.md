@@ -227,14 +227,15 @@ oder Speicherung. Andere Methoden erhalten nach erfolgreicher Berechtigungsprüf
 
 Die gemeinsame isolierte Controller-Matrix prüft Berechtigungsreihenfolge,
 Methodenablehnung und den unveränderten normalen Modell-Handoff mit Test-Doubles.
-Sie belegt keine echte HTTP-/CSRF-Verifikation. LDAP, Legal und Booking prüfen
+Sie belegt keine echte HTTP-/CSRF-Verifikation. LDAP, Legal, Booking und Matomo prüfen
 zusätzlich die aktuell gespeicherte Rolle des angemeldeten Nutzers. LDAP nimmt nur
 `ldap_is_active`, `ldap_host` und `ldap_port` an; Legal nur die sechs
-Rechtstext-Namen der Seite; Booking nur die 38 Buchungsfeld-Namen. Alle drei verwerfen übermittelte IDs und zusätzliche
+Rechtstext-Namen der Seite; Booking nur die 38 Buchungsfeld-Namen; Matomo nur
+`matomo_analytics_url` und `matomo_analytics_site_id`. Diese vier verwerfen übermittelte IDs und zusätzliche
 Felder, lehnen fremde oder doppelte Namen vor dem Batch ab und übergeben nur
 `name` und `value` an `Settings_model::save_batch`. Ihre isolierten
 HTTP-/Datenbanktests belegen Methoden, CSRF, Rollenwechsel und Namensgrenzen.
-Die anderen drei Batch-Aktionen behalten ihren bisherigen Handoff; Business
+Die anderen zwei Batch-Aktionen behalten ihren bisherigen Handoff; Business
 behält seine Feldfilterung. General Settings
 behält die vollständige Vorvalidierung und vorbereiteten IDs bei und speichert
 in einer gemeinsamen Transaktion. Die getrennten Datenbanknachweise und Grenzen

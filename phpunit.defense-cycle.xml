@@ -27,6 +27,7 @@
             <file>./tests/Integration/Controllers/LdapSettingsLegacyHttpTest.php</file>
             <file>./tests/Integration/Controllers/BookingSettingsLegacyHttpTest.php</file>
             <file>./tests/Integration/Controllers/LegalSettingsLegacyHttpTest.php</file>
+            <file>./tests/Integration/Controllers/MatomoAnalyticsLegacyHttpTest.php</file>
             <file>./tests/Integration/Controllers/AppointmentsApiHttpWriteTest.php</file>
             <file>./tests/Integration/Controllers/StaffSettingsApiHttpTest.php</file>
             <file>./tests/Integration/Controllers/RescheduleCutoffHttpTest.php</file>

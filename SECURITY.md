@@ -135,6 +135,18 @@ change the session destination. `BookingSettingsLegacyHttpTest` checks these
 boundaries in an isolated synthetic HTTP/database stack; it does not prove a
 live production role-change race or change production booking options.
 
+Classic Matomo Settings (`matomo_analytics_settings`, its direct `index` alias,
+and `save`) require the actor's current stored `system_settings` permission.
+The page accepts GET only and projects only `matomo_analytics_url` and
+`matomo_analytics_site_id` as `name`/`value`; unrelated or future same-prefix
+rows do not enter page script data. Save accepts POST with CSRF and may write
+only those two names. Submitted IDs and extra fields cannot select other rows;
+unknown or duplicate names reject the whole batch before mutation. An
+authenticated denial does not change the session destination.
+`MatomoAnalyticsLegacyHttpTest` checks these boundaries in an isolated
+synthetic HTTP/database stack; it does not prove a live production role-change
+race or activate Matomo in production.
+
 ## Required security properties
 
 The first cycle sharpened the following six properties. They are examples of
