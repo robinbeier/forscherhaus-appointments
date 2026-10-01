@@ -77,7 +77,13 @@
                             <tbody><!-- Dynamic Content --></tbody>
                         </table>
 
-                        <?php if (can('view', PRIV_BLOCKED_PERIODS, (int) session('user_id'))): ?>
+                        <?php
+// The legacy blocked-periods page still checks the login-time role.
+?>
+                        <?php if (
+                            vars('role_slug') === session('role_slug') &&
+                            can('view', PRIV_BLOCKED_PERIODS, (int) session('user_id'))
+                        ): ?>
                             <h5 class="text-black-50 mb-3 fw-light"><?= lang('blocked_periods') ?></h5>
 
                             <p class="form-text text-muted">

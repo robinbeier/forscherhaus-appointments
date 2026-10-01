@@ -103,6 +103,18 @@ final class SettingsReadProjectionHttpTest extends TestCase
             ) {
                 $response = $admin->get($path);
                 self::assertSame(200, $response->statusCode, $path . ' ' . $response->body);
+                self::assertStringContainsString(
+                    'href="' . $this->server?->baseUrl . '/index.php/service_categories"',
+                    $response->body,
+                    $path,
+                );
+                if (str_starts_with($path, 'business_settings')) {
+                    self::assertStringContainsString(
+                        'href="' . $this->server?->baseUrl . '/index.php/blocked_periods"',
+                        $response->body,
+                        $path,
+                    );
+                }
                 $key = str_starts_with($path, 'general_settings') ? 'general_settings' : 'business_settings';
                 $projection = $this->pageSettings($response, $key, $path);
                 $names = array_column($projection, 'name');
@@ -173,6 +185,18 @@ final class SettingsReadProjectionHttpTest extends TestCase
                 $response->body,
                 $path,
             );
+            self::assertStringNotContainsString(
+                'href="' . $this->server?->baseUrl . '/index.php/service_categories"',
+                $response->body,
+                $path,
+            );
+            if ($path === 'business_settings') {
+                self::assertStringNotContainsString(
+                    'href="' . $this->server?->baseUrl . '/index.php/blocked_periods"',
+                    $response->body,
+                    $path,
+                );
+            }
         }
     }
 

@@ -84,9 +84,14 @@
                     <a class="dropdown-item" href="<?= site_url('services') ?>">
                         <?= lang('services') ?>
                     </a>
-                    <a class="dropdown-item" href="<?= site_url('service_categories') ?>">
-                        <?= lang('categories') ?>
-                    </a>
+                    <?php
+// The legacy categories page still checks the login-time role.
+?>
+                    <?php if ($role_slug === session('role_slug')): ?>
+                        <a class="dropdown-item" href="<?= site_url('service_categories') ?>">
+                            <?= lang('categories') ?>
+                        </a>
+                    <?php endif; ?>
                 </div>
             </li>
 
