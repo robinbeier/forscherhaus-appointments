@@ -783,6 +783,14 @@
           "match": "exact_file"
         },
         {
+          "path": "application/views/components/backend_header.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/views/components/settings_nav.php",
+          "match": "exact_file"
+        },
+        {
           "path": "application/libraries/Accounts.php",
           "match": "exact_file"
         },

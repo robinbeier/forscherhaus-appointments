@@ -21,7 +21,24 @@
 
     <div id="header-menu" class="collapse navbar-collapse flex-row-reverse px-2">
         <ul class="navbar-nav">
-            <?php $role_slug = session('role_slug'); ?>
+            <?php
+            $user_id = (int) session('user_id');
+            $CI = &get_instance();
+            $role =
+                $user_id > 0
+                    ? $CI->db
+                        ->select('roles.*')
+                        ->from('users')
+                        ->join('roles', 'roles.id = users.id_roles')
+                        ->where('users.id', $user_id)
+                        ->get()
+                        ->row_array()
+                    : null;
+            $role_slug = $role['slug'] ?? null;
+            $can_view = static fn(string $resource): bool => (int) ($role[$resource] ?? 0) > 0;
+            $role_unchanged = $role_slug === session('role_slug');
+            ?>
+            <?php if ($role_unchanged): ?>
             <?php $can_view_dashboard = in_array($role_slug, [DB_SLUG_ADMIN, DB_SLUG_PROVIDER], true); ?>
             <?php $dashboard_classes = trim(
                 ($active_menu === 'dashboard' ? 'active' : '') . ' ' . ($can_view_dashboard ? '' : 'd-none'),
@@ -33,8 +50,9 @@
                     <?= lang('dashboard') ?>
                 </a>
             </li>
+            <?php endif; ?>
 
-            <?php $hidden = can('view', PRIV_APPOINTMENTS) ? '' : 'd-none'; ?>
+            <?php $hidden = $can_view(PRIV_APPOINTMENTS) ? '' : 'd-none'; ?>
             <?php $active = $active_menu == PRIV_APPOINTMENTS ? 'active' : ''; ?>
             <li class="nav-item <?= $active . $hidden ?>">
                 <a href="<?= site_url(
@@ -47,7 +65,11 @@
                 </a>
             </li>
 
-            <?php $hidden = can('view', PRIV_CUSTOMERS) ? '' : 'd-none'; ?>
+            <?php
+// Legacy customer writes also use the login-time role.
+?>
+            <?php if ($role_unchanged): ?>
+            <?php $hidden = $can_view(PRIV_CUSTOMERS) ? '' : 'd-none'; ?>
             <?php $active = $active_menu == PRIV_CUSTOMERS ? 'active' : ''; ?>
             <li class="nav-item <?= $active . $hidden ?>">
                 <a href="<?= site_url('customers') ?>" class="nav-link"
@@ -56,8 +78,13 @@
                     <?= lang('customers') ?>
                 </a>
             </li>
+            <?php endif; ?>
 
-            <?php $hidden = can('view', PRIV_SERVICES) ? '' : 'd-none'; ?>
+            <?php
+// Service/category and user-management writes still use the login-time role.
+?>
+            <?php if ($role_unchanged): ?>
+            <?php $hidden = $can_view(PRIV_SERVICES) ? '' : 'd-none'; ?>
             <?php $active = $active_menu == PRIV_SERVICES ? 'active' : ''; ?>
             <li class="nav-item dropdown <?= $active . $hidden ?>">
                 <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown"
@@ -75,7 +102,7 @@
                 </div>
             </li>
 
-            <?php $hidden = can('view', PRIV_USERS) ? '' : 'd-none'; ?>
+            <?php $hidden = $can_view(PRIV_USERS) ? '' : 'd-none'; ?>
             <?php $active = $active_menu == PRIV_USERS ? 'active' : ''; ?>
             <li class="nav-item dropdown <?= $active . $hidden ?>">
                 <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown"
@@ -95,33 +122,35 @@
                     </a>
                 </div>
             </li>
+            <?php endif; ?>
 
             <?php slot('before_user_nav_item'); ?>
 
-            <?php $hidden = can('view', PRIV_SYSTEM_SETTINGS) || can('view', PRIV_USER_SETTINGS) ? '' : 'd-none'; ?>
             <?php $active = $active_menu == PRIV_SYSTEM_SETTINGS ? 'active' : ''; ?>
-            <li class="nav-item dropdown <?= $active . $hidden ?>">
+            <li class="nav-item dropdown <?= $active ?>">
                 <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown"
                    data-tippy-content="<?= lang('settings_hint') ?>">
                     <i class="fas fa-user me-2"></i>
                     <?= e(vars('user_display_name')) ?>
                 </a>
                 <div class="dropdown-menu dropdown-menu-end">
-                    <?php if (can('view', PRIV_SYSTEM_SETTINGS)): ?>
+                    <?php if ($can_view(PRIV_SYSTEM_SETTINGS)): ?>
                         <a class="dropdown-item" href="<?= site_url('general_settings') ?>">
                             <?= lang('settings') ?>
                         </a>
                     <?php endif; ?>
 
-                    <?php slot('after_settings_dropdown_item'); ?>
+                    <?php if ($role_unchanged && $can_view(PRIV_USER_SETTINGS)): ?>
+                        <?php slot('after_settings_dropdown_item'); ?>
 
-                    <a class="dropdown-item" href="<?= site_url('account') ?>">
-                        <?= lang('account') ?>
-                    </a>
-                    <a class="dropdown-item" href="<?= site_url('about') ?>">
-                        <?= lang('about') ?>
-                    </a>
-                    <div class="dropdown-divider"></div>
+                        <a class="dropdown-item" href="<?= site_url('account') ?>">
+                            <?= lang('account') ?>
+                        </a>
+                        <a class="dropdown-item" href="<?= site_url('about') ?>">
+                            <?= lang('about') ?>
+                        </a>
+                        <div class="dropdown-divider"></div>
+                    <?php endif; ?>
                     <a class="dropdown-item" href="<?= site_url('logout') ?>">
                         <?= lang('log_out') ?>
                     </a>

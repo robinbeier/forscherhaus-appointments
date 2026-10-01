@@ -5,6 +5,7 @@ declare(strict_types=1);
 define('BASEPATH', __DIR__);
 define('APPPATH', dirname(__DIR__, 2) . '/application/');
 define('PRIV_SYSTEM_SETTINGS', 'system_settings');
+define('SYNTHETIC_USER_ID', 7001);
 
 $controllerName = $argv[1] ?? '';
 $scenario = $argv[2] ?? '';
@@ -16,11 +17,22 @@ $body = '';
 $saved = [];
 $saved_batches = [];
 
-function cannot(string $verb, string $permission): bool
+function session(string $key): mixed
 {
-    global $scenario, $events;
+    if ($key !== 'user_id') {
+        throw new RuntimeException('Unexpected session key.');
+    }
+    return SYNTHETIC_USER_ID;
+}
+function cannot(string $verb, string $permission, ?int $userId = null): bool
+{
+    global $scenario, $events, $controllerName;
     if ($verb !== 'edit' || $permission !== PRIV_SYSTEM_SETTINGS) {
         throw new RuntimeException('Unexpected authorization arguments.');
+    }
+    $expectsActorId = in_array($controllerName, ['General_settings', 'Business_settings'], true);
+    if (($expectsActorId && $userId !== SYNTHETIC_USER_ID) || (!$expectsActorId && $userId !== null)) {
+        throw new RuntimeException('Unexpected authorization user ID.');
     }
     $events[] = 'auth:' . $verb . ':' . $permission;
     return $scenario === 'forbidden';

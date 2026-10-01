@@ -177,6 +177,14 @@ fixture marker or seeded staff secret values in the response body. This read
 matrix does not establish invalid-write behavior or every authentication
 configuration.
 
+The authenticated legacy General and Business Settings HTML pages are a
+separate boundary from API v1 Settings reads. Their current-role, method,
+per-page projection, and session-destination contract is covered by
+`SettingsReadProjectionHttpTest` in the isolated Defense-cycle shard; the
+API-v1 read matrix does not stand in for this page proof. The same fixture
+checks that the three directly coupled General/Business Settings write actions
+do not keep login-time edit authority after a stored-role demotion.
+
 The same six read paths are also exercised with the fixture's valid Provider
 Basic credentials after asserting the synthetic username, password hash, and
 Provider role. They must return HTTP401 with a nonempty challenge and must not
