@@ -87,6 +87,7 @@
 /application/models/Settings_model.php @robinbeier
 /application/models/Unavailabilities_model.php @robinbeier
 /application/models/Users_model.php @robinbeier
+/application/views/components/backend_header.php @robinbeier
 /application/views/components/booking_* @robinbeier
 /application/views/components/company_color_style.php @robinbeier
 /application/views/components/jquery_compat_inline.php @robinbeier
