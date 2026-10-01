@@ -159,6 +159,12 @@ final class MatomoAnalyticsLegacyHttpTest extends TestCase
         $before = $this->matomoRows();
 
         foreach (['matomo_analytics_settings', 'matomo_analytics_settings/index'] as $path) {
+            $post = $admin->post($path, [], withCsrfToken: true);
+            self::assertSame(405, $post->statusCode, 'POST ' . $path);
+            self::assertSame('GET', $post->header('allow'), 'POST ' . $path);
+            self::assertSame($before, $this->matomoRows());
+            self::assertSame($destination, $this->sessionDestination($admin));
+
             foreach (['HEAD', 'PUT', 'PATCH', 'DELETE'] as $method) {
                 $response = $admin->requestApp($method, $path, [], null, false);
                 self::assertSame(405, $response->statusCode, $method . ' ' . $path);
@@ -171,6 +177,13 @@ final class MatomoAnalyticsLegacyHttpTest extends TestCase
         $saveGet = $admin->get('matomo_analytics_settings/save');
         self::assertSame(405, $saveGet->statusCode, $saveGet->body);
         self::assertSame('POST', $saveGet->header('allow'));
+        foreach (['HEAD', 'PUT', 'PATCH', 'DELETE'] as $method) {
+            $response = $admin->requestApp($method, 'matomo_analytics_settings/save');
+            self::assertSame(405, $response->statusCode, $method . ' save');
+            self::assertSame('POST', $response->header('allow'), $method . ' save');
+            self::assertSame($before, $this->matomoRows());
+            self::assertSame($destination, $this->sessionDestination($admin));
+        }
         $missingCsrf = $admin->post(
             'matomo_analytics_settings/save',
             ['matomo_analytics_settings' => [['name' => self::MATOMO_NAMES[0], 'value' => 'missing-csrf']]],
