@@ -171,6 +171,7 @@ The classic `account` page and its direct `index` alias accept GET only and
 require the current stored `user_settings` view permission. `account/save`
 accepts POST with CSRF protection and requires the current stored edit
 permission before parsing or updating the authenticated user's own account.
+The page's Save control uses the same stored edit permission as the controller.
 Demoting an existing session must deny both reads and writes without changing
 account rows; caller-supplied account IDs cannot select another account.
 

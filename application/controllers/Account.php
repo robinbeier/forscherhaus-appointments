@@ -100,6 +100,7 @@ class Account extends EA_Controller
         html_vars([
             'page_title' => lang('settings'),
             'active_menu' => PRIV_SYSTEM_SETTINGS,
+            'can_edit_account' => can('edit', PRIV_USER_SETTINGS, $user_id),
             'user_display_name' => $this->accounts->get_user_display_name($user_id),
             'grouped_timezones' => $this->timezones->to_grouped_array(),
         ]);

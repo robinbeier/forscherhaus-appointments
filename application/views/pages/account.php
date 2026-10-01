@@ -13,7 +13,7 @@
                                 <?= lang('account') ?>
                             </h4>
 
-                            <?php if (can('edit', PRIV_USER_SETTINGS)): ?>
+                            <?php if (vars('can_edit_account')): ?>
                                 <button type="button" id="save-settings" class="btn btn-primary">
                                     <i class="fas fa-check-square me-2"></i>
                                     <?= lang('save') ?>

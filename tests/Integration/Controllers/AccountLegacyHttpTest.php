@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use PHPUnit\Framework\TestCase;
 use ReleaseGate\GateHttpClient;
+use ReleaseGate\GateHttpResponse;
 use Tests\Integration\Support\DefenseCycleFixtures;
 use Tests\Integration\Support\DefenseCycleHttpServer;
 
@@ -203,6 +204,73 @@ final class AccountLegacyHttpTest extends TestCase
                     [
                         'id' => $fixture->actorId,
                     ],
+                ),
+            );
+        }
+    }
+
+    public function testPromotedCustomerSessionReceivesAccountSaveControlAfterStoredRolePromotion(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $customerRole = get_instance()
+            ->db->get_where('roles', ['slug' => DB_SLUG_CUSTOMER])
+            ->row_array();
+        $adminRole = get_instance()
+            ->db->get_where('roles', ['slug' => DB_SLUG_ADMIN])
+            ->row_array();
+        self::assertNotEmpty($customerRole['id'] ?? null);
+        self::assertNotEmpty($adminRole['id'] ?? null);
+
+        self::assertTrue(
+            get_instance()->db->update(
+                'users',
+                ['id_roles' => $customerRole['id']],
+                [
+                    'id' => $fixture->actorId,
+                ],
+            ),
+        );
+        try {
+            $customerSession = $this->login($this->credentials['admin_username']);
+            self::assertSame(403, $customerSession->get('account')->statusCode);
+            self::assertSame(403, $customerSession->get('account/index')->statusCode);
+
+            self::assertTrue(
+                get_instance()->db->update(
+                    'users',
+                    ['id_roles' => $adminRole['id']],
+                    [
+                        'id' => $fixture->actorId,
+                    ],
+                ),
+            );
+
+            $responses = [];
+            foreach (['account', 'account/index'] as $path) {
+                $response = $customerSession->get($path);
+                $responses[$path] = $response;
+            }
+            foreach ($responses as $path => $response) {
+                self::assertSame(200, $response->statusCode, $path . ' ' . $response->body);
+                self::assertStringContainsString('id="account-page"', $response->body, $path);
+            }
+            self::assertSame(
+                ['account' => true, 'account/index' => true],
+                array_map(
+                    static fn(GateHttpResponse $response): bool => str_contains($response->body, 'id="save-settings"'),
+                    $responses,
+                ),
+                'A promoted session must receive the account save control on both routes.',
+            );
+        } finally {
+            self::assertTrue(
+                get_instance()->db->update(
+                    'users',
+                    [
+                        'id_roles' => $this->actorRoleBefore['id_roles'],
+                    ],
+                    ['id' => $fixture->actorId],
                 ),
             );
         }
