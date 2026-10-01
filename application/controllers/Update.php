@@ -46,9 +46,9 @@ class Update extends EA_Controller
     public function index(): void
     {
         try {
-            $user_id = session('user_id');
+            $user_id = (int) session('user_id');
 
-            if (cannot('edit', PRIV_SYSTEM_SETTINGS)) {
+            if (!$user_id || cannot('edit', PRIV_SYSTEM_SETTINGS, $user_id)) {
                 if ($user_id) {
                     abort(403, 'Forbidden');
                 }

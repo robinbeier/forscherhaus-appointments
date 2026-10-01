@@ -18,10 +18,10 @@ function session(string $name): mixed
     global $scenario;
     return $name === 'user_id' && $scenario !== 'anonymous' ? 17 : null;
 }
-function cannot(string $verb, string $permission): bool
+function cannot(string $verb, string $permission, ?int $user_id = null): bool
 {
     global $scenario, $events;
-    if ($verb !== 'edit' || $permission !== PRIV_SYSTEM_SETTINGS) {
+    if ($verb !== 'edit' || $permission !== PRIV_SYSTEM_SETTINGS || $user_id !== 17) {
         throw new RuntimeException('Unexpected authorization probe arguments.');
     }
     $events[] = 'auth_check:' . $verb . ':' . $permission;

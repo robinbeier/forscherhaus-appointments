@@ -17,12 +17,8 @@ final class UpdateControllerTest extends TestCase
         $anonymous = $this->probe('anonymous');
         self::assertSame(302, $anonymous['status']);
         self::assertSame('/login', $anonymous['headers']['Location']);
-        self::assertContains('auth_check:edit:system_settings', $anonymous['events']);
         self::assertContains('redirect:login', $anonymous['events']);
-        self::assertLessThan(
-            array_search('redirect:login', $anonymous['events'], true),
-            array_search('auth_check:edit:system_settings', $anonymous['events'], true),
-        );
+        self::assertNotContains('auth_check:edit:system_settings', $anonymous['events']);
         self::assertFalse($anonymous['instance']);
         self::assertSame([], $anonymous['view']);
         self::assertNotContains('library:instance', $anonymous['events']);
