@@ -226,6 +226,15 @@ existing blocked-period JavaScript client uses POST for all three mutations.
 These checks do not prove concurrent behavior, production state, or transaction
 rollback beyond the observed no-mutation denial paths.
 
+`BlockedPeriodsReadHttpTest` adds a separate classic-controller read boundary
+on a fresh isolated HTTP/DB stack. It exercises both page URLs, CSRF-bearing
+POST search/find, stored-role demotion and promotion in an existing session,
+wrong-method rejection, a five-field read projection, and an unchanged
+authenticated return destination on denial. A coupled legacy store request
+after demotion must be denied without creating its synthetic period. The
+fixture restores the exact prior role and removes its owned periods; these
+local checks do not claim a production role-change test or concurrent behavior.
+
 The Blocked Periods API v1 has a separate authenticated write contract:
 `BlockedPeriodsApiHttpWriteTest` exercises POST, PUT, and DELETE over real
 loopback HTTP on the isolated stack, including URL/body ID conflicts, direct

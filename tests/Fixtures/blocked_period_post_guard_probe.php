@@ -4,6 +4,7 @@ declare(strict_types=1);
 define('BASEPATH', __DIR__);
 define('APPPATH', dirname(__DIR__, 2) . '/application/');
 define('PRIV_BLOCKED_PERIODS', 'blocked_periods');
+define('SYNTHETIC_USER_ID', 9001);
 $action = $argv[1];
 $scenario = $argv[2];
 $_SERVER['REQUEST_METHOD'] = strtoupper($argv[3]);
@@ -13,10 +14,15 @@ $headers = [];
 $body = '';
 $saved = [];
 
-function cannot(string $verb, string $permission): bool
+function session(string $key): mixed
+{
+    return $key === 'user_id' ? SYNTHETIC_USER_ID : null;
+}
+
+function cannot(string $verb, string $permission, int $user_id): bool
 {
     global $events, $scenario;
-    $events[] = "auth:$verb:$permission";
+    $events[] = "auth:$verb:$permission:$user_id";
     return $scenario === 'forbidden';
 }
 
