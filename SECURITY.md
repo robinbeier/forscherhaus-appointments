@@ -74,6 +74,19 @@ link keeps its login return target. `SecretariesReadProjectionHttpTest`
 checks these boundaries with isolated synthetic HTTP and database records; it
 does not prove a live production role-change race.
 
+Legacy Services backoffice reads (`services`, `services/index`,
+`services/search`, `services/find`, and the search alias) require the actor's
+current stored `services` view permission on every request; `find` does not
+require delete permission. Canonical search and find accept GET and POST; the
+legacy search alias accepts GET only. Other methods must not reach service data.
+Search and detail responses expose only the fields
+used by the Services form, not internal timestamps or future database columns.
+An authenticated denial must not change the session destination, while an
+anonymous Services deep link retains its login return target.
+`ServicesReadProjectionHttpTest` checks these properties with isolated
+synthetic HTTP and database records; it does not prove a live production
+role-change race.
+
 ## Required security properties
 
 The first cycle sharpened the following six properties. They are examples of
