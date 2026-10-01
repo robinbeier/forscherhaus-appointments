@@ -113,6 +113,17 @@ denial does not change the session destination. `LdapSettingsLegacyHttpTest`
 checks these boundaries in an isolated synthetic HTTP/database stack; it does
 not prove a live production role-change race or enable LDAP in production.
 
+Classic Legal Settings (`legal_settings`, `legal_settings/index`, and
+`legal_settings/save`) require the actor's current stored `system_settings`
+permission. The page accepts GET only and projects only its six legal settings
+as `name`/`value`; unrelated tokens and credentials must not enter page script
+data. Save accepts POST with CSRF and may write only those six names. Submitted
+IDs and extra fields cannot select other rows; unknown or duplicate names
+reject the whole batch before mutation. An authenticated denial does not
+change the session destination. `LegalSettingsLegacyHttpTest` checks these
+boundaries in an isolated synthetic HTTP/database stack; it does not prove a
+live production role-change race or change production legal texts.
+
 ## Required security properties
 
 The first cycle sharpened the following six properties. They are examples of

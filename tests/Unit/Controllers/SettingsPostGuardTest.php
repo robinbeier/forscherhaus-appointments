@@ -39,7 +39,19 @@ final class SettingsPostGuardTest extends TestCase
                     ['name' => 'ldap_host', 'value' => 'ldap.synthetic.invalid', 'extra' => 'drop-me-too'],
                 ];
             }
-            if (in_array($controller, ['Business_settings', 'Booking_settings', 'Ldap_settings'], true)) {
+            if ($controller === 'Legal_settings') {
+                $expected = [
+                    ['name' => 'display_cookie_notice', 'value' => '1', 'extra' => 'drop-me'],
+                    ['name' => 'cookie_notice_content', 'value' => 'synthetic legal notice', 'extra' => 'drop-me-too'],
+                ];
+            }
+            if (
+                in_array(
+                    $controller,
+                    ['Business_settings', 'Booking_settings', 'Ldap_settings', 'Legal_settings'],
+                    true,
+                )
+            ) {
                 $expected = array_map(
                     static fn(array $setting): array => array_diff_key($setting, ['extra' => true]),
                     $expected,
@@ -140,7 +152,19 @@ final class SettingsPostGuardTest extends TestCase
                     ['name' => 'ldap_host', 'value' => 'ldap.synthetic.invalid', 'extra' => 'drop-me-too'],
                 ];
             }
-            if (in_array($controller, ['Business_settings', 'Booking_settings', 'Ldap_settings'], true)) {
+            if ($controller === 'Legal_settings') {
+                $expected = [
+                    ['name' => 'display_cookie_notice', 'value' => '1', 'extra' => 'drop-me'],
+                    ['name' => 'cookie_notice_content', 'value' => 'synthetic legal notice', 'extra' => 'drop-me-too'],
+                ];
+            }
+            if (
+                in_array(
+                    $controller,
+                    ['Business_settings', 'Booking_settings', 'Ldap_settings', 'Legal_settings'],
+                    true,
+                )
+            ) {
                 $expected = array_map(
                     static fn(array $setting): array => array_diff_key($setting, ['extra' => true]),
                     $expected,
