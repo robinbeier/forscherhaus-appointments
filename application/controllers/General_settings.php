@@ -20,6 +20,20 @@
  */
 class General_settings extends EA_Controller
 {
+    private const PAGE_SETTING_NAMES = [
+        'company_name',
+        'company_link',
+        'company_logo',
+        'company_color',
+        'theme',
+        'date_format',
+        'time_format',
+        'first_weekday',
+        'default_language',
+        'default_timezone',
+        'dashboard_conflict_threshold',
+    ];
+
     /**
      * Calendar constructor.
      */
@@ -28,6 +42,8 @@ class General_settings extends EA_Controller
         parent::__construct();
 
         $this->load->model('settings_model');
+        $this->load->model('users_model');
+        $this->load->model('roles_model');
 
         $this->load->library('accounts');
         $this->load->library('timezones');
@@ -38,21 +54,34 @@ class General_settings extends EA_Controller
      */
     public function index(): void
     {
-        session(['dest_url' => site_url('general_settings')]);
-
-        $user_id = session('user_id');
-
-        if (cannot('view', PRIV_SYSTEM_SETTINGS)) {
-            if ($user_id) {
-                abort(403, 'Forbidden');
-            }
-
-            redirect('login');
-
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'GET') {
+            abort(405, 'Method Not Allowed', ['Allow: GET']);
             return;
         }
 
-        $role_slug = session('role_slug');
+        $user_id = (int) session('user_id');
+
+        if (!$user_id) {
+            session(['dest_url' => site_url('general_settings')]);
+            redirect('login');
+            return;
+        }
+
+        if (cannot('view', PRIV_SYSTEM_SETTINGS, $user_id)) {
+            abort(403, 'Forbidden');
+            return;
+        }
+
+        session(['dest_url' => site_url('general_settings')]);
+
+        $role_slug = $this->roles_model->value($this->users_model->value($user_id, 'id_roles'), 'slug');
+
+        $page_settings = $this->settings_model
+            ->query()
+            ->select('name, value')
+            ->where_in('name', self::PAGE_SETTING_NAMES)
+            ->get()
+            ->result_array();
 
         $available_theme_files = glob(__DIR__ . '/../../assets/css/themes/*.min.css');
 
@@ -64,7 +93,7 @@ class General_settings extends EA_Controller
             'user_id' => $user_id,
             'role_slug' => $role_slug,
             'timezones' => $this->timezones->to_array(),
-            'general_settings' => $this->settings_model->get(),
+            'general_settings' => $page_settings,
         ]);
 
         html_vars([
@@ -84,7 +113,8 @@ class General_settings extends EA_Controller
     public function save(): void
     {
         try {
-            if (cannot('edit', PRIV_SYSTEM_SETTINGS)) {
+            $user_id = (int) session('user_id');
+            if (!$user_id || cannot('edit', PRIV_SYSTEM_SETTINGS, $user_id)) {
                 throw new RuntimeException('You do not have the required permissions for this task.');
             }
             if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {

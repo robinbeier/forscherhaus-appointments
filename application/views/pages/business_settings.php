@@ -16,7 +16,7 @@
                                 <?= lang('business_logic') ?>
                             </h4>
 
-                            <?php if (can('edit', PRIV_SYSTEM_SETTINGS)): ?>
+                            <?php if (can('edit', PRIV_SYSTEM_SETTINGS, (int) session('user_id'))): ?>
                                 <button type="button" id="save-settings" class="btn btn-primary">
                                     <i class="fas fa-check-square me-2"></i>
                                     <?= lang('save') ?>
@@ -41,12 +41,14 @@
                             <tbody><!-- Dynamic Content --></tbody>
                         </table>
 
-                        <div class="text-end mb-5">
-                            <button class="btn btn-outline-secondary" id="apply-global-working-plan" type="button">
-                                <i class="fas fa-check"></i>
-                                <?= lang('apply_to_all_providers') ?>
-                            </button>
-                        </div>
+                        <?php if (can('edit', PRIV_SYSTEM_SETTINGS, (int) session('user_id'))): ?>
+                            <div class="text-end mb-5">
+                                <button class="btn btn-outline-secondary" id="apply-global-working-plan" type="button">
+                                    <i class="fas fa-check"></i>
+                                    <?= lang('apply_to_all_providers') ?>
+                                </button>
+                            </div>
+                        <?php endif; ?>
 
                         <h5 class="text-black-50 mb-3 fw-light"><?= lang('breaks') ?></h5>
 
@@ -75,7 +77,7 @@
                             <tbody><!-- Dynamic Content --></tbody>
                         </table>
 
-                        <?php if (can('view', PRIV_BLOCKED_PERIODS)): ?>
+                        <?php if (can('view', PRIV_BLOCKED_PERIODS, (int) session('user_id'))): ?>
                             <h5 class="text-black-50 mb-3 fw-light"><?= lang('blocked_periods') ?></h5>
 
                             <p class="form-text text-muted">
@@ -155,4 +157,3 @@
 <script src="<?= asset_url('assets/js/pages/business_settings.js') ?>"></script>
 
 <?php end_section('scripts'); ?>
-

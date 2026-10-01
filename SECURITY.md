@@ -87,6 +87,22 @@ anonymous Services deep link retains its login return target.
 synthetic HTTP and database records; it does not prove a live production
 role-change race.
 
+Legacy General and Business Settings page reads (`general_settings`,
+`general_settings/index`, `business_settings`, and `business_settings/index`)
+require the actor's current stored `system_settings` view permission on every
+request. The pages accept GET only and send each browser only the `name` and
+`value` of settings used by that page. In particular, an unrelated API token,
+LDAP credential, or future setting must not enter either page's script data.
+An authenticated denial or unsupported method must not change the session
+destination; anonymous GET deep links keep their login return target. The
+rendered role and edit controls must use the same current stored role as the
+read gate. The three directly coupled General/Business Settings write actions
+must also recheck that stored role before any database change; a login-time
+role slug cannot grant continued edit authority after demotion.
+`SettingsReadProjectionHttpTest` checks these properties with
+isolated synthetic HTTP and database data; it does not establish a live
+production role-change race or validate unrelated settings write paths.
+
 ## Required security properties
 
 The first cycle sharpened the following six properties. They are examples of

@@ -5,6 +5,7 @@ declare(strict_types=1);
 define('BASEPATH', __DIR__);
 define('APPPATH', dirname(__DIR__, 2) . '/application/');
 define('PRIV_SYSTEM_SETTINGS', 'system_settings');
+define('SYNTHETIC_USER_ID', 7001);
 
 $scenario = $argv[1] ?? 'success';
 $_SERVER['REQUEST_METHOD'] = strtoupper($argv[2] ?? 'POST');
@@ -13,9 +14,19 @@ $status = 200;
 $headers = [];
 $body = '';
 
-function cannot(string $verb, string $permission): bool
+function session(string $key): mixed
+{
+    if ($key !== 'user_id') {
+        throw new RuntimeException('Unexpected session key.');
+    }
+    return SYNTHETIC_USER_ID;
+}
+function cannot(string $verb, string $permission, ?int $userId = null): bool
 {
     global $scenario, $events;
+    if ($userId !== SYNTHETIC_USER_ID) {
+        throw new RuntimeException('Unexpected authorization user ID.');
+    }
     $events[] = "auth:$verb:$permission";
     return $scenario === 'forbidden';
 }

@@ -21,7 +21,8 @@
 
     <div id="header-menu" class="collapse navbar-collapse flex-row-reverse px-2">
         <ul class="navbar-nav">
-            <?php $role_slug = session('role_slug'); ?>
+            <?php $user_id = (int) session('user_id'); ?>
+            <?php $role_slug = vars('role_slug', session('role_slug')); ?>
             <?php $can_view_dashboard = in_array($role_slug, [DB_SLUG_ADMIN, DB_SLUG_PROVIDER], true); ?>
             <?php $dashboard_classes = trim(
                 ($active_menu === 'dashboard' ? 'active' : '') . ' ' . ($can_view_dashboard ? '' : 'd-none'),
@@ -34,7 +35,7 @@
                 </a>
             </li>
 
-            <?php $hidden = can('view', PRIV_APPOINTMENTS) ? '' : 'd-none'; ?>
+            <?php $hidden = can('view', PRIV_APPOINTMENTS, $user_id) ? '' : 'd-none'; ?>
             <?php $active = $active_menu == PRIV_APPOINTMENTS ? 'active' : ''; ?>
             <li class="nav-item <?= $active . $hidden ?>">
                 <a href="<?= site_url(
@@ -47,7 +48,7 @@
                 </a>
             </li>
 
-            <?php $hidden = can('view', PRIV_CUSTOMERS) ? '' : 'd-none'; ?>
+            <?php $hidden = can('view', PRIV_CUSTOMERS, $user_id) ? '' : 'd-none'; ?>
             <?php $active = $active_menu == PRIV_CUSTOMERS ? 'active' : ''; ?>
             <li class="nav-item <?= $active . $hidden ?>">
                 <a href="<?= site_url('customers') ?>" class="nav-link"
@@ -57,7 +58,7 @@
                 </a>
             </li>
 
-            <?php $hidden = can('view', PRIV_SERVICES) ? '' : 'd-none'; ?>
+            <?php $hidden = can('view', PRIV_SERVICES, $user_id) ? '' : 'd-none'; ?>
             <?php $active = $active_menu == PRIV_SERVICES ? 'active' : ''; ?>
             <li class="nav-item dropdown <?= $active . $hidden ?>">
                 <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown"
@@ -75,7 +76,7 @@
                 </div>
             </li>
 
-            <?php $hidden = can('view', PRIV_USERS) ? '' : 'd-none'; ?>
+            <?php $hidden = can('view', PRIV_USERS, $user_id) ? '' : 'd-none'; ?>
             <?php $active = $active_menu == PRIV_USERS ? 'active' : ''; ?>
             <li class="nav-item dropdown <?= $active . $hidden ?>">
                 <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown"
@@ -98,7 +99,10 @@
 
             <?php slot('before_user_nav_item'); ?>
 
-            <?php $hidden = can('view', PRIV_SYSTEM_SETTINGS) || can('view', PRIV_USER_SETTINGS) ? '' : 'd-none'; ?>
+            <?php $hidden =
+                can('view', PRIV_SYSTEM_SETTINGS, $user_id) || can('view', PRIV_USER_SETTINGS, $user_id)
+                    ? ''
+                    : 'd-none'; ?>
             <?php $active = $active_menu == PRIV_SYSTEM_SETTINGS ? 'active' : ''; ?>
             <li class="nav-item dropdown <?= $active . $hidden ?>">
                 <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown"
@@ -107,7 +111,7 @@
                     <?= e(vars('user_display_name')) ?>
                 </a>
                 <div class="dropdown-menu dropdown-menu-end">
-                    <?php if (can('view', PRIV_SYSTEM_SETTINGS)): ?>
+                    <?php if (can('view', PRIV_SYSTEM_SETTINGS, $user_id)): ?>
                         <a class="dropdown-item" href="<?= site_url('general_settings') ?>">
                             <?= lang('settings') ?>
                         </a>
