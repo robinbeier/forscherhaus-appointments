@@ -69,11 +69,13 @@ controller doubles separately prove the batch handoff, not real HTTP behavior.
 ### Backoffice settings batches
 
 Legal, LDAP, Matomo, Google Analytics, Business and Booking settings use the same
-ordered `Settings_model::save_batch` contract. Business and Booking retain their
-`only(id, name, value)` then `optional()` field preparation before the single
-batch handoff. No new setting-name allowlist is introduced. The shared model
-regressions prove its database rollback behavior; controller doubles separately
-prove the complete handoff, preserved field filtering and failure response.
+ordered `Settings_model::save_batch` contract. Legal, LDAP and Booking constrain
+their input to page-owned setting names before the single batch handoff, discard
+caller IDs and extra fields, and reject duplicate names before mutation.
+Business retains its `only(id, name, value)` then `optional()` field preparation;
+Matomo and Google Analytics retain their existing handoff. The shared model
+regressions prove database rollback behavior; controller doubles and isolated
+HTTP/database tests prove the respective controller boundaries.
 
 General settings retains its different existing semantics: it resolves IDs and
 validates every record before starting writes. Prepared records are then saved in

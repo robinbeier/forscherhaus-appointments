@@ -32,7 +32,7 @@ function cannot(string $verb, string $permission, ?int $userId = null): bool
     }
     $expectsActorId = in_array(
         $controllerName,
-        ['General_settings', 'Business_settings', 'Ldap_settings', 'Legal_settings'],
+        ['General_settings', 'Business_settings', 'Booking_settings', 'Ldap_settings', 'Legal_settings'],
         true,
     );
     if (($expectsActorId && $userId !== SYNTHETIC_USER_ID) || (!$expectsActorId && $userId !== null)) {
@@ -185,6 +185,14 @@ class Backoffice_request_dto_factory
                 'settings' => [
                     ['name' => 'display_cookie_notice', 'value' => '1', 'extra' => 'drop-me'],
                     ['name' => 'cookie_notice_content', 'value' => 'synthetic legal notice', 'extra' => 'drop-me-too'],
+                ],
+            ];
+        }
+        if ($key === 'booking_settings') {
+            return (object) [
+                'settings' => [
+                    ['name' => 'disable_booking', 'value' => '1', 'extra' => 'drop-me'],
+                    ['name' => 'display_any_provider', 'value' => '0', 'extra' => 'drop-me-too'],
                 ],
             ];
         }
