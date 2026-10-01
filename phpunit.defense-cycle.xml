@@ -23,6 +23,7 @@
             <file>./tests/Integration/Controllers/ServiceCategoriesApiHttpWriteTest.php</file>
             <file>./tests/Integration/Controllers/ServiceCategoriesApiPostWriteFailureTest.php</file>
             <file>./tests/Integration/Controllers/ServiceCategoriesLegacyHttpTest.php</file>
+            <file>./tests/Integration/Controllers/ApiSettingsLegacyHttpTest.php</file>
             <file>./tests/Integration/Controllers/AppointmentsApiHttpWriteTest.php</file>
             <file>./tests/Integration/Controllers/StaffSettingsApiHttpTest.php</file>
             <file>./tests/Integration/Controllers/RescheduleCutoffHttpTest.php</file>

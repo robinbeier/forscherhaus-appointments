@@ -53,7 +53,7 @@ final class ApiSettingsPostGuardTest extends TestCase
             [
                 [
                     ['name' => 'api_token', 'value' => 'synthetic-token'],
-                    ['name' => 'synthetic_setting', 'value' => 'second-value'],
+                    ['name' => 'api_feature', 'value' => 'second-value'],
                 ],
             ],
             $result['saved'],
@@ -78,7 +78,7 @@ final class ApiSettingsPostGuardTest extends TestCase
             [
                 [
                     ['name' => 'api_token', 'value' => 'synthetic-token'],
-                    ['name' => 'synthetic_setting', 'value' => 'second-value'],
+                    ['name' => 'api_feature', 'value' => 'second-value'],
                 ],
             ],
             $result['saved'],

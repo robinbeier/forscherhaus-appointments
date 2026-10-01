@@ -255,3 +255,19 @@ to absent `categories/*` routes and do not stand in for this controller.
 These local checks establish neither a live role-change exercise on production
 nor a browser cross-site attack demonstration. The API-v1 category write tests
 remain a distinct boundary.
+
+## Classic API-settings bearer-token boundary
+
+The classic `Api_settings` page contains the global bearer token, which can
+authorize API writes. Reading that page therefore requires the actor's current
+stored `system_settings.edit` permission, not only `view` or a login-time role.
+Its canonical and direct index paths accept GET only, and denied requests do
+not change the authenticated return destination. The page projects only API
+setting names and values; its save route accepts only names in the `api_`
+namespace and strips caller-supplied row IDs before the atomic model write.
+
+`ApiSettingsLegacyHttpTest` checks this boundary with synthetic token and role
+changes in a fresh isolated HTTP/DB stack. It restores the token and roles and
+asserts that denied or mixed-namespace writes leave their rows unchanged. The
+unit-level `ApiSettingsPostGuardTest` remains a separate method-handoff check.
+These local tests do not claim a production role-change or token-use exercise.

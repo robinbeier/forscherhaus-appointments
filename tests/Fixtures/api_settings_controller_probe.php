@@ -14,10 +14,18 @@ $headers = [];
 $body = '';
 $saved = [];
 
-function cannot(string $verb, string $permission): bool
+function session(string|array|null $key = null, mixed $default = null): mixed
+{
+    if ($key !== 'user_id') {
+        throw new RuntimeException('Unexpected session probe key.');
+    }
+
+    return 42;
+}
+function cannot(string $verb, string $permission, ?int $user_id = null): bool
 {
     global $scenario, $events;
-    if ($verb !== 'edit' || $permission !== PRIV_SYSTEM_SETTINGS) {
+    if ($verb !== 'edit' || $permission !== PRIV_SYSTEM_SETTINGS || $user_id !== 42) {
         throw new RuntimeException('Unexpected authorization probe arguments.');
     }
     $events[] = 'auth_check:' . $verb . ':' . $permission;
@@ -80,7 +88,7 @@ final class Backoffice_request_dto_factory
         return (object) [
             'settings' => [
                 ['name' => 'api_token', 'value' => 'synthetic-token'],
-                ['name' => 'synthetic_setting', 'value' => 'second-value'],
+                ['name' => 'api_feature', 'value' => 'second-value'],
             ],
         ];
     }
@@ -90,10 +98,13 @@ final class ProbeLoader
     public function __construct(private object $controller) {}
     public function model(string $name): void
     {
-        if ($name !== 'settings_model') {
+        if ($name === 'settings_model') {
+            $this->controller->settings_model = new ProbeSettingsModel();
+            return;
+        }
+        if (!in_array($name, ['users_model', 'roles_model'], true)) {
             throw new RuntimeException('Unexpected model.');
         }
-        $this->controller->settings_model = new ProbeSettingsModel();
     }
     public function library(string $name): void
     {

@@ -80,10 +80,12 @@
                             </div>
                         </div>
                         <div class="card-footer bg-white border-0">
-                            <a href="<?= site_url('api_settings') ?>" class="btn btn-outline-primary w-100">
-                                <i class="fas fa-cogs me-2"></i>
-                                <?= lang('configure') ?>
-                            </a>
+                            <?php if (can('edit', PRIV_SYSTEM_SETTINGS, (int) session('user_id'))): ?>
+                                <a href="<?= site_url('api_settings') ?>" class="btn btn-outline-primary w-100">
+                                    <i class="fas fa-cogs me-2"></i>
+                                    <?= lang('configure') ?>
+                                </a>
+                            <?php endif; ?>
                         </div>
                     </div>
                 </div>
@@ -118,4 +120,3 @@
 </div>
 
 <?php end_section('content'); ?>
-
