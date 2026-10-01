@@ -240,3 +240,18 @@ The Blocked Periods API v1 has a separate authenticated write contract:
 loopback HTTP on the isolated stack, including URL/body ID conflicts, direct
 controller aliases, authorization denials, and unchanged unrelated rows. The
 Backoffice controller regressions above do not cover that API boundary.
+
+## Classic service-category controller boundary
+
+`ServiceCategoriesLegacyHttpTest` covers the session-backed `Service_categories`
+page and its search, find, store, update, and destroy actions on a fresh
+synthetic HTTP/DB stack. It checks the actual stored role after demotion and
+promotion, POST-only actions with CSRF, the three-field read projection, and
+unchanged owned rows after denial. Separate Add-only and Edit-only role probes
+ensure `store` cannot edit by accepting an ID and `update` cannot create by
+omitting one. Owned categories and temporary role changes are removed or
+restored by the fixture. The historical `Backend_api` category redirects point
+to absent `categories/*` routes and do not stand in for this controller.
+These local checks establish neither a live role-change exercise on production
+nor a browser cross-site attack demonstration. The API-v1 category write tests
+remain a distinct boundary.
