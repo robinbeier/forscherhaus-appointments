@@ -98,13 +98,14 @@ class Secretaries extends EA_Controller
     {
         $user_id = (int) session('user_id');
 
-        if (!$user_id || cannot('view', PRIV_USERS, $user_id)) {
-            if ($user_id) {
-                abort(403, 'Forbidden');
-            }
-
+        if (!$user_id) {
+            session(['dest_url' => site_url('secretaries')]);
             redirect('login');
+            return;
+        }
 
+        if (cannot('view', PRIV_USERS, $user_id)) {
+            abort(403, 'Forbidden');
             return;
         }
 

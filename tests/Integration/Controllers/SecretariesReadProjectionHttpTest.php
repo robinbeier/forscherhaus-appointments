@@ -57,6 +57,26 @@ final class SecretariesReadProjectionHttpTest extends TestCase
         }
     }
 
+    public function testAnonymousSecretaryDeepLinksKeepTheirLoginReturnTarget(): void
+    {
+        $server = $this->server;
+        self::assertNotNull($server);
+
+        foreach (['secretaries', 'secretaries/index'] as $path) {
+            // Keep the first response visible so the client's redirect handling
+            // cannot replace the new anonymous session before asserting it.
+            $guest = new GateHttpClient($server->baseUrl, additionalHeaders: ['X-FH-Test' => 'secretary-deep-link']);
+            $response = $guest->get($path);
+            self::assertSame(307, $response->statusCode, $path);
+            self::assertStringContainsString('/login', (string) $response->header('location'));
+            self::assertStringEndsWith('/secretaries', $this->sessionDestination($guest));
+
+            $login = $guest->get('login');
+            self::assertSame(200, $login->statusCode);
+            self::assertStringContainsString('/secretaries', $login->body);
+        }
+    }
+
     public function testAdminReadsSecretaryProjectionAcrossCanonicalAndLegacyRoutes(): void
     {
         $fixture = $this->fixture;

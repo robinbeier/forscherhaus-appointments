@@ -68,8 +68,9 @@ Legacy Secretary backoffice reads (`secretaries`, `secretaries/index`,
 actor's current stored `users` view permission on every request. `find`
 addresses Secretary records only; search and detail responses expose only
 fields used by the Secretary form and assigned provider IDs, never stored
-integration credentials or unrelated shared-user fields. A denied page read
-must not change the session destination. `SecretariesReadProjectionHttpTest`
+integration credentials or unrelated shared-user fields. An authenticated
+denial must not change the session destination; an anonymous Secretary deep
+link keeps its login return target. `SecretariesReadProjectionHttpTest`
 checks these boundaries with isolated synthetic HTTP and database records; it
 does not prove a live production role-change race.
 
