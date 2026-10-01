@@ -20,6 +20,8 @@
  */
 class Service_categories extends EA_Controller
 {
+    private const READ_FIELDS = ['id', 'name', 'description'];
+
     public array $allowed_service_category_fields = ['id', 'name', 'description'];
 
     public array $optional_service_category_fields = [];
@@ -33,6 +35,7 @@ class Service_categories extends EA_Controller
 
         $this->load->model('service_categories_model');
         $this->load->model('roles_model');
+        $this->load->model('users_model');
 
         $this->load->library('accounts');
         $this->load->library('timezones');
@@ -46,21 +49,27 @@ class Service_categories extends EA_Controller
      */
     public function index(): void
     {
-        session(['dest_url' => site_url('service_categories')]);
-
-        $user_id = session('user_id');
-
-        if (cannot('view', PRIV_SERVICES)) {
-            if ($user_id) {
-                abort(403, 'Forbidden');
-            }
-
-            redirect('login');
-
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'GET') {
+            abort(405, 'Method Not Allowed', ['Allow: GET']);
             return;
         }
 
-        $role_slug = session('role_slug');
+        $user_id = (int) session('user_id');
+
+        if (!$user_id) {
+            session(['dest_url' => site_url('service_categories')]);
+            redirect('login');
+            return;
+        }
+
+        if (cannot('view', PRIV_SERVICES, $user_id)) {
+            abort(403, 'Forbidden');
+            return;
+        }
+
+        session(['dest_url' => site_url('service_categories')]);
+
+        $role_slug = $this->roles_model->value($this->users_model->value($user_id, 'id_roles'), 'slug');
 
         script_vars([
             'user_id' => $user_id,
@@ -84,8 +93,15 @@ class Service_categories extends EA_Controller
     public function search(): void
     {
         try {
-            if (cannot('view', PRIV_SERVICES)) {
+            if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+                abort(405, 'Method Not Allowed', ['Allow: POST']);
+                return;
+            }
+
+            $user_id = (int) session('user_id');
+            if (!$user_id || cannot('view', PRIV_SERVICES, $user_id)) {
                 abort(403, 'Forbidden');
+                return;
             }
 
             $request_dto = $this->backofficeRequestDtoFactory()->buildSearchRequestDto();
@@ -97,7 +113,13 @@ class Service_categories extends EA_Controller
                 $request_dto->orderBy,
             );
 
-            json_response($service_categories);
+            $read_fields = array_flip(self::READ_FIELDS);
+            json_response(
+                array_map(
+                    static fn(array $category): array => array_intersect_key($category, $read_fields),
+                    $service_categories,
+                ),
+            );
         } catch (Throwable $e) {
             json_exception($e);
         }
@@ -109,12 +131,27 @@ class Service_categories extends EA_Controller
     public function store(): void
     {
         try {
-            if (cannot('add', PRIV_SERVICES)) {
+            $user_id = (int) session('user_id');
+            if (!$user_id || cannot('add', PRIV_SERVICES, $user_id)) {
                 abort(403, 'Forbidden');
+                return;
+            }
+
+            if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+                abort(405, 'Method Not Allowed', ['Allow: POST']);
+                return;
             }
 
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityPayloadRequestDto('service_category');
             $service_category = $request_dto->payload;
+
+            if (array_key_exists('id', $service_category)) {
+                json_response(
+                    ['success' => false, 'message' => 'Use the update endpoint to edit an existing record.'],
+                    400,
+                );
+                return;
+            }
 
             $this->service_categories_model->only($service_category, $this->allowed_service_category_fields);
 
@@ -139,8 +176,15 @@ class Service_categories extends EA_Controller
     public function find(): void
     {
         try {
-            if (cannot('view', PRIV_SERVICES)) {
+            if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+                abort(405, 'Method Not Allowed', ['Allow: POST']);
+                return;
+            }
+
+            $user_id = (int) session('user_id');
+            if (!$user_id || cannot('view', PRIV_SERVICES, $user_id)) {
                 abort(403, 'Forbidden');
+                return;
             }
 
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityIdRequestDto('service_category_id');
@@ -148,7 +192,7 @@ class Service_categories extends EA_Controller
 
             $service_category = $this->service_categories_model->find($service_category_id);
 
-            json_response($service_category);
+            json_response(array_intersect_key($service_category, array_flip(self::READ_FIELDS)));
         } catch (Throwable $e) {
             json_exception($e);
         }
@@ -160,12 +204,24 @@ class Service_categories extends EA_Controller
     public function update(): void
     {
         try {
-            if (cannot('edit', PRIV_SERVICES)) {
+            $user_id = (int) session('user_id');
+            if (!$user_id || cannot('edit', PRIV_SERVICES, $user_id)) {
                 abort(403, 'Forbidden');
+                return;
+            }
+
+            if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+                abort(405, 'Method Not Allowed', ['Allow: POST']);
+                return;
             }
 
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityPayloadRequestDto('service_category');
             $service_category = $request_dto->payload;
+
+            if (empty($service_category['id'])) {
+                json_response(['success' => false, 'message' => 'Use the store endpoint to create a new record.'], 400);
+                return;
+            }
 
             $this->service_categories_model->only($service_category, $this->allowed_service_category_fields);
 
@@ -190,8 +246,15 @@ class Service_categories extends EA_Controller
     public function destroy(): void
     {
         try {
-            if (cannot('delete', PRIV_SERVICES)) {
+            $user_id = (int) session('user_id');
+            if (!$user_id || cannot('delete', PRIV_SERVICES, $user_id)) {
                 abort(403, 'Forbidden');
+                return;
+            }
+
+            if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+                abort(405, 'Method Not Allowed', ['Allow: POST']);
+                return;
             }
 
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityIdRequestDto('service_category_id');
