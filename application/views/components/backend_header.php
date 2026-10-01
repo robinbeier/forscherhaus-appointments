@@ -38,6 +38,7 @@
             $can_view = static fn(string $resource): bool => (int) ($role[$resource] ?? 0) > 0;
             $role_unchanged = $role_slug === session('role_slug');
             ?>
+            <?php if ($role_unchanged): ?>
             <?php $can_view_dashboard = in_array($role_slug, [DB_SLUG_ADMIN, DB_SLUG_PROVIDER], true); ?>
             <?php $dashboard_classes = trim(
                 ($active_menu === 'dashboard' ? 'active' : '') . ' ' . ($can_view_dashboard ? '' : 'd-none'),
@@ -49,6 +50,7 @@
                     <?= lang('dashboard') ?>
                 </a>
             </li>
+            <?php endif; ?>
 
             <?php $hidden = $can_view(PRIV_APPOINTMENTS) ? '' : 'd-none'; ?>
             <?php $active = $active_menu == PRIV_APPOINTMENTS ? 'active' : ''; ?>
@@ -138,15 +140,17 @@
                         </a>
                     <?php endif; ?>
 
-                    <?php slot('after_settings_dropdown_item'); ?>
+                    <?php if ($role_unchanged && $can_view(PRIV_USER_SETTINGS)): ?>
+                        <?php slot('after_settings_dropdown_item'); ?>
 
-                    <a class="dropdown-item" href="<?= site_url('account') ?>">
-                        <?= lang('account') ?>
-                    </a>
-                    <a class="dropdown-item" href="<?= site_url('about') ?>">
-                        <?= lang('about') ?>
-                    </a>
-                    <div class="dropdown-divider"></div>
+                        <a class="dropdown-item" href="<?= site_url('account') ?>">
+                            <?= lang('account') ?>
+                        </a>
+                        <a class="dropdown-item" href="<?= site_url('about') ?>">
+                            <?= lang('about') ?>
+                        </a>
+                        <div class="dropdown-divider"></div>
+                    <?php endif; ?>
                     <a class="dropdown-item" href="<?= site_url('logout') ?>">
                         <?= lang('log_out') ?>
                     </a>

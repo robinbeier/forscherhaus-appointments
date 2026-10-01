@@ -204,7 +204,10 @@ final class SettingsReadProjectionHttpTest extends TestCase
                 $response->body,
                 $path,
             );
-            foreach (['customers', 'services', 'providers', 'secretaries', 'admins'] as $legacyTarget) {
+            foreach (
+                ['dashboard', 'customers', 'services', 'providers', 'secretaries', 'admins', 'account', 'about']
+                as $legacyTarget
+            ) {
                 self::assertStringNotContainsString(
                     'href="' . $this->server?->baseUrl . '/index.php/' . $legacyTarget . '"',
                     $response->body,
@@ -369,10 +372,12 @@ final class SettingsReadProjectionHttpTest extends TestCase
         $menuOpeningTag = substr($demotedPage->body, $menuStart, $menuMarkerOffset - $menuStart);
         self::assertStringNotContainsString('d-none', $menuOpeningTag);
         self::assertStringContainsString('href="' . $this->server?->baseUrl . '/index.php/logout"', $demotedPage->body);
-        self::assertStringNotContainsString(
-            'href="' . $this->server?->baseUrl . '/index.php/general_settings"',
-            $demotedPage->body,
-        );
+        foreach (['general_settings', 'account', 'about'] as $legacyTarget) {
+            self::assertStringNotContainsString(
+                'href="' . $this->server?->baseUrl . '/index.php/' . $legacyTarget . '"',
+                $demotedPage->body,
+            );
+        }
         foreach (
             ['general_settings', 'general_settings/index', 'business_settings', 'business_settings/index']
             as $path
