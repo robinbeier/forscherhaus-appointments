@@ -36,6 +36,7 @@
                     : null;
             $role_slug = $role['slug'] ?? null;
             $can_view = static fn(string $resource): bool => (int) ($role[$resource] ?? 0) > 0;
+            $role_unchanged = $role_slug === session('role_slug');
             ?>
             <?php $can_view_dashboard = in_array($role_slug, [DB_SLUG_ADMIN, DB_SLUG_PROVIDER], true); ?>
             <?php $dashboard_classes = trim(
@@ -62,6 +63,10 @@
                 </a>
             </li>
 
+            <?php
+// Legacy customer writes also use the login-time role.
+?>
+            <?php if ($role_unchanged): ?>
             <?php $hidden = $can_view(PRIV_CUSTOMERS) ? '' : 'd-none'; ?>
             <?php $active = $active_menu == PRIV_CUSTOMERS ? 'active' : ''; ?>
             <li class="nav-item <?= $active . $hidden ?>">
@@ -71,7 +76,12 @@
                     <?= lang('customers') ?>
                 </a>
             </li>
+            <?php endif; ?>
 
+            <?php
+// Service/category and user-management writes still use the login-time role.
+?>
+            <?php if ($role_unchanged): ?>
             <?php $hidden = $can_view(PRIV_SERVICES) ? '' : 'd-none'; ?>
             <?php $active = $active_menu == PRIV_SERVICES ? 'active' : ''; ?>
             <li class="nav-item dropdown <?= $active . $hidden ?>">
@@ -84,14 +94,9 @@
                     <a class="dropdown-item" href="<?= site_url('services') ?>">
                         <?= lang('services') ?>
                     </a>
-                    <?php
-// The legacy categories page still checks the login-time role.
-?>
-                    <?php if ($role_slug === session('role_slug')): ?>
-                        <a class="dropdown-item" href="<?= site_url('service_categories') ?>">
-                            <?= lang('categories') ?>
-                        </a>
-                    <?php endif; ?>
+                    <a class="dropdown-item" href="<?= site_url('service_categories') ?>">
+                        <?= lang('categories') ?>
+                    </a>
                 </div>
             </li>
 
@@ -115,6 +120,7 @@
                     </a>
                 </div>
             </li>
+            <?php endif; ?>
 
             <?php slot('before_user_nav_item'); ?>
 

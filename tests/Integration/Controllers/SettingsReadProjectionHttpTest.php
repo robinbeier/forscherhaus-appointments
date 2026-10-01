@@ -108,6 +108,20 @@ final class SettingsReadProjectionHttpTest extends TestCase
                     $response->body,
                     $path,
                 );
+                foreach (['customers', 'services', 'providers', 'secretaries', 'admins'] as $legacyTarget) {
+                    self::assertStringContainsString(
+                        'href="' . $this->server?->baseUrl . '/index.php/' . $legacyTarget . '"',
+                        $response->body,
+                        $path,
+                    );
+                }
+                foreach (['booking_settings', 'legal_settings', 'integrations'] as $legacyTarget) {
+                    self::assertStringContainsString(
+                        'href="' . $this->server?->baseUrl . '/index.php/' . $legacyTarget . '"',
+                        $response->body,
+                        $path,
+                    );
+                }
                 if (str_starts_with($path, 'business_settings')) {
                     self::assertStringContainsString(
                         'href="' . $this->server?->baseUrl . '/index.php/blocked_periods"',
@@ -190,6 +204,25 @@ final class SettingsReadProjectionHttpTest extends TestCase
                 $response->body,
                 $path,
             );
+            foreach (['customers', 'services', 'providers', 'secretaries', 'admins'] as $legacyTarget) {
+                self::assertStringNotContainsString(
+                    'href="' . $this->server?->baseUrl . '/index.php/' . $legacyTarget . '"',
+                    $response->body,
+                    $path,
+                );
+            }
+            self::assertStringContainsString(
+                'href="' . $this->server?->baseUrl . '/index.php/business_settings"',
+                $response->body,
+                $path,
+            );
+            foreach (['booking_settings', 'legal_settings', 'integrations'] as $legacyTarget) {
+                self::assertStringNotContainsString(
+                    'href="' . $this->server?->baseUrl . '/index.php/' . $legacyTarget . '"',
+                    $response->body,
+                    $path,
+                );
+            }
             if ($path === 'business_settings') {
                 self::assertStringNotContainsString(
                     'href="' . $this->server?->baseUrl . '/index.php/blocked_periods"',
