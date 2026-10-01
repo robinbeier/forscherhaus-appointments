@@ -227,11 +227,16 @@ oder Speicherung. Andere Methoden erhalten nach erfolgreicher Berechtigungsprüf
 
 Die gemeinsame isolierte Controller-Matrix prüft Berechtigungsreihenfolge,
 Methodenablehnung und den unveränderten normalen Modell-Handoff mit Test-Doubles.
-Sie belegt keine echte HTTP-/CSRF-Verifikation. Sechs Save-Aktionen übergeben
-den vollständigen Batch an `Settings_model::save_batch`; Business und Booking
-behalten ihre vorherige Feldfilterung bei. General Settings behält dagegen die
-vollständige Vorvalidierung und vorbereiteten IDs bei und speichert diese in
-einer gemeinsamen Transaktion. Die getrennten Datenbanknachweise und Grenzen
+Sie belegt keine echte HTTP-/CSRF-Verifikation. Der LDAP-Schreibpfad prüft
+zusätzlich die aktuell gespeicherte Rolle des angemeldeten Nutzers und nimmt
+nur `ldap_is_active`, `ldap_host` und `ldap_port` an. Er verwirft übermittelte
+IDs und zusätzliche Felder, lehnt fremde oder doppelte Namen vor dem Batch ab
+und übergibt nur `name` und `value` an `Settings_model::save_batch`. Sein
+isolierter HTTP-/Datenbanktest belegt Methoden, CSRF, Rollenwechsel und die
+LDAP-Namensgrenze. Die anderen fünf Batch-Aktionen behalten ihren bisherigen
+Handoff; Business und Booking behalten ihre Feldfilterung. General Settings
+behält die vollständige Vorvalidierung und vorbereiteten IDs bei und speichert
+in einer gemeinsamen Transaktion. Die getrennten Datenbanknachweise und Grenzen
 beschreibt [der atomare Schreibvertrag](atomic-write-contracts.md#backoffice-settings-batches).
 
 Die separate Aktion `business_settings/apply_global_working_plan` verlangt

@@ -103,6 +103,16 @@ role slug cannot grant continued edit authority after demotion.
 isolated synthetic HTTP and database data; it does not establish a live
 production role-change race or validate unrelated settings write paths.
 
+Classic LDAP Settings (`ldap_settings`, `ldap_settings/index`, and
+`ldap_settings/save`) require the actor's current stored `system_settings`
+permission. The page accepts GET only and projects only the LDAP switch, host,
+and port as `name`/`value`. Save accepts POST with CSRF and may write only those
+three names; submitted IDs and extra fields cannot select other rows. Unknown
+or duplicate names reject the whole batch before mutation. An authenticated
+denial does not change the session destination. `LdapSettingsLegacyHttpTest`
+checks these boundaries in an isolated synthetic HTTP/database stack; it does
+not prove a live production role-change race or enable LDAP in production.
+
 ## Required security properties
 
 The first cycle sharpened the following six properties. They are examples of

@@ -80,4 +80,13 @@ match, it binds against the stored `ldap_dn` and logs the user in with the submi
 The local fixture uses `uid=ada,ou=people,dc=example,dc=org` for the seeded user. The LDAP settings page retains only
 the integration switch, host, and port; directory inspection and user provisioning are outside that page.
 
+The classic LDAP settings page and save action use the actor's currently stored
+system-settings permission on every request. The page accepts GET, while save
+accepts POST with the framework CSRF token. Save accepts only the three LDAP
+setting names above; caller-supplied IDs and extra fields are ignored, while
+unknown or duplicate setting names reject the entire request before writing.
+The isolated `LdapSettingsLegacyHttpTest` exercises those boundaries with
+synthetic accounts and database records. It does not prove a live production
+role-change race or modify production LDAP configuration.
+
 [Back](readme.md)
