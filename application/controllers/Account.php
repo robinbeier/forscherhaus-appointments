@@ -70,19 +70,26 @@ class Account extends EA_Controller
      */
     public function index(): void
     {
-        session(['dest_url' => site_url('account')]);
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'GET') {
+            json_response(['success' => false, 'message' => 'Method Not Allowed'], 405, ['Allow: GET']);
 
-        $user_id = session('user_id');
+            return;
+        }
 
-        if (cannot('view', PRIV_USER_SETTINGS)) {
-            if ($user_id) {
-                abort(403, 'Forbidden');
-            }
+        $user_id = (int) session('user_id');
 
+        if (!$user_id) {
+            session(['dest_url' => site_url('account')]);
             redirect('login');
 
             return;
         }
+
+        if (cannot('view', PRIV_USER_SETTINGS, $user_id)) {
+            abort(403, 'Forbidden');
+        }
+
+        session(['dest_url' => site_url('account')]);
 
         $account = $this->users_model->find($user_id);
 
@@ -112,14 +119,16 @@ class Account extends EA_Controller
         }
 
         try {
-            if (cannot('edit', PRIV_USER_SETTINGS)) {
+            $user_id = (int) session('user_id');
+
+            if (!$user_id || cannot('edit', PRIV_USER_SETTINGS, $user_id)) {
                 throw new RuntimeException('You do not have the required permissions for this task.');
             }
 
             $account_request = $this->authRequestDtoFactory()->buildAccountSaveRequestDto();
             $account = $account_request->account;
 
-            $account['id'] = session('user_id');
+            $account['id'] = $user_id;
 
             $this->users_model->only($account, $this->allowed_user_fields);
 
