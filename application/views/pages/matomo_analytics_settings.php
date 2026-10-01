@@ -21,7 +21,7 @@
                                 <?= lang('back') ?>
                             </a>
 
-                            <?php if (can('edit', PRIV_SYSTEM_SETTINGS)): ?>
+                            <?php if (can('edit', PRIV_SYSTEM_SETTINGS, (int) vars('user_id'))): ?>
                                 <button type="button" id="save-settings" class="btn btn-primary">
                                     <i class="fas fa-check-square me-2"></i>
                                     <?= lang('save') ?>

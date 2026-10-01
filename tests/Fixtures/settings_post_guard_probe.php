@@ -32,7 +32,14 @@ function cannot(string $verb, string $permission, ?int $userId = null): bool
     }
     $expectsActorId = in_array(
         $controllerName,
-        ['General_settings', 'Business_settings', 'Booking_settings', 'Ldap_settings', 'Legal_settings'],
+        [
+            'General_settings',
+            'Business_settings',
+            'Booking_settings',
+            'Ldap_settings',
+            'Legal_settings',
+            'Matomo_analytics_settings',
+        ],
         true,
     );
     if (($expectsActorId && $userId !== SYNTHETIC_USER_ID) || (!$expectsActorId && $userId !== null)) {
@@ -193,6 +200,18 @@ class Backoffice_request_dto_factory
                 'settings' => [
                     ['name' => 'disable_booking', 'value' => '1', 'extra' => 'drop-me'],
                     ['name' => 'display_any_provider', 'value' => '0', 'extra' => 'drop-me-too'],
+                ],
+            ];
+        }
+        if ($key === 'matomo_analytics_settings') {
+            return (object) [
+                'settings' => [
+                    [
+                        'name' => 'matomo_analytics_url',
+                        'value' => 'https://matomo.synthetic.invalid/',
+                        'extra' => 'drop-me',
+                    ],
+                    ['name' => 'matomo_analytics_site_id', 'value' => '7', 'extra' => 'drop-me-too'],
                 ],
             ];
         }

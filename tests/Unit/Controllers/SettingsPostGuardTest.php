@@ -51,10 +51,26 @@ final class SettingsPostGuardTest extends TestCase
                     ['name' => 'display_any_provider', 'value' => '0', 'extra' => 'drop-me-too'],
                 ];
             }
+            if ($controller === 'Matomo_analytics_settings') {
+                $expected = [
+                    [
+                        'name' => 'matomo_analytics_url',
+                        'value' => 'https://matomo.synthetic.invalid/',
+                        'extra' => 'drop-me',
+                    ],
+                    ['name' => 'matomo_analytics_site_id', 'value' => '7', 'extra' => 'drop-me-too'],
+                ];
+            }
             if (
                 in_array(
                     $controller,
-                    ['Business_settings', 'Booking_settings', 'Ldap_settings', 'Legal_settings'],
+                    [
+                        'Business_settings',
+                        'Booking_settings',
+                        'Ldap_settings',
+                        'Legal_settings',
+                        'Matomo_analytics_settings',
+                    ],
                     true,
                 )
             ) {
@@ -170,10 +186,26 @@ final class SettingsPostGuardTest extends TestCase
                     ['name' => 'display_any_provider', 'value' => '0', 'extra' => 'drop-me-too'],
                 ];
             }
+            if ($controller === 'Matomo_analytics_settings') {
+                $expected = [
+                    [
+                        'name' => 'matomo_analytics_url',
+                        'value' => 'https://matomo.synthetic.invalid/',
+                        'extra' => 'drop-me',
+                    ],
+                    ['name' => 'matomo_analytics_site_id', 'value' => '7', 'extra' => 'drop-me-too'],
+                ];
+            }
             if (
                 in_array(
                     $controller,
-                    ['Business_settings', 'Booking_settings', 'Ldap_settings', 'Legal_settings'],
+                    [
+                        'Business_settings',
+                        'Booking_settings',
+                        'Ldap_settings',
+                        'Legal_settings',
+                        'Matomo_analytics_settings',
+                    ],
                     true,
                 )
             ) {
