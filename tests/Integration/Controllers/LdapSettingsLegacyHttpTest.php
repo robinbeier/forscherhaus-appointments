@@ -22,6 +22,7 @@ final class LdapSettingsLegacyHttpTest extends TestCase
     private ?array $actorSnapshot = null;
     private ?array $providerSnapshot = null;
     private ?array $adminRoleSnapshot = null;
+    private ?array $providerRoleSnapshot = null;
     /** @var array<string, array<string, mixed>> */
     private array $ldapSnapshots = [];
 
@@ -40,6 +41,7 @@ final class LdapSettingsLegacyHttpTest extends TestCase
             $this->actorSnapshot = $this->fixture->row('users', $this->fixture->actorId);
             $this->providerSnapshot = $this->fixture->row('users', $this->fixture->providerId);
             $this->adminRoleSnapshot = $db->get_where('roles', ['slug' => DB_SLUG_ADMIN])->row_array();
+            $this->providerRoleSnapshot = $db->get_where('roles', ['slug' => DB_SLUG_PROVIDER])->row_array();
             foreach (self::LDAP_NAMES as $name) {
                 $row = $db->get_where('settings', ['name' => $name])->row_array();
                 self::assertNotEmpty($row, 'The synthetic stack must seed ' . $name . '.');
@@ -76,6 +78,13 @@ final class LdapSettingsLegacyHttpTest extends TestCase
                     self::assertSame(
                         $this->adminRoleSnapshot,
                         $db->get_where('roles', ['id' => $this->adminRoleSnapshot['id']])->row_array(),
+                    );
+                }
+                if ($this->providerRoleSnapshot !== null) {
+                    $db->update('roles', $this->providerRoleSnapshot, ['id' => $this->providerRoleSnapshot['id']]);
+                    self::assertSame(
+                        $this->providerRoleSnapshot,
+                        $db->get_where('roles', ['id' => $this->providerRoleSnapshot['id']])->row_array(),
                     );
                 }
                 foreach ($this->ldapSnapshots as $name => $row) {
@@ -174,6 +183,31 @@ final class LdapSettingsLegacyHttpTest extends TestCase
         self::assertSame(500, $mixed->statusCode, $mixed->body);
         self::assertSame($before, $this->ldapRows());
         self::assertSame($foreign, $fixture->settingRow((int) $foreign['id']));
+    }
+
+    public function testViewOnlyStoredRoleRendersWithoutUndefinedUserWarningOrSaveControl(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        self::assertNotNull($this->actorSnapshot);
+        self::assertNotNull($this->providerRoleSnapshot);
+        $db = get_instance()->db;
+        $admin = $this->login($this->credentials['admin_username']);
+        $providerRoleId = (int) $this->providerRoleSnapshot['id'];
+
+        try {
+            self::assertTrue($db->update('roles', ['system_settings' => PRIV_VIEW], ['id' => $providerRoleId]));
+            self::assertTrue($db->update('users', ['id_roles' => $providerRoleId], ['id' => $fixture->actorId]));
+
+            $response = $admin->get('ldap_settings');
+            self::assertSame(200, $response->statusCode, $response->body);
+            self::assertStringNotContainsString('id="save-settings"', $response->body);
+            self::assertStringNotContainsString('Undefined variable', $response->body);
+            self::assertStringNotContainsString('Warning:', $response->body);
+        } finally {
+            $db->update('users', ['id_roles' => $this->actorSnapshot['id_roles']], ['id' => $fixture->actorId]);
+            $db->update('roles', $this->providerRoleSnapshot, ['id' => $providerRoleId]);
+        }
     }
 
     public function testStoredSystemSettingsDemotionAndPromotionApplyToExistingSession(): void
