@@ -20,6 +20,23 @@
  */
 class Services extends EA_Controller
 {
+    private const READ_FIELDS = [
+        'id',
+        'name',
+        'duration',
+        'price',
+        'currency',
+        'description',
+        'color',
+        'location',
+        'availabilities_type',
+        'attendants_number',
+        'buffer_before',
+        'buffer_after',
+        'is_private',
+        'id_service_categories',
+    ];
+
     public array $allowed_service_fields = [
         'id',
         'name',
@@ -68,21 +85,23 @@ class Services extends EA_Controller
      */
     public function index(): void
     {
-        session(['dest_url' => site_url('services')]);
+        $user_id = (int) session('user_id');
 
-        $user_id = session('user_id');
-
-        if (cannot('view', PRIV_SERVICES)) {
-            if ($user_id) {
-                abort(403, 'Forbidden');
-            }
-
+        if (!$user_id) {
+            session(['dest_url' => site_url('services')]);
             redirect('login');
-
             return;
         }
 
-        $role_slug = session('role_slug');
+        if (cannot('view', PRIV_SERVICES, $user_id)) {
+            abort(403, 'Forbidden');
+            return;
+        }
+
+        session(['dest_url' => site_url('services')]);
+
+        $this->load->model('users_model');
+        $role_slug = $this->roles_model->value($this->users_model->value($user_id, 'id_roles'), 'slug');
 
         script_vars([
             'user_id' => $user_id,
@@ -107,8 +126,15 @@ class Services extends EA_Controller
     public function search(): void
     {
         try {
-            if (cannot('view', PRIV_SERVICES)) {
+            $user_id = (int) session('user_id');
+
+            if (!$user_id || cannot('view', PRIV_SERVICES, $user_id)) {
                 abort(403, 'Forbidden');
+            }
+
+            if (!in_array(strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')), ['GET', 'POST'], true)) {
+                abort(405, 'Method Not Allowed', ['Allow: GET, POST']);
+                return;
             }
 
             $request_dto = $this->backofficeRequestDtoFactory()->buildSearchRequestDto();
@@ -119,6 +145,8 @@ class Services extends EA_Controller
                 $request_dto->offset,
                 $request_dto->orderBy,
             );
+
+            $this->services_model->only($services, self::READ_FIELDS);
 
             json_response($services);
         } catch (Throwable $e) {
@@ -170,14 +198,23 @@ class Services extends EA_Controller
     public function find(): void
     {
         try {
-            if (cannot('delete', PRIV_SERVICES)) {
+            $user_id = (int) session('user_id');
+
+            if (!$user_id || cannot('view', PRIV_SERVICES, $user_id)) {
                 abort(403, 'Forbidden');
+            }
+
+            if (!in_array(strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')), ['GET', 'POST'], true)) {
+                abort(405, 'Method Not Allowed', ['Allow: GET, POST']);
+                return;
             }
 
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityIdRequestDto('service_id');
             $service_id = $request_dto->id;
 
             $service = $this->services_model->find($service_id);
+
+            $this->services_model->only($service, self::READ_FIELDS);
 
             json_response($service);
         } catch (Throwable $e) {

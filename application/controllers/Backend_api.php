@@ -150,6 +150,11 @@ class Backend_api extends EA_Controller
      */
     public function ajax_filter_services(): void
     {
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'GET') {
+            abort(405, 'Method Not Allowed', ['Allow: GET']);
+            return;
+        }
+
         redirect('services/search');
     }
 
