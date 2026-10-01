@@ -20,6 +20,27 @@
  */
 class Secretaries extends EA_Controller
 {
+    private const READ_FIELDS = [
+        'id',
+        'first_name',
+        'last_name',
+        'email',
+        'mobile_number',
+        'phone_number',
+        'address',
+        'city',
+        'state',
+        'zip_code',
+        'notes',
+        'timezone',
+        'language',
+        'ldap_dn',
+        'settings',
+        'providers',
+    ];
+
+    private const READ_SETTING_FIELDS = ['username', 'calendar_view'];
+
     public array $allowed_provider_fields = ['id', 'first_name', 'last_name'];
     public array $allowed_secretary_fields = [
         'id',
@@ -75,11 +96,9 @@ class Secretaries extends EA_Controller
      */
     public function index(): void
     {
-        session(['dest_url' => site_url('secretaries')]);
+        $user_id = (int) session('user_id');
 
-        $user_id = session('user_id');
-
-        if (cannot('view', PRIV_USERS)) {
+        if (!$user_id || cannot('view', PRIV_USERS, $user_id)) {
             if ($user_id) {
                 abort(403, 'Forbidden');
             }
@@ -89,7 +108,10 @@ class Secretaries extends EA_Controller
             return;
         }
 
-        $role_slug = session('role_slug');
+        session(['dest_url' => site_url('secretaries')]);
+
+        $this->load->model('users_model');
+        $role_slug = $this->roles_model->value($this->users_model->value($user_id, 'id_roles'), 'slug');
 
         $providers = $this->providers_model->get();
 
@@ -125,7 +147,9 @@ class Secretaries extends EA_Controller
     public function search(): void
     {
         try {
-            if (cannot('view', PRIV_USERS)) {
+            $user_id = (int) session('user_id');
+
+            if (!$user_id || cannot('view', PRIV_USERS, $user_id)) {
                 abort(403, 'Forbidden');
             }
 
@@ -137,6 +161,10 @@ class Secretaries extends EA_Controller
                 $request_dto->offset,
                 $request_dto->orderBy,
             );
+
+            foreach ($secretaries as &$secretary) {
+                $this->projectReadSecretary($secretary);
+            }
 
             json_response($secretaries);
         } catch (Throwable $e) {
@@ -188,19 +216,38 @@ class Secretaries extends EA_Controller
     public function find(): void
     {
         try {
-            if (cannot('view', PRIV_USERS)) {
+            $user_id = (int) session('user_id');
+
+            if (!$user_id || cannot('view', PRIV_USERS, $user_id)) {
                 abort(403, 'Forbidden');
             }
 
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityIdRequestDto('secretary_id');
             $secretary_id = $request_dto->id;
 
-            $secretary = $this->secretaries_model->find($secretary_id);
+            $secretaries = $this->secretaries_model->get(['id' => $secretary_id], 1);
+
+            if (!$secretaries) {
+                abort(404, 'Not Found');
+            }
+
+            $secretary = $secretaries[0];
+
+            $this->projectReadSecretary($secretary);
 
             json_response($secretary);
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    /** Keep backoffice read responses limited to fields used by the secretary form. */
+    private function projectReadSecretary(array &$secretary): void
+    {
+        $this->secretaries_model->only($secretary, self::READ_FIELDS);
+        $settings = $secretary['settings'] ?? [];
+        $this->secretaries_model->only($settings, self::READ_SETTING_FIELDS);
+        $secretary['settings'] = $settings;
     }
 
     /**

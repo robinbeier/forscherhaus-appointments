@@ -63,6 +63,16 @@ read must not change the session destination. `AdminsReadProjectionHttpTest`
 checks these boundaries with isolated synthetic HTTP and database records; it
 does not prove a live production role-change race.
 
+Legacy Secretary backoffice reads (`secretaries`, `secretaries/index`,
+`secretaries/search`, `secretaries/find`, and the search alias) require the
+actor's current stored `users` view permission on every request. `find`
+addresses Secretary records only; search and detail responses expose only
+fields used by the Secretary form and assigned provider IDs, never stored
+integration credentials or unrelated shared-user fields. A denied page read
+must not change the session destination. `SecretariesReadProjectionHttpTest`
+checks these boundaries with isolated synthetic HTTP and database records; it
+does not prove a live production role-change race.
+
 ## Required security properties
 
 The first cycle sharpened the following six properties. They are examples of
