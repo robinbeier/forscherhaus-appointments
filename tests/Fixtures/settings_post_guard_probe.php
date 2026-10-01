@@ -39,6 +39,7 @@ function cannot(string $verb, string $permission, ?int $userId = null): bool
             'Ldap_settings',
             'Legal_settings',
             'Matomo_analytics_settings',
+            'Google_analytics_settings',
         ],
         true,
     );
@@ -213,6 +214,11 @@ class Backoffice_request_dto_factory
                     ],
                     ['name' => 'matomo_analytics_site_id', 'value' => '7', 'extra' => 'drop-me-too'],
                 ],
+            ];
+        }
+        if ($key === 'google_analytics_settings') {
+            return (object) [
+                'settings' => [['name' => 'google_analytics_code', 'value' => 'G-SYNTHETIC', 'extra' => 'drop-me']],
             ];
         }
         return (object) [
