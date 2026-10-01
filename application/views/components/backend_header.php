@@ -124,9 +124,8 @@
 
             <?php slot('before_user_nav_item'); ?>
 
-            <?php $hidden = $can_view(PRIV_SYSTEM_SETTINGS) || $can_view(PRIV_USER_SETTINGS) ? '' : 'd-none'; ?>
             <?php $active = $active_menu == PRIV_SYSTEM_SETTINGS ? 'active' : ''; ?>
-            <li class="nav-item dropdown <?= $active . $hidden ?>">
+            <li class="nav-item dropdown <?= $active ?>">
                 <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown"
                    data-tippy-content="<?= lang('settings_hint') ?>">
                     <i class="fas fa-user me-2"></i>

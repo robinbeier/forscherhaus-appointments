@@ -359,6 +359,20 @@ final class SettingsReadProjectionHttpTest extends TestCase
         self::assertTrue(
             get_instance()->db->update('users', ['id_roles' => (int) $customerRole['id']], ['id' => $fixture->actorId]),
         );
+        $demotedPage = $admin->get('about');
+        self::assertSame(200, $demotedPage->statusCode);
+        $userMenuMarker = 'data-tippy-content="' . lang('settings_hint') . '"';
+        $menuMarkerOffset = strpos($demotedPage->body, $userMenuMarker);
+        self::assertNotFalse($menuMarkerOffset);
+        $menuStart = strrpos(substr($demotedPage->body, 0, $menuMarkerOffset), '<li ');
+        self::assertNotFalse($menuStart);
+        $menuOpeningTag = substr($demotedPage->body, $menuStart, $menuMarkerOffset - $menuStart);
+        self::assertStringNotContainsString('d-none', $menuOpeningTag);
+        self::assertStringContainsString('href="' . $this->server?->baseUrl . '/index.php/logout"', $demotedPage->body);
+        self::assertStringNotContainsString(
+            'href="' . $this->server?->baseUrl . '/index.php/general_settings"',
+            $demotedPage->body,
+        );
         foreach (
             ['general_settings', 'general_settings/index', 'business_settings', 'business_settings/index']
             as $path
