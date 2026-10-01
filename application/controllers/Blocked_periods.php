@@ -20,6 +20,8 @@
  */
 class Blocked_periods extends EA_Controller
 {
+    private const READ_FIELDS = ['id', 'name', 'start_datetime', 'end_datetime', 'notes'];
+
     public array $allowed_blocked_period_fields = ['id', 'name', 'start_datetime', 'end_datetime', 'notes'];
 
     public array $optional_blocked_period_fields = [
@@ -35,6 +37,7 @@ class Blocked_periods extends EA_Controller
 
         $this->load->model('blocked_periods_model');
         $this->load->model('roles_model');
+        $this->load->model('users_model');
 
         $this->load->library('accounts');
         $this->load->library('timezones');
@@ -48,21 +51,27 @@ class Blocked_periods extends EA_Controller
      */
     public function index(): void
     {
-        session(['dest_url' => site_url('blocked_periods')]);
-
-        $user_id = session('user_id');
-
-        if (cannot('view', PRIV_BLOCKED_PERIODS)) {
-            if ($user_id) {
-                abort(403, 'Forbidden');
-            }
-
-            redirect('login');
-
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'GET') {
+            abort(405, 'Method Not Allowed', ['Allow: GET']);
             return;
         }
 
-        $role_slug = session('role_slug');
+        $user_id = (int) session('user_id');
+
+        if (!$user_id) {
+            session(['dest_url' => site_url('blocked_periods')]);
+            redirect('login');
+            return;
+        }
+
+        if (cannot('view', PRIV_BLOCKED_PERIODS, $user_id)) {
+            abort(403, 'Forbidden');
+            return;
+        }
+
+        session(['dest_url' => site_url('blocked_periods')]);
+
+        $role_slug = $this->roles_model->value($this->users_model->value($user_id, 'id_roles'), 'slug');
 
         script_vars([
             'user_id' => $user_id,
@@ -89,8 +98,15 @@ class Blocked_periods extends EA_Controller
     public function search(): void
     {
         try {
-            if (cannot('view', PRIV_BLOCKED_PERIODS)) {
+            if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+                abort(405, 'Method Not Allowed', ['Allow: POST']);
+                return;
+            }
+
+            $user_id = (int) session('user_id');
+            if (!$user_id || cannot('view', PRIV_BLOCKED_PERIODS, $user_id)) {
                 abort(403, 'Forbidden');
+                return;
             }
 
             $request_dto = $this->backofficeRequestDtoFactory()->buildSearchRequestDto();
@@ -102,7 +118,13 @@ class Blocked_periods extends EA_Controller
                 $request_dto->orderBy,
             );
 
-            json_response($blocked_periods);
+            $read_fields = array_flip(self::READ_FIELDS);
+            json_response(
+                array_map(
+                    static fn(array $period): array => array_intersect_key($period, $read_fields),
+                    $blocked_periods,
+                ),
+            );
         } catch (Throwable $e) {
             json_exception($e);
         }
@@ -114,8 +136,10 @@ class Blocked_periods extends EA_Controller
     public function store(): void
     {
         try {
-            if (cannot('add', PRIV_BLOCKED_PERIODS)) {
+            $user_id = (int) session('user_id');
+            if (!$user_id || cannot('add', PRIV_BLOCKED_PERIODS, $user_id)) {
                 abort(403, 'Forbidden');
+                return;
             }
             if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
                 abort(405, 'Method Not Allowed', ['Allow: POST']);
@@ -148,8 +172,15 @@ class Blocked_periods extends EA_Controller
     public function find(): void
     {
         try {
-            if (cannot('view', PRIV_BLOCKED_PERIODS)) {
+            if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+                abort(405, 'Method Not Allowed', ['Allow: POST']);
+                return;
+            }
+
+            $user_id = (int) session('user_id');
+            if (!$user_id || cannot('view', PRIV_BLOCKED_PERIODS, $user_id)) {
                 abort(403, 'Forbidden');
+                return;
             }
 
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityIdRequestDto('blocked_period_id');
@@ -157,7 +188,7 @@ class Blocked_periods extends EA_Controller
 
             $blocked_period = $this->blocked_periods_model->find($blocked_period_id);
 
-            json_response($blocked_period);
+            json_response(array_intersect_key($blocked_period, array_flip(self::READ_FIELDS)));
         } catch (Throwable $e) {
             json_exception($e);
         }
@@ -169,8 +200,10 @@ class Blocked_periods extends EA_Controller
     public function update(): void
     {
         try {
-            if (cannot('edit', PRIV_BLOCKED_PERIODS)) {
+            $user_id = (int) session('user_id');
+            if (!$user_id || cannot('edit', PRIV_BLOCKED_PERIODS, $user_id)) {
                 abort(403, 'Forbidden');
+                return;
             }
             if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
                 abort(405, 'Method Not Allowed', ['Allow: POST']);
@@ -203,8 +236,10 @@ class Blocked_periods extends EA_Controller
     public function destroy(): void
     {
         try {
-            if (cannot('delete', PRIV_BLOCKED_PERIODS)) {
+            $user_id = (int) session('user_id');
+            if (!$user_id || cannot('delete', PRIV_BLOCKED_PERIODS, $user_id)) {
                 abort(403, 'Forbidden');
+                return;
             }
             if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
                 abort(405, 'Method Not Allowed', ['Allow: POST']);

@@ -9,13 +9,14 @@ use PHPUnit\Framework\TestCase;
 final class BlockedPeriodPostGuardTest extends TestCase
 {
     private const FIELDS = ['id', 'name', 'start_datetime', 'end_datetime', 'notes'];
+    private const USER_ID = 9001;
 
     #[DataProvider('actions')]
     public function testAuthorizedPostPreservesControllerHandoff(string $action, string $verb): void
     {
         $result = $this->probe($action, 'authorized', 'POST');
         $expected = [
-            "auth:$verb:blocked_periods",
+            "auth:$verb:blocked_periods:" . self::USER_ID,
             $action === 'destroy' ? 'dto:blocked_period_id' : 'dto:blocked_period',
         ];
         if ($action === 'destroy') {
@@ -45,7 +46,7 @@ final class BlockedPeriodPostGuardTest extends TestCase
     {
         foreach (['GET', 'HEAD', 'PUT', 'DELETE'] as $method) {
             $result = $this->probe($action, 'authorized', $method);
-            self::assertSame(["auth:$verb:blocked_periods", 'abort:405'], $result['events']);
+            self::assertSame(["auth:$verb:blocked_periods:" . self::USER_ID, 'abort:405'], $result['events']);
             self::assertSame(405, $result['status']);
             self::assertSame(['Allow' => 'POST'], $result['headers']);
             self::assertSame([], $result['saved']);
@@ -57,7 +58,7 @@ final class BlockedPeriodPostGuardTest extends TestCase
     {
         foreach (['GET', 'POST'] as $method) {
             $result = $this->probe($action, 'forbidden', $method);
-            self::assertSame(["auth:$verb:blocked_periods", 'abort:403'], $result['events']);
+            self::assertSame(["auth:$verb:blocked_periods:" . self::USER_ID, 'abort:403'], $result['events']);
             self::assertSame(403, $result['status']);
             self::assertSame([], $result['saved']);
         }
@@ -68,7 +69,7 @@ final class BlockedPeriodPostGuardTest extends TestCase
     {
         $result = $this->probe($action, 'model-failure', 'POST');
         $expected = [
-            "auth:$verb:blocked_periods",
+            "auth:$verb:blocked_periods:" . self::USER_ID,
             $action === 'destroy' ? 'dto:blocked_period_id' : 'dto:blocked_period',
         ];
         if ($action === 'destroy') {
