@@ -45,6 +45,12 @@ final class SettingsPostGuardTest extends TestCase
                     ['name' => 'cookie_notice_content', 'value' => 'synthetic legal notice', 'extra' => 'drop-me-too'],
                 ];
             }
+            if ($controller === 'Booking_settings') {
+                $expected = [
+                    ['name' => 'disable_booking', 'value' => '1', 'extra' => 'drop-me'],
+                    ['name' => 'display_any_provider', 'value' => '0', 'extra' => 'drop-me-too'],
+                ];
+            }
             if (
                 in_array(
                     $controller,
@@ -156,6 +162,12 @@ final class SettingsPostGuardTest extends TestCase
                 $expected = [
                     ['name' => 'display_cookie_notice', 'value' => '1', 'extra' => 'drop-me'],
                     ['name' => 'cookie_notice_content', 'value' => 'synthetic legal notice', 'extra' => 'drop-me-too'],
+                ];
+            }
+            if ($controller === 'Booking_settings') {
+                $expected = [
+                    ['name' => 'disable_booking', 'value' => '1', 'extra' => 'drop-me'],
+                    ['name' => 'display_any_provider', 'value' => '0', 'extra' => 'drop-me-too'],
                 ];
             }
             if (

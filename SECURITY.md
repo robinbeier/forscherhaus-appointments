@@ -124,6 +124,17 @@ change the session destination. `LegalSettingsLegacyHttpTest` checks these
 boundaries in an isolated synthetic HTTP/database stack; it does not prove a
 live production role-change race or change production legal texts.
 
+Classic Booking Settings (`booking_settings`, `booking_settings/index`, and
+`booking_settings/save`) require the actor's current stored `system_settings`
+permission. The page accepts GET only and projects only its 38 booking fields
+as `name`/`value`; unrelated tokens and credentials must not enter page script
+data. Save accepts POST with CSRF and may write only those booking names.
+Submitted IDs and extra fields cannot select other rows; unknown or duplicate
+names reject the whole batch before mutation. An authenticated denial does not
+change the session destination. `BookingSettingsLegacyHttpTest` checks these
+boundaries in an isolated synthetic HTTP/database stack; it does not prove a
+live production role-change race or change production booking options.
+
 ## Required security properties
 
 The first cycle sharpened the following six properties. They are examples of
