@@ -33,7 +33,13 @@ final class SettingsPostGuardTest extends TestCase
                 ['name' => 'synthetic_setting', 'value' => 'synthetic-value', 'extra' => 'drop-me'],
                 ['name' => 'synthetic_second', 'value' => 'second-value', 'extra' => 'drop-me-too'],
             ];
-            if (in_array($controller, ['Business_settings', 'Booking_settings'], true)) {
+            if ($controller === 'Ldap_settings') {
+                $expected = [
+                    ['name' => 'ldap_is_active', 'value' => '1', 'extra' => 'drop-me'],
+                    ['name' => 'ldap_host', 'value' => 'ldap.synthetic.invalid', 'extra' => 'drop-me-too'],
+                ];
+            }
+            if (in_array($controller, ['Business_settings', 'Booking_settings', 'Ldap_settings'], true)) {
                 $expected = array_map(
                     static fn(array $setting): array => array_diff_key($setting, ['extra' => true]),
                     $expected,
@@ -128,7 +134,13 @@ final class SettingsPostGuardTest extends TestCase
                 ['name' => 'synthetic_setting', 'value' => 'synthetic-value', 'extra' => 'drop-me'],
                 ['name' => 'synthetic_second', 'value' => 'second-value', 'extra' => 'drop-me-too'],
             ];
-            if (in_array($controller, ['Business_settings', 'Booking_settings'], true)) {
+            if ($controller === 'Ldap_settings') {
+                $expected = [
+                    ['name' => 'ldap_is_active', 'value' => '1', 'extra' => 'drop-me'],
+                    ['name' => 'ldap_host', 'value' => 'ldap.synthetic.invalid', 'extra' => 'drop-me-too'],
+                ];
+            }
+            if (in_array($controller, ['Business_settings', 'Booking_settings', 'Ldap_settings'], true)) {
                 $expected = array_map(
                     static fn(array $setting): array => array_diff_key($setting, ['extra' => true]),
                     $expected,

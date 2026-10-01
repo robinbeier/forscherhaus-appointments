@@ -30,7 +30,7 @@ function cannot(string $verb, string $permission, ?int $userId = null): bool
     if ($verb !== 'edit' || $permission !== PRIV_SYSTEM_SETTINGS) {
         throw new RuntimeException('Unexpected authorization arguments.');
     }
-    $expectsActorId = in_array($controllerName, ['General_settings', 'Business_settings'], true);
+    $expectsActorId = in_array($controllerName, ['General_settings', 'Business_settings', 'Ldap_settings'], true);
     if (($expectsActorId && $userId !== SYNTHETIC_USER_ID) || (!$expectsActorId && $userId !== null)) {
         throw new RuntimeException('Unexpected authorization user ID.');
     }
@@ -168,6 +168,14 @@ class Backoffice_request_dto_factory
     {
         global $events;
         $events[] = 'dto:' . $key;
+        if ($key === 'ldap_settings') {
+            return (object) [
+                'settings' => [
+                    ['name' => 'ldap_is_active', 'value' => '1', 'extra' => 'drop-me'],
+                    ['name' => 'ldap_host', 'value' => 'ldap.synthetic.invalid', 'extra' => 'drop-me-too'],
+                ],
+            ];
+        }
         return (object) [
             'settings' => [
                 ['name' => 'synthetic_setting', 'value' => 'synthetic-value', 'extra' => 'drop-me'],
