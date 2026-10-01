@@ -147,6 +147,18 @@ authenticated denial does not change the session destination.
 synthetic HTTP/database stack; it does not prove a live production role-change
 race or activate Matomo in production.
 
+Classic Google Analytics Settings (`google_analytics_settings`, its direct
+`index` alias, and `save`) require the actor's current stored
+`system_settings` permission. The page accepts GET only and projects only
+`google_analytics_code` as `name`/`value`; future same-prefix rows and database
+metadata do not enter page script data. Save accepts POST with CSRF and may
+write only that name. Submitted IDs and extra fields cannot select other rows;
+unknown or duplicate names reject the whole batch before mutation. An
+authenticated denial does not change the session destination.
+`GoogleAnalyticsLegacyHttpTest` checks these boundaries in an isolated
+synthetic HTTP/database stack; it does not prove a live production role-change
+race or activate Google Analytics in production.
+
 ## Required security properties
 
 The first cycle sharpened the following six properties. They are examples of

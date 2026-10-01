@@ -61,6 +61,9 @@ final class SettingsPostGuardTest extends TestCase
                     ['name' => 'matomo_analytics_site_id', 'value' => '7', 'extra' => 'drop-me-too'],
                 ];
             }
+            if ($controller === 'Google_analytics_settings') {
+                $expected = [['name' => 'google_analytics_code', 'value' => 'G-SYNTHETIC', 'extra' => 'drop-me']];
+            }
             if (
                 in_array(
                     $controller,
@@ -70,6 +73,7 @@ final class SettingsPostGuardTest extends TestCase
                         'Ldap_settings',
                         'Legal_settings',
                         'Matomo_analytics_settings',
+                        'Google_analytics_settings',
                     ],
                     true,
                 )
@@ -102,7 +106,10 @@ final class SettingsPostGuardTest extends TestCase
             );
             self::assertSame(
                 $controller === 'General_settings' ? 0 : 1,
-                substr_count(implode('|', $result['events']), 'save_batch:2'),
+                substr_count(
+                    implode('|', $result['events']),
+                    $controller === 'Google_analytics_settings' ? 'save_batch:1' : 'save_batch:2',
+                ),
                 $controller,
             );
             self::assertSame(1, substr_count(implode('|', $result['events']), 'response'), $controller);
@@ -196,6 +203,9 @@ final class SettingsPostGuardTest extends TestCase
                     ['name' => 'matomo_analytics_site_id', 'value' => '7', 'extra' => 'drop-me-too'],
                 ];
             }
+            if ($controller === 'Google_analytics_settings') {
+                $expected = [['name' => 'google_analytics_code', 'value' => 'G-SYNTHETIC', 'extra' => 'drop-me']];
+            }
             if (
                 in_array(
                     $controller,
@@ -205,6 +215,7 @@ final class SettingsPostGuardTest extends TestCase
                         'Ldap_settings',
                         'Legal_settings',
                         'Matomo_analytics_settings',
+                        'Google_analytics_settings',
                     ],
                     true,
                 )
