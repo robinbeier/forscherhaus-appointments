@@ -254,6 +254,13 @@ rows and temporary role changes are restored or removed by the fixture. The
 API-v1 Provider write tests remain distinct. This local matrix does not prove
 concurrent demotion or a production staff-account mutation.
 
+The separate classic Provider deletion boundary is covered by
+`ProvidersDestroyHttpTest` in the same fresh synthetic HTTP/DB stack. It checks
+POST and front-controller routing, CSRF, stored permission after sequential
+demotion, positive and Provider-role target IDs, rejection without mutation,
+and deletion of an owned synthetic Provider. These local tests do not establish
+every concurrent role-change schedule or a production account deletion.
+
 ## Classic service-category controller boundary
 
 `ServiceCategoriesLegacyHttpTest` covers the session-backed `Service_categories`
