@@ -6,6 +6,20 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 cd "$ROOT_DIR"
 
+# Docker Engine versions before 28 can expose localhost-published ports to
+# peers on the same L2 network. Fail closed before treating loopback bindings
+# as a host-isolation guarantee.
+docker_server_version="$(docker version --format '{{.Server.Version}}' 2>/dev/null || true)"
+if [[ ! "$docker_server_version" =~ ^([0-9]+)(\.[0-9]+){0,2}(-[0-9A-Za-z.-]+)?$ ]]; then
+    echo "compose_sensitive_ports=unsupported_docker_engine" >&2
+    exit 1
+fi
+docker_major="${BASH_REMATCH[1]}"
+if (( docker_major < 28 )); then
+    echo "compose_sensitive_ports=unsupported_docker_engine" >&2
+    exit 1
+fi
+
 # Inspect the canonical, fully resolved Compose model. Explicitly naming the
 # repository's default file prevents a caller-provided COMPOSE_FILE or override
 # from replacing the configuration under test. This deliberately does not

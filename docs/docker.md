@@ -2,7 +2,11 @@
 
 Run the development containers of Easy!Appointments with Docker and Docker Compose utility. Docker allows you to compose your application in microservices, so that you can easily get started with the local development.
 
-Simply clone the project and run `docker compose up` to start the environment.
+Before starting the default data-bearing stack, run
+`bash scripts/ci/compose_sensitive_ports_smoke.sh`; it requires Docker Engine
+`>=28.0.0` and the canonical loopback bindings. Then run `docker compose up`.
+The production-dump import helper runs this preflight itself before any remote
+backup, download, local data reset, or container startup.
 Nginx starts after PHP-FPM so its configured upstream name exists during startup;
 application readiness is still checked by the existing smoke and replay checks.
 
@@ -89,10 +93,15 @@ The development stack pins MySQL `8.4.8` in `docker-compose.yml` for CI parity, 
 You can additionally access phpMyAdmin from `http://localhost:8080` (credentials are `root` / `secret`).
 The default Compose configuration publishes the app, database, and phpMyAdmin
 only on host loopback (`127.0.0.1`). They remain reachable from this computer
-and from other containers on the Compose network, but not through the host's
-LAN address. `scripts/ci/compose_sensitive_ports_smoke.sh` checks the resolved
-default Compose bindings without starting containers; it does not inspect
-host firewall rules or custom Compose overrides.
+and from other containers on the Compose network. With Docker Engine
+`>=28.0.0` and default bridge/NAT networking, other devices cannot reach
+these published ports through the host LAN. Older Engines can expose even
+localhost-published ports to peers on the same network segment; do not import
+a production dump with an older Engine. See [Docker's port-publishing
+documentation](https://docs.docker.com/engine/network/port-publishing/).
+`scripts/ci/compose_sensitive_ports_smoke.sh` checks the Server version and
+resolved canonical Compose bindings without starting containers. It does not
+inspect custom daemon routing, host firewalls, or custom Compose overrides.
 
 ## Running Tests
 
