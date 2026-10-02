@@ -373,6 +373,20 @@ Zuordnungen vor und nach abgewiesenen sowie passenden PUT-Anfragen. Sie belegen
 ihren lokalen HTTP-/Datenbanklauf, nicht die produktive Auslieferung oder alle
 konkurrierenden Änderungen.
 
+## Customers und Providers API v1 direkte Löschaliase
+
+Die kanonischen Löschrouten verwenden DELETE. Auch die direkt erreichbaren
+`Customers_api_v1::destroy`- und `Providers_api_v1::destroy`-Aliase erzwingen
+DELETE nach der API-Authentifizierung und vor Datensatzsuche oder Mutation.
+GET, HEAD, POST, PUT und PATCH erhalten 405 mit `Allow: DELETE` und lassen
+Kunden-, Provider- und abhängige Zeilen unverändert. Die vorhandenen
+kanonischen DELETE-Tests sind Positivkontrollen.
+
+`CustomersProvidersApiDestroyAliasHttpTest` prüft beide direkten Aliase mit
+eigenen synthetischen Datensätzen in einem frischen HTTP-/DB-Stack. Das ist
+lokaler Verhaltensnachweis; ohne vorab belegte eigene Produktivdaten und
+vollständig verifizierbare Bereinigung bleibt der produktive Nachweis lesend.
+
 ## Admins API v1 direkte Schreibaliase
 
 Die kanonischen Admin-Routen verwenden POST für `store` und DELETE für
