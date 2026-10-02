@@ -783,6 +783,10 @@
           "match": "exact_file"
         },
         {
+          "path": "application/views/components/custom_fields.php",
+          "match": "exact_file"
+        },
+        {
           "path": "application/views/components/backend_header.php",
           "match": "exact_file"
         },
