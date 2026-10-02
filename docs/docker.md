@@ -87,6 +87,12 @@ In the host machine the server is accessible from `http://localhost` and the dat
 The development stack pins MySQL `8.4.8` in `docker-compose.yml` for CI parity, while application migrations remain compatible with MySQL `5.7+`.
 
 You can additionally access phpMyAdmin from `http://localhost:8080` (credentials are `root` / `secret`).
+The default Compose configuration publishes the app, database, and phpMyAdmin
+only on host loopback (`127.0.0.1`). They remain reachable from this computer
+and from other containers on the Compose network, but not through the host's
+LAN address. `scripts/ci/compose_sensitive_ports_smoke.sh` checks the resolved
+default Compose bindings without starting containers; it does not inspect
+host firewall rules or custom Compose overrides.
 
 ## Running Tests
 
@@ -314,6 +320,11 @@ The script will:
 - import the production dump into the local `easyappointments` database
 - run `php index.php console migrate`
 - start the remaining Docker services again without pulling new images
+
+The imported database remains a local copy. In the default Compose stack,
+the app and database are published only on host loopback; phpMyAdmin, when
+started, is loopback-only too. `--core-services-only` does not start
+phpMyAdmin.
 
 Useful options:
 

@@ -397,6 +397,10 @@ Public assets, the health file, and application routing remain available.
 `scripts/ci/nginx_private_paths_smoke.sh` checks this boundary with only
 synthetic files in a separate loopback-bound container; it does not verify
 production Apache or other published local ports.
+The default local Compose app, MySQL, and phpMyAdmin host ports must also bind
+to loopback, particularly when a production dump is imported for development.
+`scripts/ci/compose_sensitive_ports_smoke.sh` checks the resolved default
+Compose bindings; this is not a test of custom overrides or host firewalls.
 
 Across write paths, establish server-side authority before mutation, reject
 without partial changes, and keep dependent effects consistent with commit

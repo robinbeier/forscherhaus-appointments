@@ -130,6 +130,10 @@ files and the parent-facing calendar links remain available.
 - phpMyAdmin: `http://localhost:8080` (`root` / `secret`)
 - PDF renderer: `http://localhost:3003`
 
+The default Compose app, MySQL (`localhost:3306`), and phpMyAdmin bindings
+accept connections from this computer only. See the [Docker guide](docs/docker.md#local-configuration)
+for the scope and check of this boundary.
+
 For deterministic LDAP fixtures, reset and smoke the local directory with:
 
 ```bash
