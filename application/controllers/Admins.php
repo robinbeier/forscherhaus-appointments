@@ -484,13 +484,15 @@ class Admins extends EA_Controller
                 throw new RuntimeException('Could not start admin deletion transaction.');
             }
 
-            // Match the model's global admin lock order before actor authority.
+            // Lock the global admin set and a possibly demoted actor in one
+            // numeric order. Provider maintenance uses the same user order;
+            // acquiring a demoted actor after the admin set would invert it.
             $admin_role_id = $this->admins_model->get_admin_role_id();
             $locked_admins = $this->db->query(
                 'SELECT `id`, `id_roles` FROM `' .
                     $this->db->dbprefix('users') .
-                    '` WHERE `id_roles` = ? ORDER BY `id` ASC FOR UPDATE',
-                [$admin_role_id],
+                    '` WHERE (`id_roles` = ? OR `id` = ?) ORDER BY `id` ASC FOR UPDATE',
+                [$admin_role_id, $user_id],
             );
             if ($locked_admins === false) {
                 throw new RuntimeException('Could not lock admin deletion targets.');
@@ -501,16 +503,6 @@ class Admins extends EA_Controller
             }
 
             $actor = $admins_by_id[$user_id] ?? null;
-            if (!$actor) {
-                $locked_actor = $this->db->query(
-                    'SELECT `id`, `id_roles` FROM `' . $this->db->dbprefix('users') . '` WHERE `id` = ? FOR UPDATE',
-                    [$user_id],
-                );
-                if ($locked_actor === false) {
-                    throw new RuntimeException('Could not lock admin deletion actor.');
-                }
-                $actor = $locked_actor->row_array();
-            }
             $locked_role = $actor
                 ? $this->db->query(
                     'SELECT `users` FROM `' . $this->db->dbprefix('roles') . '` WHERE `id` = ? FOR UPDATE',
@@ -530,7 +522,7 @@ class Admins extends EA_Controller
                 return;
             }
 
-            if (!isset($admins_by_id[$admin_id])) {
+            if (!isset($admins_by_id[$admin_id]) || (int) $admins_by_id[$admin_id]['id_roles'] !== $admin_role_id) {
                 if ($owns_transaction) {
                     $this->db->trans_rollback();
                     $owns_transaction = false;

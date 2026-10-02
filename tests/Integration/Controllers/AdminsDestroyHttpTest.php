@@ -138,6 +138,32 @@ final class AdminsDestroyHttpTest extends TestCase
         }
     }
 
+    public function testDemotedActorWithDeletePermissionCannotDeleteOwnNonAdminRow(): void
+    {
+        $admin = $this->login($this->server->client());
+        $db = get_instance()->db;
+        $customerRole = $db->get_where('roles', ['slug' => DB_SLUG_CUSTOMER])->row_array();
+        self::assertNotEmpty($customerRole);
+        $roleId = (int) $customerRole['id'];
+        $rolePermissionsBefore = (int) $customerRole['users'];
+
+        try {
+            self::assertTrue(
+                (bool) $db->update('roles', ['users' => $rolePermissionsBefore | PRIV_DELETE], ['id' => $roleId]),
+            );
+            self::assertTrue((bool) $db->update('users', ['id_roles' => $roleId], ['id' => $this->fixture->actorId]));
+            $before = $this->fixture->adminDeleteState($this->fixture->actorId);
+
+            $response = $admin->post('admins/destroy', ['admin_id' => $this->fixture->actorId]);
+
+            self::assertSame(400, $response->statusCode, $response->body);
+            self::assertSame($before, $this->fixture->adminDeleteState($this->fixture->actorId));
+        } finally {
+            $db->update('roles', ['users' => $rolePermissionsBefore], ['id' => $roleId]);
+            $db->update('users', ['id_roles' => $this->actorRoleBefore], ['id' => $this->fixture->actorId]);
+        }
+    }
+
     public function testPositiveIdAndAdminTargetAreRequired(): void
     {
         $admin = $this->login($this->server->client());
@@ -238,6 +264,124 @@ final class AdminsDestroyHttpTest extends TestCase
         self::assertSame([], $this->fixture->adminDeleteState($this->targetId)['settings']);
     }
 
+    public function testAuthorizedAdminDeletesTargetWithReversedUserIds(): void
+    {
+        $admin = $this->login($this->server->client());
+        $this->createTargetBelowActor();
+        self::assertLessThan($this->fixture->actorId, $this->targetId);
+
+        $response = $admin->post('admins/destroy', ['admin_id' => $this->targetId]);
+
+        self::assertSame(200, $response->statusCode, $response->body);
+        self::assertTrue((bool) (json_decode($response->body, true, 512, JSON_THROW_ON_ERROR)['success'] ?? false));
+        self::assertSame([], $this->fixture->adminDeleteState($this->targetId)['user']);
+        self::assertSame([], $this->fixture->adminDeleteState($this->targetId)['settings']);
+    }
+
+    public function testDestroyInitialLockIncludesActorInOrderedSet(): void
+    {
+        $db = get_instance()->db;
+        $admin = $this->login($this->server->client());
+        $this->createTarget();
+        $observer = get_instance()->load->database(
+            [
+                'hostname' => 'mysql',
+                'username' => 'root',
+                'password' => 'secret',
+                'database' => 'easyappointments',
+                'dbdriver' => 'mysqli',
+                'dbprefix' => $db->dbprefix,
+                'pconnect' => false,
+                'db_debug' => false,
+                'char_set' => 'utf8mb4',
+                'dbcollat' => 'utf8mb4_general_ci',
+            ],
+            true,
+        );
+        $multi = $handle = null;
+        $transactionOpen = false;
+        try {
+            self::assertTrue((bool) $db->trans_begin());
+            $transactionOpen = true;
+            self::assertTrue(
+                (bool) $db->query('SELECT `id` FROM `' . $db->dbprefix('users') . '` WHERE `id` = ? FOR UPDATE', [
+                    $this->fixture->actorId,
+                ]),
+            );
+
+            $cookies = array_map(
+                static fn(array $record): string => $record['name'] . '=' . $record['value'],
+                array_filter(
+                    $admin->cookieRecords(),
+                    static fn(array $record): bool => isset($record['name'], $record['value']),
+                ),
+            );
+            $csrf = $admin->getCookie('csrf_cookie');
+            $multi = curl_multi_init();
+            $handle = curl_init($this->server->baseUrl . '/admins/destroy');
+            curl_setopt_array($handle, [
+                CURLOPT_POST => true,
+                CURLOPT_POSTFIELDS => http_build_query(['admin_id' => $this->targetId, 'csrf_token' => $csrf]),
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_CONNECTTIMEOUT => 3,
+                CURLOPT_TIMEOUT => 15,
+                CURLOPT_HTTPHEADER => [
+                    'Content-Type: application/x-www-form-urlencoded',
+                    'Cookie: ' . implode('; ', $cookies),
+                ],
+            ]);
+            self::assertSame(CURLM_OK, curl_multi_add_handle($multi, $handle));
+
+            $observed = false;
+            $deadline = microtime(true) + 8.0;
+            do {
+                do {
+                    $result = curl_multi_exec($multi, $running);
+                } while ($result === CURLM_CALL_MULTI_PERFORM);
+                self::assertSame(CURLM_OK, $result);
+                $rows = $observer->query(
+                    'SELECT INFO FROM information_schema.PROCESSLIST WHERE INFO LIKE "%FOR UPDATE%"',
+                );
+                foreach ($rows === false ? [] : $rows->result_array() as $row) {
+                    $sql = (string) ($row['INFO'] ?? '');
+                    if (
+                        str_contains($sql, 'OR `id` = ' . $this->fixture->actorId) &&
+                        str_contains($sql, 'ORDER BY `id` ASC FOR UPDATE')
+                    ) {
+                        $observed = true;
+                        break 2;
+                    }
+                }
+                if ($running) {
+                    usleep(20_000);
+                }
+            } while ($running && microtime(true) < $deadline);
+            self::assertTrue($observed, 'Destroy must lock the actor in its initial ordered user lock.');
+            self::assertTrue((bool) $db->trans_rollback());
+            $transactionOpen = false;
+            do {
+                $result = curl_multi_exec($multi, $running);
+            } while ($running && $result === CURLM_CALL_MULTI_PERFORM);
+            while ($running) {
+                curl_multi_select($multi, 0.2);
+                do {
+                    $result = curl_multi_exec($multi, $running);
+                } while ($result === CURLM_CALL_MULTI_PERFORM);
+            }
+            self::assertSame(200, (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE));
+        } finally {
+            if ($transactionOpen) {
+                $db->trans_rollback();
+            }
+            if ($handle instanceof CurlHandle && $multi instanceof CurlMultiHandle) {
+                curl_multi_remove_handle($multi, $handle);
+                curl_close($handle);
+                curl_multi_close($multi);
+            }
+            $observer->close();
+        }
+    }
+
     public function testDeletedSessionActorCannotDeleteSyntheticAdmin(): void
     {
         $admin = $this->login($this->server->client());
@@ -257,30 +401,45 @@ final class AdminsDestroyHttpTest extends TestCase
         $this->targetId = $this->insertStaffTarget(DB_SLUG_ADMIN, 'destroy_target');
     }
 
+    private function createTargetBelowActor(): void
+    {
+        $actorId = $this->fixture->actorId;
+        for ($candidate = $actorId - 1; $candidate > 0; --$candidate) {
+            if ($this->fixture->row('users', $candidate) === []) {
+                $this->targetId = $this->insertStaffTarget(DB_SLUG_ADMIN, 'reversed_target', $candidate);
+                return;
+            }
+        }
+
+        self::fail('Could not allocate a synthetic admin ID below the actor ID.');
+    }
+
     private function createOtherRoleTarget(): void
     {
         $this->otherRoleTargetId = $this->insertStaffTarget(DB_SLUG_CUSTOMER, 'other_role_target');
     }
 
-    private function insertStaffTarget(string $roleSlug, string $suffix): int
+    private function insertStaffTarget(string $roleSlug, string $suffix, ?int $id = null): int
     {
         $db = get_instance()->db;
         $role = $db->get_where('roles', ['slug' => $roleSlug])->row_array();
         self::assertNotEmpty($role);
-        self::assertTrue(
-            (bool) $db->insert('users', [
-                'first_name' => 'Synthetic',
-                'last_name' => 'Destroy Target',
-                'email' => $this->fixture->run . '_' . $suffix . '@synthetic.invalid',
-                'phone_number' => '000000000',
-                'notes' => $this->fixture->run,
-                'timezone' => 'UTC',
-                'language' => 'english',
-                'id_roles' => (int) $role['id'],
-                'is_private' => 0,
-            ]),
-        );
-        $id = (int) $db->insert_id();
+        $user = [
+            'first_name' => 'Synthetic',
+            'last_name' => 'Destroy Target',
+            'email' => $this->fixture->run . '_' . $suffix . '@synthetic.invalid',
+            'phone_number' => '000000000',
+            'notes' => $this->fixture->run,
+            'timezone' => 'UTC',
+            'language' => 'english',
+            'id_roles' => (int) $role['id'],
+            'is_private' => 0,
+        ];
+        if ($id !== null) {
+            $user['id'] = $id;
+        }
+        self::assertTrue((bool) $db->insert('users', $user));
+        $id = $id ?? (int) $db->insert_id();
         self::assertTrue(
             (bool) $db->insert('user_settings', [
                 'id_users' => $id,
