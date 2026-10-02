@@ -412,13 +412,16 @@ concurrent schedule or a production account write.
 The classic `admins/store` path accepts only POST with CSRF and requires the
 actor's current stored `users.add` permission. It creates a new Admin only:
 the caller cannot select an existing shared-table user with an ID or choose
-the new account's role. The actor row is locked through the atomic user and
-settings write, and a failed write leaves neither row behind. The isolated
+the new account's role. The actor and its current role row are locked through
+the atomic user and settings write, so a concurrent role-permission change is
+ordered before or after the create decision. A failed write leaves neither row
+behind. The isolated
 `AdminsStoreHttpTest` checks methods and aliases, sequential demotion,
 create-only IDs, CSRF, normal creation, and a downstream settings failure
-with synthetic data. A concurrent edit to a role's permission bits is not
-serialized by the actor-user lock; these tests do not prove every concurrent
-schedule or a production account write.
+with synthetic data. A coordinated two-connection test verifies that a
+concurrent role-bit revocation blocks the create decision and leaves no user
+behind. The tests do not prove every concurrent schedule or a production
+account write.
 
 The classic `providers/update` path accepts only POST with CSRF and requires
 the actor's current stored `users.edit` permission. It must update an existing

@@ -205,13 +205,24 @@ class Admins extends EA_Controller
             }
 
             $locked_actor = $this->db->query(
-                'SELECT `id` FROM `' . $this->db->dbprefix('users') . '` WHERE `id` = ? FOR UPDATE',
+                'SELECT `id_roles` FROM `' . $this->db->dbprefix('users') . '` WHERE `id` = ? FOR UPDATE',
                 [$user_id],
             );
             if ($locked_actor === false) {
                 throw new RuntimeException('Could not lock admin create actor.');
             }
-            if (!$locked_actor->row_array() || !$this->hasCurrentAddPermission($user_id)) {
+            $actor_row = $locked_actor->row_array();
+            $locked_role = $actor_row
+                ? $this->db->query(
+                    'SELECT `users` FROM `' . $this->db->dbprefix('roles') . '` WHERE `id` = ? FOR UPDATE',
+                    [(int) $actor_row['id_roles']],
+                )
+                : null;
+            if ($locked_role === false) {
+                throw new RuntimeException('Could not lock admin create role.');
+            }
+            $role_row = $locked_role?->row_array();
+            if (!$actor_row || !$role_row || !((int) $role_row['users'] & PRIV_ADD)) {
                 if ($owns_transaction) {
                     $this->db->trans_rollback();
                     $owns_transaction = false;
