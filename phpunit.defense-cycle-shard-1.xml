@@ -12,6 +12,7 @@
             <file>./tests/Integration/Controllers/ProvidersStoreHttpTest.php</file>
             <file>./tests/Integration/Controllers/AdminsStoreHttpTest.php</file>
             <file>./tests/Integration/Controllers/AdminsUpdateHttpTest.php</file>
+            <file>./tests/Integration/Controllers/AdminsDestroyHttpTest.php</file>
             <file>./tests/Integration/Controllers/CustomersApiHttpWriteTest.php</file>
             <file>./tests/Integration/Controllers/ServicesApiHttpWriteTest.php</file>
             <file>./tests/Integration/Controllers/UnavailabilitiesApiHttpWriteTest.php</file>

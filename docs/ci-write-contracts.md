@@ -561,6 +561,13 @@ gespeicherte `users.edit`-Recht des Actors und der Admin-Typ des Ziels werden
 unter derselben Transaktion geprüft, bevor User oder Settings verändert werden;
 eine abgelehnte Anfrage hinterlässt keine Teiländerung.
 
+Der klassische `admins/destroy`-Pfad verlangt POST, CSRF und ein aktuell
+gespeichertes `users.delete`-Recht. Er bindet Actor und positive Admin-Ziel-ID
+unter Transaktionssperren, zuerst in derselben globalen Admin-Reihenfolge wie
+das Löschmodell, bevor dieses den letzten Administrator schützt und löscht.
+Ungültige oder rollenfremde Ziele werden ohne Mutation abgewiesen;
+ein Datenbankfehler gibt keine interne Fehlermeldung an den Client weiter.
+
 Die isolierten Controller-Regressionen prüfen `store`, `update` und `destroy`
 beider Controller mit synthetischen DTO- und Modell-Doubles sowie die
 Redirect-Argumente der beiden Löschaliase. Sie belegen keine echte HTTP-Kette,

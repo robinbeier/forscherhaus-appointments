@@ -271,6 +271,14 @@ its final permission and target-type checks; its model save remains in the same
 transaction. These local checks do not establish a production staff-account
 mutation or every concurrent role-change schedule.
 
+The classic Admin deletion route is covered separately by
+`AdminsDestroyHttpTest`. Its fresh synthetic HTTP/DB cases check POST and direct
+route methods, CSRF, current stored delete permission after role demotion,
+positive Admin target IDs, rejection of other roles without mutation, model
+failure without internal error disclosure, and authorized deletion. The
+existing model/API-v1 tests retain the last-Admin and concurrent deletion
+evidence. These local tests do not prove a production staff-account deletion.
+
 ## Classic service-category controller boundary
 
 `ServiceCategoriesLegacyHttpTest` covers the session-backed `Service_categories`
