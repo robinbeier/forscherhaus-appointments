@@ -454,25 +454,103 @@ class Admins extends EA_Controller
      */
     public function destroy(): void
     {
+        $owns_transaction = false;
+        $db_debug = $this->db->db_debug;
+        $this->db->db_debug = false;
+
         try {
-            if (cannot('delete', PRIV_USERS)) {
-                abort(403, 'Forbidden');
-            }
             if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
                 abort(405, 'Method Not Allowed', ['Allow: POST']);
                 return;
             }
 
+            $user_id = (int) session('user_id');
+            if (!$user_id || !$this->hasCurrentDeletePermission($user_id)) {
+                abort(403, 'Forbidden');
+                return;
+            }
+
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityIdRequestDto('admin_id');
-            $admin_id = $request_dto->id;
+            $admin_id = filter_var($request_dto->id, FILTER_VALIDATE_INT, [
+                'options' => ['min_range' => 1],
+            ]);
+            if ($admin_id === false) {
+                abort(400, 'Invalid admin deletion target');
+                return;
+            }
+
+            $owns_transaction = !$this->db->trans_active();
+            if ($owns_transaction && !$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start admin deletion transaction.');
+            }
+
+            // Lock the global admin set and a possibly demoted actor in one
+            // numeric order. Provider maintenance uses the same user order;
+            // acquiring a demoted actor after the admin set would invert it.
+            $admin_role_id = $this->admins_model->get_admin_role_id();
+            $locked_admins = $this->db->query(
+                'SELECT `id`, `id_roles` FROM `' .
+                    $this->db->dbprefix('users') .
+                    '` WHERE (`id_roles` = ? OR `id` = ?) ORDER BY `id` ASC FOR UPDATE',
+                [$admin_role_id, $user_id],
+            );
+            if ($locked_admins === false) {
+                throw new RuntimeException('Could not lock admin deletion targets.');
+            }
+            $admins_by_id = [];
+            foreach ($locked_admins->result_array() as $row) {
+                $admins_by_id[(int) $row['id']] = $row;
+            }
+
+            $actor = $admins_by_id[$user_id] ?? null;
+            $locked_role = $actor
+                ? $this->db->query(
+                    'SELECT `users` FROM `' . $this->db->dbprefix('roles') . '` WHERE `id` = ? FOR UPDATE',
+                    [(int) $actor['id_roles']],
+                )
+                : null;
+            if ($locked_role === false) {
+                throw new RuntimeException('Could not lock admin deletion role.');
+            }
+            $role = $locked_role?->row_array();
+            if (!$actor || !$role || !((int) $role['users'] & PRIV_DELETE)) {
+                if ($owns_transaction) {
+                    $this->db->trans_rollback();
+                    $owns_transaction = false;
+                }
+                abort(403, 'Forbidden');
+                return;
+            }
+
+            if (!isset($admins_by_id[$admin_id]) || (int) $admins_by_id[$admin_id]['id_roles'] !== $admin_role_id) {
+                if ($owns_transaction) {
+                    $this->db->trans_rollback();
+                    $owns_transaction = false;
+                }
+                abort(400, 'Invalid admin deletion target');
+                return;
+            }
 
             $this->admins_model->delete($admin_id);
+
+            if (!$this->db->trans_status()) {
+                throw new RuntimeException('Could not complete admin deletion transaction.');
+            }
+            if ($owns_transaction && !$this->db->trans_commit()) {
+                throw new RuntimeException('Could not commit admin deletion transaction.');
+            }
+            $owns_transaction = false;
 
             json_response([
                 'success' => true,
             ]);
         } catch (Throwable $e) {
-            json_exception($e);
+            if ($owns_transaction) {
+                $this->db->trans_rollback();
+            }
+            json_exception(new RuntimeException('Could not delete admin.', 0, $e));
+        } finally {
+            $this->db->db_debug = $db_debug;
         }
     }
 
@@ -489,6 +567,15 @@ class Admins extends EA_Controller
     {
         try {
             return can('edit', PRIV_USERS, $user_id);
+        } catch (InvalidArgumentException $e) {
+            return false;
+        }
+    }
+
+    private function hasCurrentDeletePermission(int $user_id): bool
+    {
+        try {
+            return can('delete', PRIV_USERS, $user_id);
         } catch (InvalidArgumentException $e) {
             return false;
         }

@@ -133,8 +133,9 @@ final class StaffPostGuardTest extends TestCase
         return [
             // Admins::update now performs actor/target/role locking and current-user
             // authority checks; its real HTTP/DB contract is covered by AdminsUpdateHttpTest
-            // instead of this pre-transaction source probe.
-            ['Admins', 'destroy'],
+            // instead of this pre-transaction source probe. Admins::destroy uses
+            // the same current-authority transaction boundary and is covered by
+            // AdminsDestroyHttpTest.
             ['Secretaries', 'store'],
             ['Secretaries', 'update'],
             ['Secretaries', 'destroy'],
