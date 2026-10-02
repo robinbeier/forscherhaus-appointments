@@ -193,13 +193,38 @@ class Providers extends EA_Controller
      */
     public function store(): void
     {
+        $owns_transaction = false;
+        $client_validation_error = null;
+        $db_debug = $this->db->db_debug;
+        $this->db->db_debug = false;
+
         try {
-            if (cannot('add', PRIV_USERS)) {
+            if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+                abort(405, 'Method Not Allowed', ['Allow: POST']);
+
+                return;
+            }
+
+            $user_id = (int) session('user_id');
+
+            if (!$user_id || !$this->hasCurrentAddPermission($user_id)) {
                 abort(403, 'Forbidden');
             }
 
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityPayloadRequestDto('provider');
             $provider = $request_dto->payload;
+
+            if (array_key_exists('id', $provider)) {
+                if ($provider['id'] !== '') {
+                    abort(400, 'Invalid provider create');
+                }
+
+                unset($provider['id']);
+            }
+
+            if (array_key_exists('id_roles', $provider)) {
+                abort(400, 'Invalid provider create');
+            }
 
             $this->providers_model->only($provider, $this->allowed_provider_fields);
 
@@ -213,16 +238,107 @@ class Providers extends EA_Controller
             $provider['class_size_default'] =
                 $class_size_default === '' || $class_size_default === null ? null : (int) $class_size_default;
 
-            $provider_id = $this->providers_model->save($provider);
+            $service_ids = [];
+            if (!is_array($provider['services'])) {
+                abort(400, 'Invalid provider services');
+            }
+            foreach ($provider['services'] as $service_id) {
+                $parsed = filter_var($service_id, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+                if ($parsed === false) {
+                    abort(400, 'Invalid provider services');
+                }
+                $service_ids[] = $parsed;
+            }
+            $service_ids = array_values(array_unique($service_ids));
+            sort($service_ids, SORT_NUMERIC);
+            $provider['services'] = $service_ids;
 
-            $provider = $this->providers_model->find($provider_id);
+            $owns_transaction = !$this->db->trans_active();
+            if ($owns_transaction && !$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start provider create transaction.');
+            }
+
+            try {
+                $locked_actor = $this->db->query(
+                    'SELECT `id` FROM `' . $this->db->dbprefix('users') . '` WHERE `id` = ? FOR UPDATE',
+                    [$user_id],
+                );
+                if ($locked_actor === false) {
+                    throw new RuntimeException('Could not lock provider create actor.');
+                }
+                if (!$locked_actor->row_array() || !$this->hasCurrentAddPermission($user_id)) {
+                    if ($owns_transaction) {
+                        $this->db->trans_rollback();
+                        $owns_transaction = false;
+                    }
+                    abort(403, 'Forbidden');
+                    return;
+                }
+
+                if ($service_ids !== []) {
+                    $placeholders = implode(', ', array_fill(0, count($service_ids), '?'));
+                    $locked_services = $this->db->query(
+                        'SELECT `id` FROM `' .
+                            $this->db->dbprefix('services') .
+                            '` WHERE `id` IN (' .
+                            $placeholders .
+                            ') ORDER BY `id` ASC FOR UPDATE',
+                        $service_ids,
+                    );
+                    if ($locked_services === false) {
+                        throw new RuntimeException('Could not lock provider services.');
+                    }
+                    $locked_ids = array_map('intval', array_column($locked_services->result_array(), 'id'));
+                    if (array_diff($service_ids, $locked_ids) !== []) {
+                        if ($owns_transaction) {
+                            $this->db->trans_rollback();
+                            $owns_transaction = false;
+                        }
+                        abort(400, 'Unknown provider service');
+                        return;
+                    }
+                }
+
+                // Only the model's input validation messages are safe to return to the caller.
+                // The later save revalidates, while write and infrastructure errors stay generic.
+                try {
+                    $this->providers_model->validate($provider);
+                } catch (InvalidArgumentException $e) {
+                    $client_validation_error = $e;
+                    throw $e;
+                }
+
+                $provider_id = $this->providers_model->save($provider);
+                if (!$this->db->trans_status()) {
+                    throw new RuntimeException('Could not complete provider create transaction.');
+                }
+            } catch (Throwable $e) {
+                throw new RuntimeException('Provider creation failed.', 0, $e);
+            }
+
+            if ($owns_transaction && !$this->db->trans_commit()) {
+                throw new RuntimeException('Could not commit provider create transaction.');
+            }
+            $owns_transaction = false;
 
             json_response([
                 'success' => true,
                 'id' => $provider_id,
             ]);
         } catch (Throwable $e) {
-            json_exception($e);
+            if ($owns_transaction) {
+                try {
+                    if (!$this->db->trans_rollback()) {
+                        log_message('error', 'Provider creation rollback could not be confirmed.');
+                    }
+                } catch (Throwable $rollback_error) {
+                    log_message('error', 'Provider creation rollback could not be confirmed.');
+                }
+            }
+
+            json_exception($client_validation_error ?? new RuntimeException('Provider creation failed.', 0, $e));
+        } finally {
+            $this->db->db_debug = $db_debug;
         }
     }
 
@@ -497,6 +613,15 @@ class Providers extends EA_Controller
             }
 
             json_exception($e);
+        }
+    }
+
+    private function hasCurrentAddPermission(int $user_id): bool
+    {
+        try {
+            return can('add', PRIV_USERS, $user_id);
+        } catch (InvalidArgumentException $e) {
+            return false;
         }
     }
 
