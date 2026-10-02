@@ -11,6 +11,7 @@
             <file>./tests/Integration/Controllers/ProvidersDestroyHttpTest.php</file>
             <file>./tests/Integration/Controllers/ProvidersStoreHttpTest.php</file>
             <file>./tests/Integration/Controllers/AdminsStoreHttpTest.php</file>
+            <file>./tests/Integration/Controllers/AdminsUpdateHttpTest.php</file>
             <file>./tests/Integration/Controllers/CustomersApiHttpWriteTest.php</file>
             <file>./tests/Integration/Controllers/CustomersApiHttpReadTest.php</file>
             <file>./tests/Integration/Controllers/CorsPolicyHttpTest.php</file>
