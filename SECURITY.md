@@ -396,6 +396,18 @@ user in the shared table, and a direct controller alias cannot change it under
 a different HTTP method. See the [Staff API PUT contract](docs/ci-write-contracts.md#staff-api-v1-put)
 for the bounded local evidence and its limits.
 
+The classic `providers/update` path accepts only POST with CSRF and requires
+the actor's current stored `users.edit` permission. It must update an existing
+Provider only: an omitted ID cannot create one, a shared-table ID of another
+role cannot become a Provider, and a request-supplied role cannot change the
+target's role. The actor and target user rows are locked in numeric ID order
+through the atomic user, setting, and service-association write. A concurrent
+edit to a role's permission bits is not serialized by these user-row locks.
+The isolated `ProvidersUpdateHttpTest` checks the method, sequential demotion,
+ID/type, role-field, CSRF, normal update, and downstream-failure boundaries
+with synthetic data; it does not prove every concurrent role-change schedule
+or a production account write.
+
 The product supports `services.attendants_number = 1`, enforced by
 [Services_model](application/models/Services_model.php). Other values are not
 supported product behavior; this application rule is not a claim of a database

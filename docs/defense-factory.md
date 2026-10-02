@@ -241,6 +241,18 @@ loopback HTTP on the isolated stack, including URL/body ID conflicts, direct
 controller aliases, authorization denials, and unchanged unrelated rows. The
 Backoffice controller regressions above do not cover that API boundary.
 
+## Classic Provider update boundary
+
+The separate classic Provider update path is covered by
+`ProvidersUpdateHttpTest` in the fresh synthetic HTTP/DB stack. It checks
+POST-only routing including the front-controller alias, CSRF, current stored
+actor permission after demotion, an existing Provider target, rejection of
+caller role changes and creation-through-update, an ordinary successful update,
+and rollback when a service association fails its database constraint. Owned
+rows and temporary role changes are restored or removed by the fixture. The
+API-v1 Provider write tests remain distinct. This local matrix does not prove
+concurrent demotion or a production staff-account mutation.
+
 ## Classic service-category controller boundary
 
 `ServiceCategoriesLegacyHttpTest` covers the session-backed `Service_categories`

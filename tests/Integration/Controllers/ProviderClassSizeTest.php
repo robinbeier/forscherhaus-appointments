@@ -103,6 +103,7 @@ final class ProviderClassSizeTest extends TestCase
             public function __construct() {}
         };
         $controller->load = $CI->load;
+        $controller->db = $CI->db;
         $controller->providers_model = $CI->providers_model;
         $controller->permissions = $CI->permissions;
         return $controller;
