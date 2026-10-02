@@ -751,9 +751,8 @@ class Calendar extends EA_Controller
                 'status',
             ]);
 
-            $required_permissions = empty($unavailability['id'])
-                ? $this->currentCalendarCan('add', PRIV_APPOINTMENTS)
-                : $this->currentCalendarCan('edit', PRIV_APPOINTMENTS);
+            $required_action = empty($unavailability['id']) ? 'add' : 'edit';
+            $required_permissions = $this->currentCalendarCan($required_action, PRIV_APPOINTMENTS);
 
             if (!$required_permissions) {
                 throw new RuntimeException('You do not have the required permissions for this task.');
@@ -775,7 +774,9 @@ class Calendar extends EA_Controller
             }
 
             try {
-                $this->lock_calendar_update_parents($stored_unavailability ?? [], $unavailability);
+                $this->lock_calendar_update_parents($stored_unavailability ?? [], $unavailability, [
+                    (int) session('user_id'),
+                ]);
 
                 if ($stored_unavailability !== null) {
                     $locked_unavailability = $this->lock_manual_unavailability((int) $unavailability['id']);
@@ -790,6 +791,10 @@ class Calendar extends EA_Controller
                     if (!$this->has_event_permissions((int) $locked_unavailability['id_users_provider'])) {
                         throw new RuntimeException('You do not have the required permissions for this task.', 403);
                     }
+                }
+
+                if (!$this->currentCalendarCan($required_action, PRIV_APPOINTMENTS)) {
+                    throw new RuntimeException('You do not have the required permissions for this task.', 403);
                 }
 
                 if (!$this->has_event_permissions($provider_id)) {
@@ -852,12 +857,13 @@ class Calendar extends EA_Controller
             }
 
             try {
-                $this->lock_calendar_update_parents($unavailability, $unavailability);
+                $this->lock_calendar_update_parents($unavailability, $unavailability, [(int) session('user_id')]);
 
                 $locked_unavailability = $this->lock_manual_unavailability($unavailability_id);
 
                 if (
                     (int) $locked_unavailability['id_users_provider'] !== (int) $unavailability['id_users_provider'] ||
+                    !$this->currentCalendarCan('delete', PRIV_APPOINTMENTS) ||
                     !$this->has_event_permissions((int) $locked_unavailability['id_users_provider'])
                 ) {
                     throw new RuntimeException('You do not have the required permissions for this task.', 403);
