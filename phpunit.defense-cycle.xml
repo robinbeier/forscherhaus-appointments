@@ -56,6 +56,7 @@
             <file>./tests/Integration/Controllers/BackofficeWriteHttpTest.php</file>
             <file>./tests/Integration/Controllers/BackofficeHttpContractTest.php</file>
             <file>./tests/Integration/Controllers/CalendarCustomerAccessHttpTest.php</file>
+            <file>./tests/Integration/Controllers/BookingCalendarAmbiguousHashHttpTest.php</file>
             <file>./tests/Integration/Controllers/CalendarMutationMethodHttpTest.php</file>
             <file>./tests/Integration/SessionLifecycleTest.php</file>
             <file>./tests/Integration/OrdinaryLiveFixtureTest.php</file>

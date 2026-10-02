@@ -44,6 +44,10 @@ Authority einer anderen Sitzung für denselben Termin nicht ersetzen.
 `RescheduleMethodHttpTest` prüft diese Grenze mit zwei getrennten Sitzungen,
 eigenem Termin, Authority-Datensatz und Cache-Dateien. Der gültige GET bleibt
 der positive Kontrollpfad.
+Ein Hash mit mehreren gespeicherten Terminen darf weder Kundendaten auswählen
+noch eine Umbuchungsberechtigung ausgeben; `BookingCalendarAmbiguousHashHttpTest`
+prüft diese Ablehnung sowie beide authentifizierten Kalender-Hash-Routen mit
+eigenen isolierten Datensätzen und einem eindeutigen positiven Kontrollfall.
 
 ## Öffentliche Datenschutz-Löschung
 

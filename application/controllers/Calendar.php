@@ -243,6 +243,12 @@ class Calendar extends EA_Controller
         if (!empty($appointment_hash)) {
             $occurrences = $this->appointments_model->get(['hash' => $appointment_hash]);
 
+            if (count($occurrences) > 1) {
+                abort(404, 'Not Found');
+
+                return;
+            }
+
             if ($appointment_hash !== '' && !empty($occurrences)) {
                 $edit_appointment = $occurrences[0];
 
