@@ -31,6 +31,7 @@
             <file>./tests/Integration/Controllers/ServiceCategoriesApiPostWriteFailureTest.php</file>
             <file>./tests/Integration/Controllers/ServiceCategoriesLegacyHttpTest.php</file>
             <file>./tests/Integration/Controllers/ServicesLegacyWriteHttpTest.php</file>
+            <file>./tests/Integration/Controllers/CustomersLegacyWriteRoleHttpTest.php</file>
             <file>./tests/Integration/Controllers/ApiSettingsLegacyHttpTest.php</file>
             <file>./tests/Integration/Controllers/IntegrationsLegacyHttpTest.php</file>
             <file>./tests/Integration/Controllers/HealthzHttpBoundaryTest.php</file>

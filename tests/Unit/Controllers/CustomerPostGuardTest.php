@@ -34,15 +34,21 @@ final class CustomerPostGuardTest extends TestCase
     public function testAuthorizedPostPreservesControllerHandoff(string $action, string $verb): void
     {
         $result = $this->probe($action, 'authorized', 'POST');
-        $expected = ["auth:$verb:customers"];
         if ($action === 'store') {
-            $expected = array_merge($expected, ['session:role_slug', 'dto:customer']);
-        } else {
-            $expected = array_merge($expected, [
+            $expected = [
                 'session:user_id',
+                "auth:$verb:customers:17",
+                'users:value:17:id_roles',
+                'roles:value:3:slug',
+                'dto:customer',
+            ];
+        } else {
+            $expected = [
+                'session:user_id',
+                "auth:$verb:customers:17",
                 $action === 'update' ? 'dto:customer' : 'dto:customer_id',
                 'access:17:41',
-            ]);
+            ];
         }
         $expected = array_merge(
             $expected,
@@ -59,7 +65,7 @@ final class CustomerPostGuardTest extends TestCase
     {
         foreach (['GET', 'HEAD', 'PUT', 'DELETE'] as $method) {
             $result = $this->probe($action, 'authorized', $method);
-            self::assertSame(["auth:$verb:customers", 'abort:405'], $result['events']);
+            self::assertSame(['session:user_id', "auth:$verb:customers:17", 'abort:405'], $result['events']);
             self::assertSame(405, $result['status']);
             self::assertSame(['Allow' => 'POST'], $result['headers']);
             self::assertSame([], $result['saved']);
@@ -71,7 +77,7 @@ final class CustomerPostGuardTest extends TestCase
     {
         foreach (['GET', 'POST'] as $method) {
             $result = $this->probe($action, 'forbidden', $method);
-            self::assertSame(["auth:$verb:customers", 'abort:403'], $result['events']);
+            self::assertSame(['session:user_id', "auth:$verb:customers:17", 'abort:403'], $result['events']);
             self::assertSame(403, $result['status']);
             self::assertSame([], $result['saved']);
         }
@@ -79,7 +85,13 @@ final class CustomerPostGuardTest extends TestCase
 
     public function testStorePreservesNonAdminVisibilityRestriction(): void
     {
-        $prefix = ['auth:add:customers', 'session:role_slug', 'setting:limit_customer_visibility'];
+        $prefix = [
+            'session:user_id',
+            'auth:add:customers:17',
+            'users:value:17:id_roles',
+            'roles:value:3:slug',
+            'setting:limit_customer_visibility',
+        ];
         $denied = $this->probe('store', 'nonadmin-limited', 'POST');
         self::assertSame(array_merge($prefix, ['abort:403']), $denied['events']);
         self::assertSame(403, $denied['status']);
@@ -95,7 +107,14 @@ final class CustomerPostGuardTest extends TestCase
     {
         $result = $this->probe('store', 'existing-id', 'POST');
         self::assertSame(
-            ['auth:add:customers', 'session:role_slug', 'dto:customer', 'json_response'],
+            [
+                'session:user_id',
+                'auth:add:customers:17',
+                'users:value:17:id_roles',
+                'roles:value:3:slug',
+                'dto:customer',
+                'json_response',
+            ],
             $result['events'],
         );
         self::assertSame(403, $result['status']);
@@ -112,8 +131,8 @@ final class CustomerPostGuardTest extends TestCase
             $result = $this->probe($action, 'noaccess', 'POST');
             self::assertSame(
                 [
-                    "auth:$verb:customers",
                     'session:user_id',
+                    "auth:$verb:customers:17",
                     $action === 'update' ? 'dto:customer' : 'dto:customer_id',
                     'access:17:41',
                     'abort:403',

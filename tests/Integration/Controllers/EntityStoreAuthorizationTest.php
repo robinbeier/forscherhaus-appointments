@@ -64,6 +64,8 @@ final class EntityStoreAuthorizationTest extends TestCase
         );
         get_instance()->load->model('customers_model');
         get_instance()->load->model('services_model');
+        get_instance()->load->model('users_model');
+        get_instance()->load->model('roles_model');
         get_instance()->load->library('backoffice_request_dto_factory');
         $this->fixtures->setSetting('limit_customer_visibility', '0');
         get_instance()->load->library('permissions');
@@ -317,6 +319,8 @@ final class EntityStoreAuthorizationTest extends TestCase
         $controller->load = $CI->load;
         $controller->customers_model = $CI->customers_model;
         $controller->permissions = $CI->permissions;
+        $controller->users_model = $CI->users_model;
+        $controller->roles_model = $CI->roles_model;
 
         return $controller;
     }
