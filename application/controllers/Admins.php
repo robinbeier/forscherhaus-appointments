@@ -163,17 +163,33 @@ class Admins extends EA_Controller
      */
     public function store(): void
     {
+        $owns_transaction = false;
+        $client_validation_error = null;
+        $db_debug = $this->db->db_debug;
+        $this->db->db_debug = false;
+
         try {
-            if (cannot('add', PRIV_USERS)) {
-                abort(403, 'Forbidden');
-            }
             if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
                 abort(405, 'Method Not Allowed', ['Allow: POST']);
                 return;
             }
 
+            $user_id = (int) session('user_id');
+
+            if (!$user_id || !$this->hasCurrentAddPermission($user_id)) {
+                abort(403, 'Forbidden');
+            }
+
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityPayloadRequestDto('admin');
             $admin = $request_dto->payload;
+
+            if (array_key_exists('id', $admin)) {
+                if ($admin['id'] !== '') {
+                    abort(400, 'Invalid admin create');
+                }
+
+                unset($admin['id']);
+            }
 
             $this->admins_model->only($admin, $this->allowed_admin_fields);
 
@@ -183,16 +199,79 @@ class Admins extends EA_Controller
 
             $this->admins_model->optional($admin['settings'], $this->optional_admin_setting_fields);
 
-            $admin_id = $this->admins_model->save($admin);
+            $owns_transaction = !$this->db->trans_active();
+            if ($owns_transaction && !$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start admin create transaction.');
+            }
 
-            $admin = $this->admins_model->find($admin_id);
+            $locked_actor = $this->db->query(
+                'SELECT `id` FROM `' . $this->db->dbprefix('users') . '` WHERE `id` = ? FOR UPDATE',
+                [$user_id],
+            );
+            if ($locked_actor === false) {
+                throw new RuntimeException('Could not lock admin create actor.');
+            }
+            if (!$locked_actor->row_array() || !$this->hasCurrentAddPermission($user_id)) {
+                if ($owns_transaction) {
+                    $this->db->trans_rollback();
+                    $owns_transaction = false;
+                }
+                abort(403, 'Forbidden');
+                return;
+            }
+
+            // Model input validation is safe to report; infrastructure and write errors are not.
+            try {
+                $this->admins_model->validate($admin);
+            } catch (InvalidArgumentException $e) {
+                $client_validation_error = $e;
+                throw $e;
+            }
+
+            try {
+                $admin_id = $this->admins_model->save($admin);
+            } catch (InvalidArgumentException $e) {
+                // Save validates again; a concurrent duplicate is still safe to explain.
+                if (
+                    in_array(
+                        $e->getMessage(),
+                        [
+                            'The provided username is already in use, please use a different one.',
+                            'The provided email address is already in use, please use a different one.',
+                        ],
+                        true,
+                    )
+                ) {
+                    $client_validation_error = $e;
+                }
+                throw $e;
+            }
+            if (!$this->db->trans_status()) {
+                throw new RuntimeException('Could not complete admin create transaction.');
+            }
+            if ($owns_transaction && !$this->db->trans_commit()) {
+                throw new RuntimeException('Could not commit admin create transaction.');
+            }
+            $owns_transaction = false;
 
             json_response([
                 'success' => true,
                 'id' => $admin_id,
             ]);
         } catch (Throwable $e) {
-            json_exception($e);
+            if ($owns_transaction) {
+                try {
+                    if (!$this->db->trans_rollback()) {
+                        log_message('error', 'Admin creation rollback could not be confirmed.');
+                    }
+                } catch (Throwable $rollback_error) {
+                    log_message('error', 'Admin creation rollback could not be confirmed.');
+                }
+            }
+
+            json_exception($client_validation_error ?? new RuntimeException('Admin creation failed.', 0, $e));
+        } finally {
+            $this->db->db_debug = $db_debug;
         }
     }
 
@@ -298,6 +377,15 @@ class Admins extends EA_Controller
             ]);
         } catch (Throwable $e) {
             json_exception($e);
+        }
+    }
+
+    private function hasCurrentAddPermission(int $user_id): bool
+    {
+        try {
+            return can('add', PRIV_USERS, $user_id);
+        } catch (InvalidArgumentException $e) {
+            return false;
         }
     }
 

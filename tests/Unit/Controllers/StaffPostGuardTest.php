@@ -131,7 +131,8 @@ final class StaffPostGuardTest extends TestCase
     public static function actionProvider(): array
     {
         return [
-            ['Admins', 'store'],
+            // Admin creation has a transactional actor lock; its real HTTP/DB contract
+            // is covered by AdminsStoreHttpTest instead of this source probe.
             ['Admins', 'update'],
             ['Admins', 'destroy'],
             ['Secretaries', 'store'],
