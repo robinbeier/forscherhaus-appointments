@@ -381,13 +381,22 @@ aliases. The authenticated session must identify a provider whose role is still
 current in the database; request-supplied provider IDs cannot select another
 provider's records. These two exports must not persist their rendered HTML to
 fixed debug-dump files, even when the general PDF debug flag is enabled. Bundled
-Nginx denies the two historical dump URLs because storage from an older release
-may be copied forward. For other web servers, verify their storage-deny rule
+Nginx denies the whole storage tree, including the two historical dump URLs,
+because storage from an older release may be copied forward. For other web
+servers, verify their storage-deny rule
 and the absence of those files before release. The isolated
 `ProviderPdfExportHttpTest` covers two synthetic providers and the
 controller-to-renderer HTML handoff. The separate provider UI smoke checks real
 PDF rendering with one reserved synthetic identity; it does not prove
 cross-provider isolation or stale-role denial in production.
+
+The local Docker Nginx mounts the repository as its document root. It must
+not serve dotfiles, internal source/data directories, or arbitrary files at
+repository root, and only `index.php` may be executed through PHP-FPM.
+Public assets, the health file, and application routing remain available.
+`scripts/ci/nginx_private_paths_smoke.sh` checks this boundary with only
+synthetic files in a separate loopback-bound container; it does not verify
+production Apache or other published local ports.
 
 Across write paths, establish server-side authority before mutation, reject
 without partial changes, and keep dependent effects consistent with commit

@@ -19,6 +19,15 @@ docker compose -p fh-hotfix up -d
 Without a unique project name, services can accidentally mix mounts across
 worktrees (for example `nginx` from one path and `php-fpm`/`mysql` from another).
 
+The development Nginx bind-mounts the whole checkout. Its configuration
+blocks direct HTTP access to dotfiles, internal source and storage directories,
+and arbitrary root files; only the application front controller is executable
+through PHP-FPM. Public assets, the health file, and normal application routes
+remain available. The isolated Nginx path smoke uses a synthetic document root
+and loopback-only port, so it never requests local credentials or imported
+production data. This rule is specific to the development Nginx container;
+production Apache has its own sensitive-path checks.
+
 ## PHP extension scope
 
 The development/test image omits the unused PHP extensions `odbc` and `soap`,

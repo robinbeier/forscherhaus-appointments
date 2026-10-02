@@ -231,6 +231,7 @@ jobs:
               - 'scripts/ci/lib/DashboardSummaryBrowserCheck.php'
               - 'scripts/ci/lib/CheckSelection.php'
               - 'scripts/ci/lib/local_full_gate_selection.sh'
+              - 'scripts/ci/nginx_private_paths_smoke.sh'
               - 'scripts/ci/pre_pr_full.sh'
               - 'scripts/ci/select_local_full_gate.php'
               - 'scripts/release-gate/**'
@@ -1136,6 +1137,12 @@ jobs:
           cat storage/logs/ci/deep-runtime-suite/php-server.log
           exit 1
           ROB557_GATE_COMMAND
+      - name: Run nginx private-path smoke
+        if: needs.changes.outputs.integration_smoke == 'true'
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label deep-runtime-suite-nginx-private-paths -- bash --noprofile --norc -e <<'ROB699_GATE_COMMAND'
+          bash scripts/ci/nginx_private_paths_smoke.sh
+          ROB699_GATE_COMMAND
       - name: Resolve system Chrome executable
         if: needs.changes.outputs.integration_smoke == 'true'
         run: |
