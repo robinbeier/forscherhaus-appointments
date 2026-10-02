@@ -297,6 +297,12 @@ Calendar mutations recheck the persisted role and action permission, including
 the stored and requested provider, so a stale session role cannot retain write
 authority after reassignment. Appointment create, update, and delete hold the
 actor and affected parent rows while rechecking authority before mutation.
+Manual unavailability save and delete also recheck the stored appointment
+action after locking the actor, provider, and existing manual event. A request
+waiting on that event must reject a permission revocation committed before it
+resumes. `CalendarUnavailabilityPermissionRaceHttpTest` checks this with own
+synthetic HTTP and database data; it does not establish a global lock protocol
+for independent edits to role permission bits or a production write result.
 Both the initial customer list and the edit
 dialog use UI-specific read projections; write allowlists do not determine the
 fields sent to the browser. `CalendarCustomerAccessHttpTest` checks these
