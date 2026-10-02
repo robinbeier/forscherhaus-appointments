@@ -159,6 +159,16 @@ authenticated denial does not change the session destination.
 synthetic HTTP/database stack; it does not prove a live production role-change
 race or activate Google Analytics in production.
 
+The classic Integrations page (`integrations` and its direct `index` alias)
+accepts GET only and requires the actor's current stored `system_settings`
+view permission. Its displayed role and privileges follow that same stored
+role. An authenticated denial or unsupported method must not change the
+session destination; anonymous GET deep links retain the Integrations return
+target. The page lists integration destinations but must not expose stored API
+tokens or LDAP credentials. `IntegrationsLegacyHttpTest` checks these
+boundaries in an isolated synthetic HTTP/database stack; it does not prove a
+live production role-change race or exercise integration configuration writes.
+
 The classic `update` page and its direct `index` alias require the actor's
 current stored `system_settings` edit permission before the migration library
 is initialized. Anonymous and demoted sessions must not reach migration work;

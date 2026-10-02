@@ -33,6 +33,7 @@ class Integrations extends EA_Controller
         $this->load->model('providers_model');
         $this->load->model('roles_model');
         $this->load->model('settings_model');
+        $this->load->model('users_model');
 
         $this->load->library('accounts');
         $this->load->library('timezones');
@@ -43,21 +44,29 @@ class Integrations extends EA_Controller
      */
     public function index(): void
     {
-        session(['dest_url' => site_url('about')]);
-
-        $user_id = session('user_id');
-
-        if (cannot('view', PRIV_SYSTEM_SETTINGS)) {
-            if ($user_id) {
-                abort(403, 'Forbidden');
-            }
-
-            redirect('login');
-
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'GET') {
+            abort(405, 'Method Not Allowed', ['Allow: GET']);
             return;
         }
 
-        $role_slug = session('role_slug');
+        $user_id = (int) session('user_id');
+
+        if (!$user_id) {
+            session(['dest_url' => site_url('integrations')]);
+            redirect('login');
+            return;
+        }
+
+        if (cannot('view', PRIV_SYSTEM_SETTINGS, $user_id)) {
+            abort(403, 'Forbidden');
+            return;
+        }
+
+        session(['dest_url' => site_url('integrations')]);
+
+        $role_slug = $this->roles_model->value($this->users_model->value($user_id, 'id_roles'), 'slug');
+
+        script_vars(['role_slug' => $role_slug]);
 
         html_vars([
             'page_title' => lang('integrations'),
