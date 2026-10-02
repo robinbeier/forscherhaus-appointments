@@ -242,6 +242,13 @@ only on GET. A different HTTP method must not rotate an existing authority or
 create a customer privacy token, including through a direct controller alias.
 The isolated two-session HTTP regression establishes this boundary with own
 synthetic records; it does not establish possession or secrecy of real links.
+Before selecting a customer or issuing reschedule authority, the public page
+must resolve the hash to exactly one appointment. An ambiguous historical hash
+gets the same generic not-found response as a missing hash. The authenticated
+calendar hash routes likewise reject duplicate matches before opening an edit
+dialog. `BookingCalendarAmbiguousHashHttpTest` verifies both boundaries with
+isolated synthetic records; it does not establish whether production contains
+duplicate hashes.
 See the [reschedule authority contract](docs/security/public-reschedule-authority.md).
 
 Anonymous booking-confirmation and ICS downloads require a nonempty stored

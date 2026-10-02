@@ -198,13 +198,10 @@ class Booking extends EA_Controller
         $appointment_hash = html_vars('appointment_hash');
 
         if (!empty($appointment_hash)) {
-            // Load the appointments data and enable the manage mode of the booking page.
-
-            $manage_mode = true;
-
             $results = $this->appointments_model->get(['hash' => $appointment_hash]);
 
-            if (empty($results)) {
+            // A shared historical hash cannot select a customer or issue manage authority.
+            if (count($results) !== 1) {
                 html_vars([
                     'show_message' => true,
                     'page_title' => lang('page_title') . ' ' . $company_name,
@@ -220,6 +217,8 @@ class Booking extends EA_Controller
 
                 return;
             }
+
+            $manage_mode = true;
 
             $this->assertNotProviderUiSmokeBookingTarget(
                 (int) $results[0]['id_users_provider'],
