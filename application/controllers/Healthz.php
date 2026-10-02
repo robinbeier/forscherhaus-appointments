@@ -33,6 +33,19 @@ class Healthz extends EA_Controller
      */
     public function index(): void
     {
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'GET') {
+            json_response(
+                [
+                    'status' => 'error',
+                    'message' => 'Method Not Allowed.',
+                ],
+                405,
+                [...$this->cacheControlHeaders(), 'Allow: GET'],
+            );
+
+            return;
+        }
+
         $expectedToken = trim((string) env('HEALTHZ_TOKEN', ''));
 
         if ($expectedToken === '') {
