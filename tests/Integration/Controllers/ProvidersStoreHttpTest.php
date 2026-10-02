@@ -81,6 +81,37 @@ final class ProvidersStoreHttpTest extends TestCase
         self::assertSame([$this->fixture->serviceId], $state['services']);
     }
 
+    public function testSafeProviderValidationMessagesRemainActionableWithoutMutation(): void
+    {
+        $admin = $this->login($this->server->client());
+        $existingUser = $this->fixture->row('users', $this->fixture->providerId);
+        $existingSettings = get_instance()
+            ->db->get_where('user_settings', ['id_users' => $this->fixture->providerId])
+            ->row_array();
+        self::assertNotEmpty($existingUser);
+        self::assertNotEmpty($existingSettings);
+
+        $duplicateUsername = $this->fixture->providerWritePayload('store-duplicate-username');
+        $duplicateUsername['settings']['username'] = $existingSettings['username'];
+        $duplicateEmail = $this->fixture->providerWritePayload('store-duplicate-email');
+        $duplicateEmail['email'] = $existingUser['email'];
+
+        foreach (
+            [
+                [$duplicateUsername, 'The provided username is already in use'],
+                [$duplicateEmail, 'The provided email address is already in use'],
+            ]
+            as [$payload, $message]
+        ) {
+            $before = $this->fixture->providerWriteSnapshot();
+            $response = $admin->post('providers/store', ['provider' => $this->formPayload($payload)]);
+
+            self::assertSame(500, $response->statusCode, $response->body);
+            self::assertStringContainsString($message, $response->body);
+            self::assertSame($before, $this->fixture->providerWriteSnapshot());
+        }
+    }
+
     public function testStoredRoleDemotionRejectsValidCsrfStoreWithoutMutation(): void
     {
         $admin = $this->login($this->server->client());

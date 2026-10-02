@@ -194,6 +194,7 @@ class Providers extends EA_Controller
     public function store(): void
     {
         $owns_transaction = false;
+        $client_validation_error = null;
         $db_debug = $this->db->db_debug;
         $this->db->db_debug = false;
 
@@ -298,6 +299,15 @@ class Providers extends EA_Controller
                     }
                 }
 
+                // Only the model's input validation messages are safe to return to the caller.
+                // The later save revalidates, while write and infrastructure errors stay generic.
+                try {
+                    $this->providers_model->validate($provider);
+                } catch (InvalidArgumentException $e) {
+                    $client_validation_error = $e;
+                    throw $e;
+                }
+
                 $provider_id = $this->providers_model->save($provider);
                 if (!$this->db->trans_status()) {
                     throw new RuntimeException('Could not complete provider create transaction.');
@@ -326,7 +336,7 @@ class Providers extends EA_Controller
                 }
             }
 
-            json_exception(new RuntimeException('Provider creation failed.', 0, $e));
+            json_exception($client_validation_error ?? new RuntimeException('Provider creation failed.', 0, $e));
         } finally {
             $this->db->db_debug = $db_debug;
         }
