@@ -217,6 +217,10 @@ class Providers_api_v1 extends EA_Controller
             $this->providers_model->delete($id);
 
             response('', 204);
+        } catch (InvalidArgumentException $e) {
+            // A provider can change roles after the initial read. The model's
+            // conditional delete then has no target, matching the 404 contract.
+            response('', 404);
         } catch (Throwable $e) {
             json_exception($e);
         }

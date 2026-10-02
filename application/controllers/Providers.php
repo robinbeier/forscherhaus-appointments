@@ -395,23 +395,118 @@ class Providers extends EA_Controller
      */
     public function destroy(): void
     {
+        $owns_transaction = false;
+
         try {
-            if (cannot('delete', PRIV_USERS)) {
+            if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+                abort(405, 'Method Not Allowed', ['Allow: POST']);
+
+                return;
+            }
+
+            $user_id = (int) session('user_id');
+
+            if (!$user_id || !$this->hasCurrentDeletePermission($user_id)) {
                 abort(403, 'Forbidden');
             }
 
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityIdRequestDto('provider_id');
-            $provider_id = $request_dto->id;
+            $provider_id = filter_var($request_dto->id, FILTER_VALIDATE_INT, [
+                'options' => ['min_range' => 1],
+            ]);
 
-            $provider = $this->providers_model->find($provider_id);
+            if ($provider_id === false) {
+                abort(400, 'Invalid provider ID');
+            }
+
+            $owns_transaction = !$this->db->trans_active();
+
+            if ($owns_transaction && !$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start provider delete transaction.');
+            }
+
+            // Lock actor and target in the shared numeric user order.
+            $user_ids = array_values(array_unique([$user_id, $provider_id]));
+            sort($user_ids, SORT_NUMERIC);
+            $placeholders = implode(', ', array_fill(0, count($user_ids), '?'));
+            $db_debug = $this->db->db_debug;
+            $this->db->db_debug = false;
+            try {
+                $locked_users = $this->db->query(
+                    'SELECT `id`, `id_roles` FROM `' .
+                        $this->db->dbprefix('users') .
+                        '` WHERE `id` IN (' .
+                        $placeholders .
+                        ') ORDER BY `id` ASC FOR UPDATE',
+                    $user_ids,
+                );
+            } catch (Throwable $e) {
+                throw new RuntimeException('Could not lock provider delete users.', 0, $e);
+            } finally {
+                $this->db->db_debug = $db_debug;
+            }
+
+            if ($locked_users === false) {
+                throw new RuntimeException('Could not lock provider delete users.');
+            }
+
+            $users_by_id = [];
+            foreach ($locked_users->result_array() as $row) {
+                $users_by_id[(int) $row['id']] = $row;
+            }
+
+            if (!isset($users_by_id[$user_id]) || !$this->hasCurrentDeletePermission($user_id)) {
+                if ($owns_transaction) {
+                    $this->db->trans_rollback();
+                    $owns_transaction = false;
+                }
+
+                abort(403, 'Forbidden');
+            }
+
+            if (
+                !isset($users_by_id[$provider_id]) ||
+                (int) $users_by_id[$provider_id]['id_roles'] !== $this->providers_model->get_provider_role_id()
+            ) {
+                if ($owns_transaction) {
+                    $this->db->trans_rollback();
+                    $owns_transaction = false;
+                }
+
+                abort(404, 'Provider not found');
+            }
 
             $this->providers_model->delete($provider_id);
+
+            if (!$this->db->trans_status()) {
+                throw new RuntimeException('Could not complete provider delete transaction.');
+            }
+
+            if ($owns_transaction && !$this->db->trans_commit()) {
+                throw new RuntimeException('Could not commit provider delete transaction.');
+            }
+
+            $owns_transaction = false;
 
             json_response([
                 'success' => true,
             ]);
         } catch (Throwable $e) {
+            if ($owns_transaction) {
+                $this->db->trans_rollback();
+            }
+
             json_exception($e);
+        }
+    }
+
+    private function hasCurrentDeletePermission(int $user_id): bool
+    {
+        try {
+            return can('delete', PRIV_USERS, $user_id);
+        } catch (InvalidArgumentException $e) {
+            // A principal lookup that fails after session creation has no authority.
+            return false;
         }
     }
 

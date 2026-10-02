@@ -409,6 +409,18 @@ ID/type, role-field, CSRF, normal update, and downstream-failure boundaries
 with synthetic data; it does not prove every concurrent role-change schedule
 or a production account write.
 
+The classic `providers/destroy` path accepts only POST with CSRF. It requires
+the actor's current stored `users.delete` permission and a positive target ID.
+An actor whose account has disappeared after login is denied with 403.
+The target must still have the Provider role in the shared users table. Actor
+and target rows are locked in numeric ID order before the permission and role
+checks; deletion is limited to that ID and role, and succeeds only when exactly
+one row is affected. Rejected requests must leave the target unchanged. The
+isolated `ProvidersDestroyHttpTest` covers methods and direct alias, CSRF,
+sequential demotion, ID/type, and a synthetic successful delete. This local
+proof does not establish every concurrent role-change schedule or a
+production account write.
+
 The product supports `services.attendants_number = 1`, enforced by
 [Services_model](application/models/Services_model.php). Other values are not
 supported product behavior; this application rule is not a claim of a database

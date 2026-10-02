@@ -581,11 +581,36 @@ class Providers_model extends EA_Model
      *
      * @param int $provider_id Provider ID.
      *
+     * @throws InvalidArgumentException When the ID is invalid or the Provider row no longer exists.
      * @throws RuntimeException
      */
     public function delete(int $provider_id): void
     {
-        $this->db->delete('users', ['id' => $provider_id]);
+        if ($provider_id < 1) {
+            throw new InvalidArgumentException('Invalid provider ID.');
+        }
+
+        $provider_role_id = $this->get_provider_role_id();
+        $db_debug = $this->db->db_debug;
+        $this->db->db_debug = false;
+        try {
+            $deleted = $this->db->delete('users', [
+                'id' => $provider_id,
+                'id_roles' => $provider_role_id,
+            ]);
+        } catch (Throwable $e) {
+            throw new RuntimeException('Could not delete provider.', 0, $e);
+        } finally {
+            $this->db->db_debug = $db_debug;
+        }
+
+        if (!$deleted) {
+            throw new RuntimeException('Could not delete provider.');
+        }
+
+        if ($this->db->affected_rows() !== 1) {
+            throw new InvalidArgumentException('Provider not found.');
+        }
     }
 
     /**
