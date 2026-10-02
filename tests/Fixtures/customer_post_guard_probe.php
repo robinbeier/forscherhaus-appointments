@@ -62,11 +62,59 @@ function emit(): void
 }
 class EA_Controller
 {
+    public ProbeDb $db;
     public ProbeModel $customers_model;
     public ProbePermissions $permissions;
     public Backoffice_request_dto_factory $backoffice_request_dto_factory;
     public ProbeUsersModel $users_model;
     public ProbeRolesModel $roles_model;
+}
+class ProbeDb
+{
+    public function trans_begin(): bool
+    {
+        $GLOBALS['events'][] = 'trans_begin';
+        return true;
+    }
+    public function trans_status(): bool
+    {
+        $GLOBALS['events'][] = 'trans_status';
+        return true;
+    }
+    public function trans_commit(): bool
+    {
+        $GLOBALS['events'][] = 'trans_commit';
+        return true;
+    }
+    public function trans_rollback(): bool
+    {
+        $GLOBALS['events'][] = 'trans_rollback';
+        return true;
+    }
+    public function dbprefix(string $table): string
+    {
+        return $table;
+    }
+    public function query(string $sql, array $params): ProbeDbResult
+    {
+        if (str_contains($sql, '`users`')) {
+            $GLOBALS['events'][] = 'lock_users:' . implode(',', $params);
+            return new ProbeDbResult(2);
+        }
+        if (str_contains($sql, '`appointments`')) {
+            $GLOBALS['events'][] = 'lock_appointments:' . implode(',', $params);
+            return new ProbeDbResult(1);
+        }
+        throw new RuntimeException('Unexpected query in customer guard probe.');
+    }
+}
+class ProbeDbResult
+{
+    public function __construct(private int $rows) {}
+    public function num_rows(): int
+    {
+        return $this->rows;
+    }
 }
 class ProbeUsersModel
 {
@@ -148,6 +196,7 @@ class ProbeModel
 $GLOBALS['action'] = $action;
 require_once APPPATH . 'controllers/Customers.php';
 $c = (new ReflectionClass('Customers'))->newInstanceWithoutConstructor();
+$c->db = new ProbeDb();
 $c->customers_model = new ProbeModel();
 $c->permissions = new ProbePermissions();
 $c->backoffice_request_dto_factory = new Backoffice_request_dto_factory();

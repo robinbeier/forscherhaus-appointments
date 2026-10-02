@@ -18,6 +18,7 @@
             <file>./tests/Integration/Controllers/CustomersApiHttpReadTest.php</file>
             <file>./tests/Integration/Controllers/CorsPolicyHttpTest.php</file>
             <file>./tests/Integration/Controllers/CustomersReadProjectionHttpTest.php</file>
+            <file>./tests/Integration/Controllers/CustomersLegacyRelationshipRaceHttpTest.php</file>
             <file>./tests/Integration/Controllers/ProvidersReadProjectionHttpTest.php</file>
             <file>./tests/Integration/Controllers/AdminsReadProjectionHttpTest.php</file>
             <file>./tests/Integration/Controllers/SecretariesReadProjectionHttpTest.php</file>

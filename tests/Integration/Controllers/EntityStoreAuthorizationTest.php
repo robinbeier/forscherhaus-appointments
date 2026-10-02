@@ -317,6 +317,7 @@ final class EntityStoreAuthorizationTest extends TestCase
             public function __construct() {}
         };
         $controller->load = $CI->load;
+        $controller->db = $CI->db;
         $controller->customers_model = $CI->customers_model;
         $controller->permissions = $CI->permissions;
         $controller->users_model = $CI->users_model;
