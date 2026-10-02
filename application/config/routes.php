@@ -141,6 +141,7 @@ $route['api/v1/availabilities']['get'] = 'api/v1/availabilities_api_v1/get';
 */
 
 $route['appointments/ics/(:any)'] = 'appointments/ics/$1';
+$route['backend_api/ajax_validate_username'] = 'account/validate_username';
 $route['dashboard/metrics']['post'] = 'dashboard/metrics';
 $route['dashboard/heatmap']['post'] = 'dashboard/heatmap';
 $route['dashboard/threshold']['post'] = 'dashboard/threshold';

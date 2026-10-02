@@ -190,6 +190,16 @@ important boundaries, not an exhaustive list of reportable security issues.
 | Account updates require the permitted method, valid CSRF protection, and the current stored authority of the session user. | [Account](application/controllers/Account.php) requires POST and restricts fields and target identity; [EA_Security](application/core/EA_Security.php) handles CSRF validation. Rejected requests must not mutate state.                                                                                   |
 | The application sends no appointment, staff, or account notification email.                                                | Booking confirmation is delivered through the existing on-page PDF download path; contact email fields remain stored for identity and contact data, and ICS/calendar downloads remain available.                                                                                                           |
 
+Username availability is a POST-only,
+CSRF-protected authenticated check on both the canonical account route and its
+legacy alias. The current stored actor permission is checked before parsing the
+request. A caller-provided user ID may exempt an existing username only for the
+actor's own editable account or an Admin/Secretary account the actor may edit;
+it does not confer update authority. The JSON `is_valid` value is a boolean,
+and the Admin/Secretary pages must display a duplicate-username warning when it
+is false. Isolated HTTP/DB and JavaScript tests cover those boundaries, but do
+not establish behavior for real production accounts.
+
 Public login validation creates an authenticated session only through POST with
 the existing CSRF check. `Login::validate` rejects other methods before parsing
 credentials or changing session identity, including through the direct

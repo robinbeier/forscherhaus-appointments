@@ -263,14 +263,6 @@ class Backend_api extends EA_Controller
     }
 
     /**
-     * This method checks whether the username already exists in the database.
-     */
-    public function ajax_validate_username(): void
-    {
-        redirect('account/validate_username');
-    }
-
-    /**
      * Change system language for current user.
      */
     public function ajax_change_language(): void
