@@ -608,3 +608,13 @@ Modellzugriff erfolgt. Der Customer-Löschalias verwendet eine feste
 307-Weiterleitung. Die isolierten Controller-Tests halten Sichtbarkeitsregeln,
 Datensatz-Zugriffsprüfungen und synthetische DTO-/Modellübergaben fest; sie
 belegen keine echte DB-, HTTP- oder CSRF-Kette.
+
+Die klassischen Customer-Schreibpfade prüfen die Aktionsberechtigung gegen
+die aktuell gespeicherte Rolle des angemeldeten Akteurs. Auch die
+`limit_customer_visibility`-Sperre richtet sich nach dieser Rolle, nicht
+nach dem Rollenwert aus der Sitzung. `CustomersLegacyWriteRoleHttpTest`
+belegt mit isolierten HTTP-/Datenbankdaten, dass eine nach dem Login
+herabgestufte Rolle bei Store, Update und Destroy einschließlich direkter
+Aliase keine Kundenzeile verändert; ein berechtigter Staff-CRUD-Durchlauf
+bleibt möglich. Gleichzeitige Rollenänderungen und ein produktiver
+Customer-Schreibversuch sind damit nicht nachgewiesen.

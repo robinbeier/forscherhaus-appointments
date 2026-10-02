@@ -96,6 +96,16 @@ service through that endpoint. Rejected requests leave service rows unchanged.
 HTTP and database records; it does not establish a live concurrent role-change
 race or a production write result.
 
+Legacy Customers writes (`customers/store`, `customers/update`, and
+`customers/destroy`, including direct aliases) require POST with the normal
+CSRF check and the actor's current stored `customers` action permission.
+The store visibility limit uses that stored role rather than the login-time
+session role. A rejected write must leave customer rows unchanged.
+`CustomersLegacyWriteRoleHttpTest` checks sequential role demotion, the
+visibility limit, and an authorized CRUD lifecycle with isolated synthetic
+HTTP and database data; it does not establish a live concurrent role-change
+schedule or a production customer write result.
+
 Legacy General and Business Settings page reads (`general_settings`,
 `general_settings/index`, `business_settings`, and `business_settings/index`)
 require the actor's current stored `system_settings` view permission on every

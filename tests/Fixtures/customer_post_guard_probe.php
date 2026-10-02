@@ -12,10 +12,10 @@ $status = 200;
 $headers = [];
 $body = '';
 $saved = [];
-function cannot(string $v, string $p): bool
+function cannot(string $v, string $p, ?int $user_id = null): bool
 {
     global $events, $scenario;
-    $events[] = "auth:$v:$p";
+    $events[] = "auth:$v:$p:" . ($user_id ?? 'session');
     return $scenario === 'forbidden';
 }
 function session(string $key): mixed
@@ -65,6 +65,24 @@ class EA_Controller
     public ProbeModel $customers_model;
     public ProbePermissions $permissions;
     public Backoffice_request_dto_factory $backoffice_request_dto_factory;
+    public ProbeUsersModel $users_model;
+    public ProbeRolesModel $roles_model;
+}
+class ProbeUsersModel
+{
+    public function value(int $id, string $field): int
+    {
+        $GLOBALS['events'][] = "users:value:$id:$field";
+        return 3;
+    }
+}
+class ProbeRolesModel
+{
+    public function value(int $id, string $field): string
+    {
+        $GLOBALS['events'][] = "roles:value:$id:$field";
+        return str_starts_with($GLOBALS['scenario'], 'nonadmin-') ? 'secretary' : DB_SLUG_ADMIN;
+    }
 }
 class Backoffice_request_dto_factory
 {
@@ -133,5 +151,7 @@ $c = (new ReflectionClass('Customers'))->newInstanceWithoutConstructor();
 $c->customers_model = new ProbeModel();
 $c->permissions = new ProbePermissions();
 $c->backoffice_request_dto_factory = new Backoffice_request_dto_factory();
+$c->users_model = new ProbeUsersModel();
+$c->roles_model = new ProbeRolesModel();
 $c->{$action}();
 emit();
