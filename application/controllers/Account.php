@@ -163,10 +163,40 @@ class Account extends EA_Controller
      */
     public function validate_username(): void
     {
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+            json_response(['success' => false, 'message' => 'Method Not Allowed'], 405, ['Allow: POST']);
+
+            return;
+        }
+
         try {
+            $user_id = (int) session('user_id');
+
+            if (!$user_id) {
+                abort(403, 'Forbidden');
+
+                return;
+            }
+
+            $can_edit_own = can('edit', PRIV_USER_SETTINGS, $user_id);
+            $can_edit_users = can('edit', PRIV_USERS, $user_id);
+
+            if (!$can_edit_own && !$can_edit_users) {
+                abort(403, 'Forbidden');
+
+                return;
+            }
+
             $request_dto = $this->authRequestDtoFactory()->buildValidateUsernameRequestDto();
 
-            $is_valid = $this->users_model->validate_username($request_dto->username, $request_dto->userId);
+            $excluded_user_id = $this->username_validation_exclusion(
+                $request_dto->userId,
+                $user_id,
+                $can_edit_own,
+                $can_edit_users,
+            );
+
+            $is_valid = $this->users_model->validate_username($request_dto->username, $excluded_user_id);
 
             json_response([
                 'is_valid' => $is_valid,
@@ -174,6 +204,37 @@ class Account extends EA_Controller
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    private function username_validation_exclusion(
+        string|int|null $requested_user_id,
+        int $actor_id,
+        bool $can_edit_own,
+        bool $can_edit_users,
+    ): ?int {
+        $requested_id = filter_var($requested_user_id, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+
+        if ($requested_id === false) {
+            return null;
+        }
+
+        if ($requested_id === $actor_id && $can_edit_own) {
+            return $actor_id;
+        }
+
+        if (!$can_edit_users) {
+            return null;
+        }
+
+        $target = $this->db
+            ->select('roles.slug')
+            ->from('users')
+            ->join('roles', 'roles.id = users.id_roles')
+            ->where('users.id', $requested_id)
+            ->get()
+            ->row_array();
+
+        return in_array($target['slug'] ?? null, [DB_SLUG_ADMIN, DB_SLUG_SECRETARY], true) ? $requested_id : null;
     }
 
     private function authRequestDtoFactory(): Auth_request_dto_factory

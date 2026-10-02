@@ -66,7 +66,7 @@ App.Pages.Secretaries = (function () {
             const username = $input.val();
 
             App.Http.Account.validateUsername(secretaryId, username).done((response) => {
-                if (response.is_valid === 'false') {
+                if (response.is_valid === false) {
                     $input.addClass('is-invalid');
                     $input.attr('already-exists', 'true');
                     $input.parents().eq(3).find('.form-message').text(lang('username_already_exists'));
