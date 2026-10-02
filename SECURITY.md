@@ -396,6 +396,19 @@ user in the shared table, and a direct controller alias cannot change it under
 a different HTTP method. See the [Staff API PUT contract](docs/ci-write-contracts.md#staff-api-v1-put)
 for the bounded local evidence and its limits.
 
+The classic `providers/store` path accepts only POST with CSRF and requires
+the actor's current stored `users.add` permission. It creates a new Provider
+only: a caller ID may be absent or exactly empty, but cannot select an
+existing shared-table user; a caller role cannot set the new account's role.
+The actor and requested service rows are checked under locks before the
+user, settings, and service associations are written in one transaction.
+Rejected requests and downstream failures must leave no partial Provider.
+The isolated `ProvidersStoreHttpTest` checks methods and aliases, sequential
+demotion, ID/type, CSRF, normal creation, and failed association writes with
+synthetic data. A concurrent edit to a role's permission bits is not
+serialized by the actor-user lock; the local tests do not establish every
+concurrent schedule or a production account write.
+
 The classic `providers/update` path accepts only POST with CSRF and requires
 the actor's current stored `users.edit` permission. It must update an existing
 Provider only: an omitted ID cannot create one, a shared-table ID of another
