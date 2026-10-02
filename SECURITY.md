@@ -101,10 +101,17 @@ Legacy Customers writes (`customers/store`, `customers/update`, and
 CSRF check and the actor's current stored `customers` action permission.
 The store visibility limit uses that stored role rather than the login-time
 session role. A rejected write must leave customer rows unchanged.
+For `update` and `destroy`, current permission and customer relationship are
+rechecked after locking the actor, customer, and affected appointment scope in
+one transaction. Removal of the last provider relationship while a request
+waits must deny the write before mutation.
 `CustomersLegacyWriteRoleHttpTest` checks sequential role demotion, the
 visibility limit, and an authorized CRUD lifecycle with isolated synthetic
-HTTP and database data; it does not establish a live concurrent role-change
-schedule or a production customer write result.
+HTTP and database data. `CustomersLegacyRelationshipRaceHttpTest` checks the
+actual customer-row lock wait and relationship revocation through canonical
+and direct HTTP aliases with own synthetic data. These tests do not establish
+serialization of unrelated role-permission or setting changes, or a production
+customer write result.
 
 Legacy General and Business Settings page reads (`general_settings`,
 `general_settings/index`, `business_settings`, and `business_settings/index`)
