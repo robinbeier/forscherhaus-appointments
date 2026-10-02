@@ -263,6 +263,68 @@ final class ProvidersUpdateHttpTest extends TestCase
     {
         $admin = $this->login($this->server->client());
         $before = $this->providerState();
+        $db = get_instance()->db;
+        $trigger = $this->fixture->run . '_deny_provider_service_insert';
+        $fixtureAdmin = get_instance()->load->database(
+            [
+                'hostname' => 'mysql',
+                'username' => 'root',
+                'password' => 'secret',
+                'database' => 'easyappointments',
+                'dbdriver' => 'mysqli',
+                'dbprefix' => $db->dbprefix,
+                'pconnect' => false,
+                'db_debug' => false,
+                'char_set' => 'utf8mb4',
+                'dbcollat' => 'utf8mb4_general_ci',
+            ],
+            true,
+        );
+        $created = false;
+        $payload = $this->providerPayload($this->fixture->providerId);
+        $payload['notes'] = $this->fixture->run . '_must_rollback';
+        try {
+            self::assertTrue(
+                $fixtureAdmin->query(
+                    'CREATE TRIGGER `' .
+                        $trigger .
+                        '` BEFORE INSERT ON `' .
+                        $db->dbprefix('services_providers') .
+                        '` FOR EACH ROW BEGIN IF NEW.id_users = ' .
+                        (int) $this->fixture->providerId .
+                        " THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'synthetic provider association failure'; END IF; END",
+                ),
+            );
+            $created = true;
+
+            $response = $admin->post('providers/update', ['provider' => $payload]);
+
+            self::assertSame(500, $response->statusCode, $response->body);
+            self::assertStringContainsString('Could not write provider service associations.', $response->body);
+            self::assertStringNotContainsString('services_providers_services', $response->body);
+            self::assertStringNotContainsString('synthetic provider association failure', $response->body);
+            self::assertSame($before, $this->providerState());
+        } finally {
+            try {
+                if ($created) {
+                    self::assertTrue($fixtureAdmin->query('DROP TRIGGER `' . $trigger . '`'));
+                }
+                $triggerCount = $fixtureAdmin->query(
+                    'SELECT TRIGGER_NAME FROM information_schema.TRIGGERS ' .
+                        'WHERE TRIGGER_SCHEMA = DATABASE() AND TRIGGER_NAME = ?',
+                    [$trigger],
+                );
+                self::assertSame(0, (int) $triggerCount->num_rows());
+            } finally {
+                $fixtureAdmin->close();
+            }
+        }
+    }
+
+    public function testMissingRequestedServiceIsRejectedBeforeAggregateMutation(): void
+    {
+        $admin = $this->login($this->server->client());
+        $before = $this->providerState();
         $missingServiceId = 999999999;
         self::assertSame(
             0,
@@ -271,15 +333,12 @@ final class ProvidersUpdateHttpTest extends TestCase
                 ->num_rows(),
         );
         $payload = $this->providerPayload($this->fixture->providerId);
-        $payload['notes'] = $this->fixture->run . '_must_rollback';
-        $payload['services'] = [$this->fixture->serviceId, $missingServiceId];
+        $payload['services'][] = $missingServiceId;
 
-        // The second association fails its real FK after the user and first association writes.
         $response = $admin->post('providers/update', ['provider' => $payload]);
 
         self::assertSame(500, $response->statusCode, $response->body);
-        self::assertStringContainsString('Could not write provider service associations.', $response->body);
-        self::assertStringNotContainsString('services_providers_services', $response->body);
+        self::assertStringContainsString('The provider service target was not found.', $response->body);
         self::assertSame($before, $this->providerState());
     }
 

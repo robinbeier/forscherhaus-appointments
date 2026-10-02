@@ -413,10 +413,14 @@ class Providers_model extends EA_Model
         }
 
         try {
-            $target = $this->db->query(
-                'SELECT `id_roles` FROM `' . $this->db->dbprefix('users') . '` WHERE `id` = ? FOR UPDATE',
-                [$provider['id']],
-            );
+            try {
+                $target = $this->db->query(
+                    'SELECT `id_roles` FROM `' . $this->db->dbprefix('users') . '` WHERE `id` = ? FOR UPDATE',
+                    [$provider['id']],
+                );
+            } catch (Throwable $e) {
+                throw new RuntimeException('Could not lock provider update target.', 0, $e);
+            }
 
             if ($target === false) {
                 throw new RuntimeException('Could not lock provider update target.');
@@ -429,9 +433,13 @@ class Providers_model extends EA_Model
             }
 
             $provider['update_datetime'] = date('Y-m-d H:i:s');
-            $service_ids = $provider['services'];
+            $service_ids = $this->normalize_update_service_ids($provider['services']);
             $settings = $provider['settings'];
             unset($provider['services'], $provider['settings']);
+
+            // Service deletion locks its parent before cascading to these associations.
+            // Keep the same order before replacing the provider's connections.
+            $this->lock_update_service_parents((int) $provider['id'], $service_ids);
 
             if (isset($settings['password'])) {
                 $existing_settings = $this->db
@@ -475,6 +483,75 @@ class Providers_model extends EA_Model
             }
 
             throw $exception;
+        }
+    }
+
+    /** Use one canonical positive integer ID list for locking and writing. */
+    private function normalize_update_service_ids(array $service_ids): array
+    {
+        $normalized = [];
+
+        foreach ($service_ids as $service_id) {
+            $parsed = filter_var($service_id, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+
+            if ($parsed === false) {
+                throw new InvalidArgumentException('The provided provider services are invalid.');
+            }
+
+            $normalized[] = $parsed;
+        }
+
+        return array_values(array_unique($normalized));
+    }
+
+    /** Lock the current and requested service parents before association replacement. */
+    private function lock_update_service_parents(int $provider_id, array $requested_service_ids): void
+    {
+        try {
+            $current = $this->db->get_where('services_providers', ['id_users' => $provider_id]);
+        } catch (Throwable $e) {
+            throw new RuntimeException('Could not read provider service associations.', 0, $e);
+        }
+
+        if ($current === false) {
+            throw new RuntimeException('Could not read provider service associations.');
+        }
+
+        $current_ids = array_map('intval', array_column($current->result_array(), 'id_services'));
+        $service_ids = array_values(array_unique(array_merge($current_ids, $requested_service_ids)));
+
+        foreach ($service_ids as $service_id) {
+            if ($service_id < 1) {
+                throw new InvalidArgumentException('The provided provider services are invalid.');
+            }
+        }
+
+        if ($service_ids === []) {
+            return;
+        }
+
+        sort($service_ids, SORT_NUMERIC);
+        $placeholders = implode(', ', array_fill(0, count($service_ids), '?'));
+        try {
+            $locked = $this->db->query(
+                'SELECT `id` FROM `' .
+                    $this->db->dbprefix('services') .
+                    '` WHERE `id` IN (' .
+                    $placeholders .
+                    ') ORDER BY `id` ASC FOR UPDATE',
+                $service_ids,
+            );
+        } catch (Throwable $e) {
+            throw new RuntimeException('Could not lock provider service parents.', 0, $e);
+        }
+
+        if ($locked === false) {
+            throw new RuntimeException('Could not lock provider service parents.');
+        }
+
+        $locked_ids = array_map('intval', array_column($locked->result_array(), 'id'));
+        if (array_diff($requested_service_ids, $locked_ids) !== []) {
+            throw new InvalidArgumentException('The provider service target was not found.');
         }
     }
 

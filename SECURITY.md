@@ -400,8 +400,9 @@ The classic `providers/update` path accepts only POST with CSRF and requires
 the actor's current stored `users.edit` permission. It must update an existing
 Provider only: an omitted ID cannot create one, a shared-table ID of another
 role cannot become a Provider, and a request-supplied role cannot change the
-target's role. The actor and target user rows are locked in numeric ID order
-through the atomic user, setting, and service-association write. A concurrent
+target's role. The actor and target user rows are locked in numeric ID order,
+followed by current and requested service parents, through the atomic user,
+setting, and service-association write. A concurrent
 edit to a role's permission bits is not serialized by these user-row locks.
 The isolated `ProvidersUpdateHttpTest` checks the method, sequential demotion,
 ID/type, role-field, CSRF, normal update, and downstream-failure boundaries

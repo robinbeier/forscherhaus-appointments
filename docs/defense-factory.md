@@ -248,7 +248,8 @@ The separate classic Provider update path is covered by
 POST-only routing including the front-controller alias, CSRF, current stored
 actor permission after demotion, an existing Provider target, rejection of
 caller role changes and creation-through-update, an ordinary successful update,
-and rollback when a service association fails its database constraint. Owned
+and rollback when a synthetic service-association write fails. The update locks
+the current and requested service parents before replacing their links. Owned
 rows and temporary role changes are restored or removed by the fixture. The
 API-v1 Provider write tests remain distinct. This local matrix does not prove
 concurrent demotion or a production staff-account mutation.

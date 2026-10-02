@@ -307,14 +307,18 @@ class Providers extends EA_Controller
             $user_ids = array_values(array_unique([$user_id, $provider_id]));
             sort($user_ids, SORT_NUMERIC);
             $placeholders = implode(', ', array_fill(0, count($user_ids), '?'));
-            $locked_users = $this->db->query(
-                'SELECT `id`, `id_roles` FROM `' .
-                    $this->db->dbprefix('users') .
-                    '` WHERE `id` IN (' .
-                    $placeholders .
-                    ') ORDER BY `id` ASC FOR UPDATE',
-                $user_ids,
-            );
+            try {
+                $locked_users = $this->db->query(
+                    'SELECT `id`, `id_roles` FROM `' .
+                        $this->db->dbprefix('users') .
+                        '` WHERE `id` IN (' .
+                        $placeholders .
+                        ') ORDER BY `id` ASC FOR UPDATE',
+                    $user_ids,
+                );
+            } catch (Throwable $e) {
+                throw new RuntimeException('Could not lock provider update users.', 0, $e);
+            }
 
             if ($locked_users === false) {
                 throw new RuntimeException('Could not lock provider update users.');
