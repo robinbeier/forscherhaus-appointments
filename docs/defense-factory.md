@@ -261,6 +261,16 @@ demotion, positive and Provider-role target IDs, rejection without mutation,
 and deletion of an owned synthetic Provider. These local tests do not establish
 every concurrent role-change schedule or a production account deletion.
 
+The classic Admin update route has a separate boundary from Admin creation and
+the Admins API v1. `AdminsUpdateHttpTest` uses the isolated HTTP/DB stack to
+check POST-only canonical and direct routes, CSRF, current stored edit
+permission after role demotion, a positive existing Admin target, rejection of
+missing or invalid IDs and non-Admin targets without mutation, and an ordinary
+authorized update. The controller locks the actor, target, and actor role before
+its final permission and target-type checks; its model save remains in the same
+transaction. These local checks do not establish a production staff-account
+mutation or every concurrent role-change schedule.
+
 ## Classic service-category controller boundary
 
 `ServiceCategoriesLegacyHttpTest` covers the session-backed `Service_categories`

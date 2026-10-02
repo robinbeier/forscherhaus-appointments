@@ -331,17 +331,91 @@ class Admins extends EA_Controller
      */
     public function update(): void
     {
+        $owns_transaction = false;
+
         try {
-            if (cannot('edit', PRIV_USERS)) {
-                abort(403, 'Forbidden');
-            }
             if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
                 abort(405, 'Method Not Allowed', ['Allow: POST']);
                 return;
             }
 
+            $user_id = (int) session('user_id');
+
+            if (!$user_id || !$this->hasCurrentEditPermission($user_id)) {
+                abort(403, 'Forbidden');
+                return;
+            }
+
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityPayloadRequestDto('admin');
             $admin = $request_dto->payload;
+
+            $admin_id = filter_var($admin['id'] ?? null, FILTER_VALIDATE_INT, [
+                'options' => ['min_range' => 1],
+            ]);
+
+            if ($admin_id === false || array_key_exists('id_roles', $admin)) {
+                abort(400, 'Invalid admin update');
+                return;
+            }
+
+            $admin['id'] = $admin_id;
+
+            $owns_transaction = !$this->db->trans_active();
+            if ($owns_transaction && !$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start admin update transaction.');
+            }
+
+            // Lock actor and target in a stable order before either authority decision.
+            $user_ids = array_values(array_unique([$user_id, $admin_id]));
+            sort($user_ids, SORT_NUMERIC);
+            $placeholders = implode(', ', array_fill(0, count($user_ids), '?'));
+            $locked_users = $this->db->query(
+                'SELECT `id`, `id_roles` FROM `' .
+                    $this->db->dbprefix('users') .
+                    '` WHERE `id` IN (' .
+                    $placeholders .
+                    ') ORDER BY `id` ASC FOR UPDATE',
+                $user_ids,
+            );
+            if ($locked_users === false) {
+                throw new RuntimeException('Could not lock admin update users.');
+            }
+            $users_by_id = [];
+            foreach ($locked_users->result_array() as $row) {
+                $users_by_id[(int) $row['id']] = $row;
+            }
+
+            $actor = $users_by_id[$user_id] ?? null;
+            $locked_role = $actor
+                ? $this->db->query(
+                    'SELECT `users` FROM `' . $this->db->dbprefix('roles') . '` WHERE `id` = ? FOR UPDATE',
+                    [(int) $actor['id_roles']],
+                )
+                : null;
+            if ($locked_role === false) {
+                throw new RuntimeException('Could not lock admin update role.');
+            }
+            $role = $locked_role?->row_array();
+            if (!$actor || !$role || !((int) $role['users'] & PRIV_EDIT)) {
+                if ($owns_transaction) {
+                    $this->db->trans_rollback();
+                    $owns_transaction = false;
+                }
+                abort(403, 'Forbidden');
+                return;
+            }
+
+            if (
+                !isset($users_by_id[$admin_id]) ||
+                (int) $users_by_id[$admin_id]['id_roles'] !== $this->admins_model->get_admin_role_id()
+            ) {
+                if ($owns_transaction) {
+                    $this->db->trans_rollback();
+                    $owns_transaction = false;
+                }
+                abort(400, 'Invalid admin update');
+                return;
+            }
 
             $this->admins_model->only($admin, $this->allowed_admin_fields);
 
@@ -355,11 +429,22 @@ class Admins extends EA_Controller
 
             $admin = $this->admins_model->find($admin_id);
 
+            if (!$this->db->trans_status()) {
+                throw new RuntimeException('Could not complete admin update transaction.');
+            }
+            if ($owns_transaction && !$this->db->trans_commit()) {
+                throw new RuntimeException('Could not commit admin update transaction.');
+            }
+            $owns_transaction = false;
+
             json_response([
                 'success' => true,
                 'id' => $admin_id,
             ]);
         } catch (Throwable $e) {
+            if ($owns_transaction) {
+                $this->db->trans_rollback();
+            }
             json_exception($e);
         }
     }
@@ -395,6 +480,15 @@ class Admins extends EA_Controller
     {
         try {
             return can('add', PRIV_USERS, $user_id);
+        } catch (InvalidArgumentException $e) {
+            return false;
+        }
+    }
+
+    private function hasCurrentEditPermission(int $user_id): bool
+    {
+        try {
+            return can('edit', PRIV_USERS, $user_id);
         } catch (InvalidArgumentException $e) {
             return false;
         }

@@ -554,6 +554,13 @@ Berechtigung zusätzlich POST und antworten bei anderen Methoden mit 405 und
 leiten weiterhin mit 307 und unverändertem Request-Body an feste Destroy-Ziele
 weiter; die Save-Aliase bleiben eine gesonderte Kompatibilitätsfrage.
 
+Der klassische `admins/update`-Pfad darf nur eine vorhandene Admin-Zeile
+bearbeiten. Eine fehlende, ungültige oder rollenfremde Ziel-ID darf weder eine
+Neuanlage noch eine Änderung eines anderen Kontotyps auslösen. Das aktuelle
+gespeicherte `users.edit`-Recht des Actors und der Admin-Typ des Ziels werden
+unter derselben Transaktion geprüft, bevor User oder Settings verändert werden;
+eine abgelehnte Anfrage hinterlässt keine Teiländerung.
+
 Die isolierten Controller-Regressionen prüfen `store`, `update` und `destroy`
 beider Controller mit synthetischen DTO- und Modell-Doubles sowie die
 Redirect-Argumente der beiden Löschaliase. Sie belegen keine echte HTTP-Kette,
