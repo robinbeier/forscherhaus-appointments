@@ -368,6 +368,13 @@ source-level guard is placed before its model access. The isolated synthetic
 HTTP regression proves the external rejection and preservation of its fixture
 row; it does not establish behavior in production.
 
+Customers and Providers API v1 deletion requires DELETE even through direct
+controller aliases. Other authenticated methods return 405 with `Allow: DELETE`
+before either model reads or mutates a record. Isolated synthetic HTTP/DB
+tests check both aliases, unchanged dependent rows, canonical DELETE, and
+authentication. Productive behavior is limited to release identity and health
+until an owned, cleanly removable live fixture is established.
+
 The public personal-information deletion endpoint is a destructive capability
 path. It requires POST with CSRF, an enabled product setting, and a live
 customer token issued from the stored appointment-to-customer relationship.

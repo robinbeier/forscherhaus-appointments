@@ -197,6 +197,12 @@ class Customers_api_v1 extends EA_Controller
      */
     public function destroy(int $id): void
     {
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'DELETE') {
+            response('', 405, ['Allow: DELETE']);
+
+            return;
+        }
+
         try {
             $occurrences = $this->customers_model->get(['id' => $id]);
 
