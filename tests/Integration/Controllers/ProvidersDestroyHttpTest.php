@@ -20,6 +20,7 @@ final class ProvidersDestroyHttpTest extends TestCase
     private ?int $deletionTargetId = null;
     private ?string $deletionTargetEmail = null;
     private ?int $otherRoleTargetId = null;
+    private bool $actorRowDeleted = false;
 
     protected function setUp(): void
     {
@@ -46,6 +47,11 @@ final class ProvidersDestroyHttpTest extends TestCase
             $db = get_instance()->db;
             if ($this->actorRoleBefore > 0 && $this->fixture !== null) {
                 $db->update('users', ['id_roles' => $this->actorRoleBefore], ['id' => $this->fixture->actorId]);
+            }
+            if ($this->actorRowDeleted && $this->fixture !== null) {
+                $db->delete('user_settings', ['id_users' => $this->fixture->actorId]);
+                self::assertSame([], $this->fixture->userSettingsRow($this->fixture->actorId));
+                self::assertSame([], $this->fixture->row('users', $this->fixture->actorId));
             }
             if ($this->deletionTargetId !== null) {
                 $db->delete('user_settings', ['id_users' => $this->deletionTargetId]);
@@ -225,6 +231,25 @@ final class ProvidersDestroyHttpTest extends TestCase
         self::assertSame(200, $response->statusCode, $response->body);
         self::assertSame([], $this->fixture->row('users', $this->deletionTargetId));
         self::assertSame([], $this->fixture->userSettingsRow($this->deletionTargetId));
+    }
+
+    public function testDeletedSessionActorCannotDeleteSyntheticProvider(): void
+    {
+        $admin = $this->login($this->server->client());
+        $this->createDeletionTarget();
+        $before = $this->fixture->providerDeleteState($this->deletionTargetId);
+        $db = get_instance()->db;
+
+        $deleted = $db->delete('users', ['id' => $this->fixture->actorId]);
+        $this->actorRowDeleted = true;
+        self::assertTrue($deleted);
+        self::assertSame(1, $db->affected_rows());
+        self::assertSame([], $this->fixture->row('users', $this->fixture->actorId));
+
+        $response = $admin->post('providers/destroy', ['provider_id' => $this->deletionTargetId]);
+
+        self::assertSame(403, $response->statusCode, $response->body);
+        self::assertSame($before, $this->fixture->providerDeleteState($this->deletionTargetId));
     }
 
     private function createDeletionTarget(): void

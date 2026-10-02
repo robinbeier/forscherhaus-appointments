@@ -411,6 +411,7 @@ or a production account write.
 
 The classic `providers/destroy` path accepts only POST with CSRF. It requires
 the actor's current stored `users.delete` permission and a positive target ID.
+An actor whose account has disappeared after login is denied with 403.
 The target must still have the Provider role in the shared users table. Actor
 and target rows are locked in numeric ID order before the permission and role
 checks; deletion is limited to that ID and role, and succeeds only when exactly

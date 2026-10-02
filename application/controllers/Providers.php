@@ -406,7 +406,7 @@ class Providers extends EA_Controller
 
             $user_id = (int) session('user_id');
 
-            if (!$user_id || cannot('delete', PRIV_USERS, $user_id)) {
+            if (!$user_id || !$this->hasCurrentDeletePermission($user_id)) {
                 abort(403, 'Forbidden');
             }
 
@@ -455,7 +455,7 @@ class Providers extends EA_Controller
                 $users_by_id[(int) $row['id']] = $row;
             }
 
-            if (!isset($users_by_id[$user_id]) || cannot('delete', PRIV_USERS, $user_id)) {
+            if (!isset($users_by_id[$user_id]) || !$this->hasCurrentDeletePermission($user_id)) {
                 if ($owns_transaction) {
                     $this->db->trans_rollback();
                     $owns_transaction = false;
@@ -497,6 +497,16 @@ class Providers extends EA_Controller
             }
 
             json_exception($e);
+        }
+    }
+
+    private function hasCurrentDeletePermission(int $user_id): bool
+    {
+        try {
+            return can('delete', PRIV_USERS, $user_id);
+        } catch (InvalidArgumentException $e) {
+            // A principal lookup that fails after session creation has no authority.
+            return false;
         }
     }
 
