@@ -340,6 +340,8 @@ class Customers extends EA_Controller
      */
     public function update(): void
     {
+        $transaction_open = false;
+
         try {
             $user_id = (int) session('user_id');
             if (!$user_id || cannot('edit', PRIV_CUSTOMERS, $user_id)) {
@@ -353,8 +355,16 @@ class Customers extends EA_Controller
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityPayloadRequestDto('customer');
             $customer = $request_dto->payload;
 
-            if (!$this->permissions->has_customer_access($user_id, $customer['id'])) {
+            if (!$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start customer update transaction.');
+            }
+            $transaction_open = true;
+
+            if (!$this->hasLockedCustomerWriteAccess($user_id, (int) $customer['id'], 'edit')) {
+                $this->db->trans_rollback();
+                $transaction_open = false;
                 abort(403, 'Forbidden');
+                return;
             }
 
             $this->customers_model->only($customer, $this->allowed_customer_fields);
@@ -365,11 +375,19 @@ class Customers extends EA_Controller
 
             $customer = $this->customers_model->find($customer_id);
 
+            if (!$this->db->trans_status() || !$this->db->trans_commit()) {
+                throw new RuntimeException('Could not commit customer update transaction.');
+            }
+            $transaction_open = false;
+
             json_response([
                 'success' => true,
                 'id' => $customer_id,
             ]);
         } catch (Throwable $e) {
+            if ($transaction_open) {
+                $this->db->trans_rollback();
+            }
             json_exception($e);
         }
     }
@@ -379,6 +397,8 @@ class Customers extends EA_Controller
      */
     public function destroy(): void
     {
+        $transaction_open = false;
+
         try {
             $user_id = (int) session('user_id');
             if (!$user_id || cannot('delete', PRIV_CUSTOMERS, $user_id)) {
@@ -392,19 +412,79 @@ class Customers extends EA_Controller
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityIdRequestDto('customer_id');
             $customer_id = $request_dto->id;
 
-            if (!$this->permissions->has_customer_access($user_id, $customer_id)) {
+            if (!$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start customer delete transaction.');
+            }
+            $transaction_open = true;
+
+            if (!$this->hasLockedCustomerWriteAccess($user_id, $customer_id, 'delete')) {
+                $this->db->trans_rollback();
+                $transaction_open = false;
                 abort(403, 'Forbidden');
+                return;
             }
 
             $customer = $this->customers_model->find($customer_id);
 
             $this->customers_model->delete($customer_id);
 
+            if (!$this->db->trans_status() || !$this->db->trans_commit()) {
+                throw new RuntimeException('Could not commit customer delete transaction.');
+            }
+            $transaction_open = false;
+
             json_response([
                 'success' => true,
             ]);
         } catch (Throwable $e) {
+            if ($transaction_open) {
+                $this->db->trans_rollback();
+            }
             json_exception($e);
+        }
+    }
+
+    /** Keep a changing appointment relationship authoritative through the customer write. */
+    private function hasLockedCustomerWriteAccess(int $user_id, int $customer_id, string $action): bool
+    {
+        $user_ids = array_values(array_unique([$user_id, $customer_id]));
+        sort($user_ids, SORT_NUMERIC);
+        $placeholders = implode(', ', array_fill(0, count($user_ids), '?'));
+        $locked_users = $this->db->query(
+            'SELECT `id` FROM `' .
+                $this->db->dbprefix('users') .
+                '` WHERE `id` IN (' .
+                $placeholders .
+                ') ORDER BY `id` ASC FOR UPDATE',
+            $user_ids,
+        );
+
+        if ($locked_users === false) {
+            throw new RuntimeException('Could not lock customer write users.');
+        }
+
+        if ($locked_users->num_rows() !== count($user_ids)) {
+            return false;
+        }
+
+        // The permission helper reads appointment relationships. Lock that same
+        // customer scope before its first transaction-scoped nonlocking read.
+        $locked_appointments = $this->db->query(
+            'SELECT `id` FROM `' .
+                $this->db->dbprefix('appointments') .
+                '` WHERE `id_users_customer` = ? ORDER BY `id` ASC FOR UPDATE',
+            [$customer_id],
+        );
+
+        if ($locked_appointments === false) {
+            throw new RuntimeException('Could not lock customer appointment relationships.');
+        }
+
+        try {
+            return !cannot($action, PRIV_CUSTOMERS, $user_id) &&
+                $this->permissions->has_customer_access($user_id, $customer_id);
+        } catch (InvalidArgumentException) {
+            return false;
         }
     }
 

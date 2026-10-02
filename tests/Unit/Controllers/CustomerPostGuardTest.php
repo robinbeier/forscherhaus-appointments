@@ -47,12 +47,18 @@ final class CustomerPostGuardTest extends TestCase
                 'session:user_id',
                 "auth:$verb:customers:17",
                 $action === 'update' ? 'dto:customer' : 'dto:customer_id',
+                'trans_begin',
+                'lock_users:17,41',
+                'lock_appointments:41',
+                "auth:$verb:customers:17",
                 'access:17:41',
             ];
         }
         $expected = array_merge(
             $expected,
-            $action === 'destroy' ? ['find:41', 'delete:41', 'json_response'] : $this->saveEvents($action),
+            $action === 'destroy'
+                ? ['find:41', 'delete:41', 'trans_status', 'trans_commit', 'json_response']
+                : $this->saveEvents($action),
         );
         self::assertSame($expected, $result['events']);
         self::assertSame(200, $result['status']);
@@ -134,7 +140,12 @@ final class CustomerPostGuardTest extends TestCase
                     'session:user_id',
                     "auth:$verb:customers:17",
                     $action === 'update' ? 'dto:customer' : 'dto:customer_id',
+                    'trans_begin',
+                    'lock_users:17,41',
+                    'lock_appointments:41',
+                    "auth:$verb:customers:17",
                     'access:17:41',
+                    'trans_rollback',
                     'abort:403',
                 ],
                 $result['events'],
@@ -160,6 +171,7 @@ final class CustomerPostGuardTest extends TestCase
             'optional:[]',
             'save:' . json_encode($this->payload($action), JSON_THROW_ON_ERROR),
             'find:42',
+            ...$action === 'update' ? ['trans_status', 'trans_commit'] : [],
             'json_response',
         ];
     }
