@@ -13,6 +13,7 @@ nginx_config="${NGINX_CONFIG_PATH:-$ROOT_DIR/docker/nginx/nginx.conf}"
 }
 
 docroot="$(mktemp -d "${TMPDIR:-/tmp}/fh-nginx-root.XXXXXX")"
+chmod 0755 "$docroot"
 network="fh-nginx-smoke-$RANDOM-$$"
 nginx_container="fh-nginx-smoke-$RANDOM-$$"
 php_container="fh-php-smoke-$RANDOM-$$"
@@ -76,7 +77,9 @@ base_url="http://127.0.0.1:${host_port}"
 
 ready=0
 for attempt in {1..30}; do
-    if curl --noproxy '*' --silent --show-error --output "$body_file" "$base_url/assets/fixture.txt"; then
+    asset_status=""
+    asset_status="$(curl --noproxy '*' --silent --show-error --output "$body_file" --write-out '%{http_code}' "$base_url/assets/fixture.txt")" || asset_status=""
+    if [[ "$asset_status" == '200' ]] && grep -Fqx 'synthetic-public-asset' "$body_file"; then
         ready=1
         break
     fi
