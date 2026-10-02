@@ -301,6 +301,7 @@ final class ProvidersStoreHttpTest extends TestCase
         $before = $this->fixture->providerWriteSnapshot();
         $db = get_instance()->db;
         $trigger = $this->fixture->run . '_deny_provider_store_service';
+        $markerTable = $this->fixture->run . '_provider_store_marker';
         $fixtureAdmin = get_instance()->load->database(
             [
                 'hostname' => 'mysql',
@@ -316,8 +317,15 @@ final class ProvidersStoreHttpTest extends TestCase
             ],
             true,
         );
+        $markerCreated = false;
         $created = false;
         try {
+            self::assertTrue(
+                $fixtureAdmin->query(
+                    'CREATE TABLE `' . $markerTable . '` (`marker` VARCHAR(255) NOT NULL) ENGINE=MEMORY',
+                ),
+            );
+            $markerCreated = true;
             self::assertTrue(
                 $fixtureAdmin->query(
                     'CREATE TRIGGER `' .
@@ -328,7 +336,13 @@ final class ProvidersStoreHttpTest extends TestCase
                         $db->dbprefix('users') .
                         '` WHERE email = ' .
                         $fixtureAdmin->escape($payload['email']) .
-                        ' LIMIT 1) THEN SIGNAL SQLSTATE \'45000\' SET MESSAGE_TEXT = ' .
+                        ' LIMIT 1) AND EXISTS (SELECT 1 FROM `' .
+                        $db->dbprefix('user_settings') .
+                        '` WHERE id_users = NEW.id_users) THEN INSERT INTO `' .
+                        $markerTable .
+                        '` (`marker`) VALUES (' .
+                        $fixtureAdmin->escape('user-and-settings-written') .
+                        '); SIGNAL SQLSTATE \'45000\' SET MESSAGE_TEXT = ' .
                         '\'synthetic provider store service failure\'; ' .
                         'END IF; END',
                 ),
@@ -342,19 +356,33 @@ final class ProvidersStoreHttpTest extends TestCase
             self::assertStringNotContainsString('SQLSTATE', $response->body);
             self::assertStringNotContainsString('synthetic provider store service failure', $response->body);
             self::assertStringNotContainsString('services_providers', $response->body);
+            $markerRows = $fixtureAdmin->query('SELECT `marker` FROM `' . $markerTable . '`')->result_array();
+            self::assertSame([['marker' => 'user-and-settings-written']], $markerRows);
             self::assertSame([], $this->fixture->providerWriteState($payload['email']));
             self::assertSame($before, $this->fixture->providerWriteSnapshot());
         } finally {
             try {
-                if ($created) {
-                    self::assertTrue($fixtureAdmin->query('DROP TRIGGER `' . $trigger . '`'));
+                try {
+                    if ($created) {
+                        self::assertTrue($fixtureAdmin->query('DROP TRIGGER `' . $trigger . '`'));
+                    }
+                    $triggerCount = $fixtureAdmin->query(
+                        'SELECT TRIGGER_NAME FROM information_schema.TRIGGERS ' .
+                            'WHERE TRIGGER_SCHEMA = DATABASE() AND TRIGGER_NAME = ?',
+                        [$trigger],
+                    );
+                    self::assertSame(0, (int) $triggerCount->num_rows());
+                } finally {
+                    if ($markerCreated) {
+                        self::assertTrue($fixtureAdmin->query('DROP TABLE `' . $markerTable . '`'));
+                    }
                 }
-                $triggerCount = $fixtureAdmin->query(
-                    'SELECT TRIGGER_NAME FROM information_schema.TRIGGERS ' .
-                        'WHERE TRIGGER_SCHEMA = DATABASE() AND TRIGGER_NAME = ?',
-                    [$trigger],
+                $markerCount = $fixtureAdmin->query(
+                    'SELECT TABLE_NAME FROM information_schema.TABLES ' .
+                        'WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?',
+                    [$markerTable],
                 );
-                self::assertSame(0, (int) $triggerCount->num_rows());
+                self::assertSame(0, (int) $markerCount->num_rows());
             } finally {
                 $fixtureAdmin->close();
             }
