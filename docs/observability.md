@@ -59,7 +59,11 @@ Health endpoint boundaries:
 
 - `/health` is public shallow health and should not require a secret.
 - `/index.php/healthz` is token-protected deep health and must be queried with
-  the `X-Health-Token` header from Kuma or host-local config.
+  the `X-Health-Token` header from Kuma or host-local config. Its direct
+  `healthz/index` alias follows the same GET-only controller boundary:
+  non-GET requests that reach the controller return `405` before token parsing
+  or dependency checks, with `no-store` cache control. Global `OPTIONS`
+  requests end earlier under the existing routing policy.
 - The deep-health token is a bearer-like operational secret. Do not print it,
   paste it into Linear/chat, store it in desired-state YAML, or include it in
   command examples. Use `<redacted>` when documenting probes.
