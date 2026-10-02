@@ -87,6 +87,15 @@ anonymous Services deep link retains its login return target.
 synthetic HTTP and database records; it does not prove a live production
 role-change race.
 
+Legacy Services writes (`services/store`, `services/update`, and
+`services/destroy`, including direct aliases) require POST with the normal
+CSRF check and the actor's current stored `services` action permission.
+`update` requires an existing service ID; an edit-only role cannot create a
+service through that endpoint. Rejected requests leave service rows unchanged.
+`ServicesLegacyWriteHttpTest` checks these boundaries with isolated synthetic
+HTTP and database records; it does not establish a live concurrent role-change
+race or a production write result.
+
 Legacy General and Business Settings page reads (`general_settings`,
 `general_settings/index`, `business_settings`, and `business_settings/index`)
 require the actor's current stored `system_settings` view permission on every

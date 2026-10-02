@@ -160,8 +160,16 @@ class Services extends EA_Controller
     public function store(): void
     {
         try {
-            if (cannot('add', PRIV_SERVICES)) {
+            $user_id = (int) session('user_id');
+
+            if (!$user_id || cannot('add', PRIV_SERVICES, $user_id)) {
                 abort(403, 'Forbidden');
+                return;
+            }
+
+            if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+                abort(405, 'Method Not Allowed', ['Allow: POST']);
+                return;
             }
 
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityPayloadRequestDto('service');
@@ -228,19 +236,30 @@ class Services extends EA_Controller
     public function update(): void
     {
         try {
-            if (cannot('edit', PRIV_SERVICES)) {
+            $user_id = (int) session('user_id');
+
+            if (!$user_id || cannot('edit', PRIV_SERVICES, $user_id)) {
                 abort(403, 'Forbidden');
+                return;
+            }
+
+            if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+                abort(405, 'Method Not Allowed', ['Allow: POST']);
+                return;
             }
 
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityPayloadRequestDto('service');
             $service = $request_dto->payload;
 
+            if (empty($service['id'])) {
+                json_response(['success' => false, 'message' => 'Use the store endpoint to create a new record.'], 400);
+                return;
+            }
+
             $this->services_model->only($service, $this->allowed_service_fields);
             $has_category_id = array_key_exists('id_service_categories', $service);
-            if (!empty($service['id'])) {
-                $existing_service = $this->services_model->find((int) $service['id']);
-                $service = array_merge($existing_service, $service);
-            }
+            $existing_service = $this->services_model->find((int) $service['id']);
+            $service = array_merge($existing_service, $service);
 
             if (!$has_category_id) {
                 $service['id_service_categories'] = null;
@@ -248,7 +267,7 @@ class Services extends EA_Controller
 
             $this->services_model->optional($service, $this->optional_service_update_fields);
 
-            $service_id = $this->services_model->save($service, $existing_service ?? null);
+            $service_id = $this->services_model->save($service, $existing_service);
 
             $service = $this->services_model->find($service_id);
 
@@ -267,8 +286,16 @@ class Services extends EA_Controller
     public function destroy(): void
     {
         try {
-            if (cannot('delete', PRIV_SERVICES)) {
+            $user_id = (int) session('user_id');
+
+            if (!$user_id || cannot('delete', PRIV_SERVICES, $user_id)) {
                 abort(403, 'Forbidden');
+                return;
+            }
+
+            if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+                abort(405, 'Method Not Allowed', ['Allow: POST']);
+                return;
             }
 
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityIdRequestDto('service_id');

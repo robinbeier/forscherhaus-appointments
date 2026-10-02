@@ -128,6 +128,15 @@ Datensätze an. Eine mitgesendete bestehende ID wird abgewiesen; Änderungen lau
 `EntityStoreAuthorizationTest` prüft diese Trennung einschließlich normalem
 Anlegen, berechtigtem Bearbeiten und der bestehenden E-Mail-Prüfung.
 
+Die klassischen Service-Schreibwege `services/store`, `services/update` und
+`services/destroy` akzeptieren nur POST mit regulärer CSRF-Prüfung und prüfen
+die aktuell gespeicherte Aktionsberechtigung des angemeldeten Benutzers.
+`services/update` verlangt eine bestehende Service-ID; ein reines
+Bearbeitungsrecht darf dadurch keinen neuen Service anlegen.
+`ServicesLegacyWriteHttpTest` prüft direkte Aliase, Methoden, Rollenwechsel,
+Ablehnung ohne Teiländerung und den gültigen CRUD-Kontrollpfad mit eigenen
+isolierten Datensätzen.
+
 Öffentliche Buchungskonflikte liefern einheitlich HTTP 409 mit dem Hinweis,
 dass die angefragte Zeit nicht verfügbar ist. Die Antwort unterscheidet nicht
 zwischen einem belegten Zeitfenster und einer Überschneidung beim Kunden.
