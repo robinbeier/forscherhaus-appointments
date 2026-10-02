@@ -90,6 +90,7 @@
 /application/views/components/backend_header.php @robinbeier
 /application/views/components/booking_* @robinbeier
 /application/views/components/company_color_style.php @robinbeier
+/application/views/components/custom_fields.php @robinbeier
 /application/views/components/jquery_compat_inline.php @robinbeier
 /application/views/components/settings_nav.php @robinbeier
 /application/views/pages/account.php @robinbeier

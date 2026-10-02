@@ -315,6 +315,13 @@ script executes in the capability-bearing page. Ordinary booking without a
 hash may retain configured analytics; the isolated HTTP regression checks both
 sides with synthetic analytics settings.
 
+Public booking renders stored company name, logo URL, and custom-field labels
+as plain text or HTML attribute values. Escape those values at each output
+context, including the disabled-booking page title; stored settings must not
+create markup or attributes in the visitor's page. `BookingHtmlEscapingHttpTest`
+checks the ordinary and disabled pages with synthetic settings in an isolated
+HTTP/database stack. It does not change or validate production settings.
+
 When public booking CAPTCHA is enabled, registration requires both a nonempty
 server-generated challenge in the current session and a nonempty matching
 request value before any booking or consent write. A correct challenge is

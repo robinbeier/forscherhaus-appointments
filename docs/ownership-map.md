@@ -331,6 +331,7 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
   - `application/controllers/Csp_report.php` (exact_file)
   - `application/core/Csp_report_only.php` (exact_file)
   - `application/views/components/jquery_compat_inline.php` (exact_file)
+  - `application/views/components/custom_fields.php` (exact_file)
   - `application/views/components/backend_header.php` (exact_file)
   - `application/views/components/settings_nav.php` (exact_file)
   - `application/libraries/Accounts.php` (exact_file)
