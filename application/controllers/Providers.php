@@ -62,7 +62,6 @@ class Providers extends EA_Controller
         'language',
         'is_private',
         'ldap_dn',
-        'id_roles',
         'settings',
         'services',
     ];
@@ -270,13 +269,87 @@ class Providers extends EA_Controller
      */
     public function update(): void
     {
+        $owns_transaction = false;
+
         try {
-            if (cannot('edit', PRIV_USERS)) {
+            if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+                abort(405, 'Method Not Allowed', ['Allow: POST']);
+
+                return;
+            }
+
+            $user_id = (int) session('user_id');
+
+            if (!$user_id || cannot('edit', PRIV_USERS, $user_id)) {
                 abort(403, 'Forbidden');
             }
 
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityPayloadRequestDto('provider');
             $provider = $request_dto->payload;
+
+            $provider_id = filter_var($provider['id'] ?? null, FILTER_VALIDATE_INT, [
+                'options' => ['min_range' => 1],
+            ]);
+
+            if ($provider_id === false || array_key_exists('id_roles', $provider)) {
+                abort(400, 'Invalid provider update');
+            }
+
+            $provider['id'] = $provider_id;
+
+            $owns_transaction = !$this->db->trans_active();
+
+            if ($owns_transaction && !$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start provider update transaction.');
+            }
+
+            // Lock both users in the shared numeric order before checking either role.
+            $user_ids = array_values(array_unique([$user_id, $provider_id]));
+            sort($user_ids, SORT_NUMERIC);
+            $placeholders = implode(', ', array_fill(0, count($user_ids), '?'));
+            try {
+                $locked_users = $this->db->query(
+                    'SELECT `id`, `id_roles` FROM `' .
+                        $this->db->dbprefix('users') .
+                        '` WHERE `id` IN (' .
+                        $placeholders .
+                        ') ORDER BY `id` ASC FOR UPDATE',
+                    $user_ids,
+                );
+            } catch (Throwable $e) {
+                throw new RuntimeException('Could not lock provider update users.', 0, $e);
+            }
+
+            if ($locked_users === false) {
+                throw new RuntimeException('Could not lock provider update users.');
+            }
+
+            $users_by_id = [];
+
+            foreach ($locked_users->result_array() as $row) {
+                $users_by_id[(int) $row['id']] = $row;
+            }
+
+            if (!isset($users_by_id[$user_id]) || cannot('edit', PRIV_USERS, $user_id)) {
+                if ($owns_transaction) {
+                    $this->db->trans_rollback();
+                    $owns_transaction = false;
+                }
+
+                abort(403, 'Forbidden');
+            }
+
+            if (
+                !isset($users_by_id[$provider_id]) ||
+                (int) $users_by_id[$provider_id]['id_roles'] !== $this->providers_model->get_provider_role_id()
+            ) {
+                if ($owns_transaction) {
+                    $this->db->trans_rollback();
+                    $owns_transaction = false;
+                }
+
+                abort(404, 'Provider not found');
+            }
 
             $this->providers_model->only($provider, $this->allowed_provider_fields);
 
@@ -294,11 +367,25 @@ class Providers extends EA_Controller
 
             $provider = $this->providers_model->find($provider_id);
 
+            if (!$this->db->trans_status()) {
+                throw new RuntimeException('Could not complete provider update transaction.');
+            }
+
+            if ($owns_transaction && !$this->db->trans_commit()) {
+                throw new RuntimeException('Could not commit provider update transaction.');
+            }
+
+            $owns_transaction = false;
+
             json_response([
                 'success' => true,
                 'id' => $provider_id,
             ]);
         } catch (Throwable $e) {
+            if ($owns_transaction) {
+                $this->db->trans_rollback();
+            }
+
             json_exception($e);
         }
     }

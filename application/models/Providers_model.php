@@ -398,36 +398,161 @@ class Providers_model extends EA_Model
      */
     protected function update(array $provider): int
     {
-        $provider['update_datetime'] = date('Y-m-d H:i:s');
+        $provider_role_id = $this->get_provider_role_id();
 
-        $service_ids = $provider['services'];
-
-        $settings = $provider['settings'];
-
-        unset($provider['services'], $provider['settings']);
-
-        if (isset($settings['password'])) {
-            $existing_settings = $this->db->get_where('user_settings', ['id_users' => $provider['id']])->row_array();
-
-            if (empty($existing_settings)) {
-                throw new RuntimeException('No settings record found for provider with ID: ' . $provider['id']);
-            }
-
-            if (empty($existing_settings['salt'])) {
-                $existing_settings['salt'] = $settings['salt'] = generate_salt();
-            }
-
-            $settings['password'] = hash_password($existing_settings['salt'], $settings['password']);
+        if (isset($provider['id_roles']) && (int) $provider['id_roles'] !== $provider_role_id) {
+            throw new InvalidArgumentException('A provider update cannot change the user role.');
         }
 
-        if (!$this->db->update('users', $provider, ['id' => $provider['id']])) {
-            throw new RuntimeException('Could not update provider.');
+        unset($provider['id_roles']);
+
+        $owns_transaction = !$this->db->trans_active();
+
+        if ($owns_transaction && !$this->db->trans_begin()) {
+            throw new RuntimeException('Could not start provider update transaction.');
         }
 
-        $this->set_settings($provider['id'], $settings);
-        $this->set_service_ids($provider['id'], $service_ids);
+        try {
+            try {
+                $target = $this->db->query(
+                    'SELECT `id_roles` FROM `' . $this->db->dbprefix('users') . '` WHERE `id` = ? FOR UPDATE',
+                    [$provider['id']],
+                );
+            } catch (Throwable $e) {
+                throw new RuntimeException('Could not lock provider update target.', 0, $e);
+            }
 
-        return $provider['id'];
+            if ($target === false) {
+                throw new RuntimeException('Could not lock provider update target.');
+            }
+
+            $target_row = $target->row_array();
+
+            if (!$target_row || (int) $target_row['id_roles'] !== $provider_role_id) {
+                throw new InvalidArgumentException('The provider update target was not found.');
+            }
+
+            $provider['update_datetime'] = date('Y-m-d H:i:s');
+            $service_ids = $this->normalize_update_service_ids($provider['services']);
+            $settings = $provider['settings'];
+            unset($provider['services'], $provider['settings']);
+
+            // Service deletion locks its parent before cascading to these associations.
+            // Keep the same order before replacing the provider's connections.
+            $this->lock_update_service_parents((int) $provider['id'], $service_ids);
+
+            if (isset($settings['password'])) {
+                $existing_settings = $this->db
+                    ->get_where('user_settings', ['id_users' => $provider['id']])
+                    ->row_array();
+
+                if (empty($existing_settings)) {
+                    throw new RuntimeException('No settings record found for provider with ID: ' . $provider['id']);
+                }
+
+                if (empty($existing_settings['salt'])) {
+                    $existing_settings['salt'] = $settings['salt'] = generate_salt();
+                }
+
+                $settings['password'] = hash_password($existing_settings['salt'], $settings['password']);
+            }
+
+            if (!$this->db->update('users', $provider, ['id' => $provider['id'], 'id_roles' => $provider_role_id])) {
+                throw new RuntimeException('Could not update provider.');
+            }
+
+            $this->set_settings($provider['id'], $settings);
+            try {
+                $this->set_service_ids($provider['id'], $service_ids);
+            } catch (Throwable $e) {
+                throw new RuntimeException('Could not write provider service associations.', 0, $e);
+            }
+
+            if (!$this->db->trans_status()) {
+                throw new RuntimeException('Could not complete provider update transaction.');
+            }
+
+            if ($owns_transaction && !$this->db->trans_commit()) {
+                throw new RuntimeException('Could not commit provider update transaction.');
+            }
+
+            return $provider['id'];
+        } catch (Throwable $exception) {
+            if ($owns_transaction) {
+                $this->db->trans_rollback();
+            }
+
+            throw $exception;
+        }
+    }
+
+    /** Use one canonical positive integer ID list for locking and writing. */
+    private function normalize_update_service_ids(array $service_ids): array
+    {
+        $normalized = [];
+
+        foreach ($service_ids as $service_id) {
+            $parsed = filter_var($service_id, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+
+            if ($parsed === false) {
+                throw new InvalidArgumentException('The provided provider services are invalid.');
+            }
+
+            $normalized[] = $parsed;
+        }
+
+        return array_values(array_unique($normalized));
+    }
+
+    /** Lock the current and requested service parents before association replacement. */
+    private function lock_update_service_parents(int $provider_id, array $requested_service_ids): void
+    {
+        try {
+            $current = $this->db->get_where('services_providers', ['id_users' => $provider_id]);
+        } catch (Throwable $e) {
+            throw new RuntimeException('Could not read provider service associations.', 0, $e);
+        }
+
+        if ($current === false) {
+            throw new RuntimeException('Could not read provider service associations.');
+        }
+
+        $current_ids = array_map('intval', array_column($current->result_array(), 'id_services'));
+        $service_ids = array_values(array_unique(array_merge($current_ids, $requested_service_ids)));
+
+        foreach ($service_ids as $service_id) {
+            if ($service_id < 1) {
+                throw new InvalidArgumentException('The provided provider services are invalid.');
+            }
+        }
+
+        if ($service_ids === []) {
+            return;
+        }
+
+        sort($service_ids, SORT_NUMERIC);
+        $placeholders = implode(', ', array_fill(0, count($service_ids), '?'));
+        try {
+            $locked = $this->db->query(
+                'SELECT `id` FROM `' .
+                    $this->db->dbprefix('services') .
+                    '` WHERE `id` IN (' .
+                    $placeholders .
+                    ') ORDER BY `id` ASC FOR UPDATE',
+                $service_ids,
+            );
+        } catch (Throwable $e) {
+            throw new RuntimeException('Could not lock provider service parents.', 0, $e);
+        }
+
+        if ($locked === false) {
+            throw new RuntimeException('Could not lock provider service parents.');
+        }
+
+        $locked_ids = array_map('intval', array_column($locked->result_array(), 'id'));
+        if (array_diff($requested_service_ids, $locked_ids) !== []) {
+            throw new InvalidArgumentException('The provider service target was not found.');
+        }
     }
 
     /**
