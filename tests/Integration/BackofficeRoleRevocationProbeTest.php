@@ -109,10 +109,40 @@ final class BackofficeRoleRevocationProbeTest extends TestCase
         self::assertSame('clean', $this->fixture->verify());
     }
 
+    public function testGenericSuccessPageCannotMasqueradeAsOwnedAdminPage(): void
+    {
+        self::assertNotNull($this->fixture);
+        self::assertNotNull($this->server);
+        $router = $this->server->directory . '/router.php';
+        $source = file_get_contents($router);
+        self::assertIsString($source);
+        file_put_contents(
+            $router,
+            '<?php if (preg_match("~/(?:index\\.php/)?admins/?$~", (string) ($_SERVER["REQUEST_URI"] ?? "")) === 1) { http_response_code(200); echo "generic success"; exit; } ?>' .
+                "\n" .
+                $source,
+        );
+        $client = $this->operatorClient();
+        try {
+            (new BackofficeRoleRevocationProbe($client, $this->fixture))->run();
+            self::fail('A generic HTTP 200 page must not count as an owned admin page.');
+        } catch (RuntimeException $error) {
+            self::assertStringContainsString('did not render the owned synthetic admin page', $error->getMessage());
+        }
+        self::assertSame(200, $client->get('login')->statusCode, 'The probe must log out on failure.');
+        self::assertSame('active', $this->fixture->verify());
+    }
+
     private function operatorClient(): GateHttpClient
     {
         self::assertNotNull($this->server);
-        return new GateHttpClient($this->server->baseUrl, additionalHeaders: ['X-FH-Ordinary-Probe' => '1']);
+        return new GateHttpClient(
+            $this->server->baseUrl,
+            indexPage: (string) config_item('index_page'),
+            csrfCookieName: (string) config_item('csrf_cookie_name'),
+            csrfTokenName: (string) config_item('csrf_token_name'),
+            additionalHeaders: ['X-FH-Ordinary-Probe' => '1'],
+        );
     }
 
     public function testOwnershipDriftAbortsBeforeHttpAndFixtureCleanupRemainsControlled(): void

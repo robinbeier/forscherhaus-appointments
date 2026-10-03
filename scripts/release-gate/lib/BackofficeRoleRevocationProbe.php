@@ -135,7 +135,15 @@ final class BackofficeRoleRevocationProbe
             $response = $request();
             $this->remember();
             $this->expect($response, $expected, $name);
-            if ($expected === 200 && str_contains($name, '/search')) {
+            if ($expected === 200 && in_array($name, ['GET admins', 'GET admins/index'], true)) {
+                if (
+                    !str_contains($response->body, 'id="admins-page"') ||
+                    !str_contains($response->body, 'Defense Live Admin') ||
+                    preg_match('~"user_id"\s*:\s*' . $adminId . '(?:[,}])~', $response->body) !== 1
+                ) {
+                    throw new RuntimeException($name . ' did not render the owned synthetic admin page.');
+                }
+            } elseif ($expected === 200 && str_contains($name, '/search')) {
                 $rows = json_decode($response->body, true);
                 if (
                     !is_array($rows) ||

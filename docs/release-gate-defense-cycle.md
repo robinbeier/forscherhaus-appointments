@@ -205,9 +205,10 @@ under the ordinary shared lock, independent cleanup timer and session journal.
 The operator HTTP client does not follow redirects. The action classifies the
 legacy admin-search alias as a redirect to the directly checked search route,
 and checks the login-to-calendar redirect separately from the denied calendar
-response. Successful search/find responses must contain exactly the owned
-synthetic marker and ID; denied responses must not contain the marker. Local
-tests use the operator client's header configuration and exercise failure after
+response. Successful Admin pages must render the owned account identity, and
+search/find responses must contain exactly the owned synthetic marker and ID;
+denied responses must not contain the marker. Local tests use the operator
+client's configured paths, CSRF names and header, and exercise failure after
 login and recovery from a committed transition with an unfinished journal.
 It has only been exercised locally; the first productive role-change run
 requires a separate approved plan. The
