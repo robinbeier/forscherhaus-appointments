@@ -331,9 +331,14 @@ hash, integration identifiers, or raw related model rows. The current persisted
 role limits visible appointments to the provider or secretary scope before
 related records are loaded. Customer details use the calendar read projection
 only when that role may view customers; otherwise the appointment remains
-visible with an empty customer value. The isolated HTTP regression checks both
-feeds with synthetic records and a post-login permission change. It does not
-establish production browser behavior or the safety of other backoffice feeds.
+visible with an empty customer value. When events are requested, both feeds
+reject missing, invalid, reversed, or longer-than-62-day date ranges with HTTP
+400 before event queries. A default-view request without a selected filter
+continues to return an empty result without querying events.
+The day, week, and month UI views fit within this limit. The isolated HTTP
+regression checks both feeds with synthetic records and a post-login permission
+change; it does not establish production browser behavior, throughput under
+legitimate peak load, or the safety of other backoffice feeds.
 
 The authenticated customer find and search responses use the actor's persisted
 role and current `customers.view` permission. Customer search applies the

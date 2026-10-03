@@ -3,6 +3,8 @@
 namespace Tests\Unit\Libraries;
 
 use Calendar_request_dto_factory;
+use CalendarRangeValidationException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Request_normalizer;
 
@@ -48,6 +50,34 @@ class CalendarRequestDtoFactoryTest extends TestCase
         $this->assertSame('2026-03-20', $dto->date);
         $this->assertSame('next monday', $dto->originalDate);
         $this->assertSame(['notes' => 'override'], $dto->workingPlanException);
+    }
+
+    public function testCalendarRangeAllowsTheSixWeekMonthViewAndAtMostSixtyTwoDays(): void
+    {
+        $month = $this->factory->createRangeRequestDto('2026-11-01', '2026-12-12');
+        $maximum = $this->factory->createRangeRequestDto('2026-11-01', '2027-01-01');
+
+        $this->assertSame('2026-12-12', $month->endDate);
+        $this->assertSame('2027-01-01', $maximum->endDate);
+    }
+
+    #[DataProvider('invalidCalendarRanges')]
+    public function testCalendarRangeRejectsInvalidOrUnboundedIntervals(mixed $start, mixed $end): void
+    {
+        $this->expectException(CalendarRangeValidationException::class);
+
+        $this->factory->createRangeRequestDto($start, $end);
+    }
+
+    public static function invalidCalendarRanges(): array
+    {
+        return [
+            'missing start' => [null, '2026-11-01'],
+            'invalid date' => ['2026-02-30', '2026-11-01'],
+            'reversed range' => ['2026-11-02', '2026-11-01'],
+            'sixty-three days' => ['2026-11-01', '2027-01-02'],
+            'multiple years' => ['2020-01-01', '2030-01-01'],
+        ];
     }
 
     public function testCreateFilterRequestDtoNormalizesRecordAndFlags(): void

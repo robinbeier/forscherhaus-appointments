@@ -1071,6 +1071,8 @@ class Calendar extends EA_Controller
             $response['blocked_periods'] = $this->calendarBlockedPeriods($range_start_date, $range_end_date, $user_id);
 
             json_response($response);
+        } catch (CalendarRangeValidationException $e) {
+            json_response(['success' => false, 'message' => $e->getMessage()], 400);
         } catch (Throwable $e) {
             json_exception($e);
         }
@@ -1230,6 +1232,8 @@ class Calendar extends EA_Controller
             $response['blocked_periods'] = $this->calendarBlockedPeriods($range_start_date, $range_end_date, $user_id);
 
             json_response($response);
+        } catch (CalendarRangeValidationException $e) {
+            json_response(['success' => false, 'message' => $e->getMessage()], 400);
         } catch (Throwable $e) {
             json_exception($e);
         }

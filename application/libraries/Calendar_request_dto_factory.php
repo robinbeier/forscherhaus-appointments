@@ -63,8 +63,10 @@ final class CalendarWorkingPlanExceptionRequestDto
  */
 final class CalendarRangeRequestDto
 {
-    public function __construct(public readonly ?string $startDate, public readonly ?string $endDate) {}
+    public function __construct(public readonly string $startDate, public readonly string $endDate) {}
 }
+
+final class CalendarRangeValidationException extends InvalidArgumentException {}
 
 /**
  * Typed calendar filter request DTO.
@@ -101,6 +103,11 @@ final class CalendarEntityIdRequestDto
  */
 class Calendar_request_dto_factory
 {
+    // The calendar UI requests at most a six-week month view. Leave room for
+    // adjacent dates without allowing an authenticated request to enumerate
+    // an unbounded appointment history in one response.
+    private const MAX_CALENDAR_RANGE_DAYS = 62;
+
     protected Request_normalizer $request_normalizer;
 
     public function __construct(?Request_normalizer $request_normalizer = null)
@@ -209,10 +216,21 @@ class Calendar_request_dto_factory
 
     public function createRangeRequestDto(mixed $start_date, mixed $end_date): CalendarRangeRequestDto
     {
-        return new CalendarRangeRequestDto(
-            $this->normalizeDateCompat($start_date),
-            $this->normalizeDateCompat($end_date),
-        );
+        $start = $this->request_normalizer->normalizeDateYmd($start_date);
+        $end = $this->request_normalizer->normalizeDateYmd($end_date);
+
+        if ($start === null || $end === null) {
+            throw new CalendarRangeValidationException('Calendar range requires valid start and end dates.');
+        }
+
+        $start_day = new DateTimeImmutable($start);
+        $end_day = new DateTimeImmutable($end);
+
+        if ($end_day < $start_day || $start_day->diff($end_day)->days >= self::MAX_CALENDAR_RANGE_DAYS) {
+            throw new CalendarRangeValidationException('Calendar range exceeds the allowed interval.');
+        }
+
+        return new CalendarRangeRequestDto($start, $end);
     }
 
     public function createFilterRequestDto(
