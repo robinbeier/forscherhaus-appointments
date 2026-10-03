@@ -486,6 +486,11 @@ URL-selected record and use the declared HTTP method even through a direct
 controller alias. A changed blocked period affects booking availability, so a
 rejected request must leave the complete period row unchanged. The precise
 contract and evidence boundary live in [CI write contracts](docs/ci-write-contracts.md#blocked-periods-api-v1).
+The isolated `PublicBookingBlockedPeriodRaceHttpTest` additionally checks one
+ordered overlap: a global block committed while a public booking waits for its
+provider lock is visible to the post-lock availability check, and the rejected
+booking leaves no customer, appointment, or consent behind. It does not prove
+every interleaving with a blocked-period edit or a live production write.
 
 For service categories, authenticated API writes must likewise bind PUT to the
 URL-selected category and enforce the declared method on direct aliases.
