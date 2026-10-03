@@ -377,6 +377,23 @@ Zuordnungen vor und nach abgewiesenen sowie passenden PUT-Anfragen. Sie belegen
 ihren lokalen HTTP-/Datenbanklauf, nicht die produktive Auslieferung oder alle
 konkurrierenden Änderungen.
 
+## Customers API v1 direkte Store- und Update-Aliase
+
+Die kanonischen Kundenrouten verwenden POST für `store` und PUT für
+`update/:id`. Auch die direkt erreichbaren `Customers_api_v1`-Aliase erzwingen
+die jeweilige Methode nach der API-Authentifizierung und vor Payload-Auswertung,
+Datensatzsuche oder Mutation. Abweichende Methoden erhalten 405 mit
+`Allow: POST` beziehungsweise `Allow: PUT`; abgewiesene Schreibversuche dürfen
+Kunden- und abhängige Zeilen nicht verändern. Ohne Authentifizierung bleibt die
+Antwort 401. Der globale OPTIONS-Kurzschluss liegt vor dem Controller.
+
+`CustomersApiWriteAliasHttpTest` prüft mit eigenen synthetischen Datensätzen
+falsche Verben, unveränderte Kundenzeilen, fehlende Authentifizierung und
+gültige kanonische sowie direkte POST-/PUT-Kontrollen in einem frischen
+HTTP-/DB-Stack. Der Test erfasst nicht jede abhängige Zeile und beweist keine
+produktive Schreibausführung; dafür fehlt ein vorab belegter, vollständig
+bereinigbarer eigener Produktivdatensatz.
+
 ## Customers und Providers API v1 direkte Löschaliase
 
 Die kanonischen Löschrouten verwenden DELETE. Auch die direkt erreichbaren

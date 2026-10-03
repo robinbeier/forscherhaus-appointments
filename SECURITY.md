@@ -448,6 +448,15 @@ source-level guard is placed before its model access. The isolated synthetic
 HTTP regression proves the external rejection and preservation of its fixture
 row; it does not establish behavior in production.
 
+The Customers API v1 `store` and `update/:id` actions require POST and PUT,
+respectively, also through direct controller aliases. After API authentication,
+other methods return 405 with `Allow: POST` or `Allow: PUT` before customer
+payload parsing, target lookup, or mutation. Rejected writes must leave customer
+and dependent records unchanged. `CustomersApiWriteAliasHttpTest` checks the
+direct aliases, valid canonical and alias writes, and preservation of its own
+synthetic customer rows in an isolated HTTP/database stack; it does not prove
+production behavior or unchanged rows outside that fixture.
+
 Customers and Providers API v1 deletion requires DELETE even through direct
 controller aliases. Other authenticated methods return 405 with `Allow: DELETE`
 before either model reads or mutates a record. Isolated synthetic HTTP/DB
