@@ -533,6 +533,15 @@ The POST then rejects with 409 and leaves no customer, appointment, or consent
 partial write. A separate local control books the slot after its own block is
 removed. This does not cover the Calendar or API HTTP writer, every possible
 interleaving, or a live production booking.
+The isolated `PublicRescheduleManualUnavailabilityRaceHttpTest` covers the
+corresponding authorized public reschedule schedule: a run-owned manual block
+commits while the POST waits on the provider lock, and an independent
+connection confirms the block before the request resumes. The POST rejects
+with 409 without changing the original appointment, customer, service, or
+consent; the attempted use consumes its one-time authority. A new authority
+allows a positive local control after the owned block is removed. This proves
+one ordered interleaving, not the Calendar or API HTTP writer, every concurrent
+schedule, or a productive reschedule.
 
 For service categories, authenticated API writes must likewise bind PUT to the
 URL-selected category and enforce the declared method on direct aliases.
