@@ -90,6 +90,7 @@
             <file>./tests/Integration/Controllers/BookingManualUnavailabilityRescheduleHttpTest.php</file>
             <file>./tests/Integration/Controllers/PublicBookingProviderRaceHttpTest.php</file>
             <file>./tests/Integration/Controllers/PublicBookingBlockedPeriodRaceHttpTest.php</file>
+            <file>./tests/Integration/Controllers/PublicBookingManualUnavailabilityRaceHttpTest.php</file>
             <file>./tests/Integration/Controllers/PublicRescheduleBlockedPeriodRaceHttpTest.php</file>
             <file>./tests/Integration/Controllers/BookingAvailabilityAuthorityHttpTest.php</file>
             <file>./tests/Integration/Controllers/BookingJsonBodyLimitHttpTest.php</file>
