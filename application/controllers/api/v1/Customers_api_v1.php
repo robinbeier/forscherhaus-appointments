@@ -124,6 +124,12 @@ class Customers_api_v1 extends EA_Controller
      */
     public function store(): void
     {
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+            response('', 405, ['Allow: POST']);
+
+            return;
+        }
+
         try {
             $customer = $this->apiRequestDtoFactory()->buildEntityWritePayloadDto()->payload;
 
@@ -152,6 +158,12 @@ class Customers_api_v1 extends EA_Controller
      */
     public function update(int $id): void
     {
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'PUT') {
+            response('', 405, ['Allow: PUT']);
+
+            return;
+        }
+
         try {
             $occurrences = $this->customers_model->get(['id' => $id]);
 
