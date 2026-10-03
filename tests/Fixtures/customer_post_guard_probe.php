@@ -183,6 +183,12 @@ class ProbeModel
         $GLOBALS['saved'][] = $v;
         return 42;
     }
+    public function insert_new(array $v): int
+    {
+        $GLOBALS['events'][] = 'insert_new:' . json_encode($v, JSON_THROW_ON_ERROR);
+        $GLOBALS['saved'][] = $v;
+        return 42;
+    }
     public function find(int $id): array
     {
         $GLOBALS['events'][] = "find:$id";

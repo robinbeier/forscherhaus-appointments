@@ -317,12 +317,13 @@ class Customers extends EA_Controller
                 );
                 return;
             }
+            unset($customer['id']);
 
             $this->customers_model->only($customer, $this->allowed_customer_fields);
 
             $this->customers_model->optional($customer, $this->optional_customer_fields);
 
-            $customer_id = $this->customers_model->save($customer);
+            $customer_id = $this->customers_model->insert_new($customer);
 
             $customer = $this->customers_model->find($customer_id);
 

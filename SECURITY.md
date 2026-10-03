@@ -115,6 +115,8 @@ race or a production write result.
 Legacy Customers writes (`customers/store`, `customers/update`, and
 `customers/destroy`, including direct aliases) require POST with the normal
 CSRF check and the actor's current stored `customers` action permission.
+`customers/store` uses the insert-only model path: an email match cannot turn
+create authority into an update to an existing customer.
 The store visibility limit uses that stored role rather than the login-time
 session role. A rejected write must leave customer rows unchanged.
 For `update` and `destroy`, current permission and customer relationship are
