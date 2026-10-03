@@ -491,6 +491,12 @@ ordered overlap: a global block committed while a public booking waits for its
 provider lock is visible to the post-lock availability check, and the rejected
 booking leaves no customer, appointment, or consent behind. It does not prove
 every interleaving with a blocked-period edit or a live production write.
+The isolated `PublicRescheduleBlockedPeriodRaceHttpTest` checks the corresponding
+ordered overlap for an authorized public reschedule: the newly committed block
+rejects the waiting POST without changing its appointment, customer, service,
+or consent. The one-time reschedule authority is consumed; a new authority is
+required before the positive control succeeds after the synthetic block is
+removed. This is local evidence for one interleaving, not a production test.
 
 For service categories, authenticated API writes must likewise bind PUT to the
 URL-selected category and enforce the declared method on direct aliases.
