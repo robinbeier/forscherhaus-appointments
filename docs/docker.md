@@ -4,7 +4,7 @@ Run the development containers of Easy!Appointments with Docker and Docker Compo
 
 Before starting the default data-bearing stack, run
 `bash scripts/ci/compose_sensitive_ports_smoke.sh`; it requires Docker Engine
-`>=28.0.0` and the canonical loopback bindings. Then run `docker compose up`.
+`>=28.3.3` and the canonical loopback bindings. Then run `docker compose up`.
 The production-dump import helper runs this preflight itself before any remote
 backup, download, local data reset, or container startup.
 Nginx starts after PHP-FPM so its configured upstream name exists during startup;
@@ -94,11 +94,13 @@ You can additionally access phpMyAdmin from `http://localhost:8080` (credentials
 The default Compose configuration publishes the app, database, and phpMyAdmin
 only on host loopback (`127.0.0.1`). They remain reachable from this computer
 and from other containers on the Compose network. With Docker Engine
-`>=28.0.0` and default bridge/NAT networking, other devices cannot reach
+`>=28.3.3` and default bridge/NAT networking, other devices cannot reach
 these published ports through the host LAN. Older Engines can expose even
 localhost-published ports to peers on the same network segment; do not import
-a production dump with an older Engine. See [Docker's port-publishing
-documentation](https://docs.docker.com/engine/network/port-publishing/).
+a production dump with an older Engine. Versions `28.2.0` through `28.3.2`
+also have a [firewalld reload exposure](https://github.com/advisories/GHSA-x4rx-4gw3-53p4)
+on affected Linux hosts; the minimum accepted version is the patched `28.3.3`.
+See [Docker's port-publishing documentation](https://docs.docker.com/engine/network/port-publishing/).
 `scripts/ci/compose_sensitive_ports_smoke.sh` checks the Server version and
 resolved canonical Compose bindings without starting containers. It does not
 inspect custom daemon routing, host firewalls, or custom Compose overrides.

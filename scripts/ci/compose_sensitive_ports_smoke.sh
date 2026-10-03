@@ -7,15 +7,22 @@ ROOT_DIR="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 cd "$ROOT_DIR"
 
 # Docker Engine versions before 28 can expose localhost-published ports to
-# peers on the same L2 network. Fail closed before treating loopback bindings
-# as a host-isolation guarantee.
+# peers on the same L2 network. Versions 28.2.0 through 28.3.2 can also lose
+# their loopback boundary after a firewalld reload (CVE-2025-54388). Fail
+# closed before treating loopback bindings as a host-isolation guarantee.
 docker_server_version="$(docker version --format '{{.Server.Version}}' 2>/dev/null || true)"
-if [[ ! "$docker_server_version" =~ ^([0-9]+)(\.[0-9]+){0,2}(-[0-9A-Za-z.-]+)?$ ]]; then
+# Require a complete stable release. Prerelease builds can change the
+# localhost-publishing behavior this guardrail relies on, so fail closed
+# instead of treating e.g. 28.0.0-rc.1 as Docker 28.
+if [[ ! "$docker_server_version" =~ ^([0-9]+)\.[0-9]+\.[0-9]+$ ]]; then
     echo "compose_sensitive_ports=unsupported_docker_engine" >&2
     exit 1
 fi
 docker_major="${BASH_REMATCH[1]}"
-if (( docker_major < 28 )); then
+docker_minor="${docker_server_version#*.}"
+docker_minor="${docker_minor%%.*}"
+docker_patch="${docker_server_version##*.}"
+if (( docker_major < 28 || (docker_major == 28 && (docker_minor < 3 || (docker_minor == 3 && docker_patch < 3))) )); then
     echo "compose_sensitive_ports=unsupported_docker_engine" >&2
     exit 1
 fi

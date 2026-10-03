@@ -22,7 +22,7 @@ Host prerequisites for setup and the local development stack:
 - PHP `>=8.3.6`
 - Composer
 - Node.js `>=24.0.0` plus `npm`/`npx`
-- Docker Engine `>=28.0.0` + Docker Compose
+- Docker Engine `>=28.3.3` + Docker Compose
 
 For agent worktrees and local pre-PR gates, the
 [read-only start preflight](docs/local-start-preflight.md) inspects Git and the
@@ -132,7 +132,7 @@ files and the parent-facing calendar links remain available.
 - PDF renderer: `http://localhost:3003`
 
 The default Compose app, MySQL (`localhost:3306`), and phpMyAdmin bind to
-host loopback. With Docker Engine `>=28.0.0` and default bridge networking,
+host loopback. With Docker Engine `>=28.3.3` and default bridge networking,
 they are intended for access from this computer only. See the
 [Docker guide](docs/docker.md#local-configuration) for the check and limits.
 
