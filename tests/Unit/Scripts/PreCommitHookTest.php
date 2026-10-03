@@ -68,7 +68,7 @@ final class PreCommitHookTest extends TestCase
         self::assertStringContainsString('-lint-', $log);
         self::assertStringNotContainsString(' up ', $log);
         self::assertStringNotContainsString(' exec ', $log);
-        self::assertStringNotContainsString(' -v', $log);
+        self::assertStringContainsString('down -v --remove-orphans', $log);
         self::assertFileDoesNotExist($repository . '/vendor');
     }
 
@@ -98,8 +98,7 @@ final class PreCommitHookTest extends TestCase
 
         self::assertSame(1, $result['exit_code']);
         self::assertStringContainsString('run --rm --no-deps -T', $log);
-        self::assertStringContainsString('down --remove-orphans', $log);
-        self::assertStringNotContainsString(' -v', $log);
+        self::assertStringContainsString('down -v --remove-orphans', $log);
     }
 
     private function repository(bool $withNode = false, bool $composeFailure = false): string

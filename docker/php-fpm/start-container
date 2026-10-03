@@ -1,10 +1,45 @@
 #!/bin/bash
+set -euo pipefail
 
 echo "➜ Ignore Permission Changes"
-git config core.fileMode false
+# CI checkouts need not expose a writable Git directory inside the container.
+# This is only a local Git display preference, not a startup requirement.
+if ! git config --local core.fileMode false >/dev/null 2>&1; then
+    echo "➜ Git file-mode preference unavailable"
+fi
 
 echo "➜ Set Correct Permissions"
-chmod -R 777 storage
+if [[ -L storage || ! -d storage ]]; then
+    echo "✖ Refusing invalid storage root: storage" >&2
+    exit 1
+fi
+# Restrict the bind-mounted parent before classifying its children. PHP-FPM
+# writes within the prepared runtime children and its separate session volume.
+chmod 0755 storage
+if ! symlinked_storage_child="$(find -P storage -mindepth 1 -maxdepth 1 ! -name sessions -type l -print -quit)"; then
+    echo "✖ Could not inspect storage children" >&2
+    exit 1
+fi
+if [[ -n "$symlinked_storage_child" ]]; then
+    echo "✖ Refusing symlinked storage child" >&2
+    exit 1
+fi
+for runtime_dir in storage/{backups,cache,logs,uploads}; do
+    if [[ -L "$runtime_dir" || ! -d "$runtime_dir" ]]; then
+        echo "✖ Refusing invalid runtime directory: $runtime_dir" >&2
+        exit 1
+    fi
+done
+# Existing nested entries are never traversed or widened during startup.
+chmod 0777 storage/{backups,cache,logs,uploads}
+
+echo "➜ Prepare Private Session Volume"
+if [[ -L storage/sessions ]] || ! mountpoint -q storage/sessions; then
+    echo "✖ Refusing to prepare storage/sessions without a dedicated non-symlink mount." >&2
+    exit 1
+fi
+chown www-data:www-data storage/sessions
+chmod 700 storage/sessions
 
 echo "➜ Ensure Local Config"
 [[ -f config.php ]] || cp config-sample.php config.php

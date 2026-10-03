@@ -90,6 +90,48 @@ local credentials and other secrets out of version control.
 In the host machine the server is accessible from `http://localhost` and the database from `localhost:3306`.
 The development stack pins MySQL `8.4.8` in `docker-compose.yml` for CI parity, while application migrations remain compatible with MySQL `5.7+`.
 
+### PHP-FPM session storage
+
+The PHP-FPM service mounts `storage/sessions` from the project-scoped named
+volume `php_fpm_sessions` at the existing application path
+`/var/www/html/storage/sessions`. The `nocopy` option prevents Docker from
+copying the checkout's host directory into the private volume. Only PHP-FPM
+gets this mount; Nginx keeps the checkout bind mount and its existing deny rule
+for `/storage`, so session files are not served by the development web server.
+At startup PHP-FPM prepares the volume root as `www-data` with mode `0700`
+without recursively changing files inside it.
+
+This changes existing Docker users from the old host bind-mounted session
+directory to a fresh private volume, so current Docker sessions are lost and
+users must log in again. After pulling this change, run
+`docker compose up -d --force-recreate php-fpm` so the PHP-FPM container receives
+the new volume mount; `docker compose restart` keeps the old mount and is not
+sufficient for this migration. Host-side PHP continues to use
+the unchanged `application/config/config.php` save path in the checkout, and
+the worktree setup prepares an empty host `storage/sessions` directory with
+mode `0700` while preserving an existing populated directory and its contents.
+This means host PHP and PHP-FPM have separate session stores by design.
+Setup and container startup keep the `storage` root owner-writable and prepare
+only the fixed top-level runtime directories for shared local writes. They do
+not recursively change existing cache, log, backup, or upload contents; resolve
+an incompatible old local artifact deliberately under its own owner.
+
+For an isolated runtime check, run `bash scripts/ci/private_local_sessions_smoke.sh`.
+It creates and removes only its own temporary Compose projects and synthetic
+session files; it never reads existing host sessions.
+
+Use `docker compose down` to stop the stack while retaining the named session
+volume. Use `docker compose down -v` only when intentionally removing the
+local Docker session volume; it does not remove the old host bind-mounted
+directory. To roll back, check out the last known-good revision of this local
+Docker setup as a whole, including both `docker-compose.yml` and
+`docker/php-fpm/start-container`, then run
+`docker compose up -d --force-recreate php-fpm`. Removing only the Compose
+volume mount is not a rollback: the current startup script requires that
+dedicated mount and will refuse to start without it. The previous startup
+script restores host-backed sessions and their previous permission behavior;
+the private named volume can be retained for a later forward migration.
+
 You can additionally access phpMyAdmin from `http://localhost:8080` (credentials are `root` / `secret`).
 The default Compose configuration publishes the app, database, and phpMyAdmin
 only on host loopback (`127.0.0.1`). They remain reachable from this computer

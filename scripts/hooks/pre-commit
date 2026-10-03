@@ -56,7 +56,8 @@ configure_hook_compose_project() {
 
 cleanup_stack() {
     if [[ "${STACK_STARTED}" == "1" ]]; then
-        ci_docker_compose down --remove-orphans >/dev/null 2>&1 || true
+        # The lint run owns a per-process project, including its private session volume.
+        ci_docker_compose down -v --remove-orphans >/dev/null 2>&1 || true
         if [[ -n "${CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH:-}" ]]; then
             rmdir "${CI_DOCKER_EPHEMERAL_MYSQL_DATA_PATH}" >/dev/null 2>&1 || true
         fi

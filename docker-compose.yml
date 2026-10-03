@@ -10,6 +10,11 @@ services:
         volumes:
             - '.:/var/www/html'
             - './docker/php-fpm/php-ini-overrides.ini:/usr/local/etc/php/conf.d/99-overrides.ini'
+            - type: volume
+              source: php_fpm_sessions
+              target: /var/www/html/storage/sessions
+              volume:
+                  nocopy: true
 
     nginx:
         image: 'nginx:1.29.6-alpine'
@@ -82,3 +87,6 @@ services:
             interval: 30s
             timeout: 3s
             retries: 3
+
+volumes:
+    php_fpm_sessions:
