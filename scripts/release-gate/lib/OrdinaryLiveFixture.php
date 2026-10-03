@@ -19,9 +19,13 @@ final class OrdinaryLiveFixture
     private string $stateFile;
     private string $lockFile;
 
-    public function __construct(string $stateDirectory)
+    /** @var null|callable():void */
+    private readonly mixed $afterTransitionCommit;
+
+    public function __construct(string $stateDirectory, ?callable $afterTransitionCommit = null)
     {
         $this->assertRootCli();
+        $this->afterTransitionCommit = $afterTransitionCommit;
         $this->stateDirectory = $this->prepareDirectory($stateDirectory);
         $this->stateFile = $this->stateDirectory . DIRECTORY_SEPARATOR . 'state.json';
         $this->lockFile = $this->stateDirectory . DIRECTORY_SEPARATOR . 'lifecycle.lock';
@@ -213,6 +217,9 @@ final class OrdinaryLiveFixture
 
             // A crash here leaves transition_intent plus the committed role;
             // deactivate() accepts precisely that journaled pair.
+            if ($this->afterTransitionCommit !== null) {
+                ($this->afterTransitionCommit)();
+            }
             $state['phase'] = 'customer';
             $this->writeState($state);
             unset($state['password']);

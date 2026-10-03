@@ -22,7 +22,7 @@ final class BackofficeRoleRevocationProbe
     private readonly mixed $rememberSession;
 
     /**
-     * @return array{status:string,coverage:string,before_statuses:array<string,int>,after_statuses:array<string,int>,session_status:int,logout_status:int,observed:string}
+     * @return array{status:string,coverage:string,before_statuses:array<string,int>,after_statuses:array<string,int>,alias_before_status:int,alias_after_status:int,session_status:int,calendar_status:int,logout_status:int,observed:string}
      */
     public function run(): array
     {
@@ -57,6 +57,7 @@ final class BackofficeRoleRevocationProbe
             $loggedIn = true;
 
             $before = $this->readRoutes((string) $state['marker'], (int) $state['user_id'], 200);
+            $aliasBefore = $this->checkAliasRedirect((string) $state['marker']);
             $this->fixture->transitionAdminToCustomer();
             $afterUser = $db->get_where('users', ['id' => (int) $state['user_id']])->row_array();
             $afterSettings = $db->get_where('user_settings', ['id_users' => (int) $state['user_id']])->row_array();
@@ -70,16 +71,14 @@ final class BackofficeRoleRevocationProbe
                 throw new RuntimeException('Role transition changed owned user fields beyond id_roles or settings.');
             }
             $after = $this->readRoutes((string) $state['marker'], (int) $state['user_id'], 403);
+            $aliasAfter = $this->checkAliasRedirect((string) $state['marker']);
             $sessionCheck = $this->client->get('login');
             $this->remember();
-            $this->expect($sessionCheck, 403, 'same-session customer calendar after role transition');
-            if (
-                preg_match('~/(?:index\.php/)?calendar/?$~', (string) parse_url($sessionCheck->url, PHP_URL_PATH)) !== 1
-            ) {
-                throw new RuntimeException(
-                    'Login did not redirect the authenticated session to its customer-denied calendar.',
-                );
-            }
+            $this->expectRedirectTo($sessionCheck, 'calendar', 'authenticated login after role transition');
+            $calendar = $this->client->get('calendar');
+            $this->remember();
+            $this->expect($calendar, 403, 'same-session customer calendar after role transition');
+            $this->assertNoOwnedRecord($calendar, (string) $state['marker'], 'denied customer calendar');
             if (
                 $db->get_where('users', ['id' => (int) $state['user_id']])->row_array() !== $afterUser ||
                 $db->get_where('user_settings', ['id_users' => (int) $state['user_id']])->row_array() !== $afterSettings
@@ -94,10 +93,13 @@ final class BackofficeRoleRevocationProbe
                 'coverage' => 'bounded_admin_reads',
                 'before_statuses' => $before,
                 'after_statuses' => $after,
+                'alias_before_status' => $aliasBefore,
+                'alias_after_status' => $aliasAfter,
                 'session_status' => $sessionCheck->statusCode,
+                'calendar_status' => $calendar->statusCode,
                 'logout_status' => $logoutStatus,
                 'observed' =>
-                    'The same authenticated session received 200 for owned admin index, search, find, and direct search-alias reads before transition and 403 for each after the stored role changed. Login still redirected the session to the customer-denied calendar; only id_roles changed on the owned user row and user settings stayed unchanged.',
+                    'The same authenticated session received 200 for admin index and owned search/find records before transition, then 403 with no owned marker on the direct read routes after the stored role changed. The legacy alias redirected to the independently checked search route in both phases. Login still redirected the session to the customer-denied calendar; only id_roles changed on the owned user row and user settings stayed unchanged.',
             ];
         } catch (Throwable $error) {
             if ($loggedIn && !$logoutAttempted) {
@@ -123,9 +125,6 @@ final class BackofficeRoleRevocationProbe
             'GET admins/search' => fn(): GateHttpResponse => $this->client->get('admins/search', [
                 'keyword' => $marker,
             ]),
-            'GET alias' => fn(): GateHttpResponse => $this->client->get('backend_api/ajax_filter_admins', [
-                'keyword' => $marker,
-            ]),
             'POST admins/find' => fn(): GateHttpResponse => $this->client->post('admins/find', [
                 'admin_id' => $adminId,
             ]),
@@ -136,9 +135,61 @@ final class BackofficeRoleRevocationProbe
             $response = $request();
             $this->remember();
             $this->expect($response, $expected, $name);
+            if ($expected === 200 && str_contains($name, '/search')) {
+                $rows = json_decode($response->body, true);
+                if (
+                    !is_array($rows) ||
+                    !array_is_list($rows) ||
+                    count($rows) !== 1 ||
+                    (int) ($rows[0]['id'] ?? 0) !== $adminId ||
+                    ($rows[0]['notes'] ?? null) !== $marker
+                ) {
+                    throw new RuntimeException($name . ' did not return exactly the owned synthetic admin.');
+                }
+            } elseif ($expected === 200 && str_contains($name, '/find')) {
+                $record = json_decode($response->body, true);
+                if (
+                    !is_array($record) ||
+                    (int) ($record['id'] ?? 0) !== $adminId ||
+                    ($record['notes'] ?? null) !== $marker
+                ) {
+                    throw new RuntimeException($name . ' did not return the owned synthetic admin.');
+                }
+            } elseif ($expected === 403) {
+                $this->assertNoOwnedRecord($response, $marker, $name);
+            }
             $statuses[$name] = $response->statusCode;
         }
         return $statuses;
+    }
+
+    private function checkAliasRedirect(string $marker): int
+    {
+        $response = $this->client->get('backend_api/ajax_filter_admins', ['keyword' => $marker]);
+        $this->remember();
+        $this->expectRedirectTo($response, 'admins/search', 'legacy admin search alias');
+        $this->assertNoOwnedRecord($response, $marker, 'legacy admin search alias');
+        return $response->statusCode;
+    }
+
+    private function expectRedirectTo(GateHttpResponse $response, string $route, string $operation): void
+    {
+        $location = $response->header('location');
+        $path = $location !== null ? parse_url($location, PHP_URL_PATH) : null;
+        if (
+            !in_array($response->statusCode, [302, 307], true) ||
+            !is_string($path) ||
+            preg_match('~/(?:index\.php/)?' . preg_quote($route, '~') . '/?$~', $path) !== 1
+        ) {
+            throw new RuntimeException($operation . ' did not redirect to the expected route.');
+        }
+    }
+
+    private function assertNoOwnedRecord(GateHttpResponse $response, string $marker, string $operation): void
+    {
+        if (str_contains($response->body, $marker)) {
+            throw new RuntimeException($operation . ' exposed the owned synthetic marker.');
+        }
     }
 
     private function logout(): int

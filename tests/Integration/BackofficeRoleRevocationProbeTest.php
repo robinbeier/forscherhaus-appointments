@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use PHPUnit\Framework\TestCase;
 use ReleaseGate\BackofficeRoleRevocationProbe;
+use ReleaseGate\GateHttpClient;
 use ReleaseGate\OrdinaryLiveFixture;
 use Tests\Integration\Support\DefenseCycleHttpServer;
 
@@ -61,7 +62,7 @@ final class BackofficeRoleRevocationProbeTest extends TestCase
         self::assertNotNull($this->server);
         $password = (string) $this->fixture->read()['password'];
         $sessions = [];
-        $result = (new BackofficeRoleRevocationProbe($this->server->client(), $this->fixture, static function (
+        $result = (new BackofficeRoleRevocationProbe($this->operatorClient(), $this->fixture, static function (
             ?string $session,
         ) use (&$sessions): void {
             if ($session !== null && $session !== '') {
@@ -74,9 +75,44 @@ final class BackofficeRoleRevocationProbeTest extends TestCase
         self::assertSame('cleanup_pending', $this->fixture->verify());
         self::assertSame(array_fill_keys(array_keys($result['before_statuses']), 200), $result['before_statuses']);
         self::assertSame(array_fill_keys(array_keys($result['after_statuses']), 403), $result['after_statuses']);
-        self::assertSame(403, $result['session_status']);
+        self::assertContains($result['alias_before_status'], [302, 307]);
+        self::assertContains($result['alias_after_status'], [302, 307]);
+        self::assertContains($result['session_status'], [302, 307]);
+        self::assertSame(403, $result['calendar_status']);
         self::assertSame(200, $result['logout_status']);
         self::assertStringNotContainsString($password, $result['observed']);
+    }
+
+    public function testRouteFailureAfterLoginLogsOutAndLeavesFixtureRecoverable(): void
+    {
+        self::assertNotNull($this->fixture);
+        self::assertNotNull($this->server);
+        $router = $this->server->directory . '/router.php';
+        $source = file_get_contents($router);
+        self::assertIsString($source);
+        file_put_contents(
+            $router,
+            '<?php if (str_contains((string) ($_SERVER["REQUEST_URI"] ?? ""), "admins/search")) { http_response_code(503); exit; } ?>' .
+                "\n" .
+                $source,
+        );
+        $client = $this->operatorClient();
+        try {
+            (new BackofficeRoleRevocationProbe($client, $this->fixture))->run();
+            self::fail('A failed route after login must stop the probe.');
+        } catch (RuntimeException $error) {
+            self::assertStringContainsString('HTTP 503', $error->getMessage());
+        }
+        self::assertSame(200, $client->get('login')->statusCode, 'The probe must log out on failure.');
+        self::assertSame('active', $this->fixture->verify());
+        $this->fixture->deactivate();
+        self::assertSame('clean', $this->fixture->verify());
+    }
+
+    private function operatorClient(): GateHttpClient
+    {
+        self::assertNotNull($this->server);
+        return new GateHttpClient($this->server->baseUrl, additionalHeaders: ['X-FH-Ordinary-Probe' => '1']);
     }
 
     public function testOwnershipDriftAbortsBeforeHttpAndFixtureCleanupRemainsControlled(): void

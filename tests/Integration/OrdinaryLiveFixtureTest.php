@@ -359,6 +359,41 @@ final class OrdinaryLiveFixtureTest extends TestCase
         self::assertSame('clean', $this->fixture->verify());
     }
 
+    public function testRealCommitBeforeFinalJournalIsRecoverable(): void
+    {
+        $state = $this->fixture->activate(roleSlug: 'admin');
+        $db = &get_instance()->db;
+        $otherUser = $db
+            ->where('id !=', $state['user_id'])
+            ->where('id_roles', $state['role_id'])
+            ->get('users')
+            ->row_array();
+        self::assertNotEmpty($otherUser);
+        $interrupted = new OrdinaryLiveFixture($this->stateDirectory, static function (): void {
+            throw new RuntimeException('Simulated process interruption after committed role transition.');
+        });
+        try {
+            $interrupted->transitionAdminToCustomer();
+            self::fail('The injected interruption must stop final journaling.');
+        } catch (RuntimeException $error) {
+            self::assertStringContainsString('Simulated process interruption', $error->getMessage());
+        }
+        $journal = json_decode(file_get_contents($this->stateDirectory . '/state.json'), true);
+        self::assertSame('transition_intent', $journal['phase']);
+        $customerRole = $db->get_where('roles', ['slug' => 'customer'])->row_array();
+        self::assertSame(
+            (int) $customerRole['id'],
+            (int) $db->get_where('users', ['id' => $state['user_id']])->row_array()['id_roles'],
+        );
+        self::assertSame('cleanup_pending', $this->fixture->verify());
+        $this->fixture->deactivate();
+        self::assertSame('clean', $this->fixture->verify());
+        self::assertSame(
+            (int) $state['role_id'],
+            (int) $db->get_where('users', ['id' => $otherUser['id']])->row_array()['id_roles'],
+        );
+    }
+
     public function testCleanupRefusesUnexpectedThirdRoleDespiteTransitionJournal(): void
     {
         $state = $this->fixture->activate(roleSlug: 'admin');

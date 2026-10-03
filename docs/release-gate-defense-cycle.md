@@ -202,6 +202,13 @@ cleanup accepts only the journaled administrator/customer role pair and
 rechecks exact ownership. A transitioned fixture is `cleanup_pending`, never an
 ordinary active probe. The `backoffice-role-read` action uses this primitive
 under the ordinary shared lock, independent cleanup timer and session journal.
+The operator HTTP client does not follow redirects. The action classifies the
+legacy admin-search alias as a redirect to the directly checked search route,
+and checks the login-to-calendar redirect separately from the denied calendar
+response. Successful search/find responses must contain exactly the owned
+synthetic marker and ID; denied responses must not contain the marker. Local
+tests use the operator client's header configuration and exercise failure after
+login and recovery from a committed transition with an unfinished journal.
 It has only been exercised locally; the first productive role-change run
 requires a separate approved plan. The
 checks fail closed on unexpected relationships but do not prove safety against
