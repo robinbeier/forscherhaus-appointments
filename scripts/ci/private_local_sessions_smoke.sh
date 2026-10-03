@@ -6,6 +6,12 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 cd "$ROOT_DIR"
 
+[[ $# -le 1 && ( $# -eq 0 || "$1" == '--config-only' ) ]] || {
+    echo 'Usage: private_local_sessions_smoke.sh [--config-only]' >&2
+    exit 2
+}
+mode="${1:-runtime}"
+
 project_one="fh-session-smoke-${RANDOM}-$$"
 project_two="fh-session-smoke-${RANDOM}-$$-b"
 override_file="$(mktemp "${TMPDIR:-/tmp}/fh-session-smoke.XXXXXX.yml")"
@@ -41,9 +47,6 @@ assert_project_fresh() {
     fi
 }
 
-assert_project_fresh "$project_one"
-assert_project_fresh "$project_two"
-
 cat >"$override_file" <<'YAML'
 services:
   nginx:
@@ -72,6 +75,13 @@ if any(mount.get("target") == "/var/www/html/storage/sessions" for mount in serv
     raise SystemExit("Nginx must not mount the private PHP-FPM session volume")
 print("private_local_sessions_config=passed")
 PY
+
+if [[ "$mode" == '--config-only' ]]; then
+    exit 0
+fi
+
+assert_project_fresh "$project_one"
+assert_project_fresh "$project_two"
 
 runtime_config="$(docker compose -p "$project_one" -f docker-compose.yml -f "$override_file" config --format json)"
 RUNTIME_CONFIG_JSON="$runtime_config" python3 - <<'PY'
