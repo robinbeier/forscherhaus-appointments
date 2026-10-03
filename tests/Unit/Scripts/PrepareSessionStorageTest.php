@@ -96,8 +96,19 @@ final class PrepareSessionStorageTest extends TestCase
             self::assertSame($before, hash_file('sha256', $outside . '/sentinel'));
             unlink($root . '/storage/backups');
 
+            chmod($root . '/storage', 0777);
+            mkdir($root . '/storage/cache');
+            mkdir($root . '/storage/cache/existing', 0700);
+            file_put_contents($root . '/storage/cache/existing/data', 'keep private');
+            chmod($root . '/storage/cache/existing/data', 0640);
+            $nestedBefore = hash_file('sha256', $root . '/storage/cache/existing/data');
             $result = $this->runSetup($root);
             self::assertSame(0, $result['exit_code'], $result['stderr']);
+            self::assertSame(0755, fileperms($root . '/storage') & 0777);
+            self::assertSame(0777, fileperms($root . '/storage/cache') & 0777);
+            self::assertSame(0700, fileperms($root . '/storage/cache/existing') & 0777);
+            self::assertSame(0640, fileperms($root . '/storage/cache/existing/data') & 0777);
+            self::assertSame($nestedBefore, hash_file('sha256', $root . '/storage/cache/existing/data'));
             self::assertDirectoryExists($root . '/storage/sessions');
         } finally {
             $this->removeDirectory($root);

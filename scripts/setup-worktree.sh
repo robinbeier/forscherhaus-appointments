@@ -39,6 +39,9 @@ if [[ -L storage || ( -e storage && ! -d storage ) ]]; then
     exit 1
 fi
 mkdir -p storage
+# The checkout owner can create runtime children; other local users must not
+# replace a child between the symlink check and the recursive permission pass.
+chmod 0755 storage
 # Keep session data out of the broad developer-writable permission pass.
 if ! symlinked_storage_child="$(find -P storage -mindepth 1 -maxdepth 1 ! -name sessions -type l -print -quit)"; then
     echo "[setup] Could not inspect storage children" >&2
@@ -49,8 +52,10 @@ if [[ -n "$symlinked_storage_child" ]]; then
     exit 1
 fi
 mkdir -p storage/{backups,cache,logs,uploads}
-chmod a+rwX storage
-find -P storage -mindepth 1 -maxdepth 1 ! -name sessions ! -type l -exec chmod -R a+rwX {} +
+# Only the fixed runtime directories need shared local write access. Leave
+# existing nested files and directories unchanged; traversing a writable tree
+# to chmod it would reopen a symlink race.
+chmod a+rwX storage/{backups,cache,logs,uploads}
 source ./scripts/prepare-session-storage.sh
 prepare_session_storage storage
 

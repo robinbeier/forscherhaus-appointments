@@ -111,6 +111,10 @@ the unchanged `application/config/config.php` save path in the checkout, and
 the worktree setup prepares an empty host `storage/sessions` directory with
 mode `0700` while preserving an existing populated directory and its contents.
 This means host PHP and PHP-FPM have separate session stores by design.
+Setup and container startup keep the `storage` root owner-writable and prepare
+only the fixed top-level runtime directories for shared local writes. They do
+not recursively change existing cache, log, backup, or upload contents; resolve
+an incompatible old local artifact deliberately under its own owner.
 
 For an isolated runtime check, run `bash scripts/ci/private_local_sessions_smoke.sh`.
 It creates and removes only its own temporary Compose projects and synthetic

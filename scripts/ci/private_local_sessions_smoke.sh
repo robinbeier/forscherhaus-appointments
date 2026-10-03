@@ -100,7 +100,7 @@ PY
 project_one_owned=1
 docker compose -p "$project_one" -f docker-compose.yml -f "$override_file" up -d php-fpm nginx >/dev/null
 docker compose -p "$project_one" -f docker-compose.yml -f "$override_file" exec -T php-fpm \
-    sh -lc 'test "$(stat -c %u storage/sessions)" = "33" && test "$(stat -c %a storage/sessions)" = "700" && su -s /bin/sh www-data -c "printf synthetic-session-one > storage/sessions/ea_session_smoke"'
+    sh -lc 'test "$(stat -c %a storage)" = "755" && test "$(stat -c %u storage/sessions)" = "33" && test "$(stat -c %a storage/sessions)" = "700" && su -s /bin/sh www-data -c "printf synthetic-session-one > storage/sessions/ea_session_smoke"'
 
 mount_source="$(docker inspect "${project_one}-php-fpm-1" --format '{{range .Mounts}}{{if eq .Destination "/var/www/html/storage/sessions"}}{{.Source}}{{end}}{{end}}')"
 [[ -n "$mount_source" && "$mount_source" != "$ROOT_DIR/storage/sessions" ]] || {

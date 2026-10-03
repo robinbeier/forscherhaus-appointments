@@ -13,6 +13,9 @@ if [[ -L storage || ! -d storage ]]; then
     echo "✖ Refusing invalid storage root: storage" >&2
     exit 1
 fi
+# Restrict the bind-mounted parent before classifying its children. PHP-FPM
+# writes within the prepared runtime children and its separate session volume.
+chmod 0755 storage
 if ! symlinked_storage_child="$(find -P storage -mindepth 1 -maxdepth 1 ! -name sessions -type l -print -quit)"; then
     echo "✖ Could not inspect storage children" >&2
     exit 1
@@ -21,8 +24,14 @@ if [[ -n "$symlinked_storage_child" ]]; then
     echo "✖ Refusing symlinked storage child" >&2
     exit 1
 fi
-chmod 777 storage
-find -P storage -mindepth 1 -maxdepth 1 ! -name sessions ! -type l -exec chmod -R 777 -- {} +
+for runtime_dir in storage/{backups,cache,logs,uploads}; do
+    if [[ -L "$runtime_dir" || ! -d "$runtime_dir" ]]; then
+        echo "✖ Refusing invalid runtime directory: $runtime_dir" >&2
+        exit 1
+    fi
+done
+# Existing nested entries are never traversed or widened during startup.
+chmod 0777 storage/{backups,cache,logs,uploads}
 
 echo "➜ Prepare Private Session Volume"
 if [[ -L storage/sessions ]] || ! mountpoint -q storage/sessions; then
