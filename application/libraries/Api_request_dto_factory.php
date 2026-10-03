@@ -199,7 +199,31 @@ class Api_request_dto_factory
             throw new InvalidArgumentException('Appointment writes require application/json.', 415);
         }
 
-        return $this->createAppointmentsWritePayloadDto((string) $CI->input->raw_input_stream);
+        $method = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? ''));
+
+        if (in_array($method, ['POST', 'PUT'], true)) {
+            $content_length = $_SERVER['CONTENT_LENGTH'] ?? null;
+
+            if ($content_length !== null && (int) $content_length > EA_Input::MAX_JSON_BODY_BYTES) {
+                show_error('JSON request body is too large.', 413);
+            }
+
+            // CI_Input::raw_input_stream reads the entire body. Bound the read
+            // before decoding, including requests without Content-Length.
+            $raw_payload = file_get_contents('php://input', false, null, 0, EA_Input::MAX_JSON_BODY_BYTES + 1);
+
+            if (!is_string($raw_payload)) {
+                show_error('Unable to read JSON request body.', 400);
+            }
+
+            if (strlen($raw_payload) > EA_Input::MAX_JSON_BODY_BYTES) {
+                show_error('JSON request body is too large.', 413);
+            }
+        } else {
+            $raw_payload = (string) $CI->input->raw_input_stream;
+        }
+
+        return $this->createAppointmentsWritePayloadDto($raw_payload);
     }
 
     public function buildDateFilterDto(): ApiDateFilterDto

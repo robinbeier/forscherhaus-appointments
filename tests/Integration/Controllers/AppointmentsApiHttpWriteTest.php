@@ -112,6 +112,24 @@ final class AppointmentsApiHttpWriteTest extends TestCase
         self::assertSame($before, $ci->db->get_where('appointments', ['id' => $id])->row_array());
     }
 
+    public function testOversizedJsonBodiesRejectBeforeAppointmentMutation(): void
+    {
+        $admin = $this->client(
+            'Basic ' . base64_encode($this->credentials['admin_username'] . ':' . $this->credentials['password']),
+        );
+        $appointment = $this->fixture->appointment();
+        $before = $this->tableSnapshot();
+        $large = ['unsupported' => str_repeat('x', 1048576)];
+
+        self::assertSame(413, $admin->requestJsonApp('POST', 'api/v1/appointments', $large)->statusCode);
+        self::assertSame($before, $this->tableSnapshot());
+        self::assertSame(
+            413,
+            $admin->requestJsonApp('PUT', 'api/v1/appointments/' . $appointment['id'], $large)->statusCode,
+        );
+        self::assertSame($before, $this->tableSnapshot());
+    }
+
     public function testBasicAndBearerRejectPrimaryOverlapButAllowAdjacencyAndSelfUpdate(): void
     {
         $basic = $this->client(
