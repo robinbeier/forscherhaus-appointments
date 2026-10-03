@@ -18,6 +18,7 @@ final class PublicBookingBlockedPeriodRaceHttpTest extends TestCase
     private ?GateHttpClient $client = null;
     private ?array $displayEmailSetting = null;
     private ?array $requireEmailSetting = null;
+    private ?array $displayTermsSetting = null;
     private ?int $blockedPeriodId = null;
     private ?int $ownedAppointmentId = null;
     private ?int $ownedCustomerId = null;
@@ -34,8 +35,14 @@ final class PublicBookingBlockedPeriodRaceHttpTest extends TestCase
             $db = get_instance()->db;
             $this->displayEmailSetting = $db->get_where('settings', ['name' => 'display_email'])->row_array() ?: null;
             $this->requireEmailSetting = $db->get_where('settings', ['name' => 'require_email'])->row_array() ?: null;
-            $db->update('settings', ['value' => '0'], ['name' => 'display_email']);
-            $db->update('settings', ['value' => '0'], ['name' => 'require_email']);
+            $this->displayTermsSetting =
+                $db->get_where('settings', ['name' => 'display_terms_and_conditions'])->row_array() ?: null;
+            self::assertNotNull($this->displayEmailSetting);
+            self::assertNotNull($this->requireEmailSetting);
+            self::assertNotNull($this->displayTermsSetting);
+            $db->update('settings', ['value' => '0'], ['id' => $this->displayEmailSetting['id']]);
+            $db->update('settings', ['value' => '0'], ['id' => $this->requireEmailSetting['id']]);
+            $db->update('settings', ['value' => '1'], ['id' => $this->displayTermsSetting['id']]);
             $this->server = new DefenseCycleHttpServer();
             $this->client = $this->server->client();
             self::assertSame(200, $this->client->get('booking')->statusCode);
@@ -54,6 +61,7 @@ final class PublicBookingBlockedPeriodRaceHttpTest extends TestCase
         } finally {
             try {
                 $db = get_instance()->db;
+                $this->cleanupOwnedPositiveConsents($db);
                 $this->cleanupOwnedRaceRows($db);
                 if ($this->blockedPeriodId !== null) {
                     $db->delete('blocked_periods', ['id' => $this->blockedPeriodId]);
@@ -172,6 +180,14 @@ final class PublicBookingBlockedPeriodRaceHttpTest extends TestCase
                 json_decode($body, true, 512, JSON_THROW_ON_ERROR),
             );
             self::assertSame($beforeCounts, $this->mutationCounts());
+            self::assertSame(
+                0,
+                $db
+                    ->where('first_name', 'Synthetic')
+                    ->where('last_name', 'Race ' . $fixture->run)
+                    ->where('type', 'terms-and-conditions')
+                    ->count_all_results('consents'),
+            );
         } finally {
             if ($transactionOpen && $db->trans_active()) {
                 $db->trans_rollback();
@@ -236,7 +252,15 @@ final class PublicBookingBlockedPeriodRaceHttpTest extends TestCase
             self::assertSame('Positive ' . $fixture->run, $customer['last_name']);
             self::assertSame(1, $db->where('notes', $fixture->run . '_positive')->count_all_results('appointments'));
             self::assertSame(1, $db->where('id', $this->ownedCustomerId)->count_all_results('users'));
-            self::assertSame($beforeConsentCount, $db->count_all('consents'));
+            self::assertSame($beforeConsentCount + 1, $db->count_all('consents'));
+            self::assertSame(
+                1,
+                $db
+                    ->where('first_name', 'Synthetic')
+                    ->where('last_name', 'Positive ' . $fixture->run)
+                    ->where('type', 'terms-and-conditions')
+                    ->count_all_results('consents'),
+            );
         } finally {
             if ($this->ownedAppointmentId !== null) {
                 $db->delete('reschedule_authorities', ['appointment_id' => $this->ownedAppointmentId]);
@@ -368,7 +392,11 @@ final class PublicBookingBlockedPeriodRaceHttpTest extends TestCase
     {
         $db = get_instance()->db;
         foreach (
-            ['display_email' => $this->displayEmailSetting, 'require_email' => $this->requireEmailSetting]
+            [
+                'display_email' => $this->displayEmailSetting,
+                'require_email' => $this->requireEmailSetting,
+                'display_terms_and_conditions' => $this->displayTermsSetting,
+            ]
             as $name => $row
         ) {
             if ($row !== null) {
@@ -418,5 +446,20 @@ final class PublicBookingBlockedPeriodRaceHttpTest extends TestCase
             self::assertTrue($db->delete('users', ['id' => $customerId]));
             self::assertSame([], $fixture->row('users', $customerId));
         }
+    }
+
+    private function cleanupOwnedPositiveConsents(object $db): void
+    {
+        $fixture = $this->fixture;
+        if ($fixture === null) {
+            return;
+        }
+        $identity = [
+            'first_name' => 'Synthetic',
+            'last_name' => 'Positive ' . $fixture->run,
+            'type' => 'terms-and-conditions',
+        ];
+        $db->delete('consents', $identity);
+        self::assertSame(0, $db->get_where('consents', $identity)->num_rows());
     }
 }
