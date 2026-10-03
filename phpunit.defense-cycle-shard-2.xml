@@ -37,6 +37,7 @@
             <file>./tests/Integration/Controllers/RescheduleCacheHttpTest.php</file>
             <file>./tests/Integration/Controllers/PrivacyDeleteHttpTest.php</file>
             <file>./tests/Integration/Controllers/BookingBlockedPeriodsHttpTest.php</file>
+            <file>./tests/Integration/Controllers/PublicBookingProviderRaceHttpTest.php</file>
             <file>./tests/Integration/Controllers/ProviderPdfExportHttpTest.php</file>
             <file>./tests/Integration/Controllers/DashboardExportHttpTest.php</file>
             <file>./tests/Integration/Controllers/DashboardRoleRevocationHttpTest.php</file>
