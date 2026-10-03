@@ -35,11 +35,11 @@ fi
 # fresh host-side session directory privately for host PHP, without widening
 # an existing directory.
 mkdir -p storage/{backups,cache,logs,uploads}
-if [[ ! -e storage/sessions ]]; then
-    (umask 077 && mkdir storage/sessions)
-fi
 chmod a+rwX storage
-find storage -mindepth 1 -maxdepth 1 ! -name sessions -exec chmod -R a+rwX {} +
+# Keep session data out of the broad developer-writable permission pass.
+find storage -mindepth 1 -maxdepth 1 ! -name sessions -exec chmod -R a+rwX -- {} +
+source ./scripts/prepare-session-storage.sh
+prepare_session_storage storage
 
 # Install backend/frontend dependencies.
 bash ./scripts/ci/ensure_local_deps.sh --force

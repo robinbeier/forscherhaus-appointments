@@ -103,12 +103,14 @@ without recursively changing files inside it.
 
 This changes existing Docker users from the old host bind-mounted session
 directory to a fresh private volume, so current Docker sessions are lost and
-users must log in again after the first restart. Host-side PHP continues to use
+users must log in again. After pulling this change, run
+`docker compose up -d --force-recreate php-fpm` so the PHP-FPM container receives
+the new volume mount; `docker compose restart` keeps the old mount and is not
+sufficient for this migration. Host-side PHP continues to use
 the unchanged `application/config/config.php` save path in the checkout, and
-the worktree setup creates a new host `storage/sessions` directory with mode
-`0700` when absent, while leaving an existing directory and its contents
-unchanged. This means host PHP and PHP-FPM have separate session stores by
-design.
+the worktree setup prepares an empty host `storage/sessions` directory with
+mode `0700` while preserving an existing populated directory and its contents.
+This means host PHP and PHP-FPM have separate session stores by design.
 
 For an isolated runtime check, run `bash scripts/ci/private_local_sessions_smoke.sh`.
 It creates and removes only its own temporary Compose projects and synthetic

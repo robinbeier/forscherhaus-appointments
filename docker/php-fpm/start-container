@@ -2,7 +2,11 @@
 set -euo pipefail
 
 echo "➜ Ignore Permission Changes"
-git config core.fileMode false
+# CI checkouts need not expose a writable Git directory inside the container.
+# This is only a local Git display preference, not a startup requirement.
+if ! git config --local core.fileMode false >/dev/null 2>&1; then
+    echo "➜ Git file-mode preference unavailable"
+fi
 
 echo "➜ Set Correct Permissions"
 chmod 777 storage

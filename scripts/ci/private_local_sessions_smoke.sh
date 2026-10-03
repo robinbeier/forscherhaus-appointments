@@ -49,6 +49,9 @@ assert_project_fresh() {
 
 cat >"$override_file" <<'YAML'
 services:
+  php-fpm:
+    environment:
+      GIT_DIR: /nonexistent
   nginx:
     ports: !override
       - '127.0.0.1::80'
