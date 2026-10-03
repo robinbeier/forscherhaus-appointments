@@ -169,7 +169,7 @@ final class CustomerPostGuardTest extends TestCase
         return [
             'only:' . json_encode(self::FIELDS, JSON_THROW_ON_ERROR),
             'optional:[]',
-            'save:' . json_encode($this->payload($action), JSON_THROW_ON_ERROR),
+            ($action === 'store' ? 'insert_new:' : 'save:') . json_encode($this->payload($action), JSON_THROW_ON_ERROR),
             'find:42',
             ...$action === 'update' ? ['trans_status', 'trans_commit'] : [],
             'json_response',
