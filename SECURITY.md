@@ -440,6 +440,16 @@ path-specific limits; the general parent ordering is not proof about every
 maintenance or delete path. API response projections must not disclose stored
 integration secrets.
 
+API Basic authentication must resolve the actor's currently stored role for
+each request. A demotion away from Admin revokes access to Settings API v1
+through canonical and direct routes before a read or write; a rejected PUT
+must leave the setting unchanged. The global Bearer token is separate from
+that actor role. Within the Admin role, the generic API's existing authority
+does not depend on the finer `system_settings` permission; see the
+[Settings API contract](docs/ci-write-contracts.md#settings-api-v1). The
+isolated synthetic role-revocation regression is not a productive account
+test or a proof about concurrent role changes.
+
 The Customers API v1 collection and detail actions are GET-only, including
 through direct controller aliases; other methods must return 405 with
 `Allow: GET` without disclosing customer data or changing customer records,

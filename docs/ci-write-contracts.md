@@ -458,6 +458,14 @@ Schreibtest.
 
 Die generische Settings API erlaubt authentifizierten Admin-Basic- und
 Bearer-Clients das Lesen gespeicherter Werte sowie `PUT /api/v1/settings/:name`.
+Bei Basic wird die aktuell gespeicherte Admin-Rolle für jeden Request erneut
+ermittelt: Nach einem Rollenwechsel weg von Admin müssen kanonische und direkt
+erreichbare Lese- und PUT-Pfade mit 401 enden, ohne den Einstellungswert zu
+ändern oder ihn im Antworttext auszugeben. Der globale Bearer-Token ist ein
+eigener API-Zugang und bleibt von diesem Rollenwechsel unberührt. Die
+generische API prüft innerhalb der Admin-Rolle derzeit nicht zusätzlich das
+feinere `system_settings`-Recht; eine Änderung dieses bestehenden Vertrags
+braucht eine eigene Produktentscheidung.
 Der API-Token bleibt nach dem bestehenden privilegierten Vertrag sichtbar;
 dieser Methodenfix führt keine neue Namens- oder Wert-Whitelist ein.
 Ein direkt erreichbarer `Settings_api_v1/update/:name`-Alias darf nur mit PUT
@@ -468,6 +476,10 @@ schreiben. GET und POST werden vor der Auswertung von `value` mit 405 und
 synthetischen eigenen Einstellungen: abgewiesene direkte Aliase lassen die
 vollständige Zeile unverändert, erlaubtes PUT persistiert. Das belegt die
 isolierte Testumgebung, nicht die produktive Auslieferung.
+`SettingsApiBasicRevocationHttpTest` prüft mit einem eigenen synthetischen
+Konto die Rollenrücknahme, beide Routenformen, unveränderte eigene Zeilen und
+die getrennte Bearer-Kontrolle. Das ist ein isolierter HTTP-/Datenbanknachweis,
+kein produktiver Rollenwechsel oder Schreibtest.
 
 ## Write-only Integrationsgeheimnisse
 
