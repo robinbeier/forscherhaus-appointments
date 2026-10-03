@@ -47,6 +47,8 @@ throughput or a live rate-limit result.
 
 JSON bodies read through `EA_Input::json()` are bounded to 1 MiB before
 decoding, including requests whose `Content-Length` is absent or incorrect.
+The authenticated Appointments API v1 POST/PUT DTO path has the same bound
+before its separate raw-body read and JSON decode.
 An oversized body is rejected with HTTP 413 before JSON-dependent business mutation;
 subsequent field reads reuse the same decoded payload. PHP's `post_max_size`
 does not by itself protect `php://input` for JSON requests. This contract

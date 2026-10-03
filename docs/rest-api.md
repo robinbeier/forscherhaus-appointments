@@ -18,6 +18,9 @@ The API (v1) supports [Basic Authentication](https://en.wikipedia.org/wiki/Basic
 
 Additionally you can configure your own API key in the settings page and pass it through as a Bearer Token with any of your requests.
 
+Appointment POST and PUT JSON request bodies are limited to 1 MiB. Oversized
+bodies receive HTTP 413 before an appointment write is attempted.
+
 The API follows the REST structure which means that the client can use various HTTP verbs in order to perform various operations to the resources. For example you should use a GET request for fetching resources, a POST for creating new and PUT for updating existing ones in the database. Finally a DELETE request will remove a resource from the system.
 
 Browser access from a different origin is not supported. The application is

@@ -9,6 +9,7 @@ use Tests\Integration\Support\DefenseCycleHttpServer;
 
 require_once dirname(__DIR__) . '/Support/DefenseCycleFixtures.php';
 require_once dirname(__DIR__) . '/Support/DefenseCycleHttpServer.php';
+require_once APPPATH . 'libraries/Zero_surprise_canary_fixture.php';
 
 /** Isolated HTTP regression coverage for the authenticated appointment API writes. */
 final class AppointmentsApiHttpWriteTest extends TestCase
@@ -110,6 +111,80 @@ final class AppointmentsApiHttpWriteTest extends TestCase
 
         $ci = &get_instance();
         self::assertSame($before, $ci->db->get_where('appointments', ['id' => $id])->row_array());
+    }
+
+    public function testOversizedJsonBodiesRejectBeforeAppointmentMutation(): void
+    {
+        $admin = $this->client(
+            'Basic ' . base64_encode($this->credentials['admin_username'] . ':' . $this->credentials['password']),
+        );
+        $appointment = $this->fixture->appointment();
+        $before = $this->tableSnapshot();
+        $large = ['unsupported' => str_repeat('x', 1048576)];
+
+        self::assertSame(413, $admin->requestJsonApp('POST', 'api/v1/appointments', $large)->statusCode);
+        self::assertSame($before, $this->tableSnapshot());
+        self::assertSame(
+            413,
+            $admin->requestJsonApp('PUT', 'api/v1/appointments/' . $appointment['id'], $large)->statusCode,
+        );
+        self::assertSame($before, $this->tableSnapshot());
+
+        // A chunked request has no Content-Length, so the bounded stream read
+        // must reject it independently of the fast header check.
+        $chunked = new GateHttpClient(
+            $this->server->baseUrl,
+            additionalHeaders: [
+                'Authorization' =>
+                    'Basic ' .
+                    base64_encode($this->credentials['admin_username'] . ':' . $this->credentials['password']),
+                'Transfer-Encoding' => 'chunked',
+            ],
+        );
+        self::assertSame(
+            413,
+            $chunked->requestRawApp(
+                'POST',
+                'api/v1/appointments',
+                json_encode($large, JSON_THROW_ON_ERROR),
+                'application/json',
+            )->statusCode,
+        );
+        self::assertSame($before, $this->tableSnapshot());
+    }
+
+    public function testCanaryAppointmentPostBoundsJsonBeforeOwnershipChecks(): void
+    {
+        if (!function_exists('posix_geteuid') || posix_geteuid() !== 0) {
+            self::markTestSkipped('The isolated canary fixture requires the root Docker test process.');
+        }
+
+        $canary = new Zero_surprise_canary_fixture();
+        try {
+            self::assertSame('active', $canary->run('activate'));
+            $state = json_decode(
+                file_get_contents(Zero_surprise_canary_fixture::DEFAULT_STATE_FILE),
+                true,
+                512,
+                JSON_THROW_ON_ERROR,
+            );
+            $client = new GateHttpClient(
+                $this->server->baseUrl,
+                additionalHeaders: [
+                    'Authorization' =>
+                        'Basic ' . base64_encode($state['actor_username'] . ':' . $state['actor_password']),
+                    'X-EA-Canary' => $state['token'],
+                ],
+            );
+            $before = $this->tableSnapshot();
+            $large = ['unsupported' => str_repeat('x', 1048576)];
+
+            self::assertSame(413, $client->requestJsonApp('POST', 'api/v1/appointments', $large)->statusCode);
+            self::assertSame($before, $this->tableSnapshot());
+        } finally {
+            self::assertSame('clean', $canary->run('deactivate'));
+        }
+        self::assertSame('clean', $canary->run('verify'));
     }
 
     public function testBasicAndBearerRejectPrimaryOverlapButAllowAdjacencyAndSelfUpdate(): void
