@@ -61,7 +61,7 @@ final class PublicBookingBlockedPeriodRaceHttpTest extends TestCase
         } finally {
             try {
                 $db = get_instance()->db;
-                $this->cleanupOwnedPositiveConsents($db);
+                $this->cleanupOwnedPositiveRows($db);
                 $this->cleanupOwnedRaceRows($db);
                 if ($this->blockedPeriodId !== null) {
                     $db->delete('blocked_periods', ['id' => $this->blockedPeriodId]);
@@ -448,7 +448,7 @@ final class PublicBookingBlockedPeriodRaceHttpTest extends TestCase
         }
     }
 
-    private function cleanupOwnedPositiveConsents(object $db): void
+    private function cleanupOwnedPositiveRows(object $db): void
     {
         $fixture = $this->fixture;
         if ($fixture === null) {
@@ -461,5 +461,37 @@ final class PublicBookingBlockedPeriodRaceHttpTest extends TestCase
         ];
         $db->delete('consents', $identity);
         self::assertSame(0, $db->get_where('consents', $identity)->num_rows());
+
+        $appointments = $db->get_where('appointments', ['notes' => $fixture->run . '_positive'])->result_array();
+        foreach ($appointments as $appointment) {
+            self::assertSame($fixture->providerId, (int) $appointment['id_users_provider']);
+            self::assertSame($fixture->serviceId, (int) $appointment['id_services']);
+            $appointmentId = (int) $appointment['id'];
+            $customerId = (int) $appointment['id_users_customer'];
+            $customer = $db->get_where('users', ['id' => $customerId])->row_array();
+            self::assertSame('Synthetic', $customer['first_name'] ?? null);
+            self::assertSame('Positive ' . $fixture->run, $customer['last_name'] ?? null);
+            self::assertSame($fixture->run, $customer['notes'] ?? null);
+            $db->delete('reschedule_authorities', ['appointment_id' => $appointmentId]);
+            $db->delete('appointments', ['id' => $appointmentId]);
+            self::assertSame([], $fixture->row('appointments', $appointmentId));
+            self::assertSame(0, $db->get_where('appointments', ['id_users_customer' => $customerId])->num_rows());
+            $db->delete('users', ['id' => $customerId]);
+            self::assertSame([], $fixture->row('users', $customerId));
+        }
+
+        $customers = $db
+            ->get_where('users', [
+                'first_name' => 'Synthetic',
+                'last_name' => 'Positive ' . $fixture->run,
+                'notes' => $fixture->run,
+            ])
+            ->result_array();
+        foreach ($customers as $customer) {
+            $customerId = (int) $customer['id'];
+            self::assertSame(0, $db->get_where('appointments', ['id_users_customer' => $customerId])->num_rows());
+            $db->delete('users', ['id' => $customerId]);
+            self::assertSame([], $fixture->row('users', $customerId));
+        }
     }
 }
