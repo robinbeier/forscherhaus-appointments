@@ -780,6 +780,49 @@ final class DeployStableResultTest extends TestCase
         self::assertSame(0, $result['exit_code'], $result['stdout'] . $result['stderr']);
     }
 
+    public function testZeroSurpriseStageRuntimeRejectsSymlinkedReleaseGateDirectoryWithoutTouchingTarget(): void
+    {
+        $result = $this->runShell(
+            <<<'BASH'
+            set -eu
+            fixture="$(mktemp -d)"
+            trap 'rm -rf "$fixture"' EXIT
+            mkdir -p "$fixture/stage/scripts/release-gate" "$fixture/stage/storage/logs" "$fixture/outside/release-gate"
+            printf '<?php exit(0);\n' > "$fixture/stage/scripts/release-gate/prepare_zero_surprise_stage_config.php"
+            printf 'sample\n' > "$fixture/stage/config-sample.php"
+            printf 'outside-marker\n' > "$fixture/outside/release-gate/marker.txt"
+            chmod 750 "$fixture/outside/release-gate"
+            chmod 640 "$fixture/outside/release-gate/marker.txt"
+            mkdir -p "$fixture/stage/storage/logs"
+            ln -s "$fixture/outside/release-gate" "$fixture/stage/storage/logs/release-gate"
+            source ./deploy_ea.sh
+            STAGE_ROOT="$fixture/stage"
+            REQUIRE_ZERO_SURPRISE=1
+            DRYRUN=0
+            read_zero_surprise_predeploy_base_url() { echo 'http://fixture.test/'; }
+            set +e
+            prepare_zero_surprise_stage_runtime
+            status=$?
+            set -e
+            [[ "$status" -ne 0 ]]
+            [[ -L "$STAGE_ROOT/storage/logs/release-gate" ]]
+            [[ "$(cat "$fixture/outside/release-gate/marker.txt")" == 'outside-marker' ]]
+            stat_mode() {
+              if stat --version >/dev/null 2>&1; then
+                stat -c '%a' "$1"
+              else
+                stat -f '%Lp' "$1"
+              fi
+            }
+            [[ "$(stat_mode "$fixture/outside/release-gate")" == 750 ]]
+            [[ "$(stat_mode "$fixture/outside/release-gate/marker.txt")" == 640 ]]
+            BASH
+            ,
+        );
+
+        self::assertSame(0, $result['exit_code'], $result['stdout'] . $result['stderr']);
+    }
+
     public function testNormalMainInstallsStableTrapBeforeArgumentValidation(): void
     {
         $result = $this->runCommand(['bash', 'deploy_ea.sh']);

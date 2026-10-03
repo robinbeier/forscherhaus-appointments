@@ -2043,6 +2043,8 @@ prepare_zero_surprise_stage_runtime() {
     [[ ! -L "$STAGE_ROOT/storage/$runtime_dir" ]] || return 1
     [[ ! -e "$STAGE_ROOT/storage/$runtime_dir" || -d "$STAGE_ROOT/storage/$runtime_dir" ]] || return 1
   done
+  [[ ! -L "$STAGE_ROOT/storage/logs/release-gate" ]] || return 1
+  [[ ! -e "$STAGE_ROOT/storage/logs/release-gate" || -d "$STAGE_ROOT/storage/logs/release-gate" ]] || return 1
 
   base_url="$(read_zero_surprise_predeploy_base_url)" \
     || return $?
