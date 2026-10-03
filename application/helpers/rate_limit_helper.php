@@ -12,6 +12,12 @@
  * ---------------------------------------------------------------------------- */
 
 if (!function_exists('rate_limit')) {
+    function rate_limit_fail_closed(): void
+    {
+        header('HTTP/1.0 503 Service Unavailable');
+        exit();
+    }
+
     function rate_limit_is_local_loopback_request(string $ip, ?string $host = null): bool
     {
         $normalizedIp = trim($ip);
@@ -65,42 +71,110 @@ if (!function_exists('rate_limit')) {
 
         $CI->load->driver('cache', ['adapter' => 'file']);
 
+        if (!method_exists($CI->cache, 'get_loaded_driver') || $CI->cache->get_loaded_driver() !== 'file') {
+            rate_limit_fail_closed();
+        }
+
+        $cache_path = (string) $CI->config->item('cache_path');
+        if ($cache_path === '') {
+            $cache_path = APPPATH . 'cache' . DIRECTORY_SEPARATOR;
+        }
+        $cache_directory = rtrim($cache_path, DIRECTORY_SEPARATOR);
         $cache_key = str_replace(':', '', 'rate_limit_key_' . $ip);
+        $bucket = hexdec(substr(hash('sha256', $cache_key), 0, 8)) % 64;
+        $lock_path = dirname($cache_directory) . DIRECTORY_SEPARATOR . sprintf('rate_limit.lock.%02x', $bucket);
+        $lock_handle = @fopen($lock_path, 'c');
+
+        if ($lock_handle === false) {
+            rate_limit_fail_closed();
+        }
+
+        $lock_deadline = microtime(true) + 2;
+        $lock_acquired = false;
+        do {
+            if (@flock($lock_handle, LOCK_EX | LOCK_NB)) {
+                $lock_acquired = true;
+                break;
+            }
+
+            usleep(5000);
+        } while (microtime(true) < $lock_deadline);
+
+        if (!$lock_acquired) {
+            @fclose($lock_handle);
+            rate_limit_fail_closed();
+        }
 
         $cache_remain_time_key = str_replace(':', '', 'rate_limit_tmp_' . $ip);
 
         $current_time = date('Y-m-d H:i:s');
 
-        if ($CI->cache->get($cache_key) === false) {
-            // First request
+        $requests = $CI->cache->get($cache_key);
+
+        if ($requests === false) {
+            $cache_entry_path = $cache_path . $cache_key;
+            clearstatcache(true, $cache_entry_path);
+            if (file_exists($cache_entry_path) || is_link($cache_entry_path)) {
+                @flock($lock_handle, LOCK_UN);
+                fclose($lock_handle);
+                rate_limit_fail_closed();
+            }
+
+            $requests = 1;
             $current_time_plus = date('Y-m-d H:i:s', strtotime('+' . $duration . ' seconds'));
 
-            $CI->cache->save($cache_key, 1, $duration);
-
-            $CI->cache->save($cache_remain_time_key, $current_time_plus, $duration * 2);
-        }
-        // Consequent request
-        else {
-            $requests = $CI->cache->get($cache_key);
-
+            if (
+                !$CI->cache->save($cache_key, $requests, $duration) ||
+                !$CI->cache->save($cache_remain_time_key, $current_time_plus, $duration * 2)
+            ) {
+                @flock($lock_handle, LOCK_UN);
+                fclose($lock_handle);
+                rate_limit_fail_closed();
+            }
+        } elseif (!is_int($requests) || $requests < 0) {
+            @flock($lock_handle, LOCK_UN);
+            fclose($lock_handle);
+            rate_limit_fail_closed();
+        } else {
             $time_lost = $CI->cache->get($cache_remain_time_key);
 
+            if (!is_string($time_lost) || strtotime($time_lost) === false) {
+                @flock($lock_handle, LOCK_UN);
+                fclose($lock_handle);
+                rate_limit_fail_closed();
+            }
+
             if ($current_time > $time_lost) {
+                $requests = 1;
                 $current_time_plus = date('Y-m-d H:i:s', strtotime('+' . $duration . ' seconds'));
 
-                $CI->cache->save($cache_key, 1, $duration);
-
-                $CI->cache->save($cache_remain_time_key, $current_time_plus, $duration * 2);
+                if (
+                    !$CI->cache->save($cache_key, $requests, $duration) ||
+                    !$CI->cache->save($cache_remain_time_key, $current_time_plus, $duration * 2)
+                ) {
+                    @flock($lock_handle, LOCK_UN);
+                    fclose($lock_handle);
+                    rate_limit_fail_closed();
+                }
             } else {
-                $CI->cache->save($cache_key, $requests + 1, $duration);
-            }
+                $requests++;
 
-            $requests = $CI->cache->get($cache_key);
-
-            if ($requests > $max_requests) {
-                header('HTTP/1.0 429 Too Many Requests');
-                exit();
+                if (!$CI->cache->save($cache_key, $requests, $duration)) {
+                    @flock($lock_handle, LOCK_UN);
+                    fclose($lock_handle);
+                    rate_limit_fail_closed();
+                }
             }
+        }
+
+        $exceeded = $requests > $max_requests;
+
+        @flock($lock_handle, LOCK_UN);
+        fclose($lock_handle);
+
+        if ($exceeded) {
+            header('HTTP/1.0 429 Too Many Requests');
+            exit();
         }
     }
 }
