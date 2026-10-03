@@ -21,6 +21,9 @@ final class RateLimitHelperTest extends TestCase
         if ($mode !== 'lock') {
             mkdir($cachePath, 0700, true);
         }
+        if ($mode === 'corrupt-count') {
+            file_put_contents($cachePath . '/rate_limit_key_203.0.113.10', 'corrupt');
+        }
 
         $statusPath = $directory . '/status';
         $admittedPath = $directory . '/admitted';
@@ -64,7 +67,7 @@ final class RateLimitHelperTest extends TestCase
                 {
                     public function get(string $key): mixed
                     {
-                        if (__MODE__ === 'save-count' || (__MODE__ === 'save-remain' && $key === 'rate_limit_key_203.0.113.10')) {
+                        if (__MODE__ === 'save-count' || (__MODE__ === 'save-remain' && $key === 'rate_limit_key_203.0.113.10') || __MODE__ === 'corrupt-count') {
                             return false;
                         }
                         if ($key === 'rate_limit_tmp_203.0.113.10') {
@@ -87,7 +90,7 @@ final class RateLimitHelperTest extends TestCase
                 {
                     public function item(string $key): mixed
                     {
-                        return $key === 'rate_limiting' ? true : __CACHE_PATH__;
+                        return $key === 'rate_limiting' ? true : __CACHE_PATH__ . '/';
                     }
                 }
 
@@ -148,6 +151,14 @@ final class RateLimitHelperTest extends TestCase
         $result = $this->runFailClosedWorker('lock');
         $this->assertSame('503', $result['status']);
         $this->assertFalse($result['admitted']);
+    }
+
+    public function testExistingCorruptCounterFailsClosed(): void
+    {
+        $result = $this->runFailClosedWorker('corrupt-count');
+        $this->assertSame('503', $result['status']);
+        $this->assertFalse($result['admitted']);
+        $this->assertSame([], $result['calls']);
     }
 
     public function testLockTimeoutFailsClosed(): void
@@ -211,7 +222,7 @@ final class RateLimitHelperTest extends TestCase
                 }
                 final class RateLimitTimeoutConfig
                 {
-                    public function item(string $key): mixed { return $key === 'rate_limiting' ? true : __CACHE_PATH__; }
+                    public function item(string $key): mixed { return $key === 'rate_limiting' ? true : __CACHE_PATH__ . '/'; }
                 }
                 final class RateLimitTimeoutLoader
                 {
@@ -373,7 +384,7 @@ final class RateLimitHelperTest extends TestCase
                             } while (microtime(true) < $deadline);
                         }
 
-                        return $value;
+                        return $key === 'rate_limit_key_203.0.113.10' && $value !== false ? (int) $value : $value;
                     }
 
                     public function save(string $key, mixed $value, int $ttl): bool
@@ -390,7 +401,7 @@ final class RateLimitHelperTest extends TestCase
                 {
                     public function item(string $key): mixed
                     {
-                        return $key === 'rate_limiting' ? true : __CACHE_PATH__;
+                        return $key === 'rate_limiting' ? true : __CACHE_PATH__ . '/';
                     }
                 }
 

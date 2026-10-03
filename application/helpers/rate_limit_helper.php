@@ -75,9 +75,9 @@ if (!function_exists('rate_limit')) {
         if ($cache_path === '') {
             $cache_path = APPPATH . 'cache' . DIRECTORY_SEPARATOR;
         }
-        $cache_path = rtrim($cache_path, DIRECTORY_SEPARATOR);
+        $cache_directory = rtrim($cache_path, DIRECTORY_SEPARATOR);
         $bucket = hexdec(substr(hash('sha256', $ip), 0, 8)) % 64;
-        $lock_path = dirname($cache_path) . DIRECTORY_SEPARATOR . sprintf('rate_limit.lock.%02x', $bucket);
+        $lock_path = dirname($cache_directory) . DIRECTORY_SEPARATOR . sprintf('rate_limit.lock.%02x', $bucket);
         $lock_handle = @fopen($lock_path, 'c');
 
         if ($lock_handle === false) {
@@ -109,6 +109,14 @@ if (!function_exists('rate_limit')) {
         $requests = $CI->cache->get($cache_key);
 
         if ($requests === false) {
+            $cache_entry_path = $cache_path . $cache_key;
+            clearstatcache(true, $cache_entry_path);
+            if (file_exists($cache_entry_path) || is_link($cache_entry_path)) {
+                @flock($lock_handle, LOCK_UN);
+                fclose($lock_handle);
+                rate_limit_fail_closed();
+            }
+
             $requests = 1;
             $current_time_plus = date('Y-m-d H:i:s', strtotime('+' . $duration . ' seconds'));
 
@@ -120,6 +128,10 @@ if (!function_exists('rate_limit')) {
                 fclose($lock_handle);
                 rate_limit_fail_closed();
             }
+        } elseif (!is_int($requests) || $requests < 0) {
+            @flock($lock_handle, LOCK_UN);
+            fclose($lock_handle);
+            rate_limit_fail_closed();
         } else {
             $time_lost = $CI->cache->get($cache_remain_time_key);
 
