@@ -335,7 +335,7 @@ class Zero_surprise_canary
                 return;
             }
             if ($controller === 'appointments_api_v1' && $method === 'store' && $verb === 'POST') {
-                $data = json_decode($this->CI->input->raw_input_stream, true);
+                $data = $this->CI->input->json();
                 if (!is_array($data) || !self::ownsNotes($data['notes'] ?? null, $c['run_id'])) {
                     abort(403, 'Forbidden');
                 }
