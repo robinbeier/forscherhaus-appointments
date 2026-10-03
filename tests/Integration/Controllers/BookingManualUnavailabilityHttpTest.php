@@ -17,9 +17,6 @@ final class BookingManualUnavailabilityHttpTest extends TestCase
     private ?DefenseCycleHttpServer $server = null;
     private ?GateHttpClient $client = null;
     private int $manualUnavailabilityId = 0;
-    private int $positiveAppointmentId = 0;
-    private int $positiveCustomerId = 0;
-    private string $positiveStartDatetime = '';
     private int $baselineConsentCount = 0;
     private ?array $displayEmailSetting = null;
     private ?array $requireEmailSetting = null;
@@ -122,7 +119,6 @@ final class BookingManualUnavailabilityHttpTest extends TestCase
         $this->manualUnavailabilityId = 0;
         self::assertContains($targetHour, $this->availableHours($client, $pair, $date));
 
-        $this->positiveStartDatetime = $targetStart->format('Y-m-d H:i:s');
         $success = $client->post('booking/register', [
             'post_data' => $this->bookingPayload($pair, $targetStart, 'manual-cleared'),
         ]);
@@ -136,12 +132,11 @@ final class BookingManualUnavailabilityHttpTest extends TestCase
             ])
             ->result_array();
         self::assertCount(1, $booked);
-        $this->positiveAppointmentId = (int) $booked[0]['id'];
-        $this->positiveCustomerId = (int) $booked[0]['id_users_customer'];
-        self::assertGreaterThan(0, $this->positiveCustomerId);
+        $positiveCustomerId = (int) $booked[0]['id_users_customer'];
+        self::assertGreaterThan(0, $positiveCustomerId);
         self::assertSame(
             'Manual ' . $fixture->run . ' manual-cleared',
-            $fixture->row('users', $this->positiveCustomerId)['last_name'],
+            $fixture->row('users', $positiveCustomerId)['last_name'],
         );
     }
 
@@ -246,18 +241,14 @@ final class BookingManualUnavailabilityHttpTest extends TestCase
             self::assertSame([], $fixture->row('appointments', $this->manualUnavailabilityId));
             $this->manualUnavailabilityId = 0;
         }
-        $ownedBookings =
-            $this->positiveAppointmentId > 0
-                ? $db->get_where('appointments', ['id' => $this->positiveAppointmentId])->result_array()
-                : $db
-                    ->get_where('appointments', [
-                        'id_users_provider' => $fixture->providerId,
-                        'id_services' => $fixture->serviceId,
-                        'start_datetime' => $this->positiveStartDatetime,
-                        'notes' => $fixture->run,
-                        'is_unavailability' => 0,
-                    ])
-                    ->result_array();
+        $ownedBookings = $db
+            ->get_where('appointments', [
+                'id_users_provider' => $fixture->providerId,
+                'id_services' => $fixture->serviceId,
+                'notes' => $fixture->run,
+                'is_unavailability' => 0,
+            ])
+            ->result_array();
         foreach ($ownedBookings as $row) {
             if (
                 (int) $row['id_users_provider'] !== $fixture->providerId ||
@@ -269,6 +260,17 @@ final class BookingManualUnavailabilityHttpTest extends TestCase
             }
             $appointmentId = (int) $row['id'];
             $customerId = (int) $row['id_users_customer'];
+            $customer = $customerId > 0 ? $db->get_where('users', ['id' => $customerId])->row_array() : [];
+            $ownedLastNames = [
+                'Manual ' . $fixture->run . ' manual-blocked',
+                'Manual ' . $fixture->run . ' manual-cleared',
+            ];
+            if (
+                ($customer['first_name'] ?? null) !== 'Synthetic' ||
+                !in_array($customer['last_name'] ?? null, $ownedLastNames, true)
+            ) {
+                continue;
+            }
             $db->delete('reschedule_authorities', ['appointment_id' => $appointmentId]);
             $db->delete('appointments', [
                 'id' => $appointmentId,
@@ -277,12 +279,12 @@ final class BookingManualUnavailabilityHttpTest extends TestCase
             ]);
             $db->delete('consents', [
                 'first_name' => 'Synthetic',
-                'last_name' => 'Manual ' . $fixture->run . ' manual-cleared',
+                'last_name' => $customer['last_name'],
             ]);
             $db->delete('users', [
                 'id' => $customerId,
                 'first_name' => 'Synthetic',
-                'last_name' => 'Manual ' . $fixture->run . ' manual-cleared',
+                'last_name' => $customer['last_name'],
             ]);
             self::assertSame([], $fixture->row('appointments', $appointmentId));
             self::assertSame([], $fixture->row('users', $customerId));
@@ -291,17 +293,44 @@ final class BookingManualUnavailabilityHttpTest extends TestCase
                 $db
                     ->get_where('consents', [
                         'first_name' => 'Synthetic',
-                        'last_name' => 'Manual ' . $fixture->run . ' manual-cleared',
+                        'last_name' => $customer['last_name'],
                     ])
                     ->num_rows(),
             );
-            $this->positiveAppointmentId = 0;
-            $this->positiveCustomerId = 0;
         }
-        $db->delete('consents', [
-            'first_name' => 'Synthetic',
-            'last_name' => 'Manual ' . $fixture->run . ' manual-blocked',
-        ]);
+        foreach (['manual-blocked', 'manual-cleared'] as $case) {
+            $lastName = 'Manual ' . $fixture->run . ' ' . $case;
+            $db->delete('consents', ['first_name' => 'Synthetic', 'last_name' => $lastName]);
+            self::assertSame(
+                0,
+                $db
+                    ->get_where('consents', [
+                        'first_name' => 'Synthetic',
+                        'last_name' => $lastName,
+                    ])
+                    ->num_rows(),
+            );
+            self::assertSame(
+                0,
+                $db
+                    ->get_where('users', [
+                        'first_name' => 'Synthetic',
+                        'last_name' => $lastName,
+                    ])
+                    ->num_rows(),
+            );
+        }
+        self::assertSame(
+            0,
+            $db
+                ->get_where('appointments', [
+                    'id_users_provider' => $fixture->providerId,
+                    'id_services' => $fixture->serviceId,
+                    'notes' => $fixture->run,
+                    'is_unavailability' => 0,
+                ])
+                ->num_rows(),
+        );
         self::assertSame($this->baselineConsentCount, $db->count_all('consents'));
     }
 
