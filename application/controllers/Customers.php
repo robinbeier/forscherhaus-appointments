@@ -317,6 +317,7 @@ class Customers extends EA_Controller
                 );
                 return;
             }
+            unset($customer['id']);
 
             $this->customers_model->only($customer, $this->allowed_customer_fields);
 

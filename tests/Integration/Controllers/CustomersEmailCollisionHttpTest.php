@@ -76,6 +76,22 @@ final class CustomersEmailCollisionHttpTest extends TestCase
         self::assertCount(1, $this->rowsByEmail((string) $existingBefore['email']));
     }
 
+    public function testStoreAcceptsEmptyIdPlaceholderAsCreate(): void
+    {
+        $fixture = $this->fixture;
+        $client = $this->login($this->server->client());
+        $payload = $fixture->customerWritePayload('empty-id');
+
+        $response = $client->post('customers/store', ['customer' => ['id' => ''] + $payload]);
+
+        self::assertSame(200, $response->statusCode, $response->body);
+        $data = json_decode($response->body, true, 512, JSON_THROW_ON_ERROR);
+        self::assertTrue((bool) ($data['success'] ?? false), $response->body);
+        $createdId = (int) ($data['id'] ?? 0);
+        self::assertGreaterThan(0, $createdId);
+        self::assertSame($payload['email'], $fixture->row('users', $createdId)['email'] ?? null);
+    }
+
     private function login(GateHttpClient $client): GateHttpClient
     {
         self::assertSame(200, $client->get('login')->statusCode);
