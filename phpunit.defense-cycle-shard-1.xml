@@ -32,7 +32,6 @@
             <file>./tests/Integration/Controllers/GoogleAnalyticsLegacyHttpTest.php</file>
             <file>./tests/Integration/Controllers/UpdateLegacyHttpTest.php</file>
             <file>./tests/Integration/Controllers/AppointmentsApiHttpWriteTest.php</file>
-            <file>./tests/Integration/Controllers/StaffSettingsApiHttpTest.php</file>
             <file>./tests/Integration/Controllers/RescheduleCutoffHttpTest.php</file>
             <file>./tests/Integration/Controllers/RescheduleMethodHttpTest.php</file>
             <file>./tests/Integration/Controllers/BookingMethodHttpTest.php</file>
