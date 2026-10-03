@@ -19,9 +19,13 @@ final class OrdinaryLiveFixture
     private string $stateFile;
     private string $lockFile;
 
-    public function __construct(string $stateDirectory)
+    /** @var null|callable():void */
+    private readonly mixed $afterTransitionCommit;
+
+    public function __construct(string $stateDirectory, ?callable $afterTransitionCommit = null)
     {
         $this->assertRootCli();
+        $this->afterTransitionCommit = $afterTransitionCommit;
         $this->stateDirectory = $this->prepareDirectory($stateDirectory);
         $this->stateFile = $this->stateDirectory . DIRECTORY_SEPARATOR . 'state.json';
         $this->lockFile = $this->stateDirectory . DIRECTORY_SEPARATOR . 'lifecycle.lock';
@@ -134,6 +138,95 @@ final class OrdinaryLiveFixture
         });
     }
 
+    /**
+     * One-way transition for the synthetic admin account used by backoffice
+     * role-revocation probes. The returned receipt deliberately omits the
+     * plaintext password; the root-only credential remains in the journal for
+     * exact ownership checks during cleanup.
+     *
+     * @return array<string, mixed>
+     */
+    public function transitionAdminToCustomer(): array
+    {
+        return $this->withLock(function (): array {
+            if (!is_file($this->stateFile) || is_link($this->stateFile)) {
+                throw new RuntimeException('No ordinary live fixture is active.');
+            }
+            $state = $this->readState();
+            $this->validateState($state);
+            if (
+                $state['phase'] !== 'active' ||
+                $state['role_slug'] !== 'admin' ||
+                $state['expires_at'] <= time() + 60
+            ) {
+                throw new RuntimeException('Only an active ordinary admin fixture can transition to customer.');
+            }
+            $customerRole = $this->db->get_where('roles', ['slug' => 'customer'])->row_array();
+            if (empty($customerRole['id'])) {
+                throw new RuntimeException('Customer role is missing.');
+            }
+            $customerRoleId = (int) $customerRole['id'];
+            if ($customerRoleId === (int) $state['role_id']) {
+                throw new RuntimeException('Customer role must differ from the owned admin role.');
+            }
+
+            // Journal the exact transition intent before acquiring a database
+            // lock or mutating the account.
+            $state['customer_role_id'] = $customerRoleId;
+            $state['customer_role_slug'] = 'customer';
+            $state['phase'] = 'transition_intent';
+            $this->writeState($state);
+
+            if (!$this->db->trans_begin()) {
+                throw new RuntimeException('Fixture transition transaction could not start.');
+            }
+            try {
+                $usersTable = $this->db->escape_identifiers($this->db->dbprefix('users'));
+                $lockedUser = $this->db
+                    ->query('SELECT * FROM ' . $usersTable . ' WHERE id = ? FOR UPDATE', [(int) $state['user_id']])
+                    ->row_array();
+                $settingsTable = $this->db->escape_identifiers($this->db->dbprefix('user_settings'));
+                $lockedSettings = $this->db
+                    ->query('SELECT * FROM ' . $settingsTable . ' WHERE id_users = ? FOR UPDATE', [
+                        (int) $state['user_id'],
+                    ])
+                    ->row_array();
+                $this->assertTransitionOwnership($state, $lockedUser, $lockedSettings);
+                $this->assertNoRelationships((int) $state['user_id']);
+                if (
+                    !$this->db->update(
+                        'users',
+                        ['id_roles' => $customerRoleId],
+                        ['id' => (int) $state['user_id'], 'id_roles' => (int) $state['role_id']],
+                    )
+                ) {
+                    throw new RuntimeException('Fixture customer-role transition did not update the owned user.');
+                }
+                if ($this->db->affected_rows() !== 1) {
+                    throw new RuntimeException(
+                        'Fixture customer-role transition affected an unexpected number of users.',
+                    );
+                }
+                if ($this->db->trans_status() === false || !$this->db->trans_commit()) {
+                    throw new RuntimeException('Fixture transition transaction could not commit.');
+                }
+            } catch (Throwable $e) {
+                $this->db->trans_rollback();
+                throw $e;
+            }
+
+            // A crash here leaves transition_intent plus the committed role;
+            // deactivate() accepts precisely that journaled pair.
+            if ($this->afterTransitionCommit !== null) {
+                ($this->afterTransitionCommit)();
+            }
+            $state['phase'] = 'customer';
+            $this->writeState($state);
+            unset($state['password']);
+            return $state;
+        });
+    }
+
     /** @return array<string, mixed> */
     public function read(): array
     {
@@ -151,6 +244,9 @@ final class OrdinaryLiveFixture
 
     public function verify(): string
     {
+        if (is_link($this->stateFile)) {
+            throw new RuntimeException('Fixture state path is a symlink; refusing verification.');
+        }
         if (!file_exists($this->stateFile)) {
             $leftovers =
                 $this->db->like('notes', 'ordinary-live:', 'after')->get('users')->num_rows() +
@@ -169,6 +265,9 @@ final class OrdinaryLiveFixture
     public function deactivate(): void
     {
         $this->withLock(function (): void {
+            if (is_link($this->stateFile)) {
+                throw new RuntimeException('Fixture state path is a symlink; refusing cleanup.');
+            }
             if (!file_exists($this->stateFile)) {
                 return;
             }
@@ -196,13 +295,22 @@ final class OrdinaryLiveFixture
     private function cleanupExact(array $state): void
     {
         $userId = (int) $state['user_id'];
+        $allowedRoleIds = [(int) $state['role_id']];
+        if (isset($state['customer_role_id'])) {
+            $originalRole = $this->db->get_where('roles', ['id' => $state['role_id']])->row_array();
+            $customerRole = $this->db->get_where('roles', ['id' => $state['customer_role_id']])->row_array();
+            if (($originalRole['slug'] ?? null) !== 'admin' || ($customerRole['slug'] ?? null) !== 'customer') {
+                throw new RuntimeException('Fixture transition role mapping changed; refusing cleanup.');
+            }
+            $allowedRoleIds[] = (int) $state['customer_role_id'];
+        }
         $query = $this->db
             ->select('users.*')
             ->from('users')
             ->join('user_settings', 'user_settings.id_users = users.id', 'inner')
             ->where('users.notes', $state['marker'])
             ->where('users.email', $state['email'])
-            ->where('users.id_roles', (int) $state['role_id'])
+            ->where_in('users.id_roles', array_values(array_unique($allowedRoleIds)))
             ->where('user_settings.username', $state['username'])
             ->get();
         $user = $query->row_array();
@@ -251,10 +359,22 @@ final class OrdinaryLiveFixture
         if (
             ($lockedUser['notes'] ?? null) !== $state['marker'] ||
             ($lockedUser['email'] ?? null) !== $state['email'] ||
-            (int) ($lockedUser['id_roles'] ?? 0) !== (int) $state['role_id'] ||
-            ($lockedSettings['username'] ?? null) !== $state['username']
+            !in_array((int) ($lockedUser['id_roles'] ?? 0), $allowedRoleIds, true) ||
+            (int) ($lockedUser['is_private'] ?? 0) !== 1 ||
+            ($lockedSettings['username'] ?? null) !== $state['username'] ||
+            (int) ($lockedSettings['notifications'] ?? 1) !== 0 ||
+            (int) ($lockedSettings['google_sync'] ?? 1) !== 0 ||
+            (int) ($lockedSettings['caldav_sync'] ?? 1) !== 0
         ) {
             throw new RuntimeException('Fixture identity changed while cleanup was locking it.');
+        }
+        if (
+            !hash_equals(
+                (string) $lockedSettings['password'],
+                \hash_password((string) $lockedSettings['salt'], (string) $state['password']),
+            )
+        ) {
+            throw new RuntimeException('Fixture credential changed; refusing cleanup.');
         }
         foreach (
             [
@@ -275,7 +395,7 @@ final class OrdinaryLiveFixture
             'id' => $foundUserId,
             'notes' => $state['marker'],
             'email' => $state['email'],
-            'id_roles' => (int) $state['role_id'],
+            'id_roles' => (int) $lockedUser['id_roles'],
         ]);
         if (
             $this->db->get_where('users', ['id' => $foundUserId])->num_rows() !== 0 ||
@@ -343,6 +463,52 @@ final class OrdinaryLiveFixture
         ) {
             if ($this->db->get_where($table, $where)->num_rows() !== 0) {
                 throw new RuntimeException('Fixture has an unexpected relationship.');
+            }
+        }
+    }
+
+    /** @param array<string, mixed> $state @param array<string, mixed> $user @param array<string, mixed> $settings */
+    private function assertTransitionOwnership(array $state, array $user, array $settings): void
+    {
+        $originalRole = $this->db->get_where('roles', ['id' => $state['role_id']])->row_array();
+        $customerRole = $this->db->get_where('roles', ['id' => $state['customer_role_id']])->row_array();
+        if (
+            $user === [] ||
+            $settings === [] ||
+            ($originalRole['slug'] ?? null) !== 'admin' ||
+            ($customerRole['slug'] ?? null) !== 'customer' ||
+            (int) ($user['id'] ?? 0) !== (int) $state['user_id'] ||
+            ($user['notes'] ?? null) !== $state['marker'] ||
+            ($user['email'] ?? null) !== $state['email'] ||
+            (int) ($user['id_roles'] ?? 0) !== (int) $state['role_id'] ||
+            (int) ($user['is_private'] ?? 0) !== 1 ||
+            ($settings['username'] ?? null) !== $state['username'] ||
+            (int) ($settings['notifications'] ?? 1) !== 0 ||
+            (int) ($settings['google_sync'] ?? 1) !== 0 ||
+            (int) ($settings['caldav_sync'] ?? 1) !== 0 ||
+            !hash_equals(
+                (string) ($settings['password'] ?? ''),
+                \hash_password((string) ($settings['salt'] ?? ''), (string) $state['password']),
+            )
+        ) {
+            throw new RuntimeException('Fixture ownership or credential changed; refusing transition.');
+        }
+    }
+
+    private function assertNoRelationships(int $userId): void
+    {
+        foreach (
+            [
+                ['appointments', ['id_users_provider' => $userId]],
+                ['appointments', ['id_users_customer' => $userId]],
+                ['services_providers', ['id_users' => $userId]],
+                ['secretaries_providers', ['id_users_provider' => $userId]],
+                ['secretaries_providers', ['id_users_secretary' => $userId]],
+            ]
+            as [$table, $where]
+        ) {
+            if ($this->db->get_where($table, $where)->num_rows() !== 0) {
+                throw new RuntimeException('Fixture has an unexpected relationship; refusing transition.');
             }
         }
     }
@@ -456,7 +622,7 @@ final class OrdinaryLiveFixture
             !preg_match('/^defense_live_[0-9a-f]{32}$/', (string) $state['username']) ||
             $state['email'] !== $state['username'] . '@synthetic.invalid' ||
             !in_array($state['role_slug'], ['provider', 'admin'], true) ||
-            !in_array($state['phase'], ['prepared', 'active'], true) ||
+            !in_array($state['phase'], ['prepared', 'active', 'transition_intent', 'customer'], true) ||
             !is_int($state['user_id']) ||
             $state['user_id'] < 0 ||
             !is_int($state['role_id']) ||
@@ -469,6 +635,21 @@ final class OrdinaryLiveFixture
             !preg_match('/\A[0-9a-f]{64}\z/D', $state['password'])
         ) {
             throw new RuntimeException('Fixture state identity is invalid.');
+        }
+        if (in_array($state['phase'], ['transition_intent', 'customer'], true)) {
+            if (
+                $state['role_slug'] !== 'admin' ||
+                $state['user_id'] < 1 ||
+                !isset($state['customer_role_id'], $state['customer_role_slug']) ||
+                !is_int($state['customer_role_id']) ||
+                $state['customer_role_id'] < 1 ||
+                $state['customer_role_slug'] !== 'customer' ||
+                $state['customer_role_id'] === $state['role_id']
+            ) {
+                throw new RuntimeException('Fixture transition journal is invalid.');
+            }
+        } elseif (isset($state['customer_role_id']) || isset($state['customer_role_slug'])) {
+            throw new RuntimeException('Fixture transition fields are not valid in this phase.');
         }
     }
 

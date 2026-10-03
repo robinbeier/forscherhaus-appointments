@@ -15,6 +15,7 @@ use ReleaseGate\DefenseVerificationFixture;
 use ReleaseGate\ServicesApiWriteProbe;
 use ReleaseGate\UnavailabilitiesApiWriteProbe;
 use ReleaseGate\BlockedPeriodsApiWriteProbe;
+use ReleaseGate\BackofficeRoleRevocationProbe;
 use ReleaseGate\ServiceCategoriesApiWriteProbe;
 use ReleaseGate\SecretariesApiAliasProbe;
 use ReleaseGate\OrdinaryAccountProbe;
@@ -51,6 +52,7 @@ if (
             'activate',
             'account',
             'methods',
+            'backoffice-role-read',
             'customer-boundary',
             'customers-api',
             'staff-api',
@@ -174,6 +176,7 @@ try {
     require_once dirname(__DIR__) . '/release-gate/lib/ServicesApiWriteProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/UnavailabilitiesApiWriteProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/BlockedPeriodsApiWriteProbe.php';
+    require_once dirname(__DIR__) . '/release-gate/lib/BackofficeRoleRevocationProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/ServiceCategoriesApiWriteProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/SecretariesApiAliasProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/CalendarResponsibilityRaceProbe.php';
@@ -275,6 +278,14 @@ try {
                 (string) config_item('csrf_cookie_name'),
                 (string) config_item('csrf_token_name'),
             ))->run($context, $evidence->step(...));
+        } elseif ($action === 'backoffice-role-read') {
+            $result['evidence'] = $evidence->run(
+                'backoffice_role_reads',
+                fn(): array => (new BackofficeRoleRevocationProbe($client, $fixture, $sessions->remember(...)))->run(),
+            );
+            if ($fixture->verify() !== 'cleanup_pending') {
+                throw new RuntimeException('Transitioned Backoffice fixture did not enter cleanup state.');
+            }
         } elseif ($action === 'customer-boundary') {
             $supplemental = $evidence->run(
                 'supplemental_activate',
