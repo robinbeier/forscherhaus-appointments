@@ -36,6 +36,13 @@ approve a cross-origin preflight. A simple cross-origin request can still reach
 the server, so authentication, CSRF, and capability checks remain essential.
 Any future foreign-browser integration needs an explicit, reviewed policy.
 
+The global file-backed request limiter must count concurrent non-exempt requests
+without losing increments. Its read and update for one request share a stable
+cross-process lock; a missing lock or failed cache write rejects the request
+before controller work. The isolated parallel-process regression proves the
+counter boundary for its synthetic cache and does not establish production
+throughput or a live rate-limit result.
+
 Administrative dashboard PDF and ZIP exports must authorize the actor's current
 stored administrator role on every request, including direct controller paths.
 Only GET may reach export data loading or rendering. Teacher reports use parent

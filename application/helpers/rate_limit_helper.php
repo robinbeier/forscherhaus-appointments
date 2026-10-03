@@ -12,6 +12,12 @@
  * ---------------------------------------------------------------------------- */
 
 if (!function_exists('rate_limit')) {
+    function rate_limit_fail_closed(): void
+    {
+        header('HTTP/1.0 503 Service Unavailable');
+        exit();
+    }
+
     function rate_limit_is_local_loopback_request(string $ip, ?string $host = null): bool
     {
         $normalizedIp = trim($ip);
@@ -65,42 +71,82 @@ if (!function_exists('rate_limit')) {
 
         $CI->load->driver('cache', ['adapter' => 'file']);
 
+        $cache_path = (string) $CI->config->item('cache_path');
+        if ($cache_path === '') {
+            $cache_path = APPPATH . 'cache' . DIRECTORY_SEPARATOR;
+        }
+        $cache_path = rtrim($cache_path, DIRECTORY_SEPARATOR);
+        $lock_path = dirname($cache_path) . DIRECTORY_SEPARATOR . 'rate_limit.lock';
+        $lock_handle = @fopen($lock_path, 'c');
+
+        if ($lock_handle === false || !@flock($lock_handle, LOCK_EX)) {
+            if (is_resource($lock_handle)) {
+                fclose($lock_handle);
+            }
+
+            rate_limit_fail_closed();
+        }
+
         $cache_key = str_replace(':', '', 'rate_limit_key_' . $ip);
 
         $cache_remain_time_key = str_replace(':', '', 'rate_limit_tmp_' . $ip);
 
         $current_time = date('Y-m-d H:i:s');
 
-        if ($CI->cache->get($cache_key) === false) {
-            // First request
+        $requests = $CI->cache->get($cache_key);
+
+        if ($requests === false) {
+            $requests = 1;
             $current_time_plus = date('Y-m-d H:i:s', strtotime('+' . $duration . ' seconds'));
 
-            $CI->cache->save($cache_key, 1, $duration);
-
-            $CI->cache->save($cache_remain_time_key, $current_time_plus, $duration * 2);
-        }
-        // Consequent request
-        else {
-            $requests = $CI->cache->get($cache_key);
-
+            if (
+                !$CI->cache->save($cache_key, $requests, $duration) ||
+                !$CI->cache->save($cache_remain_time_key, $current_time_plus, $duration * 2)
+            ) {
+                @flock($lock_handle, LOCK_UN);
+                fclose($lock_handle);
+                rate_limit_fail_closed();
+            }
+        } else {
             $time_lost = $CI->cache->get($cache_remain_time_key);
 
+            if (!is_string($time_lost) || strtotime($time_lost) === false) {
+                @flock($lock_handle, LOCK_UN);
+                fclose($lock_handle);
+                rate_limit_fail_closed();
+            }
+
             if ($current_time > $time_lost) {
+                $requests = 1;
                 $current_time_plus = date('Y-m-d H:i:s', strtotime('+' . $duration . ' seconds'));
 
-                $CI->cache->save($cache_key, 1, $duration);
-
-                $CI->cache->save($cache_remain_time_key, $current_time_plus, $duration * 2);
+                if (
+                    !$CI->cache->save($cache_key, $requests, $duration) ||
+                    !$CI->cache->save($cache_remain_time_key, $current_time_plus, $duration * 2)
+                ) {
+                    @flock($lock_handle, LOCK_UN);
+                    fclose($lock_handle);
+                    rate_limit_fail_closed();
+                }
             } else {
-                $CI->cache->save($cache_key, $requests + 1, $duration);
-            }
+                $requests++;
 
-            $requests = $CI->cache->get($cache_key);
-
-            if ($requests > $max_requests) {
-                header('HTTP/1.0 429 Too Many Requests');
-                exit();
+                if (!$CI->cache->save($cache_key, $requests, $duration)) {
+                    @flock($lock_handle, LOCK_UN);
+                    fclose($lock_handle);
+                    rate_limit_fail_closed();
+                }
             }
+        }
+
+        $exceeded = $requests > $max_requests;
+
+        @flock($lock_handle, LOCK_UN);
+        fclose($lock_handle);
+
+        if ($exceeded) {
+            header('HTTP/1.0 429 Too Many Requests');
+            exit();
         }
     }
 }
