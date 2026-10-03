@@ -76,14 +76,27 @@ if (!function_exists('rate_limit')) {
             $cache_path = APPPATH . 'cache' . DIRECTORY_SEPARATOR;
         }
         $cache_path = rtrim($cache_path, DIRECTORY_SEPARATOR);
-        $lock_path = dirname($cache_path) . DIRECTORY_SEPARATOR . 'rate_limit.lock';
+        $bucket = hexdec(substr(hash('sha256', $ip), 0, 8)) % 64;
+        $lock_path = dirname($cache_path) . DIRECTORY_SEPARATOR . sprintf('rate_limit.lock.%02x', $bucket);
         $lock_handle = @fopen($lock_path, 'c');
 
-        if ($lock_handle === false || !@flock($lock_handle, LOCK_EX)) {
-            if (is_resource($lock_handle)) {
-                fclose($lock_handle);
+        if ($lock_handle === false) {
+            rate_limit_fail_closed();
+        }
+
+        $lock_deadline = microtime(true) + 2;
+        $lock_acquired = false;
+        do {
+            if (@flock($lock_handle, LOCK_EX | LOCK_NB)) {
+                $lock_acquired = true;
+                break;
             }
 
+            usleep(5000);
+        } while (microtime(true) < $lock_deadline);
+
+        if (!$lock_acquired) {
+            @fclose($lock_handle);
             rate_limit_fail_closed();
         }
 

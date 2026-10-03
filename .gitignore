@@ -21,7 +21,7 @@
 /storage/backups/*
 !/storage/backups/.htaccess
 !/storage/backups/index.html
-/storage/rate_limit.lock
+/storage/rate_limit.lock*
 /storage/cache/*
 !/storage/cache/.htaccess
 !/storage/cache/index.html
