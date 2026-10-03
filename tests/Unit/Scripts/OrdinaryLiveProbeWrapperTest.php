@@ -54,6 +54,7 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
                 'OrdinaryProbeEvidence.php',
                 'OrdinarySessionProbe.php',
                 'OrdinaryAccountProbe.php',
+                'BackofficeRoleRevocationProbe.php',
                 'AccountSecurityMatrixProbe.php',
                 'CustomerRoleBoundaryProbe.php',
                 'CustomersApiWriteProbe.php',
@@ -210,6 +211,7 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
         foreach (
             [
                 'methods' => 'provider',
+                'backoffice-role-read' => 'admin',
                 'customer-boundary' => 'admin',
                 'customers-api' => 'admin',
                 'services-api' => 'admin',
@@ -300,6 +302,20 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
         self::assertSame(42, $result['status']);
         self::assertContains('pending-begin', $result['lines']);
         self::assertContains('deactivate', $this->actions($result['lines']));
+        self::assertNotContains('pending-finish', $result['lines']);
+    }
+
+    public function testFailedBackofficeRoleProbeCleansUpButRetainsRecoveryMarker(): void
+    {
+        $result = $this->executeWrapper('backoffice-role-read', [
+            'MOCK_PHP_FAIL_ACTIONS' => 'backoffice-role-read',
+        ]);
+        self::assertSame(42, $result['status']);
+        self::assertSame(
+            ['preflight', 'activate', 'backoffice-role-read', 'deactivate', 'verify'],
+            $this->actions($result['lines']),
+        );
+        self::assertContains('pending-begin', $result['lines']);
         self::assertNotContains('pending-finish', $result['lines']);
     }
 

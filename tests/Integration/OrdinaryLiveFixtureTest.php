@@ -272,4 +272,171 @@ final class OrdinaryLiveFixtureTest extends TestCase
         $this->fixture->deactivate();
         self::assertSame('clean', $this->fixture->verify());
     }
+
+    public function testAdminTransitionJournalsIntentDemotesOnlyOwnedUserAndCleansUp(): void
+    {
+        $state = $this->fixture->activate(roleSlug: 'admin');
+        $db = &get_instance()->db;
+        $customerRole = $db->get_where('roles', ['slug' => 'customer'])->row_array();
+        $otherUser = $db
+            ->where('id !=', $state['user_id'])
+            ->where('id_roles', $state['role_id'])
+            ->get('users')
+            ->row_array();
+        self::assertNotEmpty($otherUser, 'The isolated fixture must contain an unrelated admin user.');
+
+        $transition = $this->fixture->transitionAdminToCustomer();
+        self::assertArrayNotHasKey('password', $transition);
+        self::assertSame('cleanup_pending', $this->fixture->verify());
+        try {
+            $this->fixture->read();
+            self::fail('A transitioned fixture must not be a normal active probe.');
+        } catch (RuntimeException) {
+            self::assertTrue(true);
+        }
+        self::assertSame(
+            (int) $customerRole['id'],
+            (int) $db->get_where('users', ['id' => $state['user_id']])->row_array()['id_roles'],
+        );
+        self::assertSame(
+            'customer',
+            json_decode(file_get_contents($this->stateDirectory . '/state.json'), true)['customer_role_slug'],
+        );
+        self::assertSame('customer', $db->get_where('roles', ['id' => $customerRole['id']])->row_array()['slug']);
+        self::assertSame(
+            $state['role_id'],
+            (int) $db->get_where('users', ['id' => $otherUser['id']])->row_array()['id_roles'],
+        );
+
+        $this->fixture->deactivate();
+        self::assertSame('clean', $this->fixture->verify());
+    }
+
+    public function testTransitionIntentFailureBeforeMutationLeavesRecoverableJournal(): void
+    {
+        $state = $this->fixture->activate(roleSlug: 'admin');
+        $db = &get_instance()->db;
+        $adminRoleId = (int) $state['role_id'];
+        $originalPassword = $db->get_where('user_settings', ['id_users' => $state['user_id']])->row_array()['password'];
+        $db->update('user_settings', ['password' => 'drifted'], ['id_users' => $state['user_id']]);
+        try {
+            $this->fixture->transitionAdminToCustomer();
+            self::fail('Credential drift must block transition after intent journaling.');
+        } catch (RuntimeException $e) {
+            self::assertStringContainsString('ownership or credential', $e->getMessage());
+        }
+        self::assertSame('cleanup_pending', $this->fixture->verify());
+        self::assertSame(
+            $adminRoleId,
+            (int) $db->get_where('users', ['id' => $state['user_id']])->row_array()['id_roles'],
+        );
+        try {
+            $this->fixture->deactivate();
+            self::fail('Credential drift must block cleanup.');
+        } catch (RuntimeException) {
+            self::assertTrue(true);
+        }
+        $db->update('user_settings', ['password' => $originalPassword], ['id_users' => $state['user_id']]);
+    }
+
+    public function testCleanupAcceptsCommittedCustomerRoleOnlyFromTransitionJournal(): void
+    {
+        $state = $this->fixture->activate(roleSlug: 'admin');
+        $db = &get_instance()->db;
+        $customerRole = $db->get_where('roles', ['slug' => 'customer'])->row_array();
+        $state['customer_role_id'] = (int) $customerRole['id'];
+        $state['customer_role_slug'] = 'customer';
+        $state['phase'] = 'transition_intent';
+        file_put_contents($this->stateDirectory . '/state.json', json_encode($state, JSON_THROW_ON_ERROR));
+        $db->update(
+            'users',
+            ['id_roles' => (int) $customerRole['id']],
+            ['id' => $state['user_id'], 'id_roles' => $state['role_id']],
+        );
+
+        self::assertSame('cleanup_pending', $this->fixture->verify());
+        $this->fixture->deactivate();
+        self::assertSame('clean', $this->fixture->verify());
+    }
+
+    public function testCleanupRefusesUnexpectedThirdRoleDespiteTransitionJournal(): void
+    {
+        $state = $this->fixture->activate(roleSlug: 'admin');
+        $db = &get_instance()->db;
+        $customerRole = $db->get_where('roles', ['slug' => 'customer'])->row_array();
+        $providerRole = $db->get_where('roles', ['slug' => 'provider'])->row_array();
+        $state['customer_role_id'] = (int) $customerRole['id'];
+        $state['customer_role_slug'] = 'customer';
+        $state['phase'] = 'transition_intent';
+        file_put_contents($this->stateDirectory . '/state.json', json_encode($state, JSON_THROW_ON_ERROR));
+        $db->update('users', ['id_roles' => (int) $providerRole['id']], ['id' => $state['user_id']]);
+
+        try {
+            $this->fixture->deactivate();
+            self::fail('An unexpected third role must block cleanup.');
+        } catch (RuntimeException) {
+            self::assertTrue(true);
+        }
+        self::assertSame(1, $db->get_where('users', ['id' => $state['user_id']])->num_rows());
+        $db->update('users', ['id_roles' => (int) $state['role_id']], ['id' => $state['user_id']]);
+    }
+
+    public function testTransitionRefusesDriftOfPrivateFlagSyncSettingsOrRoleIdentity(): void
+    {
+        $db = &get_instance()->db;
+        foreach (['is_private', 'notifications', 'role_slug'] as $drift) {
+            $state = $this->fixture->activate(roleSlug: 'admin');
+            $table = match ($drift) {
+                'is_private' => 'users',
+                'notifications' => 'user_settings',
+                default => 'roles',
+            };
+            $selector = match ($drift) {
+                'is_private' => ['id' => $state['user_id']],
+                'notifications' => ['id_users' => $state['user_id']],
+                default => ['id' => $state['role_id']],
+            };
+            $field = $drift === 'role_slug' ? 'slug' : $drift;
+            $original = $db->get_where($table, $selector)->row_array()[$field];
+            $replacement = match ($drift) {
+                'is_private' => 0,
+                'notifications' => 1,
+                default => 'synthetic_drift',
+            };
+            $db->update($table, [$field => $replacement], $selector);
+            try {
+                $this->fixture->transitionAdminToCustomer();
+                self::fail($drift . ' must block a role transition.');
+            } catch (RuntimeException $e) {
+                self::assertStringContainsString('ownership or credential', $e->getMessage(), $drift);
+                self::assertSame(
+                    $state['role_id'],
+                    (int) $db->get_where('users', ['id' => $state['user_id']])->row_array()['id_roles'],
+                    $drift,
+                );
+            } finally {
+                $db->update($table, [$field => $original], $selector);
+                $this->fixture->deactivate();
+            }
+            self::assertSame('clean', $this->fixture->verify());
+        }
+    }
+
+    public function testDanglingStateSymlinkCannotAppearCleanOrBeSilentlyDeactivated(): void
+    {
+        $statePath = $this->stateDirectory . '/state.json';
+        self::assertTrue(symlink($this->stateDirectory . '/missing-state', $statePath));
+        try {
+            foreach (['verify', 'deactivate'] as $method) {
+                try {
+                    $this->fixture->{$method}();
+                    self::fail($method . ' must refuse an untrusted state path.');
+                } catch (RuntimeException $e) {
+                    self::assertStringContainsString('symlink', $e->getMessage());
+                }
+            }
+        } finally {
+            unlink($statePath);
+        }
+    }
 }

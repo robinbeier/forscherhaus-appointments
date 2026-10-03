@@ -50,6 +50,7 @@
             <file>./tests/Integration/Controllers/CalendarMutationMethodHttpTest.php</file>
             <file>./tests/Integration/Controllers/CalendarUnavailabilityPermissionRaceHttpTest.php</file>
             <file>./tests/Integration/OrdinaryLiveFixtureTest.php</file>
+            <file>./tests/Integration/BackofficeRoleRevocationProbeTest.php</file>
             <file>./tests/Integration/OrdinaryAccountProbeTest.php</file>
             <file>./tests/Integration/OrdinarySessionProbeTest.php</file>
             <file>./tests/Integration/OrdinaryProbeEvidenceTest.php</file>

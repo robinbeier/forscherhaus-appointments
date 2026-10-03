@@ -194,6 +194,20 @@ authorization exception, global setting or application behavior change. Its
 root-only lifecycle journal binds the exact username, email, role, marker and user
 ID before any request; credential or role drift is rejected before login.
 
+ROB-670 adds a local, one-way primitive for an **owned synthetic administrator**
+to become a customer after its original identity, private flag, disabled
+integrations, credential and lack of dependent rows are checked under the
+fixture lock. A durable transition-intent journal precedes the database update;
+cleanup accepts only the journaled administrator/customer role pair and
+rechecks exact ownership. A transitioned fixture is `cleanup_pending`, never an
+ordinary active probe. The `backoffice-role-read` action uses this primitive
+under the ordinary shared lock, independent cleanup timer and session journal.
+It has only been exercised locally; the first productive role-change run
+requires a separate approved plan. The
+checks fail closed on unexpected relationships but do not prove safety against
+an arbitrary concurrent application write to that account. The account is
+random and private, and final cleanup must independently verify absence.
+
 The reviewed operator bundle includes `deploy_ea.sh`, `scripts/ops/run_ordinary_live_probe.sh`,
 `scripts/ops/ordinary_live_probe.php` and their release-gate libraries. Run them only from a root-controlled copy
 of the reviewed tools outside the replaceable application release, against the
@@ -236,6 +250,7 @@ older uncoordinated deploy script while a run or its recovery marker is pending.
 bash scripts/ops/run_ordinary_live_probe.sh preflight EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh account EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh methods EXPECTED_RELEASE
+bash scripts/ops/run_ordinary_live_probe.sh backoffice-role-read EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh customer-boundary EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh customers-api EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh staff-api EXPECTED_RELEASE

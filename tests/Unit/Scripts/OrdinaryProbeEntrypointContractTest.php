@@ -15,7 +15,11 @@ final class OrdinaryProbeEntrypointContractTest extends TestCase
 
         $files = ordinary_probe_required_libraries($source, __DIR__ . '/../../../scripts/release-gate/lib');
 
-        self::assertCount(19, $files);
+        self::assertCount(20, $files);
+        self::assertContains(
+            realpath(__DIR__ . '/../../../scripts/release-gate/lib/BackofficeRoleRevocationProbe.php'),
+            array_map('realpath', $files),
+        );
     }
 
     public function testMissingRuntimeRequireIsRejected(): void
