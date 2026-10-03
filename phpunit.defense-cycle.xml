@@ -82,6 +82,7 @@
             <file>./tests/Integration/Controllers/PrivacyDeleteHttpTest.php</file>
             <file>./tests/Integration/Controllers/BookingBlockedPeriodsHttpTest.php</file>
             <file>./tests/Integration/Controllers/BookingAvailabilityAuthorityHttpTest.php</file>
+            <file>./tests/Integration/Controllers/BookingJsonBodyLimitHttpTest.php</file>
             <file>./tests/Integration/Controllers/ProviderPdfExportHttpTest.php</file>
             <file>./tests/Integration/Controllers/DashboardExportHttpTest.php</file>
             <file>./tests/Integration/Controllers/DashboardRoleRevocationHttpTest.php</file>

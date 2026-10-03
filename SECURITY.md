@@ -45,6 +45,13 @@ controller work. The isolated parallel-process regression proves the counter
 boundary for its synthetic per-key cache; it does not establish production
 throughput or a live rate-limit result.
 
+JSON bodies read through `EA_Input::json()` are bounded to 1 MiB before
+decoding, including requests whose `Content-Length` is absent or incorrect.
+An oversized body is rejected with HTTP 413 before JSON-dependent business mutation;
+subsequent field reads reuse the same decoded payload. PHP's `post_max_size`
+does not by itself protect `php://input` for JSON requests. This contract
+does not cover non-JSON uploads or the separate CSP report receiver.
+
 Administrative dashboard PDF and ZIP exports must authorize the actor's current
 stored administrator role on every request, including direct controller paths.
 Only GET may reach export data loading or rendering. Teacher reports use parent

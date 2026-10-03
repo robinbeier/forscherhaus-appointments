@@ -43,6 +43,11 @@
  */
 class EA_Input extends CI_Input
 {
+    public const MAX_JSON_BODY_BYTES = 1048576;
+
+    private bool $json_payload_loaded = false;
+    private mixed $json_payload = null;
+
     /**
      * Fetch an item from JSON data.
      *
@@ -60,15 +65,35 @@ class EA_Input extends CI_Input
             return null;
         }
 
-        $input_stream = $CI->input->raw_input_stream;
+        if (!$this->json_payload_loaded) {
+            $content_length = $_SERVER['CONTENT_LENGTH'] ?? null;
 
-        if (empty($input_stream)) {
-            return null;
+            if ($content_length !== null && (int) $content_length > self::MAX_JSON_BODY_BYTES) {
+                show_error('JSON request body is too large.', 413);
+            }
+
+            // CI_Input::raw_input_stream reads the entire body. Bound the read
+            // before decoding, including requests without Content-Length.
+            $input_stream =
+                $this->_raw_input_stream ??
+                file_get_contents('php://input', false, null, 0, self::MAX_JSON_BODY_BYTES + 1);
+
+            if (!is_string($input_stream)) {
+                show_error('Unable to read JSON request body.', 400);
+            }
+
+            if (strlen($input_stream) > self::MAX_JSON_BODY_BYTES) {
+                show_error('JSON request body is too large.', 413);
+            }
+
+            $this->_raw_input_stream = $input_stream;
+            $this->json_payload = $input_stream === '' ? null : json_decode($input_stream, true);
+            $this->json_payload_loaded = true;
         }
 
-        $payload = json_decode($input_stream, true);
+        $payload = $this->json_payload;
 
-        if ($xss_clean) {
+        if ($xss_clean && is_array($payload)) {
             foreach ($payload as $name => $value) {
                 $payload[$name] = $CI->security->xss_clean($value);
             }
@@ -78,6 +103,6 @@ class EA_Input extends CI_Input
             return $payload;
         }
 
-        return $payload[$index] ?? null;
+        return is_array($payload) ? $payload[$index] ?? null : null;
     }
 }
