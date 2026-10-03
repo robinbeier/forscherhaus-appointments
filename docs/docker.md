@@ -123,9 +123,14 @@ session files; it never reads existing host sessions.
 Use `docker compose down` to stop the stack while retaining the named session
 volume. Use `docker compose down -v` only when intentionally removing the
 local Docker session volume; it does not remove the old host bind-mounted
-directory. To roll back this local change, remove the PHP-FPM named-volume
-mount and the top-level volume declaration, then recreate the stack; the old
-host bind mount remains available for that rollback.
+directory. To roll back, check out the last known-good revision of this local
+Docker setup as a whole, including both `docker-compose.yml` and
+`docker/php-fpm/start-container`, then run
+`docker compose up -d --force-recreate php-fpm`. Removing only the Compose
+volume mount is not a rollback: the current startup script requires that
+dedicated mount and will refuse to start without it. The previous startup
+script restores host-backed sessions and their previous permission behavior;
+the private named volume can be retained for a later forward migration.
 
 You can additionally access phpMyAdmin from `http://localhost:8080` (credentials are `root` / `secret`).
 The default Compose configuration publishes the app, database, and phpMyAdmin
