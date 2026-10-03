@@ -515,6 +515,15 @@ a customer, appointment, or consent. The isolated
 provider, removes the manual block, and verifies that the same slot can then
 be booked and all synthetic records cleaned up. It does not establish a
 concurrent edit interleaving or a production booking result.
+For an authorized public reschedule, the same provider-owned manual
+unavailability must remove its overlapping target from the displayed hours and
+reject a direct `booking/register` manage-mode POST without partially changing
+the original appointment, customer, service, or consent. The isolated
+`BookingManualUnavailabilityRescheduleHttpTest` checks this with a run-owned
+appointment and session-bound authority; after a rejected attempt consumes
+that authority, removing the exact manual block and issuing a new authority
+allows the positive control. This is one local ordered flow, not evidence for
+concurrent manual edits or a production reschedule.
 
 For service categories, authenticated API writes must likewise bind PUT to the
 URL-selected category and enforce the declared method on direct aliases.
