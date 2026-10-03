@@ -72,6 +72,109 @@ final class PrepareSessionStorageTest extends TestCase
         }
     }
 
+    public function testSetupScriptRejectsSymlinkRootAndImmediateChildrenAndPreparesNormalStorage(): void
+    {
+        $root = $this->makeSetupFixture();
+        $outside = $root . '/outside';
+        mkdir($outside, 0750);
+        file_put_contents($outside . '/sentinel', 'must remain unchanged');
+        $before = hash_file('sha256', $outside . '/sentinel');
+
+        try {
+            symlink($outside, $root . '/storage');
+            $result = $this->runSetup($root);
+            self::assertNotSame(0, $result['exit_code']);
+            self::assertSame(0750, fileperms($outside) & 0777);
+            self::assertSame($before, hash_file('sha256', $outside . '/sentinel'));
+            unlink($root . '/storage');
+
+            mkdir($root . '/storage');
+            symlink($outside, $root . '/storage/backups');
+            $result = $this->runSetup($root);
+            self::assertNotSame(0, $result['exit_code']);
+            self::assertSame(0750, fileperms($outside) & 0777);
+            self::assertSame($before, hash_file('sha256', $outside . '/sentinel'));
+            unlink($root . '/storage/backups');
+
+            $result = $this->runSetup($root);
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            self::assertDirectoryExists($root . '/storage/sessions');
+        } finally {
+            $this->removeDirectory($root);
+        }
+    }
+
+    public function testContainerStartupRejectsStorageSymlinksBeforeAnyPermissionChange(): void
+    {
+        $root = $this->makeSetupFixture();
+        mkdir($root . '/docker/php-fpm', 0755, true);
+        copy(dirname(__DIR__, 3) . '/docker/php-fpm/start-container', $root . '/docker/php-fpm/start-container');
+        $outside = $root . '/outside';
+        mkdir($outside, 0750);
+        file_put_contents($outside . '/sentinel', 'must remain unchanged');
+        $before = hash_file('sha256', $outside . '/sentinel');
+
+        try {
+            symlink($outside, $root . '/storage');
+            self::assertNotSame(0, $this->runSetup($root, 'docker/php-fpm/start-container')['exit_code']);
+            self::assertSame(0750, fileperms($outside) & 0777);
+            self::assertSame($before, hash_file('sha256', $outside . '/sentinel'));
+            unlink($root . '/storage');
+
+            mkdir($root . '/storage');
+            symlink($outside, $root . '/storage/cache');
+            self::assertNotSame(0, $this->runSetup($root, 'docker/php-fpm/start-container')['exit_code']);
+            self::assertSame(0750, fileperms($outside) & 0777);
+            self::assertSame($before, hash_file('sha256', $outside . '/sentinel'));
+        } finally {
+            $this->removeDirectory($root);
+        }
+    }
+
+    /** @return array{exit_code:int,stdout:string,stderr:string} */
+    private function runSetup(string $root, string $script = 'scripts/setup-worktree.sh'): array
+    {
+        $environment = $_ENV;
+        $environment['PATH'] = $root . '/bin' . PATH_SEPARATOR . (getenv('PATH') ?: '');
+        $process = proc_open(
+            ['bash', $root . '/' . $script],
+            [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            $pipes,
+            $root,
+            $environment,
+        );
+        self::assertIsResource($process);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        return ['exit_code' => proc_close($process), 'stdout' => $stdout, 'stderr' => $stderr];
+    }
+
+    private function makeSetupFixture(): string
+    {
+        $root = sys_get_temp_dir() . '/fh-setup-' . bin2hex(random_bytes(6));
+        mkdir($root . '/scripts/ci', 0755, true);
+        mkdir($root . '/bin');
+        copy(dirname(__DIR__, 3) . '/scripts/setup-worktree.sh', $root . '/scripts/setup-worktree.sh');
+        copy(
+            dirname(__DIR__, 3) . '/scripts/prepare-session-storage.sh',
+            $root . '/scripts/prepare-session-storage.sh',
+        );
+        file_put_contents($root . '/config-sample.php', "<?php\n");
+        foreach (['git', 'php', 'composer', 'node', 'npm', 'npx'] as $command) {
+            file_put_contents($root . '/bin/' . $command, "#!/bin/sh\nexit 0\n");
+            chmod($root . '/bin/' . $command, 0755);
+        }
+        foreach (['require_node_minimum.sh', 'ensure_local_deps.sh'] as $script) {
+            file_put_contents($root . '/scripts/ci/' . $script, "#!/bin/sh\nexit 0\n");
+            chmod($root . '/scripts/ci/' . $script, 0755);
+        }
+        file_put_contents($root . '/scripts/install-git-hooks.sh', "#!/bin/sh\nexit 0\n");
+        chmod($root . '/scripts/install-git-hooks.sh', 0755);
+        return $root;
+    }
+
     /** @return array{exit_code:int,stdout:string,stderr:string} */
     private function runHelper(string $root): array
     {

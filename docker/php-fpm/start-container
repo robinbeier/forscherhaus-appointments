@@ -9,8 +9,20 @@ if ! git config --local core.fileMode false >/dev/null 2>&1; then
 fi
 
 echo "➜ Set Correct Permissions"
+if [[ -L storage || ! -d storage ]]; then
+    echo "✖ Refusing invalid storage root: storage" >&2
+    exit 1
+fi
+if ! symlinked_storage_child="$(find -P storage -mindepth 1 -maxdepth 1 ! -name sessions -type l -print -quit)"; then
+    echo "✖ Could not inspect storage children" >&2
+    exit 1
+fi
+if [[ -n "$symlinked_storage_child" ]]; then
+    echo "✖ Refusing symlinked storage child" >&2
+    exit 1
+fi
 chmod 777 storage
-find storage -mindepth 1 -maxdepth 1 ! -name sessions -exec chmod -R 777 {} +
+find -P storage -mindepth 1 -maxdepth 1 ! -name sessions ! -type l -exec chmod -R 777 -- {} +
 
 echo "➜ Prepare Private Session Volume"
 if [[ -L storage/sessions ]] || ! mountpoint -q storage/sessions; then

@@ -34,10 +34,23 @@ fi
 # usage. PHP-FPM receives sessions through its private named volume; create a
 # fresh host-side session directory privately for host PHP, without widening
 # an existing directory.
+if [[ -L storage || ( -e storage && ! -d storage ) ]]; then
+    echo "[setup] Refusing invalid storage root: storage" >&2
+    exit 1
+fi
+mkdir -p storage
+# Keep session data out of the broad developer-writable permission pass.
+if ! symlinked_storage_child="$(find -P storage -mindepth 1 -maxdepth 1 ! -name sessions -type l -print -quit)"; then
+    echo "[setup] Could not inspect storage children" >&2
+    exit 1
+fi
+if [[ -n "$symlinked_storage_child" ]]; then
+    echo "[setup] Refusing symlinked storage child" >&2
+    exit 1
+fi
 mkdir -p storage/{backups,cache,logs,uploads}
 chmod a+rwX storage
-# Keep session data out of the broad developer-writable permission pass.
-find storage -mindepth 1 -maxdepth 1 ! -name sessions -exec chmod -R a+rwX -- {} +
+find -P storage -mindepth 1 -maxdepth 1 ! -name sessions ! -type l -exec chmod -R a+rwX {} +
 source ./scripts/prepare-session-storage.sh
 prepare_session_storage storage
 
