@@ -1,10 +1,20 @@
 #!/bin/bash
+set -euo pipefail
 
 echo "➜ Ignore Permission Changes"
 git config core.fileMode false
 
 echo "➜ Set Correct Permissions"
-chmod -R 777 storage
+chmod 777 storage
+find storage -mindepth 1 -maxdepth 1 ! -name sessions -exec chmod -R 777 {} +
+
+echo "➜ Prepare Private Session Volume"
+if [[ -L storage/sessions ]] || ! mountpoint -q storage/sessions; then
+    echo "✖ Refusing to prepare storage/sessions without a dedicated non-symlink mount." >&2
+    exit 1
+fi
+chown www-data:www-data storage/sessions
+chmod 700 storage/sessions
 
 echo "➜ Ensure Local Config"
 [[ -f config.php ]] || cp config-sample.php config.php

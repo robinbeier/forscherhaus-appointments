@@ -30,9 +30,16 @@ if [[ ! -f config.php ]]; then
     echo "[setup] Created config.php from config-sample.php"
 fi
 
-# Ensure runtime folders exist and are writable in local/dev Docker usage.
-mkdir -p storage/{backups,cache,logs,sessions,uploads}
-chmod -R a+rwX storage
+# Ensure non-session runtime folders exist and are writable in local/dev Docker
+# usage. PHP-FPM receives sessions through its private named volume; create a
+# fresh host-side session directory privately for host PHP, without widening
+# an existing directory.
+mkdir -p storage/{backups,cache,logs,uploads}
+if [[ ! -e storage/sessions ]]; then
+    (umask 077 && mkdir storage/sessions)
+fi
+chmod a+rwX storage
+find storage -mindepth 1 -maxdepth 1 ! -name sessions -exec chmod -R a+rwX {} +
 
 # Install backend/frontend dependencies.
 bash ./scripts/ci/ensure_local_deps.sh --force
