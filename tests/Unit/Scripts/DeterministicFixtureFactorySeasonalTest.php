@@ -20,6 +20,8 @@ final class DeterministicFixtureFactorySeasonalTest extends TestCase
 
     private string $router = '';
 
+    private string $serverMarker = '';
+
     protected function tearDown(): void
     {
         if (is_resource($this->server)) {
@@ -29,6 +31,7 @@ final class DeterministicFixtureFactorySeasonalTest extends TestCase
         if ($this->router !== '') {
             @unlink($this->router);
         }
+        $this->serverMarker = '';
     }
 
     public function testSearchReachesBookableDateAfterOldSeventyDayWindow(): void
@@ -101,35 +104,77 @@ final class DeterministicFixtureFactorySeasonalTest extends TestCase
     /** @param array<string,array<int,string>> $openSlots */
     private function startServer(array $openSlots): GateHttpClient
     {
-        $port = random_int(20000, 35000);
         $temporary = tempnam(sys_get_temp_dir(), 'rob630-router-');
         self::assertNotFalse($temporary);
         $this->router = $temporary . '.php';
+        $this->serverMarker = bin2hex(random_bytes(16));
         rename($temporary, $this->router);
         $encoded = var_export($openSlots, true);
         file_put_contents(
             $this->router,
-            "<?php\n\$open = {$encoded};\nif (\$_SERVER['REQUEST_METHOD'] === 'GET') { header('Set-Cookie: csrf_cookie=test'); header('Content-Type: text/html'); echo '<html></html>'; exit; }\nparse_str((string) file_get_contents('php://input'), \$body);\n\$key = (string)(\$body['selected_date'] ?? '') . '|' . (string)(\$body['provider_id'] ?? '');\nheader('Content-Type: application/json');\necho json_encode(\$open[\$key] ?? \$open[(string)(\$body['selected_date'] ?? '')] ?? []);\n",
+            "<?php\n\$open = {$encoded};\nheader('X-Rob714-Fixture: {$this->serverMarker}');\nif (\$_SERVER['REQUEST_METHOD'] === 'GET') { header('Set-Cookie: csrf_cookie=test'); header('Content-Type: text/html'); echo '<html></html>'; exit; }\nparse_str((string) file_get_contents('php://input'), \$body);\n\$key = (string)(\$body['selected_date'] ?? '') . '|' . (string)(\$body['provider_id'] ?? '');\nheader('Content-Type: application/json');\necho json_encode(\$open[\$key] ?? \$open[(string)(\$body['selected_date'] ?? '')] ?? []);\n",
         );
-        $stderr = tempnam(sys_get_temp_dir(), 'rob630-server-');
-        self::assertNotFalse($stderr);
-        $this->server = proc_open(
-            [PHP_BINARY, '-S', '127.0.0.1:' . $port, basename($this->router)],
-            [0 => ['file', '/dev/null', 'r'], 1 => ['file', '/dev/null', 'w'], 2 => ['file', $stderr, 'a']],
-            $pipes,
-            dirname($this->router),
-        );
-        for ($attempt = 0; $attempt < 20; $attempt++) {
-            $socket = @fsockopen('127.0.0.1', $port, $errorCode, $errorMessage, 0.1);
-            if (is_resource($socket)) {
-                fclose($socket);
-                @unlink($stderr);
-                return new GateHttpClient('http://127.0.0.1:' . $port, '', 2, 'rob630-test');
+        $diagnostics = [];
+        $readinessContext = stream_context_create([
+            'http' => [
+                'method' => 'GET',
+                'timeout' => 0.1,
+                'ignore_errors' => true,
+            ],
+        ]);
+        for ($attempt = 0; $attempt < 8; $attempt++) {
+            $socket = @stream_socket_server('tcp://127.0.0.1:0', $errorCode, $errorMessage);
+            if (!is_resource($socket)) {
+                $diagnostics[] = 'port reservation failed: ' . $errorMessage;
+                continue;
             }
-            usleep(50000);
+            $address = stream_socket_get_name($socket, false);
+            fclose($socket);
+            $port = is_string($address) ? (int) substr($address, strrpos($address, ':') + 1) : 0;
+            if ($port < 1) {
+                $diagnostics[] = 'port reservation returned no usable port';
+                continue;
+            }
+            $stderr = tempnam(sys_get_temp_dir(), 'rob630-server-');
+            self::assertNotFalse($stderr);
+            $this->server = proc_open(
+                [PHP_BINARY, '-S', '127.0.0.1:' . $port, basename($this->router)],
+                [0 => ['file', '/dev/null', 'r'], 1 => ['file', '/dev/null', 'w'], 2 => ['file', $stderr, 'a']],
+                $pipes,
+                dirname($this->router),
+            );
+            for ($readinessAttempt = 0; $readinessAttempt < 20; $readinessAttempt++) {
+                $headers = @get_headers('http://127.0.0.1:' . $port . '/booking', false, $readinessContext);
+                if (is_array($headers) && $this->hasServerMarker($headers)) {
+                    @unlink($stderr);
+                    return new GateHttpClient('http://127.0.0.1:' . $port, '', 2, 'rob630-test');
+                }
+                $status = is_resource($this->server) ? proc_get_status($this->server) : ['running' => false];
+                if (!$status['running']) {
+                    break;
+                }
+                usleep(50000);
+            }
+            $diagnostics[] = is_file($stderr) ? (string) file_get_contents($stderr) : 'server did not start';
+            if (is_resource($this->server)) {
+                proc_terminate($this->server);
+                proc_close($this->server);
+            }
+            $this->server = null;
+            @unlink($stderr);
         }
-        $diagnostic = is_file($stderr) ? (string) file_get_contents($stderr) : 'server did not start';
-        @unlink($stderr);
-        self::fail('Could not start local HTTP test server: ' . $diagnostic);
+        self::fail('Could not start local HTTP test server: ' . implode(' | ', $diagnostics));
+    }
+
+    /** @param array<int,string> $headers */
+    private function hasServerMarker(array $headers): bool
+    {
+        foreach ($headers as $header) {
+            if (strcasecmp($header, 'X-Rob714-Fixture: ' . $this->serverMarker) === 0) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
