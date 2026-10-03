@@ -146,15 +146,20 @@ download_remote_backup() {
     local backup_stamp
 
     backup_stamp="$(basename "${REMOTE_BACKUP_DIR}")"
-    LOCAL_IMPORT_DIR="${LOCAL_DOWNLOAD_ROOT}/easyappointments-prod-${backup_stamp}"
+    # A production dump must never reuse a predictable or pre-planted path.
+    # mktemp creates the directory exclusively with mode 0700; the process
+    # umask keeps the downloaded files private as they are written.
+    LOCAL_IMPORT_DIR="$(mktemp -d "${LOCAL_DOWNLOAD_ROOT%/}/easyappointments-prod-${backup_stamp}.XXXXXX")"
     LOCAL_DUMP_PATH="${LOCAL_IMPORT_DIR}/${LOCAL_DB_NAME}.sql.gz"
     LOCAL_META_PATH="${LOCAL_IMPORT_DIR}/backup.env"
 
-    mkdir -p "${LOCAL_IMPORT_DIR}"
-
     log "Downloading dump to ${LOCAL_IMPORT_DIR}"
-    scp "${SSH_OPTIONS[@]}" "${PROD_SSH_TARGET}:${REMOTE_BACKUP_DIR}/db/${LOCAL_DB_NAME}.sql.gz" "${LOCAL_DUMP_PATH}"
-    scp "${SSH_OPTIONS[@]}" "${PROD_SSH_TARGET}:${REMOTE_BACKUP_DIR}/meta/backup.env" "${LOCAL_META_PATH}"
+    (
+        umask 077
+        scp "${SSH_OPTIONS[@]}" "${PROD_SSH_TARGET}:${REMOTE_BACKUP_DIR}/db/${LOCAL_DB_NAME}.sql.gz" "${LOCAL_DUMP_PATH}"
+        scp "${SSH_OPTIONS[@]}" "${PROD_SSH_TARGET}:${REMOTE_BACKUP_DIR}/meta/backup.env" "${LOCAL_META_PATH}"
+    )
+    chmod 0600 "${LOCAL_DUMP_PATH}" "${LOCAL_META_PATH}"
 
     [[ -s "${LOCAL_DUMP_PATH}" ]] || die "Downloaded dump is empty: ${LOCAL_DUMP_PATH}"
 }
