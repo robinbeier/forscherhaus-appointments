@@ -215,6 +215,51 @@ final class ProviderApiHttpWriteTest extends TestCase
         self::assertSame($idB, (int) ($f->providerWriteState($payloadB['email'])['user']['id'] ?? 0));
     }
 
+    public function testProviderStoreControllerAliasRejectsWrongVerbsWithoutMutation(): void
+    {
+        $f = $this->fixture;
+        $admin = $this->basicClient($this->credentials['admin_username'], $this->credentials['password']);
+
+        $canonicalPayload = $f->providerWritePayload('store-alias-canonical');
+        $canonicalResponse = $admin->requestJsonApp('POST', 'api/v1/providers', $canonicalPayload);
+        $this->success($canonicalResponse, 201);
+        self::assertNotSame([], $f->providerWriteState($canonicalPayload['email']));
+
+        $directPayload = $f->providerWritePayload('store-alias-direct');
+        $directResponse = $admin->requestJsonApp('POST', 'api/v1/providers_api_v1/store', $directPayload);
+        $this->success($directResponse, 201);
+        self::assertNotSame([], $f->providerWriteState($directPayload['email']));
+
+        $before = $f->providerWriteSnapshot();
+        foreach (['PUT', 'GET', 'HEAD', 'PATCH', 'DELETE'] as $method) {
+            $response =
+                $method === 'PUT'
+                    ? $admin->requestJsonApp(
+                        'PUT',
+                        'api/v1/providers_api_v1/store',
+                        $f->providerWritePayload('store-alias-put'),
+                    )
+                    : $admin->requestApp($method, 'api/v1/providers_api_v1/store');
+            self::assertSame(405, $response->statusCode, $method . ' store alias must be rejected.');
+            self::assertSame('POST', $response->header('allow'), $method . ' store alias Allow header.');
+            self::assertSame($before, $f->providerWriteSnapshot(), $method . ' store alias mutated fixture tables.');
+        }
+    }
+
+    public function testProviderStoreControllerAliasRequiresAuthenticationBeforeMethodDispatch(): void
+    {
+        $f = $this->fixture;
+        $payload = $f->providerWritePayload('store-alias-no-auth');
+        $before = $f->providerWriteSnapshot();
+
+        $response = $this->server->client()->requestJsonApp('PUT', 'api/v1/providers_api_v1/store', $payload);
+
+        self::assertSame(401, $response->statusCode, 'Unauthenticated store alias PUT must be rejected.');
+        self::assertNotNull($response->header('www-authenticate'));
+        self::assertSame($before, $f->providerWriteSnapshot());
+        self::assertSame([], $f->providerWriteState($payload['email']));
+    }
+
     public function testProviderDeleteUsesAuthorizedAdminAndBearerAndIsIdempotent(): void
     {
         $f = $this->fixture;

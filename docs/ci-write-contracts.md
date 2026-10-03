@@ -394,6 +394,22 @@ HTTP-/DB-Stack. Der Test erfasst nicht jede abhängige Zeile und beweist keine
 produktive Schreibausführung; dafür fehlt ein vorab belegter, vollständig
 bereinigbarer eigener Produktivdatensatz.
 
+## Providers API v1 direkter Store-Alias
+
+Die kanonische Provider-Store-Route und der direkt erreichbare
+`Providers_api_v1::store`-Alias dürfen nur mit POST schreiben. Der Controller
+erzwingt dies nach der API-Authentifizierung und vor Payload-Auswertung oder
+Mutation. GET, HEAD, PUT, PATCH und DELETE erhalten 405 mit `Allow: POST` und
+lassen Provider, Einstellungen und Zuordnungen unverändert; ohne gültige
+Authentifizierung bleibt die Antwort 401. Der globale OPTIONS-Kurzschluss liegt
+vor dem Controller.
+
+`ProviderApiHttpWriteTest` prüft diese Grenze mit eigenen synthetischen
+Providern im isolierten HTTP-/DB-Stack. Gültige kanonische und direkte POSTs
+sind Positivkontrollen; der Test vergleicht bei abgewiesenen Methoden den
+Provider-bezogenen Datenbankzustand. Das belegt den lokalen Verhaltenspfad,
+nicht einen produktiven Schreibtest oder alle konkurrierenden Änderungen.
+
 ## Customers und Providers API v1 direkte Löschaliase
 
 Die kanonischen Löschrouten verwenden DELETE. Auch die direkt erreichbaren
