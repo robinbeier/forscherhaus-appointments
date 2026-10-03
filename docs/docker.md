@@ -104,6 +104,9 @@ See [Docker's port-publishing documentation](https://docs.docker.com/engine/netw
 `scripts/ci/compose_sensitive_ports_smoke.sh` checks the Server version and
 resolved canonical Compose bindings without starting containers. It does not
 inspect custom daemon routing, host firewalls, or custom Compose overrides.
+The CI root/deployment job uses `--config-only` to check the canonical bindings
+on its older runner Engine; that mode is not a runtime-safety approval and the
+production-dump import always uses the full no-argument check.
 
 ## Running Tests
 

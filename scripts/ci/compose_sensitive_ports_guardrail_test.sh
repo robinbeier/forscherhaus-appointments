@@ -98,6 +98,15 @@ run_expect_failure 'compose_sensitive_ports=unsupported_docker_engine' \
 run_expect_failure 'compose_sensitive_ports=unsupported_docker_engine' \
     env FAKE_DOCKER_VERSION=28.3.2 PATH="$workspace:$PATH" "$SMOKE_SCRIPT"
 
+FAKE_DOCKER_VERSION=28.0.4 PATH="$workspace:$PATH" "$SMOKE_SCRIPT" --config-only 2>"$workspace/config-only-output" |
+    grep -Fqx 'compose_sensitive_ports=passed checks=mysql:3306->3306,nginx:80->80,phpmyadmin:80->8080 host_ip=127.0.0.1'
+grep -Fqx 'compose_sensitive_ports=config_only' "$workspace/config-only-output"
+run_expect_failure 'compose_sensitive_ports=unsupported_docker_engine' \
+    env FAKE_DOCKER_VERSION=28.0.4 PATH="$workspace:$PATH" "$SMOKE_SCRIPT"
+run_expect_failure 'compose_sensitive_ports=unsupported_docker_engine' \
+    env COMPOSE_SENSITIVE_PORTS_CONFIG_ONLY=1 FAKE_DOCKER_VERSION=28.0.4 \
+        PATH="$workspace:$PATH" "$SMOKE_SCRIPT"
+
 FAKE_DOCKER_VERSION=29.8.0 PATH="$workspace:$PATH" "$SMOKE_SCRIPT" |
     grep -Fqx 'compose_sensitive_ports=passed checks=mysql:3306->3306,nginx:80->80,phpmyadmin:80->8080 host_ip=127.0.0.1'
 FAKE_DOCKER_VERSION=28.3.3 PATH="$workspace:$PATH" "$SMOKE_SCRIPT" |
@@ -117,6 +126,12 @@ run_compose_fixture_failure "$missing_mapping_json"
 run_compose_fixture_failure "$incorrect_mapping_json"
 run_compose_fixture_failure "$duplicate_mapping_json"
 
+run_expect_failure 'compose_sensitive_ports=failed' \
+    env FAKE_DOCKER_VERSION=28.0.4 \
+        FAKE_COMPOSE_JSON="$non_loopback_json" \
+        PATH="$workspace:$PATH" \
+        "$SMOKE_SCRIPT" --config-only
+
 COMPOSE_FILE="$workspace/hostile-compose.yml" \
     FAKE_DOCKER_VERSION=29.8.0 PATH="$workspace:$PATH" "$SMOKE_SCRIPT" |
     grep -Fqx 'compose_sensitive_ports=passed checks=mysql:3306->3306,nginx:80->80,phpmyadmin:80->8080 host_ip=127.0.0.1'
@@ -124,6 +139,14 @@ COMPOSE_FILE="$workspace/hostile-compose.yml" \
 import_ssh_calls="$workspace/import-ssh-calls"
 import_scp_calls="$workspace/import-scp-calls"
 import_find_calls="$workspace/import-find-calls"
+import_repo="$workspace/import-mini-repo"
+mkdir -p "$import_repo/scripts/ci" "$import_repo/docker/mysql"
+import_repo="$(cd -- "$import_repo" && pwd)"
+cp "$IMPORT_SCRIPT" "$import_repo/scripts/import_prod_backup.sh"
+cp "$SMOKE_SCRIPT" "$import_repo/scripts/ci/compose_sensitive_ports_smoke.sh"
+chmod 0700 "$import_repo/scripts/import_prod_backup.sh" "$import_repo/scripts/ci/compose_sensitive_ports_smoke.sh"
+printf '%s\n' '<?php return [];' > "$import_repo/config.php"
+: > "$import_repo/docker-compose.yml"
 guardrail_bash_env="$workspace/guardrail-bash-env"
 cat > "$guardrail_bash_env" <<EOF
 docker() {
@@ -132,7 +155,7 @@ docker() {
         return 0
     fi
     if [[ "\${1:-}" == compose ]]; then
-        if [[ "\${2:-}" != -f || "\${3:-}" != "$ROOT_DIR/docker-compose.yml" ]]; then
+        if [[ "\${2:-}" != -f || "\${3:-}" != "$import_repo/docker-compose.yml" ]]; then
             printf 'Docker Compose invocation did not pin the canonical compose file.\\n' >&2
             return 97
         fi
@@ -185,13 +208,13 @@ import_output="$(
         REMOTE_BACKUP_DIR='/root/backups/easyappointments/synthetic' \
         REMOTE_BACKUP_ROOT='/root/backups/easyappointments' \
         LOCAL_DOWNLOAD_ROOT="$workspace/import-downloads" \
-        bash "$IMPORT_SCRIPT" --core-services-only
+        bash "$import_repo/scripts/import_prod_backup.sh" --core-services-only
 )"
 import_status=$?
 set -e
 [[ "$import_status" -ne 0 ]] || { echo 'Import unexpectedly continued after synthetic compose down failure.' >&2; exit 1; }
 grep -Fqx '[import-prod-backup] Stopping local Docker stack' <<<"$import_output"
-grep -Fqx "compose-down-called compose -f $ROOT_DIR/docker-compose.yml down" "$compose_calls"
+grep -Fqx "compose-down-called compose -f $import_repo/docker-compose.yml down" "$compose_calls"
 [[ "$(wc -l < "$compose_calls" | tr -d ' ')" == 1 ]] || {
     echo 'Import invoked more than the expected first compose command.' >&2
     exit 1
@@ -221,7 +244,7 @@ run_expect_failure 'compose_sensitive_ports=unsupported_docker_engine' \
         PATH="$workspace:$PATH" \
         PROD_SSH_TARGET='synthetic@invalid' \
         LOCAL_DOWNLOAD_ROOT="$workspace/downloads" \
-        bash "$IMPORT_SCRIPT" --core-services-only
+        bash "$import_repo/scripts/import_prod_backup.sh" --core-services-only
 
 [[ ! -e "$ssh_calls" ]] || { echo 'Import contacted ssh before the preflight.' >&2; exit 1; }
 [[ ! -e "$scp_calls" ]] || { echo 'Import contacted scp before the preflight.' >&2; exit 1; }

@@ -6,25 +6,50 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 cd "$ROOT_DIR"
 
+config_only=0
+case "${1:-}" in
+    '') ;;
+    --config-only)
+        config_only=1
+        ;;
+    *)
+        echo "compose_sensitive_ports=invalid_arguments" >&2
+        echo "usage: $0 [--config-only]" >&2
+        exit 2
+        ;;
+esac
+if (( $# > 1 )); then
+    echo "compose_sensitive_ports=invalid_arguments" >&2
+    echo "usage: $0 [--config-only]" >&2
+    exit 2
+fi
+
 # Docker Engine versions before 28 can expose localhost-published ports to
 # peers on the same L2 network. Versions 28.2.0 through 28.3.2 can also lose
 # their loopback boundary after a firewalld reload (CVE-2025-54388). Fail
 # closed before treating loopback bindings as a host-isolation guarantee.
-docker_server_version="$(docker version --format '{{.Server.Version}}' 2>/dev/null || true)"
-# Require a complete stable release. Prerelease builds can change the
-# localhost-publishing behavior this guardrail relies on, so fail closed
-# instead of treating e.g. 28.0.0-rc.1 as Docker 28.
-if [[ ! "$docker_server_version" =~ ^([0-9]+)\.[0-9]+\.[0-9]+$ ]]; then
-    echo "compose_sensitive_ports=unsupported_docker_engine" >&2
-    exit 1
-fi
-docker_major="${BASH_REMATCH[1]}"
-docker_minor="${docker_server_version#*.}"
-docker_minor="${docker_minor%%.*}"
-docker_patch="${docker_server_version##*.}"
-if (( docker_major < 28 || (docker_major == 28 && (docker_minor < 3 || (docker_minor == 3 && docker_patch < 3))) )); then
-    echo "compose_sensitive_ports=unsupported_docker_engine" >&2
-    exit 1
+if (( config_only == 0 )); then
+    docker_server_version="$(docker version --format '{{.Server.Version}}' 2>/dev/null || true)"
+    # Require a complete stable release. Prerelease builds can change the
+    # localhost-publishing behavior this guardrail relies on, so fail closed
+    # instead of treating e.g. 28.0.0-rc.1 as Docker 28.
+    if [[ ! "$docker_server_version" =~ ^([0-9]+)\.[0-9]+\.[0-9]+$ ]]; then
+        echo "compose_sensitive_ports=unsupported_docker_engine" >&2
+        exit 1
+    fi
+    docker_major="${BASH_REMATCH[1]}"
+    docker_minor="${docker_server_version#*.}"
+    docker_minor="${docker_minor%%.*}"
+    docker_patch="${docker_server_version##*.}"
+    if (( docker_major < 28 || (docker_major == 28 && (docker_minor < 3 || (docker_minor == 3 && docker_patch < 3))) )); then
+        echo "compose_sensitive_ports=unsupported_docker_engine" >&2
+        exit 1
+    fi
+else
+    # CI's root-deployment job still verifies the canonical bindings on older
+    # runner Docker versions. This mode deliberately skips only the runtime
+    # safety floor; it never relaxes the resolved Compose binding checks below.
+    echo "compose_sensitive_ports=config_only" >&2
 fi
 
 # Inspect the canonical, fully resolved Compose model. Explicitly naming the

@@ -404,7 +404,8 @@ older Engines can expose localhost-published ports to same-network peers, and
 some 28.x releases can lose the boundary after a firewalld reload.
 `scripts/ci/compose_sensitive_ports_smoke.sh` checks that version and the
 canonical resolved Compose bindings; custom daemon routing, overrides and
-host firewalls are outside this check.
+host firewalls are outside this check. Its `--config-only` mode is for CI
+configuration regression only and never authorizes a production-dump import.
 
 Across write paths, establish server-side authority before mutation, reject
 without partial changes, and keep dependent effects consistent with commit

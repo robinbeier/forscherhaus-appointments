@@ -8,7 +8,7 @@ cd "$ROOT_DIR"
 mkdir -p storage/logs/ci
 
 docker pull mariadb@sha256:2f2b6bbcdbaf88afe53b76cb8d73927b623559180c5ab15db2049736f32ec590
-scripts/ci/compose_sensitive_ports_smoke.sh
+scripts/ci/compose_sensitive_ports_smoke.sh --config-only
 scripts/ci/compose_sensitive_ports_guardrail_test.sh
 systemd-analyze verify \
   scripts/ops/systemd/fh-session-retention.service \
