@@ -20,6 +20,8 @@ final class BookingManualUnavailabilityHttpTest extends TestCase
     private int $baselineConsentCount = 0;
     private ?array $displayEmailSetting = null;
     private ?array $requireEmailSetting = null;
+    private ?array $privacyPolicySetting = null;
+    private ?array $termsSetting = null;
 
     protected function setUp(): void
     {
@@ -32,8 +34,14 @@ final class BookingManualUnavailabilityHttpTest extends TestCase
             $this->fixture->create();
             $db = get_instance()->db;
             $this->baselineConsentCount = $db->count_all('consents');
+            $this->privacyPolicySetting =
+                $db->get_where('settings', ['name' => 'display_privacy_policy'])->row_array() ?: null;
+            $this->termsSetting =
+                $db->get_where('settings', ['name' => 'display_terms_and_conditions'])->row_array() ?: null;
             $this->displayEmailSetting = $db->get_where('settings', ['name' => 'display_email'])->row_array() ?: null;
             $this->requireEmailSetting = $db->get_where('settings', ['name' => 'require_email'])->row_array() ?: null;
+            $db->update('settings', ['value' => '1'], ['name' => 'display_privacy_policy']);
+            $db->update('settings', ['value' => '0'], ['name' => 'display_terms_and_conditions']);
             $db->update('settings', ['value' => '0'], ['name' => 'display_email']);
             $db->update('settings', ['value' => '0'], ['name' => 'require_email']);
             $this->server = new DefenseCycleHttpServer();
@@ -45,7 +53,7 @@ final class BookingManualUnavailabilityHttpTest extends TestCase
                 try {
                     $this->cleanupOwnedRows();
                 } finally {
-                    $this->restoreEmailSettings();
+                    $this->restoreSettings();
                 }
             } finally {
                 $this->fixture?->cleanup();
@@ -63,7 +71,7 @@ final class BookingManualUnavailabilityHttpTest extends TestCase
                 $this->cleanupOwnedRows();
             } finally {
                 try {
-                    $this->restoreEmailSettings();
+                    $this->restoreSettings();
                 } finally {
                     $this->fixture?->cleanup();
                 }
@@ -137,6 +145,16 @@ final class BookingManualUnavailabilityHttpTest extends TestCase
         self::assertSame(
             'Manual ' . $fixture->run . ' manual-cleared',
             $fixture->row('users', $positiveCustomerId)['last_name'],
+        );
+        self::assertSame(
+            1,
+            get_instance()
+                ->db->get_where('consents', [
+                    'first_name' => 'Synthetic',
+                    'last_name' => 'Manual ' . $fixture->run . ' manual-cleared',
+                    'type' => 'privacy-policy',
+                ])
+                ->num_rows(),
         );
     }
 
@@ -310,6 +328,28 @@ final class BookingManualUnavailabilityHttpTest extends TestCase
                     ])
                     ->num_rows(),
             );
+            $orphanedCustomers = $db
+                ->get_where('users', [
+                    'first_name' => 'Synthetic',
+                    'last_name' => $lastName,
+                ])
+                ->result_array();
+            foreach ($orphanedCustomers as $customer) {
+                $customerId = (int) $customer['id'];
+                self::assertSame('Synthetic', $customer['first_name']);
+                self::assertSame($lastName, $customer['last_name']);
+                self::assertTrue(
+                    $customer['notes'] === null || $customer['notes'] === $fixture->run,
+                    'An owned booking customer must retain the fixture note or the known NULL projection.',
+                );
+                self::assertSame(0, $db->get_where('appointments', ['id_users_customer' => $customerId])->num_rows());
+                $db->delete('users', [
+                    'id' => $customerId,
+                    'first_name' => 'Synthetic',
+                    'last_name' => $lastName,
+                ]);
+                self::assertSame([], $fixture->row('users', $customerId));
+            }
             self::assertSame(
                 0,
                 $db
@@ -334,11 +374,16 @@ final class BookingManualUnavailabilityHttpTest extends TestCase
         self::assertSame($this->baselineConsentCount, $db->count_all('consents'));
     }
 
-    private function restoreEmailSettings(): void
+    private function restoreSettings(): void
     {
         $db = get_instance()->db;
         foreach (
-            ['display_email' => $this->displayEmailSetting, 'require_email' => $this->requireEmailSetting]
+            [
+                'display_privacy_policy' => $this->privacyPolicySetting,
+                'display_terms_and_conditions' => $this->termsSetting,
+                'display_email' => $this->displayEmailSetting,
+                'require_email' => $this->requireEmailSetting,
+            ]
             as $name => $row
         ) {
             if ($row !== null) {
