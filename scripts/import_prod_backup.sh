@@ -61,7 +61,7 @@ require_cmd() {
 compose() {
     (
         cd "${REPO_ROOT}"
-        docker compose "$@"
+        docker compose -f "${REPO_ROOT}/docker-compose.yml" "$@"
     )
 }
 
@@ -251,6 +251,11 @@ main() {
     require_cmd gunzip
     require_cmd curl
     ensure_identifier "${LOCAL_DB_NAME}"
+
+    # Validate the canonical Compose port exposure before touching local paths
+    # or contacting production. This is intentionally before ensure_paths.
+    "${REPO_ROOT}/scripts/ci/compose_sensitive_ports_smoke.sh"
+
     ensure_paths
 
     create_or_select_remote_backup

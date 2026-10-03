@@ -17,12 +17,12 @@ This repository prioritizes stable, low-risk delivery for school operations and 
 
 ## Quickstart (Recommended)
 
-Prerequisites on host (required by `./scripts/setup-worktree.sh`):
+Host prerequisites for setup and the local development stack:
 
 - PHP `>=8.3.6`
 - Composer
 - Node.js `>=24.0.0` plus `npm`/`npx`
-- Docker + Docker Compose
+- Docker Engine `>=28.3.3` + Docker Compose
 
 For agent worktrees and local pre-PR gates, the
 [read-only start preflight](docs/local-start-preflight.md) inspects Git and the
@@ -55,6 +55,7 @@ prints a remote URL containing account information.
 
 ```bash
 ./scripts/setup-worktree.sh
+bash ./scripts/ci/compose_sensitive_ports_smoke.sh
 docker compose up -d
 
 # when you need deterministic LDAP fixtures for authentication work
@@ -129,6 +130,11 @@ files and the parent-facing calendar links remain available.
 - App: `http://localhost`
 - phpMyAdmin: `http://localhost:8080` (`root` / `secret`)
 - PDF renderer: `http://localhost:3003`
+
+The default Compose app, MySQL (`localhost:3306`), and phpMyAdmin bind to
+host loopback. With Docker Engine `>=28.3.3` and default bridge networking,
+they are intended for access from this computer only. See the
+[Docker guide](docs/docker.md#local-configuration) for the check and limits.
 
 For deterministic LDAP fixtures, reset and smoke the local directory with:
 

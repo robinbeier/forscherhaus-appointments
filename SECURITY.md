@@ -397,6 +397,15 @@ Public assets, the health file, and application routing remain available.
 `scripts/ci/nginx_private_paths_smoke.sh` checks this boundary with only
 synthetic files in a separate loopback-bound container; it does not verify
 production Apache or other published local ports.
+The default local Compose app, MySQL, and phpMyAdmin host ports must also bind
+to loopback, particularly when a production dump is imported for development.
+Docker Engine `>=28.3.3` is required for the documented LAN boundary because
+older Engines can expose localhost-published ports to same-network peers, and
+some 28.x releases can lose the boundary after a firewalld reload.
+`scripts/ci/compose_sensitive_ports_smoke.sh` checks that version and the
+canonical resolved Compose bindings; custom daemon routing, overrides and
+host firewalls are outside this check. Its `--config-only` mode is for CI
+configuration regression only and never authorizes a production-dump import.
 
 Across write paths, establish server-side authority before mutation, reject
 without partial changes, and keep dependent effects consistent with commit

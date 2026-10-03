@@ -2,7 +2,11 @@
 
 Run the development containers of Easy!Appointments with Docker and Docker Compose utility. Docker allows you to compose your application in microservices, so that you can easily get started with the local development.
 
-Simply clone the project and run `docker compose up` to start the environment.
+Before starting the default data-bearing stack, run
+`bash scripts/ci/compose_sensitive_ports_smoke.sh`; it requires Docker Engine
+`>=28.3.3` and the canonical loopback bindings. Then run `docker compose up`.
+The production-dump import helper runs this preflight itself before any remote
+backup, download, local data reset, or container startup.
 Nginx starts after PHP-FPM so its configured upstream name exists during startup;
 application readiness is still checked by the existing smoke and replay checks.
 
@@ -87,6 +91,22 @@ In the host machine the server is accessible from `http://localhost` and the dat
 The development stack pins MySQL `8.4.8` in `docker-compose.yml` for CI parity, while application migrations remain compatible with MySQL `5.7+`.
 
 You can additionally access phpMyAdmin from `http://localhost:8080` (credentials are `root` / `secret`).
+The default Compose configuration publishes the app, database, and phpMyAdmin
+only on host loopback (`127.0.0.1`). They remain reachable from this computer
+and from other containers on the Compose network. With Docker Engine
+`>=28.3.3` and default bridge/NAT networking, other devices cannot reach
+these published ports through the host LAN. Older Engines can expose even
+localhost-published ports to peers on the same network segment; do not import
+a production dump with an older Engine. Versions `28.2.0` through `28.3.2`
+also have a [firewalld reload exposure](https://github.com/advisories/GHSA-x4rx-4gw3-53p4)
+on affected Linux hosts; the minimum accepted version is the patched `28.3.3`.
+See [Docker's port-publishing documentation](https://docs.docker.com/engine/network/port-publishing/).
+`scripts/ci/compose_sensitive_ports_smoke.sh` checks the Server version and
+resolved canonical Compose bindings without starting containers. It does not
+inspect custom daemon routing, host firewalls, or custom Compose overrides.
+The CI root/deployment job uses `--config-only` to check the canonical bindings
+on its older runner Engine; that mode is not a runtime-safety approval and the
+production-dump import always uses the full no-argument check.
 
 ## Running Tests
 
@@ -314,6 +334,11 @@ The script will:
 - import the production dump into the local `easyappointments` database
 - run `php index.php console migrate`
 - start the remaining Docker services again without pulling new images
+
+The imported database remains a local copy. In the default Compose stack,
+the app and database are published only on host loopback; phpMyAdmin, when
+started, is loopback-only too. `--core-services-only` does not start
+phpMyAdmin.
 
 Useful options:
 
