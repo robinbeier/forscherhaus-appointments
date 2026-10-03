@@ -174,7 +174,11 @@ Pre-switch order in `deploy_ea.sh`:
 1. unpack release archive and detect `STAGE_ROOT`
 2. validate the extracted stage artifact contents and fail fast on host deploy-script drift
 3. validate breakglass policy if any zero-surprise bypass is requested
-4. generate a stage-local `config.php` from `config-sample.php`, patch `BASE_URL`, and disable request rate limiting so the isolated replay stack stays deterministic
+4. prepare the empty `storage/backups`, `storage/cache`, `storage/logs`, and
+   `storage/uploads` directories required by the isolated PHP-FPM startup;
+   reject symlinked or non-directory entries; generate a stage-local
+   `config.php` from `config-sample.php`, patch `BASE_URL`, and disable request
+   rate limiting so the isolated replay stack stays deterministic
 5. make release code root-controlled, make non-session runtime storage writable
    by the web user, preserve `storage/sessions`, and restore runtime script
    executable bits without following links or mutating hardlink targets
