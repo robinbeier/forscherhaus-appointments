@@ -524,6 +524,15 @@ appointment and session-bound authority; after a rejected attempt consumes
 that authority, removing the exact manual block and issuing a new authority
 allows the positive control. This is one local ordered flow, not evidence for
 concurrent manual edits or a production reschedule.
+The isolated `PublicBookingManualUnavailabilityRaceHttpTest` checks one
+concurrent booking schedule: a second connection inserts a run-owned manual
+block but holds its transaction open while the public POST completes its first
+availability read and waits for the provider lock. The block commits before
+the booking resumes; an independent connection verifies the committed row.
+The POST then rejects with 409 and leaves no customer, appointment, or consent
+partial write. A separate local control books the slot after its own block is
+removed. This does not cover the Calendar or API HTTP writer, every possible
+interleaving, or a live production booking.
 
 For service categories, authenticated API writes must likewise bind PUT to the
 URL-selected category and enforce the declared method on direct aliases.
