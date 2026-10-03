@@ -705,6 +705,81 @@ final class DeployStableResultTest extends TestCase
         self::assertSame(0, $result['exit_code'], $result['stdout'] . $result['stderr']);
     }
 
+    public function testZeroSurpriseStageRuntimeCreatesAllPhpStartupStorageDirectories(): void
+    {
+        $result = $this->runShell(
+            <<<'BASH'
+            set -eu
+            fixture="$(mktemp -d)"
+            trap 'rm -rf "$fixture"' EXIT
+            mkdir -p "$fixture/stage/scripts/release-gate"
+            printf '<?php exit(0);\n' > "$fixture/stage/scripts/release-gate/prepare_zero_surprise_stage_config.php"
+            printf 'sample\n' > "$fixture/stage/config-sample.php"
+            source ./deploy_ea.sh
+            STAGE_ROOT="$fixture/stage"
+            REQUIRE_ZERO_SURPRISE=1
+            DRYRUN=0
+            read_zero_surprise_predeploy_base_url() { echo 'http://fixture.test/'; }
+            prepare_zero_surprise_stage_runtime
+            for required_dir in \
+                storage/backups \
+                storage/cache \
+                storage/logs \
+                storage/logs/release-gate \
+                storage/uploads; do
+              test -d "$STAGE_ROOT/$required_dir"
+              test ! -L "$STAGE_ROOT/$required_dir"
+            done
+            BASH
+            ,
+        );
+
+        self::assertSame(0, $result['exit_code'], $result['stdout'] . $result['stderr']);
+    }
+
+    public function testZeroSurpriseStageRuntimeRejectsSymlinkedStorageChildWithoutTouchingTarget(): void
+    {
+        $result = $this->runShell(
+            <<<'BASH'
+            set -eu
+            fixture="$(mktemp -d)"
+            trap 'rm -rf "$fixture"' EXIT
+            mkdir -p "$fixture/stage/scripts/release-gate" "$fixture/outside/backups"
+            printf '<?php exit(0);\n' > "$fixture/stage/scripts/release-gate/prepare_zero_surprise_stage_config.php"
+            printf 'sample\n' > "$fixture/stage/config-sample.php"
+            printf 'outside-marker\n' > "$fixture/outside/backups/marker.txt"
+            chmod 750 "$fixture/outside/backups"
+            chmod 640 "$fixture/outside/backups/marker.txt"
+            mkdir -p "$fixture/stage/storage"
+            ln -s "$fixture/outside/backups" "$fixture/stage/storage/backups"
+            source ./deploy_ea.sh
+            STAGE_ROOT="$fixture/stage"
+            REQUIRE_ZERO_SURPRISE=1
+            DRYRUN=0
+            read_zero_surprise_predeploy_base_url() { echo 'http://fixture.test/'; }
+            set +e
+            prepare_zero_surprise_stage_runtime
+            status=$?
+            set -e
+            [[ "$status" -ne 0 ]]
+            [[ -L "$STAGE_ROOT/storage/backups" ]]
+            [[ "$(cat "$fixture/outside/backups/marker.txt")" == 'outside-marker' ]]
+            stat_mode() {
+              if stat --version >/dev/null 2>&1; then
+                stat -c '%a' "$1"
+              else
+                stat -f '%Lp' "$1"
+              fi
+            }
+            [[ "$(stat_mode "$fixture/outside/backups")" == 750 ]]
+            [[ "$(stat_mode "$fixture/outside/backups/marker.txt")" == 640 ]]
+            BASH
+            ,
+        );
+
+        self::assertSame(0, $result['exit_code'], $result['stdout'] . $result['stderr']);
+    }
+
     public function testNormalMainInstallsStableTrapBeforeArgumentValidation(): void
     {
         $result = $this->runCommand(['bash', 'deploy_ea.sh']);
