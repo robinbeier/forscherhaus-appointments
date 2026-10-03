@@ -507,6 +507,14 @@ rejects the waiting POST without changing its appointment, customer, service,
 or consent. The one-time reschedule authority is consumed; a new authority is
 required before the positive control succeeds after the synthetic block is
 removed. This is local evidence for one interleaving, not a production test.
+For a provider-owned manual unavailability, the public availability response
+must hide its overlapping slot while leaving an adjacent free slot available.
+A direct public booking POST into that blocked slot must reject without creating
+a customer, appointment, or consent. The isolated
+`BookingManualUnavailabilityHttpTest` checks this with a run-owned synthetic
+provider, removes the manual block, and verifies that the same slot can then
+be booked and all synthetic records cleaned up. It does not establish a
+concurrent edit interleaving or a production booking result.
 
 For service categories, authenticated API writes must likewise bind PUT to the
 URL-selected category and enforce the declared method on direct aliases.
