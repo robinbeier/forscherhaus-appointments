@@ -98,7 +98,11 @@ defense_cycle_begin compose_start
 ci_docker_compose up -d mysql php-fpm
 defense_cycle_end compose_start
 defense_cycle_begin php_ready
-ci_docker_wait_for_service_exec php-fpm defense-cycle php -v
+if ! ci_docker_wait_for_service_exec php-fpm defense-cycle php -v; then
+    # Startup failures happen before PHPUnit can report a useful test failure.
+    ci_docker_compose logs --no-color --tail=40 php-fpm >&2 || true
+    exit 1
+fi
 defense_cycle_end php_ready
 defense_cycle_begin synthetic_config
 ci_docker_compose exec -T php-fpm php -r '
