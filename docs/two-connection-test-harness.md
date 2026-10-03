@@ -64,6 +64,16 @@ Existing Calendar permission tests remain responsible for ordinary 403
 rejection coverage. These new references use authorized administrative actions
 and test consistency/serialization, not exploit reproduction.
 
+`PublicBookingProviderRaceHttpTest` uses two independent public HTTP servers and
+customers on the isolated synthetic stack. A third connection holds the target
+provider row while both requests reach the production `FOR UPDATE` parent lock;
+the test observes the actual waiting SQL before releasing that row. It then
+requires one confirmed booking and one 409, with no customer, consent, or
+appointment row from the losing request. A separate ordinary booking is the
+positive control. This proves the tested same-provider, same-slot schedule;
+it is not a claim about every possible concurrent calendar edit or a live
+production request.
+
 ## Local verification
 
 Use the repository Docker helper so the worktree has its own portless Compose

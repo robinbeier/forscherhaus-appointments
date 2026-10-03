@@ -85,6 +85,7 @@
             <file>./tests/Integration/Controllers/RescheduleCacheHttpTest.php</file>
             <file>./tests/Integration/Controllers/PrivacyDeleteHttpTest.php</file>
             <file>./tests/Integration/Controllers/BookingBlockedPeriodsHttpTest.php</file>
+            <file>./tests/Integration/Controllers/PublicBookingProviderRaceHttpTest.php</file>
             <file>./tests/Integration/Controllers/BookingAvailabilityAuthorityHttpTest.php</file>
             <file>./tests/Integration/Controllers/BookingJsonBodyLimitHttpTest.php</file>
             <file>./tests/Integration/Controllers/ProviderPdfExportHttpTest.php</file>
