@@ -65,6 +65,8 @@ final class RateLimitHelperTest extends TestCase
 
                 final class RateLimitFailureCache
                 {
+                    public function get_loaded_driver(): string { return __MODE__ === 'dummy' ? 'dummy' : 'file'; }
+
                     public function get(string $key): mixed
                     {
                         if (__MODE__ === 'save-count' || (__MODE__ === 'save-remain' && $key === 'rate_limit_key_203.0.113.10') || __MODE__ === 'corrupt-count') {
@@ -153,6 +155,14 @@ final class RateLimitHelperTest extends TestCase
         $this->assertFalse($result['admitted']);
     }
 
+    public function testUnsupportedDummyCacheFailsClosed(): void
+    {
+        $result = $this->runFailClosedWorker('dummy');
+        $this->assertSame('503', $result['status']);
+        $this->assertFalse($result['admitted']);
+        $this->assertSame([], $result['calls']);
+    }
+
     public function testExistingCorruptCounterFailsClosed(): void
     {
         $result = $this->runFailClosedWorker('corrupt-count');
@@ -167,7 +177,7 @@ final class RateLimitHelperTest extends TestCase
         mkdir($directory, 0700, true);
         $cachePath = $directory . '/cache';
         mkdir($cachePath, 0700, true);
-        $bucket = hexdec(substr(hash('sha256', '203.0.113.10'), 0, 8)) % 64;
+        $bucket = hexdec(substr(hash('sha256', 'rate_limit_key_203.0.113.10'), 0, 8)) % 64;
         $lockPath = dirname($cachePath) . '/rate_limit.lock.' . sprintf('%02x', $bucket);
         $readyPath = $directory . '/ready';
         $releasePath = $directory . '/release';
@@ -217,6 +227,7 @@ final class RateLimitHelperTest extends TestCase
                 });
                 final class RateLimitTimeoutCache
                 {
+                    public function get_loaded_driver(): string { return 'file'; }
                     public function get(string $key): mixed { return false; }
                     public function save(string $key, mixed $value, int $ttl): bool { return true; }
                 }
@@ -326,7 +337,15 @@ final class RateLimitHelperTest extends TestCase
         $this->assertFalse(rate_limit_is_local_loopback_request('203.0.113.10', 'localhost'));
     }
 
-    public function testConcurrentNonLoopbackRequestsDoNotLoseIncrements(): void
+    /** @return iterable<string, array{array<int, string>}> */
+    public static function concurrentAddresses(): iterable
+    {
+        yield 'IPv4' => [['203.0.113.10', '203.0.113.10', '203.0.113.10']];
+        yield 'colliding IPv6 cache keys' => [['1:23::4', '12:3::4', '1:23::4']];
+    }
+
+    #[DataProvider('concurrentAddresses')]
+    public function testConcurrentNonLoopbackRequestsDoNotLoseIncrements(array $ips): void
     {
         $repository = dirname(__DIR__, 3);
         $directory = sys_get_temp_dir() . '/rate-limit-race-' . bin2hex(random_bytes(8));
@@ -334,8 +353,9 @@ final class RateLimitHelperTest extends TestCase
 
         $cachePath = $directory . '/cache';
         mkdir($cachePath, 0700, true);
-        $cacheKey = 'rate_limit_key_203.0.113.10';
-        $remainKey = 'rate_limit_tmp_203.0.113.10';
+        $ip = $ips[0];
+        $cacheKey = str_replace(':', '', 'rate_limit_key_' . $ip);
+        $remainKey = str_replace(':', '', 'rate_limit_tmp_' . $ip);
         file_put_contents($cachePath . '/' . $cacheKey, '1');
         file_put_contents($cachePath . '/' . $remainKey, '2099-01-01 00:00:00');
 
@@ -343,11 +363,13 @@ final class RateLimitHelperTest extends TestCase
         file_put_contents(
             $worker,
             str_replace(
-                ['__APP_PATH__', '__BARRIER_PATH__', '__CACHE_PATH__'],
+                ['__APP_PATH__', '__BARRIER_PATH__', '__CACHE_PATH__', '__IPS__', '__CACHE_KEY__'],
                 [
                     var_export($repository . '/application/', true),
                     var_export($directory, true),
                     var_export($cachePath, true),
+                    var_export($ips, true),
+                    var_export($cacheKey, true),
                 ],
                 <<<'PHP'
                 <?php
@@ -362,6 +384,8 @@ final class RateLimitHelperTest extends TestCase
 
                 final class RateLimitRaceCache
                 {
+                    public function get_loaded_driver(): string { return 'file'; }
+
                     private int $keyReads = 0;
 
                     public function get(string $key): mixed
@@ -369,7 +393,7 @@ final class RateLimitHelperTest extends TestCase
                         $path = __CACHE_PATH__ . '/' . $key;
                         $value = is_file($path) ? file_get_contents($path) : false;
 
-                        if ($key === 'rate_limit_key_203.0.113.10') {
+                        if ($key === __CACHE_KEY__) {
                             $this->keyReads++;
                             $phase = $this->keyReads === 1 ? 'initial' : 'requests';
                             $marker = __BARRIER_PATH__ . '/' . $phase . '-' . getmypid();
@@ -384,7 +408,7 @@ final class RateLimitHelperTest extends TestCase
                             } while (microtime(true) < $deadline);
                         }
 
-                        return $key === 'rate_limit_key_203.0.113.10' && $value !== false ? (int) $value : $value;
+                        return $key === __CACHE_KEY__ && $value !== false ? (int) $value : $value;
                     }
 
                     public function save(string $key, mixed $value, int $ttl): bool
@@ -434,7 +458,8 @@ final class RateLimitHelperTest extends TestCase
                     }
                     usleep(1000);
                 } while (microtime(true) < $deadline);
-                rate_limit('203.0.113.10', 2, 3600);
+                $workerIps = __IPS__;
+                rate_limit($workerIps[((int) ($argv[1] ?? 1) - 1) % count($workerIps)], 2, 3600);
                 touch(__BARRIER_PATH__ . '/completed-' . getmypid());
                 PHP
                 ,

@@ -37,10 +37,11 @@ the server, so authentication, CSRF, and capability checks remain essential.
 Any future foreign-browser integration needs an explicit, reviewed policy.
 
 The global file-backed request limiter must count concurrent non-exempt requests
-without losing increments. Requests from one IP share a stable cross-process
-lock, chosen from 64 fixed buckets, and lock waiting is bounded to two seconds.
-A missing or unavailable lock, unreadable existing counter, or failed cache
-write rejects the request before controller work. The isolated parallel-process regression proves the counter
+without losing increments. Requests sharing a cache key use the same stable
+cross-process lock, chosen from 64 fixed buckets, and lock waiting is bounded
+to two seconds. An unavailable file-cache adapter, missing or unavailable lock,
+unreadable existing counter, or failed cache write rejects the request before
+controller work. The isolated parallel-process regression proves the counter
 boundary for its synthetic per-key cache; it does not establish production
 throughput or a live rate-limit result.
 

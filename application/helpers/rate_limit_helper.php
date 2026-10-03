@@ -71,12 +71,17 @@ if (!function_exists('rate_limit')) {
 
         $CI->load->driver('cache', ['adapter' => 'file']);
 
+        if (!method_exists($CI->cache, 'get_loaded_driver') || $CI->cache->get_loaded_driver() !== 'file') {
+            rate_limit_fail_closed();
+        }
+
         $cache_path = (string) $CI->config->item('cache_path');
         if ($cache_path === '') {
             $cache_path = APPPATH . 'cache' . DIRECTORY_SEPARATOR;
         }
         $cache_directory = rtrim($cache_path, DIRECTORY_SEPARATOR);
-        $bucket = hexdec(substr(hash('sha256', $ip), 0, 8)) % 64;
+        $cache_key = str_replace(':', '', 'rate_limit_key_' . $ip);
+        $bucket = hexdec(substr(hash('sha256', $cache_key), 0, 8)) % 64;
         $lock_path = dirname($cache_directory) . DIRECTORY_SEPARATOR . sprintf('rate_limit.lock.%02x', $bucket);
         $lock_handle = @fopen($lock_path, 'c');
 
@@ -99,8 +104,6 @@ if (!function_exists('rate_limit')) {
             @fclose($lock_handle);
             rate_limit_fail_closed();
         }
-
-        $cache_key = str_replace(':', '', 'rate_limit_key_' . $ip);
 
         $cache_remain_time_key = str_replace(':', '', 'rate_limit_tmp_' . $ip);
 
