@@ -65,7 +65,9 @@ class Booking_cancellation extends EA_Controller
 
             $occurrences = $this->appointments_model->get(['hash' => $appointment_hash]);
 
-            if (empty($occurrences)) {
+            // A public hash must identify exactly one ordinary appointment.
+            // Historical duplicates must not select an arbitrary cancellation target.
+            if (count($occurrences) !== 1) {
                 html_vars([
                     'page_title' => lang('appointment_not_found'),
                     'company_color' => setting('company_color'),

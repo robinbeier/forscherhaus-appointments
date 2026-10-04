@@ -17,6 +17,10 @@ final class BookingCancellationHttpTest extends TestCase
 {
     private ?DefenseCycleFixtures $fixture = null;
     private ?DefenseCycleHttpServer $server = null;
+    /** @var list<int> */
+    private array $ownedAppointmentIds = [];
+    /** @var array<int, array{customerId:int, parentId:?int}> */
+    private array $ownedAppointmentExpectations = [];
 
     protected function setUp(): void
     {
@@ -43,8 +47,135 @@ final class BookingCancellationHttpTest extends TestCase
         try {
             $this->server?->close();
         } finally {
+            $db = get_instance()->db;
+            $ids = $this->ownedAppointmentIds;
+            usort(
+                $ids,
+                fn(int $left, int $right): int => (($this->ownedAppointmentExpectations[$left]['parentId'] ?? null) ===
+                null
+                    ? 1
+                    : 0) <=> (($this->ownedAppointmentExpectations[$right]['parentId'] ?? null) === null ? 1 : 0),
+            );
+            foreach ($ids as $id) {
+                $row = $db->get_where('appointments', ['id' => $id])->row_array();
+                if (!$row) {
+                    continue;
+                }
+                $expected = $this->ownedAppointmentExpectations[$id] ?? null;
+                if ($expected === null) {
+                    throw new RuntimeException('Owned appointment identity was not registered.');
+                }
+                $this->assertOwnedAppointmentRow($row, $expected['customerId'], $expected['parentId']);
+                $db->delete('reschedule_authorities', ['appointment_id' => $id]);
+                if (!$db->delete('appointments', ['id' => $id])) {
+                    throw new RuntimeException('Owned appointment cleanup failed.');
+                }
+                if ($db->get_where('appointments', ['id' => $id])->num_rows() !== 0) {
+                    throw new RuntimeException('Owned appointment cleanup was not confirmed.');
+                }
+            }
             $this->fixture?->cleanup();
         }
+    }
+
+    public function testDuplicateHashCancellationFailsClosedWithoutCrossCustomerMutation(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $db = get_instance()->db;
+
+        $first = $fixture->appointment();
+        $this->registerOwnedAppointment($first, $fixture->customerId, null);
+        $secondCustomer = $fixture->customerWritePayload('duplicate-cancellation');
+        $customerRole = $db->get_where('roles', ['slug' => 'customer'])->row_array();
+        self::assertNotEmpty($customerRole);
+        self::assertTrue(
+            (bool) $db->insert(
+                'users',
+                $secondCustomer + [
+                    'timezone' => 'UTC',
+                    'language' => 'english',
+                    'id_roles' => (int) $customerRole['id'],
+                    'is_private' => 0,
+                ],
+            ),
+        );
+        $secondCustomerId = (int) $db->insert_id();
+        self::assertGreaterThan(0, $secondCustomerId);
+
+        $second = $fixture->appointment();
+        $this->registerOwnedAppointment($second, $fixture->customerId, null);
+        self::assertTrue(
+            (bool) $db->update(
+                'appointments',
+                ['id_users_customer' => $secondCustomerId, 'hash' => $first['hash']],
+                ['id' => (int) $second['id']],
+            ),
+        );
+        $this->ownedAppointmentExpectations[(int) $second['id']]['customerId'] = $secondCustomerId;
+        $first = $fixture->row('appointments', (int) $first['id']);
+        $second = $fixture->row('appointments', (int) $second['id']);
+        self::assertSame($first['hash'], $second['hash']);
+
+        $firstBuffer = $this->addBuffer($first);
+        $this->registerOwnedAppointment($firstBuffer, 0, (int) $first['id']);
+        $secondBuffer = $this->addBuffer($second);
+        $this->registerOwnedAppointment($secondBuffer, 0, (int) $second['id']);
+        $before = [
+            'appointments' => [
+                $fixture->row('appointments', (int) $first['id']),
+                $fixture->row('appointments', (int) $second['id']),
+                $fixture->row('appointments', (int) $firstBuffer['id']),
+                $fixture->row('appointments', (int) $secondBuffer['id']),
+            ],
+            'users' => [
+                $fixture->row('users', $fixture->customerId),
+                $fixture->row('users', $secondCustomerId),
+                $fixture->row('users', $fixture->providerId),
+            ],
+            'user_settings' => $db->get_where('user_settings', ['id_users' => $fixture->providerId])->result_array(),
+            'services' => [$fixture->row('services', $fixture->serviceId)],
+            'services_providers' => $db
+                ->get_where('services_providers', [
+                    'id_users' => $fixture->providerId,
+                    'id_services' => $fixture->serviceId,
+                ])
+                ->result_array(),
+        ];
+
+        $client = $this->server?->client();
+        self::assertNotNull($client);
+        $duplicateResponse = $client->requestApp('POST', 'booking_cancellation/of/' . $first['hash'], [], 15);
+        self::assertSame(200, $duplicateResponse->statusCode);
+        self::assertStringNotContainsString(
+            '<h4 class="mb-5">' . lang('appointment_cancelled_title') . '</h4>',
+            $duplicateResponse->body,
+        );
+        self::assertStringContainsString(
+            '<h4 class="mb-5">' . lang('appointment_not_found') . '</h4>',
+            $duplicateResponse->body,
+        );
+        self::assertStringContainsString(lang('appointment_does_not_exist_in_db'), $duplicateResponse->body);
+        self::assertSame(
+            $before,
+            $this->cancellationSnapshot($first, $second, $firstBuffer, $secondBuffer, $secondCustomerId),
+        );
+
+        $unknownResponse = $client->requestApp('POST', 'booking_cancellation/of/' . str_repeat('unknown-', 8), [], 15);
+        self::assertSame($duplicateResponse->statusCode, $unknownResponse->statusCode);
+        self::assertStringNotContainsString(
+            '<h4 class="mb-5">' . lang('appointment_cancelled_title') . '</h4>',
+            $unknownResponse->body,
+        );
+        self::assertStringContainsString(
+            '<h4 class="mb-5">' . lang('appointment_not_found') . '</h4>',
+            $unknownResponse->body,
+        );
+        self::assertStringContainsString(lang('appointment_does_not_exist_in_db'), $unknownResponse->body);
+        self::assertSame(
+            $before,
+            $this->cancellationSnapshot($first, $second, $firstBuffer, $secondBuffer, $secondCustomerId),
+        );
     }
 
     public function testCancellationHonorsAdvanceCutoffAndPreservesDeniedRows(): void
@@ -239,5 +370,80 @@ final class BookingCancellationHttpTest extends TestCase
                 'end_datetime' => date('Y-m-d H:i:s', $start + 1800),
             ]),
         );
+    }
+
+    /** @param array<string, mixed> $appointment */
+    private function registerOwnedAppointment(array $appointment, int $customerId, ?int $parentId): void
+    {
+        $id = (int) ($appointment['id'] ?? 0);
+        if ($id <= 0) {
+            throw new RuntimeException('Owned appointment fixture has no valid ID.');
+        }
+        $this->ownedAppointmentIds[] = $id;
+        $this->ownedAppointmentExpectations[$id] = ['customerId' => $customerId, 'parentId' => $parentId];
+    }
+
+    /** @param array<string, mixed> $row */
+    private function assertOwnedAppointmentRow(array $row, int $customerId, ?int $parentId): void
+    {
+        $fixture = $this->fixture;
+        if (
+            (int) ($row['id_users_provider'] ?? 0) !== $fixture->providerId ||
+            ($row['notes'] ?? null) !== $fixture->run
+        ) {
+            throw new RuntimeException('Owned appointment provider or notes identity changed.');
+        }
+        if ($parentId === null) {
+            if (
+                (int) ($row['id_services'] ?? 0) !== $fixture->serviceId ||
+                (int) ($row['id_users_customer'] ?? 0) !== $customerId ||
+                (int) ($row['is_unavailability'] ?? 0) !== 0 ||
+                (int) ($row['id_parent_appointment'] ?? 0) !== 0
+            ) {
+                throw new RuntimeException('Owned ordinary appointment identity changed.');
+            }
+            return;
+        }
+        if (
+            (int) ($row['id_parent_appointment'] ?? 0) !== $parentId ||
+            (int) ($row['is_unavailability'] ?? 0) !== 1 ||
+            (int) ($row['id_services'] ?? 0) !== 0 ||
+            (int) ($row['id_users_customer'] ?? 0) !== 0
+        ) {
+            throw new RuntimeException('Owned buffer appointment identity changed.');
+        }
+    }
+
+    /** @return array<string, mixed> */
+    private function cancellationSnapshot(
+        array $first,
+        array $second,
+        array $firstBuffer,
+        array $secondBuffer,
+        int $secondCustomerId,
+    ): array {
+        $fixture = $this->fixture;
+        $db = get_instance()->db;
+        return [
+            'appointments' => [
+                $fixture->row('appointments', (int) $first['id']),
+                $fixture->row('appointments', (int) $second['id']),
+                $fixture->row('appointments', (int) $firstBuffer['id']),
+                $fixture->row('appointments', (int) $secondBuffer['id']),
+            ],
+            'users' => [
+                $fixture->row('users', $fixture->customerId),
+                $fixture->row('users', $secondCustomerId),
+                $fixture->row('users', $fixture->providerId),
+            ],
+            'user_settings' => $db->get_where('user_settings', ['id_users' => $fixture->providerId])->result_array(),
+            'services' => [$fixture->row('services', $fixture->serviceId)],
+            'services_providers' => $db
+                ->get_where('services_providers', [
+                    'id_users' => $fixture->providerId,
+                    'id_services' => $fixture->serviceId,
+                ])
+                ->result_array(),
+        ];
     }
 }

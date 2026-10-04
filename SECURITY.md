@@ -276,6 +276,12 @@ calendar hash routes likewise reject duplicate matches before opening an edit
 dialog. `BookingCalendarAmbiguousHashHttpTest` verifies both boundaries with
 isolated synthetic records; it does not establish whether production contains
 duplicate hashes.
+The public cancellation POST must also resolve its hash to exactly one ordinary
+appointment before selecting a deletion target. A duplicate historical hash
+gets the same generic not-found response as an unknown hash and changes no
+appointment or generated buffer. `BookingCancellationHttpTest` verifies this
+with own isolated records; it does not prove that production has duplicates or
+cover concurrent hash insertion.
 See the [reschedule authority contract](docs/security/public-reschedule-authority.md).
 
 Anonymous booking-confirmation and ICS downloads require a nonempty stored
