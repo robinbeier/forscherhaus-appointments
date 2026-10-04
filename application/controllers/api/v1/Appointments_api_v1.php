@@ -377,6 +377,10 @@ class Appointments_api_v1 extends EA_Controller
                 !empty($appointment[$resource]) &&
                 is_array($appointment[$resource])
             ) {
+                if ($resource === 'provider') {
+                    $this->providers_model->cast($appointment[$resource]);
+                }
+
                 $this->{$model}->api_encode($appointment[$resource]);
             }
         }

@@ -275,6 +275,7 @@ final class AppointmentsApiHttpReadTest extends TestCase
         foreach (['provider', 'customer', 'service'] as $relation) {
             self::assertIsArray($appointment[$relation] ?? null, $relation . ' must be projected.');
         }
+        self::assertSame(false, $appointment['provider']['isPrivate'] ?? null);
         foreach (
             ['id_roles', 'ldap_dn', 'first_name', 'last_name', 'password', 'salt', 'google_token', 'caldav_password']
             as $rawField
