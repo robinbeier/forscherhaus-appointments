@@ -96,6 +96,62 @@ final class StaffSettingsApiHttpTest extends TestCase
         }
     }
 
+    public static function adminCollectionRoutes(): array
+    {
+        return [
+            'canonical' => ['api/v1/admins'],
+            'index-alias' => ['api/v1/admins_api_v1/index'],
+        ];
+    }
+
+    #[DataProvider('adminCollectionRoutes')]
+    public function testAdminCollectionPaginationBoundsRejectInvalidValuesBeforeQuery(string $route): void
+    {
+        $before = $this->fixture->adminDeleteSnapshot();
+        $cases = [
+            'length-zero' => ['length' => '0'],
+            'length-over-bound' => ['length' => '101'],
+            'length-huge' => ['length' => '999999999999999999999999'],
+            'page-zero' => ['page' => '0'],
+            'page-over-bound' => ['page' => '10001'],
+            'page-huge' => ['page' => '999999999999999999999999'],
+        ];
+
+        foreach ([$this->writeClient('basic'), $this->writeClient('bearer')] as $client) {
+            foreach ($cases as $name => $query) {
+                $response = $client->get($route, $query);
+                self::assertSame(400, $response->statusCode, $route . ' ' . $name);
+                $payload = json_decode($response->body, true, 512, JSON_THROW_ON_ERROR);
+                self::assertFalse($payload['success'] ?? true, $route . ' ' . $name);
+                self::assertStringContainsString(
+                    (string) array_key_first($query),
+                    (string) ($payload['message'] ?? ''),
+                );
+                self::assertSame($before, $this->fixture->adminDeleteSnapshot());
+            }
+        }
+    }
+
+    #[DataProvider('adminCollectionRoutes')]
+    public function testAdminCollectionPaginationSupportsDefaultsAndValidBoundaries(string $route): void
+    {
+        foreach ([$this->writeClient('basic'), $this->writeClient('bearer')] as $client) {
+            $default = $this->success($client->get($route, ['q' => $this->fixture->run]));
+            self::assertNotEmpty($default);
+            self::assertLessThanOrEqual(20, count($default));
+
+            $boundary = $this->success(
+                $client->get($route, ['q' => $this->fixture->run, 'length' => '1', 'page' => '1']),
+            );
+            self::assertCount(min(1, count($default)), $boundary);
+
+            $maximum = $this->success(
+                $client->get($route, ['q' => $this->fixture->run, 'length' => '100', 'page' => '10000']),
+            );
+            self::assertLessThanOrEqual(100, count($maximum));
+        }
+    }
+
     public function testValidProviderBasicCannotReadAdminSecretaryOrSettingsRoutes(): void
     {
         $provider = $this->fixture->row('users', $this->fixture->providerId);

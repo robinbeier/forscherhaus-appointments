@@ -41,6 +41,10 @@ class Admins_api_v1 extends EA_Controller
     public function index(): void
     {
         try {
+            if (!$this->validatePaginationRequest()) {
+                return;
+            }
+
             $keyword = $this->api->request_keyword();
 
             $limit = $this->api->request_limit();
@@ -253,5 +257,39 @@ class Admins_api_v1 extends EA_Controller
         $this->api_request_dto_factory = $CI->api_request_dto_factory;
 
         return $this->api_request_dto_factory;
+    }
+
+    /**
+     * Validate collection pagination before the admins model is queried.
+     */
+    private function validatePaginationRequest(): bool
+    {
+        foreach (['length' => 100, 'page' => 10000] as $parameter => $maximum) {
+            $value = request($parameter);
+
+            if ($value === null) {
+                continue;
+            }
+
+            if ((is_int($value) || is_string($value)) && preg_match('/^[0-9]+$/', (string) $value)) {
+                $number = (int) $value;
+
+                if ($number >= 1 && $number <= $maximum) {
+                    continue;
+                }
+            }
+
+            json_response(
+                [
+                    'success' => false,
+                    'message' => sprintf('The %s parameter must be an integer between 1 and %d.', $parameter, $maximum),
+                ],
+                400,
+            );
+
+            return false;
+        }
+
+        return true;
     }
 }
