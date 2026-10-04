@@ -152,6 +152,66 @@ final class StaffSettingsApiHttpTest extends TestCase
         }
     }
 
+    public static function secretaryCollectionRoutes(): array
+    {
+        return [
+            'canonical' => ['api/v1/secretaries'],
+            'index-alias' => ['api/v1/secretaries_api_v1/index'],
+        ];
+    }
+
+    #[DataProvider('secretaryCollectionRoutes')]
+    public function testSecretaryCollectionPaginationBoundsRejectInvalidValuesBeforeQuery(string $route): void
+    {
+        $before = $this->fixture->secretaryDeleteSnapshot();
+        $cases = [
+            'length-zero' => ['length' => '0'],
+            'length-over-bound' => ['length' => '101'],
+            'length-huge' => ['length' => '999999999999999999999999'],
+            'page-zero' => ['page' => '0'],
+            'page-over-bound' => ['page' => '10001'],
+            'page-huge' => ['page' => '999999999999999999999999'],
+        ];
+
+        foreach ([$this->writeClient('basic'), $this->writeClient('bearer')] as $client) {
+            foreach ($cases as $name => $query) {
+                $response = $client->get($route, $query);
+                self::assertSame(400, $response->statusCode, $route . ' ' . $name);
+                $payload = json_decode($response->body, true, 512, JSON_THROW_ON_ERROR);
+                self::assertFalse($payload['success'] ?? true, $route . ' ' . $name);
+                self::assertStringContainsString(
+                    (string) array_key_first($query),
+                    (string) ($payload['message'] ?? ''),
+                );
+                self::assertSame($before, $this->fixture->secretaryDeleteSnapshot());
+            }
+        }
+    }
+
+    #[DataProvider('secretaryCollectionRoutes')]
+    public function testSecretaryCollectionPaginationSupportsDefaultsAndValidBoundaries(string $route): void
+    {
+        $admin = $this->writeClient('basic');
+        $payload = $this->fixture->secretaryWritePayload('pagination', [$this->fixture->providerId]);
+        $this->success($admin->requestJsonApp('POST', 'api/v1/secretaries', $payload), 201);
+
+        foreach ([$this->writeClient('basic'), $this->writeClient('bearer')] as $client) {
+            $default = $this->success($client->get($route, ['q' => $this->fixture->run]));
+            self::assertNotEmpty($default);
+            self::assertLessThanOrEqual(20, count($default));
+
+            $boundary = $this->success(
+                $client->get($route, ['q' => $this->fixture->run, 'length' => '1', 'page' => '1']),
+            );
+            self::assertCount(min(1, count($default)), $boundary);
+
+            $maximum = $this->success(
+                $client->get($route, ['q' => $this->fixture->run, 'length' => '100', 'page' => '10000']),
+            );
+            self::assertLessThanOrEqual(100, count($maximum));
+        }
+    }
+
     public function testValidProviderBasicCannotReadAdminSecretaryOrSettingsRoutes(): void
     {
         $provider = $this->fixture->row('users', $this->fixture->providerId);
