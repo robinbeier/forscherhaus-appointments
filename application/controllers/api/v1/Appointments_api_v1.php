@@ -45,6 +45,10 @@ class Appointments_api_v1 extends EA_Controller
      */
     public function index(): void
     {
+        if (!$this->enforceReadMethod()) {
+            return;
+        }
+
         try {
             $request_dto = $this->apiRequestDtoFactory()->buildAppointmentsReadRequestDto($this->api);
             $query = $request_dto->query;
@@ -125,12 +129,12 @@ class Appointments_api_v1 extends EA_Controller
 
                 $this->aggregates($appointment, $request_dto->aggregates);
 
-                if (!empty($query->fields)) {
-                    $this->appointments_model->only($appointment, $query->fields);
+                if (!empty($query->with)) {
+                    $this->loadApiRelations($appointment, $query->with);
                 }
 
-                if (!empty($query->with)) {
-                    $this->appointments_model->load($appointment, $query->with);
+                if (!empty($query->fields)) {
+                    $this->appointments_model->only($appointment, array_merge($query->fields, $query->with ?? []));
                 }
 
                 $this->append_buffer_blocks($appointment, $request_dto->includeBufferBlocks, $appointment_id);
@@ -198,6 +202,10 @@ class Appointments_api_v1 extends EA_Controller
      */
     public function show(?int $id = null): void
     {
+        if (!$this->enforceReadMethod()) {
+            return;
+        }
+
         try {
             $request_dto = $this->apiRequestDtoFactory()->buildAppointmentsShowRequestDto($this->api);
 
@@ -214,12 +222,15 @@ class Appointments_api_v1 extends EA_Controller
 
             $this->appointments_model->api_encode($appointment);
 
-            if (!empty($request_dto->fields)) {
-                $this->appointments_model->only($appointment, $request_dto->fields);
+            if (!empty($request_dto->with)) {
+                $this->loadApiRelations($appointment, $request_dto->with);
             }
 
-            if (!empty($request_dto->with)) {
-                $this->appointments_model->load($appointment, $request_dto->with);
+            if (!empty($request_dto->fields)) {
+                $this->appointments_model->only(
+                    $appointment,
+                    array_merge($request_dto->fields, $request_dto->with ?? []),
+                );
             }
 
             $this->append_buffer_blocks($appointment, $request_dto->includeBufferBlocks, $appointment_id);
@@ -346,6 +357,44 @@ class Appointments_api_v1 extends EA_Controller
         $this->api_request_dto_factory = $CI->api_request_dto_factory;
 
         return $this->api_request_dto_factory;
+    }
+
+    /** Keep API relations projected without changing the model's legacy callers. */
+    private function loadApiRelations(array &$appointment, array $resources): void
+    {
+        $this->appointments_model->load($appointment, $resources);
+
+        foreach (
+            [
+                'service' => 'services_model',
+                'provider' => 'providers_model',
+                'customer' => 'customers_model',
+            ]
+            as $resource => $model
+        ) {
+            if (
+                in_array($resource, $resources, true) &&
+                !empty($appointment[$resource]) &&
+                is_array($appointment[$resource])
+            ) {
+                if ($resource === 'provider') {
+                    $this->providers_model->cast($appointment[$resource]);
+                }
+
+                $this->{$model}->api_encode($appointment[$resource]);
+            }
+        }
+    }
+
+    private function enforceReadMethod(): bool
+    {
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) === 'GET') {
+            return true;
+        }
+
+        response('', 405, ['Allow: GET']);
+
+        return false;
     }
 
     private function enforceWriteMethod(string $expected): bool

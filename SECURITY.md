@@ -79,6 +79,15 @@ subsequent field reads reuse the same decoded payload. PHP's `post_max_size`
 does not by itself protect `php://input` for JSON requests. This contract
 does not cover non-JSON uploads or the separate CSP report receiver.
 
+Appointments API v1 collection and detail reads require a current Admin Basic
+identity or the configured global Bearer token, including on direct controller
+aliases. Only GET may reach the read handler. Requested `with` relations use
+the respective API resource projections; they must not serialize raw database
+rows or staff integration secrets. `fields` may narrow appointment fields
+without preventing a requested relation from being loaded and projected.
+The isolated `AppointmentsApiHttpReadTest` checks these boundaries with owned
+synthetic records. It does not establish a live production response.
+
 Administrative dashboard PDF and ZIP exports must authorize the actor's current
 stored administrator role on every request, including direct controller paths.
 Only GET may reach export data loading or rendering. Teacher reports use parent

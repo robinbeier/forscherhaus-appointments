@@ -104,6 +104,9 @@ http://ea-installation/index.php/api/v1/appointments?with=customer,service,provi
 ```
 
 *This parameter is only available for resources that are related to other resources.*
+For appointments, attached customer, service and provider records use their
+normal API field names and projection. The `fields` parameter narrows the
+appointment itself; explicitly requested `with` relations remain attached.
 
 ### Expected Responses
 
