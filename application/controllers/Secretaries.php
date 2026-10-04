@@ -256,17 +256,31 @@ class Secretaries extends EA_Controller
      */
     public function update(): void
     {
+        $owns_transaction = false;
+
         try {
-            if (cannot('edit', PRIV_USERS)) {
-                abort(403, 'Forbidden');
-            }
             if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
                 abort(405, 'Method Not Allowed', ['Allow: POST']);
                 return;
             }
 
+            $user_id = (int) session('user_id');
+            if (!$user_id || !$this->hasCurrentEditPermission($user_id)) {
+                abort(403, 'Forbidden');
+                return;
+            }
+
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityPayloadRequestDto('secretary');
             $secretary = $request_dto->payload;
+
+            $secretary_id = filter_var($secretary['id'] ?? null, FILTER_VALIDATE_INT, [
+                'options' => ['min_range' => 1],
+            ]);
+            if ($secretary_id === false) {
+                abort(400, 'Invalid secretary update');
+                return;
+            }
+            $secretary['id'] = $secretary_id;
 
             $this->secretaries_model->only($secretary, $this->allowed_secretary_fields);
 
@@ -274,17 +288,114 @@ class Secretaries extends EA_Controller
 
             $this->secretaries_model->optional($secretary, $this->optional_secretary_fields);
 
+            // Include every user parent that the model may lock in one ordered set.
+            $user_ids = array_values(
+                array_unique(
+                    array_merge([$user_id, $secretary_id], $this->normalizeUpdateProviderIds($secretary['providers'])),
+                ),
+            );
+            sort($user_ids, SORT_NUMERIC);
+
+            $owns_transaction = !$this->db->trans_active();
+            if ($owns_transaction && !$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start secretary update transaction.');
+            }
+
+            $placeholders = implode(', ', array_fill(0, count($user_ids), '?'));
+            $locked_users = $this->db->query(
+                'SELECT `id`, `id_roles` FROM `' .
+                    $this->db->dbprefix('users') .
+                    '` WHERE `id` IN (' .
+                    $placeholders .
+                    ') ORDER BY `id` ASC FOR UPDATE',
+                $user_ids,
+            );
+            if ($locked_users === false) {
+                throw new RuntimeException('Could not lock secretary update users.');
+            }
+            $users_by_id = [];
+            foreach ($locked_users->result_array() as $row) {
+                $users_by_id[(int) $row['id']] = $row;
+            }
+
+            $actor = $users_by_id[$user_id] ?? null;
+            $locked_role = $actor
+                ? $this->db->query(
+                    'SELECT `users` FROM `' . $this->db->dbprefix('roles') . '` WHERE `id` = ? FOR UPDATE',
+                    [(int) $actor['id_roles']],
+                )
+                : null;
+            if ($locked_role === false) {
+                throw new RuntimeException('Could not lock secretary update role.');
+            }
+            $role = $locked_role?->row_array();
+            if (!$actor || !$role || !((int) $role['users'] & PRIV_EDIT)) {
+                if ($owns_transaction) {
+                    $this->db->trans_rollback();
+                    $owns_transaction = false;
+                }
+                abort(403, 'Forbidden');
+                return;
+            }
+            if (
+                !isset($users_by_id[$secretary_id]) ||
+                (int) $users_by_id[$secretary_id]['id_roles'] !== $this->secretaries_model->get_secretary_role_id()
+            ) {
+                if ($owns_transaction) {
+                    $this->db->trans_rollback();
+                    $owns_transaction = false;
+                }
+                abort(400, 'Invalid secretary update');
+                return;
+            }
+
             $secretary_id = $this->secretaries_model->save($secretary);
 
             $secretary = $this->secretaries_model->find($secretary_id);
+
+            if (!$this->db->trans_status()) {
+                throw new RuntimeException('Could not complete secretary update transaction.');
+            }
+            if ($owns_transaction && !$this->db->trans_commit()) {
+                throw new RuntimeException('Could not commit secretary update transaction.');
+            }
+            $owns_transaction = false;
 
             json_response([
                 'success' => true,
                 'id' => $secretary_id,
             ]);
         } catch (Throwable $e) {
+            if ($owns_transaction) {
+                $this->db->trans_rollback();
+            }
             json_exception($e);
         }
+    }
+
+    /** Normalize assignment IDs before locking the full user-parent set. */
+    private function normalizeUpdateProviderIds(mixed $provider_ids): array
+    {
+        if (!is_array($provider_ids)) {
+            throw new InvalidArgumentException('Secretary provider IDs must be an array.');
+        }
+
+        $normalized = [];
+        foreach ($provider_ids as $provider_id) {
+            if (
+                (!is_int($provider_id) && !is_string($provider_id)) ||
+                !preg_match('/^[1-9][0-9]*$/D', (string) $provider_id)
+            ) {
+                throw new InvalidArgumentException('Secretary provider IDs must be positive integers.');
+            }
+            $id = filter_var($provider_id, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+            if ($id === false) {
+                throw new InvalidArgumentException('Secretary provider ID is outside the supported range.');
+            }
+            $normalized[$id] = $id;
+        }
+        sort($normalized, SORT_NUMERIC);
+        return $normalized;
     }
 
     /**
@@ -391,6 +502,15 @@ class Secretaries extends EA_Controller
             return can('delete', PRIV_USERS, $user_id);
         } catch (InvalidArgumentException $e) {
             // A principal lookup that fails after login has no authority.
+            return false;
+        }
+    }
+
+    private function hasCurrentEditPermission(int $user_id): bool
+    {
+        try {
+            return can('edit', PRIV_USERS, $user_id);
+        } catch (InvalidArgumentException $e) {
             return false;
         }
     }

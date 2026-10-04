@@ -139,8 +139,8 @@ final class StaffPostGuardTest extends TestCase
             // Secretaries::destroy now has the same current-stored-authority and
             // transaction boundary; SecretariesDestroyRoleHttpTest covers its
             // real HTTP/DB method, alias, demotion, and mutation behavior.
+            // Secretaries::update is covered by SecretariesUpdateRoleHttpTest.
             ['Secretaries', 'store'],
-            ['Secretaries', 'update'],
         ];
     }
 
