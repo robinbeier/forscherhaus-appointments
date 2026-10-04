@@ -53,12 +53,16 @@ prefer an effectively read-only runtime whose coverage includes:
 
 If read-only isolation is unavailable, a controlled independent agent with
 write-capable tools may review an ordinary PR only when all of these are
-recorded: exact base, exact head, and exact scope; a fresh context; no
+available and recorded: exact base, exact head, and exact scope; a fresh context;
+an independently inspectable tool-call record for that reviewer session; no
 credentials or production data; no mutations, connectors, or external actions;
 primary-owned Git, GitHub, Linear, and merge operations; and post-review
-verification that the repository and head are unchanged plus a review of tool
-activity. This exception is a practical boundary, not proof of technical
-isolation, and it cannot undo an external action if one occurred.
+verification that the repository and head are unchanged plus inspection of the
+actual tool-call record. A reviewer self-report alone is insufficient. If the
+record is absent, incomplete, or shows a mutation or external action, use an
+isolated runtime or human instead and leave this review pending. This exception
+detects side effects after the fact rather than preventing them; it cannot undo
+an external action if one occurred.
 
 If no authorized agent meets the coverage and boundary contract, use a
 qualified independent human reviewer or leave the review pending.

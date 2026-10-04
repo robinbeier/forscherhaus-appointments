@@ -473,7 +473,8 @@ not a universal merge prerequisite for a code-only review. Before sending a
 diff, follow the [reviewer runtime preflight](docs/reviewer-runtime-preflight.md):
 check the actual model, available tools, approved data scope, and exact
 base/head. If isolation is unavailable, use its controlled no-mutation path or
-an independent human. Never pass credentials or production data to a reviewer.
+an independent human; the controlled path requires an inspectable tool-call
+record before dispatch. Never pass credentials or production data to a reviewer.
 A readiness acknowledgement is not a review; runtime failures are not PR
 findings. A platform refusal or model-specific data limit remains binding.
 That review covers correctness, security, test adequacy, and maintainability;
