@@ -6,6 +6,7 @@ use ReleaseGate\GateHttpClient;
 use ReleaseGate\GateHttpResponse;
 use ReleaseGate\AccountSecurityMatrixProbe;
 use ReleaseGate\AppointmentsApiWriteProbe;
+use ReleaseGate\AppointmentsApiReadProbe;
 use ReleaseGate\CalendarResponsibilityRaceProbe;
 use ReleaseGate\CalendarMethodProbe;
 use ReleaseGate\CustomerRoleBoundaryProbe;
@@ -67,6 +68,7 @@ if (
             'calendar-race',
             'calendar-methods',
             'appointments-api',
+            'appointments-api-read',
             'appointments-api-overlap',
             'session',
             'deactivate',
@@ -186,6 +188,7 @@ try {
     require_once dirname(__DIR__) . '/release-gate/lib/CalendarResponsibilityRaceProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/CalendarMethodProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/AppointmentsApiWriteProbe.php';
+    require_once dirname(__DIR__) . '/release-gate/lib/AppointmentsApiReadProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/DefenseVerificationFixture.php';
     if (
         !in_array($action, ['deactivate', 'verify'], true) &&
@@ -518,6 +521,21 @@ try {
                 indexPage: (string) config_item('index_page'),
             );
             $result['evidence'] = $probe->run($evidence->step(...));
+        } elseif ($action === 'appointments-api-read') {
+            $evidence->run(
+                'supplemental_activate',
+                fn(): array => $verificationFixture->activate('calendar_race', $context),
+            );
+            $supplemental = $verificationFixture->prepareAppointmentsApi();
+            $probe = AppointmentsApiReadProbe::forApp(
+                'http://localhost',
+                (string) $supplemental['api_credentials']['username'],
+                (string) $supplemental['api_credentials']['password'],
+                $verificationFixture,
+                indexPage: (string) config_item('index_page'),
+                rememberSession: $sessions->remember(...),
+            );
+            $result['evidence'] = $probe->run($evidence->step(...));
         } elseif (in_array($action, ['appointments-api', 'appointments-api-overlap'], true)) {
             $supplemental = $evidence->run(
                 'supplemental_activate',
@@ -574,6 +592,7 @@ try {
                     'calendar-race',
                     'calendar-methods',
                     'appointments-api',
+                    'appointments-api-read',
                     'appointments-api-overlap',
                 ],
                 true,

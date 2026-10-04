@@ -68,6 +68,7 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
                 'CalendarResponsibilityRaceProbe.php',
                 'CalendarMethodProbe.php',
                 'AppointmentsApiWriteProbe.php',
+                'AppointmentsApiReadProbe.php',
                 'DefenseVerificationFixture.php',
             ]
             as $file
@@ -226,6 +227,7 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
                 'calendar-race' => 'provider',
                 'calendar-methods' => 'provider',
                 'appointments-api' => 'provider',
+                'appointments-api-read' => 'provider',
                 'appointments-api-overlap' => 'provider',
             ]
             as $action => $role
