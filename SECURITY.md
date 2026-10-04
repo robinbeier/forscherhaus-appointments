@@ -55,6 +55,13 @@ still use the normal per-provider calculation. The isolated
 providers and an availability spy; it does not measure production throughput
 or replace the global request limiter.
 
+The public single-day hours read applies the same conservative future-window
+guard after request and reschedule-authority validation. A safely distant day
+returns the existing empty-hours response before any provider slot analysis;
+an invalid specific provider still fails. Near and boundary days use the normal
+calculation. `BookingAvailableHoursFutureLimitTest` checks that behavior with
+synthetic providers and an availability spy, not with production load.
+
 JSON bodies read through `EA_Input::json()` are bounded to 1 MiB before
 decoding, including requests whose `Content-Length` is absent or incorrect.
 The authenticated Appointments API v1 POST/PUT DTO path has the same bound

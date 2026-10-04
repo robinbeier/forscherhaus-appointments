@@ -196,6 +196,7 @@ jobs:
               - 'tests/Integration/Controllers/BookingCancellationControllerFlowTest.php'
               - 'tests/Integration/Controllers/BookingReadAvailabilityControllerFlowTest.php'
               - 'tests/Integration/Controllers/BookingUnavailableDatesFutureLimitTest.php'
+              - 'tests/Integration/Controllers/BookingAvailableHoursFutureLimitTest.php'
               - 'tests/Integration/Controllers/CalendarAtomicSaveTest.php'
               - 'composer.json'
               - 'composer.lock'
