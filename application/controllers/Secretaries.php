@@ -178,17 +178,31 @@ class Secretaries extends EA_Controller
      */
     public function store(): void
     {
+        $owns_transaction = false;
+
         try {
-            if (cannot('add', PRIV_USERS)) {
-                abort(403, 'Forbidden');
-            }
             if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
                 abort(405, 'Method Not Allowed', ['Allow: POST']);
                 return;
             }
 
+            $user_id = (int) session('user_id');
+            if (!$user_id || !$this->hasCurrentAddPermission($user_id)) {
+                abort(403, 'Forbidden');
+                return;
+            }
+
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityPayloadRequestDto('secretary');
             $secretary = $request_dto->payload;
+
+            if (
+                (array_key_exists('id', $secretary) && $secretary['id'] !== '' && $secretary['id'] !== null) ||
+                array_key_exists('id_roles', $secretary)
+            ) {
+                abort(400, 'Invalid secretary create');
+                return;
+            }
+            unset($secretary['id']);
 
             $this->secretaries_model->only($secretary, $this->allowed_secretary_fields);
 
@@ -198,15 +212,73 @@ class Secretaries extends EA_Controller
 
             $this->secretaries_model->optional($secretary['settings'], $this->optional_secretary_setting_fields);
 
+            $user_ids = array_values(
+                array_unique(array_merge([$user_id], $this->normalizeUpdateProviderIds($secretary['providers']))),
+            );
+            sort($user_ids, SORT_NUMERIC);
+
+            $owns_transaction = !$this->db->trans_active();
+            if ($owns_transaction && !$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start secretary create transaction.');
+            }
+
+            $placeholders = implode(', ', array_fill(0, count($user_ids), '?'));
+            $locked_users = $this->db->query(
+                'SELECT `id`, `id_roles` FROM `' .
+                    $this->db->dbprefix('users') .
+                    '` WHERE `id` IN (' .
+                    $placeholders .
+                    ') ORDER BY `id` ASC FOR UPDATE',
+                $user_ids,
+            );
+            if ($locked_users === false) {
+                throw new RuntimeException('Could not lock secretary create users.');
+            }
+            $users_by_id = [];
+            foreach ($locked_users->result_array() as $row) {
+                $users_by_id[(int) $row['id']] = $row;
+            }
+
+            $actor = $users_by_id[$user_id] ?? null;
+            $locked_role = $actor
+                ? $this->db->query(
+                    'SELECT `users` FROM `' . $this->db->dbprefix('roles') . '` WHERE `id` = ? FOR UPDATE',
+                    [(int) $actor['id_roles']],
+                )
+                : null;
+            if ($locked_role === false) {
+                throw new RuntimeException('Could not lock secretary create role.');
+            }
+            $role = $locked_role?->row_array();
+            if (!$actor || !$role || !((int) $role['users'] & PRIV_ADD)) {
+                if ($owns_transaction) {
+                    $this->db->trans_rollback();
+                    $owns_transaction = false;
+                }
+                abort(403, 'Forbidden');
+                return;
+            }
+
             $secretary_id = $this->secretaries_model->save($secretary);
 
             $secretary = $this->secretaries_model->find($secretary_id);
+
+            if (!$this->db->trans_status()) {
+                throw new RuntimeException('Could not complete secretary create transaction.');
+            }
+            if ($owns_transaction && !$this->db->trans_commit()) {
+                throw new RuntimeException('Could not commit secretary create transaction.');
+            }
+            $owns_transaction = false;
 
             json_response([
                 'success' => true,
                 'id' => $secretary_id,
             ]);
         } catch (Throwable $e) {
+            if ($owns_transaction) {
+                $this->db->trans_rollback();
+            }
             json_exception($e);
         }
     }
@@ -510,6 +582,15 @@ class Secretaries extends EA_Controller
     {
         try {
             return can('edit', PRIV_USERS, $user_id);
+        } catch (InvalidArgumentException $e) {
+            return false;
+        }
+    }
+
+    private function hasCurrentAddPermission(int $user_id): bool
+    {
+        try {
+            return can('add', PRIV_USERS, $user_id);
         } catch (InvalidArgumentException $e) {
             return false;
         }
