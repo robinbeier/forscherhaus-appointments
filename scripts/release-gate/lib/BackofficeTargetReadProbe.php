@@ -155,8 +155,9 @@ final class BackofficeTargetReadProbe
             'GET explicit index' => fn(): GateHttpResponse => $this->client->get($area . '/index'),
             'POST search' => fn(): GateHttpResponse => $this->client->post($area . '/search', ['keyword' => $marker]),
             'GET search' => fn(): GateHttpResponse => $this->client->get($area . '/search', ['keyword' => $marker]),
-            'GET alias' => fn(): GateHttpResponse => $this->client->get($alias, ['keyword' => $marker]),
-            'POST alias' => fn(): GateHttpResponse => $this->client->post($alias, ['keyword' => $marker]),
+            // Legacy aliases redirect without forwarding a search keyword.
+            'GET alias' => fn(): GateHttpResponse => $this->client->get($alias),
+            'POST alias' => fn(): GateHttpResponse => $this->client->post($alias),
             'POST find' => fn(): GateHttpResponse => $this->client->post($area . '/find', [$idKey => $targetId]),
             'GET find' => fn(): GateHttpResponse => $this->client->get($area . '/find', [$idKey => $targetId]),
         ];
@@ -242,7 +243,7 @@ final class BackofficeTargetReadProbe
         if (is_string($queryString)) {
             parse_str($queryString, $query);
         }
-        if ($query !== [] && $query !== ['keyword' => $marker]) {
+        if ($query !== []) {
             throw new RuntimeException($operation . ' redirected with an unexpected query.');
         }
         $landing = $this->client->get($area . '/search', $query);
