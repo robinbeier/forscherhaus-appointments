@@ -52,7 +52,7 @@ authority for delegation, independent review, external writes, and landing.
 | Assessment of existing local regression evidence and patch validation | Separate Daybreak Blue assessment | Observed results tied to the tested version, covered criteria, and remaining gaps |
 | Security-sensitive implementation decisions | Astra primary | Narrow remediation and its rationale |
 | Independently verifiable implementation slices | Registered `implementation_worker` | Owned local diff and focused validation; model/runtime resolution follows WORKFLOW |
-| Independent PR review | Registered read-only reviewer, currently Astra/high | Reviewed head, scope, findings, and coverage limits; separate from the implementation session |
+| Independent PR review | Registered reviewer, currently Astra/high; effectively read-only preferred | Reviewed head, scope, findings, and coverage limits; separate from the implementation session |
 | Release verification planning and evidence integration | Astra primary, with specialist assessment where useful | Feasible acceptance plan using existing operator procedures and explicit release-level evidence gaps |
 
 These are project routing choices, not measured superiority claims. Daybreak Blue
@@ -101,9 +101,11 @@ preferred model ran when it did not.
 
 Before the first substantive Daybreak handoff, follow the
 [runtime preflight](reviewer-runtime-preflight.md#daybreak-defensive-role): verify
-the actual model and effective isolation in a fresh no-content handshake. An old
-session may not expose a newly registered role. Do not substitute a generic
-workspace-write agent just to obtain the requested model name.
+the actual model and effective permissions in a fresh no-content handshake. An
+old session may not expose a newly registered role. For ordinary code-only
+assessment, use the documented controlled path if effective read-only isolation
+is unavailable; do not claim that the role configuration proves isolation or
+substitute a different model to bypass an authorization limit.
 
 Record two independent completion fields in every cycle: `assessment_status`
 (complete/partial/blocked at the stated evidence level) and `model_plan_status`

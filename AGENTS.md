@@ -35,8 +35,10 @@ Purpose: durable repo instructions for Codex. Keep this file short; long or topi
 
 ## Review Default
 
-- Use one independent read-only reviewer with enough code context; add a
-  specialist when the actual risk warrants one. Follow `code_review.md`.
+- Use one independent reviewer with enough code context; prefer an effectively
+  read-only runtime. A controlled code-only review may proceed without it under
+  `docs/reviewer-runtime-preflight.md`. Add a specialist when the risk warrants
+  one. Follow `code_review.md`.
 - Standard review and PR creation do not require a separate CLI login or
   bootstrap. Keep current blocking CI and
   reviewed-head checks; `WORKFLOW.md` defines landing and authorization.

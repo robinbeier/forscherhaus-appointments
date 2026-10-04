@@ -1,8 +1,10 @@
 # Reviewer runtime preflight
 
-Use this protocol before dispatching an independent review agent. It checks
-that the reviewer can actually start and remain within the intended boundary;
-it does not replace the review itself.
+Use this protocol before dispatching an independent review agent. The required
+outcome is an independent review of the exact change without reviewer side
+effects. Prefer technical isolation, but do not make one particular mechanism
+a universal gate. This checks dispatch and evidence conditions; it does not
+replace the review itself.
 
 ## Readiness check
 
@@ -14,12 +16,11 @@ it does not replace the review itself.
    name, role name, or another endpoint's catalog.
 3. If the requested role or capability is explicitly unsupported, reject the
    dispatch before launch. If support is unknown, perform one minimal,
-   no-diff startup handshake in the candidate read-only role.
+   no-diff startup handshake when the runtime can provide a fresh context.
    Use `fork_turns="none"` or an equivalent runtime-native fresh context for
    every probe. Supply only the self-contained readiness request, never prior
-   turns, attachments, repository extracts, or diff output. If the runtime
-   cannot enforce that context boundary, do not send a probe; availability
-   remains unknown and an equivalent isolated reviewer or human is required.
+   turns, attachments, repository extracts, or diff output. If a fresh context
+   cannot be established, do not probe; availability remains unknown.
 
 The handshake may confirm only that the candidate launches under the requested
 runtime. It must produce no review, finding, repository content, secret,
@@ -40,25 +41,46 @@ role catalog; loading the updated project configuration in a fresh session and
 checking actual launch compatibility are still necessary. App and separately
 installed CLI versions can differ. A launch failure in an older CLI does not
 establish that the current app lacks access. Do not update global tools or
-weaken isolation merely to complete a review.
+misstate effective permissions merely to complete a review.
 
 Select a preferred correctness and security reviewer independently of model
-brand or a fixed model name. If it is unavailable, use an equally qualified
-available reviewer in an enforced read-only runtime whose coverage includes:
+brand or a fixed model name. For an ordinary independent PR code review,
+prefer an effectively read-only runtime whose coverage includes:
 
 - correctness, regressions, and security;
 - design and maintainability;
 - tests and regression coverage.
 
-If no agent meets that contract, use a qualified independent human reviewer.
+If read-only isolation is unavailable, a controlled independent agent with
+write-capable tools may review an ordinary PR only when all of these are
+available and recorded: exact base, exact head, and exact scope; a fresh context;
+an independently inspectable tool-call record for that reviewer session; no
+credentials or production data; no mutations, connectors, or external actions;
+primary-owned Git, GitHub, Linear, and merge operations; and post-review
+verification that the repository and head are unchanged plus inspection of the
+actual tool-call record. A reviewer self-report alone is insufficient. If the
+record is absent, incomplete, or shows a mutation or external action, use an
+isolated runtime or human instead and leave this review pending. This exception
+detects side effects after the fact rather than preventing them; it cannot undo
+an external action if one occurred.
 
-Fallbacks must preserve the effective filesystem, tool, connector, credential,
-Git, and merge boundaries. If read-only isolation is unavailable or unknown,
-do not dispatch an agent fallback: use a human reviewer or block.
+If no authorized agent meets the coverage and boundary contract, use a
+qualified independent human reviewer or leave the review pending.
+
+For a review that needs production access, credentials, or any external action,
+require a truly restricted runtime or a qualified human reviewer. Do not use
+the ordinary-review exception for that work.
+
+Automatic approval refusal remains binding. User-specific model and data
+authorization remains bound to the user and requested action; a model switch
+does not bypass either requirement. Prompt wording such as “read-only” does not
+grant permission or prove tool isolation.
 
 Bind the verified repository, base, head, and exact scope before the real
 review. The handshake is not review evidence. Use the same ready reviewer session
-for the actual review and follow-up questions; preserve its enforced boundary.
+for the actual review and follow-up questions where its boundary remains valid.
+When the ordinary-review exception is used, record its controls and the
+post-review unchanged-state and tool-activity checks instead.
 Before dispatching the real review or a follow-up, revalidate the head, base,
 scope, runtime, role, and capabilities. Rebind the review target after a head/base
 change. If the base changed, update the branch and require fresh blocking CI for
@@ -90,9 +112,11 @@ load the role. Record the surface and configuration used. A separately launched
 read-only CLI assessment is a disclosed alternate surface, not proof that app
 subagent dispatch worked. It must preserve context, tool, credential, network,
 and approval boundaries, and is never a route around a refused method.
-If support or isolation cannot be established, leave Daybreak pending; an allowed
-fallback must not mark the model plan fulfilled. Never change global access or
-weaken managed policy to make a launch succeed.
+If model support cannot be established, leave Daybreak pending; an allowed
+fallback must not mark the model plan fulfilled. If effective read-only
+isolation cannot be established, use only the controlled ordinary code-review
+path above and record the actual write-capable runtime. Never change global
+access or managed policy to make a launch succeed.
 
 ## Short readiness request
 
@@ -117,7 +141,8 @@ Head: <exact ref and commit>
 Scope: <files/modules and requested questions>
 Reviewer: <registered role>; resolved model/effort: <values>
 Available read tools: <runtime-supplied list>
-Boundary: no mutation, credentials, connectors, Git writes, merge, or publish
+Boundary: preferred no mutation, credentials, connectors, Git writes, merge, or publish;
+if ordinary-review exception applies, record its controls and post-review checks
 Runtime preflight: <compatibility evidence and timestamp>
 
 Return an independent final review result covering correctness/security,

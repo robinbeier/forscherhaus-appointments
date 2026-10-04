@@ -118,11 +118,13 @@ Use the reviewer roles with this split:
 - An `implementation_worker` must never be the sole reviewer of its own diff; preserve an independent reviewer role and primary-agent synthesis.
 
 The default is one independent reviewer covering all four topics above.
-Use a read-only reviewer available in the current environment or a human who
-did not implement the change. Provide the relevant surrounding code and tests;
-do not restrict a normal review to isolated added lines. Reviewer instructions
-are not operating-system isolation: preserve the runtime's read-only controls
-and never give a reviewer credentials, production data, or publishing authority.
+Prefer an effectively read-only agent or use an independent human. For a
+code-only review, a write-capable agent may be used under the controlled
+no-mutation path in [the runtime preflight](docs/reviewer-runtime-preflight.md).
+Provide the relevant surrounding code and tests; do not restrict a normal
+review to isolated added lines. Never give a reviewer credentials, production
+data, or publishing authority. Instructions against writes are not technical
+isolation; record that residual risk when using the controlled path.
 
 For authority, personal-data, migration, concurrency, or production risks, add
 specialist review when the general reviewer cannot adequately assess the risk.
@@ -140,9 +142,9 @@ review, including changes to review-tool code or policy.
 Run the [runtime preflight](docs/reviewer-runtime-preflight.md) before the
 actual agent review. A configured role or model name is not availability
 evidence; an unsupported startup is a harness failure. Keep the same review
-scope, exact base/head, independence and enforced tool isolation for a fallback.
-If no equivalent reviewer is available, review remains pending and blocks merge;
-keep the PR open until an available independent reviewer or human can review it.
+scope, exact base/head, independence, and approved data boundary for a fallback.
+If no authorized reviewer is available, review remains pending and blocks merge;
+keep the PR open until an independent reviewer or human can review it.
 Current blocking CI, resolved substantive findings, an updated independent
 review summary, and explicit merge authorization are still required by
 [WORKFLOW.md](WORKFLOW.md#pr-and-review-expectations).
