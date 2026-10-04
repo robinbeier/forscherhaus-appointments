@@ -1118,10 +1118,16 @@ paths:
                   in: query
                   schema:
                       type: integer
+                      minimum: 1
+                      maximum: 10000
+                  description: Page number from 1 through 10000. Defaults to 1.
                 - name: length
                   in: query
                   schema:
                       type: integer
+                      minimum: 1
+                      maximum: 100
+                  description: Number of admins from 1 through 100. Defaults to 20.
                 - name: sort
                   in: query
                   schema:
@@ -1149,6 +1155,8 @@ paths:
                                     $ref: '#/components/schemas/AdminRecord'
                 '401':
                     description: Unauthorized
+                '400':
+                    description: Invalid pagination parameters
                 '500':
                     description: Internal Server Error
                     content:
