@@ -69,7 +69,7 @@ You can provide up to three sorting fields which will be applied in the provided
 
 ### Paginate
 
-Paginate the result by providing the `page` parameter along with the optional `length` parameter that defaults to 20.
+Paginate the appointments result by providing the `page` parameter along with the optional `length` parameter that defaults to 20. For `GET /api/v1/appointments`, explicitly provided `length` values must be integers from 1 through 100, and `page` values must be integers from 1 through 10000. Invalid explicit pagination values return HTTP 400 before the appointments query runs.
 
 ```
 http://ea-installation/index.php/api/v1/appointments?page=1&length=10

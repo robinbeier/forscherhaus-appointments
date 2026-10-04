@@ -229,15 +229,61 @@ final class AppointmentsApiHttpReadTest extends TestCase
         }
 
         $query = ['serviceId' => $fixture->serviceId, 'length' => 1, 'sort' => '+id'];
-        $pageOne = $this->decode($admin->get('api/v1/appointments', $query + ['page' => 1]));
-        $pageTwo = $this->decode($admin->get('api/v1/appointments', $query + ['page' => 2]));
-        self::assertCount(1, $pageOne);
-        self::assertCount(1, $pageTwo);
-        self::assertNotSame($pageOne[0]['id'] ?? null, $pageTwo[0]['id'] ?? null);
-        self::assertEqualsCanonicalizing(
-            [(int) $first['id'], $secondId],
-            [(int) ($pageOne[0]['id'] ?? 0), (int) ($pageTwo[0]['id'] ?? 0)],
-        );
+        foreach (['api/v1/appointments', 'api/v1/appointments_api_v1/index'] as $path) {
+            $pageOne = $this->decode($admin->get($path, $query + ['page' => 1]));
+            $pageTwo = $this->decode($admin->get($path, $query + ['page' => 2]));
+            self::assertCount(1, $pageOne, $path);
+            self::assertCount(1, $pageTwo, $path);
+            self::assertNotSame($pageOne[0]['id'] ?? null, $pageTwo[0]['id'] ?? null, $path);
+            self::assertEqualsCanonicalizing(
+                [(int) $first['id'], $secondId],
+                [(int) ($pageOne[0]['id'] ?? 0), (int) ($pageTwo[0]['id'] ?? 0)],
+            );
+
+            $maximumLength = $this->decode(
+                $admin->get($path, [
+                    'serviceId' => $fixture->serviceId,
+                    'length' => 100,
+                    'sort' => '+id',
+                ]),
+            );
+            self::assertNotEmpty(
+                array_filter(
+                    $maximumLength,
+                    static fn(mixed $row): bool => is_array($row) && (int) ($row['id'] ?? 0) === (int) $first['id'],
+                ),
+                $path . ' must accept the maximum length boundary for the fixture query',
+            );
+        }
+    }
+
+    public function testCollectionPaginationRejectsInvalidValuesBeforeAnyMutation(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $appointment = $fixture->appointment();
+        $id = (int) $appointment['id'];
+        $before = $fixture->row('appointments', $id);
+        $admin = $this->basicClient($this->credentials['admin_username'], $this->credentials['password']);
+        $cases = [
+            ['length' => '0'],
+            ['length' => '101'],
+            ['length' => '999999999999999999999999999999'],
+            ['page' => '1.5'],
+            ['page' => '10001'],
+            ['page' => '999999999999999999999999999999'],
+        ];
+
+        foreach (['api/v1/appointments', 'api/v1/appointments_api_v1/index'] as $path) {
+            foreach ($cases as $query) {
+                $response = $admin->get($path, $query);
+                self::assertSame(400, $response->statusCode, $path . ' ' . http_build_query($query));
+                $payload = json_decode($response->body, true, 512, JSON_THROW_ON_ERROR);
+                self::assertFalse($payload['success'] ?? true);
+                self::assertStringContainsString('parameter must be an integer', $payload['message'] ?? '');
+                self::assertSame($before, $fixture->row('appointments', $id));
+            }
+        }
     }
 
     public function testAggregatesWithSubsetReplacesOnlyRequestedRelation(): void
