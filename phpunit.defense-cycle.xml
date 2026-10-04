@@ -70,6 +70,7 @@
             <file>./tests/Integration/SessionLifecycleTest.php</file>
             <file>./tests/Integration/OrdinaryLiveFixtureTest.php</file>
             <file>./tests/Integration/BackofficeRoleRevocationProbeTest.php</file>
+            <file>./tests/Integration/BackofficeTargetReadProbeTest.php</file>
             <file>./tests/Integration/OrdinaryAccountProbeTest.php</file>
             <file>./tests/Integration/OrdinarySessionProbeTest.php</file>
             <file>./tests/Integration/OrdinaryProbeEvidenceTest.php</file>

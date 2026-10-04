@@ -55,6 +55,8 @@ final class OrdinaryProbeEvidence
                     'login_validate',
                     'account_page',
                     'backoffice_role_reads',
+                    'backoffice_secretary_reads',
+                    'backoffice_service_reads',
                     'get_save',
                     'post_save',
                     'logout',

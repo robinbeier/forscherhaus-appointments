@@ -77,6 +77,189 @@ final class DefenseVerificationFixtureTest extends TestCase
         $this->fixture->deactivate();
     }
 
+    public function testBackofficeSecretaryReadCreatesOwnedGraphAndCleansExactly(): void
+    {
+        $actor = $this->ordinary->activate(roleSlug: 'admin');
+        $state = $this->fixture->activate('backoffice_secretary_read', $actor);
+        $db = &get_instance()->db;
+
+        self::assertSame('active', $this->fixture->verify());
+        self::assertSame(
+            1,
+            $db->get_where('users', ['id' => $state['ids']['provider'], 'is_private' => 1])->num_rows(),
+        );
+        self::assertSame(
+            1,
+            $db->get_where('users', ['id' => $state['ids']['secretary'], 'is_private' => 1])->num_rows(),
+        );
+        self::assertSame(1, $db->get_where('secretaries_providers', $state['links']['secretary_provider'])->num_rows());
+
+        $this->fixture->deactivate();
+        self::assertSame('clean', $this->fixture->verify());
+        self::assertSame(0, $db->get_where('secretaries_providers', $state['links']['secretary_provider'])->num_rows());
+        self::assertSame(0, $db->get_where('users', ['id' => $state['ids']['provider']])->num_rows());
+        self::assertSame(0, $db->get_where('users', ['id' => $state['ids']['secretary']])->num_rows());
+    }
+
+    public function testBackofficeServiceReadUsesPublicModelExclusionAndCleansExactly(): void
+    {
+        $actor = $this->ordinary->activate(roleSlug: 'admin');
+        $state = $this->fixture->activate('backoffice_service_read', $actor);
+        $db = &get_instance()->db;
+
+        $service = $db->get_where('services', ['id' => $state['ids']['service']])->row_array();
+        self::assertSame(1, (int) ($service['is_private'] ?? 0));
+        self::assertSame(1, (int) ($service['attendants_number'] ?? 0));
+        self::assertNull($service['id_service_categories'] ?? null);
+        self::assertSame(1, $db->get_where('services_providers', $state['links']['provider_service'])->num_rows());
+        $this->fixture->assertBackofficeReadServiceNotPublic();
+
+        $this->fixture->deactivate();
+        self::assertSame('clean', $this->fixture->verify());
+        self::assertSame(0, $db->get_where('services', ['id' => $state['ids']['service']])->num_rows());
+        self::assertSame(0, $db->get_where('services_providers', $state['links']['provider_service'])->num_rows());
+    }
+
+    public function testBackofficeSecretaryReadIdentityDriftBlocksCleanupUntilRestored(): void
+    {
+        $actor = $this->ordinary->activate(roleSlug: 'admin');
+        $state = $this->fixture->activate('backoffice_secretary_read', $actor);
+        $db = &get_instance()->db;
+        $secretaryId = (int) $state['ids']['secretary'];
+        $original = $db->get_where('users', ['id' => $secretaryId])->row_array();
+        self::assertTrue($db->update('users', ['notes' => 'drifted-' . $state['run_id']], ['id' => $secretaryId]));
+
+        try {
+            $this->fixture->deactivate();
+            self::fail('Cleanup must reject identity drift.');
+        } catch (RuntimeException $error) {
+            self::assertStringContainsString('drift', strtolower($error->getMessage()));
+        } finally {
+            $db->update('users', ['notes' => $original['notes']], ['id' => $secretaryId]);
+            if (is_file($this->stateDirectory . '/defense-verification.json')) {
+                $this->fixture->deactivate();
+            }
+        }
+        self::assertSame('clean', $this->fixture->verify());
+    }
+
+    public function testBackofficeServiceReadRecoversInterruptionAfterPartialActivation(): void
+    {
+        $actor = $this->ordinary->activate(roleSlug: 'admin');
+        $db = &get_instance()->db;
+        $proxy = new class ($db) {
+            public string $dbdriver;
+            public object $conn_id;
+            public bool $failed = false;
+
+            public function __construct(private readonly object $database)
+            {
+                $this->dbdriver = $database->dbdriver;
+                $this->conn_id = $database->conn_id;
+            }
+
+            public function insert(string $table, array $row): bool
+            {
+                if (!$this->failed && $table === 'services_providers') {
+                    $this->failed = true;
+                    return false;
+                }
+                return $this->database->insert($table, $row);
+            }
+
+            public function __call(string $name, array $arguments): mixed
+            {
+                return $this->database->$name(...$arguments);
+            }
+        };
+        $databaseProperty = new ReflectionProperty(DefenseVerificationFixture::class, 'db');
+        $databaseProperty->setValue($this->fixture, $proxy);
+        try {
+            $this->fixture->activate('backoffice_service_read', $actor);
+            self::fail('Injected partial activation failure must surface.');
+        } catch (RuntimeException $error) {
+            self::assertStringContainsString('Could not insert', $error->getMessage());
+        } finally {
+            $databaseProperty->setValue($this->fixture, $db);
+        }
+        self::assertTrue($proxy->failed);
+        self::assertSame('cleanup_pending', $this->fixture->verify());
+        $this->fixture->deactivate();
+        self::assertSame('clean', $this->fixture->verify());
+    }
+
+    public function testBackofficeSecretaryReadRecoversInterruptionAfterPartialActivation(): void
+    {
+        $actor = $this->ordinary->activate(roleSlug: 'admin');
+        $db = &get_instance()->db;
+        $proxy = new class ($db) {
+            public string $dbdriver;
+            public object $conn_id;
+            public bool $failed = false;
+
+            public function __construct(private readonly object $database)
+            {
+                $this->dbdriver = $database->dbdriver;
+                $this->conn_id = $database->conn_id;
+            }
+
+            public function insert(string $table, array $row): bool
+            {
+                if (!$this->failed && $table === 'secretaries_providers') {
+                    $this->failed = true;
+                    return false;
+                }
+                return $this->database->insert($table, $row);
+            }
+
+            public function __call(string $name, array $arguments): mixed
+            {
+                return $this->database->$name(...$arguments);
+            }
+        };
+        $databaseProperty = new ReflectionProperty(DefenseVerificationFixture::class, 'db');
+        $databaseProperty->setValue($this->fixture, $proxy);
+        try {
+            $this->fixture->activate('backoffice_secretary_read', $actor);
+            self::fail('Injected partial activation failure must surface.');
+        } catch (RuntimeException $error) {
+            self::assertStringContainsString('Could not insert', $error->getMessage());
+        } finally {
+            $databaseProperty->setValue($this->fixture, $db);
+        }
+        self::assertTrue($proxy->failed);
+        $journal = json_decode(
+            (string) file_get_contents($this->stateDirectory . '/defense-verification.json'),
+            true,
+            512,
+            JSON_THROW_ON_ERROR,
+        );
+        self::assertSame('prepared', $journal['intents']['secretary_links']['secretary_provider']['stage']);
+        self::assertSame('cleanup_pending', $this->fixture->verify());
+        $this->fixture->deactivate();
+        self::assertSame('clean', $this->fixture->verify());
+    }
+
+    public function testBackofficeSecretaryReadRecoversInsertCommittedBeforeCompletionJournal(): void
+    {
+        $actor = $this->ordinary->activate(roleSlug: 'admin');
+        $state = $this->fixture->activate('backoffice_secretary_read', $actor);
+        $db = &get_instance()->db;
+        $journalPath = $this->stateDirectory . '/defense-verification.json';
+        $journal = json_decode((string) file_get_contents($journalPath), true, 512, JSON_THROW_ON_ERROR);
+        $journal['phase'] = 'prepared';
+        $journal['intents']['secretary_links']['secretary_provider']['stage'] = 'prepared';
+        file_put_contents($journalPath, json_encode($journal, JSON_THROW_ON_ERROR));
+
+        self::assertSame(1, $db->get_where('secretaries_providers', $state['links']['secretary_provider'])->num_rows());
+        self::assertSame('cleanup_pending', $this->fixture->verify());
+        $this->fixture->deactivate();
+        self::assertSame('clean', $this->fixture->verify());
+        self::assertSame(0, $db->get_where('secretaries_providers', $state['links']['secretary_provider'])->num_rows());
+        self::assertSame(0, $db->get_where('users', ['id' => $state['ids']['secretary']])->num_rows());
+        self::assertSame(0, $db->get_where('users', ['id' => $state['ids']['provider']])->num_rows());
+    }
+
     public function testSecretariesPreparedRecoveryCleansRelationships(): void
     {
         $actor = $this->ordinary->activate(roleSlug: 'admin');

@@ -16,6 +16,7 @@ use ReleaseGate\ServicesApiWriteProbe;
 use ReleaseGate\UnavailabilitiesApiWriteProbe;
 use ReleaseGate\BlockedPeriodsApiWriteProbe;
 use ReleaseGate\BackofficeRoleRevocationProbe;
+use ReleaseGate\BackofficeTargetReadProbe;
 use ReleaseGate\ServiceCategoriesApiWriteProbe;
 use ReleaseGate\SecretariesApiAliasProbe;
 use ReleaseGate\OrdinaryAccountProbe;
@@ -53,6 +54,8 @@ if (
             'account',
             'methods',
             'backoffice-role-read',
+            'backoffice-secretary-read',
+            'backoffice-service-read',
             'customer-boundary',
             'customers-api',
             'staff-api',
@@ -177,6 +180,7 @@ try {
     require_once dirname(__DIR__) . '/release-gate/lib/UnavailabilitiesApiWriteProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/BlockedPeriodsApiWriteProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/BackofficeRoleRevocationProbe.php';
+    require_once dirname(__DIR__) . '/release-gate/lib/BackofficeTargetReadProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/ServiceCategoriesApiWriteProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/SecretariesApiAliasProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/CalendarResponsibilityRaceProbe.php';
@@ -257,12 +261,19 @@ try {
             }
             return $context;
         });
+        $probeHttpOrigin = 'http://localhost';
         $newClient = static fn(): GateHttpClient => new GateHttpClient(
-            'http://localhost',
+            $probeHttpOrigin,
             indexPage: (string) config_item('index_page'),
             csrfCookieName: (string) config_item('csrf_cookie_name'),
             csrfTokenName: (string) config_item('csrf_token_name'),
             additionalHeaders: ['X-FH-Ordinary-Probe' => '1'],
+        );
+        $newPublicClient = static fn(): GateHttpClient => new GateHttpClient(
+            $probeHttpOrigin,
+            indexPage: (string) config_item('index_page'),
+            csrfCookieName: (string) config_item('csrf_cookie_name'),
+            csrfTokenName: (string) config_item('csrf_token_name'),
         );
         $client = $newClient();
         if ($action === 'account') {
@@ -285,6 +296,27 @@ try {
             );
             if ($fixture->verify() !== 'cleanup_pending') {
                 throw new RuntimeException('Transitioned Backoffice fixture did not enter cleanup state.');
+            }
+        } elseif (in_array($action, ['backoffice-secretary-read', 'backoffice-service-read'], true)) {
+            $area = $action === 'backoffice-secretary-read' ? 'secretaries' : 'services';
+            $profile = $area === 'secretaries' ? 'backoffice_secretary_read' : 'backoffice_service_read';
+            $supplemental = $evidence->run(
+                'supplemental_activate',
+                fn(): array => $verificationFixture->activate($profile, $context),
+            );
+            $result['evidence'] = $evidence->run(
+                $area === 'secretaries' ? 'backoffice_secretary_reads' : 'backoffice_service_reads',
+                fn(): array => (new BackofficeTargetReadProbe(
+                    $client,
+                    $newPublicClient(),
+                    $fixture,
+                    $verificationFixture,
+                    $probeHttpOrigin,
+                    $sessions->remember(...),
+                ))->run($area),
+            );
+            if ($fixture->verify() !== 'cleanup_pending' || $verificationFixture->verify() !== 'active') {
+                throw new RuntimeException('Backoffice read fixtures did not enter expected cleanup states.');
             }
         } elseif ($action === 'customer-boundary') {
             $supplemental = $evidence->run(

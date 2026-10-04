@@ -27,6 +27,8 @@ final class DefenseVerificationFixture
         'blocked_periods_api',
         'service_categories_api',
         'secretaries_api',
+        'backoffice_secretary_read',
+        'backoffice_service_read',
     ];
     private const ACTIVE_TRANSACTION_ERROR = 'Defense verification fixture cannot run inside an active database transaction.';
 
@@ -90,6 +92,8 @@ final class DefenseVerificationFixture
                         'blocked_periods_api',
                         'service_categories_api',
                         'secretaries_api',
+                        'backoffice_secretary_read',
+                        'backoffice_service_read',
                     ],
                     true,
                 )
@@ -120,20 +124,17 @@ final class DefenseVerificationFixture
             // an exact durable intent before it can reach the database.
             $this->writeState($state);
             try {
-                $state =
-                    $profile === 'customer_boundary'
-                        ? $this->activateCustomerBoundary($state)
-                        : ($profile === 'services_api'
-                            ? $this->activateServicesApi($state)
-                            : ($profile === 'unavailabilities_api'
-                                ? $this->activateUnavailabilitiesApi($state)
-                                : ($profile === 'blocked_periods_api'
-                                    ? $this->activateBlockedPeriodsApi($state)
-                                    : ($profile === 'service_categories_api'
-                                        ? $this->activateServiceCategoriesApi($state)
-                                        : ($profile === 'secretaries_api'
-                                            ? $this->activateSecretariesApi($state)
-                                            : $this->activateCalendarRace($state))))));
+                $state = match ($profile) {
+                    'customer_boundary' => $this->activateCustomerBoundary($state),
+                    'services_api' => $this->activateServicesApi($state),
+                    'unavailabilities_api' => $this->activateUnavailabilitiesApi($state),
+                    'blocked_periods_api' => $this->activateBlockedPeriodsApi($state),
+                    'service_categories_api' => $this->activateServiceCategoriesApi($state),
+                    'secretaries_api' => $this->activateSecretariesApi($state),
+                    'backoffice_secretary_read' => $this->activateBackofficeSecretaryRead($state),
+                    'backoffice_service_read' => $this->activateBackofficeServiceRead($state),
+                    default => $this->activateCalendarRace($state),
+                };
                 $state['phase'] = 'active';
                 $this->writeState($state);
                 return $state;
@@ -875,6 +876,84 @@ final class DefenseVerificationFixture
         return $state;
     }
 
+    /** Prepare the single private provider/secretary graph for backoffice reads. */
+    private function activateBackofficeSecretaryRead(array $state): array
+    {
+        $secretaryRole = $this->role('secretary');
+        $providerRole = $this->role('provider');
+        $state['roles'] = ['secretary' => $secretaryRole, 'provider' => $providerRole];
+        $state['ids']['provider'] = $this->insertUser($state, 'provider', $providerRole, 'backoffice-secretary');
+        $state['ids']['secretary'] = $this->insertUser($state, 'secretary', $secretaryRole, 'backoffice-secretary');
+        $state['links']['secretary_provider'] = [
+            'id_users_secretary' => $state['ids']['secretary'],
+            'id_users_provider' => $state['ids']['provider'],
+        ];
+        $state['intents']['secretary_links']['secretary_provider'] = ['stage' => 'prepared'];
+        $this->journal($state);
+        $this->insertExact('secretaries_providers', $state['links']['secretary_provider']);
+        $state['intents']['secretary_links']['secretary_provider']['stage'] = 'complete';
+        $this->journal($state);
+        return $state;
+    }
+
+    /** Prepare the single private service/provider graph for backoffice reads. */
+    private function activateBackofficeServiceRead(array $state): array
+    {
+        $providerRole = $this->role('provider');
+        $state['roles'] = ['provider' => $providerRole];
+        $state['ids']['provider'] = $this->insertUser($state, 'provider', $providerRole, 'backoffice-service');
+        $state['ids']['service'] = $this->insertServiceForKey($state, 'service', 'backoffice');
+        $state['links']['provider_service'] = [
+            'id_users' => $state['ids']['provider'],
+            'id_services' => $state['ids']['service'],
+        ];
+        $this->journal($state);
+        $this->insertExact('services_providers', $state['links']['provider_service']);
+        return $state;
+    }
+
+    /** Prove the owned private service is excluded by the real public selector. */
+    public function assertBackofficeReadServiceNotPublic(): void
+    {
+        $this->withLock(function (): void {
+            $state = $this->readState();
+            $this->validateState($state);
+            if ($state['phase'] !== 'active' || $state['profile'] !== 'backoffice_service_read') {
+                throw new RuntimeException('Backoffice service read requires its dedicated graph.');
+            }
+            $this->assertOwnership($state);
+            $serviceId = (int) ($state['ids']['service'] ?? 0);
+            $service = $this->db->get_where('services', ['id' => $serviceId])->row_array();
+            if (
+                !is_array($service) ||
+                (int) ($service['is_private'] ?? 0) !== 1 ||
+                (int) ($service['attendants_number'] ?? 0) !== 1 ||
+                ($service['id_service_categories'] ?? null) !== null ||
+                $this->db->get_where('appointments', ['id_services' => $serviceId])->num_rows() !== 0
+            ) {
+                throw new RuntimeException('Owned backoffice service is not private.');
+            }
+            $ci = &\get_instance();
+            $ci->load->model('services_model');
+            try {
+                $publicServices = $ci->services_model->get_available_services(true);
+            } catch (Throwable $error) {
+                throw new RuntimeException('Public service selection failed closed.', 0, $error);
+            }
+            if (!is_array($publicServices)) {
+                throw new RuntimeException('Public service selection returned malformed data.');
+            }
+            foreach ($publicServices as $row) {
+                if (!is_array($row) || !isset($row['id']) || (int) $row['id'] < 1) {
+                    throw new RuntimeException('Public service selection returned malformed data.');
+                }
+                if ((int) $row['id'] === $serviceId) {
+                    throw new RuntimeException('Owned private backoffice service appeared in public selection.');
+                }
+            }
+        });
+    }
+
     /** Prepare two independently owned services for the Services API probe. */
     private function activateServicesApi(array $state): array
     {
@@ -1295,6 +1374,8 @@ final class DefenseVerificationFixture
                 'calendar_customer',
                 'secretary_target',
                 'secretary_sentinel',
+                'provider',
+                'secretary',
             ]
             as $key
         ) {
@@ -1303,15 +1384,18 @@ final class DefenseVerificationFixture
                 if (($user['notes'] ?? null) !== $state['marker']) {
                     throw new RuntimeException('Fixture identity drift detected.');
                 }
-                $roleKey = in_array($key, ['provider_target', 'foreign_provider'], true)
+                $roleKey = in_array($key, ['provider_target', 'foreign_provider', 'provider'], true)
                     ? 'provider'
                     : (in_array($key, ['admin_target', 'api_admin'], true)
                         ? 'admin'
-                        : (in_array($key, ['secretary_target', 'secretary_sentinel'], true)
+                        : (in_array($key, ['secretary_target', 'secretary_sentinel', 'secretary'], true)
                             ? 'secretary'
                             : 'customer'));
                 if ((int) ($user['id_roles'] ?? 0) !== (int) $state['roles'][$roleKey]) {
                     throw new RuntimeException('Fixture role drift detected.');
+                }
+                if (in_array($key, ['provider', 'secretary'], true) && (int) ($user['is_private'] ?? 0) !== 1) {
+                    throw new RuntimeException('Backoffice read actor graph must remain private.');
                 }
                 if (isset($state['usernames'][$key])) {
                     $settings = $this->db
@@ -1542,7 +1626,22 @@ final class DefenseVerificationFixture
                     ->num_rows();
                 $stage = $state['intents']['secretary_links'][$linkKey]['stage'] ?? null;
                 if ($stage === 'prepared' && $matches !== 0) {
-                    throw new RuntimeException('Prepared secretary relationship provenance is unproven.');
+                    // The backoffice read graph journals its exact private endpoints before
+                    // insert. A crash after insert but before the complete journal may leave
+                    // precisely this one relationship; both endpoint identities were checked
+                    // above and the scoped relationship is safe to remove during recovery.
+                    if (
+                        ($state['profile'] ?? null) !== 'backoffice_secretary_read' ||
+                        $linkKey !== 'secretary_provider' ||
+                        $matches !== 1 ||
+                        $this->db
+                            ->get_where('secretaries_providers', [
+                                'id_users_secretary' => (int) $link['id_users_secretary'],
+                            ])
+                            ->num_rows() !== 1
+                    ) {
+                        throw new RuntimeException('Prepared secretary relationship provenance is unproven.');
+                    }
                 }
                 if ($stage === 'complete' && $matches !== 1) {
                     throw new RuntimeException('Prepared secretary relationship is incomplete or ambiguous.');
@@ -1967,6 +2066,8 @@ final class DefenseVerificationFixture
                         'calendar_customer',
                         'secretary_target',
                         'secretary_sentinel',
+                        'provider',
+                        'secretary',
                     ],
                     true,
                 )
@@ -2148,6 +2249,8 @@ final class DefenseVerificationFixture
                 'calendar_customer',
                 'secretary_target',
                 'secretary_sentinel',
+                'provider',
+                'secretary',
             ]
             as $key
         ) {
@@ -2829,6 +2932,8 @@ final class DefenseVerificationFixture
                 'api_admin',
                 'secretary_target',
                 'secretary_sentinel',
+                'provider',
+                'secretary',
             ]
             as $key
         ) {
@@ -2911,14 +3016,19 @@ final class DefenseVerificationFixture
             throw new InvalidArgumentException('Active ordinary actor is required.');
         }
         $row = $this->db
-            ->select('users.id, users.notes, users.id_roles, roles.slug, user_settings.username')
+            ->select('users.id, users.notes, users.id_roles, users.is_private, roles.slug, user_settings.username')
             ->from('users')
             ->join('roles', 'roles.id = users.id_roles')
             ->join('user_settings', 'user_settings.id_users = users.id')
             ->where('users.id', $id)
             ->get()
             ->row_array();
-        if (!$row || !str_starts_with((string) $row['notes'], 'ordinary-live:') || $row['slug'] !== $requiredRole) {
+        if (
+            !$row ||
+            !str_starts_with((string) $row['notes'], 'ordinary-live:') ||
+            $row['slug'] !== $requiredRole ||
+            (int) ($row['is_private'] ?? 0) !== 1
+        ) {
             throw new RuntimeException('Actor is not the active synthetic ordinary actor.');
         }
         if (isset($context['marker']) && $context['marker'] !== $row['notes']) {
@@ -3053,7 +3163,27 @@ final class DefenseVerificationFixture
 
     private function hasDatabaseLeftovers(): bool
     {
-        return $this->db->like('notes', 'defense-verification:', 'after')->count_all_results('users') > 0 ||
+        $secretaryLinks = $this->db
+            ->from('secretaries_providers')
+            ->join('users', 'users.id = secretaries_providers.id_users_secretary')
+            ->join('users AS providers', 'providers.id = secretaries_providers.id_users_provider')
+            ->group_start()
+            ->like('users.notes', 'defense-verification:', 'after')
+            ->or_like('providers.notes', 'defense-verification:', 'after')
+            ->group_end()
+            ->count_all_results();
+        $serviceLinks = $this->db
+            ->from('services_providers')
+            ->join('services', 'services.id = services_providers.id_services')
+            ->join('users', 'users.id = services_providers.id_users')
+            ->group_start()
+            ->like('services.description', 'defense-verification:', 'after')
+            ->or_like('users.notes', 'defense-verification:', 'after')
+            ->group_end()
+            ->count_all_results();
+        return $secretaryLinks > 0 ||
+            $serviceLinks > 0 ||
+            $this->db->like('notes', 'defense-verification:', 'after')->count_all_results('users') > 0 ||
             $this->db->like('username', 'defense_verify_', 'after')->count_all_results('user_settings') > 0 ||
             $this->db->like('description', 'defense-verification:', 'after')->count_all_results('services') > 0 ||
             $this->db->like('name', 'defense-verification:', 'after')->count_all_results('service_categories') > 0 ||

@@ -259,6 +259,8 @@ bash scripts/ops/run_ordinary_live_probe.sh preflight EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh account EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh methods EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh backoffice-role-read EXPECTED_RELEASE
+bash scripts/ops/run_ordinary_live_probe.sh backoffice-secretary-read EXPECTED_RELEASE
+bash scripts/ops/run_ordinary_live_probe.sh backoffice-service-read EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh customer-boundary EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh customers-api EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh staff-api EXPECTED_RELEASE
@@ -274,6 +276,25 @@ bash scripts/ops/run_ordinary_live_probe.sh appointments-api-overlap EXPECTED_RE
 bash scripts/ops/run_ordinary_live_probe.sh session EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh cleanup EXPECTED_RELEASE
 ```
+
+The two `backoffice-*-read` actions are separate, single-run ROB-670 proofs.
+Each creates a private synthetic administrator and only its own minimal target
+graph: one private provider plus one private secretary and their link, or one
+private provider plus one private service and their link. The service has no
+category or appointment. The service action checks both the public service
+model and an anonymous HTTP booking page: its service selector must omit the
+owned service. Anonymous session files join the same cleanup journal. The
+actions check bounded search/find projections and the direct aliases. The
+legacy aliases redirect to the canonical search route without retaining the
+keyword. The operator binds the redirect origin to its loopback HTTP client,
+follows only the locally reconstructed route, and checks the bounded shape of
+every row in the unfiltered landing response. The owned target may be absent
+from its first result page; if present, its values must match. Filtered
+canonical search separately requires exactly the one owned target. After role
+revocation, the landing route must return 403. Both actions check same-session
+denial after changing only the owned actor's
+stored role. The supplemental graph is removed before the actor and sessions;
+the wrapper keeps recovery markers if exact cleanup cannot be confirmed.
 
 The `calendar-methods` action uses only its own synthetic provider, customer,
 service and appointment. It requires all six direct calendar write routes to
