@@ -149,7 +149,10 @@ Die Überschneidungsprüfung und das vollständige Zurückrollen bleiben erhalte
 ## Öffentliche Stornierung
 
 `POST /booking_cancellation/of/{hash}` verlangt eine nicht leere gespeicherte
-Linkberechtigung und aktivierte Buchung. Der Controller öffnet nach dem ersten
+Linkberechtigung und aktivierte Buchung. Der Hash muss genau einen gewöhnlichen
+Termin treffen; ein historisch doppelter Hash erhält wie ein unbekannter Hash
+die generische Nicht-gefunden-Antwort, bevor ein Löschziel gewählt wird.
+Der Controller öffnet nach dem ersten
 Lookup eine äußere Transaktion, sperrt den Termin und prüft Hash, Terminart und
 `book_advance_timeout` erneut auf dem gesperrten Datensatz. Wie die bestehende
 Verwaltungsseite lehnt er `start_datetime < now + timeout` ab; Gleichheit bleibt
@@ -166,7 +169,10 @@ Anbieterzeitzone, Methode, deaktivierte Buchung, Nichtmutation und erfolgreiche
 frühe Stornierung. Der Konkurrenztest beobachtet den tatsächlichen
 Datenbank-Lock-Wait einer zweiten HTTP-Verbindung und prüft anschließend
 geänderte Startzeit, ausgetauschten Hash und gelöschten Datensatz. Diese lokalen
-Nachweise ersetzen keine Produktionsprüfung.
+Nachweise ersetzen keine Produktionsprüfung. Ein weiterer isolierter HTTP-Test
+legt zwei eigene gewöhnliche Termine mit gleichem Hash und getrennten Kunden an
+und prüft generische Ablehnung ohne Termin-, Puffer- oder Kundenänderung. Er
+belegt weder eine produktive Hash-Kollision noch konkurrierende Hash-Inserts.
 
 ## Local Repro (Docker CI-Parity)
 
