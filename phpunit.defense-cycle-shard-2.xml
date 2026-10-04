@@ -44,6 +44,7 @@
             <file>./tests/Integration/Controllers/PublicBookingBlockedPeriodRaceHttpTest.php</file>
             <file>./tests/Integration/Controllers/PublicBookingManualUnavailabilityRaceHttpTest.php</file>
             <file>./tests/Integration/Controllers/PublicRescheduleBlockedPeriodRaceHttpTest.php</file>
+            <file>./tests/Integration/Controllers/PublicRescheduleManualUnavailabilityRaceHttpTest.php</file>
             <file>./tests/Integration/Controllers/ProviderPdfExportHttpTest.php</file>
             <file>./tests/Integration/Controllers/DashboardExportHttpTest.php</file>
             <file>./tests/Integration/Controllers/DashboardRoleRevocationHttpTest.php</file>
