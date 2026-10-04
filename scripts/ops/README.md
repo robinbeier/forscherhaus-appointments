@@ -137,8 +137,8 @@ Script inventory:
   Defense Factory verification actions. Besides the original account/session
   probes, `methods`, `customer-boundary`, `customers-api`, `services-api`,
   `calendar-race`, `backoffice-secretary-read`, `backoffice-service-read`, and
-  `appointments-api-overlap` collect direct, bounded
-  evidence for the account, customer, service and appointment write contracts.
+  `appointments-api-overlap` and `appointments-api-read` collect direct, bounded
+  evidence for the account, customer, service and appointment contracts.
   See `docs/release-gate-defense-cycle.md`; repository delivery does not install
   the operator bundle or execute any production action.
 

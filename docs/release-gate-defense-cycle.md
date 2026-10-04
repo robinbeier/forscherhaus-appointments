@@ -272,6 +272,7 @@ bash scripts/ops/run_ordinary_live_probe.sh secretaries-api EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh calendar-race EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh calendar-methods EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh appointments-api EXPECTED_RELEASE
+bash scripts/ops/run_ordinary_live_probe.sh appointments-api-read EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh appointments-api-overlap EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh session EXPECTED_RELEASE
 bash scripts/ops/run_ordinary_live_probe.sh cleanup EXPECTED_RELEASE
@@ -605,6 +606,22 @@ content-type, JSON-shape and unsupported-field matrix. Negative payload checks
 use the owned PUT target, so a failed contract cannot create an unjournaled row.
 Cleanup removes the API rows before the sentinel and then removes relationships
 and parents; any foreign relationship or generated child fails closed.
+
+`appointments-api-read` reuses the same owned private provider, customer,
+service and unchanged appointment sentinel, adding only an owned Basic-admin
+principal. It makes no API write request and never prepares or changes the
+global Bearer token. The probe checks canonical collection/show GET routes and
+their direct index/show aliases through localhost HTTP, including relation
+projection with `fields=id`; it rejects unexpected raw or missing relation
+fields and requires the owned private service to remain absent from the public
+service selector. It compares the owned fixture snapshot before and after the
+requests. Setup still creates private synthetic rows and sessions under the
+shared lock and cleanup timer; success requires the ordinary independent
+cleanup of every owned row, session, journal and transient unit. This is one
+bounded productive read-path observation, not evidence about real appointments
+or every API filter/authentication mode. A new operator bundle requires exact
+reviewed-source binding and an authorized, recoverable installation before the
+first production run.
 
 `appointments-api-overlap` uses the same root-controlled fixture and recovery
 boundary as `appointments-api`, but leaves both API-created rows for wrapper
