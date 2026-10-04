@@ -583,10 +583,16 @@ paths:
                   in: query
                   schema:
                       type: integer
+                      minimum: 1
+                      maximum: 10000
+                  description: Page number from 1 through 10000. Defaults to 1.
                 - name: length
                   in: query
                   schema:
                       type: integer
+                      minimum: 1
+                      maximum: 100
+                  description: Number of customers from 1 through 100. Defaults to 20.
                 - name: sort
                   in: query
                   schema:
@@ -614,6 +620,12 @@ paths:
                                     $ref: '#/components/schemas/CustomerRecord'
                 '401':
                     description: Unauthorized
+                '400':
+                    description: Invalid pagination parameter
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
                 '500':
                     description: Internal Server Error
                     content:

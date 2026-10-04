@@ -124,6 +124,48 @@ final class CustomersApiHttpReadTest extends TestCase
         self::assertSame($before, $fixture->row('users', $fixture->customerId));
     }
 
+    public function testCollectionPaginationBoundsApplyToBothRoutesAndReadCredentialsWithoutMutation(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $before = $fixture->row('users', $fixture->customerId);
+        $clients = [
+            'admin-basic' => $this->basicClient($this->credentials['admin_username'], $this->credentials['password']),
+            'global-bearer' => $this->bearerClient($this->credentials['token']),
+        ];
+        $paths = ['api/v1/customers', 'api/v1/customers_api_v1/index'];
+
+        foreach ($clients as $case => $client) {
+            foreach ($paths as $path) {
+                foreach ([['length' => 1, 'page' => 1], ['length' => 100, 'page' => 10000]] as $query) {
+                    $response = $client->get($path, [...$query, 'q' => $fixture->run]);
+                    $rows = $this->decodeSuccess($response);
+                    self::assertLessThanOrEqual($query['length'], count($rows), $case . ' ' . $path);
+                }
+
+                foreach (
+                    [
+                        ['length' => 0],
+                        ['length' => 101],
+                        ['length' => '999999999999999999999'],
+                        ['page' => 0],
+                        ['page' => 10001],
+                        ['page' => '999999999999999999999'],
+                    ]
+                    as $query
+                ) {
+                    $response = $client->get($path, $query);
+                    self::assertSame(400, $response->statusCode, $case . ' ' . $path . ' must reject pagination.');
+                    $payload = json_decode($response->body, true, 512, JSON_THROW_ON_ERROR);
+                    self::assertFalse($payload['success'] ?? true);
+                    self::assertArrayHasKey('message', $payload);
+                }
+            }
+        }
+
+        self::assertSame($before, $fixture->row('users', $fixture->customerId));
+    }
+
     public function testDirectAliasRejectsNonGetMethodsWithoutBodyOrMutation(): void
     {
         $fixture = $this->fixture;
