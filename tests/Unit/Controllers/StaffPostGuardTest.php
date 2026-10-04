@@ -136,9 +136,11 @@ final class StaffPostGuardTest extends TestCase
             // instead of this pre-transaction source probe. Admins::destroy uses
             // the same current-authority transaction boundary and is covered by
             // AdminsDestroyHttpTest.
+            // Secretaries::destroy now has the same current-stored-authority and
+            // transaction boundary; SecretariesDestroyRoleHttpTest covers its
+            // real HTTP/DB method, alias, demotion, and mutation behavior.
             ['Secretaries', 'store'],
             ['Secretaries', 'update'],
-            ['Secretaries', 'destroy'],
         ];
     }
 

@@ -292,25 +292,106 @@ class Secretaries extends EA_Controller
      */
     public function destroy(): void
     {
+        $owns_transaction = false;
+
         try {
-            if (cannot('delete', PRIV_USERS)) {
-                abort(403, 'Forbidden');
-            }
             if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
                 abort(405, 'Method Not Allowed', ['Allow: POST']);
                 return;
             }
 
+            $user_id = (int) session('user_id');
+            if (!$user_id || !$this->hasCurrentDeletePermission($user_id)) {
+                abort(403, 'Forbidden');
+            }
+
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityIdRequestDto('secretary_id');
-            $secretary_id = $request_dto->id;
+            $secretary_id = filter_var($request_dto->id, FILTER_VALIDATE_INT, [
+                'options' => ['min_range' => 1],
+            ]);
+            if ($secretary_id === false) {
+                abort(400, 'Invalid secretary ID');
+            }
+
+            $owns_transaction = !$this->db->trans_active();
+            if ($owns_transaction && !$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start secretary delete transaction.');
+            }
+
+            // Lock the actor and target in the shared numeric user order.
+            $user_ids = array_values(array_unique([$user_id, $secretary_id]));
+            sort($user_ids, SORT_NUMERIC);
+            $placeholders = implode(', ', array_fill(0, count($user_ids), '?'));
+            $db_debug = $this->db->db_debug;
+            $this->db->db_debug = false;
+            try {
+                $locked_users = $this->db->query(
+                    'SELECT `id`, `id_roles` FROM `' .
+                        $this->db->dbprefix('users') .
+                        '` WHERE `id` IN (' .
+                        $placeholders .
+                        ') ORDER BY `id` ASC FOR UPDATE',
+                    $user_ids,
+                );
+            } catch (Throwable $e) {
+                throw new RuntimeException('Could not lock secretary delete users.', 0, $e);
+            } finally {
+                $this->db->db_debug = $db_debug;
+            }
+            if ($locked_users === false) {
+                throw new RuntimeException('Could not lock secretary delete users.');
+            }
+
+            $users_by_id = [];
+            foreach ($locked_users->result_array() as $row) {
+                $users_by_id[(int) $row['id']] = $row;
+            }
+            if (!isset($users_by_id[$user_id]) || !$this->hasCurrentDeletePermission($user_id)) {
+                if ($owns_transaction) {
+                    $this->db->trans_rollback();
+                    $owns_transaction = false;
+                }
+                abort(403, 'Forbidden');
+            }
+            if (
+                !isset($users_by_id[$secretary_id]) ||
+                (int) $users_by_id[$secretary_id]['id_roles'] !== $this->secretaries_model->get_secretary_role_id()
+            ) {
+                if ($owns_transaction) {
+                    $this->db->trans_rollback();
+                    $owns_transaction = false;
+                }
+                abort(404, 'Secretary not found');
+            }
 
             $this->secretaries_model->delete($secretary_id);
+
+            if (!$this->db->trans_status()) {
+                throw new RuntimeException('Could not complete secretary delete transaction.');
+            }
+            if ($owns_transaction && !$this->db->trans_commit()) {
+                throw new RuntimeException('Could not commit secretary delete transaction.');
+            }
+            $owns_transaction = false;
 
             json_response([
                 'success' => true,
             ]);
         } catch (Throwable $e) {
+            if ($owns_transaction) {
+                $this->db->trans_rollback();
+            }
             json_exception($e);
+        }
+    }
+
+    private function hasCurrentDeletePermission(int $user_id): bool
+    {
+        try {
+            return can('delete', PRIV_USERS, $user_id);
+        } catch (InvalidArgumentException $e) {
+            // A principal lookup that fails after login has no authority.
+            return false;
         }
     }
 

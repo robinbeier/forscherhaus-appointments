@@ -13,6 +13,7 @@
             <file>./tests/Integration/Controllers/AdminsStoreHttpTest.php</file>
             <file>./tests/Integration/Controllers/AdminsUpdateHttpTest.php</file>
             <file>./tests/Integration/Controllers/AdminsDestroyHttpTest.php</file>
+            <file>./tests/Integration/Controllers/SecretariesDestroyRoleHttpTest.php</file>
             <file>./tests/Integration/Controllers/CustomersApiHttpWriteTest.php</file>
             <file>./tests/Integration/Controllers/CustomersProvidersApiDestroyAliasHttpTest.php</file>
             <file>./tests/Integration/Controllers/CustomersApiWriteAliasHttpTest.php</file>

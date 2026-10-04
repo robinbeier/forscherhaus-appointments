@@ -640,6 +640,16 @@ sequential demotion, ID/type, and a synthetic successful delete. This local
 proof does not establish every concurrent role-change schedule or a
 production account write.
 
+The classic `secretaries/destroy` path and its `backend_api/ajax_delete_secretary`
+alias accept only POST with CSRF. The actor must retain the current stored
+`users.delete` permission; actor and target rows are locked in numeric ID order
+and rechecked before deletion. Only a target still carrying the Secretary role
+may be deleted, and the model requires exactly one affected row. The isolated
+`SecretariesDestroyRoleHttpTest` covers method and CSRF rejection, sequential
+role demotion, target type, and a synthetic successful delete on both paths.
+It does not prove every concurrent role-permission edit or a production
+account write.
+
 The product supports `services.attendants_number = 1`, enforced by
 [Services_model](application/models/Services_model.php). Other values are not
 supported product behavior; this application rule is not a claim of a database
