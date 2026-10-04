@@ -169,6 +169,8 @@ final class PublicRescheduleManualUnavailabilityRaceHttpTest extends TestCase
 
             self::assertTrue($writer->trans_commit());
             $writerTransactionOpen = false;
+            // The commit releases the provider lock. This independent read
+            // proves the block is committed, but may race with HTTP resumption.
             $committedBlock = $observer
                 ->get_where('appointments', [
                     'id' => $this->manualUnavailabilityId,

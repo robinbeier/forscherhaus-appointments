@@ -535,11 +535,11 @@ removed. This does not cover the Calendar or API HTTP writer, every possible
 interleaving, or a live production booking.
 The isolated `PublicRescheduleManualUnavailabilityRaceHttpTest` covers the
 corresponding authorized public reschedule schedule: a run-owned manual block
-commits while the POST waits on the provider lock, and an independent
-connection confirms the block before the request resumes. The POST rejects
-with 409 without changing the original appointment, customer, service, or
-consent; the attempted use consumes its one-time authority. A new authority
-allows a positive local control after the owned block is removed. This proves
+commits while the POST waits on the provider lock. An independent connection
+confirms the committed block; this observation may occur after the POST resumes.
+The POST rejects with 409 without changing the original appointment, customer,
+service, or consent; the attempted use consumes its one-time authority. A new
+authority allows a positive local control after the owned block is removed. This proves
 one ordered interleaving, not the Calendar or API HTTP writer, every concurrent
 schedule, or a productive reschedule.
 
