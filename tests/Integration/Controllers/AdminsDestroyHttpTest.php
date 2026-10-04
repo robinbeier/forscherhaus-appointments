@@ -108,6 +108,85 @@ final class AdminsDestroyHttpTest extends TestCase
         self::assertSame($before, $this->fixture->adminDeleteState($this->targetId));
     }
 
+    public function testLegacyDeleteAliasRejectsGetWithoutMutation(): void
+    {
+        $admin = $this->login($this->server->client());
+        $this->createTarget();
+        $before = $this->fixture->adminDeleteState($this->targetId);
+
+        $response = $admin->get('backend_api/ajax_delete_admin?admin_id=' . $this->targetId);
+
+        self::assertSame(405, $response->statusCode, $response->body);
+        self::assertSame($before, $this->fixture->adminDeleteState($this->targetId));
+    }
+
+    public function testLegacyDeleteAliasRejectsPostWithoutCsrfWithoutMutation(): void
+    {
+        $admin = $this->login($this->server->client());
+        $this->createTarget();
+        $before = $this->fixture->adminDeleteState($this->targetId);
+
+        $response = $admin->post('backend_api/ajax_delete_admin', ['admin_id' => $this->targetId], null, false);
+
+        self::assertSame(403, $response->statusCode, $response->body);
+        self::assertSame($before, $this->fixture->adminDeleteState($this->targetId));
+    }
+
+    public function testLegacyDeleteAliasRejectsStoredRoleDemotionWithoutMutation(): void
+    {
+        $admin = $this->login($this->server->client());
+        $this->createTarget();
+        $before = $this->fixture->adminDeleteState($this->targetId);
+        $customerRole = get_instance()
+            ->db->get_where('roles', ['slug' => DB_SLUG_CUSTOMER])
+            ->row_array();
+        self::assertNotEmpty($customerRole);
+
+        try {
+            self::assertTrue(
+                (bool) get_instance()->db->update(
+                    'users',
+                    ['id_roles' => (int) $customerRole['id']],
+                    ['id' => $this->fixture->actorId],
+                ),
+            );
+            $response = $admin->post('backend_api/ajax_delete_admin', ['admin_id' => $this->targetId]);
+            self::assertSame(403, $response->statusCode, $response->body);
+            self::assertSame($before, $this->fixture->adminDeleteState($this->targetId));
+        } finally {
+            get_instance()->db->update(
+                'users',
+                ['id_roles' => $this->actorRoleBefore],
+                ['id' => $this->fixture->actorId],
+            );
+        }
+    }
+
+    public function testAuthorizedPostThroughLegacyDeleteAliasPreservesMethodAndBody(): void
+    {
+        $noFollow = $this->login(
+            new GateHttpClient($this->server->baseUrl, additionalHeaders: ['X-FH-Test' => 'admin-delete-alias']),
+        );
+        $admin = $this->login($this->server->client());
+        $this->createTarget();
+        $before = $this->fixture->adminDeleteState($this->targetId);
+
+        $redirect = $noFollow->post('backend_api/ajax_delete_admin', ['admin_id' => $this->targetId]);
+        self::assertSame(307, $redirect->statusCode, $redirect->body);
+        self::assertStringEndsWith('/admins/destroy', (string) $redirect->header('location'));
+        self::assertSame($before, $this->fixture->adminDeleteState($this->targetId));
+
+        $response = $admin->post('backend_api/ajax_delete_admin', ['admin_id' => $this->targetId]);
+
+        self::assertSame(200, $response->statusCode, $response->body);
+        $finalPath = parse_url($response->url, PHP_URL_PATH);
+        self::assertIsString($finalPath);
+        self::assertStringEndsWith('/admins/destroy', $finalPath);
+        self::assertTrue((bool) (json_decode($response->body, true, 512, JSON_THROW_ON_ERROR)['success'] ?? false));
+        self::assertSame([], $this->fixture->adminDeleteState($this->targetId)['user']);
+        self::assertSame([], $this->fixture->adminDeleteState($this->targetId)['settings']);
+    }
+
     public function testStoredRoleDemotionRejectsDestroyWithoutMutation(): void
     {
         $admin = $this->login($this->server->client());
