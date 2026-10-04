@@ -533,6 +533,7 @@ try {
                 (string) $supplemental['api_credentials']['password'],
                 $verificationFixture,
                 indexPage: (string) config_item('index_page'),
+                rememberSession: $sessions->remember(...),
             );
             $result['evidence'] = $probe->run($evidence->step(...));
         } elseif (in_array($action, ['appointments-api', 'appointments-api-overlap'], true)) {

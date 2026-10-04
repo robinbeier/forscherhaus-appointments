@@ -9,10 +9,16 @@ use RuntimeException;
 /** Bounded HTTP proof for the Appointments API v1 read projection. */
 final class AppointmentsApiReadProbe
 {
+    /** @var callable(?string):void */
+    private readonly mixed $rememberSession;
+
     public function __construct(
         private readonly GateHttpClient $client,
         private readonly DefenseVerificationFixture $fixture,
-    ) {}
+        ?callable $rememberSession = null,
+    ) {
+        $this->rememberSession = $rememberSession ?? static function (?string $session): void {};
+    }
 
     public static function forApp(
         string $baseUrl,
@@ -20,6 +26,7 @@ final class AppointmentsApiReadProbe
         string $password,
         DefenseVerificationFixture $fixture,
         string $indexPage = 'index.php',
+        ?callable $rememberSession = null,
     ): self {
         if ($username === '' || $password === '') {
             throw new RuntimeException('Appointments API read probe credentials are unavailable.');
@@ -34,6 +41,7 @@ final class AppointmentsApiReadProbe
                 ],
             ),
             $fixture,
+            $rememberSession,
         );
     }
 
@@ -86,6 +94,7 @@ final class AppointmentsApiReadProbe
                 &$statuses,
             ): void {
                 $response = $this->client->get($path, $query);
+                ($this->rememberSession)($this->client->getCookie('ea_session'));
                 if ($response->statusCode !== 200) {
                     throw new RuntimeException('Appointments API read returned an unexpected status.');
                 }

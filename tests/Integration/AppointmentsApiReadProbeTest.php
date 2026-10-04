@@ -7,11 +7,13 @@ use ReleaseGate\AppointmentsApiReadProbe;
 use ReleaseGate\DefenseVerificationFixture;
 use ReleaseGate\OrdinaryLiveFixture;
 use ReleaseGate\OrdinaryProbeEvidence;
+use ReleaseGate\OrdinaryProbeSessions;
 use Tests\Integration\Support\DefenseCycleHttpServer;
 
 require_once dirname(__DIR__, 2) . '/scripts/release-gate/lib/GateHttpClient.php';
 require_once dirname(__DIR__, 2) . '/scripts/release-gate/lib/OrdinaryLiveFixture.php';
 require_once dirname(__DIR__, 2) . '/scripts/release-gate/lib/OrdinaryProbeEvidence.php';
+require_once dirname(__DIR__, 2) . '/scripts/release-gate/lib/OrdinaryProbeSessions.php';
 require_once dirname(__DIR__, 2) . '/scripts/release-gate/lib/DefenseVerificationFixture.php';
 require_once dirname(__DIR__, 2) . '/scripts/release-gate/lib/AppointmentsApiReadProbe.php';
 require_once __DIR__ . '/Support/DefenseCycleHttpServer.php';
@@ -28,11 +30,13 @@ final class AppointmentsApiReadProbeTest extends TestCase
         $ordinary = new OrdinaryLiveFixture($directory);
         $fixture = new DefenseVerificationFixture($directory);
         $server = null;
+        $sessions = null;
         try {
             $actor = $ordinary->activate();
             $fixture->activate('calendar_race', $actor);
             $state = $fixture->prepareAppointmentsApi();
             $server = new DefenseCycleHttpServer();
+            $sessions = new OrdinaryProbeSessions($directory, $server->directory . '/sessions');
             $evidence = new OrdinaryProbeEvidence($directory);
             $evidence->begin('ea_synthetic');
             $result = AppointmentsApiReadProbe::forApp(
@@ -40,6 +44,7 @@ final class AppointmentsApiReadProbeTest extends TestCase
                 $state['api_credentials']['username'],
                 $state['api_credentials']['password'],
                 $fixture,
+                rememberSession: $sessions->remember(...),
             )->run($evidence->step(...));
             $events = $evidence->read()['events'];
 
@@ -73,7 +78,15 @@ final class AppointmentsApiReadProbeTest extends TestCase
                     'phase',
                 ),
             );
+            self::assertFileExists($directory . '/sessions.json');
+            self::assertNotEmpty(glob($server->directory . '/sessions/ea_session*') ?: []);
+            $sessions->cleanup();
+            self::assertFileDoesNotExist($directory . '/sessions.json');
+            self::assertSame([], glob($server->directory . '/sessions/*'));
         } finally {
+            if ($sessions !== null && is_file($directory . '/sessions.json')) {
+                $sessions->cleanup();
+            }
             $server?->close();
             if (is_file($directory . '/defense-verification.json')) {
                 $fixture->deactivate();
