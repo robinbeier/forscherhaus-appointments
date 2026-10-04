@@ -661,6 +661,17 @@ writes. The isolated `SecretariesUpdateRoleHttpTest` covers methods, the direct
 and a successful update with synthetic data. It does not prove every concurrent
 role-permission edit or a production account write.
 
+The classic `secretaries/store` path accepts only POST with CSRF and the
+actor's current stored `users.add` permission. It rejects caller-supplied
+target and role IDs so a create request cannot become an update or choose its
+own role. The actor and requested provider users are locked in numeric ID
+order; the actor's current role permission is rechecked before the model joins
+the transaction for the user, settings, and provider assignments. The isolated
+`SecretariesStoreRoleHttpTest` covers methods, direct `index.php` alias, CSRF,
+sequential role demotion, ID/role rejection, and authorized creation with
+synthetic data. It does not prove every concurrent role-permission edit or a
+production account write.
+
 The product supports `services.attendants_number = 1`, enforced by
 [Services_model](application/models/Services_model.php). Other values are not
 supported product behavior; this application rule is not a claim of a database
