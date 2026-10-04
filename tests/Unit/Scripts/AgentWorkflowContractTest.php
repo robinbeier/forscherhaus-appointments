@@ -62,7 +62,7 @@ class AgentWorkflowContractTest extends TestCase
         self::assertSame('standard', $contract['review']['mode'] ?? null);
         self::assertSame(1, $contract['review']['minimum_independent_reviewers'] ?? null);
         self::assertSame('risk_based', $contract['review']['specialist_review'] ?? null);
-        self::assertSame('available_read_only_reviewer_or_human', $contract['review']['execution'] ?? null);
+        self::assertSame('independent_reviewer_read_only_preferred_or_human', $contract['review']['execution'] ?? null);
         self::assertFalse($contract['review']['requires_sealed_runner'] ?? null);
         self::assertFalse($contract['review']['requires_external_bootstrap_review'] ?? null);
         self::assertTrue($contract['review']['summary_binds_reviewed_head'] ?? null);
@@ -73,15 +73,20 @@ class AgentWorkflowContractTest extends TestCase
                 'capability_source' => 'current_runtime',
                 'before_diff_dispatch' => true,
                 'startup_probe_is_review' => false,
-                'requires_enforced_read_only_boundary' => true,
+                'read_only_preferred' => true,
+                'requires_enforced_read_only_boundary' => false,
                 'fallback_preserves' => [
                     'independence',
                     'correctness_security',
                     'design_maintainability',
                     'tests_regressions',
                     'repository_base_head',
-                    'tool_and_credential_boundaries',
+                    'approved_model_and_data_scope',
+                    'no_credentials_or_production_data',
+                    'no_reviewer_mutation_or_external_action',
                 ],
+                'write_capable_reviewer_requires_postcheck' => true,
+                'write_capable_reviewer_residual_risk_recorded' => true,
                 'runtime_failure_classification' => 'harness_failure',
                 'no_equivalent_reviewer' => 'block_merge',
                 'requires_fresh_probe_context' => true,

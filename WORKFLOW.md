@@ -467,14 +467,15 @@ watcher wrapper.
 
 ## PR and Review Expectations
 
-The standard path requires one independent reviewer, either a read-only agent
-available in the current environment or a human who did not implement the diff.
-Before sending a diff to an agent, follow the
-[reviewer runtime preflight](docs/reviewer-runtime-preflight.md): inspect the
-live role/model capabilities and, when availability is unknown, perform a
-minimal no-diff startup check. Preserve the enforced read-only tool boundary
-and exact base/head binding when choosing an equivalent fallback. A readiness
-acknowledgement is not a review; runtime failures are not PR findings.
+The standard path requires one independent reviewer who did not implement the
+diff. Prefer an effectively read-only agent; technical read-only isolation is
+not a universal merge prerequisite for a code-only review. Before sending a
+diff, follow the [reviewer runtime preflight](docs/reviewer-runtime-preflight.md):
+check the actual model, available tools, approved data scope, and exact
+base/head. If isolation is unavailable, use its controlled no-mutation path or
+an independent human. Never pass credentials or production data to a reviewer.
+A readiness acknowledgement is not a review; runtime failures are not PR
+findings. A platform refusal or model-specific data limit remains binding.
 That review covers correctness, security, test adequacy, and maintainability;
 these are topics, not a required number of agents. Give the reviewer the diff
 and enough surrounding code and tests to understand the execution path.
@@ -486,7 +487,7 @@ applies. Reviewers report to the primary and do not edit files or publish.
 
 Standard review does not require a separate Codex CLI login or attestation
 command.
-If the chosen review tool is unavailable, use another available independent
+If the chosen review tool is unavailable, use another authorized independent
 reviewer or a human and record the substitution. If none is available, leave
 the PR open with review pending; never invent review evidence. The same standard
 path applies when this repository's workflow or review tools are changed.
