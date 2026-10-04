@@ -15,9 +15,13 @@ final class OrdinaryProbeEntrypointContractTest extends TestCase
 
         $files = ordinary_probe_required_libraries($source, __DIR__ . '/../../../scripts/release-gate/lib');
 
-        self::assertCount(20, $files);
+        self::assertCount(21, $files);
         self::assertContains(
             realpath(__DIR__ . '/../../../scripts/release-gate/lib/BackofficeRoleRevocationProbe.php'),
+            array_map('realpath', $files),
+        );
+        self::assertContains(
+            realpath(__DIR__ . '/../../../scripts/release-gate/lib/BackofficeTargetReadProbe.php'),
             array_map('realpath', $files),
         );
     }

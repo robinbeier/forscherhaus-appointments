@@ -55,6 +55,7 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
                 'OrdinarySessionProbe.php',
                 'OrdinaryAccountProbe.php',
                 'BackofficeRoleRevocationProbe.php',
+                'BackofficeTargetReadProbe.php',
                 'AccountSecurityMatrixProbe.php',
                 'CustomerRoleBoundaryProbe.php',
                 'CustomersApiWriteProbe.php',
@@ -212,6 +213,8 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
             [
                 'methods' => 'provider',
                 'backoffice-role-read' => 'admin',
+                'backoffice-secretary-read' => 'admin',
+                'backoffice-service-read' => 'admin',
                 'customer-boundary' => 'admin',
                 'customers-api' => 'admin',
                 'services-api' => 'admin',

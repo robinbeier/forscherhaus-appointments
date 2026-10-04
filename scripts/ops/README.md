@@ -136,7 +136,8 @@ Script inventory:
 - `run_ordinary_live_probe.sh` runs the root-controlled, release-pinned synthetic
   Defense Factory verification actions. Besides the original account/session
   probes, `methods`, `customer-boundary`, `customers-api`, `services-api`,
-  `calendar-race`, and `appointments-api-overlap` collect direct, bounded
+  `calendar-race`, `backoffice-secretary-read`, `backoffice-service-read`, and
+  `appointments-api-overlap` collect direct, bounded
   evidence for the account, customer, service and appointment write contracts.
   See `docs/release-gate-defense-cycle.md`; repository delivery does not install
   the operator bundle or execute any production action.

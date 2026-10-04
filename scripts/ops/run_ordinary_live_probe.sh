@@ -6,7 +6,7 @@ action=${1:-preflight}
 release=${2:-}
 app_root=${APP_ROOT:-/var/www/html/easyappointments}
 case "$action" in
-    preflight|account|methods|backoffice-role-read|customer-boundary|customers-api|staff-api|services-api|unavailabilities-api|blocked-periods-api|service-categories-api|secretaries-api|calendar-race|calendar-methods|appointments-api|appointments-api-overlap|session|cleanup|verify) ;;
+    preflight|account|methods|backoffice-role-read|backoffice-secretary-read|backoffice-service-read|customer-boundary|customers-api|staff-api|services-api|unavailabilities-api|blocked-periods-api|service-categories-api|secretaries-api|calendar-race|calendar-methods|appointments-api|appointments-api-overlap|session|cleanup|verify) ;;
     *) echo 'unsupported action' >&2; exit 64 ;;
 esac
 [[ $# == 2 && "$release" =~ ^ea_[a-zA-Z0-9_]+$ ]] || { echo 'action and expected release required' >&2; exit 64; }
@@ -23,6 +23,7 @@ for path in "$probe" "$script_dir/../release-gate/lib/OrdinaryLiveFixture.php" \
     "$script_dir/../release-gate/lib/OrdinarySessionProbe.php" \
     "$script_dir/../release-gate/lib/OrdinaryAccountProbe.php" \
     "$script_dir/../release-gate/lib/BackofficeRoleRevocationProbe.php" \
+    "$script_dir/../release-gate/lib/BackofficeTargetReadProbe.php" \
     "$script_dir/../release-gate/lib/AccountSecurityMatrixProbe.php" \
     "$script_dir/../release-gate/lib/CustomerRoleBoundaryProbe.php" \
     "$script_dir/../release-gate/lib/CustomersApiWriteProbe.php" \
@@ -177,7 +178,7 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 fixture_role=provider
-[[ "$action" != backoffice-role-read && "$action" != customer-boundary && "$action" != customers-api && "$action" != staff-api && "$action" != services-api && "$action" != unavailabilities-api && "$action" != blocked-periods-api && "$action" != service-categories-api && "$action" != secretaries-api ]] || fixture_role=admin
+[[ "$action" != backoffice-role-read && "$action" != backoffice-secretary-read && "$action" != backoffice-service-read && "$action" != customer-boundary && "$action" != customers-api && "$action" != staff-api && "$action" != services-api && "$action" != unavailabilities-api && "$action" != blocked-periods-api && "$action" != service-categories-api && "$action" != secretaries-api ]] || fixture_role=admin
 invoke activate "$fixture_role"
 case "$action" in
     account)
@@ -188,6 +189,12 @@ case "$action" in
         ;;
     backoffice-role-read)
         invoke backoffice-role-read
+        ;;
+    backoffice-secretary-read)
+        invoke backoffice-secretary-read
+        ;;
+    backoffice-service-read)
+        invoke backoffice-service-read
         ;;
     customer-boundary)
         invoke customer-boundary
