@@ -789,6 +789,13 @@ class Booking extends EA_Controller
         $hour = $appointment_start->format('H:i');
 
         if ($appointment['id_users_provider'] === ANY_PROVIDER) {
+            if ($this->isDefinitelyBeyondFutureBookingLimit($date)) {
+                // Keep the normal service validation without scanning providers.
+                $this->services_model->find($appointment['id_services']);
+
+                return null;
+            }
+
             $appointment['id_users_provider'] = $this->search_any_provider(
                 (int) $appointment['id_services'],
                 $date,
@@ -803,6 +810,10 @@ class Booking extends EA_Controller
         $exclude_appointment_id = $appointment['id'] ?? null;
 
         $provider = $this->providers_model->find($appointment['id_users_provider']);
+
+        if ($this->isDefinitelyBeyondFutureBookingLimit($date)) {
+            return null;
+        }
 
         $available_hours = $this->availability->get_available_hours(
             $date,
