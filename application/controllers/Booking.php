@@ -1004,12 +1004,16 @@ class Booking extends EA_Controller
 
             $future_booking_limit = (string) setting('future_booking_limit');
 
-            if (preg_match('/^(0|[1-9][0-9]{0,3})$/D', $future_booking_limit) === 1) {
+            $future_booking_limit_days = ctype_digit($future_booking_limit)
+                ? filter_var(ltrim($future_booking_limit, '0') ?: '0', FILTER_VALIDATE_INT)
+                : false;
+
+            if ($future_booking_limit_days !== false && $future_booking_limit_days <= PHP_INT_MAX - 4) {
                 $first_day_of_month = new DateTimeImmutable($selected_date->format('Y-m-01'));
                 // The actual limit is checked in each provider timezone. Leave four days of
                 // slack for timezone and clock differences before skipping the daily work.
                 $safe_limit = (new DateTimeImmutable('today'))->modify(
-                    '+' . ((int) $future_booking_limit + 4) . ' days',
+                    '+' . ($future_booking_limit_days + 4) . ' days',
                 );
 
                 if ($first_day_of_month > $safe_limit) {

@@ -84,6 +84,12 @@ final class BookingUnavailableDatesFutureLimitTest extends ApplicationTestCase
         self::assertSame(false, $invalidProvider['response']['success'] ?? null);
         self::assertArrayNotHasKey('is_month_unavailable', $invalidProvider['response']);
 
+        $this->setSetting('future_booking_limit', '10000');
+        $longLimitMonth = (new DateTimeImmutable('+10080 days'))->modify('first day of this month')->format('Y-m-d');
+        $longLimit = $this->measure($longLimitMonth, ANY_PROVIDER);
+        self::assertSame(0, $longLimit['availability_invocations']);
+        self::assertSame(['is_month_unavailable' => true], $longLimit['response']);
+
         fwrite(
             STDOUT,
             'ROB-726 future-limit regression: ' .
