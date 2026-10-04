@@ -261,15 +261,16 @@ try {
             }
             return $context;
         });
+        $probeHttpOrigin = 'http://localhost';
         $newClient = static fn(): GateHttpClient => new GateHttpClient(
-            'http://localhost',
+            $probeHttpOrigin,
             indexPage: (string) config_item('index_page'),
             csrfCookieName: (string) config_item('csrf_cookie_name'),
             csrfTokenName: (string) config_item('csrf_token_name'),
             additionalHeaders: ['X-FH-Ordinary-Probe' => '1'],
         );
         $newPublicClient = static fn(): GateHttpClient => new GateHttpClient(
-            'http://localhost',
+            $probeHttpOrigin,
             indexPage: (string) config_item('index_page'),
             csrfCookieName: (string) config_item('csrf_cookie_name'),
             csrfTokenName: (string) config_item('csrf_token_name'),
@@ -310,7 +311,7 @@ try {
                     $newPublicClient(),
                     $fixture,
                     $verificationFixture,
-                    site_url(),
+                    $probeHttpOrigin,
                     $sessions->remember(...),
                 ))->run($area),
             );

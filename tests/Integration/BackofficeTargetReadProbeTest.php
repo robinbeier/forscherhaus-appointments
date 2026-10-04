@@ -166,6 +166,101 @@ final class BackofficeTargetReadProbeTest extends TestCase
         self::assertSame('active', $this->targets->verify());
     }
 
+    public function testFilteredServiceSearchRejectsAnUnrelatedExtraRow(): void
+    {
+        self::assertNotNull($this->actor);
+        self::assertNotNull($this->targets);
+        self::assertNotNull($this->server);
+        $this->targets->activate('backoffice_service_read', $this->actor->read());
+        $this->prependRouterFilter(
+            <<<'PHP'
+            <?php
+            if ($_SERVER['REQUEST_METHOD'] === 'GET' && preg_match('~/(?:index\.php/)?services/search$~', parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH)) === 1 && isset($_GET['keyword'])) {
+                ob_start(static function (string $body): string {
+                    $rows = json_decode($body, true);
+                    if (http_response_code() === 200 && is_array($rows) && array_is_list($rows) && count($rows) === 1) {
+                        $extra = $rows[0];
+                        $extra['id'] = 2147483647;
+                        $rows[] = $extra;
+                        return json_encode($rows, JSON_THROW_ON_ERROR);
+                    }
+                    return $body;
+                });
+            }
+            ?>
+            PHP
+            ,
+        );
+
+        try {
+            (new BackofficeTargetReadProbe(
+                $this->client(),
+                $this->publicClient(),
+                $this->actor,
+                $this->targets,
+                $this->server->baseUrl,
+            ))->run('services');
+            self::fail('Filtered search must not accept additional records.');
+        } catch (RuntimeException $error) {
+            self::assertStringContainsString('did not return exactly one owned target', $error->getMessage());
+        }
+        self::assertSame('active', $this->actor->verify());
+        self::assertSame('active', $this->targets->verify());
+    }
+
+    public function testUnfilteredAliasLandingMayOmitTheOwnedService(): void
+    {
+        self::assertNotNull($this->actor);
+        self::assertNotNull($this->targets);
+        self::assertNotNull($this->server);
+        $this->targets->activate('backoffice_service_read', $this->actor->read());
+        $this->prependRouterFilter(
+            <<<'PHP'
+            <?php
+            if ($_SERVER['REQUEST_METHOD'] === 'GET' && preg_match('~/(?:index\.php/)?services/search$~', parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH)) === 1 && !isset($_GET['keyword'])) {
+                ob_start(static function (string $body): string {
+                    $rows = json_decode($body, true);
+                    if (http_response_code() === 200 && is_array($rows) && array_is_list($rows)) {
+                        file_put_contents(__DIR__ . '/alias-empty-seen', '1');
+                        return '[]';
+                    }
+                    return $body;
+                });
+            }
+            ?>
+            PHP
+            ,
+        );
+
+        $marker = $this->server->directory . '/alias-empty-seen';
+        try {
+            $result = (new BackofficeTargetReadProbe(
+                $this->client(),
+                $this->publicClient(),
+                $this->actor,
+                $this->targets,
+                $this->server->baseUrl,
+            ))->run('services');
+            self::assertSame('verified', $result['status']);
+            self::assertSame(200, $result['before_statuses']['GET alias landing']);
+            self::assertSame(403, $result['after_statuses']['GET alias landing']);
+            self::assertSame('1', file_get_contents($marker));
+        } finally {
+            if (is_file($marker)) {
+                unlink($marker);
+            }
+        }
+    }
+
+    private function prependRouterFilter(string $filter): void
+    {
+        self::assertNotNull($this->server);
+        $router = $this->server->directory . '/router.php';
+        $source = file_get_contents($router);
+        self::assertIsString($source);
+        file_put_contents($router, $filter . "\n" . $source);
+    }
+
     private function client(): GateHttpClient
     {
         self::assertNotNull($this->server);

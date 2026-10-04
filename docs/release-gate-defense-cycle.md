@@ -286,10 +286,13 @@ model and an anonymous HTTP booking page: its service selector must omit the
 owned service. Anonymous session files join the same cleanup journal. The
 actions check bounded search/find projections and the direct aliases. The
 legacy aliases redirect to the canonical search route without retaining the
-keyword. The operator follows only that locally reconstructed route, checks the
-owned target projection in the landing response, and after role revocation
-requires a 403 response. The filtered canonical search remains a separate
-check. Both actions check same-session denial after changing only the owned actor's
+keyword. The operator binds the redirect origin to its loopback HTTP client,
+follows only the locally reconstructed route, and checks the bounded shape of
+every row in the unfiltered landing response. The owned target may be absent
+from its first result page; if present, its values must match. Filtered
+canonical search separately requires exactly the one owned target. After role
+revocation, the landing route must return 403. Both actions check same-session
+denial after changing only the owned actor's
 stored role. The supplemental graph is removed before the actor and sessions;
 the wrapper keeps recovery markers if exact cleanup cannot be confirmed.
 

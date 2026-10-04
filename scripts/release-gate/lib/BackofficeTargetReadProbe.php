@@ -252,7 +252,7 @@ final class BackofficeTargetReadProbe
         if ($expected === 403) {
             $this->assertNoMarker($landing, $marker, $operation . ' landing');
         } else {
-            $this->assertSearchProjection(
+            $this->assertAliasLandingProjection(
                 $landing,
                 $area,
                 $targetId,
@@ -275,16 +275,39 @@ final class BackofficeTargetReadProbe
         string $operation,
     ): void {
         $rows = json_decode($response->body, true);
-        if (!is_array($rows) || !array_is_list($rows)) {
-            throw new RuntimeException($operation . ' did not return a bounded list.');
-        }
-        $matches = array_values(
-            array_filter($rows, static fn(mixed $row): bool => is_array($row) && (int) ($row['id'] ?? 0) === $targetId),
-        );
-        if (count($matches) !== 1) {
+        if (!is_array($rows) || !array_is_list($rows) || count($rows) !== 1 || !is_array($rows[0])) {
             throw new RuntimeException($operation . ' did not return exactly one owned target.');
         }
-        $this->assertProjection($area, $matches[0], $targetId, $providerId, $marker, $targetRow);
+        $this->assertProjection($area, $rows[0], $targetId, $providerId, $marker, $targetRow);
+    }
+
+    private function assertAliasLandingProjection(
+        GateHttpResponse $response,
+        string $area,
+        int $targetId,
+        int $providerId,
+        string $marker,
+        array $targetRow,
+        string $operation,
+    ): void {
+        $rows = json_decode($response->body, true);
+        if (!is_array($rows) || !array_is_list($rows) || count($rows) > 1000) {
+            throw new RuntimeException($operation . ' did not return a bounded list.');
+        }
+        $ownedCount = 0;
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                throw new RuntimeException($operation . ' returned a malformed projection.');
+            }
+            $this->assertProjectionShape($area, $row);
+            if ((int) ($row['id'] ?? 0) === $targetId) {
+                $this->assertProjection($area, $row, $targetId, $providerId, $marker, $targetRow);
+                $ownedCount++;
+            }
+        }
+        if ($ownedCount > 1) {
+            throw new RuntimeException($operation . ' returned duplicate owned targets.');
+        }
     }
 
     /** @param array<string,mixed> $projection @param array<string,mixed> $row */
@@ -296,8 +319,35 @@ final class BackofficeTargetReadProbe
         string $marker,
         array $row,
     ): void {
+        $this->assertProjectionShape($area, $projection);
         if ((int) ($projection['id'] ?? 0) !== $id) {
             throw new RuntimeException('Backoffice projection did not match the owned target ID.');
+        }
+        if ($area === 'secretaries') {
+            $settings = $projection['settings'];
+            if (
+                $projection['providers'] !== [$providerId] ||
+                $projection['notes'] !== $marker ||
+                $settings['username'] !== ($row['username'] ?? null)
+            ) {
+                throw new RuntimeException('Secretary projection missed the owned read contract.');
+            }
+            return;
+        }
+        if (
+            $projection['description'] !== $marker ||
+            (int) $projection['is_private'] !== 1 ||
+            (int) $projection['attendants_number'] !== 1
+        ) {
+            throw new RuntimeException('Service projection missed the owned read contract.');
+        }
+    }
+
+    /** @param array<string,mixed> $projection */
+    private function assertProjectionShape(string $area, array $projection): void
+    {
+        if (array_is_list($projection) || (int) ($projection['id'] ?? 0) < 1) {
+            throw new RuntimeException('Backoffice response contained a malformed projection.');
         }
         if ($area === 'secretaries') {
             $keys = [
@@ -324,14 +374,8 @@ final class BackofficeTargetReadProbe
             $settings = $projection['settings'] ?? null;
             $settingsKeys = is_array($settings) ? array_keys($settings) : [];
             sort($settingsKeys);
-            if (
-                $actual !== $keys ||
-                $settingsKeys !== ['calendar_view', 'username'] ||
-                ($projection['providers'] ?? null) !== [$providerId] ||
-                ($projection['notes'] ?? null) !== $marker ||
-                ($settings['username'] ?? null) !== ($row['username'] ?? null)
-            ) {
-                throw new RuntimeException('Secretary projection exceeded or missed the owned read contract.');
+            if ($actual !== $keys || $settingsKeys !== ['calendar_view', 'username']) {
+                throw new RuntimeException('Secretary projection exceeded the bounded read contract.');
             }
             return;
         }
@@ -354,13 +398,8 @@ final class BackofficeTargetReadProbe
         $actual = array_keys($projection);
         sort($keys);
         sort($actual);
-        if (
-            $actual !== $keys ||
-            ($projection['description'] ?? null) !== $marker ||
-            (int) ($projection['is_private'] ?? 0) !== 1 ||
-            (int) ($projection['attendants_number'] ?? 0) !== 1
-        ) {
-            throw new RuntimeException('Service projection exceeded or missed the owned read contract.');
+        if ($actual !== $keys) {
+            throw new RuntimeException('Service projection exceeded the bounded read contract.');
         }
     }
 
