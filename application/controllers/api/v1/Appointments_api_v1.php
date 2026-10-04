@@ -372,7 +372,11 @@ class Appointments_api_v1 extends EA_Controller
             ]
             as $resource => $model
         ) {
-            if (!empty($appointment[$resource]) && is_array($appointment[$resource])) {
+            if (
+                in_array($resource, $resources, true) &&
+                !empty($appointment[$resource]) &&
+                is_array($appointment[$resource])
+            ) {
                 $this->{$model}->api_encode($appointment[$resource]);
             }
         }

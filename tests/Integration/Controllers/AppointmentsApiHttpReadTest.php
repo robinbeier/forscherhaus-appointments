@@ -217,6 +217,36 @@ final class AppointmentsApiHttpReadTest extends TestCase
         );
     }
 
+    public function testAggregatesWithSubsetReplacesOnlyRequestedRelation(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $appointment = $fixture->appointment();
+        $admin = $this->basicClient($this->credentials['admin_username'], $this->credentials['password']);
+
+        foreach (['provider', 'customer', 'service'] as $relation) {
+            $rows = $this->decode(
+                $admin->get('api/v1/appointments', [
+                    'q' => $fixture->run,
+                    'aggregates' => 1,
+                    'with' => $relation,
+                ]),
+            );
+            $matches = array_values(
+                array_filter(
+                    $rows,
+                    static fn(mixed $row): bool => is_array($row) &&
+                        (int) ($row['id'] ?? 0) === (int) $appointment['id'],
+                ),
+            );
+            self::assertCount(1, $matches, 'aggregate relation must remain readable with=' . $relation);
+            self::assertSame($fixture->providerId, $matches[0]['provider']['id'] ?? null);
+            self::assertSame($fixture->customerId, $matches[0]['customer']['id'] ?? null);
+            self::assertSame($fixture->serviceId, $matches[0]['service']['id'] ?? null);
+            $this->assertProjectedRelations($matches[0]);
+        }
+    }
+
     private function assertProjectedRelations(array $appointment): void
     {
         foreach (['provider', 'customer', 'service'] as $relation) {
