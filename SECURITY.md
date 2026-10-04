@@ -650,6 +650,17 @@ role demotion, target type, and a synthetic successful delete on both paths.
 It does not prove every concurrent role-permission edit or a production
 account write.
 
+The classic `secretaries/update` path accepts only POST with CSRF and a positive
+existing Secretary ID. It cannot create an account when that ID is missing.
+The actor must still have the stored `users.edit` permission after a role
+change. The actor, Secretary, and requested provider users are locked together
+in numeric ID order; the actor's role permission and target role are checked
+before the model joins the transaction for user, settings, and assignment
+writes. The isolated `SecretariesUpdateRoleHttpTest` covers methods, the direct
+`index.php` alias, CSRF, missing ID, other-role target, sequential demotion,
+and a successful update with synthetic data. It does not prove every concurrent
+role-permission edit or a production account write.
+
 The product supports `services.attendants_number = 1`, enforced by
 [Services_model](application/models/Services_model.php). Other values are not
 supported product behavior; this application rule is not a claim of a database
