@@ -62,6 +62,14 @@ an invalid specific provider still fails. Near and boundary days use the normal
 calculation. `BookingAvailableHoursFutureLimitTest` checks that behavior with
 synthetic providers and an availability spy, not with production load.
 
+The final public registration POST also skips per-provider slot analysis for a
+definitely distant date after CAPTCHA and reschedule-authority checks. It keeps
+service and specific-provider validation and returns the existing unavailable
+response without creating a customer or appointment. Near and boundary dates
+retain the normal calculation. `BookingRegisterFutureLimitTest` measures the
+pre-transaction path with synthetic providers and a valid CAPTCHA; it does not
+measure production throughput or replace the normal booking success tests.
+
 JSON bodies read through `EA_Input::json()` are bounded to 1 MiB before
 decoding, including requests whose `Content-Length` is absent or incorrect.
 The authenticated Appointments API v1 POST/PUT DTO path has the same bound
