@@ -205,6 +205,29 @@ final class AppointmentsApiHttpReadTest extends TestCase
             $this->assertProjectedRelations($row);
         }
 
+        foreach (['api/v1/appointments', 'api/v1/appointments_api_v1/index'] as $path) {
+            $rows = $this->decode(
+                $admin->get($path, [
+                    'q' => $fixture->run,
+                    'fields' => 'id',
+                    'with' => $with,
+                ]),
+            );
+            $matches = array_values(
+                array_filter(
+                    $rows,
+                    static fn(mixed $row): bool => is_array($row) && (int) ($row['id'] ?? 0) === (int) $first['id'],
+                ),
+            );
+            self::assertCount(1, $matches, 'collection must return the fixture appointment from ' . $path);
+            $row = $matches[0];
+            self::assertSame(['customer', 'id', 'provider', 'service'], $this->sortedKeys($row));
+            self::assertSame($fixture->providerId, $row['provider']['id'] ?? null);
+            self::assertSame($fixture->customerId, $row['customer']['id'] ?? null);
+            self::assertSame($fixture->serviceId, $row['service']['id'] ?? null);
+            $this->assertProjectedRelations($row);
+        }
+
         $query = ['serviceId' => $fixture->serviceId, 'length' => 1, 'sort' => '+id'];
         $pageOne = $this->decode($admin->get('api/v1/appointments', $query + ['page' => 1]));
         $pageTwo = $this->decode($admin->get('api/v1/appointments', $query + ['page' => 2]));
