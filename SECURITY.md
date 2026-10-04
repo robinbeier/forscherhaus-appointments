@@ -45,6 +45,16 @@ controller work. The isolated parallel-process regression proves the counter
 boundary for its synthetic per-key cache; it does not establish production
 throughput or a live rate-limit result.
 
+The public monthly booking-availability read must not expand a month safely
+beyond the configured future-booking window into one calculation per day and
+provider. After request and reschedule-authority validation, it may return the
+existing unavailable-month result early only with a conservative timezone
+margin and valid service/provider identities. Months near the booking boundary
+still use the normal per-provider calculation. The isolated
+`BookingUnavailableDatesFutureLimitTest` checks this work bound with synthetic
+providers and an availability spy; it does not measure production throughput
+or replace the global request limiter.
+
 JSON bodies read through `EA_Input::json()` are bounded to 1 MiB before
 decoding, including requests whose `Content-Length` is absent or incorrect.
 The authenticated Appointments API v1 POST/PUT DTO path has the same bound
