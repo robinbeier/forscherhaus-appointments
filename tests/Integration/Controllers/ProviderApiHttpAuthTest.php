@@ -68,6 +68,90 @@ final class ProviderApiHttpAuthTest extends TestCase
         );
     }
 
+    public static function providerCollectionRoutes(): array
+    {
+        return [
+            'canonical' => ['api/v1/providers'],
+            'index-alias' => ['api/v1/providers_api_v1/index'],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('providerCollectionRoutes')]
+    public function testProviderCollectionPaginationBoundsRejectInvalidValuesBeforeQuery(string $route): void
+    {
+        $before = $this->fixture->providerDeleteState($this->fixture->providerId);
+        $cases = [
+            'length-zero' => ['length' => '0'],
+            'length-over-bound' => ['length' => '101'],
+            'length-huge' => ['length' => '999999999999999999999999'],
+            'page-zero' => ['page' => '0'],
+            'page-over-bound' => ['page' => '10001'],
+            'page-huge' => ['page' => '999999999999999999999999'],
+        ];
+
+        foreach (
+            [
+                $this->basicClient($this->credentials['admin_username'], $this->credentials['password']),
+                $this->bearerClient($this->credentials['token']),
+            ]
+            as $client
+        ) {
+            foreach ($cases as $name => $query) {
+                $response = $client->get($route, $query);
+                self::assertSame(400, $response->statusCode, $route . ' ' . $name);
+                $payload = json_decode($response->body, true, 512, JSON_THROW_ON_ERROR);
+                self::assertFalse($payload['success'] ?? true, $route . ' ' . $name);
+                self::assertStringContainsString(
+                    (string) array_key_first($query),
+                    (string) ($payload['message'] ?? ''),
+                );
+                self::assertSame($before, $this->fixture->providerDeleteState($this->fixture->providerId));
+            }
+        }
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('providerCollectionRoutes')]
+    public function testProviderCollectionPaginationSupportsDefaultsAndValidBoundaries(string $route): void
+    {
+        $provider = $this->fixture->row('users', $this->fixture->providerId);
+        $identity = [
+            'firstName' => (string) $provider['first_name'],
+            'lastName' => (string) $provider['last_name'],
+            'email' => (string) $provider['email'],
+        ];
+
+        foreach (
+            [
+                $this->basicClient($this->credentials['admin_username'], $this->credentials['password']),
+                $this->bearerClient($this->credentials['token']),
+            ]
+            as $client
+        ) {
+            $default = $this->decodeSuccess($client->get($route, ['q' => $this->fixture->run]));
+            self::assertNotEmpty($default);
+            self::assertLessThanOrEqual(20, count($default));
+            $match = array_values(
+                array_filter(
+                    $default,
+                    fn(mixed $item): bool => is_array($item) && (int) ($item['id'] ?? 0) === $this->fixture->providerId,
+                ),
+            );
+            self::assertCount(1, $match);
+            $this->assertProviderIdentity($match[0], $identity);
+            $this->assertProviderSecretsAbsent($match[0]);
+
+            $boundary = $this->decodeSuccess(
+                $client->get($route, ['q' => $this->fixture->run, 'length' => '1', 'page' => '1']),
+            );
+            self::assertCount(min(1, count($default)), $boundary);
+
+            $maximum = $this->decodeSuccess(
+                $client->get($route, ['q' => $this->fixture->run, 'length' => '100', 'page' => '10000']),
+            );
+            self::assertLessThanOrEqual(100, count($maximum));
+        }
+    }
+
     private function assertSuccessfulProviderReads(
         \ReleaseGate\GateHttpClient $client,
         array $identity,
