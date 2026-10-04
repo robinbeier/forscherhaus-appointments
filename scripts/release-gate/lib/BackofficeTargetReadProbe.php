@@ -18,6 +18,7 @@ final class BackofficeTargetReadProbe
         private readonly GateHttpClient $publicClient,
         private readonly OrdinaryLiveFixture $actor,
         private readonly DefenseVerificationFixture $targets,
+        private readonly string $expectedRedirectOrigin,
         ?callable $rememberSession = null,
     ) {
         $this->rememberSession = $rememberSession ?? static function (?string $session): void {};
@@ -166,12 +167,36 @@ final class BackofficeTargetReadProbe
             if ($name === 'GET alias') {
                 $this->expectRedirectTo($response, $area . '/search', $name, [307]);
                 $this->assertNoMarker($response, $marker, $name);
+                $statuses[$name] = $response->statusCode;
+                $statuses[$name . ' landing'] = $this->followAliasSearch(
+                    $response,
+                    $area,
+                    $targetId,
+                    $providerId,
+                    $marker,
+                    $targetRow,
+                    $expected,
+                    $name,
+                );
+                continue;
             } elseif ($name === 'POST alias') {
                 $methodStatus = $area === 'secretaries' ? 303 : 405;
                 $this->expect($response, $methodStatus, $name);
                 $this->assertNoMarker($response, $marker, $name);
                 if ($methodStatus === 303) {
                     $this->expectRedirectTo($response, $area . '/search', $name, [303]);
+                    $statuses[$name] = $response->statusCode;
+                    $statuses[$name . ' landing'] = $this->followAliasSearch(
+                        $response,
+                        $area,
+                        $targetId,
+                        $providerId,
+                        $marker,
+                        $targetRow,
+                        $expected,
+                        $name,
+                    );
+                    continue;
                 } elseif (!str_contains((string) $response->header('allow'), 'GET')) {
                     throw new RuntimeException('Service alias did not advertise its allowed method.');
                 }
@@ -184,20 +209,7 @@ final class BackofficeTargetReadProbe
                         throw new RuntimeException($name . ' did not render the expected Backoffice page.');
                     }
                 } elseif (str_contains($name, 'search')) {
-                    $rows = json_decode($response->body, true);
-                    if (!is_array($rows) || !array_is_list($rows)) {
-                        throw new RuntimeException($name . ' did not return a bounded list.');
-                    }
-                    $matches = array_values(
-                        array_filter(
-                            $rows,
-                            static fn(mixed $row): bool => is_array($row) && (int) ($row['id'] ?? 0) === $targetId,
-                        ),
-                    );
-                    if (count($matches) !== 1) {
-                        throw new RuntimeException($name . ' did not return exactly one owned target.');
-                    }
-                    $this->assertProjection($area, $matches[0], $targetId, $providerId, $marker, $targetRow);
+                    $this->assertSearchProjection($response, $area, $targetId, $providerId, $marker, $targetRow, $name);
                 } else {
                     $record = json_decode($response->body, true);
                     if (!is_array($record) || array_is_list($record)) {
@@ -209,6 +221,69 @@ final class BackofficeTargetReadProbe
             $statuses[$name] = $response->statusCode;
         }
         return $statuses;
+    }
+
+    /** Follow only the already-validated local route, never an arbitrary Location URL. */
+    private function followAliasSearch(
+        GateHttpResponse $redirect,
+        string $area,
+        int $targetId,
+        int $providerId,
+        string $marker,
+        array $targetRow,
+        int $expected,
+        string $operation,
+    ): int {
+        $queryString = parse_url((string) $redirect->header('location'), PHP_URL_QUERY);
+        if ($queryString === false) {
+            throw new RuntimeException($operation . ' returned a malformed redirect query.');
+        }
+        $query = [];
+        if (is_string($queryString)) {
+            parse_str($queryString, $query);
+        }
+        if ($query !== [] && $query !== ['keyword' => $marker]) {
+            throw new RuntimeException($operation . ' redirected with an unexpected query.');
+        }
+        $landing = $this->client->get($area . '/search', $query);
+        $this->remember();
+        $this->expect($landing, $expected, $operation . ' landing');
+        if ($expected === 403) {
+            $this->assertNoMarker($landing, $marker, $operation . ' landing');
+        } else {
+            $this->assertSearchProjection(
+                $landing,
+                $area,
+                $targetId,
+                $providerId,
+                $marker,
+                $targetRow,
+                $operation . ' landing',
+            );
+        }
+        return $landing->statusCode;
+    }
+
+    private function assertSearchProjection(
+        GateHttpResponse $response,
+        string $area,
+        int $targetId,
+        int $providerId,
+        string $marker,
+        array $targetRow,
+        string $operation,
+    ): void {
+        $rows = json_decode($response->body, true);
+        if (!is_array($rows) || !array_is_list($rows)) {
+            throw new RuntimeException($operation . ' did not return a bounded list.');
+        }
+        $matches = array_values(
+            array_filter($rows, static fn(mixed $row): bool => is_array($row) && (int) ($row['id'] ?? 0) === $targetId),
+        );
+        if (count($matches) !== 1) {
+            throw new RuntimeException($operation . ' did not return exactly one owned target.');
+        }
+        $this->assertProjection($area, $matches[0], $targetId, $providerId, $marker, $targetRow);
     }
 
     /** @param array<string,mixed> $projection @param array<string,mixed> $row */
@@ -336,10 +411,19 @@ final class BackofficeTargetReadProbe
     ): void {
         $location = $response->header('location');
         $path = $location !== null ? parse_url($location, PHP_URL_PATH) : null;
+        $actualOrigin = $location !== null ? parse_url($location) : false;
+        $expectedOrigin = parse_url($this->expectedRedirectOrigin);
         if (
             !in_array($response->statusCode, $statuses, true) ||
             !is_string($path) ||
-            preg_match('~/(?:index\\.php/)?' . preg_quote($route, '~') . '/?$~', $path) !== 1
+            preg_match('~/(?:index\\.php/)?' . preg_quote($route, '~') . '/?$~', $path) !== 1 ||
+            !is_array($actualOrigin) ||
+            !is_array($expectedOrigin) ||
+            !is_string($actualOrigin['scheme'] ?? null) ||
+            !is_string($actualOrigin['host'] ?? null) ||
+            strtolower($actualOrigin['scheme']) !== strtolower((string) ($expectedOrigin['scheme'] ?? '')) ||
+            strtolower($actualOrigin['host']) !== strtolower((string) ($expectedOrigin['host'] ?? '')) ||
+            ($actualOrigin['port'] ?? null) !== ($expectedOrigin['port'] ?? null)
         ) {
             throw new RuntimeException($operation . ' did not redirect to the expected route.');
         }

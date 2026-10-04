@@ -310,6 +310,7 @@ try {
                     $newPublicClient(),
                     $fixture,
                     $verificationFixture,
+                    site_url(),
                     $sessions->remember(...),
                 ))->run($area),
             );

@@ -75,6 +75,7 @@ final class BackofficeTargetReadProbeTest extends TestCase
             $publicClient,
             $this->actor,
             $this->targets,
+            $this->server->baseUrl,
             static function (?string $session) use (&$sessions): void {
                 if ($session !== null && $session !== '') {
                     $sessions[] = $session;
@@ -95,11 +96,24 @@ final class BackofficeTargetReadProbeTest extends TestCase
         }
         self::assertSame('cleanup_pending', $this->actor->verify());
         self::assertSame('active', $this->targets->verify());
-        $before = array_fill_keys(array_keys($result['before_statuses']), 200);
+        $keys = [
+            'GET index',
+            'GET explicit index',
+            'POST search',
+            'GET search',
+            'GET alias',
+            'GET alias landing',
+            'POST alias',
+        ];
+        if ($area === 'secretaries') {
+            $keys[] = 'POST alias landing';
+        }
+        array_push($keys, 'POST find', 'GET find');
+        $before = array_fill_keys($keys, 200);
         $before['GET alias'] = 307;
         $before['POST alias'] = $area === 'secretaries' ? 303 : 405;
         self::assertSame($before, $result['before_statuses']);
-        $after = array_fill_keys(array_keys($result['after_statuses']), 403);
+        $after = array_fill_keys($keys, 403);
         $after['GET alias'] = 307;
         $after['POST alias'] = $area === 'secretaries' ? 303 : 405;
         self::assertSame($after, $result['after_statuses']);
@@ -137,9 +151,13 @@ final class BackofficeTargetReadProbeTest extends TestCase
                 $source,
         );
         try {
-            (new BackofficeTargetReadProbe($this->client(), $this->publicClient(), $this->actor, $this->targets))->run(
-                'services',
-            );
+            (new BackofficeTargetReadProbe(
+                $this->client(),
+                $this->publicClient(),
+                $this->actor,
+                $this->targets,
+                $this->server->baseUrl,
+            ))->run('services');
             self::fail('Generic HTTP success must not count as a Backoffice projection.');
         } catch (RuntimeException $error) {
             self::assertStringContainsString('did not render the expected Backoffice page', $error->getMessage());
