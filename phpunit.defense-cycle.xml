@@ -95,6 +95,7 @@
             <file>./tests/Integration/Controllers/PublicRescheduleManualUnavailabilityRaceHttpTest.php</file>
             <file>./tests/Integration/Controllers/BookingAvailabilityAuthorityHttpTest.php</file>
             <file>./tests/Integration/Controllers/BookingUnavailableDatesFutureLimitTest.php</file>
+            <file>./tests/Integration/Controllers/BookingAvailableHoursFutureLimitTest.php</file>
             <file>./tests/Integration/Controllers/BookingJsonBodyLimitHttpTest.php</file>
             <file>./tests/Integration/Controllers/ProviderPdfExportHttpTest.php</file>
             <file>./tests/Integration/Controllers/DashboardExportHttpTest.php</file>

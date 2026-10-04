@@ -13,6 +13,7 @@
             <file>./tests/Integration/Controllers/BookingCancellationControllerFlowTest.php</file>
             <file>./tests/Integration/Controllers/BookingReadAvailabilityControllerFlowTest.php</file>
             <file>./tests/Integration/Controllers/BookingUnavailableDatesFutureLimitTest.php</file>
+            <file>./tests/Integration/Controllers/BookingAvailableHoursFutureLimitTest.php</file>
         </testsuite>
     </testsuites>
     <php>

@@ -836,6 +836,24 @@ class Booking extends EA_Controller
         return $this->db->trans_begin();
     }
 
+    private function isDefinitelyBeyondFutureBookingLimit(string $selected_date): bool
+    {
+        $future_booking_limit = (string) setting('future_booking_limit');
+        $future_booking_limit_days = ctype_digit($future_booking_limit)
+            ? filter_var(ltrim($future_booking_limit, '0') ?: '0', FILTER_VALIDATE_INT)
+            : false;
+
+        if ($future_booking_limit_days === false || $future_booking_limit_days > PHP_INT_MAX - 4) {
+            return false;
+        }
+
+        // The actual limit is checked in each provider timezone. Leave four days of
+        // slack for timezone and clock differences before skipping availability work.
+        $safe_limit = (new DateTimeImmutable('today'))->modify('+' . ($future_booking_limit_days + 4) . ' days');
+
+        return new DateTimeImmutable($selected_date) > $safe_limit;
+    }
+
     /**
      * Search for any provider that can handle the requested service.
      *
@@ -920,6 +938,17 @@ class Booking extends EA_Controller
 
             $service = $this->services_model->find($service_id);
 
+            if ($this->isDefinitelyBeyondFutureBookingLimit($selected_date)) {
+                // Keep the normal invalid-provider error even when no slot can be booked.
+                if ($provider_id !== ANY_PROVIDER) {
+                    $this->providers_model->find($provider_id);
+                }
+
+                json_response([]);
+
+                return;
+            }
+
             if ($provider_id === ANY_PROVIDER) {
                 $providers = $this->providers_model->get_available_providers(true);
 
@@ -1002,31 +1031,16 @@ class Booking extends EA_Controller
             // Get the service record.
             $service = $this->services_model->find($service_id);
 
-            $future_booking_limit = (string) setting('future_booking_limit');
-
-            $future_booking_limit_days = ctype_digit($future_booking_limit)
-                ? filter_var(ltrim($future_booking_limit, '0') ?: '0', FILTER_VALIDATE_INT)
-                : false;
-
-            if ($future_booking_limit_days !== false && $future_booking_limit_days <= PHP_INT_MAX - 4) {
-                $first_day_of_month = new DateTimeImmutable($selected_date->format('Y-m-01'));
-                // The actual limit is checked in each provider timezone. Leave four days of
-                // slack for timezone and clock differences before skipping the daily work.
-                $safe_limit = (new DateTimeImmutable('today'))->modify(
-                    '+' . ($future_booking_limit_days + 4) . ' days',
-                );
-
-                if ($first_day_of_month > $safe_limit) {
-                    // Preserve invalid-provider errors rather than turning them into an
-                    // apparently valid unavailable month.
-                    foreach ($provider_ids as $current_provider_id) {
-                        $this->providers_model->find($current_provider_id);
-                    }
-
-                    json_response(['is_month_unavailable' => true]);
-
-                    return;
+            if ($this->isDefinitelyBeyondFutureBookingLimit($selected_date->format('Y-m-01'))) {
+                // Preserve invalid-provider errors rather than turning them into an
+                // apparently valid unavailable month.
+                foreach ($provider_ids as $current_provider_id) {
+                    $this->providers_model->find($current_provider_id);
                 }
+
+                json_response(['is_month_unavailable' => true]);
+
+                return;
             }
 
             for ($i = 1; $i <= $number_of_days_in_month; $i++) {
