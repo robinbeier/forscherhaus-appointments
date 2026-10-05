@@ -19,6 +19,7 @@
             <file>./tests/Integration/Controllers/CustomersApiHttpWriteTest.php</file>
             <file>./tests/Integration/Controllers/ServicesApiHttpWriteTest.php</file>
             <file>./tests/Integration/Controllers/UnavailabilitiesApiHttpWriteTest.php</file>
+            <file>./tests/Integration/Controllers/UnavailabilitiesApiHttpReadTest.php</file>
             <file>./tests/Integration/Controllers/ServiceCategoriesApiHttpWriteTest.php</file>
             <file>./tests/Integration/Controllers/ServiceCategoriesApiPostWriteFailureTest.php</file>
             <file>./tests/Integration/Controllers/ServiceCategoriesLegacyHttpTest.php</file>

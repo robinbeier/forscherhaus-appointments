@@ -406,10 +406,14 @@ paths:
                   in: query
                   schema:
                       type: integer
+                      minimum: 1
+                      maximum: 10000
                 - name: length
                   in: query
                   schema:
                       type: integer
+                      minimum: 1
+                      maximum: 100
                 - name: sort
                   in: query
                   schema:
@@ -2060,6 +2064,19 @@ components:
                     type: string
                 parentAppointmentId:
                     type: integer
+                provider:
+                    type: object
+                    nullable: true
+                    description: Minimal provider projection returned by with=provider.
+                    properties:
+                        id:
+                            type: integer
+                        firstName:
+                            type: string
+                            nullable: true
+                        lastName:
+                            type: string
+                            nullable: true
             example:
                 id: 1
                 book: '2021-01-01 12:00:00'

@@ -255,6 +255,12 @@ writes and does not change the backoffice calendar or public booking contract.
 - `PUT /api/v1/unavailabilities/:id` Provide the updated unavailability JSON in the request body to update an existing record. The ID in the URI is required.
 - `DELETE /api/v1/unavailabilities/:id` Remove an existing unavailability record.
 
+Collection reads accept `length` from 1 through 100 and `page` from 1 through
+10000; invalid values return `400 Bad Request` before the model is queried.
+`with=provider` adds a bounded provider projection with only `id` (integer),
+`firstName`, and `lastName`. Repeated `provider` tokens are deduplicated. The
+`provider` value is `null` when the referenced provider is unavailable.
+
 ### Customers
 
 **Resource JSON**

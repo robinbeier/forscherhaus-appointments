@@ -38,6 +38,14 @@ class Unavailabilities_api_v1 extends EA_Controller
      */
     public function index(): void
     {
+        if (!$this->enforceReadMethod()) {
+            return;
+        }
+
+        if (!$this->validatePaginationRequest()) {
+            return;
+        }
+
         try {
             $keyword = $this->api->request_keyword();
 
@@ -57,14 +65,15 @@ class Unavailabilities_api_v1 extends EA_Controller
 
             foreach ($unavailabilities as &$unavailability) {
                 $this->unavailabilities_model->api_encode($unavailability);
+            }
+            unset($unavailability);
 
-                if (!empty($fields)) {
-                    $this->unavailabilities_model->only($unavailability, $fields);
-                }
+            if (!empty($with)) {
+                $this->unavailabilities_model->loadCollection($unavailabilities, $with);
+            }
 
-                if (!empty($with)) {
-                    $this->unavailabilities_model->load($unavailability, $with);
-                }
+            if (!empty($fields)) {
+                $this->unavailabilities_model->only($unavailabilities, array_merge($fields, $with ?? []));
             }
 
             json_response($unavailabilities);
@@ -80,6 +89,10 @@ class Unavailabilities_api_v1 extends EA_Controller
      */
     public function show(?int $id = null): void
     {
+        if (!$this->enforceReadMethod()) {
+            return;
+        }
+
         try {
             $occurrences = $this->unavailabilities_model->get(['id' => $id]);
 
@@ -97,12 +110,12 @@ class Unavailabilities_api_v1 extends EA_Controller
 
             $this->unavailabilities_model->api_encode($unavailability);
 
-            if (!empty($fields)) {
-                $this->unavailabilities_model->only($unavailability, $fields);
-            }
-
             if (!empty($with)) {
                 $this->unavailabilities_model->load($unavailability, $with);
+            }
+
+            if (!empty($fields)) {
+                $this->unavailabilities_model->only($unavailability, array_merge($fields, $with ?? []));
             }
 
             json_response($unavailability);
@@ -252,5 +265,48 @@ class Unavailabilities_api_v1 extends EA_Controller
         response('', 405, ['Allow: ' . $expected]);
 
         return false;
+    }
+
+    private function enforceReadMethod(): bool
+    {
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) === 'GET') {
+            return true;
+        }
+
+        response('', 405, ['Allow: GET']);
+
+        return false;
+    }
+
+    /** Validate collection pagination before the unavailabilities model is queried. */
+    private function validatePaginationRequest(): bool
+    {
+        foreach (['length' => 100, 'page' => 10000] as $parameter => $maximum) {
+            $value = request($parameter);
+
+            if ($value === null) {
+                continue;
+            }
+
+            if ((is_int($value) || is_string($value)) && preg_match('/^[0-9]+$/', (string) $value)) {
+                $number = (int) $value;
+
+                if ($number >= 1 && $number <= $maximum) {
+                    continue;
+                }
+            }
+
+            json_response(
+                [
+                    'success' => false,
+                    'message' => sprintf('The %s parameter must be an integer between 1 and %d.', $parameter, $maximum),
+                ],
+                400,
+            );
+
+            return false;
+        }
+
+        return true;
     }
 }
