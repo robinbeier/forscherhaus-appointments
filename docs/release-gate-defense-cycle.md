@@ -431,7 +431,17 @@ The `secretaries-api` action permits one planned run against the bound active
 release. Its dedicated journaled profile creates one synthetic provider and two
 Secretary users, each with complete settings and one provider relationship. The
 target and sentinel are selected only from those owned rows; no existing user,
-setting, or relationship is used.
+setting, or relationship is used. Filtered canonical and direct collection GETs
+must return exactly the owned target. Canonical and direct show GETs must return
+that same target with only the expected Secretary projection, including bounded
+settings and provider IDs but no credential fields. Complete owned snapshots
+must remain unchanged after each read.
+
+POST, PUT, PATCH, DELETE and HEAD against the **direct read aliases**
+`secretaries_api_v1/index` and `secretaries_api_v1/show/{id}` must return 405
+with `Allow: GET`, an empty body and unchanged owned snapshots. The canonical
+collection and item URLs also carry legitimate write routes; the probe uses
+them only as GET controls and never sends the wrong-method matrix to them.
 
 A PUT to the direct `store` alias must return 405 with `Allow: POST`, and a GET
 to the direct `destroy` alias must return 405 with `Allow: DELETE`. Full target
@@ -439,7 +449,7 @@ and sentinel user, settings, and provider-link snapshots must remain identical
 after both requests. The root-controlled wrapper, shared lock, independent
 cleanup timer, durable fixture intents, and recovery marker apply throughout.
 
-Only `verified` with both phases passed, exact identity-bound fixture cleanup,
+Only `verified` with every phase passed, exact identity-bound fixture cleanup,
 removed transient timer and marker, unchanged active release, and healthy
 production is successful. Interrupted activation may reconstruct only rows
 matching journaled identities; cleanup refuses ambiguous users or relationships.

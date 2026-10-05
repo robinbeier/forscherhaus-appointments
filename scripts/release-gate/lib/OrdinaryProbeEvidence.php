@@ -102,6 +102,8 @@ final class OrdinaryProbeEvidence
                     'service_categories_api_conflict_put',
                     'service_categories_api_matching_put',
                     'service_categories_api_wrong_verb_destroy',
+                    'secretaries_api_read_aliases',
+                    'secretaries_api_read_method_boundaries',
                     'secretaries_api_store_alias',
                     'secretaries_api_destroy_alias',
                     'save_appointment_methods',

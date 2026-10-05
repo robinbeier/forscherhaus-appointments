@@ -44,6 +44,8 @@ final class SecretariesApiAliasProbeTest extends TestCase
             )->run($evidence->step(...));
 
             self::assertSame('verified', $result['status']);
+            self::assertSame(200, $result['read_status']);
+            self::assertSame(405, $result['read_wrong_verb_status']);
             self::assertSame(405, $result['store_wrong_verb_status']);
             self::assertSame(405, $result['destroy_wrong_verb_status']);
             $passed = array_values(
@@ -53,7 +55,12 @@ final class SecretariesApiAliasProbeTest extends TestCase
                 ),
             );
             self::assertSame(
-                ['secretaries_api_store_alias', 'secretaries_api_destroy_alias'],
+                [
+                    'secretaries_api_read_aliases',
+                    'secretaries_api_read_method_boundaries',
+                    'secretaries_api_store_alias',
+                    'secretaries_api_destroy_alias',
+                ],
                 array_column($passed, 'phase'),
             );
         } finally {

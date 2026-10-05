@@ -6,7 +6,7 @@ namespace ReleaseGate;
 
 use RuntimeException;
 
-/** Bounded localhost proof for Secretary direct store/destroy aliases. */
+/** Bounded localhost proof for Secretary API read and direct store/destroy aliases. */
 final class SecretariesApiAliasProbe
 {
     public function __construct(
@@ -57,6 +57,49 @@ final class SecretariesApiAliasProbe
             'providers' => [$this->providerId($before['target'])],
             'settings' => ['username' => (string) ($before['target']['settings']['username'] ?? '')],
         ];
+        $targetEmail = (string) ($before['target']['user']['email'] ?? '');
+        if ($targetEmail === '') {
+            throw new RuntimeException('Secretary API target email is unavailable.');
+        }
+
+        $this->phase($observe, 'secretaries_api_read_aliases', function () use (
+            $targetId,
+            $targetEmail,
+            $before,
+        ): void {
+            foreach (['api/v1/secretaries', 'api/v1/secretaries_api_v1/index'] as $path) {
+                $response = $this->client->get($path, ['q' => $targetEmail]);
+                $rows = $this->decodeJson($response, $path . ' GET');
+                $matches = array_values(
+                    array_filter(
+                        $rows,
+                        static fn(mixed $row): bool => is_array($row) && (int) ($row['id'] ?? 0) === $targetId,
+                    ),
+                );
+                if (count($rows) !== 1 || count($matches) !== 1) {
+                    throw new RuntimeException(
+                        'Secretaries API ' . $path . ' GET did not return exactly one filtered row.',
+                    );
+                }
+                $this->assertSecretaryProjection($matches[0], $before['target'], $path . ' GET');
+                $this->assertSnapshot($before, $path . ' GET');
+            }
+            foreach (['api/v1/secretaries/' . $targetId, 'api/v1/secretaries_api_v1/show/' . $targetId] as $path) {
+                $response = $this->client->get($path);
+                $row = $this->decodeJson($response, $path . ' GET');
+                $this->assertSecretaryProjection($row, $before['target'], $path . ' GET');
+                $this->assertSnapshot($before, $path . ' GET');
+            }
+        });
+
+        $this->phase($observe, 'secretaries_api_read_method_boundaries', function () use ($targetId, $before): void {
+            foreach (['api/v1/secretaries_api_v1/index'] as $path) {
+                $this->assertWrongReadMethods($path, $before);
+            }
+            foreach (['api/v1/secretaries_api_v1/show/' . $targetId] as $path) {
+                $this->assertWrongReadMethods($path, $before);
+            }
+        });
 
         $this->phase($observe, 'secretaries_api_store_alias', function () use ($targetPayload, $before): void {
             $response = $this->client->requestJsonApp('PUT', 'api/v1/secretaries_api_v1/store', $targetPayload);
@@ -75,7 +118,9 @@ final class SecretariesApiAliasProbe
 
         return [
             'status' => 'verified',
-            'coverage' => 'secretary_store_and_destroy_alias_method_boundaries',
+            'coverage' => 'secretary_read_projection_and_method_boundaries_store_and_destroy_alias_method_boundaries',
+            'read_status' => 200,
+            'read_wrong_verb_status' => 405,
             'store_wrong_verb_status' => 405,
             'destroy_wrong_verb_status' => 405,
             'observed' =>
@@ -91,6 +136,103 @@ final class SecretariesApiAliasProbe
             throw new RuntimeException('Secretary API provider relationship is unavailable.');
         }
         return $providerId;
+    }
+
+    /** @return array<string,mixed>|array<int,array<string,mixed>> */
+    private function decodeJson(GateHttpResponse $response, string $context): array
+    {
+        $this->expectStatus($response, 200, $context);
+        try {
+            $decoded = json_decode($response->body, true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException $error) {
+            throw new RuntimeException('Secretaries API ' . $context . ' returned invalid JSON.', 0, $error);
+        }
+        if (!is_array($decoded)) {
+            throw new RuntimeException('Secretaries API ' . $context . ' returned an invalid payload.');
+        }
+        return $decoded;
+    }
+
+    private function assertSecretaryProjection(array $row, array $snapshot, string $context): void
+    {
+        $expectedKeys = [
+            'id',
+            'firstName',
+            'lastName',
+            'email',
+            'mobile',
+            'phone',
+            'address',
+            'city',
+            'state',
+            'zip',
+            'notes',
+            'providers',
+            'timezone',
+            'language',
+            'ldapDn',
+            'settings',
+        ];
+        if (array_diff($expectedKeys, array_keys($row)) !== [] || array_diff(array_keys($row), $expectedKeys) !== []) {
+            throw new RuntimeException('Secretaries API ' . $context . ' returned an unexpected projection.');
+        }
+        $user = $snapshot['user'] ?? [];
+        $settings = $snapshot['settings'] ?? [];
+        $providers = $snapshot['providers'] ?? [];
+        $expectedProviders = array_map(
+            static fn(array $provider): int => (int) ($provider['id_users_provider'] ?? 0),
+            is_array($providers) ? $providers : [],
+        );
+        sort($expectedProviders, SORT_NUMERIC);
+        $actualProviders = is_array($row['providers']) ? array_map('intval', $row['providers']) : [];
+        sort($actualProviders, SORT_NUMERIC);
+        $expected = [
+            'id' => (int) ($user['id'] ?? 0),
+            'firstName' => $user['first_name'] ?? null,
+            'lastName' => $user['last_name'] ?? null,
+            'email' => $user['email'] ?? null,
+            'mobile' => $user['mobile_number'] ?? null,
+            'phone' => $user['phone_number'] ?? null,
+            'address' => $user['address'] ?? null,
+            'city' => $user['city'] ?? null,
+            'state' => $user['state'] ?? null,
+            'zip' => $user['zip_code'] ?? null,
+            'notes' => $user['notes'] ?? null,
+            'timezone' => $user['timezone'] ?? null,
+            'language' => $user['language'] ?? null,
+            'ldapDn' => $user['ldap_dn'] ?? null,
+            'settings' => [
+                'username' => $settings['username'] ?? null,
+                'calendarView' => $settings['calendar_view'] ?? null,
+            ],
+        ];
+        foreach ($expected as $key => $value) {
+            if ($row[$key] !== $value) {
+                throw new RuntimeException('Secretaries API ' . $context . ' returned an unexpected ' . $key . '.');
+            }
+        }
+        if (
+            $actualProviders !== $expectedProviders ||
+            array_key_exists('password', $row) ||
+            array_key_exists('salt', $row)
+        ) {
+            throw new RuntimeException('Secretaries API ' . $context . ' exposed unexpected secretary data.');
+        }
+    }
+
+    private function assertWrongReadMethods(string $path, array $before): void
+    {
+        foreach (['POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'] as $method) {
+            $response = in_array($method, ['POST', 'PUT'], true)
+                ? $this->client->requestJsonApp($method, $path, [])
+                : $this->client->requestApp($method, $path);
+            $this->expectStatus($response, 405, $path . ' ' . $method);
+            $this->expectAllow($response, 'GET', $path . ' ' . $method);
+            if ($response->body !== '') {
+                throw new RuntimeException('Secretaries API ' . $path . ' ' . $method . ' emitted a response body.');
+            }
+            $this->assertSnapshot($before, $path . ' ' . $method);
+        }
     }
 
     private function phase(callable $observe, string $phase, callable $operation): void
