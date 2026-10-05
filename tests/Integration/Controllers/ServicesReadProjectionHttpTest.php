@@ -136,6 +136,10 @@ final class ServicesReadProjectionHttpTest extends TestCase
             $queryStart = count($db->queries);
             get_instance()->services_model->load($serviceForLoad, ['category', 'category', 'category']);
             self::assertSame(1, count($db->queries) - $queryStart);
+            $serviceWithoutCategory = $before;
+            $serviceWithoutCategory['id_service_categories'] = null;
+            get_instance()->services_model->load($serviceWithoutCategory, ['category', 'category']);
+            self::assertNull($serviceWithoutCategory['category']);
 
             $clients = [
                 new GateHttpClient(
@@ -199,7 +203,8 @@ final class ServicesReadProjectionHttpTest extends TestCase
                 $categoryKeys = array_keys($match[0]['category']);
                 sort($categoryKeys);
                 self::assertSame(['description', 'id', 'name'], $categoryKeys);
-                self::assertSame($categoryId, (int) ($match[0]['category']['id'] ?? 0));
+                self::assertIsInt($match[0]['category']['id']);
+                self::assertSame($categoryId, $match[0]['category']['id']);
                 self::assertSame($fixture->run . '_pagination_category', $match[0]['category']['name'] ?? null);
                 self::assertStringNotContainsString(
                     $fixture->run . '_unexpected',
