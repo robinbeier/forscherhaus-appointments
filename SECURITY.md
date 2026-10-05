@@ -506,6 +506,15 @@ OPTIONS preflight behavior is unchanged. The isolated synthetic HTTP/database
 regression checks the alias method boundary and preservation of its own admin
 row. It does not establish production behavior.
 
+The authenticated Secretaries API v1 `index` and `show` read actions require
+GET, including through direct controller aliases. Non-GET requests to those
+direct actions return 405 with `Allow: GET` before querying or disclosing
+secretary data. Canonical POST, PUT, and DELETE routes remain separate write
+actions; global OPTIONS preflight behavior is unchanged. The isolated
+synthetic HTTP/database regression checks the alias method boundary and
+preservation of its own secretary, settings, and provider-link rows. It does
+not establish production behavior.
+
 The authenticated Services API v1 `index` and `show` read actions require GET,
 including through direct controller aliases. Non-GET requests to those direct
 actions return 405 with `Allow: GET` before querying service data. Canonical
