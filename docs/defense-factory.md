@@ -171,6 +171,11 @@ Basic/Bearer collection and detail reads, unauthenticated challenges, public sta
 response fields, and ordinary Admin/Secretary create-update persistence. Password
 omission and clearing Secretary provider assignments are checked against stored
 rows. Owned identities are registered before writes and cleaned with the fixture.
+For Admins API v1, the same fixture checks GET on canonical collection/detail
+routes and direct `index`/`show` aliases. Non-GET methods on the direct read
+aliases must return 405 with `Allow: GET`, no admin data, and no fixture-row
+change; canonical write routes and global OPTIONS preflight remain separate.
+This is an isolated local HTTP/database proof, not a productive account test.
 
 The six staff/settings read paths also cover absent credentials, a wrong synthetic
 Admin password, a nonexistent synthetic username, and an invalid Bearer token.
