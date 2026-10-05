@@ -2226,6 +2226,11 @@ components:
                     type: boolean
                 categoryId:
                     type: integer
+                category:
+                    allOf:
+                        - $ref: '#/components/schemas/ServiceCategoryRecord'
+                    nullable: true
+                    description: Included only when requested with=category; contains id, name, and description.
             example:
                 id: 1
                 name: Test Service

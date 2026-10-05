@@ -98,7 +98,8 @@ The service collection follows the same pagination contract on
 from 1 through 100, and `page` values must be integers from 1 through 10000.
 Invalid explicit pagination values return HTTP 400 before the service query
 runs. The optional `with=category` parameter attaches the bounded category
-projection to each returned service.
+projection (`id`, `name`, and `description`) to each returned service; repeated
+`category` tokens are loaded once per returned service.
 
 ### Paginate
 

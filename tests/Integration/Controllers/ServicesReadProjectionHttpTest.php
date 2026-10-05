@@ -131,6 +131,11 @@ final class ServicesReadProjectionHttpTest extends TestCase
             $categoryId = (int) $db->insert_id();
             $db->update('services', ['id_service_categories' => $categoryId], ['id' => $fixture->serviceId]);
             $before = $fixture->row('services', $fixture->serviceId);
+            get_instance()->load->model('services_model');
+            $serviceForLoad = $before;
+            $queryStart = count($db->queries);
+            get_instance()->services_model->load($serviceForLoad, ['category', 'category', 'category']);
+            self::assertSame(1, count($db->queries) - $queryStart);
 
             $clients = [
                 new GateHttpClient(
@@ -170,10 +175,15 @@ final class ServicesReadProjectionHttpTest extends TestCase
                     self::assertSame($before, $fixture->row('services', $fixture->serviceId));
                 }
 
-                $default = $this->decodeList(
+                $single = $this->decodeList(
                     $client->get($route, ['q' => $fixture->run, 'with' => 'category']),
-                    'default',
+                    'single-category',
                 );
+                $default = $this->decodeList(
+                    $client->get($route, ['q' => $fixture->run, 'with' => 'category,category,category']),
+                    'repeated-category',
+                );
+                self::assertSame($single, $default);
                 self::assertNotEmpty($default);
                 self::assertLessThanOrEqual(20, count($default));
                 $match = array_values(
@@ -186,6 +196,9 @@ final class ServicesReadProjectionHttpTest extends TestCase
                 self::assertCount(1, $match);
                 self::assertArrayHasKey('category', $match[0]);
                 self::assertIsArray($match[0]['category']);
+                $categoryKeys = array_keys($match[0]['category']);
+                sort($categoryKeys);
+                self::assertSame(['description', 'id', 'name'], $categoryKeys);
                 self::assertSame($categoryId, (int) ($match[0]['category']['id'] ?? 0));
                 self::assertSame($fixture->run . '_pagination_category', $match[0]['category']['name'] ?? null);
                 self::assertStringNotContainsString(

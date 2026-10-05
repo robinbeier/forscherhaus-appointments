@@ -802,9 +802,12 @@ class Services_model extends EA_Model
             return;
         }
 
+        $resources = array_values(array_unique($resources));
+
         foreach ($resources as $resource) {
             $service['category'] = match ($resource) {
                 'category' => $this->db
+                    ->select('id, name, description')
                     ->get_where('service_categories', [
                         'id' => $service['id_service_categories'] ?? ($service['serviceCategoryId'] ?? null),
                     ])
