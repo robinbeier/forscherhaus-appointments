@@ -92,6 +92,14 @@ from 1 through 100, and `page` values must be integers from 1 through 10000.
 Invalid explicit pagination values return HTTP 400 before the provider query
 runs.
 
+The service collection follows the same pagination contract on
+`GET /api/v1/services` and its direct controller alias
+`GET /api/v1/services_api_v1/index`. Explicit `length` values must be integers
+from 1 through 100, and `page` values must be integers from 1 through 10000.
+Invalid explicit pagination values return HTTP 400 before the service query
+runs. The optional `with=category` parameter attaches the bounded category
+projection to each returned service.
+
 ### Paginate
 
 Paginate the appointments result by providing the `page` parameter along with the optional `length` parameter that defaults to 20. For `GET /api/v1/appointments`, explicitly provided `length` values must be integers from 1 through 100, and `page` values must be integers from 1 through 10000. Invalid explicit pagination values return HTTP 400 before the appointments query runs.

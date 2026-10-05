@@ -102,6 +102,132 @@ final class ServicesReadProjectionHttpTest extends TestCase
         self::assertSame($before, $fixture->row('services', $fixture->serviceId));
     }
 
+    public static function serviceCollectionRoutes(): array
+    {
+        return [
+            'canonical' => ['api/v1/services'],
+            'index-alias' => ['api/v1/services_api_v1/index'],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('serviceCollectionRoutes')]
+    public function testServiceCollectionPaginationAndCategoryProjection(string $route): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $db = get_instance()->db;
+        $categoryName = $fixture->run . '_pagination_category';
+        $categoryId = 0;
+        $originalCategoryId = null;
+
+        try {
+            $originalCategoryId = $fixture->row('services', $fixture->serviceId)['id_service_categories'] ?? null;
+            $db->insert('service_categories', [
+                'name' => $categoryName,
+                'description' => $fixture->run,
+                'create_datetime' => date('Y-m-d H:i:s'),
+                'update_datetime' => date('Y-m-d H:i:s'),
+            ]);
+            $categoryId = (int) $db->insert_id();
+            $db->update('services', ['id_service_categories' => $categoryId], ['id' => $fixture->serviceId]);
+            $before = $fixture->row('services', $fixture->serviceId);
+
+            $clients = [
+                new GateHttpClient(
+                    $this->server->baseUrl,
+                    additionalHeaders: [
+                        'Authorization' =>
+                            'Basic ' .
+                            base64_encode($this->credentials['admin_username'] . ':' . $this->credentials['password']),
+                    ],
+                ),
+                new GateHttpClient(
+                    $this->server->baseUrl,
+                    additionalHeaders: ['Authorization' => 'Bearer ' . $this->credentials['token']],
+                ),
+            ];
+
+            foreach ($clients as $client) {
+                foreach (
+                    [
+                        'length-zero' => ['length' => '0'],
+                        'length-over-bound' => ['length' => '101'],
+                        'length-huge' => ['length' => '999999999999999999999999'],
+                        'page-zero' => ['page' => '0'],
+                        'page-over-bound' => ['page' => '10001'],
+                        'page-huge' => ['page' => '999999999999999999999999'],
+                    ]
+                    as $name => $query
+                ) {
+                    $response = $client->get($route, $query);
+                    self::assertSame(400, $response->statusCode, $route . ' ' . $name);
+                    $payload = json_decode($response->body, true, 512, JSON_THROW_ON_ERROR);
+                    self::assertFalse($payload['success'] ?? true, $route . ' ' . $name);
+                    self::assertStringContainsString(
+                        (string) array_key_first($query),
+                        (string) ($payload['message'] ?? ''),
+                    );
+                    self::assertSame($before, $fixture->row('services', $fixture->serviceId));
+                }
+
+                $default = $this->decodeList(
+                    $client->get($route, ['q' => $fixture->run, 'with' => 'category']),
+                    'default',
+                );
+                self::assertNotEmpty($default);
+                self::assertLessThanOrEqual(20, count($default));
+                $match = array_values(
+                    array_filter(
+                        $default,
+                        static fn(mixed $row): bool => is_array($row) &&
+                            (int) ($row['id'] ?? 0) === $fixture->serviceId,
+                    ),
+                );
+                self::assertCount(1, $match);
+                self::assertArrayHasKey('category', $match[0]);
+                self::assertIsArray($match[0]['category']);
+                self::assertSame($categoryId, (int) ($match[0]['category']['id'] ?? 0));
+                self::assertSame($fixture->run . '_pagination_category', $match[0]['category']['name'] ?? null);
+                self::assertStringNotContainsString(
+                    $fixture->run . '_unexpected',
+                    json_encode($match[0], JSON_THROW_ON_ERROR),
+                );
+                foreach (['_google_integration', '_caldav_integration'] as $suffix) {
+                    self::assertStringNotContainsString(
+                        $fixture->run . $suffix,
+                        json_encode($match[0], JSON_THROW_ON_ERROR),
+                    );
+                }
+
+                $boundary = $this->decodeList(
+                    $client->get($route, ['q' => $fixture->run, 'length' => '1', 'page' => '1']),
+                    'boundary',
+                );
+                self::assertCount(min(1, count($default)), $boundary);
+                $maximum = $this->decodeList(
+                    $client->get($route, ['q' => $fixture->run, 'length' => '100', 'page' => '10000']),
+                    'maximum',
+                );
+                self::assertLessThanOrEqual(100, count($maximum));
+            }
+
+            self::assertSame($before, $fixture->row('services', $fixture->serviceId));
+        } finally {
+            if ($originalCategoryId !== null || $categoryId > 0) {
+                $db->update(
+                    'services',
+                    ['id_service_categories' => $originalCategoryId],
+                    ['id' => $fixture->serviceId],
+                );
+            }
+            if ($categoryId > 0) {
+                $db->delete('service_categories', ['id' => $categoryId]);
+            }
+            $db->delete('service_categories', ['name' => $categoryName]);
+            self::assertSame([], $db->get_where('service_categories', ['name' => $categoryName])->result_array());
+        }
+    }
+
     public function testAnonymousServiceDeepLinksKeepTheirLoginReturnTarget(): void
     {
         $server = $this->server;
