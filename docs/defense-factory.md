@@ -177,6 +177,14 @@ aliases must return 405 with `Allow: GET`, no admin data, and no fixture-row
 change; canonical write routes and global OPTIONS preflight remain separate.
 This is an isolated local HTTP/database proof, not a productive account test.
 
+For Secretaries API v1, the fixture likewise checks canonical and direct
+collection/detail GET routes and the existing public projection. POST, PUT,
+PATCH, DELETE, and HEAD on direct `index`/`show` aliases must return 405 with
+`Allow: GET`, an empty body, and unchanged synthetic secretary, settings, and
+provider-link rows. Canonical POST, PUT, and DELETE routes remain legitimate
+write paths; global OPTIONS preflight remains separate. This is an isolated
+local HTTP/database proof and does not establish production behavior.
+
 The six staff/settings read paths also cover absent credentials, a wrong synthetic
 Admin password, a nonexistent synthetic username, and an invalid Bearer token.
 Each case requires HTTP401 and a nonempty authentication challenge, with no

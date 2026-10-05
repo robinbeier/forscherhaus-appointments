@@ -273,6 +273,76 @@ final class StaffSettingsApiHttpTest extends TestCase
         }
     }
 
+    public function testSecretaryApiReadsAllowGetOnlyAcrossCanonicalAndDirectRoutes(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $admin = $this->basicClient($this->credentials['admin_username'], $this->credentials['password']);
+        $payload = $fixture->secretaryWritePayload('read-methods', [$fixture->providerId]);
+        $created = $this->success($admin->requestJsonApp('POST', 'api/v1/secretaries', $payload), 201);
+        $secretaryId = (int) ($created['id'] ?? 0);
+        self::assertGreaterThan(0, $secretaryId, 'Secretary fixture must have a positive ID.');
+        $identity = [
+            'id' => $secretaryId,
+            'firstName' => $payload['firstName'],
+            'email' => $payload['email'],
+        ];
+        $before = $fixture->secretaryDeleteState($secretaryId);
+        $collectionPaths = ['api/v1/secretaries', 'api/v1/secretaries_api_v1/index'];
+        $showPaths = ['api/v1/secretaries/' . $secretaryId, 'api/v1/secretaries_api_v1/show/' . $secretaryId];
+
+        foreach ($collectionPaths as $path) {
+            $rows = $this->success($admin->get($path, ['q' => $fixture->run]));
+            $matches = array_values(
+                array_filter(
+                    $rows,
+                    static fn(mixed $row): bool => is_array($row) && (int) ($row['id'] ?? 0) === $secretaryId,
+                ),
+            );
+            self::assertCount(1, $matches, $path . ' must expose exactly the synthetic secretary.');
+            $this->assertStaff($matches[0], $identity, true);
+            self::assertSame($before, $fixture->secretaryDeleteState($secretaryId));
+        }
+
+        foreach ($showPaths as $path) {
+            $row = $this->success($admin->get($path));
+            $this->assertStaff($row, $identity, true);
+            self::assertSame($before, $fixture->secretaryDeleteState($secretaryId));
+        }
+
+        $requests = [];
+        foreach (['api/v1/secretaries_api_v1/index'] as $path) {
+            $requests[$path . ' POST'] = fn(): GateHttpResponse => $admin->requestJsonApp('POST', $path, []);
+            $requests[$path . ' PUT'] = fn(): GateHttpResponse => $admin->requestJsonApp('PUT', $path, []);
+            $requests[$path . ' PATCH'] = fn(): GateHttpResponse => $admin->requestApp('PATCH', $path);
+            $requests[$path . ' DELETE'] = fn(): GateHttpResponse => $admin->requestApp('DELETE', $path);
+            $requests[$path . ' HEAD'] = fn(): GateHttpResponse => $admin->requestApp('HEAD', $path);
+        }
+        foreach (['api/v1/secretaries_api_v1/show/' . $secretaryId] as $path) {
+            $requests[$path . ' POST'] = fn(): GateHttpResponse => $admin->requestJsonApp('POST', $path, []);
+            $requests[$path . ' PUT'] = fn(): GateHttpResponse => $admin->requestJsonApp('PUT', $path, []);
+            $requests[$path . ' PATCH'] = fn(): GateHttpResponse => $admin->requestApp('PATCH', $path);
+            $requests[$path . ' DELETE'] = fn(): GateHttpResponse => $admin->requestApp('DELETE', $path);
+            $requests[$path . ' HEAD'] = fn(): GateHttpResponse => $admin->requestApp('HEAD', $path);
+        }
+
+        foreach ($requests as $case => $request) {
+            $response = $request();
+            self::assertSame(405, $response->statusCode, $case . ' must be rejected.');
+            self::assertSame('GET', $response->header('allow'), $case . ' must advertise GET only.');
+            self::assertSame('', $response->body, $case . ' must not emit secretary data.');
+            self::assertStringNotContainsString($fixture->run, $response->body, $case);
+            self::assertSame($before, $fixture->secretaryDeleteState($secretaryId));
+        }
+
+        foreach (array_merge($collectionPaths, $showPaths) as $path) {
+            $options = $this->server->client()->requestApp('OPTIONS', $path);
+            self::assertSame(200, $options->statusCode, $path . ' OPTIONS must short-circuit globally.');
+            self::assertSame('', $options->body, $path . ' OPTIONS must not invoke the controller.');
+            self::assertSame($before, $fixture->secretaryDeleteState($secretaryId));
+        }
+    }
+
     public function testValidProviderBasicCannotReadAdminSecretaryOrSettingsRoutes(): void
     {
         $provider = $this->fixture->row('users', $this->fixture->providerId);
