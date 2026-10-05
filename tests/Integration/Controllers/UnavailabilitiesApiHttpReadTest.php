@@ -114,6 +114,48 @@ final class UnavailabilitiesApiHttpReadTest extends TestCase
         }
     }
 
+    public function testKeywordSearchKeepsNullProviderRowsAndAppointmentIdsOnCollectionAliases(): void
+    {
+        foreach ([$this->basicClient(), $this->bearerClient()] as $client) {
+            foreach (['api/v1/unavailabilities', 'api/v1/unavailabilities_api_v1/index'] as $path) {
+                $response = $client->get($path, [
+                    'q' => $this->fixture?->run,
+                    'sort' => '-id',
+                    'with' => 'provider',
+                    'length' => 2,
+                    'page' => 1,
+                ]);
+
+                self::assertSame(200, $response->statusCode, $path . ': ' . $response->body);
+                $rows = json_decode($response->body, true, 512, JSON_THROW_ON_ERROR);
+                self::assertSame([$this->ownedIds[1], $this->ownedIds[0]], array_column($rows, 'id'));
+                self::assertSame($this->ownedIds[1], $rows[0]['id']);
+                self::assertNull($rows[0]['provider']);
+                self::assertSame($this->fixture?->providerId, $rows[1]['provider']['id']);
+                self::assertSame(['id', 'firstName', 'lastName'], array_keys($rows[1]['provider']));
+
+                $selected = $client->get($path, [
+                    'q' => $this->fixture?->run,
+                    'sort' => '-id',
+                    'fields' => 'id',
+                    'with' => 'provider',
+                    'length' => 1,
+                    'page' => 2,
+                ]);
+                self::assertSame(200, $selected->statusCode, $path . ': ' . $selected->body);
+                $selectedRows = json_decode($selected->body, true, 512, JSON_THROW_ON_ERROR);
+                self::assertCount(1, $selectedRows);
+                self::assertSame(['id', 'provider'], array_keys($selectedRows[0]));
+                self::assertSame($this->ownedIds[0], $selectedRows[0]['id']);
+                self::assertSame(['id', 'firstName', 'lastName'], array_keys($selectedRows[0]['provider']));
+
+                $missing = $client->get($path, ['q' => 'not-found-' . $this->fixture?->run]);
+                self::assertSame(200, $missing->statusCode, $path . ': ' . $missing->body);
+                self::assertSame([], json_decode($missing->body, true, 512, JSON_THROW_ON_ERROR));
+            }
+        }
+    }
+
     public function testCollectionAndShowRejectMissingInvalidAndProviderCredentials(): void
     {
         $clients = [

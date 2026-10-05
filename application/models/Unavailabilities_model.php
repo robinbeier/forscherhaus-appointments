@@ -374,10 +374,10 @@ class Unavailabilities_model extends EA_Model
     public function search(string $keyword, ?int $limit = null, ?int $offset = null, ?string $order_by = null): array
     {
         $unavailabilities = $this->db
-            ->select()
+            ->select('appointments.*')
             ->from('appointments')
-            ->join('users AS providers', 'providers.id = appointments.id_users_provider', 'inner')
-            ->where('is_unavailability', true)
+            ->join('users AS providers', 'providers.id = appointments.id_users_provider', 'left')
+            ->where('appointments.is_unavailability', true)
             ->group_start()
             ->like('appointments.start_datetime', $keyword)
             ->or_like('appointments.end_datetime', $keyword)
@@ -391,7 +391,7 @@ class Unavailabilities_model extends EA_Model
             ->group_end()
             ->limit($limit)
             ->offset($offset)
-            ->order_by($this->quote_order_by($order_by))
+            ->order_by($this->quote_appointments_order_by($order_by))
             ->get()
             ->result_array();
 
@@ -400,6 +400,34 @@ class Unavailabilities_model extends EA_Model
         }
 
         return $unavailabilities;
+    }
+
+    /**
+     * Qualify appointment sort columns because keyword search joins providers.
+     *
+     * @param string|null $order_by
+     * @return string
+     */
+    private function quote_appointments_order_by(?string $order_by): string
+    {
+        if ($order_by === null || trim($order_by) === '') {
+            return '';
+        }
+
+        $parts = [];
+        foreach (explode(',', $order_by) as $part) {
+            $tokens = preg_split('/\s+/', trim($part));
+            $column = $tokens[0] ?? '';
+            if (!preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $column)) {
+                continue;
+            }
+
+            $direction = strtoupper($tokens[1] ?? '');
+            $parts[] =
+                'appointments.' . $column . ($direction === 'ASC' || $direction === 'DESC' ? ' ' . $direction : '');
+        }
+
+        return implode(', ', $parts);
     }
 
     /**
