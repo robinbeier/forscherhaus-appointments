@@ -2227,9 +2227,17 @@ components:
                 categoryId:
                     type: integer
                 category:
-                    allOf:
-                        - $ref: '#/components/schemas/ServiceCategoryRecord'
+                    type: object
                     nullable: true
+                    properties:
+                        id:
+                            type: integer
+                        name:
+                            type: string
+                            nullable: true
+                        description:
+                            type: string
+                            nullable: true
                     description: Included only when requested with=category; contains id, name, and description.
             example:
                 id: 1
