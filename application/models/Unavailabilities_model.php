@@ -406,7 +406,7 @@ class Unavailabilities_model extends EA_Model
      * Load related resources to an unavailability.
      *
      * @param array $unavailability Associative array with the unavailability data.
-     * @param array $resources Resource names to be attached ("service", "provider", "customer" supported).
+     * @param array $resources Resource names to be attached ("provider" supported).
      *
      * @throws InvalidArgumentException
      */
@@ -416,18 +416,98 @@ class Unavailabilities_model extends EA_Model
             return;
         }
 
-        foreach ($resources as $resource) {
+        foreach (array_values(array_unique($resources)) as $resource) {
             $unavailability['provider'] = match ($resource) {
-                'provider' => $this->db
-                    ->get_where('users', [
-                        'id' => $unavailability['id_users_provider'] ?? ($unavailability['providerId'] ?? null),
-                    ])
-                    ->row_array(),
+                'provider' => $this->loadProviderProjection($unavailability['providerId'] ?? null),
                 default => throw new InvalidArgumentException(
                     'The requested unavailability relation is not supported: ' . $resource,
                 ),
             };
         }
+    }
+
+    /**
+     * Load related resources for an unavailability collection with bounded queries.
+     *
+     * @param array<int, array<string, mixed>> $unavailabilities
+     * @param array<int, string> $resources
+     */
+    public function loadCollection(array &$unavailabilities, array $resources): void
+    {
+        if (empty($resources)) {
+            return;
+        }
+
+        $resources = array_values(array_unique($resources));
+
+        foreach ($resources as $resource) {
+            if ($resource !== 'provider') {
+                throw new InvalidArgumentException(
+                    'The requested unavailability relation is not supported: ' . $resource,
+                );
+            }
+        }
+
+        if (empty($unavailabilities)) {
+            return;
+        }
+
+        $provider_ids = [];
+        foreach ($unavailabilities as $unavailability) {
+            $provider_id = (int) ($unavailability['providerId'] ?? 0);
+            if ($provider_id > 0) {
+                $provider_ids[$provider_id] = $provider_id;
+            }
+        }
+
+        $providers = [];
+        if (!empty($provider_ids)) {
+            $rows = $this->db
+                ->select('id, first_name, last_name')
+                ->from('users')
+                ->where_in('id', array_values($provider_ids))
+                ->get()
+                ->result_array();
+
+            foreach ($rows as $provider) {
+                $provider['id'] = (int) $provider['id'];
+                $providers[$provider['id']] = [
+                    'id' => $provider['id'],
+                    'firstName' => $provider['first_name'],
+                    'lastName' => $provider['last_name'],
+                ];
+            }
+        }
+
+        foreach ($unavailabilities as &$unavailability) {
+            $provider_id = (int) ($unavailability['providerId'] ?? 0);
+            $unavailability['provider'] = $providers[$provider_id] ?? null;
+        }
+        unset($unavailability);
+    }
+
+    /** @return array<string, mixed>|null */
+    private function loadProviderProjection(mixed $provider_id): ?array
+    {
+        $provider_id = (int) $provider_id;
+        if ($provider_id <= 0) {
+            return null;
+        }
+
+        $provider = $this->db
+            ->select('id, first_name, last_name')
+            ->get_where('users', ['id' => $provider_id])
+            ->row_array();
+
+        if (empty($provider)) {
+            return null;
+        }
+
+        return [
+            'id' => (int) $provider['id'],
+            'firstName' => $provider['first_name'],
+            'lastName' => $provider['last_name'],
+        ];
     }
 
     /**
