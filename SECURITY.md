@@ -498,6 +498,14 @@ source-level guard is placed before its model access. The isolated synthetic
 HTTP regression proves the external rejection and preservation of its fixture
 row; it does not establish behavior in production.
 
+The authenticated Admins API v1 `index` and `show` read actions require GET,
+including through direct controller aliases. Non-GET requests to those direct
+actions return 405 with `Allow: GET` before querying or disclosing admin data.
+Canonical POST, PUT, and DELETE routes remain separate write actions; global
+OPTIONS preflight behavior is unchanged. The isolated synthetic HTTP/database
+regression checks the alias method boundary and preservation of its own admin
+row. It does not establish production behavior.
+
 The authenticated Services API v1 `index` and `show` read actions require GET,
 including through direct controller aliases. Non-GET requests to those direct
 actions return 405 with `Allow: GET` before querying service data. Canonical

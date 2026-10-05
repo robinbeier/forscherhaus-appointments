@@ -40,6 +40,10 @@ class Admins_api_v1 extends EA_Controller
      */
     public function index(): void
     {
+        if (!$this->enforceReadMethod()) {
+            return;
+        }
+
         try {
             if (!$this->validatePaginationRequest()) {
                 return;
@@ -86,6 +90,10 @@ class Admins_api_v1 extends EA_Controller
      */
     public function show(?int $id = null): void
     {
+        if (!$this->enforceReadMethod()) {
+            return;
+        }
+
         try {
             $occurrences = $this->admins_model->get(['id' => $id]);
 
@@ -236,6 +244,17 @@ class Admins_api_v1 extends EA_Controller
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    private function enforceReadMethod(): bool
+    {
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) === 'GET') {
+            return true;
+        }
+
+        response('', 405, ['Allow: GET']);
+
+        return false;
     }
 
     private function apiRequestDtoFactory(): Api_request_dto_factory

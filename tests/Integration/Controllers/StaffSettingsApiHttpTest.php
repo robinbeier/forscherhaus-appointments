@@ -212,6 +212,67 @@ final class StaffSettingsApiHttpTest extends TestCase
         }
     }
 
+    public function testAdminApiReadsAllowGetOnlyAcrossCanonicalAndDirectRoutes(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $before = $fixture->row('users', $fixture->actorId);
+        $admin = $this->basicClient($this->credentials['admin_username'], $this->credentials['password']);
+        $collectionPaths = ['api/v1/admins', 'api/v1/admins_api_v1/index'];
+        $showPaths = ['api/v1/admins/' . $fixture->actorId, 'api/v1/admins_api_v1/show/' . $fixture->actorId];
+
+        foreach ($collectionPaths as $path) {
+            $response = $admin->get($path, ['q' => $fixture->run]);
+            $rows = $this->success($response);
+            $matches = array_values(
+                array_filter(
+                    $rows,
+                    static fn(mixed $row): bool => is_array($row) && (int) ($row['id'] ?? 0) === $fixture->actorId,
+                ),
+            );
+            self::assertCount(1, $matches, $path . ' must expose the synthetic admin through GET.');
+        }
+
+        foreach ($showPaths as $path) {
+            $row = $this->success($admin->get($path));
+            self::assertSame($fixture->actorId, (int) ($row['id'] ?? 0), $path);
+            self::assertSame($before['email'], $row['email'] ?? null, $path);
+        }
+
+        // Canonical POST/PUT/DELETE are legitimate write routes; only direct read aliases belong here.
+        $requests = [];
+        foreach (['api/v1/admins_api_v1/index'] as $path) {
+            $requests[$path . ' POST'] = fn(): GateHttpResponse => $admin->requestJsonApp('POST', $path, []);
+            $requests[$path . ' PUT'] = fn(): GateHttpResponse => $admin->requestJsonApp('PUT', $path, []);
+            $requests[$path . ' PATCH'] = fn(): GateHttpResponse => $admin->requestApp('PATCH', $path);
+            $requests[$path . ' DELETE'] = fn(): GateHttpResponse => $admin->requestApp('DELETE', $path);
+            $requests[$path . ' HEAD'] = fn(): GateHttpResponse => $admin->requestApp('HEAD', $path);
+        }
+        foreach (['api/v1/admins_api_v1/show/' . $fixture->actorId] as $path) {
+            $requests[$path . ' POST'] = fn(): GateHttpResponse => $admin->requestJsonApp('POST', $path, []);
+            $requests[$path . ' PUT'] = fn(): GateHttpResponse => $admin->requestJsonApp('PUT', $path, []);
+            $requests[$path . ' PATCH'] = fn(): GateHttpResponse => $admin->requestApp('PATCH', $path);
+            $requests[$path . ' DELETE'] = fn(): GateHttpResponse => $admin->requestApp('DELETE', $path);
+            $requests[$path . ' HEAD'] = fn(): GateHttpResponse => $admin->requestApp('HEAD', $path);
+        }
+
+        foreach ($requests as $case => $request) {
+            $response = $request();
+            self::assertSame(405, $response->statusCode, $case . ' must be rejected.');
+            self::assertSame('GET', $response->header('allow'), $case . ' must advertise GET only.');
+            self::assertSame('', $response->body, $case . ' must not emit admin data.');
+            self::assertStringNotContainsString($fixture->run, $response->body, $case);
+            self::assertSame($before, $fixture->row('users', $fixture->actorId));
+        }
+
+        foreach (array_merge($collectionPaths, $showPaths) as $path) {
+            $options = $admin->requestApp('OPTIONS', $path);
+            self::assertSame(200, $options->statusCode, $path . ' OPTIONS must short-circuit.');
+            self::assertSame('', $options->body, $path . ' OPTIONS must not invoke the controller.');
+            self::assertSame($before, $fixture->row('users', $fixture->actorId));
+        }
+    }
+
     public function testValidProviderBasicCannotReadAdminSecretaryOrSettingsRoutes(): void
     {
         $provider = $this->fixture->row('users', $this->fixture->providerId);
