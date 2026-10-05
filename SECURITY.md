@@ -498,6 +498,13 @@ source-level guard is placed before its model access. The isolated synthetic
 HTTP regression proves the external rejection and preservation of its fixture
 row; it does not establish behavior in production.
 
+The authenticated Services API v1 `index` and `show` read actions require GET,
+including through direct controller aliases. Non-GET requests to those direct
+actions return 405 with `Allow: GET` before querying service data. Canonical
+POST, PUT, and DELETE routes remain separate write actions. Isolated
+HTTP/database tests check the read response and preservation of their own
+synthetic services; they do not establish production behavior.
+
 The Customers API v1 `store` and `update/:id` actions require POST and PUT,
 respectively, also through direct controller aliases. After API authentication,
 other methods return 405 with `Allow: POST` or `Allow: PUT` before customer

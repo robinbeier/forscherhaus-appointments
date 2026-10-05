@@ -192,6 +192,74 @@ final class ServicesApiHttpWriteTest extends TestCase
         self::assertSame($beforeB, $this->serviceSnapshot($serviceBId));
     }
 
+    public function testCanonicalGetsAndDirectReadAliasesRejectOtherMethodsWithoutMutation(): void
+    {
+        $admin = $this->adminClient();
+        $guest = $this->server->client();
+        $id = $this->fixture->serviceId;
+        $bodyId = (int) $this->bodyServiceId;
+        $before = [
+            'a' => $this->serviceSnapshot($id),
+            'b' => $this->serviceSnapshot($bodyId),
+        ];
+        $routes = [
+            'api/v1/services' => ['collection', false],
+            'api/v1/services_api_v1/index' => ['collection', true],
+            'api/v1/services/' . $id => ['member', false],
+            'api/v1/services_api_v1/show/' . $id => ['member', true],
+        ];
+
+        foreach ($routes as $path => [$kind, $assertMethodRejection]) {
+            $get = $admin->get($path);
+            self::assertSame(200, $get->statusCode, $path . ' GET');
+            $payload = json_decode($get->body, true, 512, JSON_THROW_ON_ERROR);
+            if ($kind === 'collection') {
+                self::assertIsArray($payload, $path . ' GET payload');
+                self::assertNotEmpty(
+                    array_filter(
+                        $payload,
+                        static fn(mixed $service): bool => is_array($service) && (int) ($service['id'] ?? 0) === $id,
+                    ),
+                    $path . ' must expose the synthetic service',
+                );
+            } else {
+                self::assertIsArray($payload, $path . ' GET payload');
+                self::assertSame($id, (int) ($payload['id'] ?? 0), $path . ' must expose the requested service');
+            }
+
+            if ($assertMethodRejection) {
+                foreach (['POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'] as $method) {
+                    $response = $admin->requestApp($method, $path);
+                    self::assertSame(405, $response->statusCode, $method . ' ' . $path);
+                    self::assertSame('GET', $response->header('allow'), $method . ' ' . $path . ' Allow');
+                    self::assertSame($before['a'], $this->serviceSnapshot($id), $method . ' must not mutate service A');
+                    self::assertSame(
+                        $before['b'],
+                        $this->serviceSnapshot($bodyId),
+                        $method . ' must not mutate service B',
+                    );
+                }
+            }
+
+            $unauthenticatedGet = $guest->get($path);
+            self::assertSame(401, $unauthenticatedGet->statusCode, 'Unauthenticated GET ' . $path);
+            self::assertNotNull($unauthenticatedGet->header('www-authenticate'));
+            self::assertSame(
+                $before['a'],
+                $this->serviceSnapshot($id),
+                'Unauthenticated GET must not mutate service A',
+            );
+            self::assertSame(
+                $before['b'],
+                $this->serviceSnapshot($bodyId),
+                'Unauthenticated GET must not mutate service B',
+            );
+        }
+
+        self::assertSame($before['a'], $this->serviceSnapshot($id));
+        self::assertSame($before['b'], $this->serviceSnapshot($bodyId));
+    }
+
     public function testPutRejectsInvalidDurationWithoutMutation(): void
     {
         $f = $this->fixture;
