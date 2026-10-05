@@ -802,18 +802,42 @@ class Services_model extends EA_Model
             return;
         }
 
+        $resources = array_values(array_unique($resources));
+
         foreach ($resources as $resource) {
             $service['category'] = match ($resource) {
-                'category' => $this->db
-                    ->get_where('service_categories', [
-                        'id' => $service['id_service_categories'] ?? ($service['serviceCategoryId'] ?? null),
-                    ])
-                    ->row_array(),
+                'category' => $this->loadCategoryProjection($service),
                 default => throw new InvalidArgumentException(
                     'The requested appointment relation is not supported: ' . $resource,
                 ),
             };
         }
+    }
+
+    /**
+     * Load the bounded category relation projection with its API scalar types.
+     *
+     * @param array $service Service record.
+     * @return array<string, mixed>|null
+     */
+    private function loadCategoryProjection(array $service): ?array
+    {
+        $category = $this->db
+            ->select('id, name, description')
+            ->get_where('service_categories', [
+                'id' => $service['id_service_categories'] ?? ($service['serviceCategoryId'] ?? null),
+            ])
+            ->row_array();
+
+        if ($category === null) {
+            return null;
+        }
+
+        if (array_key_exists('id', $category)) {
+            $category['id'] = (int) $category['id'];
+        }
+
+        return $category;
     }
 
     /**
