@@ -192,6 +192,21 @@ final class ServicesApiHttpWriteTest extends TestCase
         self::assertSame($beforeB, $this->serviceSnapshot($serviceBId));
     }
 
+    public function testDirectReadAliasesRejectPostWithoutMutatingSyntheticService(): void
+    {
+        $admin = $this->adminClient();
+        $id = $this->fixture->serviceId;
+        $before = $this->serviceSnapshot($id);
+
+        foreach (['api/v1/services_api_v1/index', 'api/v1/services_api_v1/show/' . $id] as $path) {
+            self::assertSame(200, $admin->get($path)->statusCode, $path . ' GET');
+            $response = $admin->requestApp('POST', $path);
+            self::assertSame(405, $response->statusCode, $path . ': ' . $response->body);
+            self::assertSame('GET', $response->header('allow'));
+            self::assertSame($before, $this->serviceSnapshot($id));
+        }
+    }
+
     public function testPutRejectsInvalidDurationWithoutMutation(): void
     {
         $f = $this->fixture;
