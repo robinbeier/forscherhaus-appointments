@@ -356,28 +356,24 @@ final class SettingsReadProjectionHttpTest extends TestCase
             ->row_array();
         self::assertNotEmpty($customerRole['id'] ?? null);
         $admin = $this->login($this->credentials['admin_username'], $this->credentials['password']);
-        self::assertSame(200, $admin->get('about')->statusCode);
+        $this->assertAboutProjection($admin->get('about'), 'direct about', DB_SLUG_ADMIN, '/index.php/about');
+        $this->assertAboutProjection(
+            $this->canonicalClient($admin)->get('about'),
+            'canonical about',
+            DB_SLUG_ADMIN,
+            '/about',
+        );
+        $authorizedSettings = $admin->get('general_settings');
+        self::assertSame(200, $authorizedSettings->statusCode, $authorizedSettings->body);
         $beforeDestination = $this->sessionDestination($admin);
 
         self::assertTrue(
             get_instance()->db->update('users', ['id_roles' => (int) $customerRole['id']], ['id' => $fixture->actorId]),
         );
-        $demotedPage = $admin->get('about');
-        self::assertSame(200, $demotedPage->statusCode);
-        $userMenuMarker = 'href="' . $this->server?->baseUrl . '/index.php/logout"';
-        $menuMarkerOffset = strpos($demotedPage->body, $userMenuMarker);
-        self::assertNotFalse($menuMarkerOffset);
-        $menuStart = strrpos(substr($demotedPage->body, 0, $menuMarkerOffset), '<li ');
-        self::assertNotFalse($menuStart);
-        $menuOpeningTag = substr($demotedPage->body, $menuStart, $menuMarkerOffset - $menuStart);
-        self::assertStringNotContainsString('d-none', $menuOpeningTag);
-        self::assertStringContainsString('href="' . $this->server?->baseUrl . '/index.php/logout"', $demotedPage->body);
-        foreach (['general_settings', 'account', 'about'] as $legacyTarget) {
-            self::assertStringNotContainsString(
-                'href="' . $this->server?->baseUrl . '/index.php/' . $legacyTarget . '"',
-                $demotedPage->body,
-            );
-        }
+        $demotedDirect = $admin->get('about');
+        $this->assertAboutDenied($demotedDirect, 'direct about after demotion', '/index.php/about', $fixture->run);
+        $demotedCanonical = $this->canonicalClient($admin)->get('about');
+        $this->assertAboutDenied($demotedCanonical, 'canonical about after demotion', '/about', $fixture->run);
         foreach (
             ['general_settings', 'general_settings/index', 'business_settings', 'business_settings/index']
             as $path
@@ -466,6 +462,47 @@ final class SettingsReadProjectionHttpTest extends TestCase
         $vars = $this->pageVars($response, $case);
         self::assertIsArray($vars[$key] ?? null, $case);
         return array_values($vars[$key]);
+    }
+
+    private function assertAboutProjection(
+        GateHttpResponse $response,
+        string $case,
+        string $expectedRoleSlug,
+        string $expectedPath,
+    ): void {
+        self::assertSame(200, $response->statusCode, $case . ' ' . $response->body);
+        self::assertSame($expectedPath, parse_url($response->url, PHP_URL_PATH), $case);
+        $vars = $this->pageVars($response, $case);
+        self::assertSame($expectedRoleSlug, $vars['role_slug'] ?? null, $case);
+    }
+
+    private function assertAboutDenied(
+        GateHttpResponse $response,
+        string $case,
+        string $expectedPath,
+        string $fixtureMarker,
+    ): void {
+        self::assertSame(403, $response->statusCode, $case . ' ' . $response->body);
+        self::assertSame($expectedPath, parse_url($response->url, PHP_URL_PATH), $case);
+        self::assertStringNotContainsString('const vars', $response->body, $case);
+        self::assertStringNotContainsString('window.vars', $response->body, $case);
+        self::assertStringNotContainsString('"role_slug":"admin"', $response->body, $case);
+        self::assertStringNotContainsString($fixtureMarker, $response->body, $case);
+    }
+
+    private function canonicalClient(GateHttpClient $authenticated): GateHttpClient
+    {
+        $server = $this->server;
+        self::assertNotNull($server);
+        $cookieName = (string) config('sess_cookie_name');
+        $sessionId = $authenticated->getCookie($cookieName);
+        self::assertIsString($sessionId);
+
+        return new GateHttpClient(
+            $server->baseUrl,
+            indexPage: '',
+            additionalHeaders: ['Cookie' => $cookieName . '=' . $sessionId],
+        );
     }
 
     /** @return array<string,mixed> */

@@ -194,6 +194,15 @@ role slug cannot grant continued edit authority after demotion.
 isolated synthetic HTTP and database data; it does not establish a live
 production role-change race or validate unrelated settings write paths.
 
+The `about` page and its direct controller alias require the actor's current
+stored `user_settings` view permission. A session role retained after demotion
+must not keep the page accessible: denial returns 403 before page script data
+is rendered or the session destination changes. Anonymous GET deep links retain
+their login return target. For an authorized actor, the projected role and
+privileges come from the stored role, not the login-time session slug. The isolated
+`SettingsReadProjectionHttpTest` covers both HTTP routes and a synthetic role
+demotion; it does not establish behavior for real production accounts.
+
 Classic LDAP Settings (`ldap_settings`, `ldap_settings/index`, and
 `ldap_settings/save`) require the actor's current stored `system_settings`
 permission. The page accepts GET only and projects only the LDAP switch, host,
