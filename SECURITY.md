@@ -501,6 +501,13 @@ does not depend on the finer `system_settings` permission; see the
 isolated synthetic role-revocation regression is not a productive account
 test or a proof about concurrent role changes.
 
+Settings API v1 `index` and `show` are GET-only through canonical routes and
+direct controller aliases. Other methods on the direct read aliases return 405
+with `Allow: GET` before the requested settings are read or disclosed; the
+authenticated PUT update action remains separate. The isolated synthetic HTTP
+regression checks method rejection and preservation of its own setting row,
+not live production behavior.
+
 The Customers API v1 collection and detail actions are GET-only, including
 through direct controller aliases; other methods must return 405 with
 `Allow: GET` without disclosing customer data or changing customer records,
