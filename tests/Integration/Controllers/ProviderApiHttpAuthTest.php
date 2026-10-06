@@ -68,6 +68,167 @@ final class ProviderApiHttpAuthTest extends TestCase
         );
     }
 
+    public function testCanonicalAndDirectReadRoutesProjectOwnedProviderAndDirectAliasesRejectWrites(): void
+    {
+        $provider = $this->fixture->row('users', $this->fixture->providerId);
+        $identity = [
+            'firstName' => (string) $provider['first_name'],
+            'lastName' => (string) $provider['last_name'],
+            'email' => (string) $provider['email'],
+        ];
+        $admin = $this->basicClient($this->credentials['admin_username'], $this->credentials['password']);
+        $fields = 'id,firstName,lastName,email';
+
+        foreach (['api/v1/providers', 'api/v1/providers_api_v1/index'] as $path) {
+            $rows = $this->decodeSuccess(
+                $admin->get($path, [
+                    'q' => $this->fixture->run,
+                    'fields' => $fields,
+                    'length' => 20,
+                ]),
+            );
+            $matches = array_values(
+                array_filter(
+                    $rows,
+                    fn(mixed $item): bool => is_array($item) && (int) ($item['id'] ?? 0) === $this->fixture->providerId,
+                ),
+            );
+            self::assertCount(1, $matches, $path . ' must return the owned provider.');
+            self::assertSame(['email', 'firstName', 'id', 'lastName'], $this->sortedKeys($matches[0]));
+            $this->assertProviderIdentity($matches[0], $identity);
+        }
+
+        foreach (
+            [
+                'api/v1/providers/' . $this->fixture->providerId,
+                'api/v1/providers_api_v1/show/' . $this->fixture->providerId,
+            ]
+            as $path
+        ) {
+            $data = $this->decodeSuccess($admin->get($path, ['fields' => $fields]));
+            self::assertSame(['email', 'firstName', 'id', 'lastName'], $this->sortedKeys($data));
+            $this->assertProviderIdentity($data, $identity);
+        }
+
+        foreach (
+            ['api/v1/providers_api_v1/index', 'api/v1/providers_api_v1/show/' . $this->fixture->providerId]
+            as $path
+        ) {
+            $denied = $this->server->client()->get($path);
+            self::assertSame(401, $denied->statusCode, $path . ' must reject missing authentication.');
+            self::assertNotNull($denied->header('www-authenticate'));
+            self::assertFalse(str_contains($denied->body, $this->fixture->run));
+        }
+
+        $before = $this->fixture->providerDeleteState($this->fixture->providerId);
+        foreach (
+            [
+                ['POST', 'api/v1/providers_api_v1/index'],
+                ['PUT', 'api/v1/providers_api_v1/index'],
+                ['PATCH', 'api/v1/providers_api_v1/index'],
+                ['DELETE', 'api/v1/providers_api_v1/index'],
+                ['HEAD', 'api/v1/providers_api_v1/index'],
+                ['POST', 'api/v1/providers_api_v1/show/' . $this->fixture->providerId],
+                ['PUT', 'api/v1/providers_api_v1/show/' . $this->fixture->providerId],
+                ['PATCH', 'api/v1/providers_api_v1/show/' . $this->fixture->providerId],
+                ['DELETE', 'api/v1/providers_api_v1/show/' . $this->fixture->providerId],
+                ['HEAD', 'api/v1/providers_api_v1/show/' . $this->fixture->providerId],
+            ]
+            as [$method, $path]
+        ) {
+            $response = $admin->requestApp($method, $path);
+            self::assertSame(
+                405,
+                $response->statusCode,
+                $method . ' ' . $path . ' must be rejected; got ' . $response->statusCode,
+            );
+            self::assertSame('GET', $response->header('allow'), $method . ' ' . $path . ' Allow header.');
+            self::assertSame('', $response->body, $method . ' ' . $path . ' must not emit provider data.');
+            self::assertSame($before, $this->fixture->providerDeleteState($this->fixture->providerId));
+        }
+    }
+
+    public function testProviderServiceRelationsUseTheServicesApiProjectionAcrossReadRoutes(): void
+    {
+        $admin = $this->basicClient($this->credentials['admin_username'], $this->credentials['password']);
+        $fields = 'id,firstName,lastName,email';
+        $serviceKeys = [
+            'attendantsNumber',
+            'availabilitiesType',
+            'bufferAfter',
+            'bufferBefore',
+            'currency',
+            'description',
+            'duration',
+            'id',
+            'isPrivate',
+            'location',
+            'name',
+            'price',
+            'serviceCategoryId',
+        ];
+
+        foreach (['api/v1/providers', 'api/v1/providers_api_v1/index'] as $path) {
+            $rows = $this->decodeSuccess(
+                $admin->get($path, [
+                    'q' => $this->fixture->run,
+                    'fields' => $fields,
+                    'with' => 'services',
+                    'length' => 20,
+                ]),
+            );
+            $matches = array_values(
+                array_filter(
+                    $rows,
+                    fn(mixed $item): bool => is_array($item) && (int) ($item['id'] ?? 0) === $this->fixture->providerId,
+                ),
+            );
+            self::assertCount(1, $matches, $path . ' must return the owned provider.');
+            $this->assertServiceRelationProjection($matches[0]['services'] ?? null, $serviceKeys, $path);
+        }
+
+        foreach (
+            [
+                'api/v1/providers/' . $this->fixture->providerId,
+                'api/v1/providers_api_v1/show/' . $this->fixture->providerId,
+            ]
+            as $path
+        ) {
+            $data = $this->decodeSuccess($admin->get($path, ['fields' => $fields, 'with' => 'services']));
+            $this->assertServiceRelationProjection($data['services'] ?? null, $serviceKeys, $path);
+        }
+    }
+
+    public function testServiceRelationWorksWhenSelectedProviderFieldsOmitId(): void
+    {
+        $admin = $this->basicClient($this->credentials['admin_username'], $this->credentials['password']);
+        $expectedFirstName = (string) $this->fixture->row('users', $this->fixture->providerId)['first_name'];
+
+        foreach (['api/v1/providers', 'api/v1/providers_api_v1/index'] as $path) {
+            $rows = $this->decodeSuccess(
+                $admin->get($path, [
+                    'q' => $this->fixture->run,
+                    'fields' => 'firstName',
+                    'with' => 'services',
+                    'length' => 20,
+                ]),
+            );
+            self::assertCount(1, $rows, $path . ' must return only the owned provider.');
+            $this->assertProjectedServiceWithoutProviderId($rows[0], $expectedFirstName, $path);
+        }
+
+        foreach (
+            [
+                'api/v1/providers/' . $this->fixture->providerId,
+                'api/v1/providers_api_v1/show/' . $this->fixture->providerId,
+            ]
+            as $path
+        ) {
+            $data = $this->decodeSuccess($admin->get($path, ['fields' => 'firstName', 'with' => 'services']));
+            $this->assertProjectedServiceWithoutProviderId($data, $expectedFirstName, $path);
+        }
+    }
+
     public static function providerCollectionRoutes(): array
     {
         return [
@@ -244,6 +405,42 @@ final class ProviderApiHttpAuthTest extends TestCase
                 'Provider must omit top-level integration secret keys.',
             );
             self::assertArrayNotHasKey($key, $provider);
+        }
+    }
+
+    private function sortedKeys(array $value): array
+    {
+        $keys = array_keys($value);
+        sort($keys);
+
+        return $keys;
+    }
+
+    private function assertServiceRelationProjection(mixed $services, array $expectedKeys, string $path): void
+    {
+        self::assertIsArray($services, $path . ' services relation must be an array.');
+        self::assertNotEmpty($services, $path . ' services relation must contain the owned service.');
+        $owned = array_values(
+            array_filter(
+                $services,
+                fn(mixed $service): bool => is_array($service) &&
+                    (int) ($service['id'] ?? 0) === $this->fixture->serviceId,
+            ),
+        );
+        self::assertCount(1, $owned, $path . ' services relation must contain the owned service.');
+        self::assertGreaterThan(0, (int) ($owned[0]['id'] ?? 0), $path . ' service ID must be positive.');
+        self::assertSame($expectedKeys, $this->sortedKeys($owned[0]), $path . ' service projection keys.');
+    }
+
+    private function assertProjectedServiceWithoutProviderId(array $provider, string $firstName, string $path): void
+    {
+        self::assertSame(['firstName', 'services'], $this->sortedKeys($provider), $path . ' provider fields.');
+        self::assertSame($firstName, $provider['firstName']);
+        self::assertIsArray($provider['services']);
+        $serviceIds = array_map(static fn(array $service): int => (int) ($service['id'] ?? 0), $provider['services']);
+        self::assertContains($this->fixture->serviceId, $serviceIds, $path . ' must keep the owned service.');
+        foreach ($provider['services'] as $service) {
+            self::assertArrayNotHasKey('id_service_categories', $service);
         }
     }
 }

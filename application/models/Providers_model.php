@@ -972,6 +972,16 @@ class Providers_model extends EA_Model
                     'The requested provider relation is not supported: ' . $resource,
                 ),
             };
+
+            if ($resource === 'services') {
+                $this->load->model('services_model');
+
+                foreach ($provider['services'] as &$service) {
+                    $this->services_model->api_encode($service);
+                }
+
+                unset($service);
+            }
         }
     }
 

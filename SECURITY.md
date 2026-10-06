@@ -88,6 +88,17 @@ without preventing a requested relation from being loaded and projected.
 The isolated `AppointmentsApiHttpReadTest` checks these boundaries with owned
 synthetic records. It does not establish a live production response.
 
+Providers API v1 collection and detail reads require the existing authorized
+Basic identity or configured global Bearer token, including on direct
+`providers_api_v1/index` and `show/{id}` aliases. Only GET may reach either
+read handler; other methods on the direct aliases must fail before provider
+data is loaded and must leave the target unchanged. A requested `with=services`
+relation uses the bounded Services API resource projection rather than raw
+database rows, even when selected provider fields omit `id`. The isolated
+`ProviderApiHttpAuthTest` checks these boundaries with owned synthetic provider
+and service records. It does not establish a live production response or broaden
+Provider write authority.
+
 Administrative dashboard PDF and ZIP exports must authorize the actor's current
 stored administrator role on every request, including direct controller paths.
 Only GET may reach export data loading or rendering. Teacher reports use parent
