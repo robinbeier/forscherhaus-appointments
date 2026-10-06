@@ -22,6 +22,11 @@ libraries. Each row binds its source/install path, role and SHA-256. Keep the
 manifest and changed source hashes together in the same reviewed commit. Repository checks retain the closed
 payload, cron contract and execution of the bundled PDF gate.
 
+For the historical 11-file runtime at baseline `08b6128b17b6fa60b4b2b57e649b69bc1f6604f9`,
+`scripts/ops/config/kuma_push_runtime_bundle_v1_rob757_compat.json` is the one-off
+compatibility manifest. It changes only the app-log entrypoint hash; use it only
+when that exact baseline payload is still installed.
+
 The canonical cron file is `scripts/ops/config/fh-uptime-kuma-push.cron`: six
 invocations of five entrypoints, including the twice-per-minute app-log check.
 Changing a package does not authorize changing its schedules, environment file,

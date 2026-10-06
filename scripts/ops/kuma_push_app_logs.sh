@@ -171,6 +171,14 @@ if [[ ! -f "$STATE_FILE" ]]; then
   exit 0
 fi
 
+# Keep this compatibility filter in the entrypoint: an older installed runtime
+# may source a classifier library that predates these two observed routes.
+exact_external_404_ignore_regex='ERROR - .*--> 404 Page Not Found: (Installation|Mnavercom)/index([[:space:]]|$)'
+if [[ -n "$IGNORE_REGEX" ]]; then
+  IGNORE_REGEX="(${IGNORE_REGEX})|${exact_external_404_ignore_regex}"
+else
+  IGNORE_REGEX="$exact_external_404_ignore_regex"
+fi
 app_log_filter_actionable_file "$tmp_delta" "$tmp_filtered" "$IGNORE_REGEX"
 mv "$tmp_filtered" "$tmp_delta"
 

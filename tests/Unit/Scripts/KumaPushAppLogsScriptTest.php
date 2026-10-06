@@ -536,6 +536,148 @@ class KumaPushAppLogsScriptTest extends TestCase
         }
     }
 
+    public function testEntrypointKeepsExact404CompatibilityWithHistoricalClassifier(): void
+    {
+        $workspace = sys_get_temp_dir() . '/kuma-push-app-logs-old-classifier-' . bin2hex(random_bytes(8));
+        $stubBin = $workspace . '/bin';
+        $runtime = $workspace . '/runtime';
+        $appRoot = $workspace . '/app-root';
+        $stateDir = $workspace . '/state';
+        $capturePath = $workspace . '/curl-args.log';
+        $today = gmdate('Y-m-d');
+        $logFile = $appRoot . '/storage/logs/log-' . $today . '.php';
+        $envFile = $workspace . '/uptime-kuma-push.env';
+
+        mkdir($stubBin, 0777, true);
+        mkdir($runtime . '/lib', 0777, true);
+        mkdir(dirname($logFile), 0777, true);
+        mkdir($stateDir, 0700, true);
+
+        try {
+            $this->writeCurlStub($stubBin, $capturePath);
+            $this->writeEnvFile($envFile, $appRoot);
+            copy($this->repoRoot() . '/scripts/ops/kuma_push_app_logs.sh', $runtime . '/kuma_push_app_logs.sh');
+            copy($this->repoRoot() . '/scripts/ops/lib/kuma_push_common.sh', $runtime . '/lib/kuma_push_common.sh');
+            $historicalClassifierPath =
+                $this->repoRoot() . '/tests/Fixtures/kuma_push_app_log_classification_b8dd554f.sh';
+            self::assertSame(
+                'b8dd554faa7a0468f98eefccfb3432a498ea284a1ac1de1a4e84227f4c782623',
+                hash_file('sha256', $historicalClassifierPath),
+            );
+            copy($historicalClassifierPath, $runtime . '/lib/app_log_classification.sh');
+            chmod($runtime . '/kuma_push_app_logs.sh', 0755);
+
+            file_put_contents($logFile, '');
+            $env = array_merge($this->commandEnv($envFile, $stateDir, $stubBin), ['KUMA_APP_LOG_FILE' => $logFile]);
+            $primeResult = $this->runCommand(['bash', $runtime . '/kuma_push_app_logs.sh'], $this->repoRoot(), $env);
+            self::assertSame(0, $primeResult['exit_code'], $primeResult['stderr']);
+
+            file_put_contents(
+                $logFile,
+                implode("\n", [
+                    'ERROR - 2026-10-05 08:00:00 --> 404 Page Not Found: Installation/index',
+                    'ERROR - 2026-10-05 08:00:01 --> 404 Page Not Found: Mnavercom/index Trace: array (',
+                    'ERROR - 2026-10-05 08:00:02 --> 404 Page Not Found: Installation/index/extra',
+                    'ERROR - 2026-10-05 08:00:03 --> 404 Page Not Found: Mnavercom/index/extra',
+                    'ERROR - 2026-10-05 08:00:04 --> 404 Page Not Found: Google/get_google_calendars',
+                    'ERROR - 2026-10-05 08:00:05 --> Severity: Warning --> real app warning',
+                    '',
+                ]),
+                FILE_APPEND,
+            );
+
+            $result = $this->runCommand(['bash', $runtime . '/kuma_push_app_logs.sh'], $this->repoRoot(), $env);
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            self::assertStringContainsString('CRIT new_app_errors=4', $result['stdout']);
+            self::assertStringContainsString('status=down', $this->readFile($capturePath));
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testHistoricalCompatibilityManifestChangesOnlyEntrypointHash(): void
+    {
+        $compatPath = $this->repoRoot() . '/scripts/ops/config/kuma_push_runtime_bundle_v1_rob757_compat.json';
+        $compatManifest = json_decode((string) file_get_contents($compatPath), true, 8, JSON_THROW_ON_ERROR);
+        self::assertCount(11, $compatManifest['files']);
+        self::assertSame(
+            'ddb47db8c80c24ee929129b5c765be05e16383d0e4a9986638acafdd43f76b54',
+            $compatManifest['cron_sha256'],
+        );
+        self::assertSame(
+            [
+                [
+                    'source' => 'scripts/ops/kuma_push_backup_creation.sh',
+                    'install' => 'scripts/ops/kuma_push_backup_creation.sh',
+                    'role' => 'entrypoint',
+                    'sha256' => '7a8921e24cd7a6f1147f4cc9e12e951bb667c39f8b71c5ce19593b98c0aebb92',
+                ],
+                [
+                    'source' => 'scripts/ops/kuma_push_host_resources.sh',
+                    'install' => 'scripts/ops/kuma_push_host_resources.sh',
+                    'role' => 'entrypoint',
+                    'sha256' => '896b11e648a85b7541332c4dd5f9eec9c4e2f6152f24148dabd212acc29e6663',
+                ],
+                [
+                    'source' => 'scripts/ops/kuma_push_ops_jobs.sh',
+                    'install' => 'scripts/ops/kuma_push_ops_jobs.sh',
+                    'role' => 'entrypoint',
+                    'sha256' => '0f6d7fc4391f553a85c44cfea37571f3e8dc0e9c653ce1581caed0efeed80f3d',
+                ],
+                [
+                    'source' => 'scripts/ops/kuma_push_pdf_export.sh',
+                    'install' => 'scripts/ops/kuma_push_pdf_export.sh',
+                    'role' => 'entrypoint',
+                    'sha256' => '350eb79182c169a2a6b4d8784f86718c7498e95f01416f4678f0fca54df3da63',
+                ],
+                [
+                    'source' => 'scripts/ops/lib/kuma_push_common.sh',
+                    'install' => 'scripts/ops/lib/kuma_push_common.sh',
+                    'role' => 'shell_library',
+                    'sha256' => 'f10665edccf5a28540f3cbf5cd90bb9000b7c052901574ecc68cb0e05bc7ee56',
+                ],
+                [
+                    'source' => 'scripts/ops/lib/app_log_classification.sh',
+                    'install' => 'scripts/ops/lib/app_log_classification.sh',
+                    'role' => 'shell_library',
+                    'sha256' => 'b8dd554faa7a0468f98eefccfb3432a498ea284a1ac1de1a4e84227f4c782623',
+                ],
+                [
+                    'source' => 'scripts/release-gate/dashboard_release_gate.php',
+                    'install' => 'scripts/release-gate/dashboard_release_gate.php',
+                    'role' => 'pdf_gate',
+                    'sha256' => 'df86dd59a2000e3f6c3a1c2f0f4d215773b83c69a94354d5133295a8d600df7a',
+                ],
+                [
+                    'source' => 'scripts/release-gate/lib/GateAssertions.php',
+                    'install' => 'scripts/release-gate/lib/GateAssertions.php',
+                    'role' => 'pdf_gate_library',
+                    'sha256' => 'd162247e0a7f894b78bd53b96097f15d63758a27f892e6545b52fa818dccc633',
+                ],
+                [
+                    'source' => 'scripts/release-gate/lib/GateCliSupport.php',
+                    'install' => 'scripts/release-gate/lib/GateCliSupport.php',
+                    'role' => 'pdf_gate_library',
+                    'sha256' => 'a0169a77fabebafc5743b9665625ef37e6ae78e2fe81726293d9bbe32aed3dd1',
+                ],
+                [
+                    'source' => 'scripts/release-gate/lib/GateHttpClient.php',
+                    'install' => 'scripts/release-gate/lib/GateHttpClient.php',
+                    'role' => 'pdf_gate_library',
+                    'sha256' => 'dafbcd13db438c760378a560d65672bb6fecb284fed46944049b43899da28067',
+                ],
+            ],
+            array_slice($compatManifest['files'], 1),
+        );
+        self::assertSame('scripts/ops/kuma_push_app_logs.sh', $compatManifest['files'][0]['source']);
+        self::assertSame('scripts/ops/kuma_push_app_logs.sh', $compatManifest['files'][0]['install']);
+        self::assertSame('entrypoint', $compatManifest['files'][0]['role']);
+        self::assertSame(
+            hash_file('sha256', $this->repoRoot() . '/scripts/ops/kuma_push_app_logs.sh'),
+            $compatManifest['files'][0]['sha256'],
+        );
+    }
+
     public function testAppLogClassifierCountsOnlyRealErrorEntryHeads(): void
     {
         $workspace = sys_get_temp_dir() . '/app-log-classifier-' . bin2hex(random_bytes(8));

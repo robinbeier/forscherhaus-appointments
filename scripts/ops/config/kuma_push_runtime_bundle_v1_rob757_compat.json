@@ -46,13 +46,13 @@
             "source": "scripts/ops/lib/app_log_classification.sh",
             "install": "scripts/ops/lib/app_log_classification.sh",
             "role": "shell_library",
-            "sha256": "1f6aeb31c1ec63cbd02d1b4cfe75561c99f35b2b05cb207b663417115c13e0db"
+            "sha256": "b8dd554faa7a0468f98eefccfb3432a498ea284a1ac1de1a4e84227f4c782623"
         },
         {
             "source": "scripts/release-gate/dashboard_release_gate.php",
             "install": "scripts/release-gate/dashboard_release_gate.php",
             "role": "pdf_gate",
-            "sha256": "989c680a82c66bc87f2dd355d6e63bfdf20cadc8fd7987a9b4a6fd75056f5f75"
+            "sha256": "df86dd59a2000e3f6c3a1c2f0f4d215773b83c69a94354d5133295a8d600df7a"
         },
         {
             "source": "scripts/release-gate/lib/GateAssertions.php",
@@ -70,13 +70,7 @@
             "source": "scripts/release-gate/lib/GateHttpClient.php",
             "install": "scripts/release-gate/lib/GateHttpClient.php",
             "role": "pdf_gate_library",
-            "sha256": "dcc207d285de8903276f9924fbf1f8ef4e47fad8b4975976b2b0fb37d2891ce8"
-        },
-        {
-            "source": "scripts/release-gate/lib/ZeroSurpriseCanaryContext.php",
-            "install": "scripts/release-gate/lib/ZeroSurpriseCanaryContext.php",
-            "role": "pdf_gate_library",
-            "sha256": "c17a6e65671198ed374b215447cb828922c2547fd0a023de2f221d1a91902d02"
+            "sha256": "dafbcd13db438c760378a560d65672bb6fecb284fed46944049b43899da28067"
         }
     ]
 }
