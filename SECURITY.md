@@ -578,6 +578,12 @@ URL-selected record and use the declared HTTP method even through a direct
 controller alias. A changed blocked period affects booking availability, so a
 rejected request must leave the complete period row unchanged. The precise
 contract and evidence boundary live in [CI write contracts](docs/ci-write-contracts.md#blocked-periods-api-v1).
+Blocked Periods API v1 collection and detail reads require GET, including on
+direct controller aliases. Other methods return 405 with `Allow: GET` before
+the requested periods or notes are read or disclosed; the existing Admin Basic
+and global Bearer authorities are unchanged. The isolated HTTP regression
+checks the response and preservation of its own period row, not live production
+behavior.
 The isolated `PublicBookingBlockedPeriodRaceHttpTest` additionally checks one
 ordered overlap: a global block committed while a public booking waits for its
 provider lock is visible to the post-lock availability check, and the rejected
