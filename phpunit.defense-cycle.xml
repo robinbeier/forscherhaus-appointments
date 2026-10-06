@@ -33,6 +33,7 @@
             <file>./tests/Integration/Controllers/UnavailabilitiesApiHttpWriteTest.php</file>
             <file>./tests/Integration/Controllers/UnavailabilitiesApiHttpReadTest.php</file>
             <file>./tests/Integration/Controllers/BlockedPeriodsApiHttpWriteTest.php</file>
+            <file>./tests/Integration/Controllers/BlockedPeriodsApiReadAliasMethodHttpTest.php</file>
             <file>./tests/Integration/Controllers/BlockedPeriodsReadHttpTest.php</file>
             <file>./tests/Integration/Controllers/ServiceCategoriesApiHttpWriteTest.php</file>
             <file>./tests/Integration/Controllers/ServiceCategoriesApiPostWriteFailureTest.php</file>
