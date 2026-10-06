@@ -32,7 +32,8 @@ final class SecretariesApiAliasProbeTest extends TestCase
         try {
             $actor = $ordinary->activate(roleSlug: 'admin');
             $fixture->activate('secretaries_api', $actor);
-            $server = new DefenseCycleHttpServer();
+            $targetId = (int) ($fixture->secretariesApiSnapshot()['target']['user']['id'] ?? 0);
+            $server = new DefenseCycleHttpServer(recordRequests: true);
             $evidence = new OrdinaryProbeEvidence($directory);
             $evidence->begin('ea_rob620_test');
 
@@ -63,6 +64,31 @@ final class SecretariesApiAliasProbeTest extends TestCase
                 ],
                 array_column($passed, 'phase'),
             );
+            self::assertSame(
+                [
+                    ['method' => 'GET', 'path' => '/index.php/api/v1/secretaries'],
+                    ['method' => 'GET', 'path' => '/index.php/api/v1/secretaries_api_v1/index'],
+                    ['method' => 'GET', 'path' => '/index.php/api/v1/secretaries/' . $targetId],
+                    ['method' => 'GET', 'path' => '/index.php/api/v1/secretaries_api_v1/show/' . $targetId],
+                    ...array_map(
+                        static fn(string $method): array => [
+                            'method' => $method,
+                            'path' => '/index.php/api/v1/secretaries_api_v1/index',
+                        ],
+                        ['POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'],
+                    ),
+                    ...array_map(
+                        static fn(string $method): array => [
+                            'method' => $method,
+                            'path' => '/index.php/api/v1/secretaries_api_v1/show/' . $targetId,
+                        ],
+                        ['POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'],
+                    ),
+                    ['method' => 'PUT', 'path' => '/index.php/api/v1/secretaries_api_v1/store'],
+                    ['method' => 'GET', 'path' => '/index.php/api/v1/secretaries_api_v1/destroy/' . $targetId],
+                ],
+                $this->requestLedger($server->requestLedger()),
+            );
         } finally {
             $server?->close();
             if (is_file($directory . '/defense-verification.json')) {
@@ -88,5 +114,16 @@ final class SecretariesApiAliasProbeTest extends TestCase
         if (is_dir($directory)) {
             rmdir($directory);
         }
+    }
+
+    /** @return array<int,array{method:string,path:string}> */
+    private function requestLedger(array $entries): array
+    {
+        $ledger = [];
+        foreach ($entries as $entry) {
+            $path = explode('?', $entry['uri'], 2)[0];
+            $ledger[] = ['method' => $entry['method'], 'path' => $path];
+        }
+        return $ledger;
     }
 }

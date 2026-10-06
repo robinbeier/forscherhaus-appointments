@@ -16,8 +16,11 @@ final class DefenseCycleHttpServer
     public readonly string $baseUrl;
     private mixed $process = null;
 
-    public function __construct(int $expiration = 7200, bool $disableSessionCacheLimiter = false)
-    {
+    public function __construct(
+        int $expiration = 7200,
+        bool $disableSessionCacheLimiter = false,
+        bool $recordRequests = false,
+    ) {
         if (getenv('FH_DEFENSE_ISOLATED') !== '1' || !is_file('/.dockerenv')) {
             throw new RuntimeException('Only available in the owned isolated Docker run.');
         }
@@ -40,8 +43,15 @@ final class DefenseCycleHttpServer
                 'sess_expiration' => $expiration,
                 'sess_time_to_update' => 300,
             ];
-            $router =
-                '<?php $assign_to_config = ' .
+            $router = '<?php ';
+            if ($recordRequests) {
+                $router .=
+                    '$request_ledger = ' .
+                    var_export($this->directory . '/request-ledger.jsonl', true) .
+                    '; file_put_contents($request_ledger, json_encode([\'method\' => $_SERVER[\'REQUEST_METHOD\'] ?? null, \'uri\' => $_SERVER[\'REQUEST_URI\'] ?? null], JSON_THROW_ON_ERROR) . PHP_EOL, FILE_APPEND | LOCK_EX); ';
+            }
+            $router .=
+                '$assign_to_config = ' .
                 var_export($config, true) .
                 '; require ' .
                 var_export($root . '/index.php', true) .
@@ -93,6 +103,23 @@ final class DefenseCycleHttpServer
         return new GateHttpClient($this->baseUrl);
     }
 
+    /** @return array<int,array{method:string,uri:string}> */
+    public function requestLedger(): array
+    {
+        $ledger = [];
+        foreach (
+            file($this->directory . '/request-ledger.jsonl', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: []
+            as $line
+        ) {
+            $entry = json_decode($line, true, 512, JSON_THROW_ON_ERROR);
+            if (!is_array($entry) || !is_string($entry['method'] ?? null) || !is_string($entry['uri'] ?? null)) {
+                throw new RuntimeException('Request ledger entry is invalid.');
+            }
+            $ledger[] = ['method' => $entry['method'], 'uri' => $entry['uri']];
+        }
+        return $ledger;
+    }
+
     public function close(): void
     {
         if (is_resource($this->process)) {
@@ -108,7 +135,7 @@ final class DefenseCycleHttpServer
         if (is_dir($this->directory . '/sessions')) {
             rmdir($this->directory . '/sessions');
         }
-        foreach (['router.php', 'server.log'] as $name) {
+        foreach (['router.php', 'server.log', 'request-ledger.jsonl'] as $name) {
             if (is_file($this->directory . '/' . $name)) {
                 unlink($this->directory . '/' . $name);
             }
