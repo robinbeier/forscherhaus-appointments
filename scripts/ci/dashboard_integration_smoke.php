@@ -28,6 +28,7 @@ $failure = null;
 $exitCode = INTEGRATION_SMOKE_EXIT_SUCCESS;
 $reportPath = null;
 $browserEvidence = null;
+$ldapFixtureCleanup = null;
 
 $repoRoot = dirname(__DIR__, 2);
 $csrfDefaults = GateCliSupport::resolveCsrfNamesFromConfig($repoRoot . '/application/config/config.php');
@@ -205,6 +206,38 @@ try {
                 'url' => $response->url,
                 'message' => $message,
                 'anonymous_dashboard_redirect' => true,
+            ];
+        });
+    }
+
+    if (shouldRunConfiguredCheck($config, 'ldap_sso_operational_failure')) {
+        $runCheck('ldap_sso_operational_failure', static function () use ($config, $repoRoot): array {
+            $ldapClient = dashboardIntegrationSmokeCreateClient($config);
+            dashboardIntegrationSmokeWarmLoginCsrf($ldapClient, $config);
+
+            $response = dashboardIntegrationSmokeWithLdapSettings(
+                $repoRoot,
+                [
+                    'ldap_host' => '127.0.0.1',
+                    'ldap_port' => '1',
+                ],
+                static fn() => $ldapClient->post(
+                    'login/validate',
+                    [
+                        'username' => $config['ldap_guardrail_username'],
+                        'password' => $config['ldap_guardrail_wrong_password'],
+                    ],
+                    $config['http_timeout'],
+                    true,
+                ),
+            );
+
+            GateAssertions::assertStatus($response->statusCode, 500, 'POST /login/validate (LDAP operational failure)');
+
+            return [
+                'http_status' => $response->statusCode,
+                'url' => $response->url,
+                'infrastructure_failure_surfaced' => true,
             ];
         });
     }
@@ -482,6 +515,14 @@ try {
         'message' => $e->getMessage(),
         'exception' => get_class($e),
     ];
+}
+
+if (is_callable($ldapFixtureCleanup)) {
+    try {
+        $ldapFixtureCleanup();
+    } catch (Throwable $e) {
+        fwrite(STDERR, '[WARN] Failed to clean up LDAP guardrail fixture: ' . $e->getMessage() . PHP_EOL);
+    }
 }
 
 if (
@@ -832,6 +873,7 @@ function integrationSmokeSupportedCheckIds(): array
         'auth_login_validate',
         'ldap_sso_success',
         'ldap_sso_wrong_password',
+        'ldap_sso_operational_failure',
         'dashboard_metrics',
         'dashboard_page_readiness',
         'dashboard_summary_browser_render',
@@ -863,6 +905,7 @@ function integrationSmokeCheckDependencies(): array
         'auth_login_validate' => ['readiness_login_page'],
         'ldap_sso_success' => [],
         'ldap_sso_wrong_password' => [],
+        'ldap_sso_operational_failure' => [],
         'dashboard_metrics' => ['auth_login_validate'],
         'dashboard_page_readiness' => ['auth_login_validate'],
         'dashboard_summary_browser_render' => ['auth_login_validate'],
@@ -935,7 +978,7 @@ function dashboardIntegrationSmokeRequiresLdapFixture(array $config): bool
  */
 function dashboardIntegrationSmokeLdapGuardrailCheckIds(): array
 {
-    return ['ldap_sso_success', 'ldap_sso_wrong_password'];
+    return ['ldap_sso_success', 'ldap_sso_wrong_password', 'ldap_sso_operational_failure'];
 }
 
 /**
@@ -967,6 +1010,37 @@ function dashboardIntegrationSmokeWarmLoginCsrf(GateHttpClient $client, array $c
         throw new GateAssertionException(
             'GET /login (LDAP guardrail) did not set cookie "' . $config['csrf_cookie_name'] . '".',
         );
+    }
+}
+
+/**
+ * Run a bounded LDAP check with temporary settings and restore them afterward.
+ *
+ * @param array<string, string> $overrides
+ */
+function dashboardIntegrationSmokeWithLdapSettings(string $repoRoot, array $overrides, callable $callback): mixed
+{
+    $CI = dashboardIntegrationSmokeBootstrapApplication($repoRoot);
+    $names = ['ldap_is_active', 'ldap_host', 'ldap_port'];
+    $snapshot = $CI->db->where_in('name', $names)->get('settings')->result_array();
+
+    try {
+        setting($overrides);
+
+        return $callback();
+    } finally {
+        $snapshotByName = [];
+        foreach ($snapshot as $row) {
+            $snapshotByName[(string) $row['name']] = $row;
+        }
+
+        foreach ($names as $name) {
+            if (isset($snapshotByName[$name])) {
+                $CI->db->update('settings', ['value' => $snapshotByName[$name]['value']], ['name' => $name]);
+            } else {
+                $CI->db->delete('settings', ['name' => $name]);
+            }
+        }
     }
 }
 
@@ -1094,23 +1168,23 @@ function dashboardIntegrationSmokeEnsureDirectory(string $directory): void
  */
 function dashboardIntegrationSmokePrepareLdapAppGuardrailFixture(string $repoRoot): array
 {
+    global $ldapFixtureCleanup;
+
     $CI = dashboardIntegrationSmokeBootstrapApplication($repoRoot);
 
     $CI->load->helper('setting');
     $CI->load->model('admins_model');
-
-    setting([
-        'ldap_is_active' => '1',
-        'ldap_host' => 'openldap',
-        'ldap_port' => '389',
-    ]);
 
     $guardrailUsername = 'ada-ldap-guardrail';
     $guardrailLocalPassword = 'guardrail-local-password';
     $guardrailExpectedDn = 'uid=ada,ou=people,dc=example,dc=org';
     $guardrailExpectedMail = 'ada.lovelace@example.org';
 
+    $settingNames = ['ldap_is_active', 'ldap_host', 'ldap_port'];
+    $settingSnapshot = $CI->db->where_in('name', $settingNames)->get('settings')->result_array();
+
     $existingUser = $CI->db
+        ->select('users.*, user_settings.username, user_settings.password, user_settings.salt')
         ->select('users.id, roles.slug AS role_slug')
         ->from('user_settings')
         ->join('users', 'users.id = user_settings.id_users', 'inner')
@@ -1119,11 +1193,71 @@ function dashboardIntegrationSmokePrepareLdapAppGuardrailFixture(string $repoRoo
         ->get()
         ->row_array();
 
+    $existingUserSettings = [];
+    if (!empty($existingUser['id'])) {
+        $existingUserSettings = $CI->db
+            ->get_where('user_settings', ['id_users' => (int) $existingUser['id']])
+            ->row_array();
+    }
+
+    $ldapFixtureCleanup = static function () use (
+        $CI,
+        $settingNames,
+        $settingSnapshot,
+        $existingUser,
+        $existingUserSettings,
+        $guardrailUsername,
+        &$ldapFixtureCleanup,
+    ): void {
+        $snapshotByName = [];
+        foreach ($settingSnapshot as $row) {
+            $snapshotByName[(string) $row['name']] = $row;
+        }
+
+        foreach ($settingNames as $name) {
+            if (isset($snapshotByName[$name])) {
+                $CI->db->update('settings', ['value' => $snapshotByName[$name]['value']], ['name' => $name]);
+            } else {
+                $CI->db->delete('settings', ['name' => $name]);
+            }
+        }
+
+        if (!empty($existingUser['id'])) {
+            $userId = (int) $existingUser['id'];
+            $userRow = $existingUser;
+            unset($userRow['role_slug'], $userRow['username'], $userRow['password'], $userRow['salt']);
+            $CI->db->update('users', $userRow, ['id' => $userId]);
+
+            if ($existingUserSettings !== []) {
+                $settingsRow = $existingUserSettings;
+                unset($settingsRow['id']);
+                $CI->db->update('user_settings', $settingsRow, ['id_users' => $userId]);
+            }
+        } else {
+            $newUser = $CI->db
+                ->select('id_users')
+                ->get_where('user_settings', ['username' => $guardrailUsername])
+                ->row_array();
+            if (!empty($newUser['id_users'])) {
+                $CI->db->delete('user_settings', ['id_users' => (int) $newUser['id_users']]);
+                $CI->db->delete('users', ['id' => (int) $newUser['id_users']]);
+            }
+        }
+
+        $ldapFixtureCleanup = null;
+    };
+
     if (!empty($existingUser) && ($existingUser['role_slug'] ?? null) !== DB_SLUG_ADMIN) {
         throw new RuntimeException(
             'LDAP guardrail username "' . $guardrailUsername . '" is already used by a non-admin account.',
         );
     }
+
+    setting([
+        'ldap_is_active' => '1',
+        'ldap_host' => 'openldap',
+        'ldap_port' => '389',
+    ]);
 
     $admin = [
         'first_name' => 'Ada',
@@ -1142,7 +1276,12 @@ function dashboardIntegrationSmokePrepareLdapAppGuardrailFixture(string $repoRoo
         $admin['id'] = (int) $existingUser['id'];
     }
 
-    $CI->admins_model->save($admin);
+    try {
+        $CI->admins_model->save($admin);
+    } catch (Throwable $exception) {
+        $ldapFixtureCleanup();
+        throw $exception;
+    }
 
     return [
         'ldap_guardrail_username' => $guardrailUsername,
