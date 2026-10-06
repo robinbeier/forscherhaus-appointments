@@ -163,6 +163,55 @@ final class LoginMethodHttpTest extends TestCase
         }
     }
 
+    public function testLogoutRejectsCurrentAndReplayedSessionCookiesOnCanonicalAndDirectRoutes(): void
+    {
+        $fixture = $this->fixture();
+        $server = $this->server();
+        $cookieName = (string) config('sess_cookie_name');
+
+        foreach (
+            [
+                [new GateHttpClient($server->baseUrl, ''), 'logout', 'calendar', '/logout'],
+                [new GateHttpClient($server->baseUrl, 'index.php'), 'logout', 'calendar', '/index.php/logout'],
+            ]
+            as [$client, $logoutPath, $calendarPath, $logoutUrlPath]
+        ) {
+            /** @var GateHttpClient $client */
+            $login = $client->get('login');
+            self::assertSame(200, $login->statusCode, $login->body);
+            $credentials = [
+                'username' => $fixture->run . '_actor',
+                'password' => $fixture->password,
+            ];
+            $authenticated = $client->post('login/validate', $credentials);
+            self::assertSame(200, $authenticated->statusCode, $authenticated->body);
+            $preLogoutCookie = $client->getCookie($cookieName);
+            self::assertNotNull($preLogoutCookie);
+
+            $beforeLogout = $client->get($calendarPath);
+            self::assertSame(200, $beforeLogout->statusCode, $beforeLogout->body);
+            self::assertStringContainsString('id="calendar-page"', $beforeLogout->body);
+
+            $logout = $client->get($logoutPath);
+            self::assertSame(200, $logout->statusCode, $logout->body);
+            self::assertSame($logoutUrlPath, (string) parse_url($logout->url, PHP_URL_PATH));
+
+            $currentCookie = $client->get($calendarPath);
+            self::assertSame(200, $currentCookie->statusCode, $currentCookie->body);
+            self::assertStringContainsString('id="login-form"', $currentCookie->body);
+            self::assertStringNotContainsString('id="calendar-page"', $currentCookie->body);
+
+            $replayedCookie = new GateHttpClient(
+                $server->baseUrl,
+                str_starts_with($logoutUrlPath, '/index.php/') ? 'index.php' : '',
+                additionalHeaders: ['Cookie' => $cookieName . '=' . $preLogoutCookie],
+            );
+            $replay = $replayedCookie->get($calendarPath);
+            self::assertSame(307, $replay->statusCode, $replay->body);
+            self::assertStringContainsString('/login', (string) $replay->header('location'));
+        }
+    }
+
     public function testInvalidCredentialsDoNotAuthenticateTheAnonymousSession(): void
     {
         $fixture = $this->fixture();
