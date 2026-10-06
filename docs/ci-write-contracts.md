@@ -103,14 +103,20 @@ Der globale OPTIONS-Kurzschluss endet vor dem Controller und erzeugt keine
 Anmeldesitzung. Die Anmeldeseite selbst bleibt per GET erreichbar.
 Ein gewöhnlich falsches Passwort liefert die generische Antwort
 `success: false` mit HTTP 200, damit die Anmeldeseite ihre Fehlermeldung zeigt,
-ohne einen App-Fehleralarm zu erzeugen. Fehlende Zugangsdaten erhalten HTTP 400;
-unerwartete Systemfehler bleiben HTTP 500 und alarmfähig.
+ohne einen App-Fehleralarm zu erzeugen. Fällt LDAP operativ aus, erhalten
+bekannte LDAP-Namen, unbekannte Namen und rein lokale Namen dieselbe generische
+Antwort wie ein ungültiges Passwort; der Server schreibt dafür ausschließlich
+den festen App-Log-Marker `LDAP authentication unavailable; login rejected.`.
+Fehlende Zugangsdaten erhalten HTTP 400; unerwartete Nicht-LDAP-Systemfehler
+bleiben HTTP 500 und alarmfähig.
 
 `LoginMethodHttpTest` prüft mit einem eigenen synthetischen Benutzer die
 Methodengrenze über Rewrite- und Direktpfad, den fehlenden geschützten Zugriff
 nach Ablehnung, den Wechsel der Sitzungs-ID bei erfolgreichem Login, die
 fortbestehende Ablehnung des alten Cookies sowie falsche und fehlende
-Zugangsdaten. Die Tests laufen
+Zugangsdaten. Der LDAP-Ausfalltest vergleicht dabei die exakte öffentliche
+Antwort für bekannten LDAP-Namen, unbekannten Namen und rein lokalen Namen.
+Die Tests laufen
 in einer frischen isolierten Datenbank und belegen keine Browser-spezifische
 Cross-Site-Ausnutzung oder unbekannte externe Clients. Produktiv werden nur
 Release-/Konfigurationsidentität und lesende Gesundheitsklassen geprüft; ein

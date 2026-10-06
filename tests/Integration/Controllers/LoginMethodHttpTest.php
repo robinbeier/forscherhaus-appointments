@@ -187,6 +187,104 @@ final class LoginMethodHttpTest extends TestCase
         }
     }
 
+    public function testLdapOutageDoesNotRevealWhetherTheUsernameIsKnown(): void
+    {
+        $fixture = $this->fixture();
+        $server = $this->server();
+        $db = \get_instance()->db;
+        $settingNames = ['ldap_is_active', 'ldap_host', 'ldap_port'];
+        $settings = $db->where_in('name', $settingNames)->get('settings')->result_array();
+        $actorUser = $db->get_where('users', ['id' => $fixture->actorId])->row_array();
+        $providerUser = $db->get_where('users', ['id' => $fixture->providerId])->row_array();
+
+        try {
+            $db->update('settings', ['value' => '1'], ['name' => 'ldap_is_active']);
+            $db->update('settings', ['value' => '127.0.0.1'], ['name' => 'ldap_host']);
+            $db->update('settings', ['value' => '1'], ['name' => 'ldap_port']);
+            $db->update(
+                'users',
+                ['ldap_dn' => 'uid=' . $fixture->run . ',ou=synthetic,dc=invalid'],
+                [
+                    'id' => $fixture->actorId,
+                ],
+            );
+            $db->update('users', ['ldap_dn' => null], ['id' => $fixture->providerId]);
+
+            self::assertSame(
+                '1',
+                (string) $db->get_where('settings', ['name' => 'ldap_is_active'])->row_array()['value'],
+            );
+            self::assertSame(
+                '127.0.0.1',
+                (string) $db->get_where('settings', ['name' => 'ldap_host'])->row_array()['value'],
+            );
+            self::assertSame('1', (string) $db->get_where('settings', ['name' => 'ldap_port'])->row_array()['value']);
+            self::assertSame(
+                'uid=' . $fixture->run . ',ou=synthetic,dc=invalid',
+                (string) $db->get_where('users', ['id' => $fixture->actorId])->row_array()['ldap_dn'],
+            );
+            self::assertSame(
+                '',
+                (string) $db->get_where('users', ['id' => $fixture->providerId])->row_array()['ldap_dn'],
+            );
+
+            foreach ($this->routes($server) as [$client, $endpoint, , $loginPath]) {
+                /** @var GateHttpClient $client */
+                self::assertSame(200, $client->get($loginPath)->statusCode);
+                $responses = [];
+
+                foreach (
+                    [$fixture->run . '_actor', $fixture->run . '_unknown', $fixture->run . '_provider']
+                    as $username
+                ) {
+                    $response = $client->post($endpoint, [
+                        'username' => $username,
+                        'password' => $fixture->password . '-invalid',
+                    ]);
+                    $responses[] = [$response->statusCode, $response->body];
+                }
+
+                self::assertSame($responses[0], $responses[1]);
+                self::assertSame($responses[0], $responses[2]);
+                self::assertSame(
+                    [
+                        200,
+                        json_encode(
+                            [
+                                'success' => false,
+                                'message' => lang('invalid_credentials_provided'),
+                            ],
+                            JSON_THROW_ON_ERROR,
+                        ),
+                    ],
+                    $responses[0],
+                );
+            }
+        } finally {
+            foreach ($settings as $row) {
+                $db->update('settings', ['value' => $row['value']], ['name' => $row['name']]);
+            }
+            if ($actorUser) {
+                $db->update(
+                    'users',
+                    ['ldap_dn' => $actorUser['ldap_dn'] ?? null],
+                    [
+                        'id' => $fixture->actorId,
+                    ],
+                );
+            }
+            if ($providerUser) {
+                $db->update(
+                    'users',
+                    ['ldap_dn' => $providerUser['ldap_dn'] ?? null],
+                    [
+                        'id' => $fixture->providerId,
+                    ],
+                );
+            }
+        }
+    }
+
     public function testMalformedCredentialsAreRejectedAsClientErrors(): void
     {
         $fixture = $this->fixture();

@@ -34,7 +34,7 @@ class LdapClientBindFailureTest extends TestCase
 
     public function testOperationalBindFailureIsSurfaced(): void
     {
-        $this->expectException(\RuntimeException::class);
+        $this->expectException(\LdapOperationalException::class);
         $this->expectExceptionMessage('result code 81');
 
         $this->client()->assertBindFailure(81);
@@ -42,7 +42,7 @@ class LdapClientBindFailureTest extends TestCase
 
     public function testConnectionFailureIsSurfaced(): void
     {
-        $this->expectException(\RuntimeException::class);
+        $this->expectException(\LdapOperationalException::class);
         $this->expectExceptionMessage('Unable to connect to the LDAP server.');
 
         $this->client()->assertConnection(false, false);
@@ -50,7 +50,7 @@ class LdapClientBindFailureTest extends TestCase
 
     public function testProtocolSetupFailureIsSurfaced(): void
     {
-        $this->expectException(\RuntimeException::class);
+        $this->expectException(\LdapOperationalException::class);
         $this->expectExceptionMessage('Unable to configure the LDAP connection.');
 
         $this->client()->assertConnection(new \stdClass(), false);

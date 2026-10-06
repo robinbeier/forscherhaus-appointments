@@ -11,10 +11,13 @@
  * @since       v1.5.0
  * ---------------------------------------------------------------------------- */
 
+/** A directory failure that must be logged without disclosing account existence. */
+final class LdapOperationalException extends RuntimeException {}
+
 /**
  * Ldap_client library.
  *
- * Handles LDAP  related functionality.
+ * Handles LDAP related functionality.
  *
  * @package Libraries
  */
@@ -61,7 +64,7 @@ class Ldap_client
         }
 
         if (!extension_loaded('ldap')) {
-            throw new RuntimeException('The LDAP extension is not available.');
+            throw new LdapOperationalException('The LDAP extension is not available.');
         }
 
         // Match user by username
@@ -114,7 +117,7 @@ class Ldap_client
      *
      * @return void
      *
-     * @throws RuntimeException When the failure is not invalid credentials.
+     * @throws LdapOperationalException When the failure is not invalid credentials.
      */
     protected function handleBindFailure(int $error_code): void
     {
@@ -122,7 +125,7 @@ class Ldap_client
             return;
         }
 
-        throw new RuntimeException(sprintf('LDAP authentication failed with result code %d.', $error_code));
+        throw new LdapOperationalException(sprintf('LDAP authentication failed with result code %d.', $error_code));
     }
 
     /**
@@ -133,16 +136,16 @@ class Ldap_client
      *
      * @return void
      *
-     * @throws RuntimeException When connection setup failed.
+     * @throws LdapOperationalException When connection setup failed.
      */
     protected function assertConnectionReady(mixed $connection, bool $protocol_configured): void
     {
         if ($connection === false) {
-            throw new RuntimeException('Unable to connect to the LDAP server.');
+            throw new LdapOperationalException('Unable to connect to the LDAP server.');
         }
 
         if (!$protocol_configured) {
-            throw new RuntimeException('Unable to configure the LDAP connection.');
+            throw new LdapOperationalException('Unable to configure the LDAP connection.');
         }
     }
 }

@@ -214,6 +214,8 @@ try {
         $runCheck('ldap_sso_operational_failure', static function () use ($config, $repoRoot): array {
             $ldapClient = dashboardIntegrationSmokeCreateClient($config);
             dashboardIntegrationSmokeWarmLoginCsrf($ldapClient, $config);
+            $logMarker = 'LDAP authentication unavailable; login rejected.';
+            $markerCountBefore = dashboardIntegrationSmokeCountLogMarker($repoRoot, $logMarker);
 
             $response = dashboardIntegrationSmokeWithLdapSettings(
                 $repoRoot,
@@ -232,12 +234,29 @@ try {
                 ),
             );
 
-            GateAssertions::assertStatus($response->statusCode, 500, 'POST /login/validate (LDAP operational failure)');
+            GateAssertions::assertStatus($response->statusCode, 200, 'POST /login/validate (LDAP operational failure)');
+            $payload = GateAssertions::decodeJson($response->body, 'POST /login/validate (LDAP operational failure)');
+            if (
+                $payload !== [
+                    'success' => false,
+                    'message' => lang('invalid_credentials_provided'),
+                ]
+            ) {
+                throw new GateAssertionException(
+                    'LDAP operational failure must return the generic invalid-credentials payload.',
+                );
+            }
+
+            $markerCountAfter = dashboardIntegrationSmokeCountLogMarker($repoRoot, $logMarker);
+            if ($markerCountAfter <= $markerCountBefore) {
+                throw new GateAssertionException('LDAP operational failure did not write the fixed App Log marker.');
+            }
 
             return [
                 'http_status' => $response->statusCode,
                 'url' => $response->url,
-                'infrastructure_failure_surfaced' => true,
+                'generic_response' => true,
+                'app_log_marker_written' => true,
             ];
         });
     }
@@ -1011,6 +1030,19 @@ function dashboardIntegrationSmokeWarmLoginCsrf(GateHttpClient $client, array $c
             'GET /login (LDAP guardrail) did not set cookie "' . $config['csrf_cookie_name'] . '".',
         );
     }
+}
+
+function dashboardIntegrationSmokeCountLogMarker(string $repoRoot, string $marker): int
+{
+    $count = 0;
+    foreach (glob(rtrim($repoRoot, '/') . '/storage/logs/log-*.php') ?: [] as $path) {
+        $contents = file_get_contents($path);
+        if ($contents !== false) {
+            $count += substr_count($contents, $marker);
+        }
+    }
+
+    return $count;
 }
 
 /**

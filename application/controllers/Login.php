@@ -123,6 +123,16 @@ class Login extends EA_Controller
             json_response([
                 'success' => true,
             ]);
+        } catch (LdapOperationalException $e) {
+            // Keep LDAP availability details out of the public authentication oracle.
+            log_message('error', 'LDAP authentication unavailable; login rejected.');
+            json_response(
+                [
+                    'success' => false,
+                    'message' => lang('invalid_credentials_provided'),
+                ],
+                200,
+            );
         } catch (Throwable $e) {
             json_exception($e);
         }
