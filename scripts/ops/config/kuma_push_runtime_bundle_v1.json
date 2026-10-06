@@ -46,7 +46,7 @@
             "source": "scripts/ops/lib/app_log_classification.sh",
             "install": "scripts/ops/lib/app_log_classification.sh",
             "role": "shell_library",
-            "sha256": "b8dd554faa7a0468f98eefccfb3432a498ea284a1ac1de1a4e84227f4c782623"
+            "sha256": "1f6aeb31c1ec63cbd02d1b4cfe75561c99f35b2b05cb207b663417115c13e0db"
         },
         {
             "source": "scripts/release-gate/dashboard_release_gate.php",
