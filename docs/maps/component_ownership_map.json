@@ -714,7 +714,7 @@
     {
       "component_id": "api-v1",
       "role": "REST API v1",
-      "summary": "External API surface for appointment-domain entities with auth and schema ties.",
+      "summary": "External API surface for appointment-domain entities; availability reads reuse public-booking slot calculation.",
       "primary_handle": "@robinbeier",
       "secondary_handle": "@robinbeier",
       "ownership_mode": "single-owner",
@@ -751,6 +751,7 @@
       ],
       "depends_on": [
         "auth-session",
+        "booking-public",
         "integrations-sync",
         "people-services-admin",
         "scheduling-backoffice",

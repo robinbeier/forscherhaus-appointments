@@ -19,7 +19,7 @@ This map defines component boundaries, path ownership scope, and dependency edge
 | `people-services-admin` | People, Providers, Services | integrations-sync, scheduling-backoffice, settings-compliance, shared-core | 25 | 3 |
 | `settings-compliance` | Settings & Compliance | auth-session, integrations-sync, people-services-admin, scheduling-backoffice, shared-core | 27 | 3 |
 | `integrations-sync` | Integrations & Sync | auth-session, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 6 | 1 |
-| `api-v1` | REST API v1 | auth-session, integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 5 | 3 |
+| `api-v1` | REST API v1 | auth-session, booking-public, integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 5 | 3 |
 | `shared-core` | Shared Core | None | 15 | 3 |
 | `platform-quality-tooling` | Platform, CI, Release Gates | api-v1, booking-public, dashboard-exports, installation-bootstrap, people-services-admin, settings-compliance, shared-core | 22 | 11 |
 
@@ -304,10 +304,11 @@ Key files:
 
 ### `api-v1` - REST API v1
 
-External API surface for appointment-domain entities with auth and schema ties.
+External API surface for appointment-domain entities; availability reads reuse public-booking slot calculation.
 
 Dependencies:
 - `auth-session`
+- `booking-public`
 - `integrations-sync`
 - `people-services-admin`
 - `scheduling-backoffice`

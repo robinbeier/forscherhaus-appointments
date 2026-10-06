@@ -644,6 +644,11 @@ before the requested category is read or disclosed; existing Admin Basic and
 global Bearer authority stays unchanged. The isolated HTTP regression checks
 the response and preservation of its own category row, not live production
 behavior.
+Availabilities API v1 requires GET on its direct read alias before provider,
+service, or availability lookup. Other methods return 405 with `Allow: GET`;
+Admin Basic and global Bearer authentication still run first. The isolated
+HTTP regression covers the owned service's response, denied identities, and
+rejected methods without a database change; it is not a live production test.
 
 For authenticated staff API v1 PUT requests, the URL selects the Admin,
 Provider, or Secretary record. A body ID cannot redirect the update to another

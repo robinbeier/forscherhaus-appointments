@@ -22,6 +22,7 @@
             <file>./tests/Integration/Controllers/UnavailabilitiesApiHttpReadTest.php</file>
             <file>./tests/Integration/Controllers/ServiceCategoriesApiHttpWriteTest.php</file>
             <file>./tests/Integration/Controllers/ServiceCategoriesApiReadAliasMethodHttpTest.php</file>
+            <file>./tests/Integration/Controllers/AvailabilitiesApiReadAliasMethodHttpTest.php</file>
             <file>./tests/Integration/Controllers/ServiceCategoriesApiPostWriteFailureTest.php</file>
             <file>./tests/Integration/Controllers/ServiceCategoriesLegacyHttpTest.php</file>
             <file>./tests/Integration/Controllers/ServicesLegacyWriteHttpTest.php</file>
