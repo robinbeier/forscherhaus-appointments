@@ -38,6 +38,10 @@ class Service_categories_api_v1 extends EA_Controller
      */
     public function index(): void
     {
+        if (!$this->enforceReadMethod()) {
+            return;
+        }
+
         try {
             $keyword = $this->api->request_keyword();
 
@@ -80,6 +84,10 @@ class Service_categories_api_v1 extends EA_Controller
      */
     public function show(?int $id = null): void
     {
+        if (!$this->enforceReadMethod()) {
+            return;
+        }
+
         try {
             $occurrences = $this->service_categories_model->get(['id' => $id]);
 
@@ -268,6 +276,17 @@ class Service_categories_api_v1 extends EA_Controller
         $this->api_request_dto_factory = $CI->api_request_dto_factory;
 
         return $this->api_request_dto_factory;
+    }
+
+    private function enforceReadMethod(): bool
+    {
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) === 'GET') {
+            return true;
+        }
+
+        response('', 405, ['Allow: GET']);
+
+        return false;
     }
 
     private function enforceWriteMethod(string $expected): bool
