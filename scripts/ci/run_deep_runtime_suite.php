@@ -517,7 +517,7 @@ function deepRuntimeIntegrationSmokeChecks(bool $includeLdapGuardrail): array
         return $checks;
     }
 
-    array_splice($checks, 2, 0, ['ldap_sso_success', 'ldap_sso_wrong_password']);
+    array_splice($checks, 2, 0, ['ldap_sso_success', 'ldap_sso_wrong_password', 'ldap_sso_operational_failure']);
 
     return $checks;
 }

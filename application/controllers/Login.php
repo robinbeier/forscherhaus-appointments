@@ -71,13 +71,29 @@ class Login extends EA_Controller
             $username = $request_dto->username;
 
             if (empty($username)) {
-                throw new InvalidArgumentException('No username value provided.');
+                json_response(
+                    [
+                        'success' => false,
+                        'message' => 'No username value provided.',
+                    ],
+                    400,
+                );
+
+                return;
             }
 
             $password = $request_dto->password;
 
             if (empty($password)) {
-                throw new InvalidArgumentException('No password value provided.');
+                json_response(
+                    [
+                        'success' => false,
+                        'message' => 'No password value provided.',
+                    ],
+                    400,
+                );
+
+                return;
             }
 
             $user_data = $this->accounts->check_login($username, $password);
@@ -89,7 +105,15 @@ class Login extends EA_Controller
             }
 
             if (empty($user_data)) {
-                throw new InvalidArgumentException(lang('invalid_credentials_provided'));
+                json_response(
+                    [
+                        'success' => false,
+                        'message' => lang('invalid_credentials_provided'),
+                    ],
+                    200,
+                );
+
+                return;
             }
 
             $this->session->sess_regenerate();
@@ -99,6 +123,16 @@ class Login extends EA_Controller
             json_response([
                 'success' => true,
             ]);
+        } catch (LdapOperationalException $e) {
+            // Keep LDAP availability details out of the public authentication oracle.
+            log_message('error', 'LDAP authentication unavailable; login rejected.');
+            json_response(
+                [
+                    'success' => false,
+                    'message' => lang('invalid_credentials_provided'),
+                ],
+                200,
+            );
         } catch (Throwable $e) {
             json_exception($e);
         }

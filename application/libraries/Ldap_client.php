@@ -11,10 +11,13 @@
  * @since       v1.5.0
  * ---------------------------------------------------------------------------- */
 
+/** A directory failure that must be logged without disclosing account existence. */
+final class LdapOperationalException extends RuntimeException {}
+
 /**
  * Ldap_client library.
  *
- * Handles LDAP  related functionality.
+ * Handles LDAP related functionality.
  *
  * @package Libraries
  */
@@ -50,10 +53,6 @@ class Ldap_client
      */
     public function check_login(string $username, string $password): ?array
     {
-        if (!extension_loaded('ldap')) {
-            return null;
-        }
-
         if (empty($username)) {
             throw new InvalidArgumentException('No username value provided.');
         }
@@ -62,6 +61,10 @@ class Ldap_client
 
         if (!$ldap_is_active) {
             return null;
+        }
+
+        if (!extension_loaded('ldap')) {
+            throw new LdapOperationalException('The LDAP extension is not available.');
         }
 
         // Match user by username
@@ -78,7 +81,9 @@ class Ldap_client
         $ldap_port = (int) setting('ldap_port');
 
         $connection = @ldap_connect($ldap_host, $ldap_port);
-        @ldap_set_option($connection, LDAP_OPT_PROTOCOL_VERSION, 3);
+        $protocol_configured = $connection !== false && @ldap_set_option($connection, LDAP_OPT_PROTOCOL_VERSION, 3);
+        $this->assertConnectionReady($connection, $protocol_configured);
+
         $user_bind = @ldap_bind($connection, $user['ldap_dn'], $password);
 
         if ($user_bind) {
@@ -96,6 +101,51 @@ class Ldap_client
             ];
         }
 
+        $this->handleBindFailure((int) @ldap_errno($connection));
+
         return null;
+    }
+
+    /**
+     * Handle a failed LDAP bind.
+     *
+     * LDAP result code 49 means that the supplied credentials are invalid. All
+     * other failures indicate that authentication could not be evaluated
+     * reliably and must be surfaced to the caller.
+     *
+     * @param int $error_code LDAP result code.
+     *
+     * @return void
+     *
+     * @throws LdapOperationalException When the failure is not invalid credentials.
+     */
+    protected function handleBindFailure(int $error_code): void
+    {
+        if ($error_code === 49) {
+            return;
+        }
+
+        throw new LdapOperationalException(sprintf('LDAP authentication failed with result code %d.', $error_code));
+    }
+
+    /**
+     * Fail closed when LDAP connection setup did not complete.
+     *
+     * @param mixed $connection LDAP connection handle.
+     * @param bool $protocol_configured Whether the protocol option was set.
+     *
+     * @return void
+     *
+     * @throws LdapOperationalException When connection setup failed.
+     */
+    protected function assertConnectionReady(mixed $connection, bool $protocol_configured): void
+    {
+        if ($connection === false) {
+            throw new LdapOperationalException('Unable to connect to the LDAP server.');
+        }
+
+        if (!$protocol_configured) {
+            throw new LdapOperationalException('Unable to configure the LDAP connection.');
+        }
     }
 }
