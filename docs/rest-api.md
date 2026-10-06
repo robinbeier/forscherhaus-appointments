@@ -101,6 +101,13 @@ runs. The optional `with=category` parameter attaches the bounded category
 projection (`id`, `name`, and `description`) to each returned service; repeated
 `category` tokens are loaded once per returned service.
 
+The blocked-period collection follows the same pagination contract on
+`GET /api/v1/blocked_periods` and its direct controller alias
+`GET /api/v1/blocked_periods_api_v1/index`. Explicit `length` values must be
+integers from 1 through 100, and `page` values must be integers from 1 through
+10000. Invalid explicit pagination values return HTTP 400 before the
+blocked-period query runs.
+
 ### Paginate
 
 Paginate the appointments result by providing the `page` parameter along with the optional `length` parameter that defaults to 20. For `GET /api/v1/appointments`, explicitly provided `length` values must be integers from 1 through 100, and `page` values must be integers from 1 through 10000. Invalid explicit pagination values return HTTP 400 before the appointments query runs.

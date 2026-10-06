@@ -584,6 +584,12 @@ the requested periods or notes are read or disclosed; the existing Admin Basic
 and global Bearer authorities are unchanged. The isolated HTTP regression
 checks the response and preservation of its own period row, not live production
 behavior.
+The Blocked Periods API v1 collection accepts explicit `length` only from 1
+through 100 and `page` only from 1 through 10000 on both the canonical GET
+route and direct index alias. It rejects invalid values with JSON 400 before
+period retrieval; an omitted value retains the existing default. The isolated
+HTTP regression uses owned periods and checks both Admin Basic and global
+Bearer. It does not establish production load behavior.
 The isolated `PublicBookingBlockedPeriodRaceHttpTest` additionally checks one
 ordered overlap: a global block committed while a public booking waits for its
 provider lock is visible to the post-lock availability check, and the rejected
