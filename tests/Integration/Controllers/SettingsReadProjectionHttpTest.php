@@ -364,7 +364,7 @@ final class SettingsReadProjectionHttpTest extends TestCase
         );
         $demotedPage = $admin->get('about');
         self::assertSame(200, $demotedPage->statusCode);
-        $userMenuMarker = 'data-tippy-content="' . lang('settings_hint') . '"';
+        $userMenuMarker = 'href="' . $this->server?->baseUrl . '/index.php/logout"';
         $menuMarkerOffset = strpos($demotedPage->body, $userMenuMarker);
         self::assertNotFalse($menuMarkerOffset);
         $menuStart = strrpos(substr($demotedPage->body, 0, $menuMarkerOffset), '<li ');
