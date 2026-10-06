@@ -94,14 +94,15 @@ previous_offset="${previous_offset:-0}"
 tmp_dir="$(mktemp -d "$STATE_DIR/delta.XXXXXX")" || kuma_push_die "Unable to create private app-log workspace"
 tmp_delta="$tmp_dir/delta"
 tmp_filtered="$tmp_dir/filtered"
+tmp_custom_filtered="$tmp_dir/custom-filtered"
 tmp_hash="$tmp_dir/hash"
 tmp_hash_pipe="$tmp_dir/hash.pipe"
 cleanup() {
-  rm -f "$tmp_delta" "$tmp_filtered" "$tmp_hash" "$tmp_hash_pipe"
+  rm -f "$tmp_delta" "$tmp_filtered" "$tmp_custom_filtered" "$tmp_hash" "$tmp_hash_pipe"
   rmdir "$tmp_dir" 2>/dev/null || true
 }
 trap cleanup EXIT
-(umask 077; : > "$tmp_delta"; : > "$tmp_filtered"; : > "$tmp_hash"; mkfifo "$tmp_hash_pipe") || kuma_push_die "Unable to create private app-log workspace files"
+(umask 077; : > "$tmp_delta"; : > "$tmp_filtered"; : > "$tmp_custom_filtered"; : > "$tmp_hash"; mkfifo "$tmp_hash_pipe") || kuma_push_die "Unable to create private app-log workspace files"
 
 read_inode="$(kuma_push_stat_dev_inode "$LOG_FILE")"
 read_size="$(kuma_push_stat_size "$LOG_FILE")"
@@ -175,11 +176,14 @@ fi
 # may source a classifier library that predates these two observed routes.
 exact_external_404_ignore_regex='ERROR - .*--> 404 Page Not Found: (Installation|Mnavercom)/index([[:space:]]|$)'
 if [[ -n "$IGNORE_REGEX" ]]; then
-  IGNORE_REGEX="(${IGNORE_REGEX})|${exact_external_404_ignore_regex}"
-else
-  IGNORE_REGEX="$exact_external_404_ignore_regex"
+  set +e
+  grep -Ev "$IGNORE_REGEX" "$tmp_delta" > "$tmp_custom_filtered"
+  custom_filter_status="$?"
+  set -e
+  (( custom_filter_status == 0 || custom_filter_status == 1 )) || kuma_push_die "Invalid app log ignore regex"
+  mv "$tmp_custom_filtered" "$tmp_delta"
 fi
-app_log_filter_actionable_file "$tmp_delta" "$tmp_filtered" "$IGNORE_REGEX"
+app_log_filter_actionable_file "$tmp_delta" "$tmp_filtered" "$exact_external_404_ignore_regex"
 mv "$tmp_filtered" "$tmp_delta"
 
 new_errors="$(grep -cF "$PATTERN" "$tmp_delta" || true)"

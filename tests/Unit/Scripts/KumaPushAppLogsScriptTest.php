@@ -323,6 +323,76 @@ class KumaPushAppLogsScriptTest extends TestCase
         }
     }
 
+    public function testCustomIgnoreRegexPreservesBackreferencesAndRejectsMalformedRegex(): void
+    {
+        $workspace = sys_get_temp_dir() . '/kuma-push-app-logs-regex-' . bin2hex(random_bytes(8));
+        $stubBin = $workspace . '/bin';
+        $appRoot = $workspace . '/app-root';
+        $stateDir = $workspace . '/state';
+        $capturePath = $workspace . '/curl-args.log';
+        $today = gmdate('Y-m-d');
+        $logFile = $appRoot . '/storage/logs/log-' . $today . '.php';
+        $envFile = $workspace . '/uptime-kuma-push.env';
+
+        mkdir($stubBin, 0777, true);
+        mkdir(dirname($logFile), 0777, true);
+        mkdir($stateDir, 0700, true);
+
+        try {
+            $this->writeCurlStub($stubBin, $capturePath);
+            $this->writeEnvFile($envFile, $appRoot);
+            file_put_contents(
+                $envFile,
+                'KUMA_APP_LOG_IGNORE_REGEX=' . escapeshellarg('ERROR - .*host=([[:alnum:]]+) \1') . "\n",
+                FILE_APPEND,
+            );
+            file_put_contents($logFile, '');
+
+            $primeResult = $this->runCommand(
+                ['bash', 'scripts/ops/kuma_push_app_logs.sh'],
+                $this->repoRoot(),
+                $this->commandEnv($envFile, $stateDir, $stubBin),
+            );
+            self::assertSame(0, $primeResult['exit_code'], $primeResult['stderr']);
+
+            file_put_contents(
+                $logFile,
+                implode("\n", [
+                    'ERROR - 2026-10-06 08:00:00 --> host=abc abc',
+                    'ERROR - 2026-10-06 08:00:01 --> host=abc real alarm',
+                    '',
+                ]),
+                FILE_APPEND,
+            );
+
+            $result = $this->runCommand(
+                ['bash', 'scripts/ops/kuma_push_app_logs.sh'],
+                $this->repoRoot(),
+                $this->commandEnv($envFile, $stateDir, $stubBin),
+            );
+
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            self::assertStringContainsString('CRIT new_app_errors=1', $result['stdout']);
+            self::assertStringContainsString(
+                'latest=ERROR - 2026-10-06 08:00:01 --> host=abc real alarm',
+                $this->readFile($capturePath),
+            );
+
+            file_put_contents($envFile, 'KUMA_APP_LOG_IGNORE_REGEX=' . escapeshellarg('[') . "\n", FILE_APPEND);
+            file_put_contents($logFile, "ERROR - 2026-10-06 08:00:02 --> host=abc malformed regex\n", FILE_APPEND);
+            $malformedResult = $this->runCommand(
+                ['bash', 'scripts/ops/kuma_push_app_logs.sh'],
+                $this->repoRoot(),
+                $this->commandEnv($envFile, $stateDir, $stubBin),
+            );
+
+            self::assertNotSame(0, $malformedResult['exit_code']);
+            self::assertStringContainsString('Invalid app log ignore regex', $malformedResult['stderr']);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
     public function testAppLogMonitorIgnoresBuiltInScannerAndProxyNoise(): void
     {
         $workspace = sys_get_temp_dir() . '/kuma-push-app-logs-' . bin2hex(random_bytes(8));
