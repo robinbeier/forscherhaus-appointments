@@ -206,10 +206,10 @@ final class BookingCalendarAmbiguousHashHttpTest extends TestCase
             self::assertStringNotContainsString($email, $response->body, $label . ' leaked customer data.');
         }
         if ($response->statusCode === 200) {
-            self::assertStringContainsString(
-                '<h4 class="mb-5">Appointment Not Found</h4>',
-                $response->body,
-                $label . ' did not show the generic not-found page.',
+            self::assertTrue(
+                str_contains($response->body, '<h4 class="mb-5">Appointment Not Found</h4>') ||
+                    str_contains($response->body, '<h4 class="mb-5">Termin nicht gefunden.</h4>'),
+                $label . ' did not show the generic localized not-found page.',
             );
         }
     }

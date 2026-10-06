@@ -8,6 +8,7 @@ require_once __DIR__ . '/../release-gate/lib/PlaywrightCookieRecords.php';
 require_once __DIR__ . '/lib/BrowserRuntimeEvidence.php';
 require_once __DIR__ . '/lib/CheckSelection.php';
 require_once __DIR__ . '/lib/DashboardSummaryBrowserCheck.php';
+require_once __DIR__ . '/lib/LdapFixtureCleanup.php';
 
 use function CiRuntimeEvidence\buildDefaultBrowserRuntimeEvidenceArtifactsDir;
 use function CiRuntimeEvidence\collectBookingPageBrowserEvidence;
@@ -536,13 +537,7 @@ try {
     ];
 }
 
-if (is_callable($ldapFixtureCleanup)) {
-    try {
-        $ldapFixtureCleanup();
-    } catch (Throwable $e) {
-        fwrite(STDERR, '[WARN] Failed to clean up LDAP guardrail fixture: ' . $e->getMessage() . PHP_EOL);
-    }
-}
+dashboardIntegrationSmokeRunLdapFixtureCleanup($ldapFixtureCleanup, $exitCode, $failure);
 
 if (
     isset($config) &&
@@ -1216,8 +1211,7 @@ function dashboardIntegrationSmokePrepareLdapAppGuardrailFixture(string $repoRoo
     $settingSnapshot = $CI->db->where_in('name', $settingNames)->get('settings')->result_array();
 
     $existingUser = $CI->db
-        ->select('users.*, user_settings.username, user_settings.password, user_settings.salt')
-        ->select('users.id, roles.slug AS role_slug')
+        ->select('users.*, roles.slug AS role_slug')
         ->from('user_settings')
         ->join('users', 'users.id = user_settings.id_users', 'inner')
         ->join('roles', 'roles.id = users.id_roles', 'inner')
