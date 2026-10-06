@@ -30,6 +30,7 @@
             <file>./tests/Integration/Controllers/IntegrationsLegacyHttpTest.php</file>
             <file>./tests/Integration/Controllers/HealthzHttpBoundaryTest.php</file>
             <file>./tests/Integration/Controllers/AccountLegacyHttpTest.php</file>
+            <file>./tests/Integration/Controllers/AccountPasswordChangeHttpTest.php</file>
             <file>./tests/Integration/Controllers/AccountUsernameValidationHttpTest.php</file>
             <file>./tests/Integration/Controllers/LdapSettingsLegacyHttpTest.php</file>
             <file>./tests/Integration/Controllers/BookingSettingsLegacyHttpTest.php</file>

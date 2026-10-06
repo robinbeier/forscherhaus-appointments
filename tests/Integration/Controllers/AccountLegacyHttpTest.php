@@ -132,6 +132,7 @@ final class AccountLegacyHttpTest extends TestCase
         $admin = $this->login($this->credentials['admin_username']);
         $account = $this->accountPayload($this->actorBefore, $this->actorSettingsBefore);
         $account['first_name'] = $fixture->run . '_wrong_method';
+        $account['settings']['password'] = $fixture->run . '_attempted_password';
 
         foreach (['GET', 'PUT', 'PATCH', 'DELETE', 'HEAD'] as $method) {
             $response = $admin->requestApp($method, 'account/save', ['account' => $account], null, $method === 'POST');
@@ -187,6 +188,7 @@ final class AccountLegacyHttpTest extends TestCase
 
             $account = $this->accountPayload($this->actorBefore, $this->actorSettingsBefore);
             $account['first_name'] = $fixture->run . '_denied';
+            $account['settings']['password'] = $fixture->run . '_attempted_password';
             $deniedSave = $admin->post('account/save', ['account' => $account]);
             self::assertSame(500, $deniedSave->statusCode, $deniedSave->body);
             self::assertSame(
