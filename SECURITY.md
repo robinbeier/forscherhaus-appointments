@@ -650,6 +650,10 @@ before the requested category is read or disclosed; existing Admin Basic and
 global Bearer authority stays unchanged. The isolated HTTP regression checks
 the response and preservation of its own category row, not live production
 behavior.
+The collection also bounds explicit `length` to 1–100 and `page` to 1–10000
+before model access. A separate isolated HTTP regression uses only owned
+categories to check both collection routes, accepted pages, invalid inputs,
+and complete cleanup; it does not establish productive query load.
 Availabilities API v1 requires GET on its direct read alias before provider,
 service, or availability lookup. Other methods return 405 with `Allow: GET`;
 Admin Basic and global Bearer authentication still run first. The isolated

@@ -957,10 +957,16 @@ paths:
                   in: query
                   schema:
                       type: integer
+                      minimum: 1
+                      maximum: 10000
+                  description: Page number from 1 through 10000. Defaults to 1.
                 - name: length
                   in: query
                   schema:
                       type: integer
+                      minimum: 1
+                      maximum: 100
+                  description: Number of service-categories from 1 through 100. Defaults to 20.
                 - name: sort
                   in: query
                   schema:
@@ -986,6 +992,12 @@ paths:
                                 type: array
                                 items:
                                     $ref: '#/components/schemas/ServiceCategoryRecord'
+                '400':
+                    description: Invalid pagination parameter
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
                 '401':
                     description: Unauthorized
                 '500':
