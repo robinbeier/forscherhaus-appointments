@@ -84,7 +84,7 @@ final class AccountPasswordChangeHttpTest extends TestCase
 
         foreach (
             [
-                ['account/save', new GateHttpClient($this->server->baseUrl)],
+                ['account/save', new GateHttpClient($this->server->baseUrl, indexPage: '')],
                 ['index.php/account/save', new GateHttpClient($this->server->baseUrl, indexPage: '')],
             ]
             as [$path, $client]
@@ -97,6 +97,7 @@ final class AccountPasswordChangeHttpTest extends TestCase
 
             $saved = $admin->post($path, ['account' => $account]);
             self::assertSame(200, $saved->statusCode, $path . ' must accept the authenticated password change.');
+            self::assertSame('/' . $path, parse_url($saved->url, PHP_URL_PATH));
             self::assertStringNotContainsString($oldPassword, $saved->body, $path);
             self::assertStringNotContainsString($newPassword, $saved->body, $path);
 
