@@ -59,6 +59,7 @@ final class ApiIntegrationSecretsWriteOnlyFlowTest extends TestCase
         $serviceId = $this->providerServiceId($providerId);
         $username = $this->providerSettings($providerId)['username'];
 
+        $this->resetRequest();
         $_GET = ['length' => '1', 'page' => '1', 'sort' => '-id'];
         $this->createProvidersController()->index();
         $collection = $this->decodeJsonOutput();

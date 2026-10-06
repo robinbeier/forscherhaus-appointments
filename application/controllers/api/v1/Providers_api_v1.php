@@ -38,6 +38,10 @@ class Providers_api_v1 extends EA_Controller
      */
     public function index(): void
     {
+        if (!$this->enforceReadMethod()) {
+            return;
+        }
+
         try {
             if (!$this->validatePaginationRequest()) {
                 return;
@@ -52,12 +56,12 @@ class Providers_api_v1 extends EA_Controller
             foreach ($providers as &$provider) {
                 $this->providers_model->api_encode($provider);
 
-                if (!empty($query->fields)) {
-                    $this->providers_model->only($provider, $query->fields);
-                }
-
                 if (!empty($query->with)) {
                     $this->providers_model->load($provider, $query->with);
+                }
+
+                if (!empty($query->fields)) {
+                    $this->providers_model->only($provider, array_merge($query->fields, $query->with ?? []));
                 }
             }
 
@@ -108,6 +112,10 @@ class Providers_api_v1 extends EA_Controller
      */
     public function show(?int $id = null): void
     {
+        if (!$this->enforceReadMethod()) {
+            return;
+        }
+
         try {
             $occurrences = $this->providers_model->get(['id' => $id]);
 
@@ -125,12 +133,12 @@ class Providers_api_v1 extends EA_Controller
 
             $this->providers_model->api_encode($provider);
 
-            if (!empty($fields)) {
-                $this->providers_model->only($provider, $fields);
-            }
-
             if (!empty($with)) {
                 $this->providers_model->load($provider, $with);
+            }
+
+            if (!empty($fields)) {
+                $this->providers_model->only($provider, array_merge($fields, $with ?? []));
             }
 
             json_response($provider);
@@ -274,6 +282,17 @@ class Providers_api_v1 extends EA_Controller
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    private function enforceReadMethod(): bool
+    {
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) === 'GET') {
+            return true;
+        }
+
+        response('', 405, ['Allow: GET']);
+
+        return false;
     }
 
     private function apiRequestDtoFactory(): Api_request_dto_factory
