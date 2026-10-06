@@ -233,6 +233,8 @@ App log script behavior:
     - numeric host:port scanner 404s matching observed route shapes such as
       `1465618042:3333/index`
     - encoded index.php scanner 404s matching `Index%2ephp/index`
+    - exact observed external 404 routes `Installation/index` and
+      `Mnavercom/index` (including their normal trace suffixes)
     - CodeIgniter file-cache expiry races for `rate_limit_key_*` entries at
       `Cache_file.php 279`
 - supports `KUMA_APP_LOG_IGNORE_REGEX` for additional host-local expected noisy
@@ -240,6 +242,7 @@ App log script behavior:
   expected invalid-login errors such as
   `JSON exception: .*Ungültige Zugangsdaten angegeben`
 - does not ignore all 404s, all warnings, or all rate-limit-related errors;
+  near-miss routes and `Google/get_google_calendars` remain alarmable, and
   genuine unclassified app errors must still turn monitor `#9` red
 - uses an exclusive lock around the state file so a staggered second cron run cannot race the primary per-minute run
 - keeps its cursor and lock in the private `KUMA_PUSH_STATE_DIR` (default

@@ -475,6 +475,67 @@ class KumaPushAppLogsScriptTest extends TestCase
         }
     }
 
+    public function testAppLogMonitorIgnoresOnlyExactObservedInstallationAndMnavercom404Routes(): void
+    {
+        $workspace = sys_get_temp_dir() . '/kuma-push-app-logs-' . bin2hex(random_bytes(8));
+        $stubBin = $workspace . '/bin';
+        $appRoot = $workspace . '/app-root';
+        $stateDir = $workspace . '/state';
+        $capturePath = $workspace . '/curl-args.log';
+        $today = gmdate('Y-m-d');
+        $logFile = $appRoot . '/storage/logs/log-' . $today . '.php';
+        $envFile = $workspace . '/uptime-kuma-push.env';
+
+        mkdir($stubBin, 0777, true);
+        mkdir(dirname($logFile), 0777, true);
+        mkdir($stateDir, 0700, true);
+
+        try {
+            $this->writeCurlStub($stubBin, $capturePath);
+            $this->writeEnvFile($envFile, $appRoot);
+            file_put_contents($logFile, '');
+
+            $primeResult = $this->runCommand(
+                ['bash', 'scripts/ops/kuma_push_app_logs.sh'],
+                $this->repoRoot(),
+                $this->commandEnv($envFile, $stateDir, $stubBin),
+            );
+
+            self::assertSame(0, $primeResult['exit_code'], $primeResult['stderr']);
+
+            file_put_contents(
+                $logFile,
+                implode("\n", [
+                    'ERROR - 2026-10-05 08:00:00 --> 404 Page Not Found: Installation/index',
+                    'ERROR - 2026-10-05 08:00:01 --> 404 Page Not Found: Mnavercom/index Trace: array (',
+                    'ERROR - 2026-10-05 08:00:02 --> 404 Page Not Found: Installation/index/extra',
+                    'ERROR - 2026-10-05 08:00:03 --> 404 Page Not Found: Mnavercom/index/extra',
+                    'ERROR - 2026-10-05 08:00:04 --> 404 Page Not Found: Google/get_google_calendars',
+                    'ERROR - 2026-10-05 08:00:05 --> Severity: Warning --> real app warning',
+                    '',
+                ]),
+                FILE_APPEND,
+            );
+
+            $result = $this->runCommand(
+                ['bash', 'scripts/ops/kuma_push_app_logs.sh'],
+                $this->repoRoot(),
+                $this->commandEnv($envFile, $stateDir, $stubBin),
+            );
+
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            self::assertStringContainsString('CRIT new_app_errors=4', $result['stdout']);
+            $curlCalls = $this->readFile($capturePath);
+            self::assertStringContainsString('status=down', $curlCalls);
+            self::assertStringContainsString(
+                'latest=ERROR - 2026-10-05 08:00:05 --> Severity: Warning --> real app warning',
+                $curlCalls,
+            );
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
     public function testAppLogClassifierCountsOnlyRealErrorEntryHeads(): void
     {
         $workspace = sys_get_temp_dir() . '/app-log-classifier-' . bin2hex(random_bytes(8));
