@@ -164,7 +164,7 @@ try {
                 true,
             );
 
-            GateAssertions::assertStatus($response->statusCode, 500, 'POST /login/validate (LDAP SSO wrong password)');
+            GateAssertions::assertStatus($response->statusCode, 200, 'POST /login/validate (LDAP SSO wrong password)');
             $payload = GateAssertions::decodeJson($response->body, 'POST /login/validate (LDAP SSO wrong password)');
 
             if (!is_array($payload)) {
@@ -181,10 +181,30 @@ try {
                 throw new GateAssertionException('LDAP wrong-password login response must include a message.');
             }
 
+            $dashboardResponse = $ldapClient->get('dashboard', [], $config['http_timeout']);
+            GateAssertions::assertStatus(
+                $dashboardResponse->statusCode,
+                200,
+                'GET /dashboard after LDAP SSO wrong password',
+            );
+
+            if (!str_contains($dashboardResponse->url, '/login')) {
+                throw new GateAssertionException(
+                    'LDAP wrong-password login must leave the client anonymous; dashboard did not redirect to login.',
+                );
+            }
+
+            if (!str_contains($dashboardResponse->body, 'id="login-form"')) {
+                throw new GateAssertionException(
+                    'LDAP wrong-password login must leave the client anonymous; dashboard response was not the login page.',
+                );
+            }
+
             return [
                 'http_status' => $response->statusCode,
                 'url' => $response->url,
                 'message' => $message,
+                'anonymous_dashboard_redirect' => true,
             ];
         });
     }

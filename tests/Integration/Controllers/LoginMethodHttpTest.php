@@ -124,7 +124,93 @@ final class LoginMethodHttpTest extends TestCase
         }
     }
 
-    /** @return list<array{GateHttpClient,string,string,string}> */
+    public function testSuccessfulLoginRotatesSessionAndRejectsThePreLoginCookie(): void
+    {
+        $fixture = $this->fixture();
+        $server = $this->server();
+
+        foreach ($this->routes($server) as [$client, $endpoint, $calendarPath, $loginPath, $indexPage]) {
+            /** @var GateHttpClient $client */
+            self::assertSame(200, $client->get($loginPath)->statusCode);
+            $cookieName = (string) config('sess_cookie_name');
+            $beforeLoginCookie = $client->getCookie($cookieName);
+            self::assertNotNull($beforeLoginCookie);
+
+            $response = $client->post($endpoint, [
+                'username' => $fixture->run . '_actor',
+                'password' => $fixture->password,
+            ]);
+
+            self::assertSame(200, $response->statusCode, $response->body);
+            self::assertTrue((bool) (json_decode($response->body, true, 512, JSON_THROW_ON_ERROR)['success'] ?? false));
+            $afterLoginCookie = $client->getCookie($cookieName);
+            self::assertNotNull($afterLoginCookie);
+            self::assertNotSame($beforeLoginCookie, $afterLoginCookie);
+
+            $oldCookieClient = new GateHttpClient(
+                $server->baseUrl,
+                indexPage: $indexPage,
+                additionalHeaders: ['Cookie' => $cookieName . '=' . $beforeLoginCookie],
+            );
+            $oldCookieCalendar = $oldCookieClient->get($calendarPath);
+            self::assertSame(307, $oldCookieCalendar->statusCode, $oldCookieCalendar->body);
+            self::assertStringContainsString('/login', (string) $oldCookieCalendar->header('location'));
+
+            $newCookieCalendar = $client->get($calendarPath);
+            self::assertSame(200, $newCookieCalendar->statusCode, $newCookieCalendar->body);
+            self::assertStringContainsString('id="calendar-page"', $newCookieCalendar->body);
+            self::assertStringNotContainsString('id="login-form"', $newCookieCalendar->body);
+        }
+    }
+
+    public function testInvalidCredentialsDoNotAuthenticateTheAnonymousSession(): void
+    {
+        $fixture = $this->fixture();
+        $server = $this->server();
+
+        foreach ($this->routes($server) as [$client, $endpoint, $calendarPath, $loginPath]) {
+            /** @var GateHttpClient $client */
+            self::assertSame(200, $client->get($loginPath)->statusCode);
+            $beforeLoginCookie = $client->getCookie((string) config('sess_cookie_name'));
+
+            $response = $client->post($endpoint, [
+                'username' => $fixture->run . '_actor',
+                'password' => $fixture->password . '-invalid',
+            ]);
+
+            $data = json_decode($response->body, true, 512, JSON_THROW_ON_ERROR);
+            self::assertSame(200, $response->statusCode, $response->body);
+            self::assertFalse((bool) ($data['success'] ?? true), $response->body);
+            self::assertSame(lang('invalid_credentials_provided'), $data['message'] ?? null);
+            self::assertSame($beforeLoginCookie, $client->getCookie((string) config('sess_cookie_name')));
+            $this->assertAnonymous($client, $calendarPath);
+        }
+    }
+
+    public function testMalformedCredentialsAreRejectedAsClientErrors(): void
+    {
+        $fixture = $this->fixture();
+        $server = $this->server();
+
+        foreach ($this->routes($server) as [$client, $endpoint, $calendarPath, $loginPath]) {
+            /** @var GateHttpClient $client */
+            self::assertSame(200, $client->get($loginPath)->statusCode);
+            $beforeLoginCookie = $client->getCookie((string) config('sess_cookie_name'));
+
+            $response = $client->post($endpoint, [
+                'username' => $fixture->run . '_actor',
+            ]);
+
+            $data = json_decode($response->body, true, 512, JSON_THROW_ON_ERROR);
+            self::assertSame(400, $response->statusCode, $response->body);
+            self::assertFalse((bool) ($data['success'] ?? true), $response->body);
+            self::assertSame('No password value provided.', $data['message'] ?? null);
+            self::assertSame($beforeLoginCookie, $client->getCookie((string) config('sess_cookie_name')));
+            $this->assertAnonymous($client, $calendarPath);
+        }
+    }
+
+    /** @return list<array{GateHttpClient,string,string,string,string}> */
     private function routes(DefenseCycleHttpServer $server): array
     {
         return [
@@ -133,12 +219,14 @@ final class LoginMethodHttpTest extends TestCase
                 self::ENDPOINT,
                 'index.php/calendar',
                 'index.php/login',
+                '',
             ],
             [
                 new GateHttpClient($server->baseUrl, additionalHeaders: ['X-FH-Test' => 'login-method']),
                 self::ENDPOINT,
                 'calendar',
                 'login',
+                'index.php',
             ],
         ];
     }
