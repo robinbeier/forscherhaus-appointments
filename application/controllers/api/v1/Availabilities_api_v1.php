@@ -57,6 +57,10 @@ class Availabilities_api_v1 extends EA_Controller
      */
     public function get(): void
     {
+        if (!$this->enforceReadMethod()) {
+            return;
+        }
+
         try {
             $request_dto = $this->apiRequestDtoFactory()->buildAvailabilitiesRequestDto();
             $provider_id = $request_dto->providerId;
@@ -73,6 +77,17 @@ class Availabilities_api_v1 extends EA_Controller
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    private function enforceReadMethod(): bool
+    {
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) === 'GET') {
+            return true;
+        }
+
+        response('', 405, ['Allow: GET']);
+
+        return false;
     }
 
     private function apiRequestDtoFactory(): Api_request_dto_factory
