@@ -35,6 +35,7 @@
             <file>./tests/Integration/Controllers/BlockedPeriodsApiHttpWriteTest.php</file>
             <file>./tests/Integration/Controllers/BlockedPeriodsApiReadAliasMethodHttpTest.php</file>
             <file>./tests/Integration/Controllers/BlockedPeriodsApiPaginationHttpTest.php</file>
+            <file>./tests/Integration/Controllers/ServiceCategoriesApiPaginationHttpTest.php</file>
             <file>./tests/Integration/Controllers/BlockedPeriodsReadHttpTest.php</file>
             <file>./tests/Integration/Controllers/ServiceCategoriesApiHttpWriteTest.php</file>
             <file>./tests/Integration/Controllers/ServiceCategoriesApiReadAliasMethodHttpTest.php</file>
