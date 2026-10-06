@@ -38,6 +38,10 @@ class Settings_api_v1 extends EA_Controller
      */
     public function index(): void
     {
+        if (!$this->enforceReadMethod()) {
+            return;
+        }
+
         try {
             $keyword = $this->api->request_keyword();
 
@@ -74,6 +78,10 @@ class Settings_api_v1 extends EA_Controller
      */
     public function show(string $name): void
     {
+        if (!$this->enforceReadMethod()) {
+            return;
+        }
+
         try {
             $value = setting($name);
 
@@ -112,6 +120,17 @@ class Settings_api_v1 extends EA_Controller
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    private function enforceReadMethod(): bool
+    {
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) === 'GET') {
+            return true;
+        }
+
+        response('', 405, ['Allow: GET']);
+
+        return false;
     }
 
     private function apiRequestDtoFactory(): Api_request_dto_factory

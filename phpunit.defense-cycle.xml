@@ -54,6 +54,7 @@
             <file>./tests/Integration/Controllers/AppointmentsApiHttpWriteTest.php</file>
             <file>./tests/Integration/Controllers/StaffSettingsApiHttpTest.php</file>
             <file>./tests/Integration/Controllers/SettingsApiBasicRevocationHttpTest.php</file>
+            <file>./tests/Integration/Controllers/SettingsApiReadAliasMethodHttpTest.php</file>
             <file>./tests/Integration/Controllers/RescheduleCutoffHttpTest.php</file>
             <file>./tests/Integration/Controllers/RescheduleMethodHttpTest.php</file>
             <file>./tests/Integration/Controllers/BookingMethodHttpTest.php</file>
