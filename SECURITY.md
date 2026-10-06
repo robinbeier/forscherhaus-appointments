@@ -638,6 +638,12 @@ successful category deletion follows the existing foreign-key rule: linked
 services remain while their category reference becomes null. See the
 [Service Categories API contract](docs/ci-write-contracts.md#service-categories-api-v1)
 for the exact local evidence and limits.
+Service Categories API v1 collection and detail reads require GET, including
+on direct controller aliases. Other methods return 405 with `Allow: GET`
+before the requested category is read or disclosed; existing Admin Basic and
+global Bearer authority stays unchanged. The isolated HTTP regression checks
+the response and preservation of its own category row, not live production
+behavior.
 
 For authenticated staff API v1 PUT requests, the URL selects the Admin,
 Provider, or Secretary record. A body ID cannot redirect the update to another
