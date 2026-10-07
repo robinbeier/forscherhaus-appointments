@@ -72,6 +72,78 @@ final class CalendarWorkingPlanExceptionRaceHttpTest extends TestCase
         $this->runRace(true);
     }
 
+    public function testTwoAuthorizedExceptionWritesWaitingOnProviderLockPreserveBothDates(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $db = get_instance()->db;
+        $firstClient = $this->loginAdmin();
+        $secondClient = $this->loginAdmin();
+        $firstDate = '2035-07-03';
+        $secondDate = '2035-07-04';
+        $before = $this->workingPlanExceptions();
+        $observer = $this->observer($db);
+        $multi = curl_multi_init();
+        $handles = [];
+        $transactionOpen = false;
+
+        try {
+            $ownerId = mysqli_thread_id($db->conn_id);
+            self::assertNotSame($ownerId, mysqli_thread_id($observer->conn_id));
+            self::assertTrue($db->trans_begin());
+            $transactionOpen = true;
+            self::assertNotFalse(
+                $db->query(
+                    'SELECT * FROM `' .
+                        $db->dbprefix('users') .
+                        '` WHERE `id` = ' .
+                        $fixture->providerId .
+                        ' FOR UPDATE',
+                ),
+            );
+
+            $handles[] = $this->startRequest($firstClient, $firstDate, $multi);
+            $handles[] = $this->startRequest($secondClient, $secondDate, $multi);
+            self::assertTrue(
+                $this->waitsForCount($multi, $observer, $ownerId, 'users', $fixture->providerId, 2),
+            );
+
+            self::assertTrue($db->trans_commit());
+            $transactionOpen = false;
+            foreach ($handles as $handle) {
+                self::assertTrue($this->drain($multi, $handle));
+                self::assertSame(200, (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE));
+                $response = json_decode((string) curl_multi_getcontent($handle), true, 512, JSON_THROW_ON_ERROR);
+                self::assertTrue((bool) ($response['success'] ?? false));
+            }
+
+            $after = $this->workingPlanExceptions();
+            self::assertArrayNotHasKey($firstDate, $before);
+            self::assertArrayNotHasKey($secondDate, $before);
+            self::assertSame(
+                ['start' => '10:00', 'end' => '12:00', 'breaks' => []],
+                $after[$firstDate] ?? null,
+            );
+            self::assertSame(
+                ['start' => '10:00', 'end' => '12:00', 'breaks' => []],
+                $after[$secondDate] ?? null,
+            );
+        } finally {
+            if ($transactionOpen && $db->trans_active()) {
+                $db->trans_rollback();
+            }
+            foreach ($handles as $handle) {
+                if ($handle instanceof CurlHandle) {
+                    $this->drain($multi, $handle);
+                    curl_multi_remove_handle($multi, $handle);
+                    curl_close($handle);
+                }
+            }
+            curl_multi_close($multi);
+            $observer->close();
+        }
+    }
+
     private function runRace(bool $revoke): void
     {
         $fixture = $this->fixture;
@@ -173,12 +245,24 @@ final class CalendarWorkingPlanExceptionRaceHttpTest extends TestCase
 
     private function waitsFor(CurlMultiHandle $multi, object $observer, int $ownerId, string $table, int $id): bool
     {
+        return $this->waitsForCount($multi, $observer, $ownerId, $table, $id, 1);
+    }
+
+    private function waitsForCount(
+        CurlMultiHandle $multi,
+        object $observer,
+        int $ownerId,
+        string $table,
+        int $id,
+        int $expected,
+    ): bool {
         $deadline = microtime(true) + 8;
         do {
             self::assertSame(CURLM_OK, curl_multi_exec($multi, $running));
             self::assertNotFalse(
                 $result = $observer->query(
-                    'SELECT l.OBJECT_NAME, COALESCE(s.SQL_TEXT, r.PROCESSLIST_INFO) AS statement_text
+                    'SELECT l.OBJECT_NAME, r.PROCESSLIST_ID AS waiting_id,
+                            COALESCE(s.SQL_TEXT, r.PROCESSLIST_INFO) AS statement_text
                      FROM performance_schema.data_lock_waits w
                      JOIN performance_schema.data_locks l ON l.ENGINE_LOCK_ID = w.REQUESTING_ENGINE_LOCK_ID
                      JOIN performance_schema.threads b ON b.THREAD_ID = w.BLOCKING_THREAD_ID
@@ -187,6 +271,7 @@ final class CalendarWorkingPlanExceptionRaceHttpTest extends TestCase
                      WHERE b.PROCESSLIST_ID = ' . $ownerId,
                 ),
             );
+            $waitingIds = [];
             foreach ($result->result_array() as $row) {
                 $sql = strtoupper(
                     (string) preg_replace('/\s+/', ' ', str_replace('`', '', trim((string) $row['statement_text']))),
@@ -196,8 +281,11 @@ final class CalendarWorkingPlanExceptionRaceHttpTest extends TestCase
                     str_contains($sql, 'FOR UPDATE') &&
                     str_contains($sql, (string) $id)
                 ) {
-                    return true;
+                    $waitingIds[] = (int) $row['waiting_id'];
                 }
+            }
+            if (count(array_unique($waitingIds)) >= $expected) {
+                return true;
             }
             if ($running === 0) {
                 return false;
