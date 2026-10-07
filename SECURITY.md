@@ -650,6 +650,16 @@ After the lock is released, the Calendar save commits its run-owned block and
 the public POST rejects with 409 without a customer, appointment, or consent
 partial write. This proves that ordered local Calendar/booking schedule, not
 every concurrent schedule, the API writer, or a live production result.
+The isolated `CalendarPublicRescheduleRaceHttpTest` checks the corresponding
+authorized reschedule with two real HTTP processes and a session-bound
+one-time authority. The target is distinct from the original appointment and
+locally available before either write. After the authenticated Calendar save
+is queued first and both requests reach the same provider lock, the committed
+run-owned block
+rejects the public reschedule with 409. The original appointment, customer,
+service, and consent remain unchanged; the attempted use consumes the
+authority. This proves one ordered local Calendar/reschedule schedule, not
+all interleavings, the API writer, or a productive reschedule.
 The isolated `PublicRescheduleManualUnavailabilityRaceHttpTest` covers the
 corresponding authorized public reschedule schedule: a run-owned manual block
 commits while the POST waits on the provider lock. An independent connection
