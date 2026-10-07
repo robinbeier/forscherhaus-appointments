@@ -35,7 +35,9 @@ mode `0555`, and matches the pinned SHA-256 in the script. The production
 change lock, existing release-pair publisher lock and cleanup lock must be
 available. The same nested-mount boundary
 check used by the manual release operator runs against the web root; active
-production work and nonterminal orchestrator runs block the operation. Review
+production work and nonterminal orchestrator runs block the operation. Both
+the web-root and archive inventories stop at their 10,000-entry bound before
+materializing more names. Review
 the plan and obtain the normal release approval before passing its digest to
 `execute`.
 

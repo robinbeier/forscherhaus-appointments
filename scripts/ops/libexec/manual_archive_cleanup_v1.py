@@ -147,6 +147,16 @@ def open_release_pair_lock(helper, releases):
         raise
 
 
+def bounded_web_names(web, helper):
+    names = []
+    with os.scandir(web) as entries:
+        for entry in entries:
+            if len(names) >= helper.MAX_CLASS_SCAN:
+                reject('web_scan_limit')
+            names.append(entry.name)
+    return names
+
+
 def collect(helper, releases, current, rollback):
     names = []
     with os.scandir(releases) as entries:
@@ -345,15 +355,15 @@ def run(mode, expected_plan_sha=None, helper=None):
         state = helper.open_absolute_directory(STATE_ROOT, exact_mode=0o700)
         web = helper.open_absolute_directory(WEB_ROOT)
         orchestrator = helper.open_absolute_directory(helper.ORCHESTRATOR_ROOT, exact_mode=0o700)
-        helper.assert_no_nested_mounts(os.listdir(web), orchestrator)
+        web_names = bounded_web_names(web, helper)
+        helper.assert_no_nested_mounts(web_names, orchestrator)
         try:
             fcntl.flock(state, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             reject('cleanup_lock_busy', 75)
         if any(name.startswith('.pending-') for name in os.listdir(state)):
             reject('pending_cleanup_unresolved', 75)
-        names = os.listdir(web)
-        if 'easyappointments' not in names:
+        if 'easyappointments' not in web_names:
             reject('active_release_missing')
         current_fd = helper.open_child_directory(web, 'easyappointments')
         try:

@@ -24,6 +24,7 @@ RETENTION_SPEC.loader.exec_module(RETENTION)
 class FakeHelper:
     MAX_ARCHIVE_BYTES = 1024 * 1024
     MAX_SIDECAR_BYTES = 4096
+    MAX_CLASS_SCAN = 10_000
     ORCHESTRATOR_ROOT = 'orchestrator'
 
     def __init__(self, root):
@@ -218,6 +219,13 @@ class ManualArchiveCleanupTest(unittest.TestCase):
         with mock.patch.object(CLEANUP, 'MAX_CLASS_SCAN', 4):
             with self.assertRaisesRegex(CLEANUP.CleanupError, 'archive_scan_limit'):
                 self._collect()
+
+    def test_web_inventory_stops_before_unbounded_mount_scan(self):
+        self.helper.MAX_CLASS_SCAN = 1
+        with mock.patch.object(CLEANUP, 'socket') as sock, mock.patch.object(CLEANUP.os, 'geteuid', return_value=0):
+            sock.gethostname.return_value = 'booking-server'
+            with self.assertRaisesRegex(CLEANUP.CleanupError, 'web_scan_limit'):
+                CLEANUP.run('plan', helper=self.helper)
 
     def test_protected_pair_drift_blocks_execute(self):
         self._pair('old')
