@@ -104,17 +104,17 @@ class Customers extends EA_Controller
      */
     public function index(): void
     {
-        session(['dest_url' => site_url('customers')]);
-
         $user_id = (int) session('user_id');
 
         if ($user_id <= 0) {
+            session(['dest_url' => site_url('customers')]);
             redirect('login');
 
             return;
         }
 
         $role_slug = $this->currentCustomerReadRole($user_id);
+        session(['dest_url' => site_url('customers')]);
 
         $date_format = setting('date_format');
         $time_format = setting('time_format');

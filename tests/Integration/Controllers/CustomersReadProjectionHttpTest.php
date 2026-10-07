@@ -235,6 +235,59 @@ final class CustomersReadProjectionHttpTest extends TestCase
         self::assertSame($customerBefore, $fixture->row('users', $fixture->customerId));
     }
 
+    public function testDeniedCustomerPagesPreserveAuthenticatedDestinationAndSetAnonymousReturnTarget(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $server = $this->server;
+        self::assertNotNull($server);
+
+        foreach (['customers', 'customers/index'] as $path) {
+            $anonymous = new GateHttpClient(
+                $server->baseUrl,
+                additionalHeaders: ['X-FH-Test' => 'customers-destination'],
+            );
+            $response = $anonymous->get($path);
+            self::assertSame(307, $response->statusCode, $path);
+            self::assertStringContainsString('/login', (string) $response->header('location'), $path);
+            self::assertStringEndsWith('/customers', $this->sessionDestination($anonymous), $path);
+        }
+
+        $customerRole = get_instance()
+            ->db->get_where('roles', ['slug' => DB_SLUG_CUSTOMER])
+            ->row_array();
+        self::assertNotEmpty($customerRole['id'] ?? null);
+        $actorBefore = $fixture->row('users', $fixture->actorId);
+        $admin = $this->login($this->credentials['admin_username'], $this->credentials['password']);
+        self::assertSame(200, $admin->get('about')->statusCode);
+        $beforeDestination = $this->sessionDestination($admin);
+
+        try {
+            self::assertTrue(
+                get_instance()->db->update(
+                    'users',
+                    ['id_roles' => (int) $customerRole['id']],
+                    ['id' => $fixture->actorId],
+                ),
+            );
+
+            foreach (['customers', 'customers/index'] as $path) {
+                $response = $admin->get($path);
+                self::assertSame(403, $response->statusCode, $path . ' ' . $response->body);
+                self::assertStringNotContainsString($fixture->run, $response->body, $path);
+                self::assertSame($beforeDestination, $this->sessionDestination($admin), $path);
+            }
+        } finally {
+            self::assertTrue(
+                get_instance()->db->update(
+                    'users',
+                    ['id_roles' => $actorBefore['id_roles']],
+                    ['id' => $fixture->actorId],
+                ),
+            );
+        }
+    }
+
     /** @return array{id:int, customers:int, appointments:int} */
     private function snapshotRole(string $slug, string $label): array
     {
@@ -437,6 +490,21 @@ final class CustomersReadProjectionHttpTest extends TestCase
         $data = json_decode($response->body, true, 512, JSON_THROW_ON_ERROR);
         self::assertIsArray($data);
         return $data;
+    }
+
+    private function sessionDestination(GateHttpClient $client): string
+    {
+        $cookieName = (string) config('sess_cookie_name');
+        $sessionId = $client->getCookie($cookieName);
+        self::assertIsString($sessionId);
+        $ipBinding = config('sess_match_ip') ? md5('127.0.0.1') : '';
+        $path = $this->server?->directory . '/sessions/' . $cookieName . $ipBinding . $sessionId;
+        self::assertFileExists($path);
+        $contents = file_get_contents($path);
+        self::assertIsString($contents);
+        self::assertSame(1, preg_match('/dest_url\|s:\d+:"([^"]*)";/', $contents, $matches));
+
+        return $matches[1];
     }
 
     private function login(string $username, string $password): GateHttpClient
