@@ -76,6 +76,7 @@
             <file>./tests/Integration/Controllers/BookingCalendarAmbiguousHashHttpTest.php</file>
             <file>./tests/Integration/Controllers/CalendarMutationMethodHttpTest.php</file>
             <file>./tests/Integration/Controllers/CalendarUnavailabilityPermissionRaceHttpTest.php</file>
+            <file>./tests/Integration/Controllers/CalendarWorkingPlanExceptionRaceHttpTest.php</file>
             <file>./tests/Integration/SessionLifecycleTest.php</file>
             <file>./tests/Integration/OrdinaryLiveFixtureTest.php</file>
             <file>./tests/Integration/BackofficeRoleRevocationProbeTest.php</file>
