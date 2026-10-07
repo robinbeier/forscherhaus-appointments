@@ -89,6 +89,7 @@ async function main() {
     let registerRequests = 0;
     let registerFulfilled = false;
     let registerRouteError = '';
+    let bookingCsrfToken = '';
     let confirmationRequests = 0;
     const blockedMutationPaths = [];
 
@@ -100,6 +101,10 @@ async function main() {
             try {
                 if (registerRequests !== 1) fail('booking/register was submitted more than once.');
                 const form = new URLSearchParams(request.postData() || '');
+                const submittedCsrfToken = form.get('csrf_token') || '';
+                if (!bookingCsrfToken || !submittedCsrfToken || submittedCsrfToken !== bookingCsrfToken) {
+                    fail('booking/register did not submit the rendered booking-page CSRF token.');
+                }
                 registerPayload = parseRegisterPayload(form);
                 if (!registerPayload?.appointment || !registerPayload?.customer) {
                     fail('booking/register payload omitted appointment or customer data.');
@@ -148,6 +153,12 @@ async function main() {
     stage = 'open';
     await page.goto(targetUrl.toString(), {waitUntil: 'domcontentloaded'});
     if (await page.locator('#login-form').count()) fail('booking page redirected to login.');
+    bookingCsrfToken = await page.evaluate(() => {
+        if (typeof window.vars !== 'function') throw new Error('booking bootstrap vars() is unavailable.');
+        const token = window.vars('csrf_token');
+        return typeof token === 'string' ? token : String(token ?? '');
+    });
+    if (!bookingCsrfToken) fail('booking page rendered no CSRF token.');
     const serviceOptions = await page
         .locator('#select-service option')
         .evaluateAll((options) =>
