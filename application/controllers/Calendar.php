@@ -208,13 +208,12 @@ class Calendar extends EA_Controller
      */
     public function index(string $appointment_hash = ''): void
     {
-        session([
-            'dest_url' => site_url('calendar/index' . (!empty($appointment_hash) ? '/' . $appointment_hash : '')),
-        ]);
-
         $user_id = session('user_id');
 
         if (!$user_id) {
+            session([
+                'dest_url' => site_url('calendar/index' . (!empty($appointment_hash) ? '/' . $appointment_hash : '')),
+            ]);
             redirect('login');
 
             return;
@@ -279,6 +278,10 @@ class Calendar extends EA_Controller
                 $this->appointments_model->only($edit_appointment, self::APPOINTMENT_READ_FIELDS);
             }
         }
+
+        session([
+            'dest_url' => site_url('calendar/index' . (!empty($appointment_hash) ? '/' . $appointment_hash : '')),
+        ]);
 
         $available_providers = $this->providers_model->get_available_providers();
 
