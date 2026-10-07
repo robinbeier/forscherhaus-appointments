@@ -337,8 +337,54 @@ async function main(input) {
         fail('payload: synthetic HTML-shaped note exceeds the event-title truncation limit');
     }
     const editedNotes = 'ROB-769 edited manual unavailability';
+    const appointmentId = '775001';
+    const appointmentStart = new Date(eventStart.getTime() + 2 * 60 * 60 * 1000);
+    const appointmentEnd = new Date(appointmentStart.getTime() + 60 * 60 * 1000);
+    const appointmentStartValue = formatDate(appointmentStart);
+    const appointmentEndValue = formatDate(appointmentEnd);
+    const appointmentServiceName = 'ROB-775 synthetic service';
+    const appointmentCustomerFirstName = 'ROB-775 <img src=x onerror=ROB775=1> Parent';
+    const appointmentCustomerLastName = 'Synthetic Customer';
+    const appointmentTitle = `${appointmentServiceName} - ${appointmentCustomerFirstName} ${appointmentCustomerLastName}`;
+    await page.evaluate(() => {
+        window.ROB775 = 0;
+    });
     syntheticFeedBody = JSON.stringify({
-        appointments: [],
+        appointments: [
+            {
+                id: appointmentId,
+                start_datetime: appointmentStartValue,
+                end_datetime: appointmentEndValue,
+                location: '',
+                notes: '',
+                color: '#123456',
+                status: 'Booked',
+                id_users_provider: Number(providerData.id),
+                id_users_customer: 775001,
+                id_services: 775001,
+                provider: providerData,
+                service: {id: 775001, name: appointmentServiceName},
+                customer: {
+                    id: 775001,
+                    first_name: appointmentCustomerFirstName,
+                    last_name: appointmentCustomerLastName,
+                    email: '',
+                    phone_number: '',
+                    address: '',
+                    city: '',
+                    state: '',
+                    zip_code: '',
+                    language: 'english',
+                    timezone: providerData.timezone || '',
+                    notes: '',
+                    custom_field_1: '',
+                    custom_field_2: '',
+                    custom_field_3: '',
+                    custom_field_4: '',
+                    custom_field_5: '',
+                },
+            },
+        ],
         unavailabilities: [
             {
                 id: eventId,
@@ -368,6 +414,30 @@ async function main(input) {
     await page.waitForFunction(() => window.jQuery && jQuery.active === 0, undefined, {
         timeout: interactionTimeoutMs,
     });
+
+    const appointmentEventLocator = page.locator('.fc-event').filter({hasText: appointmentTitle}).first();
+    await appointmentEventLocator.waitFor({state: 'visible'});
+    if (!(await appointmentEventLocator.innerText()).includes(appointmentTitle)) {
+        fail('render: appointment title did not remain literal text');
+    }
+    await appointmentEventLocator.click();
+    const appointmentPopover = page.locator('.popover').filter({hasText: appointmentCustomerLastName}).last();
+    await appointmentPopover.waitFor({state: 'visible'});
+    const appointmentPopoverText = await appointmentPopover.innerText();
+    if (
+        !appointmentPopoverText.includes(appointmentCustomerFirstName) ||
+        !appointmentPopoverText.includes(appointmentCustomerLastName)
+    ) {
+        fail('render: appointment popover did not display the literal customer name');
+    }
+    if (
+        (await appointmentPopover.locator('img[src="x"]').count()) !== 0 ||
+        (await page.evaluate(() => window.ROB775)) !== 0
+    ) {
+        fail('security: appointment customer name created a DOM node or executed a handler');
+    }
+    await appointmentPopover.locator('.close-popover').click();
+    await appointmentPopover.waitFor({state: 'hidden'});
 
     const interactionPostPathStart = postPaths.length;
     stage = 'dialog';
