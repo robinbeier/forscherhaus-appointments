@@ -1202,6 +1202,7 @@ function dashboardIntegrationSmokeAssertCalendarDialogBrowser(
             'session_cookies' => $cookies,
             'browser' => \ReleaseGate\resolveConfiguredPlaywrightBrowser(),
             'browser_executable_path' => (string) (getenv('PLAYWRIGHT_MCP_EXECUTABLE_PATH') ?: ''),
+            'browser_open_timeout' => (int) $config['browser_open_timeout'],
         ],
         JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
     );
@@ -1209,7 +1210,7 @@ function dashboardIntegrationSmokeAssertCalendarDialogBrowser(
         ['node', $script],
         $repoRoot,
         null,
-        max(75, (int) $config['browser_open_timeout'] * 2 + 35),
+        max(115, (int) $config['browser_open_timeout'] * 2 + 55),
         $input,
     );
 

@@ -17,6 +17,27 @@ const BROWSER_TYPES = {
 let browser = null;
 let context = null;
 let stage = 'input';
+let cleanupPromise = null;
+
+function closeBrowser() {
+    if (!cleanupPromise) {
+        cleanupPromise = (async () => {
+            try {
+                if (context) await context.close();
+            } finally {
+                if (browser) await browser.close();
+            }
+        })();
+    }
+    return cleanupPromise;
+}
+
+function onSignal(signal) {
+    void closeBrowser().finally(() => process.exit(128 + signal));
+}
+
+process.once('SIGTERM', () => onSignal(15));
+process.once('SIGINT', () => onSignal(2));
 
 function fail(message) {
     const error = new Error(message);
@@ -54,8 +75,15 @@ function parseFormPayload(postData) {
     };
 }
 
-async function main() {
-    const input = JSON.parse(fs.readFileSync(0, 'utf8'));
+function getOpenTimeoutSeconds(input) {
+    const seconds = Number(input.browser_open_timeout ?? 20);
+    if (!Number.isSafeInteger(seconds) || seconds < 1) {
+        fail('input: browser_open_timeout must be a positive integer');
+    }
+    return seconds;
+}
+
+async function main(input) {
     const baseUrl = assertLoopbackBaseUrl(input.base_url);
     const targetUrl = input.target_url ? assertLoopbackBaseUrl(input.target_url) : routeUrl(baseUrl, 'login');
     const browserName = input.browser || 'firefox';
@@ -63,24 +91,71 @@ async function main() {
     if (!browserType) {
         fail('input: unsupported browser');
     }
+    const openTimeoutMs = getOpenTimeoutSeconds(input) * 1000;
 
     const executablePath = input.browser_executable_path || process.env.PLAYWRIGHT_MCP_EXECUTABLE_PATH;
     stage = 'launch';
     browser = await browserType.launch({
         headless: true,
+        timeout: Math.max(30000, openTimeoutMs),
         ...(executablePath ? {executablePath} : {}),
         ...(!executablePath && (browserName === 'chrome' || browserName === 'msedge') ? {channel: browserName} : {}),
     });
     context = await browser.newContext();
+    context.setDefaultTimeout(openTimeoutMs);
+    context.setDefaultNavigationTimeout(openTimeoutMs);
     stage = 'auth';
     if (Array.isArray(input.session_cookies) && input.session_cookies.length > 0) {
         await context.addCookies(input.session_cookies);
     }
-    const page = await context.newPage();
+    const expectedOrigin = new URL(baseUrl).origin;
+    const savePath = new URL(routeUrl(baseUrl, SAVE_PATH)).pathname;
+    const reloadPath = new URL(routeUrl(baseUrl, CALENDAR_RELOAD_PATH)).pathname;
+    const loginPath = new URL(routeUrl(baseUrl, 'login/validate')).pathname;
     const postPaths = [];
+    const blockedWritePaths = [];
     const saveRequests = [];
     let saveAttempt = 0;
 
+    // Install the write boundary before any page navigation or boot request.
+    await context.route('**/*', async (route) => {
+        const request = route.request();
+        const url = new URL(request.url());
+        const method = request.method();
+        if (['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+            await route.continue();
+            return;
+        }
+        const allowedRead = method === 'POST' && url.origin === expectedOrigin && url.pathname === reloadPath;
+        const allowedLogin =
+            method === 'POST' &&
+            !input.session_cookies?.length &&
+            url.origin === expectedOrigin &&
+            url.pathname === loginPath;
+        if (allowedRead || allowedLogin) {
+            await route.continue();
+            return;
+        }
+        blockedWritePaths.push(url.pathname);
+        await route.abort('blockedbyclient');
+    });
+    await context.route(`**${SAVE_PATH}*`, async (route) => {
+        const request = route.request();
+        const url = new URL(request.url());
+        if (request.method() !== 'POST' || url.origin !== expectedOrigin || url.pathname !== savePath) {
+            await route.abort('blockedbyclient');
+            return;
+        }
+        saveAttempt += 1;
+        saveRequests.push(parseFormPayload(request.postData()));
+        if (saveAttempt === 1) {
+            await route.fulfill({status: 500, contentType: 'text/plain', body: 'synthetic failure'});
+            return;
+        }
+        await route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify({success: true})});
+    });
+
+    const page = await context.newPage();
     page.on('request', (request) => {
         if (request.method() === 'POST') {
             postPaths.push(new URL(request.url()).pathname);
@@ -107,26 +182,6 @@ async function main() {
     await page.locator('#calendar-page').waitFor({state: 'visible'});
 
     const interactionPostPathStart = postPaths.length;
-    await page.route('**/*', async (route) => {
-        const request = route.request();
-        const path = new URL(request.url()).pathname;
-        if (request.method() === 'POST' && !path.endsWith(SAVE_PATH) && !path.endsWith(CALENDAR_RELOAD_PATH)) {
-            await route.abort('blockedbyclient');
-            return;
-        }
-        await route.continue();
-    });
-    await page.route(`**${SAVE_PATH}*`, async (route) => {
-        const request = route.request();
-        saveAttempt += 1;
-        saveRequests.push(parseFormPayload(request.postData()));
-        if (saveAttempt === 1) {
-            await route.fulfill({status: 500, contentType: 'text/plain', body: 'synthetic failure'});
-            return;
-        }
-        await route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify({success: true})});
-    });
-
     stage = 'dialog';
     await page.locator('#calendar-actions [data-bs-toggle="dropdown"]').click();
     await page.locator('#insert-unavailability').click();
@@ -207,8 +262,8 @@ async function main() {
     const unexpectedWrites = interactionPostPaths.filter(
         (path) => !path.endsWith(SAVE_PATH) && !path.endsWith(CALENDAR_RELOAD_PATH),
     );
-    if (unexpectedWrites.length > 0) {
-        fail('payload: an unexpected POST write route was requested');
+    if (unexpectedWrites.length > 0 || blockedWritePaths.length > 0) {
+        fail('payload: an unexpected write route was requested');
     }
 
     return {
@@ -224,10 +279,13 @@ async function main() {
     let failedClass = null;
     let timeoutId;
     try {
+        const input = JSON.parse(fs.readFileSync(0, 'utf8'));
+        const openTimeoutSeconds = getOpenTimeoutSeconds(input);
+        const overallTimeoutMs = Math.max(90000, openTimeoutSeconds * 2000 + 35000);
         result = await Promise.race([
-            main(),
+            main(input),
             new Promise((_, reject) => {
-                timeoutId = setTimeout(() => reject(new Error('Calendar dialog check timed out')), 90000);
+                timeoutId = setTimeout(() => reject(new Error('Calendar dialog check timed out')), overallTimeoutMs);
             }),
         ]);
     } catch (error) {
@@ -240,8 +298,7 @@ async function main() {
         try {
             await Promise.race([
                 (async () => {
-                    if (context) await context.close();
-                    if (browser) await browser.close();
+                    await closeBrowser();
                 })(),
                 new Promise((_, reject) => {
                     cleanupTimeoutId = setTimeout(() => reject(new Error('cleanup timed out')), 10000);
