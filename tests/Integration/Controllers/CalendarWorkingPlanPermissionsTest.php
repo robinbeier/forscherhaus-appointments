@@ -7,6 +7,7 @@ use Tests\Integration\Support\BookingFlowFixtures;
 use Tests\TestCase;
 
 require_once APPPATH . 'controllers/Calendar.php';
+require_once APPPATH . 'models/Providers_model.php';
 
 /**
  * Isolate controller integration tests from Unit test global state during coverage runs.
@@ -90,6 +91,23 @@ class CalendarWorkingPlanPermissionsTest extends TestCase
         $this->assertArrayNotHasKey($date, $this->workingPlanExceptions());
     }
 
+    public function testRenamingExceptionRollsBackNewDateWhenOriginalDeleteFails(): void
+    {
+        $originalDate = '2035-01-18';
+        $newDate = '2035-01-19';
+        $this->createWorkingPlanException($originalDate);
+        $this->authenticateAsRole(DB_SLUG_ADMIN);
+
+        $this->postWorkingPlanException($newDate, $originalDate);
+        $this->failingRenameCalendarController()->save_working_plan_exception();
+
+        $response = $this->decodeJsonOutput();
+        $this->assertFalse($response['success'] ?? true);
+        $this->assertArrayHasKey($originalDate, $this->workingPlanExceptions());
+        $this->assertArrayNotHasKey($newDate, $this->workingPlanExceptions());
+        $this->assertFalse(get_instance()->db->trans_active());
+    }
+
     private function calendarController(): Calendar
     {
         $CI = &get_instance();
@@ -114,16 +132,33 @@ class CalendarWorkingPlanPermissionsTest extends TestCase
         ]);
     }
 
-    private function postWorkingPlanException(string $date): void
+    private function postWorkingPlanException(string $date, string $originalDate = ''): void
     {
         $_POST = [
             'provider_id' => (string) $this->providerId,
             'date' => $date,
-            'original_date' => '',
+            'original_date' => $originalDate,
             'working_plan_exception' => '{}',
         ];
         get_instance()->output->set_output('');
         http_response_code(200);
+    }
+
+    private function failingRenameCalendarController(): Calendar
+    {
+        $CI = &get_instance();
+        $CI->load->model('providers_model');
+        $CI->load->library('permissions');
+        $controller = new class extends Calendar {
+            public function __construct() {}
+        };
+        $controller->db = $CI->db;
+        $controller->input = $CI->input;
+        $controller->output = $CI->output;
+        $controller->load = $CI->load;
+        $controller->permissions = $CI->permissions;
+        $controller->providers_model = new CalendarWorkingPlanRenameFailureProviderModel();
+        return $controller;
     }
 
     /**
@@ -190,5 +225,13 @@ class CalendarWorkingPlanPermissionsTest extends TestCase
 
         get_instance()->output->set_output('');
         http_response_code(200);
+    }
+}
+
+final class CalendarWorkingPlanRenameFailureProviderModel extends \Providers_model
+{
+    public function delete_working_plan_exception(int $provider_id, string $date): void
+    {
+        throw new \RuntimeException('Synthetic original-date delete failure.');
     }
 }
