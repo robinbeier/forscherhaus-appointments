@@ -120,14 +120,11 @@ final class CalendarWorkingPlanExceptionRaceHttpTest extends TestCase
             $after = $this->workingPlanExceptions();
 
             if ($revoke) {
+                self::assertSame($before, $after, 'HTTP ' . $status . ': ' . curl_multi_getcontent($handle));
                 self::assertGreaterThanOrEqual(400, $status);
-                self::assertSame($before, $after);
             } else {
                 self::assertSame(200, $status);
-                self::assertSame(
-                    ['start' => '10:00', 'end' => '12:00', 'breaks' => []],
-                    $after[$date] ?? null,
-                );
+                self::assertSame(['start' => '10:00', 'end' => '12:00', 'breaks' => []], $after[$date] ?? null);
             }
         } finally {
             if ($transactionOpen && $db->trans_active()) {
@@ -187,8 +184,7 @@ final class CalendarWorkingPlanExceptionRaceHttpTest extends TestCase
                      JOIN performance_schema.threads b ON b.THREAD_ID = w.BLOCKING_THREAD_ID
                      JOIN performance_schema.threads r ON r.THREAD_ID = w.REQUESTING_THREAD_ID
                      LEFT JOIN performance_schema.events_statements_current s ON s.THREAD_ID = r.THREAD_ID
-                     WHERE b.PROCESSLIST_ID = ' .
-                        $ownerId,
+                     WHERE b.PROCESSLIST_ID = ' . $ownerId,
                 ),
             );
             foreach ($result->result_array() as $row) {
