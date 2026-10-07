@@ -1338,8 +1338,9 @@ function dashboardIntegrationSmokeAssertBookingCheckoutBrowser(
 
 /**
  * Temporarily disable non-name customer fields for the isolated browser
- * checkout. This mutation is permitted only against the Docker-local smoke
- * stack and restores the exact original setting rows before returning.
+ * checkout. This mutation is permitted only against the isolated Docker-local
+ * smoke stack or the exact loopback GitHub Actions smoke stack. Restore the
+ * original setting rows before returning.
  *
  * @param array<string, mixed> $config
  * @param callable():array<string, mixed> $callback
@@ -1350,14 +1351,17 @@ function dashboardIntegrationSmokeWithNameOnlyBookingSettings(
     string $repoRoot,
     callable $callback,
 ): array {
-    $baseUrl = parse_url((string) ($config['base_url'] ?? ''), PHP_URL_HOST);
-    if ($baseUrl !== 'nginx') {
-        throw new GateAssertionException('Name-only booking fixture requires the Docker-local nginx base URL.');
-    }
-
     $CI = dashboardIntegrationSmokeBootstrapApplication($repoRoot);
-    if (!defined('Config::DB_HOST') || Config::DB_HOST !== 'mysql') {
-        throw new GateAssertionException('Name-only booking fixture requires the Docker-local mysql database host.');
+    $baseUrl = rtrim((string) ($config['base_url'] ?? ''), '/');
+    $dbHost = defined('Config::DB_HOST') ? Config::DB_HOST : '';
+    $dockerLocal = $baseUrl === 'http://nginx' && $dbHost === 'mysql';
+    $actionsLocal =
+        getenv('GITHUB_ACTIONS') === 'true' &&
+        getenv('CI') === 'true' &&
+        $baseUrl === 'http://127.0.0.1:8080' &&
+        $dbHost === '127.0.0.1';
+    if (!$dockerLocal && !$actionsLocal) {
+        throw new GateAssertionException('Name-only booking fixture requires an isolated local smoke stack.');
     }
 
     $names = [
