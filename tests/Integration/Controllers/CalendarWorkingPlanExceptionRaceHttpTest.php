@@ -18,6 +18,7 @@ final class CalendarWorkingPlanExceptionRaceHttpTest extends TestCase
     private array $credentials = [];
     private ?array $providerRole = null;
     private ?array $customerRole = null;
+    private ?array $actorRole = null;
 
     protected function setUp(): void
     {
@@ -32,12 +33,20 @@ final class CalendarWorkingPlanExceptionRaceHttpTest extends TestCase
             $db = get_instance()->db;
             $this->providerRole = $db->get_where('roles', ['slug' => DB_SLUG_PROVIDER])->row_array();
             $this->customerRole = $db->get_where('roles', ['slug' => DB_SLUG_CUSTOMER])->row_array();
+            $this->actorRole = $db
+                ->select('roles.*')
+                ->from('users')
+                ->join('roles', 'roles.id = users.id_roles', 'inner')
+                ->where('users.id', $this->fixture->actorId)
+                ->get()
+                ->row_array();
             self::assertNotEmpty($this->providerRole);
             self::assertNotEmpty($this->customerRole);
+            self::assertNotEmpty($this->actorRole);
             $this->server = new DefenseCycleHttpServer();
         } catch (Throwable $error) {
             $this->server?->close();
-            $this->restoreProviderRole();
+            $this->restoreRoles();
             $this->fixture?->cleanup();
             throw $error;
         }
@@ -47,7 +56,7 @@ final class CalendarWorkingPlanExceptionRaceHttpTest extends TestCase
     {
         try {
             $this->server?->close();
-            $this->restoreProviderRole();
+            $this->restoreRoles();
         } finally {
             $this->fixture?->cleanup();
         }
@@ -99,7 +108,7 @@ final class CalendarWorkingPlanExceptionRaceHttpTest extends TestCase
                     (bool) $db->update(
                         'users',
                         ['id_roles' => (int) $this->customerRole['id']],
-                        ['id' => $fixture->providerId],
+                        ['id' => $fixture->actorId],
                     ),
                 );
             }
@@ -260,15 +269,20 @@ final class CalendarWorkingPlanExceptionRaceHttpTest extends TestCase
         return json_decode((string) ($row['working_plan_exceptions'] ?? '{}'), true) ?: [];
     }
 
-    private function restoreProviderRole(): void
+    private function restoreRoles(): void
     {
-        if ($this->fixture === null || $this->providerRole === null) {
+        if ($this->fixture === null || $this->providerRole === null || $this->actorRole === null) {
             return;
         }
         get_instance()->db->update(
             'users',
             ['id_roles' => (int) $this->providerRole['id']],
             ['id' => $this->fixture->providerId, 'notes' => $this->fixture->run],
+        );
+        get_instance()->db->update(
+            'users',
+            ['id_roles' => (int) $this->actorRole['id']],
+            ['id' => $this->fixture->actorId, 'notes' => $this->fixture->run],
         );
     }
 }
