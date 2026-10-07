@@ -504,6 +504,7 @@ function deepRuntimeIntegrationSmokeChecks(bool $includeLdapGuardrail): array
         'dashboard_metrics',
         'dashboard_page_readiness',
         'dashboard_summary_browser_render',
+        'calendar_unavailability_dialog_browser',
         'booking_page_readiness',
         'booking_extract_bootstrap',
         'booking_available_hours',

@@ -20,6 +20,7 @@ use ReleaseGate\GateAssertionException;
 use ReleaseGate\GateAssertions;
 use ReleaseGate\GateCliSupport;
 use ReleaseGate\GateHttpClient;
+use ReleaseGate\GateProcessRunner;
 const INTEGRATION_SMOKE_EXIT_SUCCESS = 0;
 const INTEGRATION_SMOKE_EXIT_ASSERTION_FAILURE = 1;
 const INTEGRATION_SMOKE_EXIT_RUNTIME_ERROR = 2;
@@ -321,6 +322,16 @@ try {
     if (shouldRunConfiguredCheck($config, 'dashboard_summary_browser_render')) {
         $runCheck('dashboard_summary_browser_render', static function () use ($config, $repoRoot): array {
             return dashboardIntegrationSmokeAssertDashboardSummaryBrowserRender($config, $repoRoot);
+        });
+    }
+
+    if (shouldRunConfiguredCheck($config, 'calendar_unavailability_dialog_browser')) {
+        $runCheck('calendar_unavailability_dialog_browser', static function () use (
+            $client,
+            $config,
+            $repoRoot,
+        ): array {
+            return dashboardIntegrationSmokeAssertCalendarDialogBrowser($client, $config, $repoRoot);
         });
     }
 
@@ -891,6 +902,7 @@ function integrationSmokeSupportedCheckIds(): array
         'dashboard_metrics',
         'dashboard_page_readiness',
         'dashboard_summary_browser_render',
+        'calendar_unavailability_dialog_browser',
         'booking_page_readiness',
         'booking_extract_bootstrap',
         'booking_available_hours',
@@ -923,6 +935,7 @@ function integrationSmokeCheckDependencies(): array
         'dashboard_metrics' => ['auth_login_validate'],
         'dashboard_page_readiness' => ['auth_login_validate'],
         'dashboard_summary_browser_render' => ['auth_login_validate'],
+        'calendar_unavailability_dialog_browser' => ['dashboard_summary_browser_render'],
         'booking_page_readiness' => [],
         'booking_extract_bootstrap' => ['booking_page_readiness'],
         'booking_available_hours' => ['booking_extract_bootstrap'],
@@ -1155,6 +1168,94 @@ function dashboardIntegrationSmokeAssertDashboardSummaryBrowserRender(array $con
         'threshold_badge_after' => (string) ($payload['threshold_badge_after'] ?? ''),
         'marker_left_before' => (string) ($payload['marker_left_before'] ?? ''),
         'marker_left_after' => (string) ($payload['marker_left_after'] ?? ''),
+    ];
+}
+
+/**
+ * Exercise the real calendar dialog in the existing local browser runtime.
+ * The browser intercepts its save request; ROB-767 covers the server and DB path.
+ *
+ * @param array<string, mixed> $config
+ * @return array<string, mixed>
+ */
+function dashboardIntegrationSmokeAssertCalendarDialogBrowser(
+    GateHttpClient $client,
+    array $config,
+    string $repoRoot,
+): array {
+    $targetUrl = dashboardIntegrationSmokeBuildAppUrl($config, 'calendar');
+    $cookies = \ReleaseGate\normalizeCookieRecordsForPlaywright($client->cookieRecords(), $targetUrl);
+
+    if ($cookies === []) {
+        throw new GateAssertionException('Calendar dialog browser check has no authenticated session cookies.');
+    }
+
+    $script = $repoRoot . '/scripts/ci/calendar_unavailability_dialog_browser.js';
+    if (!is_file($script) || !is_readable($script)) {
+        throw new GateAssertionException('Calendar dialog browser check script is unavailable.');
+    }
+
+    $input = json_encode(
+        [
+            'base_url' => dashboardIntegrationSmokeBuildAppUrl($config, ''),
+            'target_url' => $targetUrl,
+            'session_cookies' => $cookies,
+            'browser' => \ReleaseGate\resolveConfiguredPlaywrightBrowser(),
+            'browser_executable_path' => (string) (getenv('PLAYWRIGHT_MCP_EXECUTABLE_PATH') ?: ''),
+            'browser_open_timeout' => (int) $config['browser_open_timeout'],
+        ],
+        JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+    );
+    $result = GateProcessRunner::run(
+        ['node', $script],
+        $repoRoot,
+        null,
+        max(115, (int) $config['browser_open_timeout'] * 3 + 55),
+        $input,
+    );
+
+    return dashboardIntegrationSmokeParseCalendarDialogBrowserResult($result);
+}
+
+/** @param array<string, mixed> $result */
+function dashboardIntegrationSmokeParseCalendarDialogBrowserResult(array $result): array
+{
+    if (($result['timed_out'] ?? false) || ($result['exit_code'] ?? 1) !== 0) {
+        $failureClass = trim((string) ($result['stderr'] ?? ''));
+        if (
+            !in_array(
+                $failureClass,
+                ['input', 'launch', 'auth', 'dialog', 'failure', 'success', 'payload', 'cleanup'],
+                true,
+            )
+        ) {
+            $failureClass = 'runtime';
+        }
+        throw new GateAssertionException('Calendar dialog browser check failed: ' . $failureClass . '.');
+    }
+
+    $payload = json_decode(trim((string) ($result['stdout'] ?? '')), true);
+    if (!is_array($payload)) {
+        throw new GateAssertionException('Calendar dialog browser check returned no valid result.');
+    }
+    foreach (
+        ['ok', 'request_payload_verified', 'failure_state_verified', 'success_state_verified', 'cleanup_verified']
+        as $property
+    ) {
+        if (($payload[$property] ?? null) !== true) {
+            throw new GateAssertionException('Calendar dialog browser check did not verify ' . $property . '.');
+        }
+    }
+    if (!is_int($payload['duration_ms'] ?? null) || $payload['duration_ms'] < 0) {
+        throw new GateAssertionException('Calendar dialog browser check returned no duration.');
+    }
+
+    return [
+        'request_payload_verified' => true,
+        'failure_state_verified' => true,
+        'success_state_verified' => true,
+        'cleanup_verified' => true,
+        'browser_duration_ms' => $payload['duration_ms'],
     ];
 }
 

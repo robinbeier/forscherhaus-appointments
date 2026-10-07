@@ -227,6 +227,7 @@ jobs:
               - 'scripts/ci/run_deep_runtime_suite.php'
               - 'scripts/ci/assert_deep_runtime_suite.php'
               - 'scripts/ci/dashboard_integration_smoke.php'
+              - 'scripts/ci/calendar_unavailability_dialog_browser.js'
               - 'scripts/ci/git_helpers.sh'
               - 'scripts/ci/docker_compose_helpers.sh'
               - 'scripts/ci/lib/BrowserRuntimeEvidence.php'

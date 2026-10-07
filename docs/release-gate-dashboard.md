@@ -79,18 +79,19 @@ The gate always writes a JSON report containing:
 
 ## CI Integration Smoke (Quick Win #4)
 
-The CI pipeline also runs a deterministic integration smoke test for four deterministic app/runtime chains:
+The CI pipeline also runs a deterministic integration smoke test for five app/runtime chains:
 
 1. `GET /login` + `POST /login/validate` + `POST /dashboard/metrics` + authenticated browser render of the dashboard summary card
 2. `GET /booking` + `POST /booking/get_available_hours` + `POST /booking/get_unavailable_dates`
 3. `GET /api/v1/appointments` (401 without auth), then authenticated `GET /api/v1/appointments` + `GET /api/v1/availabilities`
 4. LDAP-backed `POST /login/validate` (success + wrong password)
+5. Authenticated calendar browser: open the manual unavailability dialog, verify the selected provider and times reach the save request, retain the dialog on a simulated save failure, and close/reload on a simulated success
 
 Purpose:
 
 - Catch runtime wiring regressions (session/csrf/auth/routing/db) that unit tests can miss.
 - Keep checks deterministic and low-risk close to release.
-- Keep scope read-only (no booking create/reschedule/cancel mutations).
+- Keep this smoke free of persistent writes. The calendar browser check intercepts both save requests locally; the isolated HTTP/DB test in `BookingManualUnavailabilityHttpTest.php` verifies the real save and booking behavior.
 - Avoid external dependencies such as PDF renderer.
 
 Local repro command:
