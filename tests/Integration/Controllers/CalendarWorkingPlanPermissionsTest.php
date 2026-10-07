@@ -112,12 +112,15 @@ class CalendarWorkingPlanPermissionsTest extends TestCase
     {
         $CI = &get_instance();
         $CI->load->model('providers_model');
+        $CI->load->model('appointments_model');
         $controller = new class extends Calendar {
             public function __construct() {}
         };
+        $controller->db = $CI->db;
         $controller->input = $CI->input;
         $controller->load = $CI->load;
         $controller->providers_model = $CI->providers_model;
+        $controller->appointments_model = $CI->appointments_model;
 
         return $controller;
     }
@@ -148,6 +151,7 @@ class CalendarWorkingPlanPermissionsTest extends TestCase
     {
         $CI = &get_instance();
         $CI->load->model('providers_model');
+        $CI->load->model('appointments_model');
         $CI->load->library('permissions');
         $controller = new class extends Calendar {
             public function __construct() {}
@@ -157,6 +161,7 @@ class CalendarWorkingPlanPermissionsTest extends TestCase
         $controller->output = $CI->output;
         $controller->load = $CI->load;
         $controller->permissions = $CI->permissions;
+        $controller->appointments_model = $CI->appointments_model;
         $controller->providers_model = new CalendarWorkingPlanRenameFailureProviderModel();
         return $controller;
     }

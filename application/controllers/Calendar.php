@@ -950,17 +950,28 @@ class Calendar extends EA_Controller
 
             $provider_id = $request_dto->providerId;
 
-            $this->providers_model->save_working_plan_exception($provider_id, $date, $working_plan_exception);
+            $this->write_working_plan_exception_with_current_permission($provider_id, function () use (
+                $provider_id,
+                $date,
+                $original_date,
+                $working_plan_exception,
+            ): void {
+                $this->providers_model->save_working_plan_exception($provider_id, $date, $working_plan_exception);
 
-            if ($original_date && $date !== $original_date) {
-                $this->providers_model->delete_working_plan_exception($provider_id, $original_date);
-            }
+                if ($original_date && $date !== $original_date) {
+                    $this->providers_model->delete_working_plan_exception($provider_id, $original_date);
+                }
+            });
 
             json_response([
                 'success' => true,
             ]);
         } catch (Throwable $e) {
-            json_exception($e);
+            if ($e->getCode() === 403) {
+                json_response(['success' => false, 'message' => $e->getMessage()], 403);
+            } else {
+                json_exception($e);
+            }
         }
     }
 
@@ -982,13 +993,47 @@ class Calendar extends EA_Controller
             $date = $request_dto->date;
             $provider_id = $request_dto->providerId;
 
-            $this->providers_model->delete_working_plan_exception($provider_id, $date);
+            $this->write_working_plan_exception_with_current_permission($provider_id, function () use (
+                $provider_id,
+                $date,
+            ): void {
+                $this->providers_model->delete_working_plan_exception($provider_id, $date);
+            });
 
             json_response([
                 'success' => true,
             ]);
         } catch (Throwable $e) {
-            json_exception($e);
+            if ($e->getCode() === 403) {
+                json_response(['success' => false, 'message' => $e->getMessage()], 403);
+            } else {
+                json_exception($e);
+            }
+        }
+    }
+
+    private function write_working_plan_exception_with_current_permission(int $provider_id, callable $write): void
+    {
+        if (!$this->db->trans_begin()) {
+            throw new RuntimeException('Could not start working plan exception transaction.');
+        }
+
+        try {
+            $this->lock_calendar_update_parents([], [], [(int) session('user_id'), $provider_id]);
+
+            if (!$this->currentCalendarCan('edit', PRIV_USERS)) {
+                throw new RuntimeException('You do not have the required permissions for this task.', 403);
+            }
+
+            $write();
+
+            if ($this->db->trans_status() === false || !$this->db->trans_commit()) {
+                throw new RuntimeException('Could not commit working plan exception transaction.');
+            }
+        } catch (Throwable $e) {
+            $this->db->trans_rollback();
+
+            throw $e;
         }
     }
 
