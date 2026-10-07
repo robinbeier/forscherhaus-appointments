@@ -102,7 +102,29 @@ final class BookingManualUnavailabilityHttpTest extends TestCase
         }
         self::assertNotNull($adjacentHour, 'Need a permitted slot after the manual block.');
 
-        $this->manualUnavailabilityId = $this->insertManualUnavailability($targetStart);
+        $calendar = $this->authenticatedProviderClient();
+        $save = $calendar->post('calendar/save_unavailability', [
+            'unavailability' => [
+                'start_datetime' => $targetStart->format('Y-m-d H:i:s'),
+                'end_datetime' => $targetEnd->format('Y-m-d H:i:s'),
+                'notes' => $fixture->run . '_manual_unavailability',
+                'id_users_provider' => $fixture->providerId,
+            ],
+        ]);
+        self::assertSame(200, $save->statusCode, $save->body);
+        self::assertTrue((bool) (json_decode($save->body, true, 512, JSON_THROW_ON_ERROR)['success'] ?? false));
+        $manualRows = get_instance()
+            ->db->get_where('appointments', [
+                'id_users_provider' => $fixture->providerId,
+                'is_unavailability' => 1,
+                'start_datetime' => $targetStart->format('Y-m-d H:i:s'),
+                'end_datetime' => $targetEnd->format('Y-m-d H:i:s'),
+                'notes' => $fixture->run . '_manual_unavailability',
+            ])
+            ->result_array();
+        self::assertCount(1, $manualRows);
+        $this->manualUnavailabilityId = (int) $manualRows[0]['id'];
+        self::assertGreaterThan(0, $this->manualUnavailabilityId);
         $manualBefore = $fixture->row('appointments', $this->manualUnavailabilityId);
         self::assertNotContains($targetHour, $this->availableHours($client, $pair, $date));
         self::assertContains($adjacentHour, $this->availableHours($client, $pair, $date));
@@ -121,8 +143,11 @@ final class BookingManualUnavailabilityHttpTest extends TestCase
                 ->num_rows(),
         );
 
-        $db = get_instance()->db;
-        self::assertTrue($db->delete('appointments', ['id' => $this->manualUnavailabilityId]));
+        $delete = $calendar->post('calendar/delete_unavailability', [
+            'unavailability_id' => $this->manualUnavailabilityId,
+        ]);
+        self::assertSame(200, $delete->statusCode, $delete->body);
+        self::assertTrue((bool) (json_decode($delete->body, true, 512, JSON_THROW_ON_ERROR)['success'] ?? false));
         self::assertSame([], $fixture->row('appointments', $this->manualUnavailabilityId));
         $this->manualUnavailabilityId = 0;
         self::assertContains($targetHour, $this->availableHours($client, $pair, $date));
@@ -174,27 +199,20 @@ final class BookingManualUnavailabilityHttpTest extends TestCase
         return array_values(array_map('strval', $hours));
     }
 
-    private function insertManualUnavailability(DateTimeImmutable $start): int
+    private function authenticatedProviderClient(): GateHttpClient
     {
         $fixture = $this->fixture;
         self::assertNotNull($fixture);
-        $db = get_instance()->db;
-        self::assertTrue(
-            $db->insert('appointments', [
-                'book_datetime' => date('Y-m-d H:i:s'),
-                'start_datetime' => $start->format('Y-m-d H:i:s'),
-                'end_datetime' => $start->add(new DateInterval('PT30M'))->format('Y-m-d H:i:s'),
-                'notes' => $fixture->run . '_manual_unavailability',
-                'hash' => $fixture->run . '_manual_unavailability_hash',
-                'is_unavailability' => 1,
-                'id_users_provider' => $fixture->providerId,
-                'create_datetime' => date('Y-m-d H:i:s'),
-                'update_datetime' => date('Y-m-d H:i:s'),
-            ]),
-        );
-        $id = (int) $db->insert_id();
-        self::assertGreaterThan(0, $id);
-        return $id;
+        self::assertNotNull($this->server);
+        $client = $this->server->client();
+        self::assertSame(200, $client->get('login')->statusCode);
+        $login = $client->post('login/validate', [
+            'username' => $fixture->run . '_provider',
+            'password' => $fixture->password,
+        ]);
+        self::assertSame(200, $login->statusCode, $login->body);
+        self::assertTrue((bool) (json_decode($login->body, true, 512, JSON_THROW_ON_ERROR)['success'] ?? false));
+        return $client;
     }
 
     /** @return array{appointment:array<string,mixed>,customer:array<string,mixed>,manage_mode:bool} */
@@ -250,12 +268,26 @@ final class BookingManualUnavailabilityHttpTest extends TestCase
             return;
         }
         $db = get_instance()->db;
+        $manualQuery = [
+            'id_users_provider' => $fixture->providerId,
+            'is_unavailability' => 1,
+            'notes' => $fixture->run . '_manual_unavailability',
+        ];
         if ($this->manualUnavailabilityId > 0) {
+            $manualQuery['id'] = $this->manualUnavailabilityId;
+        }
+        $manualRows = $db->get_where('appointments', $manualQuery)->result_array();
+        foreach ($manualRows as $manualRow) {
+            $manualId = (int) $manualRow['id'];
             $db->delete('appointments', [
-                'id' => $this->manualUnavailabilityId,
+                'id' => $manualId,
                 'id_users_provider' => $fixture->providerId,
                 'is_unavailability' => 1,
+                'notes' => $fixture->run . '_manual_unavailability',
             ]);
+            self::assertSame([], $fixture->row('appointments', $manualId));
+        }
+        if ($this->manualUnavailabilityId > 0) {
             self::assertSame([], $fixture->row('appointments', $this->manualUnavailabilityId));
             $this->manualUnavailabilityId = 0;
         }
