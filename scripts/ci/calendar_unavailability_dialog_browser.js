@@ -98,7 +98,9 @@ function getOpenTimeoutSeconds(input) {
 
 async function main(input) {
     const baseUrl = assertLoopbackBaseUrl(input.base_url);
-    const targetUrl = input.target_url ? assertLoopbackBaseUrl(input.target_url) : routeUrl(baseUrl, 'login');
+    const targetUrl = input.target_url ? assertLoopbackBaseUrl(input.target_url) : routeUrl(baseUrl, 'calendar');
+    const defaultViewUrl = new URL(targetUrl);
+    defaultViewUrl.searchParams.set('view', 'default');
     const browserName = input.browser || 'firefox';
     const browserType = BROWSER_TYPES[browserName];
     if (!browserType) {
@@ -219,7 +221,7 @@ async function main(input) {
     });
 
     if (Array.isArray(input.session_cookies) && input.session_cookies.length > 0) {
-        await page.goto(targetUrl, {waitUntil: 'domcontentloaded'});
+        await page.goto(defaultViewUrl.toString(), {waitUntil: 'domcontentloaded'});
         if (page.url().includes('/login') || (await page.locator('#login-form').count())) {
             fail('failure: supplied session cookies did not authenticate the calendar page');
         }
@@ -234,11 +236,12 @@ async function main(input) {
             page.waitForURL((url) => url.pathname.includes('/calendar'), {timeout: Math.max(15000, openTimeoutMs)}),
             page.locator('#login').click(),
         ]);
+        await page.goto(defaultViewUrl.toString(), {waitUntil: 'domcontentloaded'});
     }
     await page.locator('#calendar-page').waitFor({state: 'visible'});
     const calendarView = await page.evaluate(() => vars('calendar_view'));
-    if (calendarView !== 'default' && calendarView !== 'table') {
-        fail('dialog: unsupported calendar view');
+    if (calendarView !== 'default') {
+        fail('dialog: first pass did not select the default calendar view');
     }
     const expectedReloadPath = calendarView === 'table' ? tableReloadPath : defaultReloadPath;
 
