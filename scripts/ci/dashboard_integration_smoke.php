@@ -1225,7 +1225,7 @@ function dashboardIntegrationSmokeParseCalendarDialogBrowserResult(array $result
         if (
             !in_array(
                 $failureClass,
-                ['input', 'launch', 'auth', 'dialog', 'failure', 'success', 'payload', 'cleanup'],
+                ['input', 'launch', 'auth', 'create', 'dialog', 'failure', 'success', 'delete', 'payload', 'cleanup'],
                 true,
             )
         ) {
@@ -1239,7 +1239,18 @@ function dashboardIntegrationSmokeParseCalendarDialogBrowserResult(array $result
         throw new GateAssertionException('Calendar dialog browser check returned no valid result.');
     }
     foreach (
-        ['ok', 'request_payload_verified', 'failure_state_verified', 'success_state_verified', 'cleanup_verified']
+        [
+            'ok',
+            'request_payload_verified',
+            'failure_state_verified',
+            'success_state_verified',
+            'existing_event_prepopulation_verified',
+            'edit_failure_state_verified',
+            'edit_success_reload_verified',
+            'delete_failure_state_verified',
+            'delete_success_reload_verified',
+            'cleanup_verified',
+        ]
         as $property
     ) {
         if (($payload[$property] ?? null) !== true) {
@@ -1254,6 +1265,11 @@ function dashboardIntegrationSmokeParseCalendarDialogBrowserResult(array $result
         'request_payload_verified' => true,
         'failure_state_verified' => true,
         'success_state_verified' => true,
+        'existing_event_prepopulation_verified' => true,
+        'edit_failure_state_verified' => true,
+        'edit_success_reload_verified' => true,
+        'delete_failure_state_verified' => true,
+        'delete_success_reload_verified' => true,
         'cleanup_verified' => true,
         'browser_duration_ms' => $payload['duration_ms'],
     ];

@@ -72,9 +72,19 @@ function parseFormPayload(postData) {
     const form = new URLSearchParams(postData || '');
     return {
         csrf: form.get('csrf_token') || '',
+        id: form.get('unavailability[id]') || '',
         provider: form.get('unavailability[id_users_provider]') || '',
         start: form.get('unavailability[start_datetime]') || '',
         end: form.get('unavailability[end_datetime]') || '',
+        notes: form.get('unavailability[notes]') || '',
+    };
+}
+
+function parseDeletePayload(postData) {
+    const form = new URLSearchParams(postData || '');
+    return {
+        csrf: form.get('csrf_token') || '',
+        id: form.get('unavailability_id') || '',
     };
 }
 
@@ -114,6 +124,7 @@ async function main(input) {
     }
     const expectedOrigin = new URL(baseUrl).origin;
     const savePath = new URL(routeUrl(baseUrl, SAVE_PATH)).pathname;
+    const deletePath = new URL(routeUrl(baseUrl, '/calendar/delete_unavailability')).pathname;
     const [defaultReloadPath, tableReloadPath] = CALENDAR_RELOAD_PATHS.map(
         (path) => new URL(routeUrl(baseUrl, path)).pathname,
     );
@@ -122,7 +133,11 @@ async function main(input) {
     const postPaths = [];
     const blockedWritePaths = [];
     const saveRequests = [];
+    const deleteRequests = [];
+    let syntheticFeed = false;
+    let syntheticFeedBody = null;
     let saveAttempt = 0;
+    let deleteAttempt = 0;
 
     // Install the write boundary before any page navigation or boot request.
     await context.route('**/*', async (route) => {
@@ -155,11 +170,42 @@ async function main(input) {
         }
         saveAttempt += 1;
         saveRequests.push(parseFormPayload(request.postData()));
-        if (saveAttempt === 1) {
+        if (saveAttempt === 1 || saveAttempt === 3) {
             await route.fulfill({status: 500, contentType: 'text/plain', body: 'synthetic failure'});
             return;
         }
         await route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify({success: true})});
+    });
+    await context.route('**/*', async (route) => {
+        const request = route.request();
+        const url = new URL(request.url());
+        if (request.method() !== 'POST' || url.origin !== expectedOrigin || !reloadPaths.has(url.pathname)) {
+            await route.fallback();
+            return;
+        }
+        if (!syntheticFeed || !syntheticFeedBody) {
+            await route.fallback();
+            return;
+        }
+        await route.fulfill({status: 200, contentType: 'application/json', body: syntheticFeedBody});
+    });
+    await context.route(`**${deletePath}*`, async (route) => {
+        const request = route.request();
+        const url = new URL(request.url());
+        if (request.method() !== 'POST' || url.origin !== expectedOrigin || url.pathname !== deletePath) {
+            await route.abort('blockedbyclient');
+            return;
+        }
+        deleteAttempt += 1;
+        deleteRequests.push(parseDeletePayload(request.postData()));
+        if (deleteAttempt > 1) {
+            syntheticFeedBody = JSON.stringify({appointments: [], unavailabilities: [], blocked_periods: []});
+        }
+        await route.fulfill({
+            status: deleteAttempt === 1 ? 500 : 200,
+            contentType: 'application/json',
+            body: JSON.stringify({success: deleteAttempt > 1}),
+        });
     });
 
     const page = await context.newPage();
@@ -193,29 +239,153 @@ async function main(input) {
     }
     const expectedReloadPath = calendarView === 'table' ? tableReloadPath : defaultReloadPath;
 
-    const interactionPostPathStart = postPaths.length;
-    stage = 'dialog';
+    const providerData = await page.evaluate(() => vars('available_providers')[0] || null);
+    if (!providerData || !providerData.id) {
+        fail('payload: calendar page rendered no provider fixture');
+    }
+    const providerId = String(providerData.id);
+    const createStartValue = '2030-01-15 09:00:00';
+    const createEndValue = '2030-01-15 10:00:00';
+    const createNotes = 'ROB-768 synthetic manual unavailability';
+    stage = 'create';
     await page.locator('#calendar-actions [data-bs-toggle="dropdown"]').click();
     await page.locator('#insert-unavailability').click();
     const modal = page.locator('#unavailabilities-modal');
     await modal.waitFor({state: 'visible'});
-    const provider = modal.locator('#unavailability-provider option').filter({hasText: /.+/}).first();
-    await provider.waitFor({state: 'attached'});
-    const providerId = await provider.getAttribute('value');
-    if (!providerId) {
-        fail('payload: rendered provider select had no synthetic provider option');
-    }
     await modal.locator('#unavailability-provider').selectOption(providerId);
-
-    const startDate = '2030-01-15T09:00:00';
-    const endDate = '2030-01-15T10:00:00';
     await page.evaluate(
         ({start, end}) => {
             App.Utils.UI.setDateTimePickerValue($('#unavailability-start'), new Date(start));
             App.Utils.UI.setDateTimePickerValue($('#unavailability-end'), new Date(end));
+            $('#unavailability-notes').val('ROB-768 synthetic manual unavailability');
         },
-        {start: startDate, end: endDate},
+        {start: '2030-01-15T09:00:00', end: '2030-01-15T10:00:00'},
     );
+    const createReloadBeforeFailure = postPaths.filter((path) => reloadPaths.has(path)).length;
+    const createFailureResponse = page.waitForResponse(
+        (response) =>
+            response.request().method() === 'POST' &&
+            new URL(response.url()).pathname === savePath &&
+            response.status() === 500,
+        {timeout: interactionTimeoutMs},
+    );
+    await Promise.all([createFailureResponse, modal.locator('#save-unavailability').click()]);
+    await page.waitForFunction(() => window.jQuery && jQuery.active === 0, undefined, {
+        timeout: interactionTimeoutMs,
+    });
+    const createErrorModal = page.locator('#message-modal');
+    await createErrorModal.waitFor({state: 'visible', timeout: interactionTimeoutMs});
+    if (!(await modal.isVisible())) {
+        fail('failure: modal closed after simulated create failure');
+    }
+    if (postPaths.filter((path) => reloadPaths.has(path)).length !== createReloadBeforeFailure) {
+        fail('failure: calendar reloaded after simulated create failure');
+    }
+    await createErrorModal.locator('.modal-footer button').click();
+    await createErrorModal.waitFor({state: 'hidden'});
+    const createReloadBeforeSuccess = postPaths.filter((path) => reloadPaths.has(path)).length;
+    const createSuccessResponse = page.waitForResponse(
+        (response) =>
+            response.request().method() === 'POST' &&
+            new URL(response.url()).pathname === savePath &&
+            response.status() === 200,
+        {timeout: interactionTimeoutMs},
+    );
+    const createReloadResponse = page.waitForResponse(
+        (response) =>
+            response.request().method() === 'POST' &&
+            new URL(response.url()).pathname === expectedReloadPath &&
+            response.status() === 200,
+        {timeout: interactionTimeoutMs},
+    );
+    await Promise.all([createSuccessResponse, createReloadResponse, modal.locator('#save-unavailability').click()]);
+    await page.waitForFunction(() => window.jQuery && jQuery.active === 0, undefined, {
+        timeout: interactionTimeoutMs,
+    });
+    await modal.waitFor({state: 'hidden'});
+    if (saveRequests.length !== 2) {
+        fail('payload: expected exactly two intercepted create save attempts');
+    }
+    for (const payload of saveRequests) {
+        if (
+            !payload.csrf ||
+            payload.id ||
+            payload.provider !== providerId ||
+            payload.start !== createStartValue ||
+            payload.end !== createEndValue ||
+            payload.notes !== createNotes
+        ) {
+            fail('payload: create save did not send the expected insert payload');
+        }
+    }
+    if (postPaths.filter((path) => reloadPaths.has(path)).length !== createReloadBeforeSuccess + 1) {
+        fail('success: create did not reload the calendar exactly once');
+    }
+
+    const eventId = '769001';
+    const eventStart = new Date();
+    eventStart.setHours(9, 0, 0, 0);
+    const eventEnd = new Date(eventStart.getTime() + 60 * 60 * 1000);
+    const formatDate = (date) => {
+        const pad = (value) => String(value).padStart(2, '0');
+        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+    };
+    const eventStartValue = formatDate(eventStart);
+    const eventEndValue = formatDate(eventEnd);
+    const originalNotes = 'ROB-769 synthetic manual unavailability';
+    const editedNotes = 'ROB-769 edited manual unavailability';
+    syntheticFeedBody = JSON.stringify({
+        appointments: [],
+        unavailabilities: [
+            {
+                id: eventId,
+                id_users_provider: Number(providerData.id),
+                start_datetime: eventStartValue,
+                end_datetime: eventEndValue,
+                notes: originalNotes,
+                id_parent_appointment: 0,
+                is_unavailability: 1,
+                provider: providerData,
+            },
+        ],
+        blocked_periods: [],
+    });
+    syntheticFeed = true;
+    const initialSyntheticReload = page.waitForResponse(
+        (response) =>
+            response.request().method() === 'POST' &&
+            new URL(response.url()).pathname === expectedReloadPath &&
+            response.status() === 200,
+        {timeout: interactionTimeoutMs},
+    );
+    await Promise.all([initialSyntheticReload, page.locator('#reload-appointments').click()]);
+    await page.waitForFunction(() => window.jQuery && jQuery.active === 0, undefined, {
+        timeout: interactionTimeoutMs,
+    });
+
+    const interactionPostPathStart = postPaths.length;
+    stage = 'dialog';
+    const eventLocator = page.locator('.fc-unavailability.fc-custom').first();
+    await eventLocator.waitFor({state: 'visible'});
+    await eventLocator.click();
+    await page.locator('.popover .edit-popover').click();
+    await modal.waitFor({state: 'visible'});
+    const openedValues = await page.evaluate(() => ({
+        id: $('#unavailability-id').val(),
+        provider: $('#unavailability-provider').val(),
+        start: moment(App.Utils.UI.getDateTimePickerValue($('#unavailability-start'))).format('YYYY-MM-DD HH:mm:ss'),
+        end: moment(App.Utils.UI.getDateTimePickerValue($('#unavailability-end'))).format('YYYY-MM-DD HH:mm:ss'),
+        notes: $('#unavailability-notes').val(),
+    }));
+    if (
+        openedValues.id !== eventId ||
+        openedValues.provider !== providerId ||
+        openedValues.start !== eventStartValue ||
+        openedValues.end !== eventEndValue ||
+        openedValues.notes !== originalNotes
+    ) {
+        fail('payload: existing manual unavailability did not prepopulate the edit dialog');
+    }
 
     stage = 'failure';
     const reloadRequestsBeforeFailure = postPaths.filter((path) => reloadPaths.has(path)).length;
@@ -245,6 +415,16 @@ async function main(input) {
         fail('failure: unavailability modal closed when dismissing the error message');
     }
 
+    if (
+        saveRequests[2].id !== eventId ||
+        saveRequests[2].provider !== providerId ||
+        saveRequests[2].start !== eventStartValue ||
+        saveRequests[2].end !== eventEndValue ||
+        saveRequests[2].notes !== originalNotes
+    ) {
+        fail('payload: failed edit did not send the exact existing-event payload');
+    }
+    await modal.locator('#unavailability-notes').fill(editedNotes);
     stage = 'success';
     const reloadResponse = page.waitForResponse(
         (response) =>
@@ -266,20 +446,73 @@ async function main(input) {
     });
     await modal.waitFor({state: 'hidden'});
 
-    if (saveRequests.length !== 2) {
-        fail('payload: expected exactly two intercepted save attempts');
+    if (saveRequests.length !== 4) {
+        fail('payload: expected exactly four intercepted save attempts');
     }
-    for (const payload of saveRequests) {
-        if (!payload.csrf || payload.provider !== String(providerId)) {
+    for (const payload of saveRequests.slice(2)) {
+        if (!payload.csrf || payload.id !== eventId || payload.provider !== String(providerId)) {
             fail('payload: CSRF or selected provider did not reach the save request');
         }
-        if (payload.start !== '2030-01-15 09:00:00' || payload.end !== '2030-01-15 10:00:00') {
+        if (payload.start !== eventStartValue || payload.end !== eventEndValue) {
             fail('payload: selected start/end did not reach the save request');
         }
     }
+    if (saveRequests[3].notes !== editedNotes) {
+        fail('payload: successful edit did not send the changed notes');
+    }
+
+    stage = 'delete';
+    await eventLocator.click();
+    const deleteResponseFailure = page.waitForResponse(
+        (response) =>
+            response.request().method() === 'POST' &&
+            new URL(response.url()).pathname === deletePath &&
+            response.status() === 500,
+        {timeout: interactionTimeoutMs},
+    );
+    await Promise.all([deleteResponseFailure, page.locator('.popover .delete-popover').click()]);
+    await page.waitForFunction(() => window.jQuery && jQuery.active === 0, undefined, {
+        timeout: interactionTimeoutMs,
+    });
+    const reloadRequestsAfterDeleteFailure = postPaths.filter((path) => reloadPaths.has(path)).length;
+    if (reloadRequestsAfterDeleteFailure !== reloadRequestsBeforeFailure + 1) {
+        fail('failure: calendar reload occurred after simulated delete failure');
+    }
+    if (deleteRequests[0].id !== eventId || !deleteRequests[0].csrf) {
+        fail('payload: failed delete did not send the exact existing-event id');
+    }
+    if (!(await eventLocator.isVisible())) {
+        fail('failure: existing event disappeared after simulated delete failure');
+    }
+
+    await eventLocator.click();
+    const deleteResponseSuccess = page.waitForResponse(
+        (response) =>
+            response.request().method() === 'POST' &&
+            new URL(response.url()).pathname === deletePath &&
+            response.status() === 200,
+        {timeout: interactionTimeoutMs},
+    );
+    const deleteReloadResponse = page.waitForResponse(
+        (response) =>
+            response.request().method() === 'POST' &&
+            new URL(response.url()).pathname === expectedReloadPath &&
+            response.status() === 200,
+        {timeout: interactionTimeoutMs},
+    );
+    await Promise.all([deleteResponseSuccess, deleteReloadResponse, page.locator('.popover .delete-popover').click()]);
+    await page.waitForFunction(() => window.jQuery && jQuery.active === 0, undefined, {
+        timeout: interactionTimeoutMs,
+    });
+    await eventLocator.waitFor({state: 'detached', timeout: interactionTimeoutMs});
+    if (deleteRequests.length !== 2 || deleteRequests[1].id !== eventId || !deleteRequests[1].csrf) {
+        fail('payload: successful delete did not send the exact existing-event id');
+    }
 
     const interactionPostPaths = postPaths.slice(interactionPostPathStart);
-    const unexpectedWrites = interactionPostPaths.filter((path) => !path.endsWith(SAVE_PATH) && !reloadPaths.has(path));
+    const unexpectedWrites = interactionPostPaths.filter(
+        (path) => !path.endsWith(SAVE_PATH) && path !== deletePath && !reloadPaths.has(path),
+    );
     if (unexpectedWrites.length > 0 || blockedWritePaths.length > 0) {
         fail('payload: an unexpected write route was requested');
     }
@@ -288,6 +521,11 @@ async function main(input) {
         request_payload_verified: true,
         failure_state_verified: true,
         success_state_verified: true,
+        existing_event_prepopulation_verified: true,
+        edit_failure_state_verified: true,
+        edit_success_reload_verified: true,
+        delete_failure_state_verified: true,
+        delete_success_reload_verified: true,
     };
 }
 
