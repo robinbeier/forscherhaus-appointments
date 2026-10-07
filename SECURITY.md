@@ -415,6 +415,10 @@ appointment scope is enforced before related records are loaded or serialized;
 customer, appointment, provider, and service data use UI-specific projections.
 The customer page still needs an appointment hash for its existing edit link,
 so only an in-scope appointment may carry that public management capability.
+An authenticated customer-page denial after a stored role change must leave
+the session's existing return destination unchanged; anonymous deep links
+still set their login return destination. This applies to the canonical page
+and direct `customers/index` path.
 `CustomersReadProjectionHttpTest` checks these boundaries and the legacy search
 alias with synthetic records. It does not establish production browser behavior
 or secrecy of an otherwise authorized management link.
