@@ -32,7 +32,8 @@ valid hold blocks the plan.
 
 Before a run, the release owner must verify the installed helper is root-owned,
 mode `0555`, and matches the pinned SHA-256 in the script. The production
-change lock and cleanup lock must be available. The same nested-mount boundary
+change lock, existing release-pair publisher lock and cleanup lock must be
+available. The same nested-mount boundary
 check used by the manual release operator runs against the web root; active
 production work and nonterminal orchestrator runs block the operation. Review
 the plan and obtain the normal release approval before passing its digest to
@@ -44,6 +45,8 @@ name using an atomic hardlink followed by source unlink; this keeps destination
 creation no-clobber while retaining recovery if the second step fails. The
 parent directories are fsynced, and both files are rehashed and checked again.
 Only after the pair passes those checks are the two exact pending files
+unlinked. Both quarantined inodes are checked for late open file descriptors
+immediately before deletion, including a second check before the sidecar is
 unlinked. If a sidecar transfer, revalidation, open-file check, activity check or
 post-quarantine check fails, the pending object is left in place and the JSON
 result is blocked with exact mutation counts and an `unknown` outcome when a

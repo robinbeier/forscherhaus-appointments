@@ -122,13 +122,43 @@ def pair_identity(helper, releases, release_id):
     }
 
 
+def open_release_pair_lock(helper, releases):
+    leaf = '.release-pair.lock'
+    before = os.stat(leaf, dir_fd=releases, follow_symlinks=False)
+    directory = os.fstat(releases)
+    descriptor = os.open(leaf, os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK,
+                         dir_fd=releases)
+    try:
+        opened = os.fstat(descriptor)
+        if (helper.file_identity(before) != helper.file_identity(opened)
+                or not stat.S_ISREG(opened.st_mode)
+                or opened.st_uid != directory.st_uid or opened.st_gid != directory.st_gid
+                or stat.S_IMODE(opened.st_mode) != 0o600 or opened.st_nlink != 1):
+            reject('release_pair_lock_invalid', 75)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            reject('release_pair_lock_busy', 75)
+        if helper.file_identity(os.stat(leaf, dir_fd=releases, follow_symlinks=False)) != helper.file_identity(opened):
+            reject('release_pair_lock_changed', 75)
+        return descriptor
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
 def collect(helper, releases, current, rollback):
-    names = os.listdir(releases)
-    if len(names) > MAX_CLASS_SCAN:
-        reject('archive_scan_limit')
+    names = []
+    with os.scandir(releases) as entries:
+        for entry in entries:
+            if len(names) >= MAX_CLASS_SCAN:
+                reject('archive_scan_limit')
+            names.append(entry.name)
     grouped = {}
     foreign = 0
     for name in names:
+        if name == '.release-pair.lock':
+            continue
         match = PAIR.fullmatch(name)
         if match is None:
             foreign += 1
@@ -283,9 +313,15 @@ def execute_pair(helper, releases, state, item):
             helper.validate_provenance(data, rid, pair['archive_sha256'], pair['archive_size_bytes'])
         if observed_identity[:5] != identity[:5]:
             reject('quarantined_candidate_changed', 75)
+    pending_identities = {'identities': {tuple(pair['archive_identity'][:2]),
+                                         tuple(pair['provenance_identity'][:2])}}
+    if helper.open_file_identities([pending_identities]):
+        reject('quarantined_candidate_open', 75)
     os.unlink(pending_archive, dir_fd=state)
     MUTATIONS.deleted()
     os.fsync(state)
+    if helper.open_file_identities([pending_identities]):
+        reject('quarantined_candidate_open', 75)
     os.unlink(pending_sidecar, dir_fd=state)
     MUTATIONS.deleted()
     os.fsync(state)
@@ -297,12 +333,13 @@ def run(mode, expected_plan_sha=None, helper=None):
     helper = helper or load_pinned_helper()
     MUTATIONS.reset()
     global_lock = helper.open_global_lock()
-    releases = state = web = orchestrator = None
+    releases = release_pair_lock = state = web = orchestrator = None
     try:
         if helper.activity_count() != 0:
             reject('active_production_work', 75)
         helper.assert_no_nonterminal_runs()
         releases = helper.open_absolute_directory(RELEASES_ROOT, exact_mode=0o700)
+        release_pair_lock = open_release_pair_lock(helper, releases)
         state = helper.open_absolute_directory(STATE_ROOT, exact_mode=0o700)
         web = helper.open_absolute_directory(WEB_ROOT)
         orchestrator = helper.open_absolute_directory(helper.ORCHESTRATOR_ROOT, exact_mode=0o700)
@@ -388,7 +425,7 @@ def run(mode, expected_plan_sha=None, helper=None):
                 'deleted_archive_pairs': deleted, 'deletion_performed': deleted > 0,
                 **MUTATIONS.fields()}
     finally:
-        for fd in (orchestrator, web, state, releases, global_lock):
+        for fd in (orchestrator, web, state, release_pair_lock, releases, global_lock):
             if fd is not None:
                 os.close(fd)
 

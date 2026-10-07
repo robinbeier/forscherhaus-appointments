@@ -111,6 +111,9 @@ class FakeHelper:
         return self.markers[fd]
 
     def open_file_identities(self, _items):
+        if getattr(self, 'late_open', False) and any(
+                name.startswith('.pending-archive-') for name in os.listdir(os.path.join(self.root, 'state'))):
+            return 1
         return 0
 
 
@@ -120,6 +123,10 @@ class ManualArchiveCleanupTest(unittest.TestCase):
         self.root = self.tmp.name
         for leaf in ('web', 'releases', 'state', 'orchestrator'):
             os.mkdir(os.path.join(self.root, leaf), 0o700)
+        lock_path = os.path.join(self.root, 'releases', '.release-pair.lock')
+        with open(lock_path, 'wb'):
+            pass
+        os.chmod(lock_path, 0o600)
         self.helper = FakeHelper(self.root)
         self._release('easyappointments', 'current')
         self._release('easyappointments_prev_current', 'rollback')
@@ -195,6 +202,23 @@ class ManualArchiveCleanupTest(unittest.TestCase):
             with self.assertRaisesRegex(CLEANUP.CleanupError, 'pending_cleanup_unresolved'):
                 CLEANUP.run('plan', helper=self.helper)
 
+    def test_release_pair_writer_lock_blocks_plan(self):
+        lock = os.open(os.path.join(self.root, 'releases', '.release-pair.lock'), os.O_RDWR)
+        try:
+            CLEANUP.fcntl.flock(lock, CLEANUP.fcntl.LOCK_EX | CLEANUP.fcntl.LOCK_NB)
+            with mock.patch.object(CLEANUP, 'socket') as sock, mock.patch.object(CLEANUP.os, 'geteuid', return_value=0):
+                sock.gethostname.return_value = 'booking-server'
+                with self.assertRaisesRegex(CLEANUP.CleanupError, 'release_pair_lock_busy'):
+                    CLEANUP.run('plan', helper=self.helper)
+        finally:
+            CLEANUP.fcntl.flock(lock, CLEANUP.fcntl.LOCK_UN)
+            os.close(lock)
+
+    def test_archive_inventory_stops_at_entry_limit(self):
+        with mock.patch.object(CLEANUP, 'MAX_CLASS_SCAN', 4):
+            with self.assertRaisesRegex(CLEANUP.CleanupError, 'archive_scan_limit'):
+                self._collect()
+
     def test_protected_pair_drift_blocks_execute(self):
         self._pair('old')
         plan, _ = self._collect()
@@ -259,6 +283,19 @@ class ManualArchiveCleanupTest(unittest.TestCase):
             os.close(state); os.close(releases)
         self.assertTrue(any(name.startswith('.pending-archive-archive-') for name in os.listdir(os.path.join(self.root, 'state'))))
         self.assertTrue(os.path.exists(os.path.join(self.root, 'releases', 'old.build-provenance.json')))
+
+    def test_late_open_file_leaves_quarantined_pair_pending(self):
+        self._pair('old')
+        self.helper.late_open = True
+        plan, _ = self._collect()
+        digest = hashlib.sha256(CLEANUP.canonical(plan)).hexdigest()
+        with mock.patch.object(CLEANUP, 'socket') as sock, mock.patch.object(CLEANUP.os, 'geteuid', return_value=0):
+            sock.gethostname.return_value = 'booking-server'
+            with self.assertRaisesRegex(CLEANUP.CleanupError, 'quarantined_candidate_open'):
+                CLEANUP.run('execute', digest, self.helper)
+        self.assertEqual(0, CLEANUP.MUTATIONS.counts['deleted_files'])
+        self.assertEqual(2, len([name for name in os.listdir(os.path.join(self.root, 'state'))
+                                 if name.startswith('.pending-archive-')]))
 
     def test_ambiguous_pair_blocks_and_does_not_touch_unrelated_files(self):
         self._pair('old')
@@ -386,6 +423,9 @@ class ActualRetentionPrimitiveTest(unittest.TestCase):
                 MAX_SIDECAR_BYTES = RETENTION.MAX_SIDECAR_BYTES
                 file_identity = staticmethod(RETENTION.file_identity)
                 validate_provenance = staticmethod(RETENTION.validate_provenance)
+                # macOS has no /proc; the late-open guard is covered by the
+                # separate synthetic test while these readers remain real.
+                open_file_identities = staticmethod(lambda _items: 0)
 
                 @staticmethod
                 def stable_hash(directory, leaf, _uid, _gid, modes, maximum):
