@@ -643,6 +643,13 @@ The POST then rejects with 409 and leaves no customer, appointment, or consent
 partial write. A separate local control books the slot after its own block is
 removed. This does not cover the Calendar or API HTTP writer, every possible
 interleaving, or a live production booking.
+The isolated `CalendarPublicBookingRaceHttpTest` additionally uses two real
+HTTP server processes. An authenticated Calendar save and a public booking
+POST reach the same provider lock as distinct queued requests, in that order.
+After the lock is released, the Calendar save commits its run-owned block and
+the public POST rejects with 409 without a customer, appointment, or consent
+partial write. This proves that ordered local Calendar/booking schedule, not
+every concurrent schedule, the API writer, or a live production result.
 The isolated `PublicRescheduleManualUnavailabilityRaceHttpTest` covers the
 corresponding authorized public reschedule schedule: a run-owned manual block
 commits while the POST waits on the provider lock. An independent connection
