@@ -266,6 +266,9 @@ Disk, memory, or swap pressure:
   reviewed release-only manual path in
   `docs/ops/production-manual-release-cleanup.md`; do not bypass a blocked
   helper with a broad filesystem delete.
+- For an approved one-time cleanup of complete historical release archive and
+  provenance pairs, follow `docs/ops/production-manual-archive-cleanup.md`;
+  the disabled general retention service remains unchanged.
 - Retain ordinary probe bundles and matching `.provenance` files under
   `/root/fh-ordinary-probe-bundles`; keep `/root/releases` for application
   release pairs and any valid legacy holds. This path rule does not authorize
