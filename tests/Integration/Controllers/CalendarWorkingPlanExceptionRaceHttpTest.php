@@ -78,7 +78,6 @@ final class CalendarWorkingPlanExceptionRaceHttpTest extends TestCase
         self::assertNotNull($fixture);
         $db = get_instance()->db;
         $firstClient = $this->loginAdmin();
-        $secondClient = $this->loginAdmin();
         $firstDate = '2035-07-03';
         $secondDate = '2035-07-04';
         $before = $this->workingPlanExceptions();
@@ -86,8 +85,11 @@ final class CalendarWorkingPlanExceptionRaceHttpTest extends TestCase
         $multi = curl_multi_init();
         $handles = [];
         $transactionOpen = false;
+        $secondServer = null;
 
         try {
+            $secondServer = new DefenseCycleHttpServer();
+            $secondClient = $this->loginAdmin($secondServer);
             $ownerId = mysqli_thread_id($db->conn_id);
             self::assertNotSame($ownerId, mysqli_thread_id($observer->conn_id));
             self::assertTrue($db->trans_begin());
@@ -103,7 +105,7 @@ final class CalendarWorkingPlanExceptionRaceHttpTest extends TestCase
             );
 
             $handles[] = $this->startRequest($firstClient, $firstDate, $multi);
-            $handles[] = $this->startRequest($secondClient, $secondDate, $multi);
+            $handles[] = $this->startRequest($secondClient, $secondDate, $multi, $secondServer->baseUrl);
             self::assertTrue(
                 $this->waitsForCount($multi, $observer, $ownerId, 'users', $fixture->providerId, 2),
             );
@@ -141,6 +143,7 @@ final class CalendarWorkingPlanExceptionRaceHttpTest extends TestCase
             }
             curl_multi_close($multi);
             $observer->close();
+            $secondServer?->close();
         }
     }
 
@@ -212,7 +215,7 @@ final class CalendarWorkingPlanExceptionRaceHttpTest extends TestCase
         }
     }
 
-    private function startRequest(GateHttpClient $client, string $date, CurlMultiHandle $multi): CurlHandle
+    private function startRequest(GateHttpClient $client, string $date, CurlMultiHandle $multi, ?string $baseUrl = null): CurlHandle
     {
         $token = $client->getCookie('csrf_cookie');
         self::assertNotSame('', (string) $token);
@@ -225,7 +228,7 @@ final class CalendarWorkingPlanExceptionRaceHttpTest extends TestCase
             'working_plan_exception' => ['start' => '10:00', 'end' => '12:00', 'breaks' => []],
         ];
         $cookies = array_map(static fn(array $r): string => $r['name'] . '=' . $r['value'], $client->cookieRecords());
-        $handle = curl_init($this->server->baseUrl . '/calendar/save_working_plan_exception');
+        $handle = curl_init(($baseUrl ?? $this->server->baseUrl) . '/calendar/save_working_plan_exception');
         self::assertInstanceOf(CurlHandle::class, $handle);
         curl_setopt_array($handle, [
             CURLOPT_POST => true,
@@ -310,11 +313,11 @@ final class CalendarWorkingPlanExceptionRaceHttpTest extends TestCase
         return false;
     }
 
-    private function loginAdmin(): GateHttpClient
+    private function loginAdmin(?DefenseCycleHttpServer $server = null): GateHttpClient
     {
         $fixture = $this->fixture;
         self::assertNotNull($fixture);
-        $client = $this->server->client();
+        $client = ($server ?? $this->server)->client();
         self::assertSame(200, $client->get('login')->statusCode);
         $response = $client->post('login/validate', [
             'username' => $this->credentials['admin_username'],
