@@ -287,6 +287,61 @@ class ManualArchiveCleanupTest(unittest.TestCase):
         with self.assertRaisesRegex(CLEANUP.CleanupError, 'protected_archive_changed'):
             self._collect()
 
+    def test_coherent_held_archive_change_invalidates_approved_plan(self):
+        self._pair('held')
+        os.unlink(os.path.join(self.root, 'releases', 'held.build-provenance.json'))
+        held_archive = b'held-archive'
+        self.helper.holds = {'held': {'sha256': hashlib.sha256(held_archive).hexdigest(),
+                                      'size_bytes': len(held_archive)}}
+        self._pair('old')
+        plan, _ = self._collect()
+        digest = hashlib.sha256(CLEANUP.canonical(plan)).hexdigest()
+        changed = b'replaced-held-archive'
+        with open(os.path.join(self.root, 'releases', 'held.tar.gz'), 'wb') as stream:
+            stream.write(changed)
+        self.helper.holds = {'held': {'sha256': hashlib.sha256(changed).hexdigest(),
+                                      'size_bytes': len(changed)}}
+        with mock.patch.object(CLEANUP, 'socket') as sock, mock.patch.object(CLEANUP.os, 'geteuid', return_value=0):
+            sock.gethostname.return_value = 'booking-server'
+            with self.assertRaisesRegex(CLEANUP.CleanupError, 'plan_identity_changed'):
+                CLEANUP.run('execute', digest, self.helper)
+        self.assertTrue(os.path.exists(os.path.join(self.root, 'releases', 'old.tar.gz')))
+
+    def test_archive_only_held_active_release_remains_protected(self):
+        os.unlink(os.path.join(self.root, 'releases', 'current.build-provenance.json'))
+        held_archive = b'current-archive'
+        self.helper.holds = {'current': {'sha256': hashlib.sha256(held_archive).hexdigest(),
+                                         'size_bytes': len(held_archive)}}
+        self._pair('old')
+        plan, selected = self._collect()
+        self.assertEqual(['old'], [item['release_id'] for item in selected])
+        self.assertIn('current', plan['protected_hold_archives'])
+        digest = hashlib.sha256(CLEANUP.canonical(plan)).hexdigest()
+        with mock.patch.object(CLEANUP, 'socket') as sock, mock.patch.object(CLEANUP.os, 'geteuid', return_value=0):
+            sock.gethostname.return_value = 'booking-server'
+            result = CLEANUP.run('execute', digest, self.helper)
+        self.assertEqual(1, result['deleted_archive_pairs'])
+        self.assertTrue(os.path.exists(os.path.join(self.root, 'releases', 'current.tar.gz')))
+
+    def test_complete_held_pair_change_invalidates_approved_plan(self):
+        self._pair('held')
+        held_archive = b'held-archive'
+        self.helper.holds = {'held': {'sha256': hashlib.sha256(held_archive).hexdigest(),
+                                      'size_bytes': len(held_archive)}}
+        self._pair('old')
+        plan, _ = self._collect()
+        digest = hashlib.sha256(CLEANUP.canonical(plan)).hexdigest()
+        sidecar = os.path.join(self.root, 'releases', 'held.build-provenance.json')
+        with open(sidecar, encoding='utf-8') as stream:
+            payload = json.load(stream)
+        with open(sidecar, 'w', encoding='utf-8') as stream:
+            json.dump(payload, stream, indent=2)
+        with mock.patch.object(CLEANUP, 'socket') as sock, mock.patch.object(CLEANUP.os, 'geteuid', return_value=0):
+            sock.gethostname.return_value = 'booking-server'
+            with self.assertRaisesRegex(CLEANUP.CleanupError, 'plan_identity_changed'):
+                CLEANUP.run('execute', digest, self.helper)
+        self.assertTrue(os.path.exists(os.path.join(self.root, 'releases', 'old.tar.gz')))
+
 
 class ActualRetentionPrimitiveTest(unittest.TestCase):
     """Exercise the real stable readers and provenance contract without root."""

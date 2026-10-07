@@ -135,6 +135,7 @@ def collect(helper, releases, current, rollback):
             continue
         grouped.setdefault(match.group(1), set()).add(match.group(2))
     holds = helper.read_legacy_hold() or {}
+    hold_binding = hashlib.sha256(canonical(holds)).hexdigest()
     for release_id, sides in grouped.items():
         if release_id in holds:
             # A valid legacy hold can predate provenance sidecars. It still
@@ -144,21 +145,27 @@ def collect(helper, releases, current, rollback):
             continue
         if sides != {'tar.gz', 'build-provenance.json'}:
             reject('ambiguous_archive_pair')
+    held_archives = {}
     for release_id, hold in holds.items():
         if release_id not in grouped:
             reject('protected_archive_missing')
-        archive_sha, archive_size, _, _ = helper.stable_hash(
+        archive_sha, archive_size, archive_identity, _ = helper.stable_hash(
             releases, release_id + '.tar.gz', 0, 0, {0o600}, helper.MAX_ARCHIVE_BYTES)
         if archive_sha != hold['sha256'] or archive_size != hold['size_bytes']:
             reject('protected_archive_changed')
+        held_archives[release_id] = {'archive_identity': archive_identity,
+                                     'archive_sha256': archive_sha,
+                                     'archive_size_bytes': archive_size}
         if grouped[release_id] == {'tar.gz', 'build-provenance.json'}:
-            pair_identity(helper, releases, release_id)
+            held_archives[release_id]['complete_pair'] = pair_identity(helper, releases, release_id)
     protected = {current, rollback}
     for release_id in protected:
+        if release_id in holds:
+            continue
         if grouped.get(release_id) != {'tar.gz', 'build-provenance.json'}:
             reject('protected_archive_missing')
     protected_pairs = {release_id: pair_identity(helper, releases, release_id)
-                       for release_id in sorted(protected)}
+                       for release_id in sorted(protected - holds.keys())}
     records = []
     for release_id in sorted(grouped):
         if release_id in protected or release_id in holds:
@@ -176,6 +183,8 @@ def collect(helper, releases, current, rollback):
         'unrelated_entry_count': foreign,
         'protected_pair_count': len(protected | set(holds)),
         'protected_pairs': protected_pairs,
+        'protected_hold_archives': held_archives,
+        'legacy_hold_binding_sha256': hold_binding,
         'eligible_count': len(records),
         'selected': [{'release_id': item['release_id'], 'pair': item['pair']}
                      for item in selected],
@@ -355,6 +364,19 @@ def run(mode, expected_plan_sha=None, helper=None):
                     os.close(protected_fd)
             for protected_id, protected_pair in plan['protected_pairs'].items():
                 if pair_identity(helper, releases, protected_id) != protected_pair:
+                    reject('protected_archive_changed', 75)
+            if hashlib.sha256(canonical(helper.read_legacy_hold() or {})).hexdigest() != plan['legacy_hold_binding_sha256']:
+                reject('protected_archive_changed', 75)
+            for held_id, held_archive in plan['protected_hold_archives'].items():
+                archive_sha, archive_size, archive_identity, _ = helper.stable_hash(
+                    releases, held_id + '.tar.gz', 0, 0, {0o600}, helper.MAX_ARCHIVE_BYTES)
+                observed_held = {'archive_identity': archive_identity,
+                                 'archive_sha256': archive_sha,
+                                 'archive_size_bytes': archive_size}
+                expected_held = {key: held_archive[key] for key in observed_held}
+                if observed_held != expected_held:
+                    reject('protected_archive_changed', 75)
+                if 'complete_pair' in held_archive and pair_identity(helper, releases, held_id) != held_archive['complete_pair']:
                     reject('protected_archive_changed', 75)
             try:
                 execute_pair(helper, releases, state, item)

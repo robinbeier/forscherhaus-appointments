@@ -26,7 +26,9 @@ foreign files, incomplete pairs, and all unrelated directories remain
 protected and are counted in the JSON result where applicable. Any ambiguous
 pair inventory fails closed. A valid legacy-held archive may lack a provenance
 sidecar; the operator verifies its exact held hash and size and excludes it from
-selection. An incomplete pair without a valid hold blocks the plan.
+selection. The plan also binds the validated hold state and held archive file
+identity, including its sidecar when one exists. An incomplete pair without a
+valid hold blocks the plan.
 
 Before a run, the release owner must verify the installed helper is root-owned,
 mode `0555`, and matches the pinned SHA-256 in the script. The production
