@@ -269,6 +269,8 @@ def _quarantine_file(helper, releases, state, leaf, identity, kind, expected_sha
     if (stable_linked != stable_before or stable_source != stable_before
             or linked.st_nlink != 2 or source.st_nlink != 2):
         reject('candidate_changed', 75)
+    # The recovery link must be durable before the only source name is removed.
+    os.fsync(state)
     os.unlink(leaf, dir_fd=releases)
     os.fsync(releases)
     os.fsync(state)

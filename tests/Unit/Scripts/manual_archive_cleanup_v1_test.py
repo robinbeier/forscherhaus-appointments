@@ -264,6 +264,34 @@ class ManualArchiveCleanupTest(unittest.TestCase):
         self.assertEqual('unknown', CLEANUP.MUTATIONS.outcome)
         self.assertTrue(any(name.startswith('.pending-archive-archive-') for name in os.listdir(os.path.join(self.root, 'state'))))
 
+    def test_pending_directory_is_synced_before_source_unlink(self):
+        self._pair('old')
+        releases = os.open(os.path.join(self.root, 'releases'), os.O_RDONLY | os.O_DIRECTORY)
+        state = os.open(os.path.join(self.root, 'state'), os.O_RDONLY | os.O_DIRECTORY)
+        self.helper.state_fd = state
+        events = []
+        original_sync, original_unlink = os.fsync, os.unlink
+
+        def record_sync(fd):
+            events.append(('sync', fd))
+            return original_sync(fd)
+
+        def record_unlink(leaf, *args, **kwargs):
+            events.append(('unlink', leaf))
+            return original_unlink(leaf, *args, **kwargs)
+
+        try:
+            pair = CLEANUP.pair_identity(self.helper, releases, 'old')
+            with mock.patch.object(CLEANUP.os, 'fsync', side_effect=record_sync), \
+                    mock.patch.object(CLEANUP.os, 'unlink', side_effect=record_unlink):
+                CLEANUP._quarantine_file(self.helper, releases, state, 'old.tar.gz',
+                                         pair['archive_identity'], 'archive',
+                                         pair['archive_sha256'], pair['archive_size_bytes'])
+        finally:
+            os.close(state); os.close(releases)
+        self.assertLess(events.index(('sync', state)), events.index(('unlink', 'old.tar.gz')))
+        self.assertLess(events.index(('unlink', 'old.tar.gz')), events.index(('sync', releases)))
+
     def test_interrupted_pair_leaves_pending_recovery_state(self):
         self._pair('old')
         releases = os.open(os.path.join(self.root, 'releases'), os.O_RDONLY | os.O_DIRECTORY)

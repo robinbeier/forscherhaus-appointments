@@ -43,7 +43,9 @@ Execution revalidates the entire plan immediately before mutation. Each pair
 is transferred into the root-only state directory under a no-clobber pending
 name using an atomic hardlink followed by source unlink; this keeps destination
 creation no-clobber while retaining recovery if the second step fails. The
-parent directories are fsynced, and both files are rehashed and checked again.
+pending link's directory is fsynced before the source name is removed; the
+source directory is fsynced after removal. Both files are rehashed and checked
+again.
 Only after the pair passes those checks are the two exact pending files
 unlinked. Both quarantined inodes are checked for late open file descriptors
 immediately before deletion, including a second check before the sidecar is
