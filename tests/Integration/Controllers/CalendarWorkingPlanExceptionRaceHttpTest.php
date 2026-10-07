@@ -165,18 +165,36 @@ final class CalendarWorkingPlanExceptionRaceHttpTest extends TestCase
             self::assertNotSame($ownerId, mysqli_thread_id($observer->conn_id));
             self::assertTrue($db->trans_begin());
             $transactionOpen = true;
-            self::assertNotFalse(
-                $db->query(
-                    'SELECT * FROM `' .
-                        $db->dbprefix('users') .
-                        '` WHERE `id` = ' .
-                        $fixture->providerId .
-                        ' FOR UPDATE',
-                ),
-            );
+            if ($revoke) {
+                $ownedUserIds = [$fixture->actorId, $fixture->providerId];
+                sort($ownedUserIds, SORT_NUMERIC);
+                self::assertNotFalse(
+                    $db->query(
+                        'SELECT * FROM `' .
+                            $db->dbprefix('users') .
+                            '` WHERE `id` IN (' .
+                            implode(', ', $ownedUserIds) .
+                            ') ORDER BY `id` ASC FOR UPDATE',
+                    ),
+                );
+            } else {
+                self::assertNotFalse(
+                    $db->query(
+                        'SELECT * FROM `' .
+                            $db->dbprefix('users') .
+                            '` WHERE `id` = ' .
+                            $fixture->providerId .
+                            ' FOR UPDATE',
+                    ),
+                );
+            }
 
             $handle = $this->startRequest($client, $date, $multi);
-            self::assertTrue($this->waitsFor($multi, $observer, $ownerId, 'users', $fixture->providerId));
+            self::assertTrue(
+                $revoke
+                    ? $this->waitsForIds($multi, $observer, $ownerId, 'users', [$fixture->actorId, $fixture->providerId], 1)
+                    : $this->waitsFor($multi, $observer, $ownerId, 'users', $fixture->providerId),
+            );
 
             if ($revoke) {
                 self::assertTrue(
@@ -248,7 +266,7 @@ final class CalendarWorkingPlanExceptionRaceHttpTest extends TestCase
 
     private function waitsFor(CurlMultiHandle $multi, object $observer, int $ownerId, string $table, int $id): bool
     {
-        return $this->waitsForCount($multi, $observer, $ownerId, $table, $id, 1);
+        return $this->waitsForIds($multi, $observer, $ownerId, $table, [$id], 1);
     }
 
     private function waitsForCount(
@@ -257,6 +275,18 @@ final class CalendarWorkingPlanExceptionRaceHttpTest extends TestCase
         int $ownerId,
         string $table,
         int $id,
+        int $expected,
+    ): bool {
+        return $this->waitsForIds($multi, $observer, $ownerId, $table, [$id], $expected);
+    }
+
+    /** @param list<int> $ids */
+    private function waitsForIds(
+        CurlMultiHandle $multi,
+        object $observer,
+        int $ownerId,
+        string $table,
+        array $ids,
         int $expected,
     ): bool {
         $deadline = microtime(true) + 8;
@@ -279,10 +309,17 @@ final class CalendarWorkingPlanExceptionRaceHttpTest extends TestCase
                 $sql = strtoupper(
                     (string) preg_replace('/\s+/', ' ', str_replace('`', '', trim((string) $row['statement_text']))),
                 );
+                $mentionsOwnedId = false;
+                foreach ($ids as $id) {
+                    if (str_contains($sql, (string) $id)) {
+                        $mentionsOwnedId = true;
+                        break;
+                    }
+                }
                 if (
                     $row['OBJECT_NAME'] === $observer->dbprefix($table) &&
                     str_contains($sql, 'FOR UPDATE') &&
-                    str_contains($sql, (string) $id)
+                    $mentionsOwnedId
                 ) {
                     $waitingIds[] = (int) $row['waiting_id'];
                 }
