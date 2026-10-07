@@ -508,6 +508,7 @@ function deepRuntimeIntegrationSmokeChecks(bool $includeLdapGuardrail): array
         'booking_page_readiness',
         'booking_extract_bootstrap',
         'booking_available_hours',
+        'booking_checkout_browser',
         'booking_unavailable_dates',
         'api_unauthorized_guard',
         'api_appointments_index',
