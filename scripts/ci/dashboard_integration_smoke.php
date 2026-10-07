@@ -1498,6 +1498,8 @@ function dashboardIntegrationSmokeParseCalendarDialogBrowserResult(array $result
             'edit_success_reload_verified',
             'delete_failure_state_verified',
             'delete_success_reload_verified',
+            'table_view_literal_name_verified',
+            'table_view_write_boundary_verified',
             'cleanup_verified',
         ]
         as $property
