@@ -411,6 +411,22 @@ try {
         });
     }
 
+    if (shouldRunConfiguredCheck($config, 'booking_checkout_browser')) {
+        $runCheck('booking_checkout_browser', static function () use (
+            $config,
+            $repoRoot,
+            &$providerServicePair,
+            &$resolvedBooking,
+        ): array {
+            return dashboardIntegrationSmokeAssertBookingCheckoutBrowser(
+                $config,
+                $repoRoot,
+                $providerServicePair,
+                $resolvedBooking,
+            );
+        });
+    }
+
     if (shouldRunConfiguredCheck($config, 'booking_unavailable_dates')) {
         $runCheck('booking_unavailable_dates', static function () use (
             $client,
@@ -906,6 +922,7 @@ function integrationSmokeSupportedCheckIds(): array
         'booking_page_readiness',
         'booking_extract_bootstrap',
         'booking_available_hours',
+        'booking_checkout_browser',
         'booking_unavailable_dates',
         'api_unauthorized_guard',
         'api_appointments_index',
@@ -939,6 +956,7 @@ function integrationSmokeCheckDependencies(): array
         'booking_page_readiness' => [],
         'booking_extract_bootstrap' => ['booking_page_readiness'],
         'booking_available_hours' => ['booking_extract_bootstrap'],
+        'booking_checkout_browser' => ['booking_available_hours'],
         'booking_unavailable_dates' => ['booking_available_hours'],
         'api_unauthorized_guard' => [],
         'api_appointments_index' => [],
@@ -1215,6 +1233,213 @@ function dashboardIntegrationSmokeAssertCalendarDialogBrowser(
     );
 
     return dashboardIntegrationSmokeParseCalendarDialogBrowserResult($result);
+}
+
+/**
+ * Exercise the public booking wizard through name-only checkout. The browser
+ * submits the real payload to booking/register, which is fulfilled with a
+ * synthetic confirmation hash so this CI smoke leaves no appointment behind.
+ *
+ * @param array<string, mixed> $config
+ * @param array<string, mixed>|null $providerServicePair
+ * @param array<string, mixed>|null $resolvedBooking
+ * @return array<string, mixed>
+ */
+function dashboardIntegrationSmokeAssertBookingCheckoutBrowser(
+    array $config,
+    string $repoRoot,
+    ?array $providerServicePair,
+    ?array $resolvedBooking,
+): array {
+    if (!is_array($providerServicePair) || !is_array($resolvedBooking)) {
+        throw new GateAssertionException(
+            'Booking checkout browser check requires the resolved fixture provider, service, and date.',
+        );
+    }
+    $script = $repoRoot . '/scripts/ci/booking_checkout_browser.js';
+    if (!is_file($script) || !is_readable($script)) {
+        throw new GateAssertionException('Booking checkout browser check script is unavailable.');
+    }
+
+    $input = json_encode(
+        [
+            'base_url' => dashboardIntegrationSmokeBuildAppUrl($config, ''),
+            'target_url' => dashboardIntegrationSmokeBuildAppUrl($config, 'booking'),
+            'browser' => \ReleaseGate\resolveConfiguredPlaywrightBrowser(),
+            'executable_path' => (string) (getenv('PLAYWRIGHT_MCP_EXECUTABLE_PATH') ?: ''),
+            'open_timeout' => (int) $config['browser_open_timeout'],
+            'first_name' => 'Browser',
+            'last_name' => 'Checkout',
+            'expected_provider_id' => (int) $providerServicePair['provider_id'],
+            'expected_service_id' => (int) $providerServicePair['service_id'],
+            'expected_date' => (string) $resolvedBooking['date'],
+        ],
+        JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+    );
+    $browserStartedAt = hrtime(true);
+    $result = dashboardIntegrationSmokeWithNameOnlyBookingSettings(
+        $config,
+        $repoRoot,
+        static fn(): array => GateProcessRunner::run(
+            ['node', $script],
+            $repoRoot,
+            null,
+            max(115, (int) $config['browser_open_timeout'] * 4 + 55),
+            $input,
+        ),
+    );
+    $browserDurationMs = (int) ((hrtime(true) - $browserStartedAt) / 1_000_000);
+
+    if (($result['timed_out'] ?? false) || ($result['exit_code'] ?? 1) !== 0) {
+        throw new GateAssertionException(
+            'Booking checkout browser check failed: ' . trim((string) ($result['stderr'] ?? 'runtime')),
+        );
+    }
+
+    $payload = json_decode(trim((string) ($result['stdout'] ?? '')), true);
+    if (!is_array($payload)) {
+        throw new GateAssertionException('Booking checkout browser check returned no valid result.');
+    }
+    foreach (
+        [
+            'ok',
+            'public_service_options_verified',
+            'fixture_pair_verified',
+            'selected_provider_verified',
+            'selected_slot_verified',
+            'name_only_payload_verified',
+            'blank_name_rejection_verified',
+            'register_payload_verified',
+            'confirmation_navigation_verified',
+            'no_persistence_verified',
+        ]
+        as $property
+    ) {
+        if (($payload[$property] ?? null) !== true) {
+            throw new GateAssertionException('Booking checkout browser check did not verify ' . $property . '.');
+        }
+    }
+
+    return [
+        'public_service_options_verified' => true,
+        'fixture_pair_verified' => true,
+        'selected_provider_verified' => true,
+        'selected_slot_verified' => true,
+        'name_only_payload_verified' => true,
+        'blank_name_rejection_verified' => true,
+        'register_payload_verified' => true,
+        'confirmation_navigation_verified' => true,
+        'no_persistence_verified' => true,
+        'register_requests' => (int) ($payload['register_requests'] ?? 0),
+        'confirmation_requests' => (int) ($payload['confirmation_requests'] ?? 0),
+        'browser_duration_ms' => $browserDurationMs,
+    ];
+}
+
+/**
+ * Temporarily disable non-name customer fields for the isolated browser
+ * checkout. This mutation is permitted only against the Docker-local smoke
+ * stack and restores the exact original setting rows before returning.
+ *
+ * @param array<string, mixed> $config
+ * @param callable():array<string, mixed> $callback
+ * @return array<string, mixed>
+ */
+function dashboardIntegrationSmokeWithNameOnlyBookingSettings(
+    array $config,
+    string $repoRoot,
+    callable $callback,
+): array {
+    $baseUrl = parse_url((string) ($config['base_url'] ?? ''), PHP_URL_HOST);
+    if ($baseUrl !== 'nginx') {
+        throw new GateAssertionException('Name-only booking fixture requires the Docker-local nginx base URL.');
+    }
+
+    $CI = dashboardIntegrationSmokeBootstrapApplication($repoRoot);
+    if (!defined('Config::DB_HOST') || Config::DB_HOST !== 'mysql') {
+        throw new GateAssertionException('Name-only booking fixture requires the Docker-local mysql database host.');
+    }
+
+    $names = [
+        'display_first_name',
+        'require_first_name',
+        'display_last_name',
+        'require_last_name',
+        'require_email',
+        'display_email',
+        'require_phone_number',
+        'display_phone_number',
+        'require_address',
+        'display_address',
+        'require_city',
+        'display_city',
+        'require_zip_code',
+        'display_zip_code',
+        'require_notes',
+        'display_notes',
+        'require_captcha',
+    ];
+    $snapshot = $CI->db->where_in('name', $names)->get('settings')->result_array();
+    $snapshotByName = [];
+    foreach ($snapshot as $row) {
+        $snapshotByName[(string) $row['name']] = $row;
+    }
+    ksort($snapshotByName);
+    $mutationTables = ['appointments', 'users', 'consents'];
+    $beforeCounts = [];
+    foreach ($mutationTables as $table) {
+        $beforeCounts[$table] = (int) $CI->db->count_all_results($table);
+    }
+
+    try {
+        setting([
+            'display_first_name' => '1',
+            'require_first_name' => '1',
+            'display_last_name' => '1',
+            'require_last_name' => '1',
+            'require_email' => '0',
+            'display_email' => '0',
+            'require_phone_number' => '0',
+            'display_phone_number' => '0',
+            'require_address' => '0',
+            'display_address' => '0',
+            'require_city' => '0',
+            'display_city' => '0',
+            'require_zip_code' => '0',
+            'display_zip_code' => '0',
+            'require_notes' => '0',
+            'display_notes' => '0',
+            'require_captcha' => '0',
+        ]);
+
+        return $callback();
+    } finally {
+        foreach ($names as $name) {
+            if (isset($snapshotByName[$name])) {
+                $restoreRow = $snapshotByName[$name];
+                unset($restoreRow['id'], $restoreRow['name']);
+                $CI->db->update('settings', $restoreRow, ['name' => $name]);
+            } else {
+                $CI->db->delete('settings', ['name' => $name]);
+            }
+        }
+
+        $restoredRows = $CI->db->where_in('name', $names)->get('settings')->result_array();
+        $restoredByName = [];
+        foreach ($restoredRows as $row) {
+            $restoredByName[(string) $row['name']] = $row;
+        }
+        ksort($restoredByName);
+
+        if ($restoredByName !== $snapshotByName) {
+            throw new GateAssertionException('Name-only booking fixture did not restore customer settings exactly.');
+        }
+        foreach ($mutationTables as $table) {
+            if ((int) $CI->db->count_all_results($table) !== $beforeCounts[$table]) {
+                throw new GateAssertionException('Name-only booking browser persisted unexpected ' . $table . ' rows.');
+            }
+        }
+    }
 }
 
 /** @param array<string, mixed> $result */

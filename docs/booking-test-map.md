@@ -26,6 +26,7 @@ ist eine Orientierung, keine vollständige Testliste.
 | Reise/Verhalten | Tests | Ebene und abgedecktes Risiko |
 | --- | --- | --- |
 | Normale Buchung erzeugt Kunde/Termin und Hash | `tests/Integration/Controllers/BookingControllerFlowTest.php::testRegisterSuccessCreatesAppointmentAndReturnsHash` | Verhaltens-Integration mit Datenbank; Persistenz, Zuordnung und Rückgabe-Identität |
+| Öffentlicher Browser-Checkout mit Name ohne Eltern-E-Mail | `scripts/ci/booking_checkout_browser.js` über `integration-smoke` | Lokale Browserreise über Dienst, Anbieter und freien Slot: leere Namen werden abgelehnt, eingegebene Namen gelangen einmalig als serialisierter `booking/register`-Aufruf zum synthetischen Bestätigungslink. Der Schreibaufruf wird im Browser abgefangen; ein unabhängiger DB-Vorher-Nachher-Vergleich belegt unveränderte Termin-, Nutzer- und Consent-Zahlen. Die kurzzeitige lokale Namenskonfiguration wird exakt zurückgestellt. Echte Persistenz und Bereinigung belegen separate HTTP-/DB-Tests, das Rendern einer realen Bestätigungsseite der PDF-Gate. |
 | Register-Aufruf mit GET statt POST | `tests/Integration/Controllers/BookingMethodHttpTest.php::testGetRegisterRejectsValidPublicQueryPayloadWithoutMutation` | FH_DEFENSE_ISOLATED HTTP/DB; 405 und `Allow: POST` vor Query-Auswertung, keine Termin-/Kunden-/Consent-Mutation, Fixture-Cleanup |
 | Identitäts-Lock und späte Kundenkollision | dieselbe Datei: `testCreationIdentityLockSerializesAcrossDatabaseConnections`, `testNormalCreationResolvesCustomerAfterIdentityLockAndRejectsLateOverlap` | Verhaltens-Integration; gleiche Kundenidentität und erneute Kundenüberschneidung nach dem Identity-Lock, kein paralleler HTTP-Buchungsschedule |
 | Zwei gleichzeitige öffentliche Buchungen desselben Anbieter-Slots | `tests/Integration/Controllers/PublicBookingProviderRaceHttpTest.php` | Isolierte HTTP-/DB-Integration; beide Requests warten nach der ersten Verfügbarkeitsprüfung am tatsächlichen Provider-Lock, danach ein Erfolg und ein 409 ohne Teiländerung des Verlierers. Belegt genau diesen Schedule, keine beliebigen konkurrierenden Kalenderänderungen oder Produktion unter Last. |
@@ -82,11 +83,12 @@ Szenario erhalten. Vier Tests werden zu zwei, ohne Änderung am Produktcode.
 - `BookingReadAvailabilityControllerFlowTest` und die JavaScript-Harness prüfen
   beide Verfügbarkeit, aber die PHP-Suite die Controller-Antwort und die JS-
   Suite sichtbaren Browser-State, Abbruch und Rennen.
-- Die hier zugeordneten Tests zeigen keinen vollständigen realen Browser-Checkout
-  mit Kontaktdateneingabe und Bestätigung; der WebMCP-Test endet ausdrücklich
-  bei `prepare_booking`, der PDF-Gate-Fluss startet mit bereits vorhandenem
-  Bestätigungs-Hash. Das ist eine beobachtete Abgrenzung, kein Vorschlag für
-  neue Tests.
+- Der lokale Browser-Checkout belegt die UI-Übergänge, Namenseingabe ohne
+  Eltern-E-Mail, Serialisierung und Navigation nach einer synthetischen
+  Register-Antwort. Er belegt weder einen echten Datenbank-Schreibvorgang noch
+  das Rendern der daraus entstehenden Bestätigungsseite in demselben
+  Browserlauf. Diese separaten Nachweise liefern der HTTP-/DB-Schreibvertrag
+  und der PDF-Gate. Es gibt keinen produktiven Browser-Checkout-Nachweis.
 - Der bisherige `BookingConfirmationJsonTest` prüfte nur ausgewählte
   `json_encode`-Ausdrücke im View-Quelltext. Der HTTP-Test ersetzt ihn durch
   gerenderte Share- und PDF-Daten aus einer eigenen DB-Fixture; er schützt
