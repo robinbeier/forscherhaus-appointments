@@ -229,10 +229,6 @@ class Calendar extends EA_Controller
             return;
         }
 
-        session([
-            'dest_url' => site_url('calendar/index' . (!empty($appointment_hash) ? '/' . $appointment_hash : '')),
-        ]);
-
         $secretary_providers = [];
 
         if ($role_slug === DB_SLUG_SECRETARY) {
@@ -282,6 +278,10 @@ class Calendar extends EA_Controller
                 $this->appointments_model->only($edit_appointment, self::APPOINTMENT_READ_FIELDS);
             }
         }
+
+        session([
+            'dest_url' => site_url('calendar/index' . (!empty($appointment_hash) ? '/' . $appointment_hash : '')),
+        ]);
 
         $available_providers = $this->providers_model->get_available_providers();
 

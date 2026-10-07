@@ -280,14 +280,19 @@ final class CalendarCustomerAccessHttpTest extends TestCase
         self::assertStringNotContainsString($this->customerEmail($foreignCustomer), $initial->body);
         self::assertStringNotContainsString($customerInternal, $initial->body);
 
+        $client->get('about');
+        $beforeForeignDestination = $this->sessionDestination($client);
+        self::assertStringEndsWith('/about', $beforeForeignDestination);
         $beforeForeignAppointment = $fixture->row('appointments', (int) $foreignAppointment['id']);
         $foreign = $client->get('calendar/index/' . rawurlencode((string) $foreignAppointment['hash']));
         self::assertSame(403, $foreign->statusCode, $foreign->body);
+        self::assertSame($beforeForeignDestination, $this->sessionDestination($client));
         self::assertSame($beforeForeignAppointment, $fixture->row('appointments', (int) $foreignAppointment['id']));
         self::assertStringNotContainsString($this->customerEmail($foreignCustomer), $foreign->body);
 
         $foreignAlias = $client->get('calendar/reschedule/' . rawurlencode((string) $foreignAppointment['hash']));
         self::assertSame(403, $foreignAlias->statusCode, $foreignAlias->body);
+        self::assertSame($beforeForeignDestination, $this->sessionDestination($client));
 
         $own = $client->get('calendar/index/' . rawurlencode((string) $ownedAppointment['hash']));
         self::assertSame(200, $own->statusCode, $own->body);
