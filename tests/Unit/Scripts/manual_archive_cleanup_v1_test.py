@@ -269,6 +269,24 @@ class ManualArchiveCleanupTest(unittest.TestCase):
             stream.write(b'keep')
         self.assertTrue(os.path.exists(os.path.join(self.root, 'releases', 'unrelated.dump')))
 
+    def test_valid_archive_only_legacy_hold_is_protected(self):
+        self._pair('held')
+        os.unlink(os.path.join(self.root, 'releases', 'held.build-provenance.json'))
+        held_archive = b'held-archive'
+        self.helper.holds = {'held': {'sha256': hashlib.sha256(held_archive).hexdigest(),
+                                      'size_bytes': len(held_archive)}}
+        self._pair('old')
+        plan, selected = self._collect()
+        self.assertEqual(3, plan['protected_pair_count'])
+        self.assertEqual(['old'], [item['release_id'] for item in selected])
+
+    def test_legacy_hold_archive_mismatch_blocks_plan(self):
+        self._pair('held')
+        os.unlink(os.path.join(self.root, 'releases', 'held.build-provenance.json'))
+        self.helper.holds = {'held': {'sha256': '0' * 64, 'size_bytes': len(b'held-archive')}}
+        with self.assertRaisesRegex(CLEANUP.CleanupError, 'protected_archive_changed'):
+            self._collect()
+
 
 class ActualRetentionPrimitiveTest(unittest.TestCase):
     """Exercise the real stable readers and provenance contract without root."""

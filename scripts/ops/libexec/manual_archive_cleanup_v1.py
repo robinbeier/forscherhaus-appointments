@@ -136,10 +136,23 @@ def collect(helper, releases, current, rollback):
         grouped.setdefault(match.group(1), set()).add(match.group(2))
     holds = helper.read_legacy_hold() or {}
     for release_id, sides in grouped.items():
+        if release_id in holds:
+            # A valid legacy hold can predate provenance sidecars. It still
+            # requires the exact held archive, but is never a cleanup target.
+            if sides not in ({'tar.gz'}, {'tar.gz', 'build-provenance.json'}):
+                reject('protected_archive_missing')
+            continue
         if sides != {'tar.gz', 'build-provenance.json'}:
             reject('ambiguous_archive_pair')
-        if release_id in holds:
-            continue
+    for release_id, hold in holds.items():
+        if release_id not in grouped:
+            reject('protected_archive_missing')
+        archive_sha, archive_size, _, _ = helper.stable_hash(
+            releases, release_id + '.tar.gz', 0, 0, {0o600}, helper.MAX_ARCHIVE_BYTES)
+        if archive_sha != hold['sha256'] or archive_size != hold['size_bytes']:
+            reject('protected_archive_changed')
+        if grouped[release_id] == {'tar.gz', 'build-provenance.json'}:
+            pair_identity(helper, releases, release_id)
     protected = {current, rollback}
     for release_id in protected:
         if grouped.get(release_id) != {'tar.gz', 'build-provenance.json'}:
@@ -161,7 +174,7 @@ def collect(helper, releases, current, rollback):
         'rollback_release': rollback,
         'foreign_entry_count': foreign,
         'unrelated_entry_count': foreign,
-        'protected_pair_count': len(protected) + len(holds),
+        'protected_pair_count': len(protected | set(holds)),
         'protected_pairs': protected_pairs,
         'eligible_count': len(records),
         'selected': [{'release_id': item['release_id'], 'pair': item['pair']}
