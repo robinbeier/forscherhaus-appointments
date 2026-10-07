@@ -1382,6 +1382,16 @@ function dashboardIntegrationSmokeWithNameOnlyBookingSettings(
         'require_notes',
         'display_notes',
         'require_captcha',
+        'display_custom_field_1',
+        'require_custom_field_1',
+        'display_custom_field_2',
+        'require_custom_field_2',
+        'display_custom_field_3',
+        'require_custom_field_3',
+        'display_custom_field_4',
+        'require_custom_field_4',
+        'display_custom_field_5',
+        'require_custom_field_5',
     ];
     $snapshot = $CI->db->where_in('name', $names)->get('settings')->result_array();
     $snapshotByName = [];
@@ -1414,6 +1424,16 @@ function dashboardIntegrationSmokeWithNameOnlyBookingSettings(
             'require_notes' => '0',
             'display_notes' => '0',
             'require_captcha' => '0',
+            'display_custom_field_1' => '0',
+            'require_custom_field_1' => '0',
+            'display_custom_field_2' => '0',
+            'require_custom_field_2' => '0',
+            'display_custom_field_3' => '0',
+            'require_custom_field_3' => '0',
+            'display_custom_field_4' => '0',
+            'require_custom_field_4' => '0',
+            'display_custom_field_5' => '0',
+            'require_custom_field_5' => '0',
         ]);
 
         return $callback();

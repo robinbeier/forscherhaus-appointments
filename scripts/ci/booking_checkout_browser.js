@@ -205,6 +205,18 @@ async function main() {
 
     stage = 'slot';
     await page.waitForSelector('#wizard-frame-2', {state: 'visible'});
+    const expectedAvailabilityResponse = page.waitForResponse(async (response) => {
+        const request = response.request();
+        if (
+            request.method() !== 'POST' ||
+            new URL(request.url()).origin !== expectedOrigin ||
+            new URL(request.url()).pathname !== availableHoursPath
+        ) {
+            return false;
+        }
+        const form = new URLSearchParams(request.postData() || '');
+        return form.get('selected_date') === String(input.expected_date) && response.ok();
+    });
     await page.evaluate((expectedDate) => {
         const input = document.querySelector('#select-date');
         if (!input?._flatpickr) throw new Error('booking date picker was not initialized.');
@@ -219,6 +231,11 @@ async function main() {
             return `${year}-${month}-${day}` === expectedDate;
         });
     }, input.expected_date);
+    const availabilityResponse = await expectedAvailabilityResponse;
+    const availabilityPayload = await availabilityResponse.json();
+    if (!Array.isArray(availabilityPayload) || availabilityPayload.length === 0) {
+        fail('expected-date availability response did not contain any slots.');
+    }
     const slotHandle = await page.waitForFunction(() => {
         const jquery = window.jQuery || window.$;
         const buttons = Array.from(document.querySelectorAll('#available-hours .available-hour'));
@@ -232,6 +249,9 @@ async function main() {
         return null;
     });
     const {index: slotIndex, value: selectedHour} = await slotHandle.jsonValue();
+    if (!availabilityPayload.map((hour) => String(hour)).includes(String(selectedHour))) {
+        fail('selected UI slot was not present in the expected-date availability response.');
+    }
     await page.locator('#available-hours .available-hour').nth(slotIndex).click();
     await page.click('#button-next-2');
 
