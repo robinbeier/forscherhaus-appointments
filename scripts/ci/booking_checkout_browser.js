@@ -47,10 +47,25 @@ function parseRegisterPayload(form) {
 
     const payload = {appointment: {}, customer: {}};
     for (const [key, value] of form.entries()) {
-        const match = key.match(/^post_data\[(appointment|customer)\]\[([^\]]+)\]$/);
-        if (match) payload[match[1]][match[2]] = value;
+        const nestedMatch = key.match(/^post_data\[(appointment|customer)\]\[([^\]]+)\]$/);
+        if (nestedMatch) {
+            payload[nestedMatch[1]][nestedMatch[2]] = value;
+            continue;
+        }
+        const topLevelMatch = key.match(/^post_data\[([^\]]+)\]$/);
+        if (topLevelMatch) payload[topLevelMatch[1]] = value;
     }
     return payload;
+}
+
+function isFalseFlag(value) {
+    return value === false || value === 0 || value === '0' || value === 'false';
+}
+
+function isNormalManageMode(value) {
+    // vars(false) becomes undefined, Number(undefined) becomes NaN, and JSON/jQuery
+    // serialization carries that value as null or an empty form value.
+    return isFalseFlag(value) || value === 'NaN' || value === null || value === '';
 }
 
 async function closeBrowser() {
@@ -105,9 +120,31 @@ async function main() {
                 if (!bookingCsrfToken || !submittedCsrfToken || submittedCsrfToken !== bookingCsrfToken) {
                     fail('booking/register did not submit the rendered booking-page CSRF token.');
                 }
+                if (form.has('exclude_appointment_id')) {
+                    fail('normal booking/register submitted an exclude_appointment_id.');
+                }
                 registerPayload = parseRegisterPayload(form);
                 if (!registerPayload?.appointment || !registerPayload?.customer) {
                     fail('booking/register payload omitted appointment or customer data.');
+                }
+                if (!Object.prototype.hasOwnProperty.call(registerPayload, 'manage_mode')) {
+                    fail('booking/register payload omitted manage_mode.');
+                }
+                // Request_normalizer::normalizeBool('NaN', false) and empty/null input both fall back to false.
+                if (!isNormalManageMode(registerPayload.manage_mode)) {
+                    fail('normal booking/register submitted manage_mode=true.');
+                }
+                if (Object.prototype.hasOwnProperty.call(registerPayload.appointment, 'id')) {
+                    fail('normal booking/register submitted an appointment id.');
+                }
+                if (Object.prototype.hasOwnProperty.call(registerPayload.customer, 'id')) {
+                    fail('normal booking/register submitted a customer id.');
+                }
+                if (!Object.prototype.hasOwnProperty.call(registerPayload.appointment, 'is_unavailability')) {
+                    fail('booking/register payload omitted is_unavailability.');
+                }
+                if (!isFalseFlag(registerPayload.appointment.is_unavailability)) {
+                    fail('normal booking/register submitted is_unavailability=true.');
                 }
                 if (String(registerPayload.customer.email || '').trim() !== '') {
                     fail('name-only checkout unexpectedly submitted a parent email.');
@@ -226,7 +263,12 @@ async function main() {
             return false;
         }
         const form = new URLSearchParams(request.postData() || '');
-        return form.get('selected_date') === String(input.expected_date) && response.ok();
+        return (
+            form.get('selected_date') === String(input.expected_date) &&
+            form.get('service_id') === selectedService &&
+            form.get('provider_id') === selectedProvider &&
+            response.ok()
+        );
     });
     await page.evaluate((expectedDate) => {
         const input = document.querySelector('#select-date');
