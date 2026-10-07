@@ -33,6 +33,7 @@ class About extends EA_Controller
         $this->load->model('providers_model');
         $this->load->model('roles_model');
         $this->load->model('settings_model');
+        $this->load->model('users_model');
 
         $this->load->library('accounts');
         $this->load->library('timezones');
@@ -43,21 +44,22 @@ class About extends EA_Controller
      */
     public function index(): void
     {
-        session(['dest_url' => site_url('about')]);
+        $user_id = (int) session('user_id');
 
-        $user_id = session('user_id');
-
-        if (cannot('view', PRIV_USER_SETTINGS)) {
-            if ($user_id) {
-                abort(403, 'Forbidden');
-            }
-
+        if (!$user_id) {
+            session(['dest_url' => site_url('about')]);
             redirect('login');
-
             return;
         }
 
-        $role_slug = session('role_slug');
+        if (cannot('view', PRIV_USER_SETTINGS, $user_id)) {
+            abort(403, 'Forbidden');
+            return;
+        }
+
+        session(['dest_url' => site_url('about')]);
+
+        $role_slug = $this->roles_model->value($this->users_model->value($user_id, 'id_roles'), 'slug');
 
         script_vars([
             'user_id' => $user_id,
