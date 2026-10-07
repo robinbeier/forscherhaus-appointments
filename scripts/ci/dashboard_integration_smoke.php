@@ -1210,7 +1210,7 @@ function dashboardIntegrationSmokeAssertCalendarDialogBrowser(
         ['node', $script],
         $repoRoot,
         null,
-        max(115, (int) $config['browser_open_timeout'] * 2 + 55),
+        max(115, (int) $config['browser_open_timeout'] * 3 + 55),
         $input,
     );
 

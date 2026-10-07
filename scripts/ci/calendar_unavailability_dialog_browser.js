@@ -95,6 +95,7 @@ async function main(input) {
         fail('input: unsupported browser');
     }
     const openTimeoutMs = getOpenTimeoutSeconds(input) * 1000;
+    const interactionTimeoutMs = Math.max(5000, openTimeoutMs);
 
     const executablePath = input.browser_executable_path || process.env.PLAYWRIGHT_MCP_EXECUTABLE_PATH;
     stage = 'launch';
@@ -181,7 +182,7 @@ async function main(input) {
         await page.locator('#username').fill(String(input.username));
         await page.locator('#password').fill(String(input.password));
         await Promise.all([
-            page.waitForURL((url) => url.pathname.includes('/calendar'), {timeout: 15000}),
+            page.waitForURL((url) => url.pathname.includes('/calendar'), {timeout: Math.max(15000, openTimeoutMs)}),
             page.locator('#login').click(),
         ]);
     }
@@ -223,12 +224,14 @@ async function main(input) {
             response.request().method() === 'POST' &&
             new URL(response.url()).pathname.endsWith(SAVE_PATH) &&
             response.status() === 500,
-        {timeout: 5000},
+        {timeout: interactionTimeoutMs},
     );
     await Promise.all([firstSaveResponse, modal.locator('#save-unavailability').click()]);
-    await page.waitForFunction(() => window.jQuery && jQuery.active === 0, undefined, {timeout: 5000});
+    await page.waitForFunction(() => window.jQuery && jQuery.active === 0, undefined, {
+        timeout: interactionTimeoutMs,
+    });
     const errorModal = page.locator('#message-modal');
-    await errorModal.waitFor({state: 'visible', timeout: 5000});
+    await errorModal.waitFor({state: 'visible', timeout: interactionTimeoutMs});
     if (!(await modal.isVisible())) {
         fail('failure: modal closed after simulated HTTP failure');
     }
@@ -243,18 +246,24 @@ async function main(input) {
     }
 
     stage = 'success';
-    const reloadRequest = page.waitForRequest(
-        (request) => request.method() === 'POST' && new URL(request.url()).pathname === expectedReloadPath,
-        {timeout: 5000},
+    const reloadResponse = page.waitForResponse(
+        (response) =>
+            response.request().method() === 'POST' &&
+            new URL(response.url()).pathname === expectedReloadPath &&
+            response.status() === 200,
+        {timeout: interactionTimeoutMs},
     );
     const secondSaveResponse = page.waitForResponse(
         (response) =>
             response.request().method() === 'POST' &&
             new URL(response.url()).pathname.endsWith(SAVE_PATH) &&
             response.status() === 200,
-        {timeout: 5000},
+        {timeout: interactionTimeoutMs},
     );
-    await Promise.all([secondSaveResponse, reloadRequest, modal.locator('#save-unavailability').click()]);
+    await Promise.all([secondSaveResponse, reloadResponse, modal.locator('#save-unavailability').click()]);
+    await page.waitForFunction(() => window.jQuery && jQuery.active === 0, undefined, {
+        timeout: interactionTimeoutMs,
+    });
     await modal.waitFor({state: 'hidden'});
 
     if (saveRequests.length !== 2) {
@@ -290,7 +299,7 @@ async function main(input) {
     try {
         const input = JSON.parse(fs.readFileSync(0, 'utf8'));
         const openTimeoutSeconds = getOpenTimeoutSeconds(input);
-        const overallTimeoutMs = Math.max(90000, openTimeoutSeconds * 2000 + 35000);
+        const overallTimeoutMs = Math.max(90000, openTimeoutSeconds * 3000 + 35000);
         result = await Promise.race([
             main(input),
             new Promise((_, reject) => {
