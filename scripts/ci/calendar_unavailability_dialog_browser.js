@@ -5,7 +5,7 @@ const playwright = require('playwright');
 
 const SAVE_PATH = '/calendar/save_unavailability';
 const CALENDAR_RELOAD_PATH = '/calendar/get_calendar_appointments';
-const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', 'nginx']);
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', 'nginx']);
 const BROWSER_TYPES = {
     chromium: playwright.chromium,
     chrome: playwright.chromium,
