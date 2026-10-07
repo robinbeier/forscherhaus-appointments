@@ -38,6 +38,7 @@ REQUIRED_DIRECT_ROUTES = {
 ROOT_DEPLOYMENT_SCRIPT = "scripts/ci/run_root_deployment_regressions.sh"
 REVIEWED_INDIRECT_PYTHON_ROUTES = {
     "tests/Unit/Scripts/bound_release_recovery_inspect_v1_test.py": ROOT_DEPLOYMENT_SCRIPT,
+    "tests/Unit/Scripts/manual_archive_cleanup_v1_test.py": ROOT_DEPLOYMENT_SCRIPT,
     "tests/Unit/Scripts/manual_release_cleanup_v1_test.py": ROOT_DEPLOYMENT_SCRIPT,
     "tests/Unit/Scripts/zero_surprise_canary_fixture_lock_test.py": ROOT_DEPLOYMENT_SCRIPT,
 }
