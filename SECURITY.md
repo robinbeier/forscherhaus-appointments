@@ -373,6 +373,9 @@ carrying an appointment hash may open an edit dialog only for an appointment
 within the staff member's provider scope when the current role may view the
 accessible customer. Calendar data requests use that current role for provider
 scope, appointment-view permission, and private blocked-period notes as well.
+An authenticated calendar page denied after a stored role change must not
+overwrite the session's existing login return destination; anonymous calendar
+deep links may still set that destination before redirecting to login.
 Calendar mutations recheck the persisted role and action permission, including
 the stored and requested provider, so a stale session role cannot retain write
 authority after reassignment. Appointment create, update, and delete hold the

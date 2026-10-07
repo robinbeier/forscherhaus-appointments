@@ -179,6 +179,64 @@ final class CalendarCustomerAccessHttpTest extends TestCase
         }
     }
 
+    public function testDemotedAdminCannotReadCalendarOrOverwriteExistingDestination(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $appointment = $fixture->appointment();
+        $admin = $this->login($this->credentials['admin_username'], $this->credentials['password']);
+        self::assertSame(200, $admin->get('calendar/index')->statusCode);
+        self::assertStringContainsString(
+            $fixture->run,
+            $admin->get('calendar/index/' . rawurlencode((string) $appointment['hash']))->body,
+        );
+
+        $admin->get('about');
+        $beforeDestination = $this->sessionDestination($admin);
+        self::assertStringEndsWith('/about', $beforeDestination);
+
+        $customerRole = get_instance()
+            ->db->get_where('roles', ['slug' => DB_SLUG_CUSTOMER])
+            ->row_array();
+        self::assertNotEmpty($customerRole['id'] ?? null);
+        $originalRoleId = (int) get_instance()
+            ->db->get_where('users', ['id' => $fixture->actorId])
+            ->row('id_roles');
+
+        try {
+            self::assertTrue(
+                get_instance()->db->update(
+                    'users',
+                    ['id_roles' => (int) $customerRole['id']],
+                    ['id' => $fixture->actorId],
+                ),
+            );
+
+            foreach (
+                ['calendar', 'calendar/index', 'calendar/reschedule/' . rawurlencode((string) $appointment['hash'])]
+                as $path
+            ) {
+                $response = $admin->get($path);
+                self::assertSame(403, $response->statusCode, $path);
+                self::assertStringNotContainsString($fixture->run, $response->body, $path);
+                self::assertSame($beforeDestination, $this->sessionDestination($admin), $path);
+            }
+
+            $anonymous = new GateHttpClient($this->server?->baseUrl ?? '', additionalHeaders: ['X-No-Redirect' => '1']);
+            $anonymousResponse = $anonymous->get('calendar/reschedule/' . rawurlencode((string) $appointment['hash']));
+            self::assertContains($anonymousResponse->statusCode, [302, 307]);
+            self::assertStringContainsString('/login', (string) $anonymousResponse->header('location'));
+            self::assertStringEndsWith(
+                '/calendar/index/' . $appointment['hash'],
+                $this->sessionDestination($anonymous),
+            );
+        } finally {
+            self::assertTrue(
+                get_instance()->db->update('users', ['id_roles' => $originalRoleId], ['id' => $fixture->actorId]),
+            );
+        }
+    }
+
     public function testLimitedProviderSeesOnlyPermittedCustomersAndAppointmentHashes(): void
     {
         $fixture = $this->fixture;
@@ -708,6 +766,21 @@ final class CalendarCustomerAccessHttpTest extends TestCase
         self::assertTrue((bool) (json_decode($response->body, true, 512, JSON_THROW_ON_ERROR)['success'] ?? false));
 
         return $client;
+    }
+
+    private function sessionDestination(GateHttpClient $client): string
+    {
+        $cookieName = (string) config('sess_cookie_name');
+        $sessionId = $client->getCookie($cookieName);
+        self::assertIsString($sessionId);
+        $ipBinding = config('sess_match_ip') ? md5('127.0.0.1') : '';
+        $path = $this->server?->directory . '/sessions/' . $cookieName . $ipBinding . $sessionId;
+        self::assertFileExists($path);
+        $contents = file_get_contents($path);
+        self::assertIsString($contents);
+        self::assertSame(1, preg_match('/dest_url\\|s:\\d+:"([^"]*)";/', $contents, $matches));
+
+        return $matches[1];
     }
 
     private function foreignProviderId(int $ownedProviderId): int
