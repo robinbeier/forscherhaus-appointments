@@ -67,6 +67,7 @@ ist eine Orientierung, keine vollständige Testliste.
 | --- | --- | --- |
 | Anbieter-Konfiguration in Kalenderseite und Ereignisantworten | `tests/Integration/Controllers/CalendarProviderDataTest.php` | Arbeitspläne bleiben verfügbar; historische Integrationsgeheimnisse werden nicht an den Browser weitergegeben. |
 | Sperrzeiten mit rollenabhängigen Notizen | `tests/Integration/Controllers/CalendarEventPermissionsTest.php` | Kalendernutzer sehen gesperrte Zeiten; zusätzliche Notizen erfordern Leserecht für Sperrzeiten. |
+| Manuelle Sperrzeit-Notiz als Text im Kalender | `scripts/ci/calendar_unavailability_dialog_browser.js` über `integration-smoke` | Lokaler Browserlauf mit abgefangener synthetischer Kalenderantwort: Ein vollständiger HTML-/Event-Handler-Marker bleibt im Standardkalender und Popover Text, ohne Bildknoten oder Handler-Ausführung. Die Tabellenansicht zeigt keine Notiz im Titel; der Bearbeitungsdialog übernimmt sie unverändert. Kein produktiver Notiz- oder Mehrnutzer-Nachweis. |
 
 ## Entscheidung zur Vereinfachung
 

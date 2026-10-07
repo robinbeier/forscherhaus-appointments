@@ -332,7 +332,10 @@ async function main(input) {
     };
     const eventStartValue = formatDate(eventStart);
     const eventEndValue = formatDate(eventEnd);
-    const originalNotes = 'ROB-769 synthetic manual unavailability';
+    const originalNotes = 'R774<img src=x onerror=R774=1>';
+    if (originalNotes.length > 30) {
+        fail('payload: synthetic HTML-shaped note exceeds the event-title truncation limit');
+    }
     const editedNotes = 'ROB-769 edited manual unavailability';
     syntheticFeedBody = JSON.stringify({
         appointments: [],
@@ -351,6 +354,9 @@ async function main(input) {
         blocked_periods: [],
     });
     syntheticFeed = true;
+    await page.evaluate(() => {
+        window.R774 = 0;
+    });
     const initialSyntheticReload = page.waitForResponse(
         (response) =>
             response.request().method() === 'POST' &&
@@ -367,7 +373,42 @@ async function main(input) {
     stage = 'dialog';
     const eventLocator = page.locator('.fc-unavailability.fc-custom').first();
     await eventLocator.waitFor({state: 'visible'});
+    const eventText = await eventLocator.textContent();
+    if (calendarView === 'default') {
+        if (!eventText || !eventText.includes(originalNotes)) {
+            fail('display: synthetic HTML-shaped note was not rendered as full event text');
+        }
+    } else if (eventText && eventText.includes(originalNotes)) {
+        fail('display: table event title unexpectedly rendered the unavailability note');
+    }
+    if ((await eventLocator.locator('img').count()) !== 0) {
+        fail('security: synthetic HTML-shaped note created an image DOM node');
+    }
+    const payloadState = await page.evaluate(() => ({
+        payloadNodeCount: document.querySelectorAll('img[src="x"]').length,
+        handlerExecuted: window.R774 !== 0,
+    }));
+    if (payloadState.payloadNodeCount !== 0 || payloadState.handlerExecuted) {
+        fail('security: synthetic HTML-shaped note created a node or executed a handler');
+    }
     await eventLocator.click();
+    const popover = page.locator('.popover').last();
+    await popover.waitFor({state: 'visible'});
+    const popoverTitle = await popover.locator('.popover-header').textContent();
+    if (calendarView === 'default') {
+        if (!popoverTitle || !popoverTitle.includes(originalNotes)) {
+            fail('display: synthetic HTML-shaped note was not rendered as full popover title text');
+        }
+    } else if (popoverTitle && popoverTitle.includes(originalNotes)) {
+        fail('display: table popover title unexpectedly rendered the unavailability note');
+    }
+    const popoverPayloadState = await page.evaluate(() => ({
+        payloadNodeCount: document.querySelectorAll('img[src="x"]').length,
+        handlerExecuted: window.R774 !== 0,
+    }));
+    if (popoverPayloadState.payloadNodeCount !== 0 || popoverPayloadState.handlerExecuted) {
+        fail('security: popover created a payload node or executed a handler');
+    }
     await page.locator('.popover .edit-popover').click();
     await modal.waitFor({state: 'visible'});
     const openedValues = await page.evaluate(() => ({
