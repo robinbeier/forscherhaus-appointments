@@ -1225,7 +1225,7 @@ function dashboardIntegrationSmokeParseCalendarDialogBrowserResult(array $result
         if (
             !in_array(
                 $failureClass,
-                ['input', 'launch', 'auth', 'dialog', 'failure', 'success', 'payload', 'cleanup'],
+                ['input', 'launch', 'auth', 'create', 'dialog', 'failure', 'success', 'delete', 'payload', 'cleanup'],
                 true,
             )
         ) {
