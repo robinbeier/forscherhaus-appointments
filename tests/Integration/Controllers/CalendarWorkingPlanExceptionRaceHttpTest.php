@@ -94,20 +94,22 @@ final class CalendarWorkingPlanExceptionRaceHttpTest extends TestCase
             self::assertNotSame($ownerId, mysqli_thread_id($observer->conn_id));
             self::assertTrue($db->trans_begin());
             $transactionOpen = true;
+            $ownedUserIds = [$fixture->actorId, $fixture->providerId];
+            sort($ownedUserIds, SORT_NUMERIC);
             self::assertNotFalse(
                 $db->query(
                     'SELECT * FROM `' .
                         $db->dbprefix('users') .
-                        '` WHERE `id` = ' .
-                        $fixture->providerId .
-                        ' FOR UPDATE',
+                        '` WHERE `id` IN (' .
+                        implode(', ', $ownedUserIds) .
+                        ') ORDER BY `id` ASC FOR UPDATE',
                 ),
             );
 
             $handles[] = $this->startRequest($firstClient, $firstDate, $multi);
             $handles[] = $this->startRequest($secondClient, $secondDate, $multi, $secondServer->baseUrl);
             self::assertTrue(
-                $this->waitsForCount($multi, $observer, $ownerId, 'users', $fixture->providerId, 2),
+                $this->waitsForIds($multi, $observer, $ownerId, 'users', $ownedUserIds, 2),
             );
 
             self::assertTrue($db->trans_commit());
@@ -267,17 +269,6 @@ final class CalendarWorkingPlanExceptionRaceHttpTest extends TestCase
     private function waitsFor(CurlMultiHandle $multi, object $observer, int $ownerId, string $table, int $id): bool
     {
         return $this->waitsForIds($multi, $observer, $ownerId, $table, [$id], 1);
-    }
-
-    private function waitsForCount(
-        CurlMultiHandle $multi,
-        object $observer,
-        int $ownerId,
-        string $table,
-        int $id,
-        int $expected,
-    ): bool {
-        return $this->waitsForIds($multi, $observer, $ownerId, $table, [$id], $expected);
     }
 
     /** @param list<int> $ids */
