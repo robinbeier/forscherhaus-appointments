@@ -4,7 +4,10 @@ const fs = require('node:fs');
 const playwright = require('playwright');
 
 const SAVE_PATH = '/calendar/save_unavailability';
-const CALENDAR_RELOAD_PATH = '/calendar/get_calendar_appointments';
+const CALENDAR_RELOAD_PATHS = [
+    '/calendar/get_calendar_appointments',
+    '/calendar/get_calendar_appointments_for_table_view',
+];
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', 'nginx']);
 const BROWSER_TYPES = {
     chromium: playwright.chromium,
@@ -110,7 +113,10 @@ async function main(input) {
     }
     const expectedOrigin = new URL(baseUrl).origin;
     const savePath = new URL(routeUrl(baseUrl, SAVE_PATH)).pathname;
-    const reloadPath = new URL(routeUrl(baseUrl, CALENDAR_RELOAD_PATH)).pathname;
+    const [defaultReloadPath, tableReloadPath] = CALENDAR_RELOAD_PATHS.map(
+        (path) => new URL(routeUrl(baseUrl, path)).pathname,
+    );
+    const reloadPaths = new Set([defaultReloadPath, tableReloadPath]);
     const loginPath = new URL(routeUrl(baseUrl, 'login/validate')).pathname;
     const postPaths = [];
     const blockedWritePaths = [];
@@ -126,7 +132,7 @@ async function main(input) {
             await route.continue();
             return;
         }
-        const allowedRead = method === 'POST' && url.origin === expectedOrigin && url.pathname === reloadPath;
+        const allowedRead = method === 'POST' && url.origin === expectedOrigin && reloadPaths.has(url.pathname);
         const allowedLogin =
             method === 'POST' &&
             !input.session_cookies?.length &&
@@ -180,6 +186,11 @@ async function main(input) {
         ]);
     }
     await page.locator('#calendar-page').waitFor({state: 'visible'});
+    const calendarView = await page.evaluate(() => vars('calendar_view'));
+    if (calendarView !== 'default' && calendarView !== 'table') {
+        fail('dialog: unsupported calendar view');
+    }
+    const expectedReloadPath = calendarView === 'table' ? tableReloadPath : defaultReloadPath;
 
     const interactionPostPathStart = postPaths.length;
     stage = 'dialog';
@@ -206,7 +217,7 @@ async function main(input) {
     );
 
     stage = 'failure';
-    const reloadRequestsBeforeFailure = postPaths.filter((path) => path.endsWith(CALENDAR_RELOAD_PATH)).length;
+    const reloadRequestsBeforeFailure = postPaths.filter((path) => reloadPaths.has(path)).length;
     const firstSaveResponse = page.waitForResponse(
         (response) =>
             response.request().method() === 'POST' &&
@@ -221,7 +232,7 @@ async function main(input) {
     if (!(await modal.isVisible())) {
         fail('failure: modal closed after simulated HTTP failure');
     }
-    const reloadRequestsAfterFailure = postPaths.filter((path) => path.endsWith(CALENDAR_RELOAD_PATH)).length;
+    const reloadRequestsAfterFailure = postPaths.filter((path) => reloadPaths.has(path)).length;
     if (reloadRequestsAfterFailure !== reloadRequestsBeforeFailure) {
         fail('failure: calendar reload occurred after simulated HTTP failure');
     }
@@ -233,7 +244,7 @@ async function main(input) {
 
     stage = 'success';
     const reloadRequest = page.waitForRequest(
-        (request) => request.method() === 'POST' && new URL(request.url()).pathname.endsWith(CALENDAR_RELOAD_PATH),
+        (request) => request.method() === 'POST' && new URL(request.url()).pathname === expectedReloadPath,
         {timeout: 5000},
     );
     const secondSaveResponse = page.waitForResponse(
@@ -259,9 +270,7 @@ async function main(input) {
     }
 
     const interactionPostPaths = postPaths.slice(interactionPostPathStart);
-    const unexpectedWrites = interactionPostPaths.filter(
-        (path) => !path.endsWith(SAVE_PATH) && !path.endsWith(CALENDAR_RELOAD_PATH),
-    );
+    const unexpectedWrites = interactionPostPaths.filter((path) => !path.endsWith(SAVE_PATH) && !reloadPaths.has(path));
     if (unexpectedWrites.length > 0 || blockedWritePaths.length > 0) {
         fail('payload: an unexpected write route was requested');
     }
