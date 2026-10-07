@@ -17,6 +17,10 @@ final class CalendarPublicRescheduleRaceHttpTest extends TestCase
     private ?DefenseCycleHttpServer $calendarServer = null;
     private ?DefenseCycleHttpServer $bookingServer = null;
     private ?array $settings = null;
+    /** @var array{first_name:string,last_name:string,email:string,type:string}|null */
+    private ?array $ownedConsentIdentity = null;
+    /** @var array<int, int> */
+    private array $baselineConsentIds = [];
     private bool $resourcesCleaned = false;
 
     protected function setUp(): void
@@ -125,6 +129,11 @@ final class CalendarPublicRescheduleRaceHttpTest extends TestCase
             'type' => 'terms-and-conditions',
         ];
         $beforeConsentCount = $db->get_where('consents', $consentIdentity)->num_rows();
+        $this->ownedConsentIdentity = $consentIdentity;
+        $this->baselineConsentIds = array_map(
+            static fn(array $row): int => (int) $row['id'],
+            $db->get_where('consents', $consentIdentity)->result_array(),
+        );
         $start = (new DateTimeImmutable('today'))->modify('+15 days')->setTime(10, 0);
         $blockStart = $start->format('Y-m-d H:i:s');
         $blockEnd = $start->modify('+30 minutes')->format('Y-m-d H:i:s');
@@ -479,6 +488,38 @@ final class CalendarPublicRescheduleRaceHttpTest extends TestCase
             return;
         }
         $db = get_instance()->db;
+        $independent = $this->connection($db);
+        try {
+            if ($this->ownedConsentIdentity !== null) {
+                $baselineIds = array_fill_keys($this->baselineConsentIds, true);
+                foreach ($db->get_where('consents', $this->ownedConsentIdentity)->result_array() as $row) {
+                    $consentId = (int) ($row['id'] ?? 0);
+                    if ($consentId <= 0 || isset($baselineIds[$consentId])) {
+                        continue;
+                    }
+                    self::assertTrue(
+                        $db->delete('consents', array_merge($this->ownedConsentIdentity, ['id' => $consentId])),
+                    );
+                    self::assertSame([], $fixture->row('consents', $consentId));
+                    self::assertSame(
+                        [],
+                        $independent
+                            ->get_where('consents', array_merge($this->ownedConsentIdentity, ['id' => $consentId]))
+                            ->result_array(),
+                        'Independent readback must confirm deletion of each run-owned consent.',
+                    );
+                }
+                $remainingOwned = array_values(
+                    array_filter(
+                        $independent->get_where('consents', $this->ownedConsentIdentity)->result_array(),
+                        static fn(array $row): bool => !isset($baselineIds[(int) ($row['id'] ?? 0)]),
+                    ),
+                );
+                self::assertSame([], $remainingOwned, 'Independent readback must show no remaining run-owned consent.');
+            }
+        } finally {
+            $independent->close();
+        }
         $blockNotes = $fixture->run . '_calendar_race';
         foreach ($db->get_where('appointments', ['notes' => $blockNotes])->result_array() as $row) {
             self::assertSame($fixture->providerId, (int) $row['id_users_provider']);
