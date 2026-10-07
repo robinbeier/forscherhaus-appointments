@@ -1498,6 +1498,8 @@ function dashboardIntegrationSmokeParseCalendarDialogBrowserResult(array $result
             'edit_success_reload_verified',
             'delete_failure_state_verified',
             'delete_success_reload_verified',
+            'table_view_literal_name_verified',
+            'table_view_write_boundary_verified',
             'cleanup_verified',
         ]
         as $property
@@ -1519,6 +1521,8 @@ function dashboardIntegrationSmokeParseCalendarDialogBrowserResult(array $result
         'edit_success_reload_verified' => true,
         'delete_failure_state_verified' => true,
         'delete_success_reload_verified' => true,
+        'table_view_literal_name_verified' => true,
+        'table_view_write_boundary_verified' => true,
         'cleanup_verified' => true,
         'browser_duration_ms' => $payload['duration_ms'],
     ];

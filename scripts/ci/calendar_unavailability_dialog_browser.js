@@ -98,7 +98,9 @@ function getOpenTimeoutSeconds(input) {
 
 async function main(input) {
     const baseUrl = assertLoopbackBaseUrl(input.base_url);
-    const targetUrl = input.target_url ? assertLoopbackBaseUrl(input.target_url) : routeUrl(baseUrl, 'login');
+    const targetUrl = input.target_url ? assertLoopbackBaseUrl(input.target_url) : routeUrl(baseUrl, 'calendar');
+    const defaultViewUrl = new URL(targetUrl);
+    defaultViewUrl.searchParams.set('view', 'default');
     const browserName = input.browser || 'firefox';
     const browserType = BROWSER_TYPES[browserName];
     if (!browserType) {
@@ -208,6 +210,9 @@ async function main(input) {
         });
     });
 
+    await context.addInitScript(() => {
+        window.ROB775 = 0;
+    });
     const page = await context.newPage();
     page.on('request', (request) => {
         if (request.method() === 'POST') {
@@ -216,7 +221,7 @@ async function main(input) {
     });
 
     if (Array.isArray(input.session_cookies) && input.session_cookies.length > 0) {
-        await page.goto(targetUrl, {waitUntil: 'domcontentloaded'});
+        await page.goto(defaultViewUrl.toString(), {waitUntil: 'domcontentloaded'});
         if (page.url().includes('/login') || (await page.locator('#login-form').count())) {
             fail('failure: supplied session cookies did not authenticate the calendar page');
         }
@@ -231,11 +236,12 @@ async function main(input) {
             page.waitForURL((url) => url.pathname.includes('/calendar'), {timeout: Math.max(15000, openTimeoutMs)}),
             page.locator('#login').click(),
         ]);
+        await page.goto(defaultViewUrl.toString(), {waitUntil: 'domcontentloaded'});
     }
     await page.locator('#calendar-page').waitFor({state: 'visible'});
     const calendarView = await page.evaluate(() => vars('calendar_view'));
-    if (calendarView !== 'default' && calendarView !== 'table') {
-        fail('dialog: unsupported calendar view');
+    if (calendarView !== 'default') {
+        fail('dialog: first pass did not select the default calendar view');
     }
     const expectedReloadPath = calendarView === 'table' ? tableReloadPath : defaultReloadPath;
 
@@ -399,6 +405,7 @@ async function main(input) {
         ],
         blocked_periods: [],
     });
+    const fullSyntheticFeedBody = syntheticFeedBody;
     syntheticFeed = true;
     await page.evaluate(() => {
         window.R774 = 0;
@@ -620,6 +627,57 @@ async function main(input) {
         fail('payload: successful delete did not send the exact existing-event id');
     }
 
+    // The delete handler clears its synthetic feed after the successful delete. Restore the
+    // complete captured fixture before exercising the table view in this same browser context.
+    syntheticFeedBody = fullSyntheticFeedBody;
+    const tableViewPostPathStart = postPaths.length;
+    const tableViewUrl = routeUrl(baseUrl, 'calendar?view=table');
+    const tableViewReloadResponse = page.waitForResponse(
+        (response) =>
+            response.request().method() === 'POST' &&
+            new URL(response.url()).pathname === tableReloadPath &&
+            response.status() === 200,
+        {timeout: interactionTimeoutMs},
+    );
+    await Promise.all([tableViewReloadResponse, page.goto(tableViewUrl, {waitUntil: 'domcontentloaded'})]);
+    if ((await page.evaluate(() => vars('calendar_view'))) !== 'table') {
+        fail('dialog: calendar?view=table did not select the table view');
+    }
+    await page
+        .locator('.calendar-view .fc-event')
+        .filter({hasText: appointmentTitle})
+        .first()
+        .waitFor({state: 'visible'});
+    const tableAppointmentEventLocator = page
+        .locator('.calendar-view .fc-event')
+        .filter({hasText: appointmentTitle})
+        .first();
+    if (!(await tableAppointmentEventLocator.innerText()).includes(appointmentTitle)) {
+        fail('dialog: table appointment title did not remain literal text');
+    }
+    await tableAppointmentEventLocator.click();
+    const tableAppointmentPopover = page.locator('.popover').filter({hasText: appointmentCustomerLastName}).last();
+    await tableAppointmentPopover.waitFor({state: 'visible'});
+    const tableAppointmentPopoverText = await tableAppointmentPopover.innerText();
+    if (
+        !tableAppointmentPopoverText.includes(appointmentCustomerFirstName) ||
+        !tableAppointmentPopoverText.includes(appointmentCustomerLastName)
+    ) {
+        fail('dialog: table appointment popover did not display the literal customer name');
+    }
+    if (
+        (await tableAppointmentPopover.locator('img[src="x"]').count()) !== 0 ||
+        (await page.evaluate(() => window.ROB775)) !== 0
+    ) {
+        fail('security: table appointment customer name created a DOM node or executed a handler');
+    }
+    await tableAppointmentPopover.locator('.close-popover').click();
+    await tableAppointmentPopover.waitFor({state: 'hidden'});
+    const tableViewPostPaths = postPaths.slice(tableViewPostPathStart);
+    if (tableViewPostPaths.some((path) => path !== tableReloadPath) || blockedWritePaths.length > 0) {
+        fail('payload: table view requested an unexpected write route');
+    }
+
     const interactionPostPaths = postPaths.slice(interactionPostPathStart);
     const unexpectedWrites = interactionPostPaths.filter(
         (path) => !path.endsWith(SAVE_PATH) && path !== deletePath && !reloadPaths.has(path),
@@ -637,6 +695,8 @@ async function main(input) {
         edit_success_reload_verified: true,
         delete_failure_state_verified: true,
         delete_success_reload_verified: true,
+        table_view_literal_name_verified: true,
+        table_view_write_boundary_verified: true,
     };
 }
 
