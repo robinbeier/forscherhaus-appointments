@@ -327,7 +327,13 @@ final class CalendarWorkingPlanPublicRescheduleRaceHttpTest extends TestCase
         return $handle;
     }
 
-    /** @return array<int, int> requester thread IDs */
+    /**
+     * Return distinct requesters whose users-table wait is directly or transitively
+     * blocked by the held owner transaction. InnoDB may report the second queued
+     * request as blocked by the first waiter instead of by the owner itself.
+     *
+     * @return array<int, int> requester thread IDs
+     */
     private function waitForProviderWaiters(
         CurlMultiHandle $multi,
         object $observer,
@@ -339,23 +345,46 @@ final class CalendarWorkingPlanPublicRescheduleRaceHttpTest extends TestCase
         do {
             self::assertSame(CURLM_OK, curl_multi_exec($multi, $running));
             $result = $observer->query(
-                'SELECT DISTINCT r.THREAD_ID AS requester_thread_id ' .
+                'SELECT DISTINCT r.THREAD_ID AS requester_thread_id, ' .
+                    'r.PROCESSLIST_ID AS requester_processlist_id, ' .
+                    'b.PROCESSLIST_ID AS blocker_processlist_id ' .
                     'FROM performance_schema.data_lock_waits w ' .
                     'JOIN performance_schema.data_locks l ON l.ENGINE_LOCK_ID = w.REQUESTING_ENGINE_LOCK_ID ' .
                     'JOIN performance_schema.threads b ON b.THREAD_ID = w.BLOCKING_THREAD_ID ' .
                     'JOIN performance_schema.threads r ON r.THREAD_ID = w.REQUESTING_THREAD_ID ' .
-                    'WHERE b.PROCESSLIST_ID = ' .
-                    $ownerId .
-                    ' AND l.OBJECT_SCHEMA = ' .
+                    'WHERE l.OBJECT_SCHEMA = ' .
                     $observer->escape(Config::DB_NAME) .
                     ' AND l.OBJECT_NAME = ' .
                     $observer->escape($table),
             );
             self::assertNotFalse($result, 'Independent lock instrumentation must be available.');
-            $waiters = [];
+            $edges = [];
             foreach ($result->result_array() as $row) {
-                $waiters[(int) $row['requester_thread_id']] = (int) $row['requester_thread_id'];
+                $requesterProcessId = (int) ($row['requester_processlist_id'] ?? 0);
+                $blockerProcessId = (int) ($row['blocker_processlist_id'] ?? 0);
+                if ($requesterProcessId > 0 && $blockerProcessId > 0) {
+                    $edges[] = [
+                        'requester_process_id' => $requesterProcessId,
+                        'blocker_process_id' => $blockerProcessId,
+                        'requester_thread_id' => (int) $row['requester_thread_id'],
+                    ];
+                }
             }
+            $reachable = [$ownerId => true];
+            $waiters = [];
+            do {
+                $changed = false;
+                foreach ($edges as $edge) {
+                    if (
+                        isset($reachable[$edge['blocker_process_id']]) &&
+                        !isset($reachable[$edge['requester_process_id']])
+                    ) {
+                        $reachable[$edge['requester_process_id']] = true;
+                        $waiters[$edge['requester_thread_id']] = $edge['requester_thread_id'];
+                        $changed = true;
+                    }
+                }
+            } while ($changed);
             if (count($waiters) >= $minimum) {
                 return $waiters;
             }
