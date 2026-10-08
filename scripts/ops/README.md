@@ -8,6 +8,9 @@ Current production monitor roles are documented in `docs/uptime-kuma.md`.
 For agent-first production diagnostics and post-change validation, start with
 `docs/ops/agent-operations.md` and the `prod_*.sh` scripts in this directory.
 
+For the prepared, inactive backoffice request-duration summary and its separate
+production activation boundary, see [`docs/ops/backoffice-latency.md`](../../docs/ops/backoffice-latency.md).
+
 For the on-demand, synthetic-only production Provider UI browser smoke, use
 `docs/release-gate-provider-ui-smoke.md`. It deliberately runs Playwright on the
 operator workstation, not on the production host or in Kuma.

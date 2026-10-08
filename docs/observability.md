@@ -12,6 +12,11 @@ without turning top-level docs into an operations runbook.
 
 These layers complement each other. They do not replace each other.
 
+The first staff-use request-duration gap and the inactive, data-minimal
+measurement contract are documented in
+[`docs/ops/backoffice-latency.md`](ops/backoffice-latency.md). Existing health
+and availability monitors are not a latency baseline for authenticated paths.
+
 ## Runtime Matrix
 
 PDF renderer endpoint resolution:
