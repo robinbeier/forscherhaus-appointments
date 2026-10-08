@@ -477,6 +477,12 @@ class CiPathFilterMatrixTest extends TestCase
         self::assertTrue($matches['integration_smoke']);
     }
 
+    public function testBookingCheckoutBrowserRunnerChangeTriggersIntegrationSmoke(): void
+    {
+        $matches = $this->applyFilters(['scripts/ci/booking_checkout_browser.js']);
+        self::assertTrue($matches['integration_smoke']);
+    }
+
     public function testDashboardSummaryBrowserCheckLibraryChangeTriggersIntegrationSmoke(): void
     {
         $matches = $this->applyFilters(['scripts/ci/lib/DashboardSummaryBrowserCheck.php']);

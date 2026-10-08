@@ -253,8 +253,8 @@ async function main() {
 
     stage = 'slot';
     await page.waitForSelector('#wizard-frame-2', {state: 'visible'});
-    const expectedAvailabilityResponse = page.waitForResponse(async (response) => {
-        const request = response.request();
+    await page.waitForFunction(() => window.jQuery && jQuery.active === 0);
+    const isExpectedAvailabilityRequest = (request) => {
         if (
             request.method() !== 'POST' ||
             new URL(request.url()).origin !== expectedOrigin ||
@@ -266,15 +266,75 @@ async function main() {
         return (
             form.get('selected_date') === String(input.expected_date) &&
             form.get('service_id') === selectedService &&
-            form.get('provider_id') === selectedProvider &&
-            response.ok()
+            form.get('provider_id') === selectedProvider
         );
-    });
-    await page.evaluate((expectedDate) => {
+    };
+    const isExpectedAvailabilityResponse = (response) =>
+        isExpectedAvailabilityRequest(response.request()) && response.ok();
+    const targetMonth = `${String(input.expected_date).slice(0, 7)}-01`;
+    const fixtureMonthChanged = await page.evaluate((expectedDate) => {
         const input = document.querySelector('#select-date');
         if (!input?._flatpickr) throw new Error('booking date picker was not initialized.');
-        input._flatpickr.setDate(expectedDate, true);
+        const [year, month] = expectedDate.split('-').map(Number);
+        return input._flatpickr.currentYear !== year || input._flatpickr.currentMonth !== month - 1;
     }, input.expected_date);
+    const expectedAvailabilityResponse = page.waitForResponse(isExpectedAvailabilityResponse);
+    const monthRefreshResponse = fixtureMonthChanged
+        ? page.waitForResponse((response) => {
+              const url = new URL(response.url());
+              return (
+                  response.request().method() === 'GET' &&
+                  url.origin === expectedOrigin &&
+                  url.pathname === new URL(routePath(input.base_url, 'booking/get_unavailable_dates')).pathname &&
+                  decodeURIComponent(url.searchParams.get('selected_date') || '') === targetMonth &&
+                  url.searchParams.get('service_id') === selectedService &&
+                  url.searchParams.get('provider_id') === selectedProvider &&
+                  response.ok()
+              );
+          })
+        : null;
+    await page.evaluate((expectedDate) => {
+        const input = document.querySelector('#select-date');
+        const [year, month, day] = expectedDate.split('-').map(Number);
+        // Pass noon so Flatpickr's date normalization cannot move a date across
+        // a timezone boundary when the browser and application use different TZs.
+        input._flatpickr.setDate(new Date(year, month - 1, day, 12), true);
+    }, input.expected_date);
+    stage = 'slot-initial-response';
+    await expectedAvailabilityResponse;
+    if (fixtureMonthChanged) {
+        // Booking schedules a second request after the month changes. Wait for
+        // that actual response before deciding the calendar is settled.
+        stage = 'slot-month-refresh';
+        await monthRefreshResponse;
+    }
+    stage = 'slot-initial-drain';
+    await page.waitForFunction(() => window.jQuery && jQuery.active === 0);
+    // The booking page can still finish an availability refresh started while
+    // the provider/date controls were initializing. Re-apply the expected date
+    // after those requests drain. Bind the response to this newly observed
+    // request, so an older same-date response cannot satisfy the final check.
+    let refreshedAvailabilityRequest = null;
+    const refreshedRequest = page.waitForRequest((request) => {
+        if (!isExpectedAvailabilityRequest(request)) return false;
+        refreshedAvailabilityRequest = request;
+        return true;
+    });
+    const refreshedResponse = page.waitForResponse(
+        (response) => response.request() === refreshedAvailabilityRequest && response.ok(),
+    );
+    await page.evaluate((expectedDate) => {
+        const input = document.querySelector('#select-date');
+        const [year, month, day] = expectedDate.split('-').map(Number);
+        input._flatpickr.setDate(new Date(year, month - 1, day, 12), true);
+    }, input.expected_date);
+    stage = 'slot-refreshed-request';
+    await refreshedRequest;
+    stage = 'slot-refreshed-response';
+    const availabilityResponse = await refreshedResponse;
+    stage = 'slot-refreshed-drain';
+    await page.waitForFunction(() => window.jQuery && jQuery.active === 0);
+    stage = 'slot-selected-date';
     await page.waitForFunction((expectedDate) => {
         const input = document.querySelector('#select-date');
         return input?._flatpickr?.selectedDates?.some((date) => {
@@ -284,11 +344,11 @@ async function main() {
             return `${year}-${month}-${day}` === expectedDate;
         });
     }, input.expected_date);
-    const availabilityResponse = await expectedAvailabilityResponse;
     const availabilityPayload = await availabilityResponse.json();
     if (!Array.isArray(availabilityPayload) || availabilityPayload.length === 0) {
         fail('expected-date availability response did not contain any slots.');
     }
+    stage = 'slot-render';
     const slotHandle = await page.waitForFunction(() => {
         const jquery = window.jQuery || window.$;
         const buttons = Array.from(document.querySelectorAll('#available-hours .available-hour'));
