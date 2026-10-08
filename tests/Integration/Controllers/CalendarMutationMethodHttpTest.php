@@ -187,6 +187,65 @@ final class CalendarMutationMethodHttpTest extends TestCase
         }
     }
 
+    public function testClosingWorkingPlanExceptionChangesPublicHoursAndAuthorizedDeleteRestoresThem(): void
+    {
+        $fixture = $this->fixture;
+        $calendar = $this->authenticatedClient();
+        self::assertNotNull($fixture);
+
+        $public = $this->server?->client();
+        self::assertNotNull($public);
+        self::assertSame(200, $public->get('booking')->statusCode);
+
+        $appointment = $fixture->appointment();
+        $unavailability = $this->seedUnavailability();
+        $date = (new DateTimeImmutable('today'))->modify('next monday')->modify('+14 days')->format('Y-m-d');
+        $preservedDate = (new DateTimeImmutable($date))->modify('+7 days')->format('Y-m-d');
+        $this->seedWorkingPlanException($preservedDate);
+        $pair = [
+            'provider_id' => $fixture->providerId,
+            'service_id' => $fixture->serviceId,
+            'selected_date' => $date,
+            'manage_mode' => 'false',
+            'appointment_id' => '',
+        ];
+
+        $before = $this->mutationSnapshot((int) $appointment['id'], (int) $unavailability['id'], $date);
+        $availableBefore = $this->availableHours($public, $pair);
+        self::assertContains('10:00', $availableBefore, 'The synthetic slot must be public before the exception.');
+
+        $save = $calendar->post('calendar/save_working_plan_exception', [
+            'provider_id' => $fixture->providerId,
+            'date' => $date,
+            'working_plan_exception' => [],
+        ]);
+        self::assertTrue((bool) ($this->json($save)['success'] ?? false));
+        $expectedAfterSave = $before['working_plan_exceptions'];
+        $expectedAfterSave[$date] = null;
+        self::assertSame($expectedAfterSave, $this->workingPlanExceptions());
+        self::assertNotContains('10:00', $this->availableHours($public, $pair));
+
+        $afterSave = $this->mutationSnapshot((int) $appointment['id'], (int) $unavailability['id'], $date);
+        self::assertSame($before['appointment'], $afterSave['appointment']);
+        self::assertSame($before['unavailability'], $afterSave['unavailability']);
+        self::assertSame($before['customer'], $afterSave['customer']);
+        self::assertSame($before['service'], $afterSave['service']);
+
+        $delete = $calendar->post('calendar/delete_working_plan_exception', [
+            'provider_id' => $fixture->providerId,
+            'date' => $date,
+        ]);
+        self::assertTrue((bool) ($this->json($delete)['success'] ?? false));
+        self::assertSame($before['working_plan_exceptions'], $this->workingPlanExceptions());
+        self::assertContains('10:00', $this->availableHours($public, $pair));
+
+        $afterDelete = $this->mutationSnapshot((int) $appointment['id'], (int) $unavailability['id'], $date);
+        self::assertSame($before['appointment'], $afterDelete['appointment']);
+        self::assertSame($before['unavailability'], $afterDelete['unavailability']);
+        self::assertSame($before['customer'], $afterDelete['customer']);
+        self::assertSame($before['service'], $afterDelete['service']);
+    }
+
     private function authenticatedClient(bool $followRedirects = true): GateHttpClient
     {
         $fixture = $this->fixture;
@@ -283,6 +342,7 @@ final class CalendarMutationMethodHttpTest extends TestCase
             'appointment' => $this->fixture->row('appointments', $appointmentId),
             'unavailability' => $this->fixture->row('appointments', $unavailabilityId),
             'customer' => $this->fixture->row('users', $this->fixture->customerId),
+            'service' => $this->fixture->row('services', $this->fixture->serviceId),
             'working_plan_exceptions' => $this->workingPlanExceptions(),
             'date' => $date,
         ];
@@ -294,5 +354,15 @@ final class CalendarMutationMethodHttpTest extends TestCase
         $data = json_decode($response->body, true, 512, JSON_THROW_ON_ERROR);
         self::assertIsArray($data);
         return $data;
+    }
+
+    /** @param array<string, string|int> $payload @return list<string> */
+    private function availableHours(GateHttpClient $client, array $payload): array
+    {
+        $response = $client->post('booking/get_available_hours', $payload);
+        self::assertSame(200, $response->statusCode, $response->body);
+        $hours = json_decode($response->body, true, 512, JSON_THROW_ON_ERROR);
+        self::assertIsArray($hours);
+        return array_values(array_map('strval', $hours));
     }
 }
