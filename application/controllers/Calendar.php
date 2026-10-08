@@ -936,7 +936,7 @@ class Calendar extends EA_Controller
 
         try {
             if (!$this->currentCalendarCan('edit', PRIV_USERS)) {
-                throw new RuntimeException('You do not have the required permissions for this task.');
+                throw new RuntimeException('You do not have the required permissions for this task.', 403);
             }
 
             $request_dto = $this->calendarRequestDtoFactory()->buildWorkingPlanExceptionRequestDto();
@@ -986,7 +986,7 @@ class Calendar extends EA_Controller
 
         try {
             if (!$this->currentCalendarCan('edit', PRIV_USERS)) {
-                throw new RuntimeException('You do not have the required permissions for this task.');
+                throw new RuntimeException('You do not have the required permissions for this task.', 403);
             }
 
             $request_dto = $this->calendarRequestDtoFactory()->buildWorkingPlanExceptionRequestDto();

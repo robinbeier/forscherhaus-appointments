@@ -246,6 +246,58 @@ final class CalendarMutationMethodHttpTest extends TestCase
         self::assertSame($before['service'], $afterDelete['service']);
     }
 
+    public function testProviderAndSecretaryCannotSaveOrDeleteWorkingPlanExceptionOverHttp(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $public = $this->server?->client();
+        self::assertNotNull($public);
+        self::assertSame(200, $public->get('booking')->statusCode);
+
+        $date = (new DateTimeImmutable('today'))->modify('next monday')->modify('+14 days')->format('Y-m-d');
+        $this->seedWorkingPlanException($date);
+        $beforeExceptions = $this->workingPlanExceptions();
+        $publicPair = [
+            'provider_id' => $fixture->providerId,
+            'service_id' => $fixture->serviceId,
+            'selected_date' => $date,
+            'manage_mode' => 'false',
+            'appointment_id' => '',
+        ];
+        $beforeHours = $this->availableHours($public, $publicPair);
+        self::assertContains('10:00', $beforeHours, 'The synthetic slot must be publicly available before denial checks.');
+
+        $admin = $this->authenticatedClient();
+        $secretary = $this->createSecretary($admin, 'calendar-denied');
+        $clients = [
+            'provider' => $this->login($fixture->run . '_provider', $fixture->password),
+            'secretary' => $this->login($secretary['username'], $fixture->password),
+        ];
+
+        foreach ($clients as $role => $client) {
+            $save = $client->post('calendar/save_working_plan_exception', [
+                'provider_id' => $fixture->providerId,
+                'date' => $date,
+                'working_plan_exception' => [],
+            ]);
+            self::assertSame(403, $save->statusCode, $role . ' save: ' . $save->body);
+            self::assertSame($beforeExceptions, $this->workingPlanExceptions(), $role . ' save mutated settings.');
+            self::assertSame($beforeHours, $this->availableHours($public, $publicPair), $role . ' save changed hours.');
+
+            $delete = $client->post('calendar/delete_working_plan_exception', [
+                'provider_id' => $fixture->providerId,
+                'date' => $date,
+            ]);
+            self::assertSame(403, $delete->statusCode, $role . ' delete: ' . $delete->body);
+            self::assertSame($beforeExceptions, $this->workingPlanExceptions(), $role . ' delete mutated settings.');
+            self::assertSame(
+                $beforeHours,
+                $this->availableHours($public, $publicPair),
+                $role . ' delete changed hours.',
+            );
+        }
+    }
+
     private function authenticatedClient(bool $followRedirects = true): GateHttpClient
     {
         $fixture = $this->fixture;
@@ -261,6 +313,36 @@ final class CalendarMutationMethodHttpTest extends TestCase
         ]);
         self::assertSame(200, $login->statusCode, $login->body);
         self::assertTrue((bool) (json_decode($login->body, true, 512, JSON_THROW_ON_ERROR)['success'] ?? false));
+        return $client;
+    }
+
+    /** @return array{username:string} */
+    private function createSecretary(GateHttpClient $admin, string $case): array
+    {
+        $payload = $this->fixture->secretaryWritePayload($case, [$this->fixture->providerId]);
+        $response = $admin->post('secretaries/store', [
+            'secretary' => [
+                'first_name' => $payload['firstName'],
+                'last_name' => $payload['lastName'],
+                'email' => $payload['email'],
+                'notes' => $payload['notes'],
+                'providers' => $payload['providers'],
+                'settings' => $payload['settings'],
+            ],
+        ]);
+        self::assertSame(200, $response->statusCode, $response->body);
+        self::assertTrue((bool) (json_decode($response->body, true, 512, JSON_THROW_ON_ERROR)['success'] ?? false));
+        return ['username' => $payload['settings']['username']];
+    }
+
+    private function login(string $username, string $password): GateHttpClient
+    {
+        $client = $this->server?->client();
+        self::assertNotNull($client);
+        self::assertSame(200, $client->get('login')->statusCode);
+        $response = $client->post('login/validate', ['username' => $username, 'password' => $password]);
+        self::assertSame(200, $response->statusCode, $response->body);
+        self::assertTrue((bool) (json_decode($response->body, true, 512, JSON_THROW_ON_ERROR)['success'] ?? false));
         return $client;
     }
 
