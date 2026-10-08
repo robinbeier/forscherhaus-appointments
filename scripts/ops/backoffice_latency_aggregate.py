@@ -52,6 +52,7 @@ _ROUTE_PATHS = {
     "/backend_api/ajax_get_calendar_appointments": "legacy_alias_redirect",
     "/backend_api/ajax_save_unavailability": "legacy_alias_redirect",
 }
+_CALENDAR_LINK_PATH = re.compile(r"^/calendar/(?:index|reschedule)/[^/]+$")
 
 
 def _empty_operation_counts() -> dict[str, dict[str, Any]]:
@@ -130,6 +131,9 @@ def parse_line(line: str) -> tuple[str, dict[str, Any] | None]:
     if target.startswith("/index.php/"):
         target = "/" + target[len("/index.php/"):]
     operation = _ROUTE_PATHS.get(target)
+    if operation is None and _CALENDAR_LINK_PATH.fullmatch(target):
+        # The final segment is a capability token; classify it, never retain it.
+        operation = "calendar_page"
     if operation is None:
         return "excluded_route", {"timestamp": timestamp}
     duration_text = match["duration"]

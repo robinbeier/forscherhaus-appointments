@@ -23,7 +23,9 @@ does not write files, echo a line, or emit a request target or identifier. The
 operation list is closed: login page/validation, dashboard page/data, calendar
 page/event read/unavailability save, and separate legacy redirect aliases.
 The direct `/index.php/` entrypoint is canonical and stays in the same operation
-as its corresponding controller path. Unrecognized paths are excluded.
+as its corresponding controller path. The `/calendar/index/<token>` and
+`/calendar/reschedule/<token>` links count only as `calendar_page`; their token
+is never retained. Unrecognized paths are excluded.
 
 Before emitting any counts, the CLI fails closed with only a
 `privacy_suppressed` result if fewer than 20 measurements exist overall or for

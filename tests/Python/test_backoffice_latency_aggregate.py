@@ -66,6 +66,15 @@ class BackofficeLatencyAggregateTest(unittest.TestCase):
         self.assertEqual(result["operations"]["dashboard_data"]["duration_buckets"]["3000000us+"], 1)
         self.assertEqual(result["operations"]["dashboard_page"]["duration_buckets"]["3000000us+"], 0)
 
+    def test_calendar_link_routes_are_classified_without_exposing_tokens(self):
+        token = "private-appointment-capability"
+        for path in (f"/calendar/index/{token}", f"/calendar/reschedule/{token}", f"/index.php/calendar/reschedule/{token}"):
+            reason, event = module.parse_line(line(path))
+            self.assertEqual(reason, "valid")
+            self.assertEqual(event["operation"], "calendar_page")
+            self.assertNotIn(token, repr(event))
+        self.assertEqual(module.parse_line(line(f"/calendar/reschedule/{token}/extra"))[0], "excluded_route")
+
     def test_missing_invalid_malformed_and_unknown_routes_are_separate(self):
         result = module.aggregate([line(duration=None), line(duration="oops"), line("/unknown", duration=None), line("/unknown", duration="oops"), "not an access line\n", line("/customers", duration="100")], START, END)
         self.assertEqual(result["missing_duration"], 1)
