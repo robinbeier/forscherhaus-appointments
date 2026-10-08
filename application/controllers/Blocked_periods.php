@@ -135,6 +135,8 @@ class Blocked_periods extends EA_Controller
      */
     public function store(): void
     {
+        $owns_transaction = false;
+
         try {
             $user_id = (int) session('user_id');
             if (!$user_id || cannot('add', PRIV_BLOCKED_PERIODS, $user_id)) {
@@ -143,6 +145,20 @@ class Blocked_periods extends EA_Controller
             }
             if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
                 abort(405, 'Method Not Allowed', ['Allow: POST']);
+                return;
+            }
+
+            $owns_transaction = !$this->db->trans_active();
+            if ($owns_transaction && !$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start blocked-period create transaction.');
+            }
+
+            if (!$this->lockActorAndCheckPermission($user_id, 'add')) {
+                if ($owns_transaction) {
+                    $this->db->trans_rollback();
+                    $owns_transaction = false;
+                }
+                abort(403, 'Forbidden');
                 return;
             }
 
@@ -157,11 +173,22 @@ class Blocked_periods extends EA_Controller
 
             $blocked_period = $this->blocked_periods_model->find($blocked_period_id);
 
+            if (!$this->db->trans_status()) {
+                throw new RuntimeException('Could not complete blocked-period create transaction.');
+            }
+            if ($owns_transaction && !$this->db->trans_commit()) {
+                throw new RuntimeException('Could not commit blocked-period create transaction.');
+            }
+            $owns_transaction = false;
+
             json_response([
                 'success' => true,
                 'id' => $blocked_period_id,
             ]);
         } catch (Throwable $e) {
+            if ($owns_transaction) {
+                $this->db->trans_rollback();
+            }
             json_exception($e);
         }
     }
@@ -199,6 +226,8 @@ class Blocked_periods extends EA_Controller
      */
     public function update(): void
     {
+        $owns_transaction = false;
+
         try {
             $user_id = (int) session('user_id');
             if (!$user_id || cannot('edit', PRIV_BLOCKED_PERIODS, $user_id)) {
@@ -207,6 +236,20 @@ class Blocked_periods extends EA_Controller
             }
             if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
                 abort(405, 'Method Not Allowed', ['Allow: POST']);
+                return;
+            }
+
+            $owns_transaction = !$this->db->trans_active();
+            if ($owns_transaction && !$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start blocked-period update transaction.');
+            }
+
+            if (!$this->lockActorAndCheckPermission($user_id, 'edit')) {
+                if ($owns_transaction) {
+                    $this->db->trans_rollback();
+                    $owns_transaction = false;
+                }
+                abort(403, 'Forbidden');
                 return;
             }
 
@@ -221,11 +264,22 @@ class Blocked_periods extends EA_Controller
 
             $blocked_period = $this->blocked_periods_model->find($blocked_period_id);
 
+            if (!$this->db->trans_status()) {
+                throw new RuntimeException('Could not complete blocked-period update transaction.');
+            }
+            if ($owns_transaction && !$this->db->trans_commit()) {
+                throw new RuntimeException('Could not commit blocked-period update transaction.');
+            }
+            $owns_transaction = false;
+
             json_response([
                 'success' => true,
                 'id' => $blocked_period_id,
             ]);
         } catch (Throwable $e) {
+            if ($owns_transaction) {
+                $this->db->trans_rollback();
+            }
             json_exception($e);
         }
     }
@@ -235,6 +289,8 @@ class Blocked_periods extends EA_Controller
      */
     public function destroy(): void
     {
+        $owns_transaction = false;
+
         try {
             $user_id = (int) session('user_id');
             if (!$user_id || cannot('delete', PRIV_BLOCKED_PERIODS, $user_id)) {
@@ -246,6 +302,20 @@ class Blocked_periods extends EA_Controller
                 return;
             }
 
+            $owns_transaction = !$this->db->trans_active();
+            if ($owns_transaction && !$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start blocked-period deletion transaction.');
+            }
+
+            if (!$this->lockActorAndCheckPermission($user_id, 'delete')) {
+                if ($owns_transaction) {
+                    $this->db->trans_rollback();
+                    $owns_transaction = false;
+                }
+                abort(403, 'Forbidden');
+                return;
+            }
+
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityIdRequestDto('blocked_period_id');
             $blocked_period_id = $request_dto->id;
 
@@ -253,12 +323,39 @@ class Blocked_periods extends EA_Controller
 
             $this->blocked_periods_model->delete($blocked_period_id);
 
+            if (!$this->db->trans_status()) {
+                throw new RuntimeException('Could not complete blocked-period deletion transaction.');
+            }
+            if ($owns_transaction && !$this->db->trans_commit()) {
+                throw new RuntimeException('Could not commit blocked-period deletion transaction.');
+            }
+            $owns_transaction = false;
+
             json_response([
                 'success' => true,
             ]);
         } catch (Throwable $e) {
+            if ($owns_transaction) {
+                $this->db->trans_rollback();
+            }
             json_exception($e);
         }
+    }
+
+    private function lockActorAndCheckPermission(int $user_id, string $action): bool
+    {
+        $locked_actor = $this->db->query(
+            'SELECT `id` FROM `' . $this->db->dbprefix('users') . '` WHERE `id` = ? FOR UPDATE',
+            [$user_id],
+        );
+
+        if ($locked_actor === false) {
+            throw new RuntimeException('Could not lock blocked-period mutation actor.');
+        }
+
+        $actor = $locked_actor->row_array();
+
+        return !empty($actor) && !cannot($action, PRIV_BLOCKED_PERIODS, $user_id);
     }
 
     private function backofficeRequestDtoFactory(): Backoffice_request_dto_factory

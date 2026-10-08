@@ -322,6 +322,23 @@ Zwei-Verbindungs-Test verschiebt die Anbieterzuordnung zwischen erster
 Autorisierung und Sperre und erwartet eine Ablehnung ohne Änderung. Lokale
 Nachweise belegen keine produktive Auslieferung.
 
+## Klassische globale Sperrzeiten
+
+Die authentifizierten POST-Wege `blocked_periods/store`, `update` und `destroy`
+prüfen das jeweilige gespeicherte Aktionsrecht. Die Controller-Transaktion
+sperrt den handelnden Benutzer vor dem erneuten Rechtecheck und hält diese
+Sperre bis zum Commit der Sperrzeitänderung. Ein vor Erwerb dieser Sperre
+bestätigter Rollenentzug lehnt die Änderung mit 403 ohne Teilmutation ab.
+Ein bereits laufender, zuerst autorisierter Schreibvorgang darf vor einem
+später wartenden Rollenentzug abgeschlossen werden.
+
+`BlockedPeriodsPermissionRaceHttpTest` prüft die drei POST-Aktionen mit
+eigenem Admin, eigenen Sperrzeiten und einer zweiten Datenbankverbindung,
+welche den Actor-Lock hält, die Rolle ändert und erst dann den HTTP-Request
+fortsetzt. `BackofficeWriteHttpTest` belegt die normalen erlaubten CRUD-Wege.
+Diese lokalen Tests belegen weder Änderungen an globalen Rollenrechten noch
+einen fachlichen Live-Schreibtest auf Produktion.
+
 ## Blocked Periods API v1
 
 Die API verwaltet globale Sperrzeiten. Admin-Basic-Authentifizierung oder der
