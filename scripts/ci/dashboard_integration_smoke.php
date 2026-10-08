@@ -9,6 +9,7 @@ require_once __DIR__ . '/lib/BrowserRuntimeEvidence.php';
 require_once __DIR__ . '/lib/CheckSelection.php';
 require_once __DIR__ . '/lib/DashboardSummaryBrowserCheck.php';
 require_once __DIR__ . '/lib/LdapFixtureCleanup.php';
+require_once __DIR__ . '/lib/ProviderCalendarFixture.php';
 
 use function CiRuntimeEvidence\buildDefaultBrowserRuntimeEvidenceArtifactsDir;
 use function CiRuntimeEvidence\collectBookingPageBrowserEvidence;
@@ -16,6 +17,7 @@ use function CiRuntimeEvidence\parseBrowserRuntimeEvidenceMode;
 use function CiRuntimeEvidence\runDashboardSummaryBrowserCheck;
 use function CiRuntimeEvidence\shouldCollectBrowserRuntimeEvidenceForChecks;
 use CiContract\CheckSelection;
+use CiContract\ProviderCalendarFixture;
 use ReleaseGate\GateAssertionException;
 use ReleaseGate\GateAssertions;
 use ReleaseGate\GateCliSupport;
@@ -378,6 +380,25 @@ try {
                 'service_id' => $providerServicePair['service_id'],
                 'provider_id' => $providerServicePair['provider_id'],
             ];
+        });
+    }
+
+    if (shouldRunConfiguredCheck($config, 'provider_calendar_unavailability_browser')) {
+        $runCheck('provider_calendar_unavailability_browser', static function () use (
+            $client,
+            $config,
+            $repoRoot,
+            &$providerServicePair,
+        ): array {
+            if (!is_array($providerServicePair) || !isset($providerServicePair['service_id'])) {
+                throw new GateAssertionException('Provider calendar browser check has no synthetic service fixture.');
+            }
+            return dashboardIntegrationSmokeAssertProviderCalendarDialogBrowser(
+                $client,
+                $config,
+                $repoRoot,
+                (int) $providerServicePair['service_id'],
+            );
         });
     }
 
@@ -921,6 +942,7 @@ function integrationSmokeSupportedCheckIds(): array
         'calendar_unavailability_dialog_browser',
         'booking_page_readiness',
         'booking_extract_bootstrap',
+        'provider_calendar_unavailability_browser',
         'booking_available_hours',
         'booking_checkout_browser',
         'booking_unavailable_dates',
@@ -955,6 +977,7 @@ function integrationSmokeCheckDependencies(): array
         'calendar_unavailability_dialog_browser' => ['dashboard_summary_browser_render'],
         'booking_page_readiness' => [],
         'booking_extract_bootstrap' => ['booking_page_readiness'],
+        'provider_calendar_unavailability_browser' => ['auth_login_validate', 'booking_extract_bootstrap'],
         'booking_available_hours' => ['booking_extract_bootstrap'],
         'booking_checkout_browser' => ['booking_available_hours'],
         'booking_unavailable_dates' => ['booking_available_hours'],
@@ -1236,6 +1259,64 @@ function dashboardIntegrationSmokeAssertCalendarDialogBrowser(
 }
 
 /**
+ * Exercise the same intercepted calendar dialog with a private synthetic provider.
+ * The local fixture is removed even when browser execution fails.
+ *
+ * @param array<string, mixed> $config
+ * @return array<string, mixed>
+ */
+function dashboardIntegrationSmokeAssertProviderCalendarDialogBrowser(
+    GateHttpClient $adminClient,
+    array $config,
+    string $repoRoot,
+    int $serviceId,
+): array {
+    dashboardIntegrationSmokeBootstrapApplication($repoRoot);
+    $baseUrl = rtrim((string) $config['base_url'], '/');
+    $fixture = ProviderCalendarFixture::create($adminClient, $baseUrl, $serviceId);
+
+    try {
+        $providerClient = dashboardIntegrationSmokeCreateClient($config);
+        GateAssertions::assertStatus($providerClient->get('login')->statusCode, 200, 'provider GET /login');
+        $login = $providerClient->post('login/validate', [
+            'username' => $fixture['username'],
+            'password' => $fixture['password'],
+        ]);
+        GateAssertions::assertStatus($login->statusCode, 200, 'provider POST /login/validate');
+        GateAssertions::assertLoginPayload(GateAssertions::decodeJson($login->body, 'provider login'));
+
+        $targetUrl = dashboardIntegrationSmokeBuildAppUrl($config, 'calendar');
+        $cookies = \ReleaseGate\normalizeCookieRecordsForPlaywright($providerClient->cookieRecords(), $targetUrl);
+        if ($cookies === []) {
+            throw new GateAssertionException('Provider calendar browser check has no authenticated session cookies.');
+        }
+        $input = json_encode(
+            [
+                'mode' => 'provider',
+                'expected_provider_id' => $fixture['provider_id'],
+                'base_url' => dashboardIntegrationSmokeBuildAppUrl($config, ''),
+                'target_url' => $targetUrl,
+                'session_cookies' => $cookies,
+                'browser' => \ReleaseGate\resolveConfiguredPlaywrightBrowser(),
+                'browser_executable_path' => (string) (getenv('PLAYWRIGHT_MCP_EXECUTABLE_PATH') ?: ''),
+                'browser_open_timeout' => (int) $config['browser_open_timeout'],
+            ],
+            JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+        );
+        $result = GateProcessRunner::run(
+            ['node', $repoRoot . '/scripts/ci/calendar_unavailability_dialog_browser.js'],
+            $repoRoot,
+            null,
+            max(115, (int) $config['browser_open_timeout'] * 3 + 55),
+            $input,
+        );
+        return dashboardIntegrationSmokeParseCalendarDialogBrowserResult($result, true);
+    } finally {
+        ProviderCalendarFixture::cleanup($adminClient, $baseUrl, $fixture['provider_id'], $fixture['marker']);
+    }
+}
+
+/**
  * Exercise the public booking wizard through name-only checkout. The browser
  * submits the real payload to booking/register, which is fulfilled with a
  * synthetic confirmation hash so this CI smoke leaves no appointment behind.
@@ -1467,7 +1548,7 @@ function dashboardIntegrationSmokeWithNameOnlyBookingSettings(
 }
 
 /** @param array<string, mixed> $result */
-function dashboardIntegrationSmokeParseCalendarDialogBrowserResult(array $result): array
+function dashboardIntegrationSmokeParseCalendarDialogBrowserResult(array $result, bool $providerMode = false): array
 {
     if (($result['timed_out'] ?? false) || ($result['exit_code'] ?? 1) !== 0) {
         $failureClass = trim((string) ($result['stderr'] ?? ''));
@@ -1484,6 +1565,7 @@ function dashboardIntegrationSmokeParseCalendarDialogBrowserResult(array $result
                     'success',
                     'delete',
                     'working_plan_exception',
+                    'role',
                     'payload',
                     'cleanup',
                 ],
@@ -1499,26 +1581,31 @@ function dashboardIntegrationSmokeParseCalendarDialogBrowserResult(array $result
     if (!is_array($payload)) {
         throw new GateAssertionException('Calendar dialog browser check returned no valid result.');
     }
-    foreach (
-        [
-            'ok',
-            'request_payload_verified',
-            'failure_state_verified',
-            'success_state_verified',
-            'existing_event_prepopulation_verified',
-            'edit_failure_state_verified',
-            'edit_success_reload_verified',
-            'delete_failure_state_verified',
-            'delete_success_reload_verified',
-            'working_plan_exception_create_verified',
-            'working_plan_exception_edit_verified',
-            'working_plan_exception_delete_verified',
-            'table_view_literal_name_verified',
-            'table_view_write_boundary_verified',
-            'cleanup_verified',
-        ]
-        as $property
-    ) {
+    $requiredProperties = [
+        'ok',
+        'request_payload_verified',
+        'failure_state_verified',
+        'success_state_verified',
+        'existing_event_prepopulation_verified',
+        'edit_failure_state_verified',
+        'edit_success_reload_verified',
+        'delete_failure_state_verified',
+        'delete_success_reload_verified',
+        'table_view_literal_name_verified',
+        'table_view_write_boundary_verified',
+        'cleanup_verified',
+    ];
+    $requiredProperties = array_merge(
+        $requiredProperties,
+        $providerMode
+            ? ['provider_role_verified', 'provider_ownership_verified']
+            : [
+                'working_plan_exception_create_verified',
+                'working_plan_exception_edit_verified',
+                'working_plan_exception_delete_verified',
+            ],
+    );
+    foreach ($requiredProperties as $property) {
         if (($payload[$property] ?? null) !== true) {
             throw new GateAssertionException('Calendar dialog browser check did not verify ' . $property . '.');
         }
@@ -1526,28 +1613,37 @@ function dashboardIntegrationSmokeParseCalendarDialogBrowserResult(array $result
     if (!is_int($payload['duration_ms'] ?? null) || $payload['duration_ms'] < 0) {
         throw new GateAssertionException('Calendar dialog browser check returned no duration.');
     }
-    if (!is_int($payload['working_plan_duration_ms'] ?? null) || $payload['working_plan_duration_ms'] < 0) {
+    if (
+        !$providerMode &&
+        (!is_int($payload['working_plan_duration_ms'] ?? null) || $payload['working_plan_duration_ms'] < 0)
+    ) {
         throw new GateAssertionException('Calendar dialog browser check returned no working-plan duration.');
     }
 
-    return [
-        'request_payload_verified' => true,
-        'failure_state_verified' => true,
-        'success_state_verified' => true,
-        'existing_event_prepopulation_verified' => true,
-        'edit_failure_state_verified' => true,
-        'edit_success_reload_verified' => true,
-        'delete_failure_state_verified' => true,
-        'delete_success_reload_verified' => true,
-        'working_plan_exception_create_verified' => true,
-        'working_plan_exception_edit_verified' => true,
-        'working_plan_exception_delete_verified' => true,
-        'table_view_literal_name_verified' => true,
-        'table_view_write_boundary_verified' => true,
-        'cleanup_verified' => true,
-        'browser_duration_ms' => $payload['duration_ms'],
-        'working_plan_browser_duration_ms' => $payload['working_plan_duration_ms'],
-    ];
+    return array_merge(
+        [
+            'request_payload_verified' => true,
+            'failure_state_verified' => true,
+            'success_state_verified' => true,
+            'existing_event_prepopulation_verified' => true,
+            'edit_failure_state_verified' => true,
+            'edit_success_reload_verified' => true,
+            'delete_failure_state_verified' => true,
+            'delete_success_reload_verified' => true,
+            'table_view_literal_name_verified' => true,
+            'table_view_write_boundary_verified' => true,
+            'cleanup_verified' => true,
+            'browser_duration_ms' => $payload['duration_ms'],
+        ],
+        $providerMode
+            ? ['provider_role_verified' => true, 'provider_ownership_verified' => true]
+            : [
+                'working_plan_exception_create_verified' => true,
+                'working_plan_exception_edit_verified' => true,
+                'working_plan_exception_delete_verified' => true,
+                'working_plan_browser_duration_ms' => $payload['working_plan_duration_ms'],
+            ],
+    );
 }
 
 /**

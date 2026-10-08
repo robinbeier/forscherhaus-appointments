@@ -235,6 +235,7 @@ jobs:
               - 'scripts/ci/dashboard_summary_browser.js'
               - 'scripts/ci/lib/DashboardSummaryBrowserCheck.php'
               - 'scripts/ci/lib/CheckSelection.php'
+              - 'scripts/ci/lib/ProviderCalendarFixture.php'
               - 'scripts/ci/lib/local_full_gate_selection.sh'
               - 'scripts/ci/nginx_private_paths_smoke.sh'
               - 'scripts/ci/private_local_sessions_smoke.sh'
