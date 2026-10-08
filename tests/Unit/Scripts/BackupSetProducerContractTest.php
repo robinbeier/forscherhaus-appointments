@@ -552,9 +552,11 @@ final class BackupSetProducerContractTest extends TestCase
     public function testProducerSupervisorForwardsTermAndReturnsChildStatus(): void
     {
         $pidPath = tempnam(sys_get_temp_dir(), 'fh-producer-child-pid-');
+        $readyPath = tempnam(sys_get_temp_dir(), 'fh-producer-child-ready-');
         $childPath = tempnam(sys_get_temp_dir(), 'fh-producer-child-');
         $supervisorPath = tempnam(sys_get_temp_dir(), 'fh-producer-supervisor-signal-');
         self::assertIsString($pidPath);
+        self::assertIsString($readyPath);
         self::assertIsString($childPath);
         self::assertIsString($supervisorPath);
         $childPid = null;
@@ -567,6 +569,9 @@ final class BackupSetProducerContractTest extends TestCase
                     var_export($pidPath, true) .
                     ", 'w', encoding='ascii').write(str(os.getpid()))\n" .
                     "signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(SystemExit(42)))\n" .
+                    'open(' .
+                    var_export($readyPath, true) .
+                    ", 'w', encoding='ascii').write('ready')\n" .
                     "while True:\n    time.sleep(0.05)\n",
             );
             chmod($childPath, 0444);
@@ -586,7 +591,8 @@ final class BackupSetProducerContractTest extends TestCase
             fclose($pipes[0]);
             for ($attempt = 0; $attempt < 100; $attempt++) {
                 $value = trim((string) file_get_contents($pidPath));
-                if (ctype_digit($value)) {
+                $ready = trim((string) file_get_contents($readyPath));
+                if (ctype_digit($value) && $ready === 'ready') {
                     $childPid = (int) $value;
                     break;
                 }
@@ -610,6 +616,7 @@ final class BackupSetProducerContractTest extends TestCase
                 proc_close($process);
             }
             @unlink($pidPath);
+            @unlink($readyPath);
             @unlink($childPath);
             @unlink($supervisorPath);
         }
