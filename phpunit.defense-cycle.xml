@@ -72,6 +72,7 @@
             <file>./tests/Integration/Controllers/BackofficeWriteHttpTest.php</file>
             <file>./tests/Integration/Controllers/BackofficeHttpContractTest.php</file>
             <file>./tests/Integration/Controllers/CalendarCustomerAccessHttpTest.php</file>
+            <file>./tests/Integration/Controllers/CalendarReadRevocationHttpTest.php</file>
             <file>./tests/Integration/Controllers/CalendarRangeLimitHttpTest.php</file>
             <file>./tests/Integration/Controllers/BookingCalendarAmbiguousHashHttpTest.php</file>
             <file>./tests/Integration/Controllers/CalendarMutationMethodHttpTest.php</file>
