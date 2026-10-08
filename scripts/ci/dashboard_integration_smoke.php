@@ -1474,7 +1474,19 @@ function dashboardIntegrationSmokeParseCalendarDialogBrowserResult(array $result
         if (
             !in_array(
                 $failureClass,
-                ['input', 'launch', 'auth', 'create', 'dialog', 'failure', 'success', 'delete', 'payload', 'cleanup'],
+                [
+                    'input',
+                    'launch',
+                    'auth',
+                    'create',
+                    'dialog',
+                    'failure',
+                    'success',
+                    'delete',
+                    'working_plan_exception',
+                    'payload',
+                    'cleanup',
+                ],
                 true,
             )
         ) {
@@ -1498,6 +1510,9 @@ function dashboardIntegrationSmokeParseCalendarDialogBrowserResult(array $result
             'edit_success_reload_verified',
             'delete_failure_state_verified',
             'delete_success_reload_verified',
+            'working_plan_exception_create_verified',
+            'working_plan_exception_edit_verified',
+            'working_plan_exception_delete_verified',
             'table_view_literal_name_verified',
             'table_view_write_boundary_verified',
             'cleanup_verified',
@@ -1511,6 +1526,9 @@ function dashboardIntegrationSmokeParseCalendarDialogBrowserResult(array $result
     if (!is_int($payload['duration_ms'] ?? null) || $payload['duration_ms'] < 0) {
         throw new GateAssertionException('Calendar dialog browser check returned no duration.');
     }
+    if (!is_int($payload['working_plan_duration_ms'] ?? null) || $payload['working_plan_duration_ms'] < 0) {
+        throw new GateAssertionException('Calendar dialog browser check returned no working-plan duration.');
+    }
 
     return [
         'request_payload_verified' => true,
@@ -1521,10 +1539,14 @@ function dashboardIntegrationSmokeParseCalendarDialogBrowserResult(array $result
         'edit_success_reload_verified' => true,
         'delete_failure_state_verified' => true,
         'delete_success_reload_verified' => true,
+        'working_plan_exception_create_verified' => true,
+        'working_plan_exception_edit_verified' => true,
+        'working_plan_exception_delete_verified' => true,
         'table_view_literal_name_verified' => true,
         'table_view_write_boundary_verified' => true,
         'cleanup_verified' => true,
         'browser_duration_ms' => $payload['duration_ms'],
+        'working_plan_browser_duration_ms' => $payload['working_plan_duration_ms'],
     ];
 }
 

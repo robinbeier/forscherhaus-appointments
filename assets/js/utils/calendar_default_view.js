@@ -320,8 +320,10 @@ App.Utils.CalendarDefaultView = (function () {
                 $('.provider-timezone').text(vars('timezones')[provider.timezone]);
             }
 
-            $('#insert-working-plan-exception').toggle(
-                providerId === App.Utils.CalendarDefaultView.FILTER_TYPE_PROVIDER,
+            const $insertWorkingPlanException = $('#insert-working-plan-exception');
+            $insertWorkingPlanException.toggle(
+                !$insertWorkingPlanException.prop('hidden') &&
+                    $selectFilterItem.find('option:selected').attr('type') === FILTER_TYPE_PROVIDER,
             );
 
             $reloadAppointments.trigger('click');
@@ -492,7 +494,12 @@ App.Utils.CalendarDefaultView = (function () {
                 ],
             });
         } else if ($target.hasClass('fc-working-plan-exception')) {
-            displayDelete = $target.hasClass('fc-custom') && vars('privileges').users.edit === true ? 'me-2' : 'd-none';
+            const canEditWorkingPlanException =
+                $target.hasClass('fc-custom') &&
+                vars('role_slug') === App.Layouts.Backend.DB_SLUG_ADMIN &&
+                vars('privileges').users.edit === true;
+            displayEdit = canEditWorkingPlanException ? '' : 'd-none';
+            displayDelete = canEditWorkingPlanException ? 'me-2' : 'd-none';
 
             const {date, workingPlanException, provider} = info.event.extendedProps.data;
             const startTime = workingPlanException?.start;
@@ -580,7 +587,7 @@ App.Utils.CalendarDefaultView = (function () {
                                 ],
                             }),
                             $('<button/>', {
-                                'class': 'edit-popover btn btn-primary',
+                                'class': 'edit-popover btn btn-primary ' + displayEdit,
                                 'html': [
                                     $('<i/>', {
                                         'class': 'fas fa-edit me-2',
