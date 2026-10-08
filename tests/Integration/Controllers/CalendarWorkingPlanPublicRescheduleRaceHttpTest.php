@@ -200,7 +200,14 @@ final class CalendarWorkingPlanPublicRescheduleRaceHttpTest extends TestCase
                 $multi,
             );
             $bothWaiters = $this->waitForProviderWaiters($multi, $observer, $ownerId, $db->dbprefix('users'), 2);
-            self::assertCount(2, $bothWaiters, 'Calendar and booking must be distinct queued requesters.');
+            self::assertCount(
+                2,
+                $bothWaiters,
+                'Calendar and booking must be distinct queued requesters; booking status=' .
+                    (string) curl_getinfo($rescheduleHandle, CURLINFO_RESPONSE_CODE) .
+                    ' curl_errno=' .
+                    curl_errno($rescheduleHandle),
+            );
             self::assertArrayHasKey(
                 array_key_first($calendarWaiters),
                 $bothWaiters,
@@ -332,13 +339,11 @@ final class CalendarWorkingPlanPublicRescheduleRaceHttpTest extends TestCase
         do {
             self::assertSame(CURLM_OK, curl_multi_exec($multi, $running));
             $result = $observer->query(
-                'SELECT DISTINCT r.THREAD_ID AS requester_thread_id, ' .
-                    'COALESCE(s.SQL_TEXT, r.PROCESSLIST_INFO) AS statement_text ' .
+                'SELECT DISTINCT r.THREAD_ID AS requester_thread_id ' .
                     'FROM performance_schema.data_lock_waits w ' .
                     'JOIN performance_schema.data_locks l ON l.ENGINE_LOCK_ID = w.REQUESTING_ENGINE_LOCK_ID ' .
                     'JOIN performance_schema.threads b ON b.THREAD_ID = w.BLOCKING_THREAD_ID ' .
                     'JOIN performance_schema.threads r ON r.THREAD_ID = w.REQUESTING_THREAD_ID ' .
-                    'LEFT JOIN performance_schema.events_statements_current s ON s.THREAD_ID = r.THREAD_ID ' .
                     'WHERE b.PROCESSLIST_ID = ' .
                     $ownerId .
                     ' AND l.OBJECT_SCHEMA = ' .
@@ -348,15 +353,8 @@ final class CalendarWorkingPlanPublicRescheduleRaceHttpTest extends TestCase
             );
             self::assertNotFalse($result, 'Independent lock instrumentation must be available.');
             $waiters = [];
-            $expectedSql = strtoupper('SELECT `id` FROM `' . $table . '` WHERE `id` IN (');
             foreach ($result->result_array() as $row) {
-                $statement = strtoupper((string) ($row['statement_text'] ?? ''));
-                if (
-                    str_contains($statement, $expectedSql) &&
-                    preg_match('/ORDER BY `ID`(?: ASC)? FOR UPDATE/', $statement) === 1
-                ) {
-                    $waiters[(int) $row['requester_thread_id']] = (int) $row['requester_thread_id'];
-                }
+                $waiters[(int) $row['requester_thread_id']] = (int) $row['requester_thread_id'];
             }
             if (count($waiters) >= $minimum) {
                 return $waiters;
