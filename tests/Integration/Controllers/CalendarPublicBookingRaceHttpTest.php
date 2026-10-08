@@ -131,6 +131,19 @@ final class CalendarPublicBookingRaceHttpTest extends TestCase
             $calendarClient = $this->loginProvider($this->calendarServer, $fixture);
             $bookingClient = $this->bookingServer->client();
             self::assertSame(200, $bookingClient->get('booking')->statusCode);
+            $availableHours = $bookingClient->post('booking/get_available_hours', [
+                'provider_id' => $fixture->providerId,
+                'service_id' => $fixture->serviceId,
+                'selected_date' => $start->format('Y-m-d'),
+                'manage_mode' => '0',
+                'appointment_id' => '',
+            ]);
+            self::assertSame(200, $availableHours->statusCode, $availableHours->body);
+            self::assertContains(
+                '10:00',
+                json_decode($availableHours->body, true, 512, JSON_THROW_ON_ERROR),
+                'The owned provider/service slot must be publicly available before the race starts.',
+            );
             self::assertTrue($owner->trans_begin());
             $transactionOpen = true;
             self::assertNotFalse(
