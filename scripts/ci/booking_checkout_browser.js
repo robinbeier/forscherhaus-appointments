@@ -253,8 +253,7 @@ async function main() {
 
     stage = 'slot';
     await page.waitForSelector('#wizard-frame-2', {state: 'visible'});
-    const expectedAvailabilityResponse = page.waitForResponse(async (response) => {
-        const request = response.request();
+    const isExpectedAvailabilityRequest = (request) => {
         if (
             request.method() !== 'POST' ||
             new URL(request.url()).origin !== expectedOrigin ||
@@ -266,15 +265,49 @@ async function main() {
         return (
             form.get('selected_date') === String(input.expected_date) &&
             form.get('service_id') === selectedService &&
-            form.get('provider_id') === selectedProvider &&
-            response.ok()
+            form.get('provider_id') === selectedProvider
         );
-    });
+    };
+    const isExpectedAvailabilityResponse = (response) =>
+        isExpectedAvailabilityRequest(response.request()) && response.ok();
+    const expectedAvailabilityResponse = page.waitForResponse(isExpectedAvailabilityResponse);
     await page.evaluate((expectedDate) => {
         const input = document.querySelector('#select-date');
         if (!input?._flatpickr) throw new Error('booking date picker was not initialized.');
-        input._flatpickr.setDate(expectedDate, true);
+        const [year, month, day] = expectedDate.split('-').map(Number);
+        // Pass noon so Flatpickr's date normalization cannot move a date across
+        // a timezone boundary when the browser and application use different TZs.
+        input._flatpickr.setDate(new Date(year, month - 1, day, 12), true);
     }, input.expected_date);
+    stage = 'slot-initial-response';
+    await expectedAvailabilityResponse;
+    stage = 'slot-initial-drain';
+    await page.waitForFunction(() => window.jQuery && jQuery.active === 0);
+    // The booking page can still finish an availability refresh started while
+    // the provider/date controls were initializing. Re-apply the expected date
+    // after those requests drain. Bind the response to this newly observed
+    // request, so an older same-date response cannot satisfy the final check.
+    let refreshedAvailabilityRequest = null;
+    const refreshedRequest = page.waitForRequest((request) => {
+        if (!isExpectedAvailabilityRequest(request)) return false;
+        refreshedAvailabilityRequest = request;
+        return true;
+    });
+    const refreshedResponse = page.waitForResponse(
+        (response) => response.request() === refreshedAvailabilityRequest && response.ok(),
+    );
+    await page.evaluate((expectedDate) => {
+        const input = document.querySelector('#select-date');
+        const [year, month, day] = expectedDate.split('-').map(Number);
+        input._flatpickr.setDate(new Date(year, month - 1, day, 12), true);
+    }, input.expected_date);
+    stage = 'slot-refreshed-request';
+    await refreshedRequest;
+    stage = 'slot-refreshed-response';
+    const availabilityResponse = await refreshedResponse;
+    stage = 'slot-refreshed-drain';
+    await page.waitForFunction(() => window.jQuery && jQuery.active === 0);
+    stage = 'slot-selected-date';
     await page.waitForFunction((expectedDate) => {
         const input = document.querySelector('#select-date');
         return input?._flatpickr?.selectedDates?.some((date) => {
@@ -284,11 +317,11 @@ async function main() {
             return `${year}-${month}-${day}` === expectedDate;
         });
     }, input.expected_date);
-    const availabilityResponse = await expectedAvailabilityResponse;
     const availabilityPayload = await availabilityResponse.json();
     if (!Array.isArray(availabilityPayload) || availabilityPayload.length === 0) {
         fail('expected-date availability response did not contain any slots.');
     }
+    stage = 'slot-render';
     const slotHandle = await page.waitForFunction(() => {
         const jquery = window.jQuery || window.$;
         const buttons = Array.from(document.querySelectorAll('#available-hours .available-hour'));
