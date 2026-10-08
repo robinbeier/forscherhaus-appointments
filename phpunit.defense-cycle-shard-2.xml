@@ -8,7 +8,7 @@
             <file>./tests/Integration/CustomerRoleBoundaryProbeTest.php</file>
             <file>./tests/Integration/CustomersApiWriteProbeTest.php</file>
             <file>./tests/Integration/Controllers/CustomersApiHttpReadTest.php</file>
-            <file>./tests/Integration/Controllers/AppointmentsApiHttpReadTest.php</file>
+            <file>./tests/Integration/Controllers/StaffSettingsApiHttpTest.php</file>
             <file>./tests/Integration/Controllers/CustomersProvidersApiDestroyAliasHttpTest.php</file>
             <file>./tests/Integration/Controllers/CustomersApiWriteAliasHttpTest.php</file>
             <file>./tests/Integration/Controllers/CorsPolicyHttpTest.php</file>
@@ -41,7 +41,6 @@
             <file>./tests/Integration/Controllers/BookingDownloadHttpTest.php</file>
             <file>./tests/Integration/Controllers/BookingAnalyticsCapabilityHttpTest.php</file>
             <file>./tests/Integration/Controllers/RescheduleCacheHttpTest.php</file>
-            <file>./tests/Integration/Controllers/PrivacyDeleteHttpTest.php</file>
             <file>./tests/Integration/Controllers/BookingBlockedPeriodsHttpTest.php</file>
             <file>./tests/Integration/Controllers/BookingManualUnavailabilityHttpTest.php</file>
             <file>./tests/Integration/Controllers/BookingManualUnavailabilityRescheduleHttpTest.php</file>
@@ -56,7 +55,6 @@
             <file>./tests/Integration/Controllers/PublicRescheduleBlockedPeriodRaceHttpTest.php</file>
             <file>./tests/Integration/Controllers/PublicRescheduleManualUnavailabilityRaceHttpTest.php</file>
             <file>./tests/Integration/Controllers/ProviderPdfExportHttpTest.php</file>
-            <file>./tests/Integration/Controllers/DashboardExportHttpTest.php</file>
             <file>./tests/Integration/Controllers/DashboardRoleRevocationHttpTest.php</file>
             <file>./tests/Integration/Controllers/ReadOnlyProbeHttpTest.php</file>
             <file>./tests/Integration/Controllers/CspReportHttpTest.php</file>
