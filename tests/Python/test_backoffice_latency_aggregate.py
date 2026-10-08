@@ -44,17 +44,18 @@ class BackofficeLatencyAggregateTest(unittest.TestCase):
                 line("/index.php/login/validate", "POST", 401, "1000000"),
                 line("/dashboard/metrics", "POST", 200, "250000"),
                 line("/index.php/backend_api/ajax_get_calendar_events", "GET", 302, "500000"),
+                line("/backend_api/ajax_save_unavailability", "POST", 302, "500000"),
                 line("/calendar/save_unavailability", "POST", 204, "3000000"),
                 line("/unknown", "GET", 404, "100000"),
             ],
             START,
             END,
         )
-        self.assertEqual(result["lines_in_window"], 5)
-        self.assertEqual(result["valid_measurements"], 4)
+        self.assertEqual(result["lines_in_window"], 6)
+        self.assertEqual(result["valid_measurements"], 5)
         self.assertEqual(result["excluded_routes"], 1)
         self.assertEqual(result["operations"]["login_validation"]["valid_measurements"], 1)
-        self.assertEqual(result["operations"]["legacy_alias_redirect"]["valid_measurements"], 1)
+        self.assertEqual(result["operations"]["legacy_alias_redirect"]["valid_measurements"], 2)
         self.assertEqual(result["operations"]["dashboard_data"]["method_status"]["POST"]["2xx"], 1)
         self.assertEqual(result["operations"]["legacy_alias_redirect"]["method_status"]["GET"]["3xx"], 1)
         self.assertEqual(result["operations"]["calendar_unavailability_save"]["method_status"]["POST"]["2xx"], 1)
@@ -86,11 +87,25 @@ class BackofficeLatencyAggregateTest(unittest.TestCase):
         completed = subprocess.run([sys.executable, str(MODULE_PATH), "--start", "2026-10-08T10:00:00Z", "--end", "2026-10-08T11:00:00Z"], input=line().encode(), stdout=subprocess.PIPE, check=True)
         output = completed.stdout.decode()
         payload = json.loads(output)
-        self.assertEqual(payload["valid_measurements"], 1)
+        self.assertEqual(payload, {"window_start": "2026-10-08T10:00:00Z", "window_end": "2026-10-08T11:00:00Z", "result_class": "privacy_suppressed"})
         for secret in ("203.0.113.7", "/login?secret=query", "ref.example", "secret-agent", "actor"):
             self.assertNotIn(secret, output)
-        self.assertEqual(payload["result_class"], "insufficient_samples")
-        self.assertEqual(set(payload), {"window_start", "window_end", "lines_seen", "lines_in_window", "valid_measurements", "missing_duration", "invalid_duration", "malformed_lines", "excluded_routes", "operations", "low_sample", "result_class"})
+
+    def test_cli_suppresses_singleton_cell_even_with_twenty_requests(self):
+        def run(lines):
+            completed = subprocess.run(
+                [sys.executable, str(MODULE_PATH), "--start", "2026-10-08T10:00:00Z", "--end", "2026-10-08T11:00:00Z"],
+                input="".join(lines).encode(), stdout=subprocess.PIPE, check=True,
+            )
+            return json.loads(completed.stdout)
+
+        measured = run([line()] * 20)
+        self.assertEqual(measured["result_class"], "measured")
+        self.assertEqual(measured["operations"]["login_page"]["valid_measurements"], 20)
+        self.assertNotIn("secret", json.dumps(measured))
+        sparse_error = run([line()] * 19 + [line(status=500)])
+        self.assertEqual(set(sparse_error), {"window_start", "window_end", "result_class"})
+        self.assertEqual(sparse_error["result_class"], "privacy_suppressed")
 
 
 if __name__ == "__main__":

@@ -50,6 +50,7 @@ _ROUTE_PATHS = {
     "/calendar/save_unavailability": "calendar_unavailability_save",
     "/backend_api/ajax_get_calendar_events": "legacy_alias_redirect",
     "/backend_api/ajax_get_calendar_appointments": "legacy_alias_redirect",
+    "/backend_api/ajax_save_unavailability": "legacy_alias_redirect",
 }
 
 
@@ -199,6 +200,29 @@ def aggregate(lines: Iterable[str], start: datetime, end: datetime) -> dict[str,
     return result
 
 
+def _safe_public_summary(result: dict[str, Any]) -> dict[str, Any]:
+    """Fail closed rather than expose a sparse cell from a known use window."""
+    operations = result["operations"].values()
+    if result["valid_measurements"] < LOW_SAMPLE_THRESHOLD or any(
+        0 < operation["valid_measurements"] < LOW_SAMPLE_THRESHOLD for operation in operations
+    ):
+        safe = False
+    else:
+        def has_sparse_count(value: Any) -> bool:
+            if isinstance(value, dict):
+                return any(has_sparse_count(child) for child in value.values())
+            return type(value) is int and 0 < value < 5
+
+        safe = not has_sparse_count(result)
+    if safe:
+        return result
+    return {
+        "window_start": result["window_start"],
+        "window_end": result["window_end"],
+        "result_class": "privacy_suppressed",
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--start", required=True, type=_parse_window, help="UTC window start (ISO-8601)")
@@ -206,7 +230,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.end <= args.start:
         parser.error("--end must be after --start")
-    json.dump(aggregate(sys.stdin, args.start, args.end), sys.stdout, sort_keys=True)
+    json.dump(_safe_public_summary(aggregate(sys.stdin, args.start, args.end)), sys.stdout, sort_keys=True)
     sys.stdout.write("\n")
     return 0
 

@@ -25,10 +25,20 @@ page/event read/unavailability save, and separate legacy redirect aliases.
 The direct `/index.php/` entrypoint is canonical and stays in the same operation
 as its corresponding controller path. Unrecognized paths are excluded.
 
+Before emitting any counts, the CLI fails closed with only a
+`privacy_suppressed` result if fewer than 20 measurements exist overall or for
+any populated operation, or if **any** positive output cell contains fewer than
+five observations. This includes uncommon error and alias cells as well as
+duration buckets. An operator must additionally use a broad window with a
+separately supported multi-person population; event-count thresholds alone do
+not establish distinct people or anonymize a known individual's session.
+Never store a per-session or narrow single-user result in Linear.
+
 The duration buckets are below 100 ms, 100–250 ms, 250–500 ms, 500 ms–1 s,
 1–3 s, and at least 3 s. A result is `no_measurement`,
 `incomplete_format`, `insufficient_samples` (fewer than 20 observations), or
-`measured`. Each operation has its own result class. Even `measured` is only a
+`measured` inside an eligible summary. Each operation has its own result class.
+Even `measured` is only a
 descriptive server-side distribution: it does not establish p95, a browser
 experience, a user's role, real versus synthetic traffic, or an improvement
 over a nonexistent historical baseline. Malformed lines without a parseable
