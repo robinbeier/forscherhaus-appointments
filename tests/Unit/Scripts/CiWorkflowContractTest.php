@@ -178,6 +178,8 @@ class CiWorkflowContractTest extends TestCase
         );
         self::assertSame([], array_intersect($shards[1], $shards[2]));
         self::assertContains('./tests/Integration/Controllers/BookingAvailabilityAuthorityHttpTest.php', $shards[1]);
+        self::assertContains('./tests/Integration/Controllers/StaffSettingsApiHttpTest.php', $shards[1]);
+        self::assertNotContains('./tests/Integration/Controllers/StaffSettingsApiHttpTest.php', $shards[2]);
         foreach (
             [
                 './tests/Integration/SessionLifecycleTest.php',
