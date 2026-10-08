@@ -109,6 +109,7 @@
             <file>./tests/Integration/Controllers/CalendarPublicBookingRaceHttpTest.php</file>
             <file>./tests/Integration/Controllers/CalendarWorkingPlanPublicBookingRaceHttpTest.php</file>
             <file>./tests/Integration/Controllers/CalendarPublicRescheduleRaceHttpTest.php</file>
+            <file>./tests/Integration/Controllers/CalendarWorkingPlanPublicRescheduleRaceHttpTest.php</file>
             <file>./tests/Integration/Controllers/PublicRescheduleBlockedPeriodRaceHttpTest.php</file>
             <file>./tests/Integration/Controllers/PublicRescheduleManualUnavailabilityRaceHttpTest.php</file>
             <file>./tests/Integration/Controllers/BookingAvailabilityAuthorityHttpTest.php</file>
