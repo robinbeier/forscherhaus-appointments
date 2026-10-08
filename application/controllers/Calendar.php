@@ -1122,7 +1122,14 @@ class Calendar extends EA_Controller
         } catch (CalendarRangeValidationException $e) {
             json_response(['success' => false, 'message' => $e->getMessage()], 400);
         } catch (Throwable $e) {
-            json_exception($e);
+            if (
+                $e->getCode() === 403 &&
+                $e->getMessage() === 'You do not have the required permissions for this task.'
+            ) {
+                json_response(['success' => false, 'message' => $e->getMessage()], 403);
+            } else {
+                json_exception($e);
+            }
         }
     }
 
@@ -1283,7 +1290,14 @@ class Calendar extends EA_Controller
         } catch (CalendarRangeValidationException $e) {
             json_response(['success' => false, 'message' => $e->getMessage()], 400);
         } catch (Throwable $e) {
-            json_exception($e);
+            if (
+                $e->getCode() === 403 &&
+                $e->getMessage() === 'You do not have the required permissions for this task.'
+            ) {
+                json_response(['success' => false, 'message' => $e->getMessage()], 403);
+            } else {
+                json_exception($e);
+            }
         }
     }
 
