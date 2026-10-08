@@ -154,6 +154,44 @@ final class ProdPostureScriptTest extends TestCase
         }
     }
 
+    public function testPostureHelperStripsZonesForIpv4AndIpv6WithoutRelaxingClassification(): void
+    {
+        $workspace = sys_get_temp_dir() . '/prod-posture-' . bin2hex(random_bytes(8));
+        $stubBin = $workspace . '/bin';
+
+        mkdir($stubBin, 0777, true);
+
+        try {
+            $this->writeIpStub($stubBin);
+
+            $result = $this->runCommand(
+                [
+                    'bash',
+                    '-c',
+                    'source scripts/ops/lib/prod_posture.sh; ' .
+                    'printf "ipv4=%s\\n" "$(prod_posture_address_class "100.64.0.1%tailscale0:47175")"; ' .
+                    'printf "ipv6=%s\\n" "$(prod_posture_address_class "[fd7a:115c:a1e0::1%tailscale0]:44842")"; ' .
+                    'printf "ipv6_suffix_zone=%s\\n" "$(prod_posture_address_class "[fd7a:115c:a1e0::1]%tailscale0:44842")"; ' .
+                    'printf "wildcard=%s\\n" "$(prod_posture_address_class "0.0.0.0:443")"; ' .
+                    'printf "unknown=%s\\n" "$(prod_posture_address_class "10.0.0.99%tailscale0:443")"',
+                ],
+                $this->repoRoot(),
+                [
+                    'PATH' => $stubBin . PATH_SEPARATOR . (getenv('PATH') ?: ''),
+                ],
+            );
+
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            self::assertStringContainsString("ipv4=overlay\n", $result['stdout']);
+            self::assertStringContainsString("ipv6=overlay\n", $result['stdout']);
+            self::assertStringContainsString("ipv6_suffix_zone=overlay\n", $result['stdout']);
+            self::assertStringContainsString("wildcard=wildcard\n", $result['stdout']);
+            self::assertStringContainsString("unknown=public\n", $result['stdout']);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
     private function writeCurlStub(string $stubBin): void
     {
         file_put_contents(
