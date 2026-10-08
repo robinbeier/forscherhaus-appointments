@@ -758,7 +758,7 @@ class Calendar extends EA_Controller
             $required_permissions = $this->currentCalendarCan($required_action, PRIV_APPOINTMENTS);
 
             if (!$required_permissions) {
-                throw new RuntimeException('You do not have the required permissions for this task.');
+                throw new RuntimeException('You do not have the required permissions for this task.', 403);
             }
 
             $stored_unavailability = null;
@@ -843,7 +843,7 @@ class Calendar extends EA_Controller
 
         try {
             if (!$this->currentCalendarCan('delete', PRIV_APPOINTMENTS)) {
-                throw new RuntimeException('You do not have the required permissions for this task.');
+                throw new RuntimeException('You do not have the required permissions for this task.', 403);
             }
 
             $request_dto = $this->calendarRequestDtoFactory()->buildEntityIdRequestDto('unavailability_id');
