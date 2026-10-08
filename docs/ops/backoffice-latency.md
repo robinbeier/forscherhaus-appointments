@@ -42,8 +42,8 @@ Even `measured` is only a
 descriptive server-side distribution: it does not establish p95, a browser
 experience, a user's role, real versus synthetic traffic, or an improvement
 over a nonexistent historical baseline. Malformed lines without a parseable
-timestamp are counted outside the window classification; interpret them as an
-explicit completeness limit.
+timestamp are ignored because they cannot be attributed to the approved time
+window. A result therefore cannot prove that the input was complete.
 
 Local validation uses synthetic log lines only:
 

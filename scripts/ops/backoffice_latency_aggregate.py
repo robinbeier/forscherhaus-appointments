@@ -148,26 +148,22 @@ def aggregate(lines: Iterable[str], start: datetime, end: datetime) -> dict[str,
     result: dict[str, Any] = {
         "window_start": start.isoformat().replace("+00:00", "Z"),
         "window_end": end.isoformat().replace("+00:00", "Z"),
-        "lines_seen": 0,
         "lines_in_window": 0,
         "valid_measurements": 0,
         "missing_duration": 0,
         "invalid_duration": 0,
-        "malformed_lines": 0,
         "excluded_routes": 0,
         "operations": _empty_operation_counts(),
         "low_sample": True,
         "result_class": "no_measurement",
     }
     for line in lines:
-        result["lines_seen"] += 1
         reason, event = parse_line(line)
         if event is not None and not start <= event["timestamp"] < end:
             continue
         if event is not None:
             result["lines_in_window"] += 1
         if reason == "malformed":
-            result["malformed_lines"] += 1
             continue
         if reason == "missing_duration":
             result["missing_duration"] += 1
