@@ -91,6 +91,83 @@ final class CalendarUnavailabilityPermissionRaceHttpTest extends TestCase
         $this->runCreateRace(true);
     }
 
+    public function testProviderWithoutAppointmentWritePermissionCannotCreateOverHttp(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $client = $this->loginProvider();
+        $before = $this->publicHours();
+        $this->revokeAppointmentWritePermission();
+        $date = $this->publicDate();
+
+        $response = $client->post('calendar/save_unavailability', [
+            'unavailability' => [
+                'start_datetime' => $date . ' 10:00:00',
+                'end_datetime' => $date . ' 10:30:00',
+                'notes' => $fixture->run . '_initial_create',
+                'id_users_provider' => $fixture->providerId,
+                'is_unavailability' => true,
+            ],
+        ]);
+
+        self::assertSame(403, $response->statusCode, $response->body);
+        self::assertSame(
+            [],
+            get_instance()
+                ->db->get_where('appointments', [
+                    'notes' => $fixture->run . '_initial_create',
+                    'id_users_provider' => $fixture->providerId,
+                ])
+                ->result_array(),
+        );
+        self::assertSame($before, $this->publicHours());
+    }
+
+    public function testProviderWithoutAppointmentWritePermissionCannotEditOverHttp(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $client = $this->loginProvider();
+        $date = $this->publicDate();
+        $id = $this->createUnavailability($date);
+        $this->ownedId = $id;
+        $before = $fixture->row('appointments', $id);
+        $beforeHours = $this->publicHours(false);
+        $this->revokeAppointmentWritePermission();
+
+        $response = $client->post('calendar/save_unavailability', [
+            'unavailability' => [
+                'id' => $id,
+                'start_datetime' => $date . ' 09:00:00',
+                'end_datetime' => $date . ' 09:30:00',
+                'notes' => $fixture->run . '_initial_edit',
+                'id_users_provider' => $fixture->providerId,
+            ],
+        ]);
+
+        self::assertSame(403, $response->statusCode, $response->body);
+        self::assertSame($before, $fixture->row('appointments', $id));
+        self::assertSame($beforeHours, $this->publicHours(false));
+    }
+
+    public function testProviderWithoutAppointmentWritePermissionCannotDeleteOverHttp(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $client = $this->loginProvider();
+        $id = $this->createUnavailability($this->publicDate());
+        $this->ownedId = $id;
+        $before = $fixture->row('appointments', $id);
+        $beforeHours = $this->publicHours(false);
+        $this->revokeAppointmentWritePermission();
+
+        $response = $client->post('calendar/delete_unavailability', ['unavailability_id' => $id]);
+
+        self::assertSame(403, $response->statusCode, $response->body);
+        self::assertSame($before, $fixture->row('appointments', $id));
+        self::assertSame($beforeHours, $this->publicHours(false));
+    }
+
     private function runCreateRace(bool $revoke): void
     {
         $fixture = $this->fixture;
@@ -366,15 +443,62 @@ final class CalendarUnavailabilityPermissionRaceHttpTest extends TestCase
         return $client;
     }
 
-    private function createUnavailability(): int
+    private function revokeAppointmentWritePermission(): void
+    {
+        self::assertTrue(
+            (bool) get_instance()->db->update(
+                'roles',
+                ['appointments' => PRIV_VIEW],
+                ['id' => (int) $this->providerRole['id']],
+            ),
+        );
+    }
+
+    /** @return list<string> */
+    private function publicHours(bool $expectSlot = true): array
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $public = $this->server?->client();
+        self::assertNotNull($public);
+        self::assertSame(200, $public->get('booking')->statusCode);
+        $date = $this->publicDate();
+        $response = $public->post('booking/get_available_hours', [
+            'provider_id' => $fixture->providerId,
+            'service_id' => $fixture->serviceId,
+            'selected_date' => $date,
+            'manage_mode' => 'false',
+            'appointment_id' => '',
+        ]);
+        self::assertSame(200, $response->statusCode, $response->body);
+        $hours = json_decode($response->body, true, 512, JSON_THROW_ON_ERROR);
+        self::assertIsArray($hours);
+        if ($expectSlot) {
+            self::assertContains('10:00', $hours);
+        } else {
+            self::assertNotContains('10:00', $hours);
+        }
+        return array_values(array_map('strval', $hours));
+    }
+
+    private function publicDate(): string
+    {
+        return (new DateTimeImmutable('today'))->modify('next monday')->modify('+14 days')->format('Y-m-d');
+    }
+
+    private function createUnavailability(?string $date = null): int
     {
         $f = $this->fixture;
         $now = date('Y-m-d H:i:s');
+        $dynamicDate = $date !== null;
+        $date ??= '2035-06-01';
+        $start = $dynamicDate ? '10:00:00' : '08:00:00';
+        $end = $dynamicDate ? '10:30:00' : '08:30:00';
         self::assertTrue(
             (bool) get_instance()->db->insert('appointments', [
                 'book_datetime' => $now,
-                'start_datetime' => '2035-06-01 08:00:00',
-                'end_datetime' => '2035-06-01 08:30:00',
+                'start_datetime' => $date . ' ' . $start,
+                'end_datetime' => $date . ' ' . $end,
                 'notes' => $f->run . '_race',
                 'hash' => $f->run . '_race_hash',
                 'is_unavailability' => 1,
@@ -391,6 +515,11 @@ final class CalendarUnavailabilityPermissionRaceHttpTest extends TestCase
         // The create request may have inserted a row even when an assertion fails
         // before its ID can be recorded. Only remove this fixture's exact run tag.
         if ($this->fixture !== null && isset($this->fixture->providerId)) {
+            get_instance()->db->delete('appointments', [
+                'notes' => $this->fixture->run . '_initial_create',
+                'id_users_provider' => $this->fixture->providerId,
+                'is_unavailability' => 1,
+            ]);
             get_instance()->db->delete('appointments', [
                 'notes' => $this->fixture->run . '_create_race',
                 'id_users_provider' => $this->fixture->providerId,
