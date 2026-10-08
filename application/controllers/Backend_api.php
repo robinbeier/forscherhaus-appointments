@@ -62,7 +62,7 @@ class Backend_api extends EA_Controller
      */
     public function ajax_save_appointment(): void
     {
-        redirect('calendar/save_appointment');
+        redirect('calendar/save_appointment', 'location', 303);
     }
 
     /**
@@ -70,7 +70,7 @@ class Backend_api extends EA_Controller
      */
     public function ajax_delete_appointment(): void
     {
-        redirect('calendar/delete_appointment');
+        redirect('calendar/delete_appointment', 'location', 303);
     }
 
     /**
@@ -86,7 +86,7 @@ class Backend_api extends EA_Controller
      */
     public function ajax_save_unavailability(): void
     {
-        redirect('calendar/save_unavailability');
+        redirect('calendar/save_unavailability', 'location', 303);
     }
 
     /**
@@ -94,7 +94,7 @@ class Backend_api extends EA_Controller
      */
     public function ajax_delete_unavailability(): void
     {
-        redirect('calendar/delete_unavailability');
+        redirect('calendar/delete_unavailability', 'location', 303);
     }
 
     /**
@@ -102,7 +102,7 @@ class Backend_api extends EA_Controller
      */
     public function ajax_save_working_plan_exception(): void
     {
-        redirect('calendar/save_working_plan_exception');
+        redirect('calendar/save_working_plan_exception', 'location', 303);
     }
 
     /**
@@ -110,7 +110,7 @@ class Backend_api extends EA_Controller
      */
     public function ajax_delete_working_plan_exception(): void
     {
-        redirect('calendar/delete_working_plan_exception');
+        redirect('calendar/delete_working_plan_exception', 'location', 303);
     }
 
     /**

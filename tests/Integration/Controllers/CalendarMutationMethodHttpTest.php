@@ -90,7 +90,7 @@ final class CalendarMutationMethodHttpTest extends TestCase
         }
     }
 
-    public function testRepresentativePostControlsReachAllSixCalendarWritesAndLegacyAliasesRedirect(): void
+    public function testRepresentativePostControlsReachAllSixCalendarWrites(): void
     {
         $fixture = $this->fixture;
         $client = $this->authenticatedClient();
@@ -175,7 +175,11 @@ final class CalendarMutationMethodHttpTest extends TestCase
                     $method === 'POST'
                         ? $aliasClient->post('backend_api/' . $alias)
                         : $aliasClient->requestApp($method, 'backend_api/' . $alias . '?id=' . $appointmentId);
-                self::assertContains($response->statusCode, [301, 302, 303, 307, 308], $method . ' ' . $alias);
+                if ($method === 'POST') {
+                    self::assertSame(303, $response->statusCode, $method . ' ' . $alias);
+                } else {
+                    self::assertContains($response->statusCode, [301, 302, 303, 307, 308], $method . ' ' . $alias);
+                }
                 self::assertStringEndsWith(
                     '/' . $target,
                     (string) $response->header('location'),
@@ -184,6 +188,63 @@ final class CalendarMutationMethodHttpTest extends TestCase
                 self::assertSame([], $fixture->row('appointments', $appointmentId));
                 self::assertSame([], $fixture->row('appointments', $unavailabilityId));
             }
+        }
+    }
+
+    public function testManualUnavailabilityAliasesRedirectWithoutMutatingOwnedAvailability(): void
+    {
+        $fixture = $this->fixture;
+        $public = $this->server?->client();
+        self::assertNotNull($fixture);
+        self::assertNotNull($public);
+        self::assertSame(200, $public->get('booking')->statusCode);
+
+        $date = (new DateTimeImmutable('today'))->modify('next monday')->modify('+14 days')->format('Y-m-d');
+        $pair = [
+            'provider_id' => $fixture->providerId,
+            'service_id' => $fixture->serviceId,
+            'selected_date' => $date,
+            'manage_mode' => 'false',
+            'appointment_id' => '',
+        ];
+        $beforeHours = $this->availableHours($public, $pair);
+        self::assertGreaterThanOrEqual(1, count($beforeHours), 'Need a synthetic public slot.');
+        $targetStart = new DateTimeImmutable($date . ' ' . $beforeHours[0] . ':00');
+        $targetEnd = $targetStart->add(new DateInterval('PT30M'));
+
+        $row = $this->seedUnavailabilityAt($targetStart, $targetEnd, '_alias_regression');
+        $unavailabilityId = (int) $row['id'];
+        $beforeRow = $fixture->row('appointments', $unavailabilityId);
+        $blockedHours = $this->availableHours($public, $pair);
+        self::assertNotContains($beforeHours[0], $blockedHours);
+
+        $aliasClient = $this->authenticatedClient(false);
+        foreach (
+            [
+                'ajax_save_unavailability' => [
+                    'calendar/save_unavailability',
+                    [
+                        'unavailability' => [
+                            'id' => $unavailabilityId,
+                            'start_datetime' => $targetEnd->format('Y-m-d H:i:s'),
+                            'end_datetime' => $targetEnd->add(new DateInterval('PT30M'))->format('Y-m-d H:i:s'),
+                            'notes' => $fixture->run . '_alias_replay',
+                            'id_users_provider' => $fixture->providerId,
+                        ],
+                    ],
+                ],
+                'ajax_delete_unavailability' => [
+                    'calendar/delete_unavailability',
+                    ['unavailability_id' => $unavailabilityId],
+                ],
+            ]
+            as $alias => [$target, $payload]
+        ) {
+            $response = $aliasClient->post('backend_api/' . $alias, $payload);
+            self::assertSame(303, $response->statusCode, $alias);
+            self::assertSame($this->server->baseUrl . '/index.php/' . $target, $response->header('location'), $alias);
+            self::assertSame($beforeRow, $fixture->row('appointments', $unavailabilityId), $alias);
+            self::assertSame($blockedHours, $this->availableHours($public, $pair), $alias);
         }
     }
 
@@ -265,7 +326,11 @@ final class CalendarMutationMethodHttpTest extends TestCase
             'appointment_id' => '',
         ];
         $beforeHours = $this->availableHours($public, $publicPair);
-        self::assertContains('10:00', $beforeHours, 'The synthetic slot must be publicly available before denial checks.');
+        self::assertContains(
+            '10:00',
+            $beforeHours,
+            'The synthetic slot must be publicly available before denial checks.',
+        );
 
         $admin = $this->authenticatedClient();
         $secretary = $this->createSecretary($admin, 'calendar-denied');
@@ -398,6 +463,24 @@ final class CalendarMutationMethodHttpTest extends TestCase
         );
         $id = (int) get_instance()->db->insert_id();
         $row = $fixture->row('appointments', $id);
+        self::assertNotEmpty($row);
+        return $row;
+    }
+
+    private function seedUnavailabilityAt(DateTimeImmutable $start, DateTimeImmutable $end, string $notesSuffix): array
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        get_instance()->db->insert('appointments', [
+            'start_datetime' => $start->format('Y-m-d H:i:s'),
+            'end_datetime' => $end->format('Y-m-d H:i:s'),
+            'notes' => $fixture->run . $notesSuffix,
+            'id_users_provider' => $fixture->providerId,
+            'id_users_customer' => $fixture->customerId,
+            'id_services' => $fixture->serviceId,
+            'is_unavailability' => 1,
+        ]);
+        $row = $fixture->row('appointments', (int) get_instance()->db->insert_id());
         self::assertNotEmpty($row);
         return $row;
     }
