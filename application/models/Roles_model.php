@@ -223,30 +223,19 @@ class Roles_model extends EA_Model
         $permissions = [];
 
         foreach ($role as $resource => $value) {
-            $permissions[$resource] = [
-                'view' => false,
-                'add' => false,
-                'edit' => false,
-                'delete' => false,
-            ];
+            $value = (int) $value;
+            $known_mask = PRIV_VIEW | PRIV_ADD | PRIV_EDIT | PRIV_DELETE;
 
-            if ($value > 0) {
-                if ((int) ($value / PRIV_DELETE) === 1) {
-                    $permissions[$resource]['delete'] = true;
-                    $value -= PRIV_DELETE;
-                }
-
-                if ((int) ($value / PRIV_EDIT) === 1) {
-                    $permissions[$resource]['edit'] = true;
-                    $value -= PRIV_EDIT;
-                }
-
-                if ((int) ($value / PRIV_ADD) === 1) {
-                    $permissions[$resource]['add'] = true;
-                }
-
-                $permissions[$resource]['view'] = true;
+            // Fail closed for invalid database masks instead of interpreting their low bits as authority.
+            if ($value < 0 || ($value & ~$known_mask) !== 0) {
+                $value = 0;
             }
+            $permissions[$resource] = [
+                'view' => ($value & PRIV_VIEW) === PRIV_VIEW,
+                'add' => ($value & PRIV_ADD) === PRIV_ADD,
+                'edit' => ($value & PRIV_EDIT) === PRIV_EDIT,
+                'delete' => ($value & PRIV_DELETE) === PRIV_DELETE,
+            ];
         }
 
         return $permissions;

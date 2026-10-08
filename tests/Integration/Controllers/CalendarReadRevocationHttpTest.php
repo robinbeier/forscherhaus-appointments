@@ -60,6 +60,34 @@ final class CalendarReadRevocationHttpTest extends TestCase
         $this->assertRevocationIsForbiddenInExistingSession('admin');
     }
 
+    public function testPermissionDecoderHonorsEveryAppointmentsBitmaskCombination(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $role = get_instance()
+            ->db->get_where('roles', ['slug' => DB_SLUG_PROVIDER])
+            ->row_array();
+        self::assertNotEmpty($role['id'] ?? null, 'Synthetic provider role is required.');
+        $roleId = (int) $role['id'];
+        $this->roleSnapshots[$roleId] = ['appointments' => (int) $role['appointments']];
+        get_instance()->load->model('roles_model');
+
+        $allPermissions = PRIV_VIEW | PRIV_ADD | PRIV_EDIT | PRIV_DELETE;
+        foreach (array_merge([-1], range(0, $allPermissions), [16, 18, 20, 24, 31]) as $mask) {
+            self::assertTrue(get_instance()->db->update('roles', ['appointments' => $mask], ['id' => $roleId]));
+            $permissions = get_instance()->roles_model->get_permissions_by_slug(DB_SLUG_PROVIDER)['appointments'];
+            $effectiveMask = $mask >= 0 && ($mask & ~$allPermissions) === 0 ? $mask : 0;
+            self::assertSame(($effectiveMask & PRIV_VIEW) === PRIV_VIEW, $permissions['view'], 'view mask ' . $mask);
+            self::assertSame(($effectiveMask & PRIV_ADD) === PRIV_ADD, $permissions['add'], 'add mask ' . $mask);
+            self::assertSame(($effectiveMask & PRIV_EDIT) === PRIV_EDIT, $permissions['edit'], 'edit mask ' . $mask);
+            self::assertSame(
+                ($effectiveMask & PRIV_DELETE) === PRIV_DELETE,
+                $permissions['delete'],
+                'delete mask ' . $mask,
+            );
+        }
+    }
+
     private function assertRevocationIsForbiddenInExistingSession(string $actor): void
     {
         $fixture = $this->fixture;
@@ -72,7 +100,19 @@ final class CalendarReadRevocationHttpTest extends TestCase
             ->db->get_where('roles', ['slug' => $roleSlug])
             ->row_array();
         self::assertNotEmpty($role['id'] ?? null, $roleSlug . ' role is required.');
-        $this->roleSnapshots[(int) $role['id']] = ['appointments' => (int) $role['appointments']];
+        $originalAppointments = (int) $role['appointments'];
+        $nonViewPermissions = PRIV_ADD | PRIV_EDIT | PRIV_DELETE;
+        self::assertSame(
+            PRIV_VIEW,
+            $originalAppointments & PRIV_VIEW,
+            $roleSlug . ' fixture must start with appointments.view.',
+        );
+        self::assertNotSame(
+            0,
+            $originalAppointments & $nonViewPermissions,
+            $roleSlug . ' fixture must preserve at least one non-view appointment permission.',
+        );
+        $this->roleSnapshots[(int) $role['id']] = ['appointments' => $originalAppointments];
 
         $client = $this->login(
             $actor === 'provider' ? $this->credentials['provider_username'] : $this->credentials['admin_username'],
@@ -84,7 +124,17 @@ final class CalendarReadRevocationHttpTest extends TestCase
             self::assertContains((int) $appointment['id'], $ids, $path . ' positive control');
         }
 
-        self::assertTrue(get_instance()->db->update('roles', ['appointments' => 0], ['id' => (int) $role['id']]));
+        $revokedAppointments = $originalAppointments & ~PRIV_VIEW;
+        self::assertTrue(
+            get_instance()->db->update('roles', ['appointments' => $revokedAppointments], ['id' => (int) $role['id']]),
+        );
+        self::assertSame(
+            $revokedAppointments,
+            (int) get_instance()
+                ->db->get_where('roles', ['id' => (int) $role['id']])
+                ->row('appointments'),
+            $roleSlug . ' role mask was not persisted exactly.',
+        );
 
         foreach ($this->calendarPaths() as $path) {
             $response = $client->post($path, $this->rangePayload());
@@ -160,7 +210,11 @@ final class CalendarReadRevocationHttpTest extends TestCase
     private function restoreRolePermissions(): void
     {
         foreach ($this->roleSnapshots as $roleId => $snapshot) {
-            get_instance()->db->update('roles', $snapshot, ['id' => $roleId]);
+            self::assertTrue(get_instance()->db->update('roles', $snapshot, ['id' => $roleId]));
+            $restoredRole = get_instance()
+                ->db->get_where('roles', ['id' => $roleId])
+                ->row_array();
+            self::assertSame($snapshot['appointments'], (int) ($restoredRole['appointments'] ?? -1));
         }
         $this->roleSnapshots = [];
     }
