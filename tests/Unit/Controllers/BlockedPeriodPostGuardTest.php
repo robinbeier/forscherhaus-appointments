@@ -17,16 +17,20 @@ final class BlockedPeriodPostGuardTest extends TestCase
         $result = $this->probe($action, 'authorized', 'POST');
         $expected = [
             "auth:$verb:blocked_periods:" . self::USER_ID,
+            'transaction:begin',
+            'lock:user:' . self::USER_ID,
+            "auth:$verb:blocked_periods:" . self::USER_ID,
             $action === 'destroy' ? 'dto:blocked_period_id' : 'dto:blocked_period',
         ];
         if ($action === 'destroy') {
-            $expected = array_merge($expected, ['find:41', 'delete:41', 'json_response']);
+            $expected = array_merge($expected, ['find:41', 'delete:41', 'transaction:commit', 'json_response']);
         } else {
             $expected = array_merge($expected, [
                 'only:' . json_encode(self::FIELDS, JSON_THROW_ON_ERROR),
                 'optional:[]',
                 'save:' . json_encode($this->payload($action), JSON_THROW_ON_ERROR),
                 $action === 'update' ? 'find:41' : 'find:42',
+                'transaction:commit',
                 'json_response',
             ]);
         }
@@ -70,6 +74,9 @@ final class BlockedPeriodPostGuardTest extends TestCase
         $result = $this->probe($action, 'model-failure', 'POST');
         $expected = [
             "auth:$verb:blocked_periods:" . self::USER_ID,
+            'transaction:begin',
+            'lock:user:' . self::USER_ID,
+            "auth:$verb:blocked_periods:" . self::USER_ID,
             $action === 'destroy' ? 'dto:blocked_period_id' : 'dto:blocked_period',
         ];
         if ($action === 'destroy') {
@@ -81,11 +88,32 @@ final class BlockedPeriodPostGuardTest extends TestCase
                 'save:' . json_encode($this->payload($action), JSON_THROW_ON_ERROR),
             ]);
         }
-        self::assertSame(array_merge($expected, ['json_exception']), $result['events']);
+        self::assertSame(array_merge($expected, ['transaction:rollback', 'json_exception']), $result['events']);
         self::assertSame(500, $result['status']);
         self::assertSame('synthetic model failure', $result['body']);
         self::assertSame([], $result['saved']);
         self::assertNotContains('json_response', $result['events']);
+    }
+
+    #[DataProvider('actions')]
+    public function testPermissionRevokedAfterActorLockRollsBackBeforeDto(string $action, string $verb): void
+    {
+        $result = $this->probe($action, 'denied-after-lock', 'POST');
+
+        self::assertSame(
+            [
+                "auth:$verb:blocked_periods:" . self::USER_ID,
+                'transaction:begin',
+                'lock:user:' . self::USER_ID,
+                "auth:$verb:blocked_periods:" . self::USER_ID,
+                'transaction:rollback',
+                'abort:403',
+            ],
+            $result['events'],
+        );
+        self::assertSame(403, $result['status']);
+        self::assertSame([], $result['saved']);
+        self::assertSame('', $result['body']);
     }
 
     public static function actions(): array
