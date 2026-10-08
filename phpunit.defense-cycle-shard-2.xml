@@ -21,7 +21,6 @@
             <file>./tests/Integration/Controllers/SecretariesReadProjectionHttpTest.php</file>
             <file>./tests/Integration/Controllers/ServicesReadProjectionHttpTest.php</file>
             <file>./tests/Integration/Controllers/SettingsReadProjectionHttpTest.php</file>
-            <file>./tests/Integration/Controllers/StaffSettingsApiHttpTest.php</file>
             <file>./tests/Integration/Controllers/SettingsApiBasicRevocationHttpTest.php</file>
             <file>./tests/Integration/Controllers/SettingsApiReadAliasMethodHttpTest.php</file>
             <file>./tests/Integration/StaffApiPutProbeTest.php</file>
