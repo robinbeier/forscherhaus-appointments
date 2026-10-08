@@ -102,8 +102,10 @@ prod_posture_address_host() {
 
     if [[ "$local_addr" =~ ^\[([^]]+)\]:[0-9]+$ ]]; then
         printf '%s' "${BASH_REMATCH[1]%%\%*}"
-    elif [[ "$local_addr" =~ ^(.+):[0-9]+$ ]]; then
+    elif [[ "$local_addr" =~ ^\[([^]]+)\]%[^:]+:[0-9]+$ ]]; then
         printf '%s' "${BASH_REMATCH[1]}"
+    elif [[ "$local_addr" =~ ^(.+):[0-9]+$ ]]; then
+        printf '%s' "${BASH_REMATCH[1]%%\%*}"
     fi
 }
 
