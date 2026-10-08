@@ -122,6 +122,13 @@ function getOpenTimeoutSeconds(input) {
 
 async function main(input) {
     const baseUrl = assertLoopbackBaseUrl(input.base_url);
+    const providerMode = input.mode === 'provider';
+    if (input.mode && !providerMode) {
+        fail('input: unsupported calendar browser mode');
+    }
+    if (providerMode && !/^[1-9][0-9]*$/.test(String(input.expected_provider_id || ''))) {
+        fail('input: provider mode requires a positive expected_provider_id');
+    }
     const targetUrl = input.target_url ? assertLoopbackBaseUrl(input.target_url) : routeUrl(baseUrl, 'calendar');
     const defaultViewUrl = new URL(targetUrl);
     defaultViewUrl.searchParams.set('view', 'default');
@@ -316,14 +323,48 @@ async function main(input) {
         fail('payload: calendar page rendered no provider fixture');
     }
     const providerId = String(providerData.id);
+    if (providerMode) {
+        const roleState = await page.evaluate(() => ({
+            role: vars('role_slug'),
+            userId: String(vars('user_id')),
+            providerIds: vars('available_providers').map((provider) => String(provider.id)),
+            selectedFilter: $('#select-filter-item').val(),
+        }));
+        if (
+            roleState.role !== 'provider' ||
+            roleState.userId !== String(input.expected_provider_id) ||
+            roleState.providerIds.length !== 1 ||
+            roleState.providerIds[0] !== roleState.userId ||
+            String(roleState.selectedFilter) !== roleState.userId
+        ) {
+            fail('role: provider calendar did not bind the selected filter and fixture to its own identity');
+        }
+        if (
+            (await page.locator('#insert-working-plan-exception:visible').count()) !== 0 ||
+            (await page.locator('#insert-unavailability').count()) !== 1
+        ) {
+            fail('role: provider calendar exposed an admin action or hid manual unavailability');
+        }
+    }
     const createStartValue = '2030-01-15 09:00:00';
     const createEndValue = '2030-01-15 10:00:00';
     const createNotes = 'ROB-768 synthetic manual unavailability';
     stage = 'create';
     await page.locator('#calendar-actions [data-bs-toggle="dropdown"]').click();
+    if (providerMode && !(await page.locator('#insert-unavailability').isVisible())) {
+        fail('role: provider cannot open the manual-unavailability action');
+    }
     await page.locator('#insert-unavailability').click();
     const modal = page.locator('#unavailabilities-modal');
     await modal.waitFor({state: 'visible'});
+    if (providerMode) {
+        const selectableProviders = await modal
+            .locator('#unavailability-provider option')
+            .evaluateAll((options) => options.map((option) => option.value).filter(Boolean));
+        if (selectableProviders.length !== 1 || selectableProviders[0] !== providerId) {
+            fail('role: provider dialog offered a different provider identity');
+        }
+    }
     await modal.locator('#unavailability-provider').selectOption(providerId);
     await page.evaluate(
         ({start, end}) => {
@@ -394,17 +435,156 @@ async function main(input) {
         fail('success: create did not reload the calendar exactly once');
     }
 
-    // Exercise the working-plan exception through its real modal and HTTP client. The
-    // intercepted responses keep this browser-only coverage free of database writes.
-    stage = 'working_plan_exception';
-    const workingPlanStartedAt = Date.now();
-    const workingPlanModal = page.locator('#working-plan-exceptions-modal');
-    const workingPlanProvider = providerId;
-    const workingPlanStart = '09:00';
-    const workingPlanEnd = '17:00';
-    const workingPlanEditedEnd = '18:00';
-    if ((await page.locator('#select-filter-item').inputValue()) !== workingPlanProvider) {
-        const providerSelectionReload = page.waitForResponse(
+    // Only admins may exercise the working-plan exception; providers use manual unavailability.
+    // The intercepted responses keep this browser-only coverage free of database writes.
+    let workingPlanDurationMs = null;
+    if (!providerMode) {
+        stage = 'working_plan_exception';
+        const workingPlanStartedAt = Date.now();
+        const workingPlanModal = page.locator('#working-plan-exceptions-modal');
+        const workingPlanProvider = providerId;
+        const workingPlanStart = '09:00';
+        const workingPlanEnd = '17:00';
+        const workingPlanEditedEnd = '18:00';
+        if ((await page.locator('#select-filter-item').inputValue()) !== workingPlanProvider) {
+            const providerSelectionReload = page.waitForResponse(
+                (response) =>
+                    response.request().method() === 'POST' &&
+                    new URL(response.url()).pathname === expectedReloadPath &&
+                    response.status() === 200,
+                {timeout: interactionTimeoutMs},
+            );
+            await Promise.all([
+                providerSelectionReload,
+                page.locator('#select-filter-item').selectOption(workingPlanProvider),
+            ]);
+            await page.waitForFunction(() => window.jQuery && jQuery.active === 0, undefined, {
+                timeout: interactionTimeoutMs,
+            });
+        }
+        const workingPlanDates = await page.evaluate(() => {
+            const provider = vars('available_providers')[0] || {};
+            const exceptions = JSON.parse(provider.settings?.working_plan_exceptions || '{}');
+            const visibleDates = [...document.querySelectorAll('[data-date]')]
+                .map((element) => element.getAttribute('data-date'))
+                .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date));
+            const freeDates = [...new Set(visibleDates)].filter(
+                (date) => !Object.prototype.hasOwnProperty.call(exceptions, date),
+            );
+            return {create: freeDates[0] || '', move: freeDates[1] || ''};
+        });
+        if (!workingPlanDates.create || !workingPlanDates.move || workingPlanDates.create === workingPlanDates.move) {
+            fail('working_plan_exception: current calendar range has fewer than two free dates');
+        }
+        const workingPlanDate = workingPlanDates.create;
+        const workingPlanMovedDate = workingPlanDates.move;
+        const readWorkingPlanExceptions = () =>
+            page.evaluate((selectedProviderId) => {
+                const provider = vars('available_providers').find((item) => String(item.id) === selectedProviderId);
+                return JSON.parse(provider?.settings?.working_plan_exceptions || '{}');
+            }, workingPlanProvider);
+        const findWorkingPlanEvent = async (date) => {
+            const events = page.locator('.fc-working-plan-exception.fc-custom');
+            const index = await events.evaluateAll(
+                (elements, targetDate) =>
+                    elements.findIndex(
+                        (element) => element.closest('[data-date]')?.getAttribute('data-date') === targetDate,
+                    ),
+                date,
+            );
+            if (index < 0) {
+                fail(`success: no working-plan event rendered for ${date}`);
+            }
+            return events.nth(index);
+        };
+        const dismissWorkingPlanErrorDialog = async () => {
+            const errorModal = page.locator('#message-modal');
+            if (await errorModal.isVisible().catch(() => false)) {
+                await errorModal.locator('.modal-footer button').click();
+                await errorModal.waitFor({state: 'hidden'});
+            }
+        };
+        const workingPlanExceptionsBeforeCreate = await readWorkingPlanExceptions();
+        const workingPlanReloadBefore = postPaths.filter((path) => reloadPaths.has(path)).length;
+        const workingPlanEventsBefore = await page.locator('.fc-working-plan-exception.fc-custom').count();
+        const workingPlanAuthority = await page.evaluate(() => ({
+            role: vars('role_slug'),
+            canEditUsers: vars('privileges')?.users?.edit === true,
+        }));
+        if (workingPlanAuthority.role !== 'admin' || !workingPlanAuthority.canEditUsers) {
+            fail('working_plan_exception: authenticated actor is not an Admin with users.edit authority');
+        }
+
+        await page.locator('#calendar-actions [data-bs-toggle="dropdown"]').click();
+        const workingPlanInsert = page.locator('#insert-working-plan-exception');
+        if (!(await workingPlanInsert.isVisible())) {
+            fail('working_plan_exception: Admin working-plan action is not visible');
+        }
+        await workingPlanInsert.click();
+        await workingPlanModal.waitFor({state: 'visible'});
+        await page.evaluate(
+            ({date, start, end}) => {
+                App.Utils.UI.setDateTimePickerValue($('#working-plan-exceptions-date'), moment(date).toDate());
+                App.Utils.UI.setDateTimePickerValue(
+                    $('#working-plan-exceptions-start'),
+                    moment(start, 'HH:mm').toDate(),
+                );
+                App.Utils.UI.setDateTimePickerValue($('#working-plan-exceptions-end'), moment(end, 'HH:mm').toDate());
+            },
+            {date: workingPlanDate, start: workingPlanStart, end: workingPlanEnd},
+        );
+        const workingPlanCreateFailure = page.waitForResponse(
+            (response) =>
+                response.request().method() === 'POST' &&
+                new URL(response.url()).pathname ===
+                    new URL(routeUrl(baseUrl, SAVE_WORKING_PLAN_EXCEPTION_PATH)).pathname &&
+                response.status() === 500,
+            {timeout: interactionTimeoutMs},
+        );
+        await Promise.all([
+            workingPlanCreateFailure,
+            workingPlanModal.locator('#working-plan-exceptions-save').click(),
+        ]);
+        await page.waitForFunction(() => window.jQuery && jQuery.active === 0, undefined, {
+            timeout: interactionTimeoutMs,
+        });
+        await dismissWorkingPlanErrorDialog();
+        if (postPaths.filter((path) => reloadPaths.has(path)).length !== workingPlanReloadBefore) {
+            fail('failure: working-plan exception create reloaded the calendar');
+        }
+        if ((await page.locator('.fc-working-plan-exception.fc-custom').count()) !== workingPlanEventsBefore) {
+            fail('failure: working-plan exception create changed the rendered events');
+        }
+        if (JSON.stringify(await readWorkingPlanExceptions()) !== JSON.stringify(workingPlanExceptionsBeforeCreate)) {
+            fail('failure: working-plan exception create changed the backing exception map');
+        }
+
+        await page.locator('#calendar-actions [data-bs-toggle="dropdown"]').click();
+        if (!(await workingPlanInsert.isVisible())) {
+            fail('working_plan_exception: Admin working-plan action is not visible for the second create');
+        }
+        await workingPlanInsert.click();
+        await workingPlanModal.waitFor({state: 'visible'});
+        await page.evaluate(
+            ({date, start, end}) => {
+                App.Utils.UI.setDateTimePickerValue($('#working-plan-exceptions-date'), moment(date).toDate());
+                App.Utils.UI.setDateTimePickerValue(
+                    $('#working-plan-exceptions-start'),
+                    moment(start, 'HH:mm').toDate(),
+                );
+                App.Utils.UI.setDateTimePickerValue($('#working-plan-exceptions-end'), moment(end, 'HH:mm').toDate());
+            },
+            {date: workingPlanDate, start: workingPlanStart, end: workingPlanEnd},
+        );
+        const workingPlanCreateSuccess = page.waitForResponse(
+            (response) =>
+                response.request().method() === 'POST' &&
+                new URL(response.url()).pathname ===
+                    new URL(routeUrl(baseUrl, SAVE_WORKING_PLAN_EXCEPTION_PATH)).pathname &&
+                response.status() === 200,
+            {timeout: interactionTimeoutMs},
+        );
+        const workingPlanCreateReload = page.waitForResponse(
             (response) =>
                 response.request().method() === 'POST' &&
                 new URL(response.url()).pathname === expectedReloadPath &&
@@ -412,357 +592,237 @@ async function main(input) {
             {timeout: interactionTimeoutMs},
         );
         await Promise.all([
-            providerSelectionReload,
-            page.locator('#select-filter-item').selectOption(workingPlanProvider),
+            workingPlanCreateSuccess,
+            workingPlanCreateReload,
+            workingPlanModal.locator('#working-plan-exceptions-save').click(),
         ]);
         await page.waitForFunction(() => window.jQuery && jQuery.active === 0, undefined, {
             timeout: interactionTimeoutMs,
         });
-    }
-    const workingPlanDates = await page.evaluate(() => {
-        const provider = vars('available_providers')[0] || {};
-        const exceptions = JSON.parse(provider.settings?.working_plan_exceptions || '{}');
-        const visibleDates = [...document.querySelectorAll('[data-date]')]
-            .map((element) => element.getAttribute('data-date'))
-            .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date));
-        const freeDates = [...new Set(visibleDates)].filter(
-            (date) => !Object.prototype.hasOwnProperty.call(exceptions, date),
+        await workingPlanModal.waitFor({state: 'hidden'});
+        const workingPlanEvent = await findWorkingPlanEvent(workingPlanDate);
+        await workingPlanEvent.waitFor({state: 'visible'});
+        if ((await page.locator('.fc-working-plan-exception.fc-custom').count()) <= workingPlanEventsBefore) {
+            fail('success: working-plan exception create did not add a rendered event');
+        }
+        const workingPlanRenderedDate = await workingPlanEvent.evaluate(
+            (element) => element.closest('[data-date]')?.getAttribute('data-date') || '',
         );
-        return {create: freeDates[0] || '', move: freeDates[1] || ''};
-    });
-    if (!workingPlanDates.create || !workingPlanDates.move || workingPlanDates.create === workingPlanDates.move) {
-        fail('working_plan_exception: current calendar range has fewer than two free dates');
-    }
-    const workingPlanDate = workingPlanDates.create;
-    const workingPlanMovedDate = workingPlanDates.move;
-    const readWorkingPlanExceptions = () =>
-        page.evaluate((selectedProviderId) => {
-            const provider = vars('available_providers').find((item) => String(item.id) === selectedProviderId);
-            return JSON.parse(provider?.settings?.working_plan_exceptions || '{}');
-        }, workingPlanProvider);
-    const findWorkingPlanEvent = async (date) => {
-        const events = page.locator('.fc-working-plan-exception.fc-custom');
-        const index = await events.evaluateAll(
-            (elements, targetDate) =>
-                elements.findIndex(
-                    (element) => element.closest('[data-date]')?.getAttribute('data-date') === targetDate,
+        if (workingPlanRenderedDate !== workingPlanDate) {
+            fail('success: working-plan exception create rendered on the wrong date');
+        }
+        const workingPlanPayloads = workingPlanSaveRequests.slice(0, 2);
+        if (
+            workingPlanPayloads.length !== 2 ||
+            workingPlanPayloads.some(
+                (payload) =>
+                    !payload.csrf ||
+                    payload.provider !== workingPlanProvider ||
+                    payload.date !== workingPlanDate ||
+                    payload.start !== workingPlanStart ||
+                    payload.end !== workingPlanEnd,
+            )
+        ) {
+            fail('payload: working-plan exception create did not send provider/date/start/end');
+        }
+        const workingPlanExceptionsAfterCreate = await readWorkingPlanExceptions();
+
+        await workingPlanEvent.click();
+        const workingPlanPopover = page.locator('.popover').last();
+        await workingPlanPopover.waitFor({state: 'visible'});
+        await workingPlanPopover.locator('.edit-popover').click();
+        await workingPlanModal.waitFor({state: 'visible'});
+        const workingPlanOpened = await page.evaluate(() => ({
+            date: moment(App.Utils.UI.getDateTimePickerValue($('#working-plan-exceptions-date'))).format('YYYY-MM-DD'),
+            start: moment(App.Utils.UI.getDateTimePickerValue($('#working-plan-exceptions-start'))).format('HH:mm'),
+            end: moment(App.Utils.UI.getDateTimePickerValue($('#working-plan-exceptions-end'))).format('HH:mm'),
+        }));
+        if (
+            workingPlanOpened.date !== workingPlanDate ||
+            workingPlanOpened.start !== workingPlanStart ||
+            workingPlanOpened.end !== workingPlanEnd
+        ) {
+            fail('payload: working-plan exception edit did not prepopulate the selected date/start/end');
+        }
+        await page.evaluate(
+            (end) =>
+                App.Utils.UI.setDateTimePickerValue($('#working-plan-exceptions-end'), moment(end, 'HH:mm').toDate()),
+            workingPlanEditedEnd,
+        );
+        const workingPlanEditFailure = page.waitForResponse(
+            (response) =>
+                response.request().method() === 'POST' &&
+                new URL(response.url()).pathname ===
+                    new URL(routeUrl(baseUrl, SAVE_WORKING_PLAN_EXCEPTION_PATH)).pathname &&
+                response.status() === 500,
+            {timeout: interactionTimeoutMs},
+        );
+        await Promise.all([workingPlanEditFailure, workingPlanModal.locator('#working-plan-exceptions-save').click()]);
+        await page.waitForFunction(() => window.jQuery && jQuery.active === 0, undefined, {
+            timeout: interactionTimeoutMs,
+        });
+        await dismissWorkingPlanErrorDialog();
+        if (postPaths.filter((path) => reloadPaths.has(path)).length !== workingPlanReloadBefore + 1) {
+            fail('failure: working-plan exception edit reloaded the calendar');
+        }
+        if (
+            workingPlanSaveRequests[2]?.date !== workingPlanDate ||
+            workingPlanSaveRequests[2]?.originalDate !== workingPlanDate ||
+            workingPlanSaveRequests[2]?.start !== workingPlanStart ||
+            workingPlanSaveRequests[2]?.end !== workingPlanEditedEnd ||
+            JSON.stringify(await readWorkingPlanExceptions()) !== JSON.stringify(workingPlanExceptionsAfterCreate)
+        ) {
+            fail('failure: working-plan exception edit changed date, times, or backing exception map');
+        }
+        await workingPlanEvent.waitFor({state: 'visible'});
+
+        await workingPlanEvent.click();
+        await page.locator('.popover').last().locator('.edit-popover').click();
+        await workingPlanModal.waitFor({state: 'visible'});
+        const workingPlanAfterFailedEdit = await page.evaluate(() => ({
+            date: moment(App.Utils.UI.getDateTimePickerValue($('#working-plan-exceptions-date'))).format('YYYY-MM-DD'),
+            start: moment(App.Utils.UI.getDateTimePickerValue($('#working-plan-exceptions-start'))).format('HH:mm'),
+            end: moment(App.Utils.UI.getDateTimePickerValue($('#working-plan-exceptions-end'))).format('HH:mm'),
+        }));
+        if (
+            workingPlanAfterFailedEdit.date !== workingPlanDate ||
+            workingPlanAfterFailedEdit.start !== workingPlanStart ||
+            workingPlanAfterFailedEdit.end !== workingPlanEnd
+        ) {
+            fail('failure: working-plan exception edit changed the rendered event after HTTP 500');
+        }
+        await page.evaluate(
+            ({date, end}) => {
+                App.Utils.UI.setDateTimePickerValue($('#working-plan-exceptions-date'), moment(date).toDate());
+                App.Utils.UI.setDateTimePickerValue($('#working-plan-exceptions-end'), moment(end, 'HH:mm').toDate());
+            },
+            {date: workingPlanMovedDate, end: workingPlanEditedEnd},
+        );
+        const workingPlanEditSuccess = page.waitForResponse(
+            (response) =>
+                response.request().method() === 'POST' &&
+                new URL(response.url()).pathname ===
+                    new URL(routeUrl(baseUrl, SAVE_WORKING_PLAN_EXCEPTION_PATH)).pathname &&
+                response.status() === 200,
+            {timeout: interactionTimeoutMs},
+        );
+        const workingPlanEditReload = page.waitForResponse(
+            (response) =>
+                response.request().method() === 'POST' &&
+                new URL(response.url()).pathname === expectedReloadPath &&
+                response.status() === 200,
+            {timeout: interactionTimeoutMs},
+        );
+        await Promise.all([
+            workingPlanEditSuccess,
+            workingPlanEditReload,
+            workingPlanModal.locator('#working-plan-exceptions-save').click(),
+        ]);
+        await page.waitForFunction(() => window.jQuery && jQuery.active === 0, undefined, {
+            timeout: interactionTimeoutMs,
+        });
+        const workingPlanEventAfterMove = await findWorkingPlanEvent(workingPlanMovedDate);
+        await workingPlanEventAfterMove.waitFor({state: 'visible'});
+        const movedWorkingPlanRenderedDate = await workingPlanEventAfterMove.evaluate(
+            (element) => element.closest('[data-date]')?.getAttribute('data-date') || '',
+        );
+        const workingPlanEditPayload = workingPlanSaveRequests[3];
+        if (
+            !workingPlanEditPayload ||
+            workingPlanEditPayload.provider !== workingPlanProvider ||
+            workingPlanEditPayload.date !== workingPlanMovedDate ||
+            workingPlanEditPayload.originalDate !== workingPlanDate ||
+            workingPlanEditPayload.start !== workingPlanStart ||
+            workingPlanEditPayload.end !== workingPlanEditedEnd ||
+            movedWorkingPlanRenderedDate !== workingPlanMovedDate
+        ) {
+            fail(
+                'payload: working-plan exception edit did not move the rendered event or send the changed date/end time',
+            );
+        }
+        const movedWorkingPlanSettings = await page.evaluate(
+            ({providerId, oldDate, newDate}) => {
+                const provider = vars('available_providers').find((item) => String(item.id) === providerId);
+                const exceptions = JSON.parse(provider?.settings?.working_plan_exceptions || '{}');
+                return {
+                    oldPresent: Object.prototype.hasOwnProperty.call(exceptions, oldDate),
+                    newValue: exceptions[newDate],
+                };
+            },
+            {providerId: workingPlanProvider, oldDate: workingPlanDate, newDate: workingPlanMovedDate},
+        );
+        if (movedWorkingPlanSettings.oldPresent || movedWorkingPlanSettings.newValue?.end !== workingPlanEditedEnd) {
+            fail('success: working-plan exception edit did not update the backing exception map');
+        }
+        const workingPlanExceptionsAfterMove = await readWorkingPlanExceptions();
+
+        await workingPlanEventAfterMove.click();
+        const workingPlanDeleteFailure = page.waitForResponse(
+            (response) =>
+                response.request().method() === 'POST' &&
+                new URL(response.url()).pathname ===
+                    new URL(routeUrl(baseUrl, DELETE_WORKING_PLAN_EXCEPTION_PATH)).pathname &&
+                response.status() === 500,
+            {timeout: interactionTimeoutMs},
+        );
+        await Promise.all([
+            workingPlanDeleteFailure,
+            page.locator('.popover').last().locator('.delete-popover').click(),
+        ]);
+        await page.waitForFunction(() => window.jQuery && jQuery.active === 0, undefined, {
+            timeout: interactionTimeoutMs,
+        });
+        await dismissWorkingPlanErrorDialog();
+        if (postPaths.filter((path) => reloadPaths.has(path)).length !== workingPlanReloadBefore + 2) {
+            fail('failure: working-plan exception delete reloaded the calendar');
+        }
+        if (JSON.stringify(await readWorkingPlanExceptions()) !== JSON.stringify(workingPlanExceptionsAfterMove)) {
+            fail('failure: working-plan exception delete changed the backing exception map');
+        }
+        await workingPlanEventAfterMove.waitFor({state: 'visible'});
+
+        await workingPlanEventAfterMove.click();
+        const workingPlanDeleteSuccess = page.waitForResponse(
+            (response) =>
+                response.request().method() === 'POST' &&
+                new URL(response.url()).pathname ===
+                    new URL(routeUrl(baseUrl, DELETE_WORKING_PLAN_EXCEPTION_PATH)).pathname &&
+                response.status() === 200,
+            {timeout: interactionTimeoutMs},
+        );
+        const workingPlanDeleteReload = page.waitForResponse(
+            (response) =>
+                response.request().method() === 'POST' &&
+                new URL(response.url()).pathname === expectedReloadPath &&
+                response.status() === 200,
+            {timeout: interactionTimeoutMs},
+        );
+        await Promise.all([
+            workingPlanDeleteSuccess,
+            workingPlanDeleteReload,
+            page.locator('.popover').last().locator('.delete-popover').click(),
+        ]);
+        await page.waitForFunction(() => window.jQuery && jQuery.active === 0, undefined, {
+            timeout: interactionTimeoutMs,
+        });
+        await page.waitForFunction(
+            (date) =>
+                ![...document.querySelectorAll('.fc-working-plan-exception.fc-custom')].some(
+                    (element) => element.closest('[data-date]')?.getAttribute('data-date') === date,
                 ),
-            date,
+            workingPlanMovedDate,
+            {timeout: interactionTimeoutMs},
         );
-        if (index < 0) {
-            fail(`success: no working-plan event rendered for ${date}`);
+        if (
+            workingPlanDeleteRequests.length !== 2 ||
+            workingPlanDeleteRequests.some(
+                (payload) =>
+                    !payload.csrf || payload.provider !== workingPlanProvider || payload.date !== workingPlanMovedDate,
+            )
+        ) {
+            fail('payload: working-plan exception delete did not send provider/date');
         }
-        return events.nth(index);
-    };
-    const dismissWorkingPlanErrorDialog = async () => {
-        const errorModal = page.locator('#message-modal');
-        if (await errorModal.isVisible().catch(() => false)) {
-            await errorModal.locator('.modal-footer button').click();
-            await errorModal.waitFor({state: 'hidden'});
-        }
-    };
-    const workingPlanExceptionsBeforeCreate = await readWorkingPlanExceptions();
-    const workingPlanReloadBefore = postPaths.filter((path) => reloadPaths.has(path)).length;
-    const workingPlanEventsBefore = await page.locator('.fc-working-plan-exception.fc-custom').count();
-    const workingPlanAuthority = await page.evaluate(() => ({
-        role: vars('role_slug'),
-        canEditUsers: vars('privileges')?.users?.edit === true,
-    }));
-    if (workingPlanAuthority.role !== 'admin' || !workingPlanAuthority.canEditUsers) {
-        fail('working_plan_exception: authenticated actor is not an Admin with users.edit authority');
-    }
-
-    await page.locator('#calendar-actions [data-bs-toggle="dropdown"]').click();
-    const workingPlanInsert = page.locator('#insert-working-plan-exception');
-    if (!(await workingPlanInsert.isVisible())) {
-        fail('working_plan_exception: Admin working-plan action is not visible');
-    }
-    await workingPlanInsert.click();
-    await workingPlanModal.waitFor({state: 'visible'});
-    await page.evaluate(
-        ({date, start, end}) => {
-            App.Utils.UI.setDateTimePickerValue($('#working-plan-exceptions-date'), moment(date).toDate());
-            App.Utils.UI.setDateTimePickerValue($('#working-plan-exceptions-start'), moment(start, 'HH:mm').toDate());
-            App.Utils.UI.setDateTimePickerValue($('#working-plan-exceptions-end'), moment(end, 'HH:mm').toDate());
-        },
-        {date: workingPlanDate, start: workingPlanStart, end: workingPlanEnd},
-    );
-    const workingPlanCreateFailure = page.waitForResponse(
-        (response) =>
-            response.request().method() === 'POST' &&
-            new URL(response.url()).pathname ===
-                new URL(routeUrl(baseUrl, SAVE_WORKING_PLAN_EXCEPTION_PATH)).pathname &&
-            response.status() === 500,
-        {timeout: interactionTimeoutMs},
-    );
-    await Promise.all([workingPlanCreateFailure, workingPlanModal.locator('#working-plan-exceptions-save').click()]);
-    await page.waitForFunction(() => window.jQuery && jQuery.active === 0, undefined, {
-        timeout: interactionTimeoutMs,
-    });
-    await dismissWorkingPlanErrorDialog();
-    if (postPaths.filter((path) => reloadPaths.has(path)).length !== workingPlanReloadBefore) {
-        fail('failure: working-plan exception create reloaded the calendar');
-    }
-    if ((await page.locator('.fc-working-plan-exception.fc-custom').count()) !== workingPlanEventsBefore) {
-        fail('failure: working-plan exception create changed the rendered events');
-    }
-    if (JSON.stringify(await readWorkingPlanExceptions()) !== JSON.stringify(workingPlanExceptionsBeforeCreate)) {
-        fail('failure: working-plan exception create changed the backing exception map');
-    }
-
-    await page.locator('#calendar-actions [data-bs-toggle="dropdown"]').click();
-    if (!(await workingPlanInsert.isVisible())) {
-        fail('working_plan_exception: Admin working-plan action is not visible for the second create');
-    }
-    await workingPlanInsert.click();
-    await workingPlanModal.waitFor({state: 'visible'});
-    await page.evaluate(
-        ({date, start, end}) => {
-            App.Utils.UI.setDateTimePickerValue($('#working-plan-exceptions-date'), moment(date).toDate());
-            App.Utils.UI.setDateTimePickerValue($('#working-plan-exceptions-start'), moment(start, 'HH:mm').toDate());
-            App.Utils.UI.setDateTimePickerValue($('#working-plan-exceptions-end'), moment(end, 'HH:mm').toDate());
-        },
-        {date: workingPlanDate, start: workingPlanStart, end: workingPlanEnd},
-    );
-    const workingPlanCreateSuccess = page.waitForResponse(
-        (response) =>
-            response.request().method() === 'POST' &&
-            new URL(response.url()).pathname ===
-                new URL(routeUrl(baseUrl, SAVE_WORKING_PLAN_EXCEPTION_PATH)).pathname &&
-            response.status() === 200,
-        {timeout: interactionTimeoutMs},
-    );
-    const workingPlanCreateReload = page.waitForResponse(
-        (response) =>
-            response.request().method() === 'POST' &&
-            new URL(response.url()).pathname === expectedReloadPath &&
-            response.status() === 200,
-        {timeout: interactionTimeoutMs},
-    );
-    await Promise.all([
-        workingPlanCreateSuccess,
-        workingPlanCreateReload,
-        workingPlanModal.locator('#working-plan-exceptions-save').click(),
-    ]);
-    await page.waitForFunction(() => window.jQuery && jQuery.active === 0, undefined, {
-        timeout: interactionTimeoutMs,
-    });
-    await workingPlanModal.waitFor({state: 'hidden'});
-    const workingPlanEvent = await findWorkingPlanEvent(workingPlanDate);
-    await workingPlanEvent.waitFor({state: 'visible'});
-    if ((await page.locator('.fc-working-plan-exception.fc-custom').count()) <= workingPlanEventsBefore) {
-        fail('success: working-plan exception create did not add a rendered event');
-    }
-    const workingPlanRenderedDate = await workingPlanEvent.evaluate(
-        (element) => element.closest('[data-date]')?.getAttribute('data-date') || '',
-    );
-    if (workingPlanRenderedDate !== workingPlanDate) {
-        fail('success: working-plan exception create rendered on the wrong date');
-    }
-    const workingPlanPayloads = workingPlanSaveRequests.slice(0, 2);
-    if (
-        workingPlanPayloads.length !== 2 ||
-        workingPlanPayloads.some(
-            (payload) =>
-                !payload.csrf ||
-                payload.provider !== workingPlanProvider ||
-                payload.date !== workingPlanDate ||
-                payload.start !== workingPlanStart ||
-                payload.end !== workingPlanEnd,
-        )
-    ) {
-        fail('payload: working-plan exception create did not send provider/date/start/end');
-    }
-    const workingPlanExceptionsAfterCreate = await readWorkingPlanExceptions();
-
-    await workingPlanEvent.click();
-    const workingPlanPopover = page.locator('.popover').last();
-    await workingPlanPopover.waitFor({state: 'visible'});
-    await workingPlanPopover.locator('.edit-popover').click();
-    await workingPlanModal.waitFor({state: 'visible'});
-    const workingPlanOpened = await page.evaluate(() => ({
-        date: moment(App.Utils.UI.getDateTimePickerValue($('#working-plan-exceptions-date'))).format('YYYY-MM-DD'),
-        start: moment(App.Utils.UI.getDateTimePickerValue($('#working-plan-exceptions-start'))).format('HH:mm'),
-        end: moment(App.Utils.UI.getDateTimePickerValue($('#working-plan-exceptions-end'))).format('HH:mm'),
-    }));
-    if (
-        workingPlanOpened.date !== workingPlanDate ||
-        workingPlanOpened.start !== workingPlanStart ||
-        workingPlanOpened.end !== workingPlanEnd
-    ) {
-        fail('payload: working-plan exception edit did not prepopulate the selected date/start/end');
-    }
-    await page.evaluate(
-        (end) => App.Utils.UI.setDateTimePickerValue($('#working-plan-exceptions-end'), moment(end, 'HH:mm').toDate()),
-        workingPlanEditedEnd,
-    );
-    const workingPlanEditFailure = page.waitForResponse(
-        (response) =>
-            response.request().method() === 'POST' &&
-            new URL(response.url()).pathname ===
-                new URL(routeUrl(baseUrl, SAVE_WORKING_PLAN_EXCEPTION_PATH)).pathname &&
-            response.status() === 500,
-        {timeout: interactionTimeoutMs},
-    );
-    await Promise.all([workingPlanEditFailure, workingPlanModal.locator('#working-plan-exceptions-save').click()]);
-    await page.waitForFunction(() => window.jQuery && jQuery.active === 0, undefined, {
-        timeout: interactionTimeoutMs,
-    });
-    await dismissWorkingPlanErrorDialog();
-    if (postPaths.filter((path) => reloadPaths.has(path)).length !== workingPlanReloadBefore + 1) {
-        fail('failure: working-plan exception edit reloaded the calendar');
-    }
-    if (
-        workingPlanSaveRequests[2]?.date !== workingPlanDate ||
-        workingPlanSaveRequests[2]?.originalDate !== workingPlanDate ||
-        workingPlanSaveRequests[2]?.start !== workingPlanStart ||
-        workingPlanSaveRequests[2]?.end !== workingPlanEditedEnd ||
-        JSON.stringify(await readWorkingPlanExceptions()) !== JSON.stringify(workingPlanExceptionsAfterCreate)
-    ) {
-        fail('failure: working-plan exception edit changed date, times, or backing exception map');
-    }
-    await workingPlanEvent.waitFor({state: 'visible'});
-
-    await workingPlanEvent.click();
-    await page.locator('.popover').last().locator('.edit-popover').click();
-    await workingPlanModal.waitFor({state: 'visible'});
-    const workingPlanAfterFailedEdit = await page.evaluate(() => ({
-        date: moment(App.Utils.UI.getDateTimePickerValue($('#working-plan-exceptions-date'))).format('YYYY-MM-DD'),
-        start: moment(App.Utils.UI.getDateTimePickerValue($('#working-plan-exceptions-start'))).format('HH:mm'),
-        end: moment(App.Utils.UI.getDateTimePickerValue($('#working-plan-exceptions-end'))).format('HH:mm'),
-    }));
-    if (
-        workingPlanAfterFailedEdit.date !== workingPlanDate ||
-        workingPlanAfterFailedEdit.start !== workingPlanStart ||
-        workingPlanAfterFailedEdit.end !== workingPlanEnd
-    ) {
-        fail('failure: working-plan exception edit changed the rendered event after HTTP 500');
-    }
-    await page.evaluate(
-        ({date, end}) => {
-            App.Utils.UI.setDateTimePickerValue($('#working-plan-exceptions-date'), moment(date).toDate());
-            App.Utils.UI.setDateTimePickerValue($('#working-plan-exceptions-end'), moment(end, 'HH:mm').toDate());
-        },
-        {date: workingPlanMovedDate, end: workingPlanEditedEnd},
-    );
-    const workingPlanEditSuccess = page.waitForResponse(
-        (response) =>
-            response.request().method() === 'POST' &&
-            new URL(response.url()).pathname ===
-                new URL(routeUrl(baseUrl, SAVE_WORKING_PLAN_EXCEPTION_PATH)).pathname &&
-            response.status() === 200,
-        {timeout: interactionTimeoutMs},
-    );
-    const workingPlanEditReload = page.waitForResponse(
-        (response) =>
-            response.request().method() === 'POST' &&
-            new URL(response.url()).pathname === expectedReloadPath &&
-            response.status() === 200,
-        {timeout: interactionTimeoutMs},
-    );
-    await Promise.all([
-        workingPlanEditSuccess,
-        workingPlanEditReload,
-        workingPlanModal.locator('#working-plan-exceptions-save').click(),
-    ]);
-    await page.waitForFunction(() => window.jQuery && jQuery.active === 0, undefined, {
-        timeout: interactionTimeoutMs,
-    });
-    const workingPlanEventAfterMove = await findWorkingPlanEvent(workingPlanMovedDate);
-    await workingPlanEventAfterMove.waitFor({state: 'visible'});
-    const movedWorkingPlanRenderedDate = await workingPlanEventAfterMove.evaluate(
-        (element) => element.closest('[data-date]')?.getAttribute('data-date') || '',
-    );
-    const workingPlanEditPayload = workingPlanSaveRequests[3];
-    if (
-        !workingPlanEditPayload ||
-        workingPlanEditPayload.provider !== workingPlanProvider ||
-        workingPlanEditPayload.date !== workingPlanMovedDate ||
-        workingPlanEditPayload.originalDate !== workingPlanDate ||
-        workingPlanEditPayload.start !== workingPlanStart ||
-        workingPlanEditPayload.end !== workingPlanEditedEnd ||
-        movedWorkingPlanRenderedDate !== workingPlanMovedDate
-    ) {
-        fail('payload: working-plan exception edit did not move the rendered event or send the changed date/end time');
-    }
-    const movedWorkingPlanSettings = await page.evaluate(
-        ({providerId, oldDate, newDate}) => {
-            const provider = vars('available_providers').find((item) => String(item.id) === providerId);
-            const exceptions = JSON.parse(provider?.settings?.working_plan_exceptions || '{}');
-            return {
-                oldPresent: Object.prototype.hasOwnProperty.call(exceptions, oldDate),
-                newValue: exceptions[newDate],
-            };
-        },
-        {providerId: workingPlanProvider, oldDate: workingPlanDate, newDate: workingPlanMovedDate},
-    );
-    if (movedWorkingPlanSettings.oldPresent || movedWorkingPlanSettings.newValue?.end !== workingPlanEditedEnd) {
-        fail('success: working-plan exception edit did not update the backing exception map');
-    }
-    const workingPlanExceptionsAfterMove = await readWorkingPlanExceptions();
-
-    await workingPlanEventAfterMove.click();
-    const workingPlanDeleteFailure = page.waitForResponse(
-        (response) =>
-            response.request().method() === 'POST' &&
-            new URL(response.url()).pathname ===
-                new URL(routeUrl(baseUrl, DELETE_WORKING_PLAN_EXCEPTION_PATH)).pathname &&
-            response.status() === 500,
-        {timeout: interactionTimeoutMs},
-    );
-    await Promise.all([workingPlanDeleteFailure, page.locator('.popover').last().locator('.delete-popover').click()]);
-    await page.waitForFunction(() => window.jQuery && jQuery.active === 0, undefined, {
-        timeout: interactionTimeoutMs,
-    });
-    await dismissWorkingPlanErrorDialog();
-    if (postPaths.filter((path) => reloadPaths.has(path)).length !== workingPlanReloadBefore + 2) {
-        fail('failure: working-plan exception delete reloaded the calendar');
-    }
-    if (JSON.stringify(await readWorkingPlanExceptions()) !== JSON.stringify(workingPlanExceptionsAfterMove)) {
-        fail('failure: working-plan exception delete changed the backing exception map');
-    }
-    await workingPlanEventAfterMove.waitFor({state: 'visible'});
-
-    await workingPlanEventAfterMove.click();
-    const workingPlanDeleteSuccess = page.waitForResponse(
-        (response) =>
-            response.request().method() === 'POST' &&
-            new URL(response.url()).pathname ===
-                new URL(routeUrl(baseUrl, DELETE_WORKING_PLAN_EXCEPTION_PATH)).pathname &&
-            response.status() === 200,
-        {timeout: interactionTimeoutMs},
-    );
-    const workingPlanDeleteReload = page.waitForResponse(
-        (response) =>
-            response.request().method() === 'POST' &&
-            new URL(response.url()).pathname === expectedReloadPath &&
-            response.status() === 200,
-        {timeout: interactionTimeoutMs},
-    );
-    await Promise.all([
-        workingPlanDeleteSuccess,
-        workingPlanDeleteReload,
-        page.locator('.popover').last().locator('.delete-popover').click(),
-    ]);
-    await page.waitForFunction(() => window.jQuery && jQuery.active === 0, undefined, {
-        timeout: interactionTimeoutMs,
-    });
-    await page.waitForFunction(
-        (date) =>
-            ![...document.querySelectorAll('.fc-working-plan-exception.fc-custom')].some(
-                (element) => element.closest('[data-date]')?.getAttribute('data-date') === date,
-            ),
-        workingPlanMovedDate,
-        {timeout: interactionTimeoutMs},
-    );
-    if (
-        workingPlanDeleteRequests.length !== 2 ||
-        workingPlanDeleteRequests.some(
-            (payload) =>
-                !payload.csrf || payload.provider !== workingPlanProvider || payload.date !== workingPlanMovedDate,
-        )
-    ) {
-        fail('payload: working-plan exception delete did not send provider/date');
+        workingPlanDurationMs = Date.now() - workingPlanStartedAt;
     }
 
     const eventId = '769001';
@@ -1127,8 +1187,12 @@ async function main(input) {
     if (unexpectedWrites.length > 0 || blockedWritePaths.length > 0) {
         fail('payload: an unexpected write route was requested');
     }
+    if (providerMode && (workingPlanSaveRequests.length > 0 || workingPlanDeleteRequests.length > 0)) {
+        fail('role: provider browser requested an admin-only working-plan write');
+    }
 
     return {
+        ...(providerMode ? {provider_role_verified: true, provider_ownership_verified: true} : {}),
         request_payload_verified: true,
         failure_state_verified: true,
         success_state_verified: true,
@@ -1137,10 +1201,14 @@ async function main(input) {
         edit_success_reload_verified: true,
         delete_failure_state_verified: true,
         delete_success_reload_verified: true,
-        working_plan_exception_create_verified: true,
-        working_plan_exception_edit_verified: true,
-        working_plan_exception_delete_verified: true,
-        working_plan_duration_ms: Date.now() - workingPlanStartedAt,
+        ...(!providerMode
+            ? {
+                  working_plan_exception_create_verified: true,
+                  working_plan_exception_edit_verified: true,
+                  working_plan_exception_delete_verified: true,
+                  working_plan_duration_ms: workingPlanDurationMs,
+              }
+            : {}),
         table_view_literal_name_verified: true,
         table_view_write_boundary_verified: true,
     };
