@@ -31,6 +31,7 @@ class Unavailabilities_api_v1 extends EA_Controller
         $this->api->auth();
 
         $this->api->model('unavailabilities_model');
+        $this->load->model('appointments_model');
     }
 
     /**
@@ -189,11 +190,49 @@ class Unavailabilities_api_v1 extends EA_Controller
                 unset($unavailability['id']);
             }
 
+            $requested_unavailability = $unavailability;
             $this->unavailabilities_model->api_decode($unavailability, $original_unavailability);
 
-            $unavailability['id'] = $id;
+            if (!$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start unavailability transaction.');
+            }
 
-            $unavailability_id = $this->unavailabilities_model->save($unavailability);
+            try {
+                // Match public booking and Calendar writes: lock both possible
+                // providers before the row, then re-read the row under the lock.
+                $this->appointments_model->lock_update_parents($original_unavailability, $unavailability);
+
+                $locked_unavailability = $this->db
+                    ->query(
+                        'SELECT * FROM `' .
+                            $this->db->dbprefix('appointments') .
+                            '` WHERE `id` = ? AND `is_unavailability` = 1 AND `id_parent_appointment` IS NULL FOR UPDATE',
+                        [$id],
+                    )
+                    ->row_array();
+
+                if (
+                    !$locked_unavailability ||
+                    (int) $locked_unavailability['id_users_provider'] !==
+                        (int) $original_unavailability['id_users_provider']
+                ) {
+                    throw new RuntimeException('The unavailability changed during this request.', 409);
+                }
+
+                $unavailability = $requested_unavailability;
+                $this->unavailabilities_model->api_decode($unavailability, $locked_unavailability);
+                $unavailability['id'] = $id;
+
+                $unavailability_id = $this->unavailabilities_model->save($unavailability);
+
+                if ($this->db->trans_status() === false || !$this->db->trans_commit()) {
+                    throw new RuntimeException('Could not commit unavailability transaction.');
+                }
+            } catch (Throwable $e) {
+                $this->db->trans_rollback();
+
+                throw $e;
+            }
 
             $updated_unavailability = $this->unavailabilities_model->find($unavailability_id);
 
@@ -201,7 +240,14 @@ class Unavailabilities_api_v1 extends EA_Controller
 
             json_response($updated_unavailability);
         } catch (Throwable $e) {
-            json_exception($e);
+            if ($e->getCode() === 409) {
+                json_response(
+                    ['success' => false, 'message' => 'The unavailability changed during this request.'],
+                    409,
+                );
+            } else {
+                json_exception($e);
+            }
         }
     }
 

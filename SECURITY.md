@@ -650,6 +650,12 @@ After the lock is released, the Calendar save commits its run-owned block and
 the public POST rejects with 409 without a customer, appointment, or consent
 partial write. This proves that ordered local Calendar/booking schedule, not
 every concurrent schedule, the API writer, or a live production result.
+The isolated `UnavailabilitiesApiProviderLockRaceHttpTest` checks a distinct
+API boundary: an authenticated API PUT moving a run-owned manual block into a
+previously free slot waits behind a held provider-row lock on the canonical
+route and direct alias. This establishes the provider-lock ordering for those
+local writes; it does not establish every concurrent booking outcome or a
+live production booking.
 The isolated `CalendarPublicRescheduleRaceHttpTest` checks the corresponding
 authorized reschedule with two real HTTP processes and a session-bound
 one-time authority. The target is distinct from the original appointment and

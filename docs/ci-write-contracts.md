@@ -303,6 +303,17 @@ und -Löschung besitzen eine gemeinsame Transaktionsgrenze. Diese Sperrfolge
 schützt den geprüften Datensatz, verspricht aber keine anwendungsweite
 Serialisierung aller Anbieter-Berechtigungsänderungen.
 
+Auch API-PUT sperrt die bisherige und angefragte Anbieterzeile vor der
+manuellen Sperrzeitzeile. Er liest die Zeile unter dieser Sperre erneut,
+verwirft eine zwischenzeitlich geänderte Anbieterzuordnung mit 409 und
+schreibt erst danach in derselben Transaktion. Damit kann ein API-PUT eine
+Sperrzeit nicht während eines gehaltenen Provider-Locks in einen zunächst
+freien Buchungsslot verschieben. Der isolierte HTTP-/DB-Test hält den Lock
+mit einer zweiten Verbindung und prüft kanonische Route sowie direkten Alias.
+Ein getrennter Negativfall ändert die Anbieterzuordnung während des Wartens
+und verlangt 409 ohne weitere Mutation. Die Tests belegen diese geordneten
+Konflikte, keinen beliebigen Gleichzeitigkeitspfad oder eine produktive Buchung.
+
 Die isolierten HTTP-Regressionen prüfen Normalfälle, unautorisierte Anfragen,
 abweichende Body-IDs, reguläre Termin-IDs, generierte Puffer und direkte Aliase
 mit einem Vorher-/Nachher-Abgleich der eigenen Testdatensätze. Die Modelltests
