@@ -175,7 +175,11 @@ final class CalendarMutationMethodHttpTest extends TestCase
                     $method === 'POST'
                         ? $aliasClient->post('backend_api/' . $alias)
                         : $aliasClient->requestApp($method, 'backend_api/' . $alias . '?id=' . $appointmentId);
-                self::assertContains($response->statusCode, [301, 302, 303, 307, 308], $method . ' ' . $alias);
+                if ($method === 'POST') {
+                    self::assertSame(303, $response->statusCode, $method . ' ' . $alias);
+                } else {
+                    self::assertContains($response->statusCode, [301, 302, 303, 307, 308], $method . ' ' . $alias);
+                }
                 self::assertStringEndsWith(
                     '/' . $target,
                     (string) $response->header('location'),
