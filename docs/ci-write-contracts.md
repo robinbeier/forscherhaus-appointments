@@ -147,9 +147,10 @@ einem Anbieter gehören. Der Kalender prüft den Typ vor der Transaktion und
 erneut nach dem Sperren der Benutzerzeile; andere oder fehlende Ziel-IDs
 erhalten 403 ohne Eintrag. `CalendarUnavailabilityTargetHttpTest` prüft den
 kanonischen Pfad mit eigenen Anbieter- und Kundendaten sowie die Weiterleitung
-des direkten Altalias. Der Modellschutz bleibt zusätzlich bestehen; ein
-produktiver Schreibtest ist damit
-nicht belegt.
+des direkten Altalias. Ein isolierter Race-Test lässt den eigenen Anbieter
+zwischen Vorprüfung und Zeilensperre verschwinden und verlangt ebenfalls 403
+ohne Eintrag. Der Modellschutz bleibt zusätzlich bestehen; ein produktiver
+Schreibtest ist damit nicht belegt.
 
 `CalendarMutationMethodHttpTest` prüft GET und HEAD mit echten Query-Parametern
 für alle sechs direkten Aktionen, die Nichtmutation eigener synthetischer

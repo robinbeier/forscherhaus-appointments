@@ -99,6 +99,73 @@ final class CalendarUnavailabilityTargetHttpTest extends TestCase
         self::assertSame($before, $this->mutationSnapshot());
     }
 
+    public function testProviderDisappearanceAfterPrecheckReturns403WithoutCreatingUnavailability(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $db = get_instance()->db;
+        $client = $this->authenticatedClient();
+        $provider = $db->get_where('users', ['id' => $fixture->providerId])->row_array();
+        $settings = $fixture->userSettingsRow($fixture->providerId);
+        $links = $db->get_where('services_providers', ['id_users' => $fixture->providerId])->result_array();
+        self::assertNotEmpty($provider);
+        self::assertNotEmpty($settings);
+        self::assertNotEmpty($links);
+
+        $observer = $this->observer($db);
+        $multi = curl_multi_init();
+        $handle = null;
+        $transactionOpen = false;
+        $providerDeleted = false;
+        try {
+            self::assertTrue($db->trans_begin());
+            $transactionOpen = true;
+            self::assertNotFalse(
+                $db->query(
+                    'SELECT * FROM `' .
+                        $db->dbprefix('users') .
+                        '` WHERE `id` = ' .
+                        $fixture->providerId .
+                        ' FOR UPDATE',
+                ),
+            );
+
+            $handle = $this->startRequest($client, $this->payload($fixture->providerId, '_disappearance'), $multi);
+            self::assertTrue($this->waitsFor($multi, $observer, mysqli_thread_id($db->conn_id), $fixture->providerId));
+            self::assertTrue((bool) $db->delete('users', ['id' => $fixture->providerId]));
+            $providerDeleted = true;
+            self::assertTrue($db->trans_commit());
+            $transactionOpen = false;
+
+            self::assertTrue($this->drain($multi, $handle));
+            self::assertSame(403, (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE));
+            $body = json_decode((string) curl_multi_getcontent($handle), true, 512, JSON_THROW_ON_ERROR);
+            self::assertFalse((bool) ($body['success'] ?? true));
+            self::assertSame(
+                [],
+                $db->get_where('appointments', ['notes' => $fixture->run . '_disappearance'])->result_array(),
+            );
+        } finally {
+            if ($transactionOpen && $db->trans_active()) {
+                $db->trans_rollback();
+            }
+            if ($handle instanceof CurlHandle) {
+                $this->drain($multi, $handle);
+                curl_multi_remove_handle($multi, $handle);
+                curl_close($handle);
+            }
+            curl_multi_close($multi);
+            $observer->close();
+            if ($providerDeleted) {
+                self::assertTrue((bool) $db->insert('users', $provider));
+                self::assertTrue((bool) $db->insert('user_settings', $settings));
+                foreach ($links as $link) {
+                    self::assertTrue((bool) $db->insert('services_providers', $link));
+                }
+            }
+        }
+    }
+
     private function authenticatedClient(bool $followRedirects = true): GateHttpClient
     {
         $fixture = $this->fixture;
@@ -149,5 +216,102 @@ final class CalendarUnavailabilityTargetHttpTest extends TestCase
         self::assertNotNull($fixture);
         $max = get_instance()->db->select_max('id')->get('users')->row_array()['id'] ?? 0;
         return max((int) $max, $fixture->actorId, $fixture->providerId, $fixture->customerId) + 1000;
+    }
+
+    private function startRequest(GateHttpClient $client, array $payload, CurlMultiHandle $multi): CurlHandle
+    {
+        $token = $client->getCookie('csrf_cookie');
+        self::assertNotSame('', (string) $token);
+        $cookies = array_map(
+            static fn(array $record): string => $record['name'] . '=' . $record['value'],
+            $client->cookieRecords(),
+        );
+        $handle = curl_init($this->server->baseUrl . '/calendar/save_unavailability');
+        self::assertInstanceOf(CurlHandle::class, $handle);
+        curl_setopt_array($handle, [
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => http_build_query(['unavailability' => $payload, 'csrf_token' => $token]),
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => false,
+            CURLOPT_CONNECTTIMEOUT => 3,
+            CURLOPT_TIMEOUT => 15,
+            CURLOPT_HTTPHEADER => [
+                'Content-Type: application/x-www-form-urlencoded',
+                'Cookie: ' . implode('; ', $cookies),
+            ],
+        ]);
+        self::assertSame(CURLM_OK, curl_multi_add_handle($multi, $handle));
+        return $handle;
+    }
+
+    private function observer(object $db): object
+    {
+        $observer = get_instance()->load->database(
+            [
+                'hostname' => 'mysql',
+                'username' => 'root',
+                'password' => 'secret',
+                'database' => 'easyappointments',
+                'dbdriver' => 'mysqli',
+                'dbprefix' => $db->dbprefix,
+                'pconnect' => false,
+                'db_debug' => false,
+                'char_set' => 'utf8mb4',
+                'dbcollat' => 'utf8mb4_general_ci',
+            ],
+            true,
+        );
+        self::assertTrue($observer->query('SET SESSION TRANSACTION READ ONLY'));
+        return $observer;
+    }
+
+    private function waitsFor(CurlMultiHandle $multi, object $observer, int $ownerId, int $providerId): bool
+    {
+        $deadline = microtime(true) + 8;
+        do {
+            self::assertSame(CURLM_OK, curl_multi_exec($multi, $running));
+            $result = $observer->query(
+                'SELECT l.OBJECT_NAME, COALESCE(s.SQL_TEXT, r.PROCESSLIST_INFO) AS statement_text ' .
+                    'FROM performance_schema.data_lock_waits w ' .
+                    'JOIN performance_schema.data_locks l ON l.ENGINE_LOCK_ID = w.REQUESTING_ENGINE_LOCK_ID ' .
+                    'JOIN performance_schema.threads b ON b.THREAD_ID = w.BLOCKING_THREAD_ID ' .
+                    'JOIN performance_schema.threads r ON r.THREAD_ID = w.REQUESTING_THREAD_ID ' .
+                    'LEFT JOIN performance_schema.events_statements_current s ON s.THREAD_ID = r.THREAD_ID ' .
+                    'WHERE b.PROCESSLIST_ID = ' .
+                    $ownerId,
+            );
+            foreach ($result->result_array() as $row) {
+                $sql = strtoupper(
+                    (string) preg_replace('/\s+/', ' ', str_replace('`', '', trim((string) $row['statement_text']))),
+                );
+                if (
+                    $row['OBJECT_NAME'] === $observer->dbprefix('users') &&
+                    str_contains($sql, 'FOR UPDATE') &&
+                    str_contains($sql, (string) $providerId)
+                ) {
+                    return true;
+                }
+            }
+            if ($running === 0) {
+                return false;
+            }
+            curl_multi_select($multi, 0.05);
+        } while (microtime(true) < $deadline);
+        return false;
+    }
+
+    private function drain(CurlMultiHandle $multi, CurlHandle $handle): bool
+    {
+        $deadline = microtime(true) + 8;
+        do {
+            if (curl_multi_exec($multi, $running) !== CURLM_OK) {
+                return false;
+            }
+            if ($running === 0) {
+                return curl_errno($handle) === CURLE_OK;
+            }
+            curl_multi_select($multi, 0.05);
+        } while (microtime(true) < $deadline);
+        return false;
     }
 }

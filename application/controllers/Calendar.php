@@ -781,9 +781,20 @@ class Calendar extends EA_Controller
             }
 
             try {
-                $this->lock_calendar_update_parents($stored_unavailability ?? [], $unavailability, [
-                    (int) session('user_id'),
-                ]);
+                try {
+                    $this->lock_calendar_update_parents($stored_unavailability ?? [], $unavailability, [
+                        (int) session('user_id'),
+                    ]);
+                } catch (RuntimeException $error) {
+                    if (
+                        $error->getMessage() === 'Appointment parent record was not found.' &&
+                        !$this->is_calendar_provider($provider_id)
+                    ) {
+                        throw new RuntimeException('The selected provider is not available.', 403, $error);
+                    }
+
+                    throw $error;
+                }
 
                 if ($stored_unavailability !== null) {
                     $locked_unavailability = $this->lock_manual_unavailability((int) $unavailability['id']);
