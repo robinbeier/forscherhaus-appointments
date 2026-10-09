@@ -401,6 +401,12 @@ guard. `CalendarAppointmentProviderTargetHttpTest` covers the isolated
 synthetic HTTP path, absence of partial changes, and provider deletion while
 the request waits at the parent lock. It does not prove a production write or
 arbitrary concurrent role changes.
+Calendar appointment save and delete must not act on manual unavailability
+rows, even though both kinds share `appointments` storage. The save path rejects
+a caller-requested unavailability type and fixes ordinary appointment type
+server-side; update and delete recheck the stored kind after locking the row.
+`CalendarCrossTypeMutationHttpTest` checks the isolated HTTP/database boundary
+and nonmutation, not a production write or every concurrent type change.
 Both the initial customer list and the edit
 dialog use UI-specific read projections; write allowlists do not determine the
 fields sent to the browser. `CalendarCustomerAccessHttpTest` checks these

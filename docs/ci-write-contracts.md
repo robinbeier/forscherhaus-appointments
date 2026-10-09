@@ -164,6 +164,14 @@ Lock-Race lässt den eigenen Anbieter nach der Vorprüfung verschwinden und
 verlangt ebenfalls 403 ohne Teiländerung. Kein produktiver Termin-Schreibnachweis
 oder beliebiger gleichzeitiger Rollenwechsel ist damit belegt.
 
+Termin- und manuelle Sperrzeit-Zeilen teilen eine Tabelle, aber nicht den
+Schreibpfad. `calendar/save_appointment` verwirft ein angefordertes
+`is_unavailability=true`, setzt den Typ für echte Termine serverseitig auf
+false und prüft bestehende Zielzeilen vor sowie nach der Zeilensperre. Auch
+`calendar/delete_appointment` lehnt Sperrzeit-IDs vor und nach der Sperre mit
+403 ab. `CalendarCrossTypeMutationHttpTest` belegt dies mit eigenen Zeilen und
+Nichtmutation; ein produktiver fachlicher Schreibtest ist damit nicht belegt.
+
 `CalendarMutationMethodHttpTest` prüft GET und HEAD mit echten Query-Parametern
 für alle sechs direkten Aktionen, die Nichtmutation eigener synthetischer
 Datensätze, gültige POST-Kontrollpfade und die Weiterleitungen der alten
