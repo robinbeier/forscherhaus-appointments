@@ -152,6 +152,18 @@ zwischen Vorprüfung und Zeilensperre verschwinden und verlangt ebenfalls 403
 ohne Eintrag. Der Modellschutz bleibt zusätzlich bestehen; ein produktiver
 Schreibtest ist damit nicht belegt.
 
+Beim Kalender-Termin-POST muss die angegebene Anbieter-ID aktuell einem
+Anbieter gehören. Vor der Transaktion und erneut nach dem Sperren der
+Elternzeilen prüft der Controller den Zieltyp; ein Kunde oder unbekanntes
+Ziel erhält 403, bevor Kunden- oder Termindaten gespeichert werden. Die
+Rollenprüfung im Terminmodell bleibt zusätzlich bestehen.
+`CalendarAppointmentProviderTargetHttpTest` vergleicht in einem isolierten
+HTTP-/DB-Lauf den gültigen Anbieter mit Kunden- und unbekannter Ziel-ID,
+unveränderten eigenen Daten sowie dem direkten Altalias. Ein separater
+Lock-Race lässt den eigenen Anbieter nach der Vorprüfung verschwinden und
+verlangt ebenfalls 403 ohne Teiländerung. Kein produktiver Termin-Schreibnachweis
+oder beliebiger gleichzeitiger Rollenwechsel ist damit belegt.
+
 `CalendarMutationMethodHttpTest` prüft GET und HEAD mit echten Query-Parametern
 für alle sechs direkten Aktionen, die Nichtmutation eigener synthetischer
 Datensätze, gültige POST-Kontrollpfade und die Weiterleitungen der alten

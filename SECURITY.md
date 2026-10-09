@@ -393,6 +393,14 @@ second guard. `CalendarUnavailabilityTargetHttpTest` covers the isolated
 synthetic HTTP path, including provider deletion while the request waits at
 the parent lock. It does not prove a production write or every concurrent
 role change.
+Calendar appointment save also requires the requested provider target to retain
+the Provider role before the transaction and after its parent user row is
+locked. A Customer or missing target is rejected as 403 before any customer
+or appointment write; the appointment model's role validation remains a second
+guard. `CalendarAppointmentProviderTargetHttpTest` covers the isolated
+synthetic HTTP path, absence of partial changes, and provider deletion while
+the request waits at the parent lock. It does not prove a production write or
+arbitrary concurrent role changes.
 Both the initial customer list and the edit
 dialog use UI-specific read projections; write allowlists do not determine the
 fields sent to the browser. `CalendarCustomerAccessHttpTest` checks these
