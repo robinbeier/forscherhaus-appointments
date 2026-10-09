@@ -407,11 +407,18 @@ class Calendar extends EA_Controller
             $request_dto = $this->calendarRequestDtoFactory()->buildSaveAppointmentRequestDto();
             $customer_data = $request_dto->customerData;
             $appointment_data = $request_dto->appointmentData;
+            if (filter_var($appointment_data['is_unavailability'] ?? false, FILTER_VALIDATE_BOOLEAN)) {
+                throw new RuntimeException('You do not have the required permissions for this task.', 403);
+            }
+
+            // This endpoint only creates and edits appointments, regardless of a caller-supplied type flag.
+            $appointment_data['is_unavailability'] = false;
             $manage_mode = !empty($appointment_data['id']);
             $stored_appointment = null;
 
             if ($manage_mode) {
                 $stored_appointment = $this->appointments_model->find((int) $appointment_data['id']);
+                $this->assert_calendar_appointment_type($stored_appointment);
                 $this->check_event_permissions((int) $stored_appointment['id_users_provider']);
             }
 
@@ -467,6 +474,7 @@ class Calendar extends EA_Controller
                     }
 
                     $locked_appointment = $this->lock_appointment((int) $appointment_data['id']);
+                    $this->assert_calendar_appointment_type($locked_appointment);
 
                     if (!$this->has_event_permissions((int) $locked_appointment['id_users_provider'])) {
                         throw new RuntimeException('You do not have the required permissions for this task.', 403);
@@ -671,6 +679,14 @@ class Calendar extends EA_Controller
         return false;
     }
 
+    private function assert_calendar_appointment_type(array $appointment): void
+    {
+        // A missing or noncanonical stored kind must never gain appointment write authority.
+        if (!in_array($appointment['is_unavailability'] ?? null, [false, 0, '0'], true)) {
+            throw new RuntimeException('You do not have the required permissions for this task.', 403);
+        }
+    }
+
     /**
      * Delete appointment from the database.
      *
@@ -697,6 +713,7 @@ class Calendar extends EA_Controller
 
             // Store appointment data for later use in this method.
             $appointment = $this->appointments_model->find($appointment_id);
+            $this->assert_calendar_appointment_type($appointment);
 
             $this->check_event_permissions((int) $appointment['id_users_provider']);
 
@@ -707,6 +724,7 @@ class Calendar extends EA_Controller
             try {
                 $this->lock_calendar_update_parents($appointment, [], [(int) session('user_id')]);
                 $locked_appointment = $this->lock_appointment($appointment_id);
+                $this->assert_calendar_appointment_type($locked_appointment);
 
                 if ($this->appointment_parent_ids_changed($appointment, $locked_appointment)) {
                     throw new RuntimeException('You do not have the required permissions for this task.', 403);
