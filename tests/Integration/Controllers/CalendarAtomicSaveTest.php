@@ -161,11 +161,21 @@ class CalendarAtomicSaveTest extends TestCase
             );
             $this->assertFalse($this->fixtures->customerExistsByEmail($email));
             $this->assertFalse(get_instance()->db->trans_active());
+            $transactionEvents = array_values(
+                array_filter(
+                    $controller->db->events,
+                    static fn(string $event): bool => in_array(
+                        $event,
+                        ['trans_begin', 'trans_status', 'trans_commit', 'trans_rollback'],
+                        true,
+                    ),
+                ),
+            );
             $this->assertSame(
                 $failure === 'trans_begin'
                     ? ['trans_begin']
                     : ['trans_begin', 'trans_status', 'trans_commit', 'trans_rollback'],
-                $controller->db->events,
+                $transactionEvents,
             );
         }
     }

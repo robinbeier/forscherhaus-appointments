@@ -417,6 +417,12 @@ class Calendar extends EA_Controller
 
             $this->check_event_permissions((int) $appointment_data['id_users_provider']);
 
+            $provider_id = (int) $appointment_data['id_users_provider'];
+
+            if (!$this->is_calendar_provider($provider_id)) {
+                throw new RuntimeException('You do not have the required permissions for this task.', 403);
+            }
+
             foreach ([$customer_data['id'] ?? null, $appointment_data['id_users_customer'] ?? null] as $customer_id) {
                 if (
                     !empty($customer_id) &&
@@ -431,10 +437,29 @@ class Calendar extends EA_Controller
             }
 
             try {
-                $this->lock_calendar_update_parents($stored_appointment ?? [], $appointment_data, [
-                    $customer_data['id'] ?? null,
-                    (int) session('user_id'),
-                ]);
+                try {
+                    $this->lock_calendar_update_parents($stored_appointment ?? [], $appointment_data, [
+                        $customer_data['id'] ?? null,
+                        (int) session('user_id'),
+                    ]);
+                } catch (RuntimeException $error) {
+                    if (
+                        $error->getMessage() === 'Appointment parent record was not found.' &&
+                        !$this->is_calendar_provider($provider_id)
+                    ) {
+                        throw new RuntimeException(
+                            'You do not have the required permissions for this task.',
+                            403,
+                            $error,
+                        );
+                    }
+
+                    throw $error;
+                }
+
+                if (!$this->is_calendar_provider($provider_id)) {
+                    throw new RuntimeException('You do not have the required permissions for this task.', 403);
+                }
 
                 if ($manage_mode) {
                     if ($stored_appointment === null) {
