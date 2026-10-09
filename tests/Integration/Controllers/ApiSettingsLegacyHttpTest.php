@@ -354,8 +354,18 @@ final class ApiSettingsLegacyHttpTest extends TestCase
         $ipBinding = config('sess_match_ip') ? md5('127.0.0.1') : '';
         $path = $this->server?->directory . '/sessions/' . $cookieName . $ipBinding . $sessionId;
         self::assertFileExists($path);
-        $contents = file_get_contents($path);
-        self::assertIsString($contents);
+        $handle = fopen($path, 'rb');
+        self::assertIsResource($handle);
+        try {
+            self::assertTrue(flock($handle, LOCK_SH));
+            $contents = stream_get_contents($handle);
+            self::assertIsString($contents);
+        } finally {
+            if (is_resource($handle)) {
+                flock($handle, LOCK_UN);
+                fclose($handle);
+            }
+        }
         self::assertSame(1, preg_match('/dest_url\|s:\d+:"([^"]*)";/', $contents, $matches));
         return $matches[1];
     }
