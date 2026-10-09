@@ -366,14 +366,64 @@ async function main(input) {
         }
     }
     await modal.locator('#unavailability-provider').selectOption(providerId);
-    await page.evaluate(
-        ({start, end}) => {
-            App.Utils.UI.setDateTimePickerValue($('#unavailability-start'), new Date(start));
-            App.Utils.UI.setDateTimePickerValue($('#unavailability-end'), new Date(end));
-            $('#unavailability-notes').val('ROB-768 synthetic manual unavailability');
-        },
-        {start: '2030-01-15T09:00:00', end: '2030-01-15T10:00:00'},
-    );
+    if (providerMode) {
+        const formattedPickerValues = await page.evaluate(() => {
+            const formatPickerValue = (selector, value) => {
+                const input = document.querySelector(selector);
+                const picker = input?._flatpickr;
+                if (!picker || typeof picker.formatDate !== 'function') return null;
+                return picker.formatDate(new Date(value), picker.config.dateFormat);
+            };
+            return {
+                start: formatPickerValue('#unavailability-start', '2030-01-15T09:00:00'),
+                end: formatPickerValue('#unavailability-end', '2030-01-15T10:00:00'),
+            };
+        });
+        if (!formattedPickerValues.start || !formattedPickerValues.end) {
+            fail('input: provider date-time Flatpickr instances were not available');
+        }
+        const startInput = modal.locator('#unavailability-start');
+        const endInput = modal.locator('#unavailability-end');
+        await startInput.fill(formattedPickerValues.start);
+        await startInput.press('Tab');
+        await endInput.fill(formattedPickerValues.end);
+        await endInput.press('Tab');
+        await modal.locator('#unavailability-notes').fill(createNotes);
+
+        const pickerValues = await page.evaluate(() => {
+            const readPicker = (selector) => {
+                const selectedDate = document.querySelector(selector)?._flatpickr?.selectedDates?.[0];
+                return selectedDate
+                    ? [
+                          selectedDate.getFullYear(),
+                          selectedDate.getMonth() + 1,
+                          selectedDate.getDate(),
+                          selectedDate.getHours(),
+                          selectedDate.getMinutes(),
+                      ]
+                    : null;
+            };
+            return {
+                start: readPicker('#unavailability-start'),
+                end: readPicker('#unavailability-end'),
+            };
+        });
+        if (
+            JSON.stringify(pickerValues.start) !== JSON.stringify([2030, 1, 15, 9, 0]) ||
+            JSON.stringify(pickerValues.end) !== JSON.stringify([2030, 1, 15, 10, 0])
+        ) {
+            fail('input: provider date-time fields did not select the requested Flatpickr dates');
+        }
+    } else {
+        await page.evaluate(
+            ({start, end}) => {
+                App.Utils.UI.setDateTimePickerValue($('#unavailability-start'), new Date(start));
+                App.Utils.UI.setDateTimePickerValue($('#unavailability-end'), new Date(end));
+                $('#unavailability-notes').val('ROB-768 synthetic manual unavailability');
+            },
+            {start: '2030-01-15T09:00:00', end: '2030-01-15T10:00:00'},
+        );
+    }
     const createReloadBeforeFailure = postPaths.filter((path) => reloadPaths.has(path)).length;
     const createFailureResponse = page.waitForResponse(
         (response) =>
