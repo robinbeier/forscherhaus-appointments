@@ -86,15 +86,12 @@ final class CalendarWorkingPlanTargetHttpTest extends TestCase
                         $path . ' ' . $name,
                     );
                 } else {
-                    self::assertGreaterThanOrEqual(
-                        400,
-                        $response->statusCode,
+                    self::assertSame(403, $response->statusCode, $path . ' ' . $name . ': ' . $response->body);
+                    $payload = json_decode($response->body, true, 512, JSON_THROW_ON_ERROR);
+                    self::assertIsArray($payload);
+                    self::assertFalse(
+                        (bool) ($payload['success'] ?? true),
                         $path . ' ' . $name . ': ' . $response->body,
-                    );
-                    self::assertLessThan(
-                        500,
-                        $response->statusCode,
-                        $path . ' ' . $name . ' returned a server error: ' . $response->body,
                     );
                 }
                 self::assertSame(
