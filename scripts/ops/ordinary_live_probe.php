@@ -9,6 +9,7 @@ use ReleaseGate\AppointmentsApiWriteProbe;
 use ReleaseGate\AppointmentsApiReadProbe;
 use ReleaseGate\CalendarResponsibilityRaceProbe;
 use ReleaseGate\CalendarMethodProbe;
+use ReleaseGate\CalendarCrossTypeLiveProbe;
 use ReleaseGate\CustomerRoleBoundaryProbe;
 use ReleaseGate\CustomersApiWriteProbe;
 use ReleaseGate\StaffApiPutProbe;
@@ -67,6 +68,7 @@ if (
             'secretaries-api',
             'calendar-race',
             'calendar-methods',
+            'calendar-cross-type',
             'appointments-api',
             'appointments-api-read',
             'appointments-api-overlap',
@@ -187,6 +189,7 @@ try {
     require_once dirname(__DIR__) . '/release-gate/lib/SecretariesApiAliasProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/CalendarResponsibilityRaceProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/CalendarMethodProbe.php';
+    require_once dirname(__DIR__) . '/release-gate/lib/CalendarCrossTypeLiveProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/AppointmentsApiWriteProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/AppointmentsApiReadProbe.php';
     require_once dirname(__DIR__) . '/release-gate/lib/DefenseVerificationFixture.php';
@@ -428,6 +431,43 @@ try {
                     $sessions->remember($client->getCookie('ea_session'));
                 },
             ))->run($evidence->step(...));
+        } elseif ($action === 'calendar-cross-type') {
+            $evidence->run(
+                'supplemental_activate',
+                fn(): array => $verificationFixture->activate('unavailabilities_api', $context),
+            );
+            $retainCrossTypeRecovery = static function () use (
+                &$requestRecoveryRequired,
+                $markRequestRecovery,
+                $verificationFixture,
+            ): void {
+                $requestRecoveryRequired = true;
+                $markerRetained = false;
+                $fixtureRetained = false;
+                try {
+                    $markRequestRecovery();
+                    $markerRetained = true;
+                } catch (Throwable) {
+                    // The fixture recovery phase is the independent fallback.
+                }
+                try {
+                    $verificationFixture->retainForRecovery('calendar_request_termination_unconfirmed');
+                    $fixtureRetained = true;
+                } catch (Throwable) {
+                    // The request-unconfirmed marker is the independent fallback.
+                }
+                if (!$markerRetained && !$fixtureRetained) {
+                    throw new RuntimeException('Calendar cross-type recovery state could not be retained.');
+                }
+            };
+            $result['evidence'] = (new CalendarCrossTypeLiveProbe(
+                $client,
+                $newPublicClient(),
+                $fixture,
+                $verificationFixture,
+                $sessions->remember(...),
+                $retainCrossTypeRecovery,
+            ))->run($evidence->step(...));
         } elseif ($action === 'customers-api') {
             $evidence->run(
                 'supplemental_activate',
@@ -591,6 +631,7 @@ try {
                     'secretaries-api',
                     'calendar-race',
                     'calendar-methods',
+                    'calendar-cross-type',
                     'appointments-api',
                     'appointments-api-read',
                     'appointments-api-overlap',
