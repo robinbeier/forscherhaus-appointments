@@ -772,14 +772,29 @@ class Calendar extends EA_Controller
 
             $this->check_event_permissions($provider_id);
 
+            if (!$this->is_calendar_provider($provider_id)) {
+                throw new RuntimeException('The selected provider is not available.', 403);
+            }
+
             if (!$this->db->trans_begin()) {
                 throw new RuntimeException('Could not start unavailability transaction.');
             }
 
             try {
-                $this->lock_calendar_update_parents($stored_unavailability ?? [], $unavailability, [
-                    (int) session('user_id'),
-                ]);
+                try {
+                    $this->lock_calendar_update_parents($stored_unavailability ?? [], $unavailability, [
+                        (int) session('user_id'),
+                    ]);
+                } catch (RuntimeException $error) {
+                    if (
+                        $error->getMessage() === 'Appointment parent record was not found.' &&
+                        !$this->is_calendar_provider($provider_id)
+                    ) {
+                        throw new RuntimeException('The selected provider is not available.', 403, $error);
+                    }
+
+                    throw $error;
+                }
 
                 if ($stored_unavailability !== null) {
                     $locked_unavailability = $this->lock_manual_unavailability((int) $unavailability['id']);
@@ -802,6 +817,10 @@ class Calendar extends EA_Controller
 
                 if (!$this->has_event_permissions($provider_id)) {
                     throw new RuntimeException('You do not have the required permissions for this task.', 403);
+                }
+
+                if (!$this->is_calendar_provider($provider_id)) {
+                    throw new RuntimeException('The selected provider is not available.', 403);
                 }
 
                 $this->providers_model->find($provider_id);
@@ -1014,7 +1033,7 @@ class Calendar extends EA_Controller
 
     private function write_working_plan_exception_with_current_permission(int $provider_id, callable $write): void
     {
-        if (!$this->is_working_plan_provider($provider_id)) {
+        if (!$this->is_calendar_provider($provider_id)) {
             throw new RuntimeException('The selected provider is not available.', 403);
         }
 
@@ -1030,7 +1049,7 @@ class Calendar extends EA_Controller
             }
 
             // Recheck after locking the target so a concurrent role change cannot pass the earlier validation.
-            if (!$this->is_working_plan_provider($provider_id)) {
+            if (!$this->is_calendar_provider($provider_id)) {
                 throw new RuntimeException('The selected provider is not available.', 403);
             }
 
@@ -1046,7 +1065,7 @@ class Calendar extends EA_Controller
         }
     }
 
-    private function is_working_plan_provider(int $provider_id): bool
+    private function is_calendar_provider(int $provider_id): bool
     {
         return $this->db
             ->select('users.id')

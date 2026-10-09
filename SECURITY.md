@@ -386,6 +386,13 @@ waiting on that event must reject a permission revocation committed before it
 resumes. `CalendarUnavailabilityPermissionRaceHttpTest` checks this with own
 synthetic HTTP and database data; it does not establish a global lock protocol
 for independent edits to role permission bits or a production write result.
+Manual unavailability save also requires the requested target to remain a
+Provider before and after its user row is locked. A Customer or missing target
+is denied with 403 before insertion; the model's role validation remains a
+second guard. `CalendarUnavailabilityTargetHttpTest` covers the isolated
+synthetic HTTP path, including provider deletion while the request waits at
+the parent lock. It does not prove a production write or every concurrent
+role change.
 Both the initial customer list and the edit
 dialog use UI-specific read projections; write allowlists do not determine the
 fields sent to the browser. `CalendarCustomerAccessHttpTest` checks these
