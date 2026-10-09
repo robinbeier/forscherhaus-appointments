@@ -23,7 +23,9 @@ function cannot(string $verb, string $permission, int $user_id): bool
 {
     global $events, $scenario;
     $events[] = "auth:$verb:$permission:$user_id";
-    return $scenario === 'forbidden';
+    return $scenario === 'forbidden' ||
+        ($scenario === 'denied-after-lock' &&
+            count(array_filter($events, static fn(string $event): bool => str_starts_with($event, 'auth:'))) > 1);
 }
 
 function abort(int $code, string $message = '', array $responseHeaders = []): never
@@ -64,6 +66,56 @@ class EA_Controller
 {
     public ProbeModel $blocked_periods_model;
     public Backoffice_request_dto_factory $backoffice_request_dto_factory;
+    public ProbeDb $db;
+}
+
+class ProbeDb
+{
+    public function trans_active(): bool
+    {
+        return false;
+    }
+
+    public function trans_begin(): bool
+    {
+        $GLOBALS['events'][] = 'transaction:begin';
+        return true;
+    }
+
+    public function query(string $sql, array $params): ProbeQueryResult|false
+    {
+        $GLOBALS['events'][] = 'lock:user:' . $params[0];
+        return new ProbeQueryResult();
+    }
+
+    public function trans_status(): bool
+    {
+        return true;
+    }
+
+    public function trans_commit(): bool
+    {
+        $GLOBALS['events'][] = 'transaction:commit';
+        return true;
+    }
+
+    public function trans_rollback(): void
+    {
+        $GLOBALS['events'][] = 'transaction:rollback';
+    }
+
+    public function dbprefix(string $table): string
+    {
+        return $table;
+    }
+}
+
+class ProbeQueryResult
+{
+    public function row_array(): array
+    {
+        return ['id' => SYNTHETIC_USER_ID];
+    }
 }
 
 class Backoffice_request_dto_factory
@@ -134,5 +186,6 @@ require_once APPPATH . 'controllers/Blocked_periods.php';
 $controller = (new ReflectionClass('Blocked_periods'))->newInstanceWithoutConstructor();
 $controller->blocked_periods_model = new ProbeModel();
 $controller->backoffice_request_dto_factory = new Backoffice_request_dto_factory();
+$controller->db = new ProbeDb();
 $controller->{$action}();
 emit();
