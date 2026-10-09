@@ -250,6 +250,14 @@ after demotion must be denied without creating its synthetic period. The
 fixture restores the exact prior role and removes its owned periods; these
 local checks do not claim a production role-change test or concurrent behavior.
 
+`BlockedPeriodsLegacyIdBoundaryHttpTest` covers the classic write ID boundary
+over both controller entry paths. `store` rejects a caller-supplied existing
+ID; `update` rejects missing, empty, null, or invalid IDs with HTTP 400 and no
+insert or overwrite. It uses owned periods and separate add-only/edit-only
+role masks in the fresh isolated HTTP/DB stack. The evidence is bounded to
+these synthetic requests and does not establish production behavior or every
+possible payload representation.
+
 The Blocked Periods API v1 has a separate authenticated write contract:
 `BlockedPeriodsApiHttpWriteTest` exercises POST, PUT, and DELETE over real
 loopback HTTP on the isolated stack, including URL/body ID conflicts, direct

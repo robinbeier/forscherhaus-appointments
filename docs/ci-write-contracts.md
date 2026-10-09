@@ -339,6 +339,14 @@ fortsetzt. `BackofficeWriteHttpTest` belegt die normalen erlaubten CRUD-Wege.
 Diese lokalen Tests belegen weder Änderungen an globalen Rollenrechten noch
 einen fachlichen Live-Schreibtest auf Produktion.
 
+`store` darf eine mitgesendete bestehende ID nicht als Update verwenden.
+`update` verlangt eine positive ID; eine fehlende, leere oder ungültige ID
+führt zu HTTP 400 ohne Insert oder Änderung. Die beiden klassischen
+Controller-Einstiegspfade und die getrennten Add-/Edit-Rollenmasken werden in
+`BlockedPeriodsLegacyIdBoundaryHttpTest` mit eigenen Daten im isolierten
+HTTP-/DB-Stack geprüft. Der Nachweis gilt für diese synthetischen Pfade und
+ersetzt keinen Produktions- oder Vollständigkeitsnachweis.
+
 ## Blocked Periods API v1
 
 Die API verwaltet globale Sperrzeiten. Admin-Basic-Authentifizierung oder der
