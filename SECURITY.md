@@ -600,6 +600,12 @@ under that lock. A role downgrade committed before the actor lock is acquired
 must deny the write without changing the period; a downgrade waiting behind an
 already authorized write follows that write. This does not serialize edits to
 the role's permission bits or API Basic/Bearer authority.
+The classic `store` action must not use a caller-supplied existing ID as an
+update; `update` requires a positive ID and must reject missing, empty, or
+invalid IDs with HTTP 400 before mutation. `BlockedPeriodsLegacyIdBoundaryHttpTest`
+checks both controller entry paths with owned rows and separate add-only/edit-only
+role masks in the isolated stack. This is bounded local evidence, not a
+production or full payload-behavior claim.
 Blocked Periods API v1 collection and detail reads require GET, including on
 direct controller aliases. Other methods return 405 with `Allow: GET` before
 the requested periods or notes are read or disclosed; the existing Admin Basic

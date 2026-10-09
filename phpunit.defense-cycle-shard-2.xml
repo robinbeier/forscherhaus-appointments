@@ -34,6 +34,7 @@
             <file>./tests/Integration/Controllers/BlockedPeriodsApiPaginationHttpTest.php</file>
             <file>./tests/Integration/Controllers/ServiceCategoriesApiPaginationHttpTest.php</file>
             <file>./tests/Integration/Controllers/BlockedPeriodsReadHttpTest.php</file>
+            <file>./tests/Integration/Controllers/BlockedPeriodsLegacyIdBoundaryHttpTest.php</file>
             <file>./tests/Integration/Controllers/BlockedPeriodsPermissionRaceHttpTest.php</file>
             <file>./tests/Integration/ServiceCategoriesApiWriteProbeTest.php</file>
             <file>./tests/Integration/CalendarResponsibilityRaceProbeTest.php</file>

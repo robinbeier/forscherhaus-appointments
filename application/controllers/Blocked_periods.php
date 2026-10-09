@@ -169,6 +169,19 @@ class Blocked_periods extends EA_Controller
 
             $this->blocked_periods_model->optional($blocked_period, $this->optional_blocked_period_fields);
 
+            if (array_key_exists('id', $blocked_period)) {
+                $provided_id = $blocked_period['id'];
+                if ($provided_id !== null && $provided_id !== '') {
+                    if ($owns_transaction) {
+                        $this->db->trans_rollback();
+                        $owns_transaction = false;
+                    }
+                    abort(400, 'Invalid blocked-period create');
+                    return;
+                }
+                unset($blocked_period['id']);
+            }
+
             $blocked_period_id = $this->blocked_periods_model->save($blocked_period);
 
             $blocked_period = $this->blocked_periods_model->find($blocked_period_id);
@@ -259,6 +272,19 @@ class Blocked_periods extends EA_Controller
             $this->blocked_periods_model->only($blocked_period, $this->allowed_blocked_period_fields);
 
             $this->blocked_periods_model->optional($blocked_period, $this->optional_blocked_period_fields);
+
+            $blocked_period_id = filter_var($blocked_period['id'] ?? null, FILTER_VALIDATE_INT, [
+                'options' => ['min_range' => 1],
+            ]);
+            if ($blocked_period_id === false) {
+                if ($owns_transaction) {
+                    $this->db->trans_rollback();
+                    $owns_transaction = false;
+                }
+                abort(400, 'Invalid blocked-period update');
+                return;
+            }
+            $blocked_period['id'] = $blocked_period_id;
 
             $blocked_period_id = $this->blocked_periods_model->save($blocked_period);
 
