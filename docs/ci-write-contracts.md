@@ -132,6 +132,16 @@ bleiben zusätzliche Voraussetzungen; sie ersetzen die Methodengrenze nicht.
 Die alten `backend_api/ajax_*`-Aliase leiten lediglich zu diesen geschützten
 Zielaktionen weiter und führen selbst keine Änderung aus.
 
+Für Arbeitsplan-Ausnahmen ist die übermittelte Ziel-ID nur gültig, wenn sie
+aktuell zu einem Anbieter gehört. Speichern und Löschen prüfen den Zieltyp vor
+der Transaktion und erneut nach dem Sperren der Benutzerzeile. Andere oder
+nicht vorhandene IDs werden mit 403 ohne Änderung abgewiesen; der Modellschutz
+gegen eine Änderung von Nicht-Anbietern bleibt zusätzlich bestehen.
+`CalendarWorkingPlanTargetHttpTest` prüft diese Grenze mit eigenen Kunden- und
+Anbieterdaten, einem fehlenden Ziel, dem direkten Altalias und einem gültigen
+Löschfall. Der Test belegt keine produktive Schreibprobe und keinen beliebigen
+gleichzeitigen Rollenwechsel.
+
 `CalendarMutationMethodHttpTest` prüft GET und HEAD mit echten Query-Parametern
 für alle sechs direkten Aktionen, die Nichtmutation eigener synthetischer
 Datensätze, gültige POST-Kontrollpfade und die Weiterleitungen der alten

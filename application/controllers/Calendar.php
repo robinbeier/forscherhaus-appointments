@@ -1014,6 +1014,10 @@ class Calendar extends EA_Controller
 
     private function write_working_plan_exception_with_current_permission(int $provider_id, callable $write): void
     {
+        if (!$this->is_working_plan_provider($provider_id)) {
+            throw new RuntimeException('The selected provider is not available.', 403);
+        }
+
         if (!$this->db->trans_begin()) {
             throw new RuntimeException('Could not start working plan exception transaction.');
         }
@@ -1023,6 +1027,11 @@ class Calendar extends EA_Controller
 
             if (!$this->currentCalendarCan('edit', PRIV_USERS)) {
                 throw new RuntimeException('You do not have the required permissions for this task.', 403);
+            }
+
+            // Recheck after locking the target so a concurrent role change cannot pass the earlier validation.
+            if (!$this->is_working_plan_provider($provider_id)) {
+                throw new RuntimeException('The selected provider is not available.', 403);
             }
 
             $write();
@@ -1035,6 +1044,19 @@ class Calendar extends EA_Controller
 
             throw $e;
         }
+    }
+
+    private function is_working_plan_provider(int $provider_id): bool
+    {
+        return $this->db
+            ->select('users.id')
+            ->from('users')
+            ->join('roles', 'roles.id = users.id_roles', 'inner')
+            ->where('users.id', $provider_id)
+            ->where('roles.slug', DB_SLUG_PROVIDER)
+            ->limit(1)
+            ->get()
+            ->num_rows() === 1;
     }
 
     /**
