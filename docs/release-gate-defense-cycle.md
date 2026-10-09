@@ -314,7 +314,9 @@ the classic calendar write endpoints. It reuses the `unavailabilities_api`
 profile: one owned administrator, provider, customer, private uncategorized
 service, two manual unavailabilities, one ordinary appointment and its two
 buffers. Before any write request, the probe checks that the service is absent
-from both the public service model and the anonymous booking selector. It then
+from both the public service model and the anonymous booking selector, and
+that the actor's currently stored admin role still grants appointment add,
+edit and delete. A role-level `403` cannot count as a type-boundary proof. It then
 requires `403` for a forged unavailability create through
 `calendar/save_appointment`, an attempted update of an owned manual
 unavailability through that route, and an attempted delete of the same manual
@@ -323,8 +325,9 @@ appointments belonging to the owned provider, including both buffers. The
 local isolated tests cover the request behavior and the operator lifecycle.
 Evidence stores only the three phase classes, expected statuses and public
 service exclusion, never response bodies, credentials or row identifiers.
-An unconfirmed write response retains recovery state and blocks automatic
-cleanup. Terminal success also requires exact fixture/session cleanup, no
+Any failure after a write is dispatched, including an unexpected response,
+session-journal failure or changed provider snapshot, retains recovery state
+and blocks automatic cleanup. Terminal success also requires exact fixture/session cleanup, no
 pending marker or cleanup timer, unchanged release identity and healthy
 production. This action does not prove every calendar authorization boundary.
 

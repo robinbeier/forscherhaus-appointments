@@ -46,6 +46,7 @@ final class CalendarCrossTypeLiveProbe
         ) {
             throw new RuntimeException('Owned cross-type targets are unavailable.');
         }
+        $this->assertCurrentWritePermissions($actor);
         $this->assertPublicServiceExcluded($service, (string) $state['marker']);
         $before = $this->snapshot($provider);
         $this->authenticate($actor);
@@ -154,6 +155,23 @@ final class CalendarCrossTypeLiveProbe
         }
     }
 
+    private function assertCurrentWritePermissions(array $actor): void
+    {
+        $ci = &\get_instance();
+        $user = $ci->db->get_where('users', ['id' => (int) $actor['user_id']])->row_array();
+        $role = $ci->db->get_where('roles', ['id' => (int) ($user['id_roles'] ?? 0)])->row_array();
+        if ((int) ($user['id_roles'] ?? 0) !== (int) ($actor['role_id'] ?? 0) || ($role['slug'] ?? null) !== 'admin') {
+            throw new RuntimeException('Owned admin role changed before calendar write proof.');
+        }
+        $ci->load->model('roles_model');
+        $permissions = $ci->roles_model->get_permissions_by_slug('admin')['appointments'] ?? [];
+        foreach (['add', 'edit', 'delete'] as $action) {
+            if (($permissions[$action] ?? false) !== true) {
+                throw new RuntimeException('Current admin role lacks appointments.' . $action . ' permission.');
+            }
+        }
+    }
+
     private function assertPublicServiceExcluded(int $serviceId, string $marker): void
     {
         $ci = &\get_instance();
@@ -194,19 +212,19 @@ final class CalendarCrossTypeLiveProbe
     {
         try {
             $response = $this->client->post($path, $form);
+            $this->remember($this->client);
+            $body = json_decode($response->body, true);
+            if ($response->statusCode !== 403 || !is_array($body) || ($body['success'] ?? null) !== false) {
+                throw new RuntimeException('Calendar cross-type write did not return the expected denial.');
+            }
+            if ($this->snapshot($provider) !== $before) {
+                throw new RuntimeException('Calendar cross-type denial changed owned provider rows.');
+            }
         } catch (Throwable $error) {
             if (is_callable($this->retainRecovery)) {
                 ($this->retainRecovery)();
             }
-            throw new CalendarCrossTypeRequestUnconfirmed('Calendar write response was not confirmed.', 0, $error);
-        }
-        $this->remember($this->client);
-        $body = json_decode($response->body, true);
-        if ($response->statusCode !== 403 || !is_array($body) || ($body['success'] ?? null) !== false) {
-            throw new RuntimeException('Calendar cross-type write did not return the expected denial.');
-        }
-        if ($this->snapshot($provider) !== $before) {
-            throw new RuntimeException('Calendar cross-type denial changed owned provider rows.');
+            throw new CalendarCrossTypeRequestUnconfirmed('Calendar write outcome was not confirmed.', 0, $error);
         }
     }
 

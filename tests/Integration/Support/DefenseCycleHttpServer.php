@@ -20,6 +20,7 @@ final class DefenseCycleHttpServer
         int $expiration = 7200,
         bool $disableSessionCacheLimiter = false,
         bool $recordRequests = false,
+        bool $failCalendarWrites = false,
     ) {
         if (getenv('FH_DEFENSE_ISOLATED') !== '1' || !is_file('/.dockerenv')) {
             throw new RuntimeException('Only available in the owned isolated Docker run.');
@@ -49,6 +50,10 @@ final class DefenseCycleHttpServer
                     '$request_ledger = ' .
                     var_export($this->directory . '/request-ledger.jsonl', true) .
                     '; file_put_contents($request_ledger, json_encode([\'method\' => $_SERVER[\'REQUEST_METHOD\'] ?? null, \'uri\' => $_SERVER[\'REQUEST_URI\'] ?? null], JSON_THROW_ON_ERROR) . PHP_EOL, FILE_APPEND | LOCK_EX); ';
+            }
+            if ($failCalendarWrites) {
+                $router .=
+                    'if (($_SERVER[\'REQUEST_METHOD\'] ?? null) === \'POST\' && str_contains($_SERVER[\'REQUEST_URI\'] ?? \'\', \'/calendar/\')) { http_response_code(502); header(\'Content-Type: application/json\'); echo \'{"success":false}\'; exit; } ';
             }
             $router .=
                 '$assign_to_config = ' .
