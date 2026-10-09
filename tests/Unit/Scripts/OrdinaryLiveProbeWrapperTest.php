@@ -69,6 +69,7 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
                 'CalendarMethodProbe.php',
                 'AppointmentsApiWriteProbe.php',
                 'AppointmentsApiReadProbe.php',
+                'CalendarCrossTypeLiveProbe.php',
                 'DefenseVerificationFixture.php',
             ]
             as $file
@@ -229,6 +230,7 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
                 'appointments-api' => 'provider',
                 'appointments-api-read' => 'provider',
                 'appointments-api-overlap' => 'provider',
+                'calendar-cross-type' => 'admin',
             ]
             as $action => $role
         ) {
@@ -379,6 +381,20 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
                 static fn(string $line): bool => str_starts_with($line, 'systemctl stop'),
             ),
         );
+    }
+
+    public function testUnconfirmedCrossTypeWriteRetainsItsJournalAndSkipsCleanup(): void
+    {
+        $result = $this->executeWrapper('calendar-cross-type', [
+            'MOCK_PHP_UNCONFIRMED_ACTION' => 'calendar-cross-type',
+        ]);
+
+        self::assertSame(86, $result['status']);
+        self::assertSame(['preflight', 'activate', 'calendar-cross-type'], $this->actions($result['lines']));
+        self::assertDirectoryExists($this->sandbox . '/ordinary-state/request-unconfirmed');
+        self::assertFileExists($this->sandbox . '/ordinary-state/run.pending');
+        self::assertNotContains('deactivate', $this->actions($result['lines']));
+        self::assertNotContains('pending-finish', $result['lines']);
     }
 
     public function testUnconfirmedRequestStopsTimerWhenIndependentMarkerCannotBeEstablished(): void

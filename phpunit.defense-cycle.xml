@@ -101,6 +101,7 @@
             <file>./tests/Integration/BlockedPeriodsApiWriteProbeTest.php</file>
             <file>./tests/Integration/ServiceCategoriesApiWriteProbeTest.php</file>
             <file>./tests/Integration/CalendarResponsibilityRaceProbeTest.php</file>
+            <file>./tests/Integration/CalendarCrossTypeLiveProbeTest.php</file>
             <file>./tests/Integration/AppointmentsApiWriteProbeTest.php</file>
             <file>./tests/Integration/AppointmentsApiReadProbeTest.php</file>
             <file>./tests/Integration/Controllers/BookingDownloadHttpTest.php</file>
