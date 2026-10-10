@@ -193,6 +193,53 @@ final class OrdinaryDeploymentCoordinationTest extends TestCase
         self::assertSame(0, $result['exit_code'], $result['stderr']);
     }
 
+    public function testOrdinaryLockDescriptorIsReadWriteForDurableAdmission(): void
+    {
+        $result = $this->runShell(
+            <<<'BASH'
+            source ./deploy_ea.sh
+            ordinary_production_change_lock "$1"
+            python3 - "$ORDINARY_CHANGE_LOCK_FD" <<'PY'
+            import fcntl
+            import os
+            import sys
+
+            fd = int(sys.argv[1])
+            flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+            assert (flags & os.O_ACCMODE) == os.O_RDWR
+            PY
+            BASH
+            ,
+            [$this->lock],
+        );
+
+        self::assertSame(0, $result['exit_code'], $result['stdout'] . $result['stderr']);
+    }
+
+    public function testDeployEntryRequiresFixedHashBoundAdmissionBeforeReceiptMutation(): void
+    {
+        $source = (string) file_get_contents(dirname(__DIR__, 3) . '/deploy_ea.sh');
+        $entryStart = strpos($source, "if [[ \"\$DRYRUN\" -eq 0 ]]; then\n  ordinary_production_change_lock");
+        $entryEnd = strpos($source, "\nARCHIVE=\"\${SRC}/\${REL}.tar.gz\"", $entryStart === false ? 0 : $entryStart);
+
+        self::assertIsInt($entryStart);
+        self::assertIsInt($entryEnd);
+        $entry = substr($source, $entryStart, $entryEnd - $entryStart);
+        self::assertIsString($entry);
+        self::assertSame(1, substr_count($entry, 'ordinary_assert_pending_admission'));
+        self::assertStringContainsString("local core='/usr/local/libexec/fh/maintenance_pending_v1.py'", $source);
+        self::assertStringContainsString(
+            "local expected_hash='32f814b338e933dfe73c67fdec03799e68c5c50a97c263a7b7b17481ab7f6d1c'",
+            $source,
+        );
+        self::assertStringContainsString('exec {ordinary_ro_fd}<"$lock_path"', $source);
+        self::assertStringContainsString('exec {ordinary_fd}<>"/proc/$$/fd/$ordinary_ro_fd"', $source);
+        self::assertLessThan(
+            strpos($entry, 'deploy_result_receipt_prepare'),
+            strpos($entry, 'ordinary_assert_pending_admission'),
+        );
+    }
+
     public function testDirectDeploymentPassesItsLockThroughPhpProcessRunner(): void
     {
         $probe = $this->directory . '/php-lock-probe.php';

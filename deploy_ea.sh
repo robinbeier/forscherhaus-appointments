@@ -97,7 +97,7 @@ ordinary_trusted_path() {
 }
 
 ordinary_production_change_lock() {
-  local lock_path="${1:-/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock}" wait_seconds="${2:-0}" before after opened ordinary_fd
+  local lock_path="${1:-/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock}" wait_seconds="${2:-0}" before after opened ordinary_fd ordinary_ro_fd
   [[ "$wait_seconds" =~ ^[0-9]+$ && "$wait_seconds" -le 300 ]] || return 1
   ordinary_trusted_path "$lock_path" || return 1
   [[ -f "$lock_path" && ! -L "$lock_path" ]] || return 1
@@ -110,7 +110,23 @@ ordinary_production_change_lock() {
     opened="$(stat -Lc '%a:%u:%h:%s:%d:%i' -- "/proc/$$/fd/$ordinary_fd")" || return 1
     [[ "$opened" == "$before" ]] || return 1
   else
-    exec {ordinary_fd}<"$lock_path" || return 1
+    # Open the existing inode read-only first so a disappearing path can
+    # never be recreated by a read/write shell redirection.  Reopen through
+    # the already-bound descriptor to obtain O_RDWR for the admission core.
+    exec {ordinary_ro_fd}<"$lock_path" || return 1
+    opened="$(stat -Lc '%a:%u:%h:%s:%d:%i' -- "/proc/$$/fd/$ordinary_ro_fd")" || {
+      exec {ordinary_ro_fd}<&-
+      return 1
+    }
+    [[ "$opened" == "$before" ]] || {
+      exec {ordinary_ro_fd}<&-
+      return 1
+    }
+    exec {ordinary_fd}<>"/proc/$$/fd/$ordinary_ro_fd" || {
+      exec {ordinary_ro_fd}<&-
+      return 1
+    }
+    exec {ordinary_ro_fd}<&-
   fi
   if ! flock -w "$wait_seconds" "$ordinary_fd"; then
     exec {ordinary_fd}>&-
@@ -123,6 +139,65 @@ ordinary_production_change_lock() {
     return 1
   fi
   export ORDINARY_CHANGE_LOCK_FD="$ordinary_fd"
+}
+
+ordinary_assert_pending_admission() {
+  # This is a fixed, root-controlled integration point.  Do not make either
+  # path or digest caller-configurable: the core is a reviewed prerequisite,
+  # and a missing or changed installation must fail closed.
+  local core='/usr/local/libexec/fh/maintenance_pending_v1.py'
+  local expected_hash='32f814b338e933dfe73c67fdec03799e68c5c50a97c263a7b7b17481ab7f6d1c'
+  local observed_hash observed_identity observed_identity_after
+
+  [[ -f "$core" && ! -L "$core" ]] || {
+    echo '[!] Maintenance admission core is not installed as the expected regular file.' >&2
+    return 75
+  }
+  ordinary_trusted_path "$core" || {
+    echo '[!] Maintenance admission core trust chain is invalid.' >&2
+    return 75
+  }
+  observed_identity="$(stat -c '%a:%u:%g:%h:%s:%d:%i' -- "$core" 2>/dev/null || true)"
+  [[ "$observed_identity" == 644:0:0:1:* ]] || {
+    echo '[!] Maintenance admission core identity is not root-controlled.' >&2
+    return 75
+  }
+  read -r observed_hash _ < <(/usr/bin/sha256sum -- "$core") || return 75
+  observed_identity_after="$(stat -c '%a:%u:%g:%h:%s:%d:%i' -- "$core" 2>/dev/null || true)"
+  [[ "$observed_identity_after" == "$observed_identity" ]] || {
+    echo '[!] Maintenance admission core changed while it was being verified.' >&2
+    return 75
+  }
+  [[ "$observed_hash" == "$expected_hash" ]] || {
+    echo '[!] Maintenance admission core hash is not the reviewed version.' >&2
+    return 75
+  }
+  [[ -n "${ORDINARY_CHANGE_LOCK_FD:-}" && "$ORDINARY_CHANGE_LOCK_FD" =~ ^[0-9]+$ ]] || return 75
+  [[ -e "/proc/$$/fd/$ORDINARY_CHANGE_LOCK_FD" ]] || return 75
+
+  /usr/bin/python3 -I -B - "$ORDINARY_CHANGE_LOCK_FD" <<'PY'
+import importlib.util
+import sys
+
+CORE = '/usr/local/libexec/fh/maintenance_pending_v1.py'
+module = None
+try:
+    lock_fd = int(sys.argv[1])
+    spec = importlib.util.spec_from_file_location('fh_maintenance_pending_v1', CORE)
+    if spec is None or spec.loader is None:
+        raise RuntimeError('admission_core_loader_unavailable')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    result = module.admit_existing_lock_fd(lock_fd)
+    if not isinstance(result, dict) or result.get('status') != 'admitted':
+        raise RuntimeError('admission_status_unknown')
+except Exception as error:
+    if module is not None and isinstance(error, module.PendingError):
+        print(f'maintenance admission refused: {error.reason}', file=sys.stderr)
+        raise SystemExit(error.code)
+    print(f'maintenance admission failed closed: {type(error).__name__}', file=sys.stderr)
+    raise SystemExit(75)
+PY
 }
 
 ordinary_assert_no_pending_probe() {
@@ -2611,6 +2686,8 @@ validate_trusted_deploy_script "$CURRENT_SCRIPT_PATH" "$WEBUSER" \
 if [[ "$DRYRUN" -eq 0 ]]; then
   ordinary_production_change_lock \
     || die "[!] Shared production-change lock is unavailable; deployment refused."
+  ordinary_assert_pending_admission \
+    || die "[!] Durable maintenance admission is unavailable; deployment refused."
   ordinary_assert_bound_recovery_guard \
     || die "[!] Pending bound-release recovery requires the matching guarded invocation."
   ordinary_assert_no_active_zero_surprise_canary \

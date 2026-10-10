@@ -9,6 +9,10 @@ use PHPUnit\Framework\TestCase;
 
 final class DeployStableResultTest extends TestCase
 {
+    private const ADMISSION_ROOT = '/var/lib/fh-maintenance-admission';
+    private const ADMISSION_CORE = '/usr/local/libexec/fh/maintenance_pending_v1.py';
+    private const ADMISSION_CORE_HASH = '32f814b338e933dfe73c67fdec03799e68c5c50a97c263a7b7b17481ab7f6d1c';
+
     #[Group('root-deployment')]
     public function testDirectEntryAdmissionOrderKeepsCanaryRejectionBeforeReceiptMutation(): void
     {
@@ -247,6 +251,30 @@ final class DeployStableResultTest extends TestCase
             }
             $createdLock = true;
         }
+        try {
+            $admission = $this->stageAdmissionPrerequisite();
+        } catch (\Throwable $error) {
+            if ($createdLock) {
+                $currentLock = @lstat($lock);
+                if (
+                    is_array($lockIdentity) &&
+                    is_array($currentLock) &&
+                    $currentLock['dev'] === $lockIdentity['dev'] &&
+                    $currentLock['ino'] === $lockIdentity['ino'] &&
+                    $currentLock['uid'] === $lockIdentity['uid'] &&
+                    $currentLock['gid'] === $lockIdentity['gid'] &&
+                    $currentLock['mode'] === $lockIdentity['mode'] &&
+                    $currentLock['nlink'] === $lockIdentity['nlink']
+                ) {
+                    @unlink($lock);
+                }
+            }
+            if ($createdDirectory) {
+                @rmdir($lockDirectory);
+                @rmdir(dirname($lockDirectory));
+            }
+            throw $error;
+        }
         $result = '/root/fh-bound-entry-result-' . getmypid() . '.json';
         $trustedScript = '/root/fh-bound-entry-deploy-' . getmypid() . '.sh';
         $trustedScriptIdentity = null;
@@ -349,6 +377,7 @@ final class DeployStableResultTest extends TestCase
                 @rmdir($lockDirectory);
                 @rmdir(dirname($lockDirectory));
             }
+            $this->cleanupAdmissionPrerequisite($admission);
         }
     }
 
@@ -382,7 +411,6 @@ final class DeployStableResultTest extends TestCase
         ) {
             self::markTestSkipped('fixed deployment artifact path already exists');
         }
-
         $state = '/var/lib/fh-zero-surprise-canary/active.json';
         $stateParent = dirname($state);
         if (is_file($state) || is_link($state)) {
@@ -534,6 +562,28 @@ final class DeployStableResultTest extends TestCase
             $createdLock = true;
         }
 
+        try {
+            $admission = $this->stageAdmissionPrerequisite();
+        } catch (\Throwable $error) {
+            if ($createdLock) {
+                $currentLock = @lstat($lock);
+                if (
+                    is_array($lockIdentity) &&
+                    is_array($currentLock) &&
+                    $currentLock['dev'] === $lockIdentity['dev'] &&
+                    $currentLock['ino'] === $lockIdentity['ino'] &&
+                    $currentLock['uid'] === $lockIdentity['uid'] &&
+                    $currentLock['gid'] === $lockIdentity['gid'] &&
+                    $currentLock['mode'] === $lockIdentity['mode'] &&
+                    $currentLock['nlink'] === $lockIdentity['nlink']
+                ) {
+                    @unlink($lock);
+                }
+            }
+            $removeCreatedLockDirectory();
+            $removeStateParent();
+            throw $error;
+        }
         $trustedScript = '/root/fh-canary-entry-deploy-' . getmypid() . '.sh';
         $trustedScriptIdentity = null;
         $stateIdentity = null;
@@ -639,6 +689,7 @@ final class DeployStableResultTest extends TestCase
                     'test-created canary state parent must be absent after teardown',
                 );
             }
+            $this->cleanupAdmissionPrerequisite($admission);
         }
     }
 
@@ -2046,6 +2097,141 @@ final class DeployStableResultTest extends TestCase
         {$summary}
         rollback_after_failure 'redacted failure'
         BASH;
+    }
+
+    /** @return array{state_identity:array<string,mixed>,core_created:bool,core_identity:?array<string,mixed>,core_parent_created:bool} */
+    private function stageAdmissionPrerequisite(): array
+    {
+        if (file_exists(self::ADMISSION_ROOT) || is_link(self::ADMISSION_ROOT)) {
+            self::markTestSkipped('fixed admission state root already exists');
+        }
+        if (!mkdir(self::ADMISSION_ROOT, 0700, true)) {
+            @unlink(self::ADMISSION_ROOT . '/epoch');
+            @rmdir(self::ADMISSION_ROOT);
+            self::markTestSkipped('fixed admission state root unavailable');
+        }
+        if (
+            file_put_contents(self::ADMISSION_ROOT . '/epoch', "maintenance-admission.v1\n") === false ||
+            !chmod(self::ADMISSION_ROOT . '/epoch', 0600)
+        ) {
+            @unlink(self::ADMISSION_ROOT . '/epoch');
+            @rmdir(self::ADMISSION_ROOT);
+            self::markTestSkipped('fixed admission state fixture unavailable');
+        }
+        $stateIdentity = lstat(self::ADMISSION_ROOT);
+        if (!is_array($stateIdentity)) {
+            @unlink(self::ADMISSION_ROOT . '/epoch');
+            @rmdir(self::ADMISSION_ROOT);
+            self::markTestSkipped('fixed admission state root unavailable');
+        }
+
+        $coreCreated = false;
+        $coreParentCreated = false;
+        $coreIdentity = null;
+        $parent = dirname(self::ADMISSION_CORE);
+        if (is_link($parent) || (file_exists($parent) && !is_dir($parent))) {
+            $this->cleanupAdmissionPrerequisite([
+                'state_identity' => $stateIdentity,
+                'core_created' => false,
+                'core_identity' => null,
+                'core_parent_created' => false,
+            ]);
+            self::markTestSkipped('fixed admission core parent is not a directory');
+        }
+        if (!file_exists($parent)) {
+            if (!mkdir($parent, 0755, true)) {
+                $this->cleanupAdmissionPrerequisite([
+                    'state_identity' => $stateIdentity,
+                    'core_created' => false,
+                    'core_identity' => null,
+                    'core_parent_created' => false,
+                ]);
+                self::markTestSkipped('fixed admission core parent unavailable');
+            }
+            $coreParentCreated = true;
+        }
+        if (is_link(self::ADMISSION_CORE)) {
+            $this->cleanupAdmissionPrerequisite([
+                'state_identity' => $stateIdentity,
+                'core_created' => false,
+                'core_identity' => null,
+                'core_parent_created' => $coreParentCreated,
+            ]);
+            self::markTestSkipped('fixed admission core is a symlink');
+        }
+        if (is_file(self::ADMISSION_CORE)) {
+            $coreIdentity = lstat(self::ADMISSION_CORE);
+            if (
+                !is_array($coreIdentity) ||
+                $coreIdentity['uid'] !== 0 ||
+                $coreIdentity['gid'] !== 0 ||
+                ($coreIdentity['mode'] & 0777) !== 0644 ||
+                $coreIdentity['nlink'] !== 1 ||
+                hash_file('sha256', self::ADMISSION_CORE) !== self::ADMISSION_CORE_HASH
+            ) {
+                $this->cleanupAdmissionPrerequisite([
+                    'state_identity' => $stateIdentity,
+                    'core_created' => false,
+                    'core_identity' => null,
+                    'core_parent_created' => $coreParentCreated,
+                ]);
+                self::markTestSkipped('fixed admission core is not the reviewed root-controlled file');
+            }
+        } else {
+            $source = dirname(__DIR__, 3) . '/scripts/ops/libexec/maintenance_pending_v1.py';
+            if (hash_file('sha256', $source) !== self::ADMISSION_CORE_HASH || !copy($source, self::ADMISSION_CORE)) {
+                $this->cleanupAdmissionPrerequisite([
+                    'state_identity' => $stateIdentity,
+                    'core_created' => false,
+                    'core_identity' => null,
+                    'core_parent_created' => $coreParentCreated,
+                ]);
+                self::markTestSkipped('fixed admission core fixture unavailable');
+            }
+            chmod(self::ADMISSION_CORE, 0644);
+            $coreCreated = true;
+            $coreIdentity = lstat(self::ADMISSION_CORE);
+        }
+
+        return [
+            'state_identity' => $stateIdentity,
+            'core_created' => $coreCreated,
+            'core_identity' => $coreIdentity,
+            'core_parent_created' => $coreParentCreated,
+        ];
+    }
+
+    /** @param array{state_identity:array<string,mixed>,core_created:bool,core_identity:?array<string,mixed>,core_parent_created:bool} $admission */
+    private function cleanupAdmissionPrerequisite(array $admission): void
+    {
+        $currentState = @lstat(self::ADMISSION_ROOT);
+        if ($this->sameProtectedIdentity($currentState, $admission['state_identity'])) {
+            @unlink(self::ADMISSION_ROOT . '/epoch');
+            @rmdir(self::ADMISSION_ROOT);
+        }
+        if ($admission['core_created'] && is_array($admission['core_identity'])) {
+            $currentCore = @lstat(self::ADMISSION_CORE);
+            if ($this->sameProtectedIdentity($currentCore, $admission['core_identity'])) {
+                @unlink(self::ADMISSION_CORE);
+            }
+        }
+        if ($admission['core_parent_created']) {
+            @rmdir(dirname(self::ADMISSION_CORE));
+        }
+    }
+
+    /** @param array<string,mixed>|false|null $current @param array<string,mixed> $expected */
+    private function sameProtectedIdentity(array|false|null $current, array $expected): bool
+    {
+        if (!is_array($current)) {
+            return false;
+        }
+        foreach (['dev', 'ino', 'uid', 'gid', 'mode', 'nlink'] as $field) {
+            if (($current[$field] ?? null) !== ($expected[$field] ?? null)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** @return array{stdout:string,stderr:string,exit_code:int} */
