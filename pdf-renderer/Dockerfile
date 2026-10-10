@@ -15,6 +15,7 @@ RUN PUPPETEER_SKIP_DOWNLOAD=true npm ci --omit=dev \
         fonts-liberation \
         fonts-noto-core \
         fonts-noto-color-emoji \
+        unzip \
     && npx puppeteer browsers install chrome --install-deps \
     && mkdir -p "$PUPPETEER_CACHE_DIR" \
     && chown -R node:node "$PUPPETEER_CACHE_DIR" \
