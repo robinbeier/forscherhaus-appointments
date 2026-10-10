@@ -124,6 +124,7 @@ final class BackupSetProducerRootTest extends TestCase
             $this->runner,
             <<<'PY'
             import importlib.util
+            import os
             import sys
             spec = importlib.util.spec_from_file_location('rob466', sys.argv[1])
             module = importlib.util.module_from_spec(spec)
@@ -139,6 +140,14 @@ final class BackupSetProducerRootTest extends TestCase
             original_load_admission_core = module.load_admission_core
             def load_fixture_admission_core():
                 core = original_load_admission_core()
+                if os.environ.get('ROB812_INJECT_PENDING') == 'publish':
+                    def reject_publish(_admission, _record):
+                        raise core.PendingError('synthetic test refusal', 75)
+                    core.MaintenanceAdmission.publish_pending = reject_publish
+                if os.environ.get('ROB812_INJECT_PENDING') == 'clear':
+                    def reject_clear(_admission, _record, _terminal_proof=None):
+                        raise core.PendingError('synthetic settlement refusal', 75)
+                    core.MaintenanceAdmission.clear_pending = reject_clear
                 return core
             module.load_admission_core = load_fixture_admission_core
             if len(sys.argv) == 4:
@@ -151,14 +160,7 @@ final class BackupSetProducerRootTest extends TestCase
             # filesystem suite exercises the producer after that entry guard.
             module.bind_to_parent_death = lambda: None
             sys.argv = [sys.argv[0]]
-            try:
-                module.main()
-            except module.ProducerError as error:
-                module.emit('busy' if error.code == 75 else 'rejected')
-                raise SystemExit(error.code)
-            except (OSError, ValueError, UnicodeError):
-                module.emit('rejected')
-                raise SystemExit(70)
+            module.run()
             PY
             ,
         );
@@ -408,6 +410,36 @@ final class BackupSetProducerRootTest extends TestCase
             flock($lock, LOCK_UN);
             fclose($lock);
         }
+    }
+
+    public function testAdmissionPendingErrorBecomesBoundedBusyResult(): void
+    {
+        $result = $this->runProducer(null, ['ROB812_INJECT_PENDING' => 'publish']);
+
+        self::assertSame(75, $result['exit']);
+        self::assertSame(
+            ['schema' => 'production_backup_set_result.v1', 'status' => 'busy'],
+            json_decode($result['stdout'], true, 512, JSON_THROW_ON_ERROR),
+        );
+        self::assertStringNotContainsString('Traceback', $result['stderr']);
+        self::assertStringNotContainsString('synthetic test refusal', $result['stdout'] . $result['stderr']);
+        self::assertFileDoesNotExist($this->root . '/backups/backup_continuity_state.json');
+        self::assertSame([], glob($this->root . '/backups/.backup-set-producer-*.tmp') ?: []);
+    }
+
+    public function testSettlementPendingErrorRetainsPendingVetoAsBoundedBusyResult(): void
+    {
+        $result = $this->runProducer(null, ['ROB812_INJECT_PENDING' => 'clear']);
+
+        self::assertSame(75, $result['exit']);
+        self::assertSame(
+            ['schema' => 'production_backup_set_result.v1', 'status' => 'busy'],
+            json_decode($result['stdout'], true, 512, JSON_THROW_ON_ERROR),
+        );
+        self::assertStringNotContainsString('Traceback', $result['stderr']);
+        self::assertStringNotContainsString('synthetic settlement refusal', $result['stdout'] . $result['stderr']);
+        self::assertFileExists('/var/lib/fh-maintenance-admission/pending.json');
+        self::assertFileExists($this->root . '/backups/backup_continuity_state.json');
     }
 
     public function testTrustedDumpChildRetainsBothLocksAfterProducerDeath(): void
@@ -820,13 +852,13 @@ final class BackupSetProducerRootTest extends TestCase
     }
 
     /** @return array{exit:int,stdout:string,stderr:string} */
-    private function runProducer(?string $observedAtUtc = null): array
+    private function runProducer(?string $observedAtUtc = null, array $environment = []): array
     {
         $command = ['/usr/bin/python3', '-I', '-B', $this->runner, $this->helper, $this->root];
         if ($observedAtUtc !== null) {
             $command[] = $observedAtUtc;
         }
-        $process = proc_open($command, [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']], $pipes, null, []);
+        $process = proc_open($command, [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']], $pipes, null, $environment);
         self::assertIsResource($process);
         fclose($pipes[0]);
         $stdout = stream_get_contents($pipes[1]);

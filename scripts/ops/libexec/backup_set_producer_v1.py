@@ -56,6 +56,7 @@ HANDOFF_TEMP = re.compile(r'\.last_backup_set\.json\.tmp-[0-9a-f]{32}\Z')
 CONTINUITY_STATE_TEMP = re.compile(r'\.backup_continuity_state\.json\.tmp-[0-9a-f]{32}\Z')
 RENAME_NOREPLACE = 1
 LIBC = ctypes.CDLL(None, use_errno=True)
+ADMISSION_PENDING_ERROR_TYPES = ()
 
 
 def bind_to_parent_death():
@@ -1040,6 +1041,9 @@ def main():
         finally:
             os.close(locks)
         admission_core = load_admission_core()
+        global ADMISSION_PENDING_ERROR_TYPES
+        pending_error_type = getattr(admission_core, 'PendingError', None)
+        ADMISSION_PENDING_ERROR_TYPES = (pending_error_type,) if isinstance(pending_error_type, type) else ()
         try:
             admission = admission_core.MaintenanceAdmission.from_existing_lock_fd(
                 global_lock,
@@ -1133,7 +1137,7 @@ def main():
                 os.close(descriptor)
 
 
-if __name__ == '__main__':
+def run():
     try:
         main()
     except ProducerError as error:
@@ -1142,3 +1146,13 @@ if __name__ == '__main__':
     except (OSError, ValueError, UnicodeError):
         emit('rejected')
         raise SystemExit(70)
+    except Exception as error:
+        if ADMISSION_PENDING_ERROR_TYPES and isinstance(error, ADMISSION_PENDING_ERROR_TYPES):
+            code = 75 if getattr(error, 'code', 70) == 75 else 70
+            emit('busy' if code == 75 else 'rejected')
+            raise SystemExit(code)
+        raise
+
+
+if __name__ == '__main__':
+    run()
