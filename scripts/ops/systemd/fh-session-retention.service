@@ -24,6 +24,7 @@ ProtectSystem=strict
 ProtectHome=read-only
 ReadOnlyPaths=/var/www/html/easyappointments
 ReadOnlyPaths=/usr/local/libexec/fh-session-retention-v1
+ReadOnlyPaths=/usr/local/libexec/fh/maintenance_pending_v1.py /var/lib/fh-maintenance-admission
 ReadWritePaths=/var/www/html/easyappointments/storage/sessions /var/lib/fh-session-retention /var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock
 ProtectKernelTunables=yes
 ProtectKernelModules=yes

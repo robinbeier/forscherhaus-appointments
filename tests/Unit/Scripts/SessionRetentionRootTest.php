@@ -15,9 +15,16 @@ final class SessionRetentionRootTest extends TestCase
     private const SESSION_ROOT = self::APP_ROOT . '/storage/sessions';
     private const STATE_ROOT = '/var/lib/fh-session-retention';
     private const ORCHESTRATOR_ROOT = '/var/lib/fh-deploy-orchestrator';
+    private const ADMISSION_ROOT = '/var/lib/fh-maintenance-admission';
+    private const ADMISSION_CORE = '/usr/local/libexec/fh/maintenance_pending_v1.py';
+    private const ADMISSION_CORE_HASH = '32f814b338e933dfe73c67fdec03799e68c5c50a97c263a7b7b17481ab7f6d1c';
     private string $helper;
     private int $webUid;
     private int $webGid;
+    private bool $coreStaged = false;
+    private bool $admissionStateCreated = false;
+    /** @var list<string> */
+    private array $coreDirectoriesStaged = [];
 
     protected function setUp(): void
     {
@@ -47,7 +54,13 @@ final class SessionRetentionRootTest extends TestCase
                 ),
             );
         }
-        if (file_exists(self::APP_ROOT) || file_exists(self::STATE_ROOT) || file_exists(self::ORCHESTRATOR_ROOT)) {
+        if (
+            file_exists(self::APP_ROOT) ||
+            file_exists(self::STATE_ROOT) ||
+            file_exists(self::ORCHESTRATOR_ROOT) ||
+            file_exists(self::ADMISSION_ROOT) ||
+            is_link(self::ADMISSION_ROOT)
+        ) {
             RootHostTestPrerequisites::enforce(
                 $this,
                 RootHostTestPrerequisites::classify(
@@ -118,6 +131,12 @@ final class SessionRetentionRootTest extends TestCase
         $lock = self::ORCHESTRATOR_ROOT . '/locks/fh-production-change.lock';
         touch($lock);
         chmod($lock, 0600);
+        $this->stageAdmissionCore();
+        mkdir(self::ADMISSION_ROOT, 0700);
+        $this->admissionStateCreated = true;
+        chmod(self::ADMISSION_ROOT, 0700);
+        file_put_contents(self::ADMISSION_ROOT . '/epoch', "maintenance-admission.v1\n");
+        chmod(self::ADMISSION_ROOT . '/epoch', 0600);
     }
 
     protected function tearDown(): void
@@ -126,6 +145,15 @@ final class SessionRetentionRootTest extends TestCase
             $this->removeTree(self::APP_ROOT);
             $this->removeTree(self::STATE_ROOT);
             $this->removeTree(self::ORCHESTRATOR_ROOT);
+            if ($this->admissionStateCreated) {
+                $this->removeTree(self::ADMISSION_ROOT);
+            }
+            if ($this->coreStaged) {
+                @unlink(self::ADMISSION_CORE);
+            }
+            foreach (array_reverse($this->coreDirectoriesStaged) as $directory) {
+                @rmdir($directory);
+            }
         }
         parent::tearDown();
     }
@@ -240,6 +268,56 @@ final class SessionRetentionRootTest extends TestCase
         fclose($global);
     }
 
+    public function testMalformedAdmissionStateBlocksBeforeDeletionOrMarker(): void
+    {
+        $old = $this->session('4', 90_000, 'old');
+        file_put_contents(self::ADMISSION_ROOT . '/epoch', "wrong\n");
+        $temporary = self::STATE_ROOT . '/.last-success.json.tmp-' . str_repeat('a', 32);
+        file_put_contents($temporary, "temporary\n");
+        chmod($temporary, 0600);
+        $blocked = $this->runHelper('execute');
+        self::assertSame(75, $blocked['exit']);
+        self::assertSame('epoch_unknown', $this->decode($blocked)['reason']);
+        self::assertFileExists($old);
+        self::assertFileExists($temporary);
+        self::assertFileDoesNotExist(self::STATE_ROOT . '/last-success.json');
+    }
+
+    public function testPendingAdmissionBlocksBeforeDeletionOrMarker(): void
+    {
+        $old = $this->session('5', 90_000, 'old');
+        $record = [
+            'boot_id' => trim((string) file_get_contents('/proc/sys/kernel/random/boot_id')),
+            'epoch' => 'maintenance-admission.v1',
+            'operation' => 'test',
+            'registered_at_utc' => gmdate('Y-m-d\TH:i:s\Z'),
+            'resource_identity' => ['test' => true],
+            'run_id' => 'pending-test',
+            'schema' => 'maintenance_pending.v1',
+        ];
+        ksort($record);
+        file_put_contents(
+            self::ADMISSION_ROOT . '/pending.json',
+            json_encode($record, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n",
+        );
+        chmod(self::ADMISSION_ROOT . '/pending.json', 0600);
+        $blocked = $this->runHelper('execute');
+        self::assertSame(75, $blocked['exit']);
+        self::assertSame('pending_present', $this->decode($blocked)['reason']);
+        self::assertFileExists($old);
+        self::assertFileDoesNotExist(self::STATE_ROOT . '/last-success.json');
+    }
+
+    public function testMissingRetentionStateIsNotCreatedByExecute(): void
+    {
+        $old = $this->session('6', 90_000, 'old');
+        $this->removeTree(self::STATE_ROOT);
+        $blocked = $this->runHelper('execute');
+        self::assertSame(70, $blocked['exit']);
+        self::assertFileExists($old);
+        self::assertDirectoryDoesNotExist(self::STATE_ROOT);
+    }
+
     public function testDeletionCapIsExactAndRequiresAnotherPassBeforeSuccessMarker(): void
     {
         for ($index = 0; $index < 10_001; $index++) {
@@ -311,6 +389,76 @@ final class SessionRetentionRootTest extends TestCase
             json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n",
         );
         chmod(self::STATE_ROOT . '/last-success.json', 0600);
+    }
+
+    private function stageAdmissionCore(): void
+    {
+        if (is_link(self::ADMISSION_CORE)) {
+            self::fail('Admission core must not be a symlink.');
+        }
+        if (file_exists(self::ADMISSION_CORE)) {
+            $this->assertCoreAncestorLayout();
+            self::assertSame(self::ADMISSION_CORE_HASH, hash_file('sha256', self::ADMISSION_CORE));
+            $metadata = lstat(self::ADMISSION_CORE);
+            self::assertIsArray($metadata);
+            self::assertSame(0, $metadata['uid']);
+            self::assertSame(0644, $metadata['mode'] & 0777);
+            $parentMetadata = lstat(dirname(self::ADMISSION_CORE));
+            self::assertIsArray($parentMetadata);
+            self::assertSame(0, $parentMetadata['uid']);
+            self::assertSame(0040000, $parentMetadata['mode'] & 0170000);
+            self::assertSame(0, $parentMetadata['mode'] & 0022);
+            return;
+        }
+        $parent = dirname(self::ADMISSION_CORE);
+        $missing = [];
+        for ($path = $parent; $path !== '/'; $path = dirname($path)) {
+            clearstatcache(true, $path);
+            if (file_exists($path) || is_link($path)) {
+                break;
+            }
+            array_unshift($missing, $path);
+        }
+        foreach ($missing as $path) {
+            $ancestor = dirname($path);
+            $metadata = lstat($ancestor);
+            self::assertIsArray($metadata);
+            self::assertSame(0, $metadata['uid']);
+            self::assertSame(0040000, $metadata['mode'] & 0170000);
+            self::assertSame(0, $metadata['mode'] & 0022);
+            mkdir($path, 0755);
+            chown($path, 0);
+            chgrp($path, 0);
+            chmod($path, 0755);
+            $this->coreDirectoriesStaged[] = $path;
+        }
+        $this->assertCoreAncestorLayout();
+        $metadata = lstat($parent);
+        self::assertIsArray($metadata);
+        self::assertSame(0, $metadata['uid']);
+        self::assertSame(0040000, $metadata['mode'] & 0170000);
+        self::assertSame(0, $metadata['mode'] & 0022);
+        if (is_link($parent)) {
+            self::fail('Admission core parent must not be a symlink.');
+        }
+        $source = dirname(__DIR__, 3) . '/scripts/ops/libexec/maintenance_pending_v1.py';
+        self::assertSame(self::ADMISSION_CORE_HASH, hash_file('sha256', $source));
+        file_put_contents(self::ADMISSION_CORE, file_get_contents($source));
+        chown(self::ADMISSION_CORE, 0);
+        chgrp(self::ADMISSION_CORE, 0);
+        chmod(self::ADMISSION_CORE, 0644);
+        $this->coreStaged = true;
+    }
+
+    private function assertCoreAncestorLayout(): void
+    {
+        foreach (['/usr', '/usr/local', '/usr/local/libexec', dirname(self::ADMISSION_CORE)] as $directory) {
+            $metadata = lstat($directory);
+            self::assertIsArray($metadata);
+            self::assertSame(0, $metadata['uid']);
+            self::assertSame(0040000, $metadata['mode'] & 0170000);
+            self::assertSame(0, $metadata['mode'] & 0022);
+        }
     }
 
     /** @return array{exit:int,stdout:string,stderr:string} */

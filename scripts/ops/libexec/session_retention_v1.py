@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 import datetime
 import fcntl
+import hashlib
 import json
 import os
 import pwd
@@ -8,6 +9,7 @@ import re
 import secrets
 import stat
 import sys
+import types
 
 
 SCHEMA = 'prod_session_retention.v1'
@@ -23,6 +25,9 @@ MIN_AGE_SECONDS = 86_400
 MAX_DELETE = 10_000
 MAX_SCAN = 1_000_000
 MAX_SESSION_ID_BYTES = 256
+MAX_ADMISSION_CORE_BYTES = 1_048_576
+ADMISSION_CORE_PATH = '/usr/local/libexec/fh/maintenance_pending_v1.py'
+ADMISSION_CORE_SHA256 = '32f814b338e933dfe73c67fdec03799e68c5c50a97c263a7b7b17481ab7f6d1c'
 
 
 class RetentionError(Exception):
@@ -115,22 +120,20 @@ def open_root_owned_directory(path, exact_mode=None):
         raise
 
 
-def prepare_state_directory():
+def open_existing_state_directory():
     parent = open_root_owned_directory('/var/lib')
     try:
         try:
-            os.mkdir('fh-session-retention', 0o700, dir_fd=parent)
-            os.fsync(parent)
-        except FileExistsError:
-            pass
-        return open_child_directory(
-            parent,
-            'fh-session-retention',
-            0,
-            0,
-            exact_mode=0o700,
-            root_safe=True,
-        )
+            return open_child_directory(
+                parent,
+                'fh-session-retention',
+                0,
+                0,
+                exact_mode=0o700,
+                root_safe=True,
+            )
+        except FileNotFoundError:
+            reject('state_missing')
     finally:
         os.close(parent)
 
@@ -410,6 +413,63 @@ def open_global_lock():
         os.close(locks)
 
 
+def load_admission_core():
+    """Load the root-owned admission core from its fixed install path."""
+    path = ADMISSION_CORE_PATH
+    try:
+        for directory in ('/usr', '/usr/local', '/usr/local/libexec', '/usr/local/libexec/fh'):
+            metadata = os.lstat(directory)
+            if (
+                not stat.S_ISDIR(metadata.st_mode)
+                or metadata.st_uid != 0
+                or (stat.S_IMODE(metadata.st_mode) & 0o022) != 0
+            ):
+                reject('admission_core_untrusted')
+        metadata = os.lstat(path)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != 0
+            or metadata.st_gid != 0
+            or stat.S_IMODE(metadata.st_mode) != 0o644
+            or metadata.st_nlink != 1
+        ):
+            reject('admission_core_untrusted')
+        descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            opened = os.fstat(descriptor)
+            if file_identity(metadata) != file_identity(opened):
+                reject('admission_core_untrusted')
+            source = bytearray()
+            while len(source) <= MAX_ADMISSION_CORE_BYTES:
+                chunk = os.read(descriptor, min(65_536, MAX_ADMISSION_CORE_BYTES + 1 - len(source)))
+                if not chunk:
+                    break
+                source.extend(chunk)
+            after_open = os.fstat(descriptor)
+        finally:
+            os.close(descriptor)
+        source = bytes(source)
+        after = os.lstat(path)
+        if (
+            len(source) > MAX_ADMISSION_CORE_BYTES
+            or file_identity(metadata) != file_identity(after_open)
+            or file_identity(metadata) != file_identity(after)
+            or hashlib.sha256(source).hexdigest() != ADMISSION_CORE_SHA256
+        ):
+            reject('admission_core_untrusted')
+    except FileNotFoundError:
+        reject('admission_core_missing')
+    except OSError:
+        reject('admission_core_untrusted')
+    module = types.ModuleType('fh_maintenance_pending_v1')
+    module.__file__ = path
+    try:
+        exec(compile(source, path, 'exec'), module.__dict__)
+    except Exception:
+        reject('admission_core_untrusted')
+    return module
+
+
 def canonical_json(payload):
     return (json.dumps(payload, sort_keys=True, separators=(',', ':')) + '\n').encode('utf-8')
 
@@ -547,18 +607,25 @@ def dry_run():
 
 
 def execute():
-    state = prepare_state_directory()
+    state = open_existing_state_directory()
     global_lock = None
     directory = None
+    admission_core = None
     try:
         try:
             fcntl.flock(state, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             reject('cleanup_lock_busy', 75)
-        clean_marker_temps(state)
         global_lock = open_global_lock()
         if activity_count() != 0:
             reject('active_production_work', 75)
+        admission_core = load_admission_core()
+        try:
+            admission_core.admit_existing_lock_fd(global_lock)
+        except Exception as error:
+            reject(getattr(error, 'reason', 'maintenance_admission_failed'),
+                   getattr(error, 'code', 75))
+        clean_marker_temps(state)
 
         directory, web_uid, web_gid = open_session_directory()
         now_ns = datetime.datetime.now(datetime.timezone.utc).timestamp() * 1_000_000_000
