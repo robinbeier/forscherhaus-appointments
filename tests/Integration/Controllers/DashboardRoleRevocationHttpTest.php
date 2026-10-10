@@ -6,9 +6,11 @@ use PHPUnit\Framework\TestCase;
 use ReleaseGate\GateHttpClient;
 use Tests\Integration\Support\DefenseCycleFixtures;
 use Tests\Integration\Support\DefenseCycleHttpServer;
+use Tests\Integration\Support\SessionFileReader;
 
 require_once dirname(__DIR__) . '/Support/DefenseCycleFixtures.php';
 require_once dirname(__DIR__) . '/Support/DefenseCycleHttpServer.php';
+require_once dirname(__DIR__) . '/Support/SessionFileReader.php';
 
 /** Authenticated dashboard access must follow the current stored role. */
 final class DashboardRoleRevocationHttpTest extends TestCase
@@ -226,8 +228,7 @@ final class DashboardRoleRevocationHttpTest extends TestCase
         $sessionPath = $this->server?->directory . '/sessions/' . $cookieName . $ipBinding . $sessionId;
         self::assertFileExists($sessionPath);
         self::assertFalse(is_link($sessionPath));
-        $contents = file_get_contents($sessionPath);
-        self::assertIsString($contents);
+        $contents = SessionFileReader::read($sessionPath);
         self::assertSame(1, preg_match('/dest_url\\|s:\\d+:"([^"]*)";/', $contents, $matches));
 
         return $matches[1];
