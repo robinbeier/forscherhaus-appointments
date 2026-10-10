@@ -203,6 +203,71 @@ def _open_shared_lock():
         raise
 
 
+def admit_existing_lock_fd(lock_fd, expected_boot_id=None):
+    """Admit through a trusted caller-owned canonical lock descriptor.
+
+    The caller must pass the descriptor opened for ``SHARED_LOCK_PATH`` and
+    must retain it until all later mutation work has finished.  This function
+    never opens the path, creates state, or unlocks the caller descriptor.  A
+    duplicate descriptor is used only to renew the exclusive flock on the
+    same open-file-description; callers must close their descriptor on every
+    failure and after successful mutation completion.
+    """
+    validate_state_layout()
+    _validate_epoch()
+    path = SHARED_LOCK_PATH
+    _trusted_directory('/var')
+    _trusted_directory('/var/lib')
+    parent = os.path.dirname(path)
+    _trusted_directory(os.path.dirname(parent))
+    _trusted_directory(parent, 0o700)
+    try:
+        flags = fcntl.fcntl(lock_fd, fcntl.F_GETFL)
+        original = os.fstat(lock_fd)
+    except (OSError, TypeError, ValueError):
+        reject('shared_lock_fd_invalid')
+    if (flags & os.O_ACCMODE) != os.O_RDWR:
+        reject('shared_lock_fd_not_rw')
+    if (not stat.S_ISREG(original.st_mode) or original.st_uid != 0 or
+            original.st_gid != 0 or stat.S_IMODE(original.st_mode) != 0o600 or
+            original.st_nlink != 1 or original.st_size != 0):
+        reject('shared_lock_fd_identity_invalid')
+    try:
+        before = os.lstat(path)
+    except OSError:
+        reject('state_missing')
+    if (not stat.S_ISREG(before.st_mode) or before.st_uid != 0 or
+            before.st_gid != 0 or stat.S_IMODE(before.st_mode) != 0o600 or
+            before.st_nlink != 1 or before.st_size != 0 or
+            _identity(original) != _identity(before)):
+        reject('shared_lock_identity_changed')
+    try:
+        duplicate = os.dup(lock_fd)
+        os.set_inheritable(duplicate, False)
+    except (OSError, ValueError):
+        reject('shared_lock_fd_invalid')
+    try:
+        duplicate_identity = os.fstat(duplicate)
+        if _identity(original) != _identity(duplicate_identity):
+            reject('shared_lock_identity_changed')
+        try:
+            fcntl.flock(duplicate, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            if exc.errno in (errno.EACCES, errno.EAGAIN):
+                reject('shared_lock_busy')
+            reject('shared_lock_failed')
+        after_original = os.fstat(lock_fd)
+        after_duplicate = os.fstat(duplicate)
+        after_path = os.lstat(path)
+        if (_identity(original) != _identity(after_original) or
+                _identity(original) != _identity(after_duplicate) or
+                _identity(original) != _identity(after_path)):
+            reject('shared_lock_identity_changed')
+        return _admit_locked(expected_boot_id)
+    finally:
+        os.close(duplicate)
+
+
 def _close_shared_lock(fd):
     try:
         fcntl.flock(fd, fcntl.LOCK_UN)
