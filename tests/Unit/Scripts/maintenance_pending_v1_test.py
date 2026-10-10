@@ -26,17 +26,18 @@ class MaintenancePendingTest(unittest.TestCase):
         os.mkdir(self.lock_dir, 0o700)
         self.epoch = os.path.join(self.state, 'epoch')
         self.pending = os.path.join(self.state, 'pending.json')
+        self.clear_marker = os.path.join(self.state, 'clear-state.json')
         self.lock = os.path.join(self.lock_dir, 'fh-production-change.lock')
         self._write(self.epoch, (MODULE.PROTOCOL_EPOCH + '\n').encode(), 0o600)
         self._write(self.lock, b'', 0o600)
         self.old = (MODULE.STATE_ROOT, MODULE.EPOCH_PATH, MODULE.PENDING_PATH,
-                    MODULE.SHARED_LOCK_PATH)
-        MODULE.STATE_ROOT, MODULE.EPOCH_PATH, MODULE.PENDING_PATH, MODULE.SHARED_LOCK_PATH = (
-            self.state, self.epoch, self.pending, self.lock)
+                    MODULE.CLEAR_MARKER_PATH, MODULE.SHARED_LOCK_PATH)
+        MODULE.STATE_ROOT, MODULE.EPOCH_PATH, MODULE.PENDING_PATH, MODULE.CLEAR_MARKER_PATH, MODULE.SHARED_LOCK_PATH = (
+            self.state, self.epoch, self.pending, self.clear_marker, self.lock)
 
     def tearDown(self):
         (MODULE.STATE_ROOT, MODULE.EPOCH_PATH, MODULE.PENDING_PATH,
-         MODULE.SHARED_LOCK_PATH) = self.old
+         MODULE.CLEAR_MARKER_PATH, MODULE.SHARED_LOCK_PATH) = self.old
         self.tmp.cleanup()
 
     @staticmethod
@@ -179,8 +180,171 @@ class MaintenancePendingTest(unittest.TestCase):
             admission.publish_pending(record)
             result = admission.clear_pending(record, lambda value: value['run_id'] == 'run001')
         self.assertEqual('cleared', result['status'])
+        self.assertTrue(os.path.lexists(MODULE.CLEAR_MARKER_PATH))
         self.assertFalse(os.path.lexists(self.pending))
+        with self.assertRaisesRegex(MODULE.PendingError, 'pending_clear_unsettled'):
+            MODULE.admit_read_only()
+        with MODULE.maintenance_recovery() as recovery:
+            recovered = recovery.recover_clear_marker(lambda value: value['run_id'] == 'run001')
+        self.assertEqual('recovered', recovered['status'])
+        self.assertFalse(os.path.lexists(MODULE.CLEAR_MARKER_PATH))
         self.assertEqual('admitted', MODULE.admit_read_only()['status'])
+
+    def test_fsync_after_pending_unlink_leaves_recovery_veto(self):
+        record = self.record()
+        original_fsync = MODULE.os.fsync
+        state_dir_calls = []
+
+        def fail_after_pending_unlink(fd):
+            target = os.readlink('/proc/self/fd/' + str(fd))
+            if target == self.state:
+                state_dir_calls.append(fd)
+            # Admission itself fsyncs once.  The fourth state-directory fsync
+            # is the one after pending unlink: admission, publication, marker,
+            # then pending removal.
+            if target == self.state and len(state_dir_calls) == 4:
+                raise OSError(errno.EIO, 'synthetic directory fsync failure')
+            return original_fsync(fd)
+
+        MODULE.os.fsync = fail_after_pending_unlink
+        try:
+            with self.assertRaisesRegex(MODULE.PendingError, 'state_directory_sync_unknown'):
+                with MODULE.maintenance_admission() as admission:
+                    admission.publish_pending(record)
+                    admission.clear_pending(record, lambda _: True)
+        finally:
+            MODULE.os.fsync = original_fsync
+        self.assertEqual(4, len(state_dir_calls))
+        self.assertFalse(os.path.lexists(self.pending))
+        self.assertTrue(os.path.lexists(MODULE.CLEAR_MARKER_PATH))
+        with self.assertRaisesRegex(MODULE.PendingError, 'pending_clear_unsettled'):
+            MODULE.admit_read_only()
+
+        # Explicit recovery may settle and remove the marker only after the
+        # caller supplies terminal proof and the directory is durable again.
+        with MODULE.maintenance_recovery() as recovery:
+            self.assertEqual('recovered',
+                             recovery.recover_clear_marker(lambda _: True)['status'])
+        self.assertEqual('admitted', MODULE.admit_read_only()['status'])
+
+    def test_recovery_settles_matching_marker_and_pending_pair(self):
+        record = self.record()
+        with MODULE.maintenance_admission() as admission:
+            admission.publish_pending(record)
+            _, pending_identity = MODULE._read_bounded(self.pending, MODULE.MAX_RECORD_BYTES)
+            MODULE._link_clear_marker_locked(MODULE._canonical(record), pending_identity)
+            self.assertEqual(2, os.lstat(self.pending).st_nlink)
+            self.assertEqual(2, os.lstat(self.clear_marker).st_nlink)
+        with self.assertRaisesRegex(MODULE.PendingError, 'pending_clear_unsettled'):
+            MODULE.admit_read_only()
+        with MODULE.maintenance_recovery() as recovery:
+            self.assertEqual('recovered',
+                             recovery.recover_clear_marker(lambda _: True)['status'])
+        self.assertFalse(os.path.lexists(self.pending))
+        self.assertFalse(os.path.lexists(self.clear_marker))
+
+    def test_marker_link_failure_leaves_pending_and_no_marker(self):
+        record = self.record()
+        original_link = MODULE.os.link
+
+        def failing_link(*args, **kwargs):
+            if args[1] == self.clear_marker:
+                raise OSError(errno.EIO, 'synthetic hardlink failure')
+            return original_link(*args, **kwargs)
+
+        MODULE.os.link = failing_link
+        try:
+            with self.assertRaisesRegex(OSError, 'synthetic hardlink failure'):
+                with MODULE.maintenance_admission() as admission:
+                    admission.publish_pending(record)
+                    admission.clear_pending(record, lambda _: True)
+        finally:
+            MODULE.os.link = original_link
+        self.assertTrue(os.path.lexists(self.pending))
+        self.assertFalse(os.path.lexists(self.clear_marker))
+        with self.assertRaisesRegex(MODULE.PendingError, 'pending_present'):
+            MODULE.admit_read_only()
+
+    def test_recovery_keeps_hardlink_pair_when_publication_or_first_recovery_fsync_fails(self):
+        """An unconfirmed hardlink pair remains a recovery veto until durable."""
+        record = self.record()
+        original_fsync = MODULE.os.fsync
+        state_dir_calls = []
+
+        def fail_marker_publication_fsync(fd):
+            target = os.readlink('/proc/self/fd/' + str(fd))
+            if target == self.state:
+                state_dir_calls.append(fd)
+                # Admission and pending publication have already synced the
+                # directory.  Fail the first sync that confirms the marker.
+                if len(state_dir_calls) == 3:
+                    raise OSError(errno.EIO, 'synthetic marker publication fsync failure')
+            return original_fsync(fd)
+
+        MODULE.os.fsync = fail_marker_publication_fsync
+        try:
+            with self.assertRaisesRegex(MODULE.PendingError,
+                                         'state_directory_sync_unknown'):
+                with MODULE.maintenance_admission() as admission:
+                    admission.publish_pending(record)
+                    _, pending_identity = MODULE._read_bounded(
+                        self.pending, MODULE.MAX_RECORD_BYTES)
+                    MODULE._link_clear_marker_locked(
+                        MODULE._canonical(record), pending_identity)
+        finally:
+            MODULE.os.fsync = original_fsync
+
+        self.assertEqual(3, len(state_dir_calls))
+        self.assertEqual(2, os.lstat(self.pending).st_nlink)
+        self.assertEqual(2, os.lstat(self.clear_marker).st_nlink)
+        with self.assertRaisesRegex(MODULE.PendingError,
+                                     'pending_clear_unsettled'):
+            MODULE.admit_read_only()
+
+        def fail_first_recovery_fsync(fd):
+            target = os.readlink('/proc/self/fd/' + str(fd))
+            if target == self.state:
+                raise OSError(errno.EIO, 'synthetic recovery fsync failure')
+            return original_fsync(fd)
+
+        MODULE.os.fsync = fail_first_recovery_fsync
+        try:
+            with self.assertRaisesRegex(MODULE.PendingError,
+                                         'state_directory_sync_unknown'):
+                with MODULE.maintenance_recovery() as recovery:
+                    recovery.recover_clear_marker(lambda _: True)
+        finally:
+            MODULE.os.fsync = original_fsync
+
+        self.assertTrue(os.path.lexists(self.pending))
+        self.assertTrue(os.path.lexists(self.clear_marker))
+        self.assertEqual(2, os.lstat(self.pending).st_nlink)
+        self.assertEqual(2, os.lstat(self.clear_marker).st_nlink)
+        with self.assertRaisesRegex(MODULE.PendingError,
+                                     'pending_clear_unsettled'):
+            MODULE.admit_read_only()
+
+        with MODULE.maintenance_recovery() as recovery:
+            result = recovery.recover_clear_marker(lambda _: True)
+        self.assertEqual('recovered', result['status'])
+        self.assertFalse(os.path.lexists(self.pending))
+        self.assertFalse(os.path.lexists(self.clear_marker))
+        self.assertEqual('admitted', MODULE.admit_read_only()['status'])
+
+    def test_recovery_rejects_marker_and_pending_identity_mismatch(self):
+        record = self.record()
+        other = self.record(run='run002')
+        with MODULE.maintenance_admission() as admission:
+            admission.publish_pending(record)
+            _, pending_identity = MODULE._read_bounded(self.pending, MODULE.MAX_RECORD_BYTES)
+            MODULE._link_clear_marker_locked(MODULE._canonical(record), pending_identity)
+            os.unlink(self.pending)
+            self._write(self.pending, MODULE._canonical(other))
+        with MODULE.maintenance_recovery() as recovery:
+            with self.assertRaisesRegex(MODULE.PendingError, 'clear_marker_conflict'):
+                recovery.recover_clear_marker(lambda _: True)
+        self.assertTrue(os.path.lexists(self.pending))
+        self.assertTrue(os.path.lexists(self.clear_marker))
 
     def test_pending_replacement_after_read_refuses_clear(self):
         record = self.record()
@@ -212,6 +376,19 @@ class MaintenancePendingTest(unittest.TestCase):
             with self.assertRaisesRegex(MODULE.PendingError, 'shared_lock_busy'):
                 with MODULE.MaintenanceAdmission() as _second:
                     pass
+
+    def test_recovery_capability_cannot_publish_or_clear_work(self):
+        record = self.record()
+        with MODULE.maintenance_recovery() as recovery:
+            with self.assertRaisesRegex(MODULE.PendingError, 'recovery_operation_forbidden'):
+                recovery.publish_pending(record)
+            with self.assertRaisesRegex(MODULE.PendingError, 'recovery_operation_forbidden'):
+                recovery.clear_pending(record, lambda _: True)
+
+    def test_normal_capability_cannot_recover_clear_marker(self):
+        with MODULE.maintenance_admission() as admission:
+            with self.assertRaisesRegex(MODULE.PendingError, 'recovery_capability_required'):
+                admission.recover_clear_marker(lambda _: True)
 
     def test_resource_identity_is_bounded_and_immutable(self):
         with self.assertRaisesRegex(MODULE.PendingError, 'resource_identity_oversized'):

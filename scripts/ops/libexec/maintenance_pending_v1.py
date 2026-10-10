@@ -24,6 +24,8 @@ STATE_ROOT = '/var/lib/fh-maintenance-admission'
 EPOCH_PATH = STATE_ROOT + '/epoch'
 PENDING_PATH = STATE_ROOT + '/pending.json'
 PENDING_TEMP_PREFIX = 'pending.json.tmp.'
+CLEAR_MARKER_PATH = STATE_ROOT + '/clear-state.json'
+CLEAR_MARKER_TEMP_PREFIX = 'clear-state.json.tmp.'
 SHARED_LOCK_PATH = '/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock'
 MAX_RECORD_BYTES = 4096
 MAX_RESOURCE_BYTES = 1024
@@ -47,6 +49,12 @@ def reject(reason, code=75):
 def _identity(st):
     return (st.st_dev, st.st_ino, st.st_mode, st.st_uid, st.st_gid,
             st.st_nlink, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+
+
+def _inode_binding(st):
+    """Identity fields stable across hardlink creation (excluding nlink/ctime)."""
+    return (st.st_dev, st.st_ino, st.st_mode, st.st_uid, st.st_gid,
+            st.st_size, st.st_mtime_ns)
 
 
 def _exact_regular(path, mode, maximum=None):
@@ -88,12 +96,12 @@ def validate_state_layout():
     return epoch
 
 
-def _read_bounded(path, maximum):
+def _read_bounded(path, maximum, allowed_nlinks=(1,)):
     fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
     try:
         before = os.fstat(fd)
         if (not stat.S_ISREG(before.st_mode) or before.st_uid != 0 or
-                before.st_gid != 0 or before.st_nlink != 1 or
+                before.st_gid != 0 or before.st_nlink not in allowed_nlinks or
                 stat.S_IMODE(before.st_mode) != 0o600 or
                 before.st_size > maximum):
             reject('state_identity_invalid')
@@ -290,6 +298,37 @@ def _pending_exists():
         reject('pending_state_unreadable')
 
 
+def _clear_marker_exists():
+    try:
+        os.lstat(CLEAR_MARKER_PATH)
+        return True
+    except FileNotFoundError:
+        return False
+    except OSError:
+        reject('clear_marker_unreadable')
+
+
+def _clear_temp_names():
+    try:
+        return [name for name in os.listdir(STATE_ROOT)
+                if name.startswith(CLEAR_MARKER_TEMP_PREFIX)]
+    except OSError:
+        reject('state_directory_unreadable')
+
+
+def _fsync_state_directory():
+    try:
+        directory_fd = os.open(STATE_ROOT, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    except OSError:
+        reject('state_directory_sync_unknown')
+    try:
+        os.fsync(directory_fd)
+    except OSError:
+        reject('state_directory_sync_unknown')
+    finally:
+        os.close(directory_fd)
+
+
 def _publish_pending_locked(record):
     """Publish one record while the caller retains the shared lock."""
     if _pending_exists() or _temp_names():
@@ -328,10 +367,55 @@ def _publish_pending_locked(record):
     return record
 
 
+def _read_clear_marker():
+    if not _clear_marker_exists():
+        return None
+    raw, identity = _read_bounded(CLEAR_MARKER_PATH, MAX_RECORD_BYTES, (1, 2))
+    return _validate_record(_decode(raw)), identity, raw
+
+
+def _matching_clear_pair():
+    """Validate marker and pending as the same exact hardlinked inode."""
+    marker_info = _read_clear_marker()
+    if marker_info is None:
+        return None
+    marker_record, marker_stat, marker_raw = marker_info
+    if not _pending_exists():
+        if marker_stat.st_nlink != 1:
+            reject('clear_marker_identity_invalid')
+        return marker_info, None
+    pending_raw, pending_stat = _read_bounded(PENDING_PATH, MAX_RECORD_BYTES, (1, 2))
+    if (pending_raw != marker_raw or marker_stat.st_nlink != 2 or
+            pending_stat.st_nlink != 2 or
+            _inode_binding(marker_stat) != _inode_binding(pending_stat)):
+        reject('clear_marker_conflict')
+    return marker_info, (pending_raw, pending_stat)
+
+
+def _link_clear_marker_locked(expected_raw, expected_stat):
+    """Create the immutable marker as a no-clobber hardlink to pending."""
+    if _clear_marker_exists() or _clear_temp_names():
+        reject('pending_clear_unsettled')
+    try:
+        os.link(PENDING_PATH, CLEAR_MARKER_PATH, follow_symlinks=False)
+    except FileExistsError:
+        reject('pending_clear_unsettled')
+    marker_raw, marker_stat = _read_bounded(CLEAR_MARKER_PATH, MAX_RECORD_BYTES, (2,))
+    pending_raw, pending_stat = _read_bounded(PENDING_PATH, MAX_RECORD_BYTES, (2,))
+    if (marker_raw != expected_raw or pending_raw != expected_raw or
+            marker_stat.st_nlink != 2 or pending_stat.st_nlink != 2 or
+            _inode_binding(marker_stat) != _inode_binding(pending_stat) or
+            _inode_binding(pending_stat) != _inode_binding(expected_stat)):
+        reject('clear_marker_identity_invalid')
+    _fsync_state_directory()
+
+
 def read_pending(expected_boot_id=None):
     """Read and validate the exact pending record, if present."""
     validate_state_layout()
     _validate_epoch()
+    if _clear_temp_names() or _clear_marker_exists():
+        reject('pending_clear_unsettled')
     if _temp_names():
         reject('pending_temp_present')
     if not _pending_exists():
@@ -346,6 +430,14 @@ def read_pending(expected_boot_id=None):
 def _admit_locked(expected_boot_id=None):
     """Perform read-only admission while the caller holds the shared lock."""
     _validate_epoch()
+    if _clear_temp_names():
+        reject('pending_clear_temp_present')
+    marker = _matching_clear_pair()
+    if marker is not None:
+        # Even a validated terminal marker remains a recovery veto.  A
+        # separate recovery capability must prove the terminal result and
+        # remove it; ordinary admission never silently consumes that proof.
+        reject('pending_clear_unsettled')
     if _temp_names():
         reject('pending_temp_present')
     if _pending_exists():
@@ -353,6 +445,9 @@ def _admit_locked(expected_boot_id=None):
         # record into permission to proceed.
         read_pending(expected_boot_id)
         reject('pending_present')
+    # A marker may have just been removed by a proved recovery.  Confirm the
+    # directory's durable view before accepting an empty state as authoritative.
+    _fsync_state_directory()
     return {'schema': SCHEMA, 'epoch': PROTOCOL_EPOCH, 'status': 'admitted'}
 
 
@@ -364,8 +459,9 @@ class MaintenanceAdmission:
     invoke :meth:`clear_pending` with an explicit terminal proof.
     """
 
-    def __init__(self, expected_boot_id=None):
+    def __init__(self, expected_boot_id=None, recovery=False):
         self.expected_boot_id = expected_boot_id
+        self.recovery = recovery
         self._fd = None
         self.lock_identity = None
         self.admission = None
@@ -375,7 +471,9 @@ class MaintenanceAdmission:
         self._validate_epoch_and_lock()
         self._fd, self.lock_identity = _open_shared_lock()
         try:
-            self.admission = _admit_locked(self.expected_boot_id)
+            self.admission = ({'schema': SCHEMA, 'epoch': PROTOCOL_EPOCH,
+                               'status': 'recovery'} if self.recovery else
+                              _admit_locked(self.expected_boot_id))
             return self
         except Exception:
             _close_shared_lock(self._fd)
@@ -404,11 +502,52 @@ class MaintenanceAdmission:
 
     def publish_pending(self, record):
         self._assert_held()
+        if self.recovery:
+            reject('recovery_operation_forbidden')
         return _publish_pending_locked(record)
 
     def clear_pending(self, expected_record, terminal_proof=None):
         self._assert_held()
+        if self.recovery:
+            reject('recovery_operation_forbidden')
         return _clear_pending_locked(expected_record, terminal_proof)
+
+    def recover_clear_marker(self, terminal_proof=None):
+        """Remove a clearing or terminal marker after fresh terminal proof."""
+        self._assert_held()
+        if not self.recovery:
+            reject('recovery_capability_required')
+        if not callable(terminal_proof):
+            reject('terminal_proof_missing')
+        pair = _matching_clear_pair()
+        if pair is None:
+            reject('clear_marker_missing')
+        marker_info, pending_info = pair
+        marker, before, marker_raw = marker_info
+        pending_present = pending_info is not None
+        try:
+            proven = terminal_proof(marker)
+        except Exception:
+            reject('terminal_proof_unknown')
+        if proven is not True:
+            reject('terminal_proof_unknown')
+        current = os.lstat(CLEAR_MARKER_PATH)
+        if _identity(before) != _identity(current):
+            reject('clear_marker_identity_changed')
+        # For a marker+pending pair, first confirm that the hardlink pair was
+        # durably published. Only then may recovery remove pending. For
+        # marker-only state, the earlier unlink is already durable or admission
+        # would have remained blocked.
+        if pending_present:
+            _fsync_state_directory()
+            os.unlink(PENDING_PATH)
+        _fsync_state_directory()
+        os.unlink(CLEAR_MARKER_PATH)
+        # If this fsync is unknown, the next admission fsyncs the directory
+        # before accepting an absent marker, and otherwise remains blocked.
+        _fsync_state_directory()
+        return {'schema': SCHEMA, 'epoch': PROTOCOL_EPOCH, 'status': 'recovered',
+                'run_id': marker['run_id']}
 
     def __exit__(self, exc_type, exc_value, traceback):
         if self._fd is not None:
@@ -421,6 +560,13 @@ class MaintenanceAdmission:
 def maintenance_admission(expected_boot_id=None):
     """Yield one lock-held :class:`MaintenanceAdmission` capability."""
     with MaintenanceAdmission(expected_boot_id) as capability:
+        yield capability
+
+
+@contextmanager
+def maintenance_recovery(expected_boot_id=None):
+    """Yield the same lock-held capability for explicit marker recovery."""
+    with MaintenanceAdmission(expected_boot_id, recovery=True) as capability:
         yield capability
 
 
@@ -447,6 +593,8 @@ def _clear_pending_locked(expected_record, terminal_proof=None):
     if proven is not True:
         reject('terminal_proof_unknown')
     expected_raw = _canonical(_validate_record(expected_record))
+    if _clear_temp_names() or _clear_marker_exists():
+        reject('pending_clear_unsettled')
     if not _pending_exists():
         reject('pending_missing')
     raw, before = _read_bounded(PENDING_PATH, MAX_RECORD_BYTES)
@@ -455,11 +603,13 @@ def _clear_pending_locked(expected_record, terminal_proof=None):
     current = os.lstat(PENDING_PATH)
     if _identity(before) != _identity(current):
         reject('pending_binding_changed')
+    _link_clear_marker_locked(raw, before)
+    # Once the same inode is durably linked as the marker, every failure below
+    # leaves an explicit recovery veto. Pending is never removed before that
+    # exact marker link exists.
     os.unlink(PENDING_PATH)
-    directory_fd = os.open(STATE_ROOT, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
-    try:
-        os.fsync(directory_fd)
-    finally:
-        os.close(directory_fd)
+    _fsync_state_directory()
+    # Keep the nlink-1 marker until explicit recovery proves the terminal
+    # result and removes it.
     return {'schema': SCHEMA, 'epoch': PROTOCOL_EPOCH, 'status': 'cleared',
-            'run_id': expected_record['run_id']}
+            'run_id': expected_record['run_id'], 'clear_marker': 'recovery_required'}

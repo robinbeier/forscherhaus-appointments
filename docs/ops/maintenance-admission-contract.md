@@ -82,6 +82,20 @@ There is no time-based expiry or operator flag that converts uncertainty into
 permission. The shared flock prevents concurrent admission; durable pending
 state prevents admission after an owner dies while work may still exist.
 
+The local, uninstalled core uses an immutable hardlink from `pending.json` to
+`clear-state.json` before removing the pending name. It synchronizes the state
+directory before and after that removal and retains the marker until a separate
+recovery call verifies the exact record and terminal outcome. A marker with or
+without the pending name refuses ordinary admission. Recovery can settle the
+matching two-name inode state after interruption; an identity mismatch remains
+blocked. Admission also synchronizes an apparently empty state directory before
+accepting it, including after an interrupted final marker removal. These core
+mechanics do not supply an operation-specific terminal proof or enroll a writer.
+Only trusted root integration code may call the recovery capability; its proof
+callback is not an operator-selectable flag or an authorization boundary. Each
+future writer must bind a fixed, reviewed verifier for its own resource before
+this core can be installed or used on production.
+
 Manual `docker builder prune` needs an operation-specific terminal proof. Its
 CLI delegates mutation to the Docker daemon; CLI termination, timeout or a free
 flock does not establish that daemon-side work ended. Unlike a restore
