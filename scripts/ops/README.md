@@ -346,13 +346,18 @@ Closed production backup sets:
   installed hash against the tracked source. See
   `docs/ops/production-release-entry.md` for the separate installation and
   pause/restore gates.
-- Install `scripts/ops/libexec/backup_set_producer_v1.py` as root-owned mode
-  `0555` at `/usr/local/libexec/fh-backup-set-producer-v1`.
-- Install `scripts/ops/libexec/backup_set_producer_supervisor_v1.sh` as
-  root-owned mode `0555` at
-  `/usr/local/libexec/fh-backup-set-producer-supervisor-v1`; the recurring
+- The current `scripts/ops/libexec/backup_set_producer_v1.py` and its systemd
+  unit require the ROB-812 admission core, protected state and coordinated
+  writer rollout. Do not install either independently or replace the verified
+  legacy producer yet. Follow the
+  [maintenance-admission migration gate](../../docs/ops/maintenance-admission-contract.md#migration-and-removal-gate)
+  and its future exact installation manifest; the installed producer remains
+  root-owned mode `0555` at `/usr/local/libexec/fh-backup-set-producer-v1`.
+- The installed `fh-backup-set-producer-supervisor-v1` remains root-owned
+  mode `0555` and unchanged during this source-only slice. The recurring
   systemd producer must use this fixed parent so the Python helper's unchanged
-  parent-death binding remains effective.
+  parent-death binding remains effective. Include the supervisor in the
+  coordinated rollout's identity and hash checks.
 - Provision the dedicated `fh_backup` database account with only `SELECT` and
   `SHOW VIEW` on `easyappointments.*`. Provide the exact six-line connection
   authority at `/etc/fh/backup-set-producer.cnf` as root-owned mode `0600`;

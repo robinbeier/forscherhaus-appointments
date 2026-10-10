@@ -218,38 +218,24 @@ it never treats the image entrypoint's temporary initialization server as
 restore-ready. Clean shutdown evidence is published only after that final
 server has completed the fixed import and verification sequence.
 
-Install and validate the reviewed recurring units without activating them:
-
-```bash
-sudo /usr/bin/install -o root -g root -m 0555 \
-  scripts/ops/libexec/backup_set_producer_v1.py \
-  /usr/local/libexec/fh-backup-set-producer-v1
-sudo /usr/bin/install -o root -g root -m 0555 \
-  scripts/ops/libexec/backup_set_producer_supervisor_v1.sh \
-  /usr/local/libexec/fh-backup-set-producer-supervisor-v1
-sudo /usr/bin/install -o root -g root -m 0644 \
-  scripts/ops/systemd/fh-backup-set-producer.service \
-  /etc/systemd/system/fh-backup-set-producer.service
-sudo /usr/bin/install -o root -g root -m 0644 \
-  scripts/ops/systemd/fh-backup-set-continuity.timer \
-  /etc/systemd/system/fh-backup-set-continuity.timer
-sudo /usr/bin/install -o root -g root -m 0644 \
-  scripts/ops/systemd/fh-backup-set-restore-verify.service \
-  /etc/systemd/system/fh-backup-set-restore-verify.service
-sudo /usr/bin/systemd-analyze verify \
-  /etc/systemd/system/fh-backup-set-producer.service \
-  /etc/systemd/system/fh-backup-set-continuity.timer \
-  /etc/systemd/system/fh-backup-set-restore-verify.service
-sudo /usr/bin/systemctl daemon-reload
-/usr/bin/systemctl is-enabled fh-backup-set-continuity.timer
-/usr/bin/systemctl is-active fh-backup-set-continuity.timer
-```
+The current tracked producer and service unit are **not standalone-installable**.
+They require the protected admission directory, protocol epoch, reviewed core,
+and enrollment of the other maintenance writers. Do not replace the installed
+legacy producer or unit from this source-only ROB-812 slice. Keep their
+verified hashes and the active backup timer unchanged. The coordinated
+installation, native systemd validation, rollback and activation sequence
+must come from the exact manifest required by the
+[maintenance-admission migration gate](maintenance-admission-contract.md#migration-and-removal-gate).
 
 The fixed supervisor must remain the producer service's direct child of
 systemd. It keeps the Python producer as a distinct child so the unchanged
 `PR_SET_PDEATHSIG(SIGKILL)` guard binds the mutating process to that trusted
 parent; replacing the service command with a direct Python invocation is not a
 supported profile.
+
+The following ROB-480 pre-cutover sequence records the original timer
+transition. It is not a repeatable installation procedure for the current
+admission-enabled source or the already active production timer.
 
 The required pre-cutover state is `disabled` and `inactive`; both services must
 also be inactive. Continue only with the exact installed helper and unit hashes,
