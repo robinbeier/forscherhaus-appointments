@@ -84,6 +84,9 @@ Override it with:
 bash scripts/ops/prod_doctor.sh --prod-ssh-target root@booking-server
 ```
 
+For the prepared, not-yet-executed tailnet-only SSH cutover, see the
+[ROB-809 Tailscale SSH cutover runbook](../security/ROB-809-tailscale-ssh-cutover.md).
+
 ## Production Map
 
 Current accepted baseline:
