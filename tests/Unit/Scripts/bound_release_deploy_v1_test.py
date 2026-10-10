@@ -2,6 +2,7 @@
 
 import argparse
 import contextlib
+import fcntl
 import importlib.util
 import json
 import os
@@ -16,6 +17,8 @@ SPEC = importlib.util.spec_from_file_location('bound_release_deploy_v1', PATH)
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 ORIGINAL_CONFIG_BINDINGS = MODULE.config_bindings
+ORIGINAL_OPEN_LOCK = MODULE.open_lock
+REAL_EUID = os.geteuid()
 ORIGINAL_NO_RECOVERY = MODULE.no_recovery
 ORIGINAL_RESERVE_GUARD = MODULE.reserve_recovery_guard
 ORIGINAL_RETIRE_GUARD = MODULE.retire_recovery_guard
@@ -76,6 +79,22 @@ class BoundReleaseDeployTest(unittest.TestCase):
         self.assertEqual(arguments().run_id, self.child.call_args.kwargs['env']['BOUND_RELEASE_RUN_ID'])
         self.assertEqual(1, self.reserve.call_count)
         self.assertEqual(1, self.receipt.call_count)
+
+    def test_open_lock_returns_read_write_descriptor_for_durable_admission(self):
+        if REAL_EUID != 0:
+            self.skipTest('root is required for the root-owned lock contract')
+        with tempfile.TemporaryDirectory() as directory:
+            lock = os.path.join(directory, 'shared.lock')
+            with open(lock, 'wb'):
+                pass
+            os.chmod(lock, 0o600)
+            with mock.patch.object(MODULE, 'LOCK', lock), \
+                    mock.patch.object(MODULE, 'trusted_parent'):
+                fd = ORIGINAL_OPEN_LOCK()
+            try:
+                self.assertEqual(os.O_RDWR, os.O_ACCMODE & fcntl.fcntl(fd, fcntl.F_GETFL))
+            finally:
+                os.close(fd)
 
     def test_pair_drift_blocks_before_reservation_or_child(self):
         error = self.pair.PairAdmissionError('pair_mismatch')

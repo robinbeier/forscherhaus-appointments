@@ -153,7 +153,10 @@ def open_lock():
     if (not stat.S_ISREG(before.st_mode) or before.st_uid != 0 or before.st_gid != 0 or
             stat.S_IMODE(before.st_mode) != 0o600 or before.st_nlink != 1 or before.st_size != 0):
         fail('lock_unsafe')
-    fd = os.open(LOCK, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    # The ordinary deployment entry passes this descriptor to the durable
+    # admission core, which requires an existing lock opened read/write.  The
+    # exclusive lock and identity checks still happen before returning it.
+    fd = os.open(LOCK, os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW)
     try:
         opened = os.fstat(fd)
         if identity(before) != identity(opened):
