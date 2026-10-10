@@ -21,6 +21,7 @@ final class OrdinaryDeploymentAdmissionRootTest extends TestCase
     private bool $createdLockDirectory = false;
     private bool $createdLock = false;
     private bool $stagedCore = false;
+    private ?array $coreIdentity = null;
     private bool $createdCoreDirectory = false;
 
     protected function setUp(): void
@@ -38,6 +39,9 @@ final class OrdinaryDeploymentAdmissionRootTest extends TestCase
         if (file_exists(self::LOCK) || is_link(self::LOCK)) {
             self::markTestSkipped('The production lock already exists; the root fixture will not replace it.');
         }
+        if (file_exists(self::CORE) || is_link(self::CORE)) {
+            self::markTestSkipped('The admission core already exists; the root fixture will not replace it.');
+        }
 
         // The copied trusted deploy script must live below a root-controlled
         // ancestor.  /tmp is intentionally world-writable and therefore
@@ -53,8 +57,11 @@ final class OrdinaryDeploymentAdmissionRootTest extends TestCase
         if (isset($this->fixture)) {
             $this->removeTree($this->fixture);
         }
-        if ($this->stagedCore) {
-            @unlink(self::CORE);
+        if ($this->stagedCore && is_array($this->coreIdentity)) {
+            $current = @lstat(self::CORE);
+            if ($this->sameIdentity($current, $this->coreIdentity)) {
+                @unlink(self::CORE);
+            }
         }
         if ($this->createdCoreDirectory) {
             @rmdir(dirname(self::CORE));
@@ -131,6 +138,24 @@ final class OrdinaryDeploymentAdmissionRootTest extends TestCase
         self::assertFileExists(self::ADMISSION_ROOT . '/pending.json');
     }
 
+    public function testRealDeployEntryRejectsInvalidAdmissionCoreBytes(): void
+    {
+        $this->stageAdmissionCoreBytes("print('unreviewed')\n");
+        $result = $this->runDeployEntry();
+        self::assertSame(30, $result['exit_code'], $result['stdout'] . $result['stderr']);
+        self::assertStringContainsString('admission_core_hash_mismatch', $result['stdout'] . $result['stderr']);
+        self::assertFileDoesNotExist($this->fixture . '/receipt.json');
+    }
+
+    public function testRealDeployEntryRejectsOversizedAdmissionCoreBytes(): void
+    {
+        $this->stageAdmissionCoreBytes(str_repeat('x', 1024 * 1024 + 1));
+        $result = $this->runDeployEntry();
+        self::assertSame(30, $result['exit_code'], $result['stdout'] . $result['stderr']);
+        self::assertStringContainsString('admission_core_oversize', $result['stdout'] . $result['stderr']);
+        self::assertFileDoesNotExist($this->fixture . '/receipt.json');
+    }
+
     private function createAdmissionState(): void
     {
         mkdir(self::ADMISSION_ROOT, 0700, true);
@@ -156,19 +181,54 @@ final class OrdinaryDeploymentAdmissionRootTest extends TestCase
 
     private function stageAdmissionCore(): void
     {
-        $parent = dirname(self::CORE);
-        if (!is_dir($parent)) {
-            mkdir($parent, 0755, true);
-            $this->createdCoreDirectory = true;
-        }
         $source = dirname(__DIR__, 3) . '/scripts/ops/libexec/maintenance_pending_v1.py';
         self::assertSame(
             '32f814b338e933dfe73c67fdec03799e68c5c50a97c263a7b7b17481ab7f6d1c',
             hash_file('sha256', $source),
         );
-        copy($source, self::CORE);
+        $this->stageAdmissionCoreBytes((string) file_get_contents($source));
+    }
+
+    private function stageAdmissionCoreBytes(string $bytes): void
+    {
+        $parent = dirname(self::CORE);
+        if (!is_dir($parent)) {
+            mkdir($parent, 0755, true);
+            $this->createdCoreDirectory = true;
+        }
+        if ($this->stagedCore || file_exists(self::CORE) || is_link(self::CORE)) {
+            self::markTestSkipped('The admission core fixture must be created exactly once without clobbering.');
+        }
+        $stream = @fopen(self::CORE, 'x+b');
+        if (!is_resource($stream)) {
+            self::markTestSkipped('The admission core fixture could not be created without clobbering.');
+        }
         chmod(self::CORE, 0644);
         $this->stagedCore = true;
+        fwrite($stream, $bytes);
+        fflush($stream);
+        if (function_exists('fsync')) {
+            fsync($stream);
+        }
+        fclose($stream);
+        $identity = lstat(self::CORE);
+        self::assertIsArray($identity);
+        $this->coreIdentity ??= $identity;
+        self::assertTrue($this->sameIdentity($identity, $this->coreIdentity));
+    }
+
+    /** @param array<string,mixed>|false $current @param array<string,mixed> $expected */
+    private function sameIdentity(array|false $current, array $expected): bool
+    {
+        if (!is_array($current)) {
+            return false;
+        }
+        foreach (['dev', 'ino', 'uid', 'gid', 'mode', 'nlink'] as $field) {
+            if (($current[$field] ?? null) !== ($expected[$field] ?? null)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** @return array{exit_code:int,stdout:string,stderr:string} */

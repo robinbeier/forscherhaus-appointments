@@ -232,6 +232,12 @@ final class OrdinaryDeploymentCoordinationTest extends TestCase
             "local expected_hash='32f814b338e933dfe73c67fdec03799e68c5c50a97c263a7b7b17481ab7f6d1c'",
             $source,
         );
+        self::assertStringNotContainsString('spec_from_file_location', $source);
+        self::assertStringContainsString('max_core_bytes = 1024 * 1024', $source);
+        self::assertStringContainsString('source.extend(chunk)', $source);
+        self::assertStringContainsString('hashlib.sha256(source).hexdigest()', $source);
+        self::assertStringContainsString("exec(compile(bytes(source), CORE, 'exec'), module_namespace)", $source);
+        self::assertStringContainsString("pending_error = module_namespace.get('PendingError')", $source);
         self::assertStringContainsString('exec {ordinary_ro_fd}<"$lock_path"', $source);
         self::assertStringContainsString('exec {ordinary_fd}<>"/proc/$$/fd/$ordinary_ro_fd"', $source);
         self::assertLessThan(

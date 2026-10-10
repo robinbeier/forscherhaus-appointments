@@ -147,7 +147,7 @@ ordinary_assert_pending_admission() {
   # and a missing or changed installation must fail closed.
   local core='/usr/local/libexec/fh/maintenance_pending_v1.py'
   local expected_hash='32f814b338e933dfe73c67fdec03799e68c5c50a97c263a7b7b17481ab7f6d1c'
-  local observed_hash observed_identity observed_identity_after
+  local core_fd observed_identity path_identity observed_identity_after status
 
   [[ -f "$core" && ! -L "$core" ]] || {
     echo '[!] Maintenance admission core is not installed as the expected regular file.' >&2
@@ -157,47 +157,81 @@ ordinary_assert_pending_admission() {
     echo '[!] Maintenance admission core trust chain is invalid.' >&2
     return 75
   }
-  observed_identity="$(stat -c '%a:%u:%g:%h:%s:%d:%i' -- "$core" 2>/dev/null || true)"
-  [[ "$observed_identity" == 644:0:0:1:* ]] || {
+  # Bind the bytes through an already-open descriptor.  The Python loader
+  # must never reopen the pathname after this identity/hash check.
+  exec {core_fd}<"$core" || return 75
+  observed_identity="$(stat -Lc '%a:%u:%g:%h:%s:%d:%i' -- "/proc/$$/fd/$core_fd" 2>/dev/null || true)"
+  path_identity="$(stat -c '%a:%u:%g:%h:%s:%d:%i' -- "$core" 2>/dev/null || true)"
+  [[ "$observed_identity" == 644:0:0:1:* && "$path_identity" == "$observed_identity" ]] || {
+    exec {core_fd}<&-
     echo '[!] Maintenance admission core identity is not root-controlled.' >&2
     return 75
   }
-  read -r observed_hash _ < <(/usr/bin/sha256sum -- "$core") || return 75
-  observed_identity_after="$(stat -c '%a:%u:%g:%h:%s:%d:%i' -- "$core" 2>/dev/null || true)"
-  [[ "$observed_identity_after" == "$observed_identity" ]] || {
-    echo '[!] Maintenance admission core changed while it was being verified.' >&2
+  [[ -n "${ORDINARY_CHANGE_LOCK_FD:-}" && "$ORDINARY_CHANGE_LOCK_FD" =~ ^[0-9]+$ ]] || {
+    exec {core_fd}<&-
     return 75
   }
-  [[ "$observed_hash" == "$expected_hash" ]] || {
-    echo '[!] Maintenance admission core hash is not the reviewed version.' >&2
+  [[ -e "/proc/$$/fd/$ORDINARY_CHANGE_LOCK_FD" ]] || {
+    exec {core_fd}<&-
     return 75
   }
-  [[ -n "${ORDINARY_CHANGE_LOCK_FD:-}" && "$ORDINARY_CHANGE_LOCK_FD" =~ ^[0-9]+$ ]] || return 75
-  [[ -e "/proc/$$/fd/$ORDINARY_CHANGE_LOCK_FD" ]] || return 75
 
-  /usr/bin/python3 -I -B - "$ORDINARY_CHANGE_LOCK_FD" <<'PY'
-import importlib.util
+  if /usr/bin/python3 -I -B - "$ORDINARY_CHANGE_LOCK_FD" "$core_fd" "$expected_hash" <<'PY'
+import hashlib
+import os
 import sys
 
 CORE = '/usr/local/libexec/fh/maintenance_pending_v1.py'
-module = None
+pending_error = None
+class AdmissionFailure(Exception):
+    pass
 try:
     lock_fd = int(sys.argv[1])
-    spec = importlib.util.spec_from_file_location('fh_maintenance_pending_v1', CORE)
-    if spec is None or spec.loader is None:
-        raise RuntimeError('admission_core_loader_unavailable')
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    result = module.admit_existing_lock_fd(lock_fd)
+    core_fd = int(sys.argv[2])
+    expected_hash = sys.argv[3]
+    os.lseek(core_fd, 0, os.SEEK_SET)
+    max_core_bytes = 1024 * 1024
+    source = bytearray()
+    while True:
+        chunk = os.read(core_fd, max_core_bytes - len(source) + 1)
+        if not chunk:
+            break
+        source.extend(chunk)
+        if len(source) > max_core_bytes:
+            raise AdmissionFailure('admission_core_oversize')
+    if hashlib.sha256(source).hexdigest() != expected_hash:
+        raise AdmissionFailure('admission_core_hash_mismatch')
+    module_namespace = {'__name__': 'fh_maintenance_pending_v1', '__file__': CORE}
+    exec(compile(bytes(source), CORE, 'exec'), module_namespace)
+    admission = module_namespace['admit_existing_lock_fd']
+    pending_error = module_namespace.get('PendingError')
+    result = admission(lock_fd)
     if not isinstance(result, dict) or result.get('status') != 'admitted':
         raise RuntimeError('admission_status_unknown')
 except Exception as error:
-    if module is not None and isinstance(error, module.PendingError):
+    if isinstance(error, AdmissionFailure):
+        print(f'maintenance admission failed closed: {error}', file=sys.stderr)
+        raise SystemExit(75)
+    if isinstance(pending_error, type) and isinstance(error, pending_error):
         print(f'maintenance admission refused: {error.reason}', file=sys.stderr)
         raise SystemExit(error.code)
     print(f'maintenance admission failed closed: {type(error).__name__}', file=sys.stderr)
     raise SystemExit(75)
 PY
+  then
+    status=0
+  else
+    status=$?
+  fi
+  exec {core_fd}<&-
+  if [[ "$status" -eq 0 ]]; then
+    observed_identity_after="$(stat -c '%a:%u:%g:%h:%s:%d:%i' -- "$core" 2>/dev/null || true)"
+    if [[ "$observed_identity_after" != "$observed_identity" ]]; then
+      echo '[!] Maintenance admission core changed while it was being verified.' >&2
+      status=75
+    fi
+  fi
+  return "$status"
 }
 
 ordinary_assert_no_pending_probe() {
