@@ -1,8 +1,9 @@
 # Coordinated maintenance admission
 
-ROB-532 tracks replacement of process-name activity inference with a verified
-contract shared by supported maintenance entrypoints. This document is the
-**target contract and migration gate**, not evidence that it is installed.
+ROB-812 tracks the durable pending-state prerequisite for ROB-809. The earlier
+ROB-532 process-identity work is complete, but does not establish this pending
+protocol. This document is the **target contract and migration gate**, not
+evidence that it is installed.
 Keep the current conservative activity veto until every removal criterion below
 passes. A source merge does not authorize production installation.
 
@@ -81,6 +82,20 @@ There is no time-based expiry or operator flag that converts uncertainty into
 permission. The shared flock prevents concurrent admission; durable pending
 state prevents admission after an owner dies while work may still exist.
 
+The local, uninstalled core uses an immutable hardlink from `pending.json` to
+`clear-state.json` before removing the pending name. It synchronizes the state
+directory before and after that removal and retains the marker until a separate
+recovery call verifies the exact record and terminal outcome. A marker with or
+without the pending name refuses ordinary admission. Recovery can settle the
+matching two-name inode state after interruption; an identity mismatch remains
+blocked. Admission also synchronizes an apparently empty state directory before
+accepting it, including after an interrupted final marker removal. These core
+mechanics do not supply an operation-specific terminal proof or enroll a writer.
+Only trusted root integration code may call the recovery capability; its proof
+callback is not an operator-selectable flag or an authorization boundary. Each
+future writer must bind a fixed, reviewed verifier for its own resource before
+this core can be installed or used on production.
+
 Manual `docker builder prune` needs an operation-specific terminal proof. Its
 CLI delegates mutation to the Docker daemon; CLI termination, timeout or a free
 flock does not establish that daemon-side work ended. Unlike a restore
@@ -156,9 +171,11 @@ operations; reverting only some tools must not reopen legacy admission.
 Remove command-name inference only after every supported retained scheduler,
 manual and recovery path is enrolled, versions agree, crash/recovery evidence
 passes, and installed production versions are independently verified. A
-repository-only test or a free flock is insufficient. ROB-532 stays open until
-its agreed operational acceptance criteria are met; child prerequisite issues
-may close independently with their narrower evidence.
+repository-only test or a free flock is insufficient. ROB-812 remains open
+until its local writer enrollment, recovery and mixed-version acceptance
+criteria pass; small local prerequisites may land independently with their
+narrower evidence. Production installation and the SSH cutover remain separate
+nighttime steps under ROB-809 after those local criteria are met.
 
 For host operations and release authority, use
 [the operations harness](agent-operations.md). The

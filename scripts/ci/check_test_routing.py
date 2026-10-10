@@ -40,6 +40,7 @@ REVIEWED_INDIRECT_PYTHON_ROUTES = {
     "tests/Unit/Scripts/bound_release_recovery_inspect_v1_test.py": ROOT_DEPLOYMENT_SCRIPT,
     "tests/Unit/Scripts/manual_archive_cleanup_v1_test.py": ROOT_DEPLOYMENT_SCRIPT,
     "tests/Unit/Scripts/manual_release_cleanup_v1_test.py": ROOT_DEPLOYMENT_SCRIPT,
+    "tests/Unit/Scripts/maintenance_pending_v1_test.py": ROOT_DEPLOYMENT_SCRIPT,
     "tests/Unit/Scripts/zero_surprise_canary_fixture_lock_test.py": ROOT_DEPLOYMENT_SCRIPT,
 }
 
