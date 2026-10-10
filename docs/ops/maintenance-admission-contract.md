@@ -36,7 +36,7 @@ scheduler, operator and recovery entrypoints, including direct supported calls.
 | Ordinary deploy | `deploy_ea.sh`; validated shared descriptor | Preserve deployment state, recovery and delegated descriptor checks |
 | Ordinary live probe | `scripts/ops/run_ordinary_live_probe.sh`; interruption markers and cleanup callback | Enroll the separately invoked cleanup path as a writer |
 | Provider/customer UI smokes | `scripts/ops/prod_provider_ui_smoke.sh`, `scripts/ops/prod_customers_ui_smoke.sh`; private cleanup locks and delayed systemd cleanup | Enroll foreground mutation, delayed cleanup units and disarm cleanup as separate writer entrypoints |
-| Backup producer | `scripts/ops/libexec/backup_set_producer_v1.py`; shared and private locks, continuity state | Retain both validated descriptors in the trusted dump child; prove child termination and publication recovery separately |
+| Backup producer | `scripts/ops/libexec/backup_set_producer_v1.py`; shared and private locks, continuity state | Repository source registers pending before dump dispatch and clears only after direct-child termination and publication. Installed helper remains legacy; interrupted-run recovery and coordinated rollout remain open. |
 | Restore verification | `scripts/ops/libexec/deployment_dump_attestation_v1.py`; detached container, lease watcher, orphan and continuity checks | Pending state must cover the interval between owner death and verified container termination |
 | Session retention | `scripts/ops/libexec/session_retention_v1.py`; shared lock and protected local state | Repository execute path reads the pending-state contract through its existing lock descriptor before mutation; installed helper and unit remain legacy until the coordinated rollout |
 | Manual build-cache retention | `scripts/ops/prod_build_cache_retention.sh`; private lock and activity veto | Require the shared lock for execute, including when its path is absent; ROB-579 tracks this prerequisite |
@@ -101,8 +101,10 @@ closing and reusing the caller's numeric FD cannot silently rebind authority.
 The caller retains ownership of its original descriptor and closes it on every
 failed admission and after mutation. This
 check is only a source-level integration primitive: the ordinary deployment
-entry now invokes it in local source and regression fixtures, while the
-installed production deploy script remains on the older contract. The local
+entry now invokes it in local source and regression fixtures. The repository
+backup producer also uses the same held descriptor for pending registration
+around its direct dump child and continuity publication. Installed production
+helpers remain on the older contract. The local
 core also offers recovery through the same already-held lock descriptor, so a
 writer can settle its own clear marker without releasing the shared lock. The
 caller must independently prove its exact operation is terminal and all

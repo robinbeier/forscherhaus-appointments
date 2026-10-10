@@ -18,6 +18,10 @@ final class BackupSetProducerRootTest extends TestCase
     private string $root;
     private string $helper;
     private string $runner;
+    private string $canonicalOrchestrator = '/var/lib/fh-deploy-orchestrator';
+    private string $canonicalAdmission = '/var/lib/fh-maintenance-admission';
+    /** @var array<string, array{dev:int,ino:int,mode:int,uid:int,gid:int}> */
+    private array $canonicalIdentities = [];
 
     protected function setUp(): void
     {
@@ -26,13 +30,51 @@ final class BackupSetProducerRootTest extends TestCase
         }
         // The production helper rejects world-writable ancestors. Keep the
         // Linux-root fixture beneath the same trusted /var/lib boundary.
+        if (
+            file_exists($this->canonicalOrchestrator) ||
+            is_link($this->canonicalOrchestrator) ||
+            file_exists($this->canonicalAdmission) ||
+            is_link($this->canonicalAdmission)
+        ) {
+            $this->markTestSkipped('Canonical admission paths already exist; refusing to touch them.');
+        }
+        mkdir($this->canonicalOrchestrator, 0700);
+        mkdir($this->canonicalOrchestrator . '/locks', 0700);
+        mkdir($this->canonicalAdmission, 0700);
+        $canonicalLock = $this->canonicalOrchestrator . '/locks/fh-production-change.lock';
+        $lockHandle = fopen($canonicalLock, 'x');
+        self::assertIsResource($lockHandle);
+        fclose($lockHandle);
+        chmod($canonicalLock, 0600);
+        $canonicalEpoch = $this->canonicalAdmission . '/epoch';
+        $epochHandle = fopen($canonicalEpoch, 'x');
+        self::assertIsResource($epochHandle);
+        fwrite($epochHandle, "maintenance-admission.v1\n");
+        fclose($epochHandle);
+        chmod($canonicalEpoch, 0600);
+        foreach (
+            [
+                $this->canonicalOrchestrator,
+                $this->canonicalOrchestrator . '/locks',
+                $canonicalLock,
+                $this->canonicalAdmission,
+                $canonicalEpoch,
+            ]
+            as $path
+        ) {
+            $identity = lstat($path);
+            self::assertIsArray($identity);
+            $this->canonicalIdentities[$path] = [
+                'dev' => (int) $identity['dev'],
+                'ino' => (int) $identity['ino'],
+                'mode' => (int) $identity['mode'],
+                'uid' => (int) $identity['uid'],
+                'gid' => (int) $identity['gid'],
+            ];
+        }
         $this->root = '/var/lib/fh-backup-set-producer-root-' . bin2hex(random_bytes(8));
         mkdir($this->root, 0700);
         mkdir($this->root . '/backups', 0700);
-        mkdir($this->root . '/orchestrator', 0700);
-        mkdir($this->root . '/orchestrator/locks', 0700);
-        touch($this->root . '/orchestrator/locks/fh-production-change.lock');
-        chmod($this->root . '/orchestrator/locks/fh-production-change.lock', 0600);
         file_put_contents(
             $this->root . '/credentials.cnf',
             "[client]\nuser=fh_backup\npassword=" . self::PASSWORD . "\nprotocol=tcp\nhost=127.0.0.1\nport=3306\n",
@@ -41,6 +83,13 @@ final class BackupSetProducerRootTest extends TestCase
 
         $this->helper = dirname(__DIR__, 3) . '/scripts/ops/libexec/backup_set_producer_v1.py';
         $this->runner = $this->root . '/run.py';
+        $coreSource = dirname(__DIR__, 3) . '/scripts/ops/libexec/maintenance_pending_v1.py';
+        $coreTarget = $this->root . '/maintenance_pending_v1.py';
+        $coreHandle = fopen($coreTarget, 'x');
+        self::assertIsResource($coreHandle);
+        fwrite($coreHandle, (string) file_get_contents($coreSource));
+        fclose($coreHandle);
+        chmod($coreTarget, 0644);
         $dump = $this->root . '/mariadb-dump';
         file_put_contents(
             $dump,
@@ -80,12 +129,18 @@ final class BackupSetProducerRootTest extends TestCase
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
             module.BACKUP_ROOT = sys.argv[2] + '/backups'
-            module.ORCHESTRATOR_ROOT = sys.argv[2] + '/orchestrator'
+            module.ORCHESTRATOR_ROOT = '/var/lib/fh-deploy-orchestrator'
             module.CREDENTIALS = sys.argv[2] + '/credentials.cnf'
             module.CONFIG_PATH = module.CREDENTIALS
             module.MARIADB_DUMP = sys.argv[2] + '/mariadb-dump'
             module.DUMP_PATH = module.MARIADB_DUMP
             module.TERMINAL_VALIDATOR = sys.argv[2] + '/unused-validator'
+            module.ADMISSION_CORE = sys.argv[2] + '/maintenance_pending_v1.py'
+            original_load_admission_core = module.load_admission_core
+            def load_fixture_admission_core():
+                core = original_load_admission_core()
+                return core
+            module.load_admission_core = load_fixture_admission_core
             if len(sys.argv) == 4:
                 import datetime
                 fixed = datetime.datetime.strptime(sys.argv[3], '%Y-%m-%dT%H:%M:%SZ').replace(
@@ -114,6 +169,98 @@ final class BackupSetProducerRootTest extends TestCase
     {
         if (isset($this->root) && is_dir($this->root)) {
             $this->removeTree($this->root);
+        }
+        $runsPath = $this->canonicalOrchestrator . '/runs';
+        if (isset($this->canonicalIdentities[$runsPath]) && is_dir($runsPath)) {
+            foreach (scandir($runsPath) ?: [] as $runLeaf) {
+                if (!preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/D', $runLeaf)) {
+                    continue;
+                }
+                $runPath = $runsPath . '/' . $runLeaf;
+                $runIdentity = lstat($runPath);
+                if (
+                    !is_array($runIdentity) ||
+                    (($runIdentity['mode'] ?? 0) & 0170000) !== 0040000 ||
+                    (int) $runIdentity['uid'] !== 0 ||
+                    (int) $runIdentity['gid'] !== 0 ||
+                    (int) $runIdentity['nlink'] < 1 ||
+                    (($runIdentity['mode'] ?? 0) & 0777) !== 0700
+                ) {
+                    continue;
+                }
+                foreach (scandir($runPath) ?: [] as $leaf) {
+                    if (!in_array($leaf, ['state.json', 'events.jsonl', 'evidence.json'], true)) {
+                        continue;
+                    }
+                    $path = $runPath . '/' . $leaf;
+                    $identity = lstat($path);
+                    if (
+                        is_array($identity) &&
+                        (($identity['mode'] ?? 0) & 0170000) === 0100000 &&
+                        (int) $identity['uid'] === 0 &&
+                        (int) $identity['gid'] === 0 &&
+                        (int) $identity['nlink'] === 1 &&
+                        (($identity['mode'] ?? 0) & 0777) === 0600
+                    ) {
+                        unlink($path);
+                    }
+                }
+                if (array_values(array_diff(scandir($runPath) ?: [], ['.', '..'])) === []) {
+                    rmdir($runPath);
+                }
+            }
+        }
+        $statePath = $this->canonicalAdmission;
+        if (isset($this->canonicalIdentities[$statePath]) && is_dir($statePath)) {
+            foreach (scandir($statePath) ?: [] as $leaf) {
+                if ($leaf === '.' || $leaf === '..' || $leaf === 'epoch') {
+                    continue;
+                }
+                if (!preg_match('/^(?:pending|clear-state)\.json(?:\.tmp\..*)?$/D', $leaf)) {
+                    continue;
+                }
+                $path = $statePath . '/' . $leaf;
+                $identity = lstat($path);
+                if (
+                    !is_array($identity) ||
+                    (($identity['mode'] ?? 0) & 0170000) !== 0100000 ||
+                    (int) $identity['uid'] !== 0 ||
+                    (int) $identity['gid'] !== 0 ||
+                    (int) $identity['nlink'] !== 1 ||
+                    (($identity['mode'] ?? 0) & 0777) !== 0600
+                ) {
+                    continue;
+                }
+                unlink($path);
+            }
+        }
+        foreach (array_reverse(array_keys($this->canonicalIdentities)) as $path) {
+            if (!file_exists($path) && !is_link($path)) {
+                continue;
+            }
+            $current = lstat($path);
+            $expected = $this->canonicalIdentities[$path];
+            $observed = [
+                'dev' => (int) $current['dev'],
+                'ino' => (int) $current['ino'],
+                'mode' => (int) $current['mode'],
+                'uid' => (int) $current['uid'],
+                'gid' => (int) $current['gid'],
+            ];
+            if ($observed !== $expected) {
+                // Never remove a canonical object whose identity changed while
+                // the fixture was running.
+                continue;
+            }
+            if (is_dir($path) && !is_link($path)) {
+                $children = array_values(array_diff(scandir($path) ?: [], ['.', '..']));
+                if ($children !== []) {
+                    continue;
+                }
+                rmdir($path);
+            } else {
+                unlink($path);
+            }
         }
     }
 
@@ -240,11 +387,13 @@ final class BackupSetProducerRootTest extends TestCase
         }
         self::assertSame(2, count(glob($this->root . '/backups/20*T*Z') ?: []));
         self::assertSame([], glob($this->root . '/backups/.backup-set-producer-*.tmp') ?: []);
+        self::assertFileDoesNotExist('/var/lib/fh-maintenance-admission/pending.json');
+        self::assertFileDoesNotExist('/var/lib/fh-maintenance-admission/clear-state.json');
     }
 
     public function testGlobalLockIsRetryableAndDoesNotPublish(): void
     {
-        $lock = fopen($this->root . '/orchestrator/locks/fh-production-change.lock', 'r+');
+        $lock = fopen($this->canonicalOrchestrator . '/locks/fh-production-change.lock', 'r+');
         self::assertIsResource($lock);
         self::assertTrue(flock($lock, LOCK_EX | LOCK_NB));
         try {
@@ -295,7 +444,7 @@ final class BackupSetProducerRootTest extends TestCase
             ['/usr/bin/python3', '-I', '-B', runner, helper, root],
             start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
-        locks = [root + '/orchestrator/locks/fh-production-change.lock',
+        locks = ['/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock',
                  root + '/backups/.backup-set-producer.lock']
 
         def wait_for(predicate, seconds=5.0):
@@ -410,8 +559,9 @@ final class BackupSetProducerRootTest extends TestCase
 
     public function testIncompleteRunnerHistoryIsRetryableAndDoesNotPublish(): void
     {
-        $runs = $this->root . '/orchestrator/runs';
+        $runs = $this->canonicalOrchestrator . '/runs';
         mkdir($runs, 0700);
+        $this->trackCanonicalIdentity($runs);
 
         foreach (['state.json', 'events.jsonl', 'evidence.json'] as $missing) {
             $run = $runs . '/018f6f52-4c87-4d4e-8b19-6a66e6e1af25';
@@ -701,7 +851,7 @@ final class BackupSetProducerRootTest extends TestCase
         foreach (['fh-production-change.lock', '.backup-set-producer.lock'] as $leaf) {
             $path =
                 $leaf === 'fh-production-change.lock'
-                    ? $this->root . '/orchestrator/locks/' . $leaf
+                    ? $this->canonicalOrchestrator . '/locks/' . $leaf
                     : $this->root . '/backups/' . $leaf;
             $lock = fopen($path, 'r+');
             self::assertIsResource($lock);
@@ -724,5 +874,18 @@ final class BackupSetProducerRootTest extends TestCase
             $item->isLink() || $item->isFile() ? unlink($item->getPathname()) : rmdir($item->getPathname());
         }
         rmdir($path);
+    }
+
+    private function trackCanonicalIdentity(string $path): void
+    {
+        $identity = lstat($path);
+        self::assertIsArray($identity);
+        $this->canonicalIdentities[$path] = [
+            'dev' => (int) $identity['dev'],
+            'ino' => (int) $identity['ino'],
+            'mode' => (int) $identity['mode'],
+            'uid' => (int) $identity['uid'],
+            'gid' => (int) $identity['gid'],
+        ];
     }
 }

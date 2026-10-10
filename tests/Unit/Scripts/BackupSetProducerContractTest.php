@@ -104,6 +104,46 @@ final class BackupSetProducerContractTest extends TestCase
         self::assertStringNotContainsString("'sha256':", $this->helper);
     }
 
+    public function testBackupProducerRegistersThroughExistingLockBeforeDumpAndSettlesAfterPublication(): void
+    {
+        $main = substr($this->helper, (int) strpos($this->helper, 'def main():'));
+        $load = strpos($main, 'admission_core = load_admission_core()');
+        $fromLock = strpos($main, 'MaintenanceAdmission.from_existing_lock_fd(');
+        $registration = strpos($main, 'admission.publish_pending(admission_record)');
+        $dump = strpos($main, 'digest, compressed, unpacked = create_backup(');
+        $marker = strpos($main, 'publish_marker(backups, marker_value, nonce, expected_marker)');
+        $settlement = strpos($main, 'admission.clear_pending(');
+        $recovery = strpos($main, 'recovery_from_existing_lock_fd(');
+        $recovered = strpos($main, 'recovery_admission.recover_clear_marker(');
+
+        foreach ([$load, $fromLock, $registration, $dump, $marker, $settlement, $recovery, $recovered] as $position) {
+            self::assertIsInt($position);
+        }
+        self::assertLessThan($registration, $fromLock);
+        self::assertLessThan($dump, $registration);
+        self::assertLessThan($settlement, $marker);
+        self::assertLessThan($recovery, $settlement);
+        self::assertLessThan($recovered, $recovery);
+        self::assertStringContainsString('child_terminal_proven', $this->helper);
+        self::assertStringContainsString('publication_complete', $this->helper);
+        self::assertStringContainsString(
+            'record == admission_record and child_terminal_proven and publication_complete',
+            $this->helper,
+        );
+    }
+
+    public function testAdmissionCoreIsHashAndIdentityBoundBeforeExecution(): void
+    {
+        self::assertStringContainsString(
+            "ADMISSION_CORE = '/usr/local/libexec/fh/maintenance_pending_v1.py'",
+            $this->helper,
+        );
+        self::assertStringContainsString('ADMISSION_CORE_SHA256 = ', $this->helper);
+        self::assertStringContainsString('load_admission_core()', $this->helper);
+        self::assertStringContainsString('verify_trusted_path(ADMISSION_CORE, observed)', $this->helper);
+        self::assertStringContainsString('hashlib.sha256(source).hexdigest()', $this->helper);
+    }
+
     public function testEachPathCapturesItsClockOnlyAfterPotentiallyBlockingValidation(): void
     {
         $main = substr($this->helper, (int) strpos($this->helper, 'def main():'));
