@@ -514,7 +514,7 @@ final class BackupSetProducerContractTest extends TestCase
             $this->producerUnit,
         );
         self::assertStringContainsString(
-            'ReadWritePaths=/root/backups/easyappointments /var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock',
+            'ReadWritePaths=/root/backups/easyappointments /var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock /var/lib/fh-maintenance-admission',
             $this->producerUnit,
         );
         self::assertStringContainsString(
