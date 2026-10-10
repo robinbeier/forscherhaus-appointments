@@ -566,9 +566,11 @@ if [[ " $* " == *" /usr/bin/sha256sum "* ]]; then
 fi
 if [[ " $* " == *" --ack "* ]]; then
   printf '%s\n' ack-attempted > "${FH_ACK_MARKER}"
+  printf '%s\n' "${FH_ACK_RECEIPT}"
+  exit 75
 fi
-printf '%s\n' "${FH_RECEIPT}"
-exit 75
+printf '%s\n' "${FH_DEPLOY_RECEIPT}"
+exit "${FH_DEPLOY_RC}"
 ''')
 
             environment = os.environ.copy()
@@ -586,10 +588,15 @@ exit 75
                 '--expected-active-release', 'ea_previous', '--archive', archive,
                 '--provenance', provenance, '--execute', '--confirm-live-deploy', 'ROB-618',
             ]
-            for result_class in ('maintenance_pending_present', 'lock_busy'):
+
+            # Preserve the deployment-side veto regression: no acknowledgement
+            # is attempted when the deployment itself returns exit 75.
+            for result_class in ('maintenance_pending_present', 'lock_busy', 'unexpected_refusal'):
                 marker = os.path.join(directory, 'ack-marker')
                 environment.update({
-                    'FH_RECEIPT': json.dumps({'schema': 'bound_release_deploy.v1', 'status': 'failed', 'result_class': result_class}),
+                    'FH_DEPLOY_RECEIPT': json.dumps({'schema': 'bound_release_deploy.v1', 'status': 'failed', 'result_class': result_class}),
+                    'FH_DEPLOY_RC': '75',
+                    'FH_ACK_RECEIPT': json.dumps({'schema': 'bound_release_deploy_ack.v1', 'status': 'passed', 'result_class': 'acknowledged'}),
                     'FH_ACK_MARKER': marker,
                 })
                 completed = REAL_SUBPROCESS_RUN(
@@ -597,20 +604,40 @@ exit 75
                     capture_output=True, check=False,
                 )
                 self.assertEqual(70, completed.returncode, completed.stderr)
-                self.assertIn('deployment_result_class=' + result_class, completed.stdout, completed.stderr)
+                if result_class == 'unexpected_refusal':
+                    self.assertIn('deployment_status=unknown', completed.stdout)
+                    self.assertIn('deployment_result_class=transport_or_receipt_unknown', completed.stdout)
+                else:
+                    self.assertIn('deployment_status=failed', completed.stdout)
+                    self.assertIn('deployment_result_class=' + result_class, completed.stdout)
                 self.assertIn('ack_status=not_attempted', completed.stdout)
                 self.assertFalse(os.path.exists(marker))
 
-            environment['FH_RECEIPT'] = json.dumps({'schema': 'bound_release_deploy.v1', 'status': 'failed', 'result_class': 'unexpected_refusal'})
-            completed = REAL_SUBPROCESS_RUN(
-                args, env=environment, stdin=subprocess.DEVNULL, text=True,
-                capture_output=True, check=False,
-            )
-            self.assertEqual(70, completed.returncode, completed.stderr)
-            self.assertIn('deployment_status=unknown', completed.stdout)
-            self.assertIn('deployment_result_class=transport_or_receipt_unknown', completed.stdout)
-            self.assertIn('ack_status=not_attempted', completed.stdout)
-            self.assertFalse(os.path.exists(os.path.join(directory, 'ack-marker')))
+            for result_class in ('maintenance_pending_present', 'lock_busy', 'unexpected_refusal'):
+                marker = os.path.join(directory, 'ack-marker')
+                environment.update({
+                    'FH_DEPLOY_RECEIPT': json.dumps({'schema': 'bound_release_deploy.v1', 'status': 'passed', 'result_class': 'deployed'}),
+                    'FH_DEPLOY_RC': '0',
+                    'FH_ACK_RECEIPT': json.dumps({'schema': 'bound_release_deploy_ack.v1', 'status': 'failed', 'result_class': result_class}),
+                    'FH_ACK_MARKER': marker,
+                })
+                completed = REAL_SUBPROCESS_RUN(
+                    args, env=environment, stdin=subprocess.DEVNULL, text=True,
+                    capture_output=True, check=False,
+                )
+                self.assertEqual(70, completed.returncode, completed.stderr)
+                self.assertIn('deployment_status=passed', completed.stdout, completed.stderr)
+                self.assertIn('deployment_result_class=deployed', completed.stdout)
+                self.assertIn('status=failed', completed.stdout)
+                if result_class == 'unexpected_refusal':
+                    self.assertIn('ack_status=uncertain', completed.stdout)
+                    self.assertIn('ack_result_class=transport_or_receipt_unknown', completed.stdout)
+                    self.assertIn('result_class=acknowledgment_unknown', completed.stdout)
+                else:
+                    self.assertIn('ack_status=refused', completed.stdout)
+                    self.assertIn('ack_result_class=' + result_class, completed.stdout)
+                    self.assertNotIn('status=passed\nresult_class=deployed\n', completed.stdout)
+                self.assertTrue(os.path.exists(marker))
 
     def test_stale_config_binding_blocks_before_reservation(self):
         old = tuple((((1, 2), b'\0' * 32) for _ in MODULE.CONFIGS))

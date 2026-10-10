@@ -278,8 +278,8 @@ if (( deployment_known == 1 )) && { (( remote_rc == 0 )) || (( remote_rc == 30 )
     else
         ack_rc=$?
     fi
-    if ack_output="$(python3 -I -B - "$ack_receipt_file" "$ack_rc" <<'PY'
-import json, sys
+if ack_output="$(python3 -I -B - "$ack_receipt_file" "$ack_rc" <<'PY'
+import json, re, sys
 try:
     with open(sys.argv[1], 'rb') as handle:
         raw = handle.read(1025)
@@ -294,6 +294,12 @@ try:
         print('ack_status=acknowledged')
         print('ack_result_class=acknowledged')
         sys.exit(0)
+    if (code == 75 and value['status'] == 'failed' and
+            (value['result_class'] == 'lock_busy' or
+             re.fullmatch(r'maintenance_[a-z0-9_]+', value['result_class']))):
+        print('ack_status=refused')
+        print('ack_result_class=' + value['result_class'])
+        sys.exit(0)
     raise ValueError('contradictory acknowledgement')
 except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
     print('ack_status=uncertain')
@@ -301,8 +307,13 @@ except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
     sys.exit(70)
 PY
     )"; then
-        ack_status=acknowledged
-        ack_class=acknowledged
+        if [[ "$ack_output" == ack_status=refused* ]]; then
+            ack_status=refused
+            ack_class="${ack_output##*ack_result_class=}"
+        else
+            ack_status=acknowledged
+            ack_class=acknowledged
+        fi
     else
         ack_status=uncertain
         ack_class=transport_or_receipt_unknown
