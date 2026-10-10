@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 import errno
+import fcntl
 import json
 import os
 import stat
@@ -50,9 +51,103 @@ class MaintenancePendingTest(unittest.TestCase):
         return MODULE.make_record('deploy', run, boot, {'kind': 'synthetic', 'id': run},
                                   '2026-10-10T00:00:00Z')
 
+    def assert_lock_busy(self, fd):
+        with self.assertRaises(OSError) as raised:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        self.assertIn(raised.exception.errno, (errno.EACCES, errno.EAGAIN))
+
     def test_empty_state_admits_read_only(self):
         self.assertEqual('admitted', MODULE.admit_read_only()['status'])
         self.assertFalse(os.path.lexists(self.pending))
+
+    def test_existing_locked_fd_is_admitted_and_remains_held(self):
+        caller = os.open(self.lock, os.O_RDWR)
+        competitor = os.open(self.lock, os.O_RDWR)
+        try:
+            fcntl.flock(caller, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self.assertEqual('admitted', MODULE.admit_existing_lock_fd(caller)['status'])
+            self.assert_lock_busy(competitor)
+        finally:
+            os.close(competitor)
+            fcntl.flock(caller, fcntl.LOCK_UN)
+            os.close(caller)
+
+    def test_existing_unlocked_fd_is_locked_until_caller_close(self):
+        caller = os.open(self.lock, os.O_RDWR)
+        competitor = os.open(self.lock, os.O_RDWR)
+        try:
+            self.assertEqual('admitted', MODULE.admit_existing_lock_fd(caller)['status'])
+            self.assert_lock_busy(competitor)
+            os.close(caller)
+            caller = None
+            fcntl.flock(competitor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        finally:
+            if caller is not None:
+                os.close(caller)
+            os.close(competitor)
+
+    def test_existing_fd_rejects_wrong_replaced_or_closed_descriptor(self):
+        read_only = os.open(self.lock, os.O_RDONLY)
+        try:
+            with self.assertRaisesRegex(MODULE.PendingError, 'shared_lock_fd_not_rw'):
+                MODULE.admit_existing_lock_fd(read_only)
+        finally:
+            os.close(read_only)
+        wrong = os.open(self.epoch, os.O_RDWR)
+        try:
+            with self.assertRaisesRegex(MODULE.PendingError, 'shared_lock_fd_identity_invalid|shared_lock_identity_changed'):
+                MODULE.admit_existing_lock_fd(wrong)
+        finally:
+            os.close(wrong)
+        caller = os.open(self.lock, os.O_RDWR)
+        os.unlink(self.lock)
+        self._write(self.lock, b'', 0o600)
+        try:
+            with self.assertRaisesRegex(MODULE.PendingError, 'shared_lock_fd_identity_invalid|shared_lock_identity_changed'):
+                MODULE.admit_existing_lock_fd(caller)
+        finally:
+            os.close(caller)
+        closed = os.open(self.lock, os.O_RDWR)
+        os.close(closed)
+        with self.assertRaisesRegex(MODULE.PendingError, 'shared_lock_fd_invalid'):
+            MODULE.admit_existing_lock_fd(closed)
+
+    def test_existing_fd_refuses_foreign_lock_and_does_not_create_state(self):
+        foreign = os.open(self.lock, os.O_RDWR)
+        candidate = os.open(self.lock, os.O_RDWR)
+        before = set(os.listdir(self.state))
+        try:
+            fcntl.flock(foreign, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with self.assertRaisesRegex(MODULE.PendingError, 'shared_lock_busy'):
+                MODULE.admit_existing_lock_fd(candidate)
+            self.assertEqual(before, set(os.listdir(self.state)))
+        finally:
+            os.close(candidate)
+            fcntl.flock(foreign, fcntl.LOCK_UN)
+            os.close(foreign)
+
+    def test_existing_fd_blocks_pending_clear_marker_and_temp(self):
+        cases = ('pending', 'clear_marker', 'clear_temp')
+        for case in cases:
+            with self.subTest(case=case):
+                if case == 'pending':
+                    self._write(self.pending, MODULE._canonical(self.record()))
+                elif case == 'clear_marker':
+                    self._write(self.clear_marker, b'blocked')
+                else:
+                    self._write(os.path.join(self.state, MODULE.CLEAR_MARKER_TEMP_PREFIX + 'blocked'), b'blocked')
+                caller = os.open(self.lock, os.O_RDWR)
+                try:
+                    with self.assertRaisesRegex(MODULE.PendingError, 'pending_|state_'):
+                        MODULE.admit_existing_lock_fd(caller)
+                finally:
+                    os.close(caller)
+                for path in (self.pending, self.clear_marker):
+                    if os.path.lexists(path):
+                        os.unlink(path)
+                for name in os.listdir(self.state):
+                    if '.tmp.' in name:
+                        os.unlink(os.path.join(self.state, name))
 
     def test_missing_or_unsafe_epoch_refuses(self):
         os.unlink(self.epoch)
