@@ -24,17 +24,20 @@ Host-owned:
 
 ## Production Snapshot
 
-The repository desired state pins `2.5.5-slim` and its digest in
-`docker/compose.uptime-kuma.yml`. On 2026-09-16, the production update to this
-image completed successfully: the live instance was healthy at 19:36 UTC after
-the change, 18 configuration tables were preserved, and the full-backup
-old-image restore and new-image offline-upgrade checks passed. Production
-validation passed at 19:37 UTC. This dated observation is bound to the
-deployed update and does not replace a fresh check for a later release;
-ordinary post-update observation remains pending in this snapshot.
+The repository desired state now pins the official `2.5.6-slim` OCI index in
+`docker/compose.uptime-kuma.yml`. The documented deployed baseline remains
+`2.5.5-slim`; changing this repository pin does not claim that production has
+been upgraded.
 
-- desired image: `2.5.5-slim@sha256:9c56a772a7df53f444a404c579e87a27bd0c201375d00d6745a75bf8138f4342`
-- deployed image: `2.5.5-slim@sha256:9c56a772a7df53f444a404c579e87a27bd0c201375d00d6745a75bf8138f4342`
+On 2026-09-16, the production update to the then-current `2.5.5-slim` image
+completed successfully: the live instance was healthy at 19:36 UTC after the
+change, 18 configuration tables were preserved, and the full-backup old-image
+restore and new-image offline-upgrade checks passed. Production validation
+passed at 19:37 UTC. This is historical evidence for the deployed 2.5.5
+baseline and does not establish compatibility or deployment of 2.5.6.
+
+- desired image: `2.5.6-slim@sha256:5db97dbbef610276e1699f3ece586c3509c8fd35de75d45ff5109761a1b377dc`
+- documented deployed baseline: `2.5.5-slim@sha256:9c56a772a7df53f444a404c579e87a27bd0c201375d00d6745a75bf8138f4342`
 - saved rollback image: `2.5.3-slim@sha256:7d70c3bd3127dc4ad2910f9d2d18481a6ac4f195a4e23e32f0c50869f977985a`
 - listen address: `127.0.0.1:3001`
 - data mount: `/var/lib/uptime-kuma-data` bind-mounted at `/app/data`
@@ -42,12 +45,32 @@ ordinary post-update observation remains pending in this snapshot.
 
 The slim image omits Chromium and embedded MariaDB; this instance uses SQLite
 and HTTP, keyword, JSON, and Push monitors. It does not use browser monitors.
-The completed update preserved the existing monitor and notification
-configuration. The full-backup restore and offline-upgrade checks are dated
-evidence for this update. If rollback is required, restore the matching saved
-old data backup together with the saved `2.5.3-slim` image and digest. The new
-rollback backup is excluded from ROB-513. Any later upgrade requires its own
-fresh backup and verification.
+
+### 2.5.6 upgrade and rollback prerequisites
+
+Before an authorized production upgrade, complete every gate below:
+
+1. Make a fresh, consistent full Kuma data backup while the documented deployed
+   `2.5.5-slim` image is still active; verify an isolated restore under that
+   same old image and retain the old image/data pair together.
+2. Run an offline compatibility trial with the desired `2.5.6-slim` image
+   and a copy of that backup. Confirm the instance starts and the database is
+   readable before touching production data.
+3. Compare monitor definitions and notification assignments in the offline
+   trial. After the live upgrade, verify the same pre-upgrade monitor set and
+   fresh successful results, including fresh Push signals. The seven-monitor
+   repository catalog is a separate desired-state comparison, not permission
+   to change the live catalog during an image upgrade.
+4. Keep the old `2.5.5-slim` image and its matching data backup available as
+   the rollback pair. The saved `2.5.3-slim` image below is an older fallback,
+   not a substitute for this pair.
+5. Stop without changing production if backup restore, image compatibility,
+   monitor definitions, or fresh signals are ambiguous.
+
+The completed 2.5.5 update evidence above does not satisfy these 2.5.6 gates.
+The backup retained from the 2.5.5 update remains excluded from ROB-513. If
+rollback is required, restore the freshly bound 2.5.5 data backup together
+with the saved 2.5.5 image.
 
 Active monitors were captured on 2026-05-14. The repo desired-state catalog now
 also includes reviewed follow-up changes, such as the ROB-385 split between
