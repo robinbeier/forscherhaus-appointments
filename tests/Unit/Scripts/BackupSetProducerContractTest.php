@@ -427,10 +427,15 @@ final class BackupSetProducerContractTest extends TestCase
         self::assertStringContainsString('ROB-812', $docs);
         self::assertStringContainsString('maintenance-admission migration gate', $docs);
         self::assertStringContainsString('Do not install either independently', $opsReadme);
-        self::assertDoesNotMatchRegularExpression(
-            '/(?mi)^\s*(?:sudo\s+)?(?:cp|install|chmod|sha256sum|systemctl\s+(?:enable|start|restart|daemon-reload))\b.*(?:backup_set_producer|fh-backup-set-producer)/',
-            $contract,
-        );
+        $installRecipe = "sudo /usr/bin/install -o root -g root -m 0555 \
+  scripts/ops/libexec/backup_set_producer_v1.py \
+  /usr/local/libexec/fh-backup-set-producer-v1";
+        $installPattern =
+            '/(?mi)^\s*(?:sudo\s+)?(?:\/(?:usr\/)?bin\/)?(?:cp|install|chmod|sha256sum|systemctl)\b[^\n]*(?:backup_set_producer|fh-backup-set-producer)/';
+        $collapseContinuations = static fn(string $value): string => str_replace(["\\\r\n", "\\\n"], ' ', $value);
+
+        self::assertMatchesRegularExpression($installPattern, $collapseContinuations($installRecipe));
+        self::assertDoesNotMatchRegularExpression($installPattern, $collapseContinuations($contract));
     }
 
     public function testContinuityStateClosesTheInterServiceHandoffGap(): void
