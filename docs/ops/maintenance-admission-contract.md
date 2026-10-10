@@ -158,8 +158,10 @@ Remove command-name inference only after every supported retained scheduler,
 manual and recovery path is enrolled, versions agree, crash/recovery evidence
 passes, and installed production versions are independently verified. A
 repository-only test or a free flock is insufficient. ROB-812 remains open
-until its enrollment, recovery and mixed-version acceptance criteria pass;
-small local prerequisites may land independently with their narrower evidence.
+until its local writer enrollment, recovery and mixed-version acceptance
+criteria pass; small local prerequisites may land independently with their
+narrower evidence. Production installation and the SSH cutover remain separate
+nighttime steps under ROB-809 after those local criteria are met.
 
 For host operations and release authority, use
 [the operations harness](agent-operations.md). The
