@@ -71,10 +71,12 @@ authority. A missing, stale, contradictory, or unknown fact blocks the entry.
    deploy/probe command acquire and manage the lock under its own contract. For
    an approved migration, the root operator must first acquire that same lock
    through the verified installed `deploy_ea.sh` helper, then call its
-   `ordinary_assert_no_pending_probe` and
+   `ordinary_assert_pending_admission`, `ordinary_assert_no_pending_probe` and
    `ordinary_assert_no_active_csp_report_only_pilot` checks **while holding the
-   lock and before the first migration write**. Keep the validated descriptor
-   held and exported to the deploy child through completion or rollback as in
+   lock and before the first migration write**. Immediately before handing
+   control to the deploy child, run `ordinary_assert_pending_admission` again
+   under the same held lock descriptor. Keep the validated descriptor held and
+   exported to the deploy child through completion or rollback as in
    [Deployment](../deployment.md#deploy). A read-only snapshot taken before lock
    acquisition does not authorize migration. The
    [coordinated maintenance admission](maintenance-admission-contract.md)
@@ -160,8 +162,9 @@ authority. A missing, stale, contradictory, or unknown fact blocks the entry.
    Accept the CSP lease parent only as a non-symlink root-owned mode-`0700`
    directory. A missing lock, untrusted CSP lease parent, present CSP pilot lease,
    unexpected ordinary marker, or unknown timer state blocks admission before
-   any migration. After acquiring the shared lock, repeat the pending-probe and
-   CSP-lease checks before the first migration write. Recheck immediately before
+   any migration. After acquiring the shared lock, repeat the
+   pending-admission, pending-probe and CSP-lease checks before the first
+   migration write. Recheck immediately before
    the deploy child under the same held lock; a previous absence is not authority.
 
 5. **Prove recovery inputs when required.** If the deployment contract or
