@@ -106,8 +106,10 @@ family without traversing Tailscale. Bind its source network, target DNS
 answer, address family, and route interface privately; record only classes in
 Linear. The client may itself run Tailscale, but the route for each public
   target must be verified to use the ordinary network interface, never a
-  tailnet tunnel. On the local macOS client, resolve and privately bind the
-  currently published numeric A and AAAA addresses, check each with
+  tailnet tunnel. Bind the host's current public interface addresses from a
+  narrow read-only interface inventory and compare them with public DNS;
+  **do not rely on DNS alone**, because a directly reachable IPv6 address may
+  lack an AAAA record. On the local macOS client, check each bound address with
   `route -n get -inet ADDRESS` or `route -n get -inet6 ADDRESS`, and require
   an ordinary network interface rather than `utun`/Tailscale. Use the local
   `nc` with `-4` or `-6`, `-G 5`, and `-z` against each bound numeric address
