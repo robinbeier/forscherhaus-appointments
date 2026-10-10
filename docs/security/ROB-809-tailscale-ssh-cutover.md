@@ -105,9 +105,12 @@ Immediately after deletion, compare the full redacted UFW rule-class inventory
 with the bound inventory. The only allowed difference is the absence of the
 two general SSH rows. Confirm the two tailnet-specific rows, all other rule
 classes, and both rules-file hashes' *new* identities. An unexpected
-difference is a rollback/stop condition. The same narrow checks apply after
-rollback, with the original rule classes restored; do not assert byte-for-byte
-restoration of UFW's rewritten files.
+difference is a rollback/stop condition. After rollback, require exactly one
+general and one tailnet-specific SSH allow per family, all six untouched
+non-general-SSH rows in their previous relative order, and no extra or
+overlapping rule. The restored general allows may be appended rather than
+returning to their original positions; bind that resulting order explicitly.
+Do not assert byte-for-byte restoration of UFW's rewritten files.
 
 The exact command pair and dual-stack behavior follow the
 [Ubuntu UFW manual](https://manpages.ubuntu.com/manpages/noble/man8/ufw.8.html).
@@ -115,7 +118,8 @@ The ordered inventory comes from `status numbered`; `show added` is
 command-form evidence only. Because the inverse append need not reproduce an
 original placement, require a rule set with no overlapping deny/reject or
 other SSH rule whose order changes the effective decision. Compare the
-ordered classes after rollback and stop on any unexpected placement or rule.
+ordered classes after rollback against the allowed appended positions and
+stop on any unexpected placement or rule.
 Do not run the cutover if the live UFW version or observed rule representation
 does not meet this contract.
 
