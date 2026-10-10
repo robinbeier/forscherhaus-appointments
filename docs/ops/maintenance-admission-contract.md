@@ -37,7 +37,7 @@ scheduler, operator and recovery entrypoints, including direct supported calls.
 | Ordinary live probe | `scripts/ops/run_ordinary_live_probe.sh`; interruption markers and cleanup callback | Enroll the separately invoked cleanup path as a writer |
 | Provider/customer UI smokes | `scripts/ops/prod_provider_ui_smoke.sh`, `scripts/ops/prod_customers_ui_smoke.sh`; private cleanup locks and delayed systemd cleanup | Enroll foreground mutation, delayed cleanup units and disarm cleanup as separate writer entrypoints |
 | Backup producer | `scripts/ops/libexec/backup_set_producer_v1.py`; shared and private locks, continuity state | Repository source registers pending before dump dispatch and clears only after direct-child termination and publication. Installed helper remains legacy; interrupted-run recovery and coordinated rollout remain open. |
-| Restore verification | `scripts/ops/libexec/deployment_dump_attestation_v1.py`; detached container, lease watcher, orphan and continuity checks | Pending state must cover the interval between owner death and verified container termination |
+| Restore verification | `scripts/ops/libexec/deployment_dump_attestation_v1.py`; detached container, lease watcher, orphan and continuity checks | Repository source admits before reconciliation, registers pending before Docker launch, and settles after terminal restore and publication. Interrupted-owner recovery and production installation remain open. |
 | Session retention | `scripts/ops/libexec/session_retention_v1.py`; shared lock and protected local state | Repository execute path reads the pending-state contract through its existing lock descriptor before mutation; installed helper and unit remain legacy until the coordinated rollout |
 | Manual build-cache retention | `scripts/ops/prod_build_cache_retention.sh`; private lock and activity veto | Require the shared lock for execute, including when its path is absent; ROB-579 tracks this prerequisite |
 | Retired release/archive/dump retention | Retired helper and existing hold/retention controls | Remain disabled; do not reactivate as part of enrollment |
@@ -117,6 +117,24 @@ writer can settle its own clear marker without releasing the shared lock. The
 caller must independently prove its exact operation is terminal and all
 publication or cleanup obligations are complete. Neither API replaces
 registration or terminal proof for work that can outlive its owner.
+The repository restore-verification helper now uses this same lock-held core
+before local reconciliation and registers a run-, dump-, backup-, and
+container-intent-bound pending record before detached Docker launch. Its
+successful path clears pending only after the container-exit proof,
+attestation, success-marker, optional continuity publication, and run-tree
+cleanup; an unknown path preserves the pending veto. This is source-only
+enrollment.
+If cleanup is interrupted, the run tree may be complete, partial, or absent;
+the pending veto remains regardless. After successful cleanup, an interrupted
+pending or clear-marker settlement retains the published attestation, success
+marker, and optional continuity state. Those records can only support recovery
+when an independent verifier binds them to the registered dump and backup,
+checks the exact Docker resource is absent, and proves that every required
+publication completed.
+The repository does not yet contain that cross-process verifier for interrupted
+Docker launch, reboot, or partial publication. This helper must not be
+installed on production until those recovery cases are independently
+demonstrated.
 Only trusted root integration code may call the recovery capability; its proof
 callback is not an operator-selectable flag or an authorization boundary. Each
 future writer must bind a fixed, reviewed verifier for its own resource before
