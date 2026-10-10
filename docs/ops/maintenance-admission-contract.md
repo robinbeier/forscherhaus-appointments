@@ -95,8 +95,11 @@ For a writer that already holds the canonical shared lock, the local core now
 has a descriptor-based admission check. It validates the same lock inode and
 protocol epoch and checks the caller's exclusive flock through read-only
 /proc/self/fdinfo for that exact descriptor, without attempting to acquire a
-lock, opening a second lock description or creating state. The caller must retain its original
-descriptor through all mutation and close it on every failed admission. This
+lock, opening a second lock description or creating state. A capability keeps a
+close-on-exec duplicate of the original open-file-description until exit, so
+closing and reusing the caller's numeric FD cannot silently rebind authority.
+The caller retains ownership of its original descriptor and closes it on every
+failed admission and after mutation. This
 check is only a source-level integration primitive: the ordinary deployment
 entry now invokes it in local source and regression fixtures, while the
 installed production deploy script remains on the older contract. The local

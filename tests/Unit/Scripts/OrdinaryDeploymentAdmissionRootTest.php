@@ -107,7 +107,7 @@ final class OrdinaryDeploymentAdmissionRootTest extends TestCase
         } else {
             self::assertFalse(is_link(self::CORE), 'The installed admission core must not be a symlink.');
             self::assertSame(
-                '4b746d1f51325a6a3b6fbf82e5bf6caa4c6948c2b19625b85c66c66e74186936',
+                '78da04cc6c66c7e140dcc6f4a924acf92062ea5860c8bb424115129b922c6bb5',
                 hash_file('sha256', self::CORE),
             );
         }
@@ -183,7 +183,7 @@ final class OrdinaryDeploymentAdmissionRootTest extends TestCase
     {
         $source = dirname(__DIR__, 3) . '/scripts/ops/libexec/maintenance_pending_v1.py';
         self::assertSame(
-            '4b746d1f51325a6a3b6fbf82e5bf6caa4c6948c2b19625b85c66c66e74186936',
+            '78da04cc6c66c7e140dcc6f4a924acf92062ea5860c8bb424115129b922c6bb5',
             hash_file('sha256', $source),
         );
         $this->stageAdmissionCoreBytes((string) file_get_contents($source));

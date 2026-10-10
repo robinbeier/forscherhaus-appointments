@@ -146,7 +146,7 @@ ordinary_assert_pending_admission() {
   # path or digest caller-configurable: the core is a reviewed prerequisite,
   # and a missing or changed installation must fail closed.
   local core='/usr/local/libexec/fh/maintenance_pending_v1.py'
-  local expected_hash='4b746d1f51325a6a3b6fbf82e5bf6caa4c6948c2b19625b85c66c66e74186936'
+  local expected_hash='78da04cc6c66c7e140dcc6f4a924acf92062ea5860c8bb424115129b922c6bb5'
   local core_fd observed_identity path_identity observed_identity_after status
 
   [[ -f "$core" && ! -L "$core" ]] || {

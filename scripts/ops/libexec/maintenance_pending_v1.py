@@ -599,6 +599,7 @@ class MaintenanceAdmission:
         """Create a capability over an already-held lock descriptor."""
         capability = cls(expected_boot_id, recovery=recovery)
         capability._caller_owned_fd = True
+        pinned_fd = None
         try:
             epoch = validate_state_layout()
             _validate_epoch()
@@ -612,14 +613,29 @@ class MaintenanceAdmission:
             capability._state_identity = _directory_identity(
                 _trusted_directory(STATE_ROOT, 0o700))
             capability._epoch_identity = _identity(epoch)
-            capability._fd = lock_fd
             capability.lock_identity = _validate_existing_lock_fd(lock_fd)
-            _verify_existing_flock(lock_fd, capability.lock_identity)
+            try:
+                pinned_fd = fcntl.fcntl(lock_fd, fcntl.F_DUPFD_CLOEXEC, 0)
+            except (AttributeError, OSError, ValueError):
+                reject('shared_lock_fd_invalid')
+            pinned_identity = os.fstat(pinned_fd)
+            if _identity(pinned_identity) != capability.lock_identity:
+                reject('shared_lock_identity_changed')
+            # The pin is the capability's lock descriptor for its entire
+            # lifetime. Do not flock it: the descriptor-specific fdinfo proof
+            # must observe an already-held lock and never acquire one.
+            capability._fd = pinned_fd
+            pinned_fd = None
+            _verify_existing_flock(capability._fd, capability.lock_identity)
             capability.admission = ({'schema': SCHEMA, 'epoch': PROTOCOL_EPOCH,
                                      'status': 'recovery'} if recovery else
                                     _admit_locked(expected_boot_id))
             return capability
         except Exception:
+            if pinned_fd is not None:
+                os.close(pinned_fd)
+            if capability._fd is not None:
+                os.close(capability._fd)
             capability._fd = None
             raise
 
@@ -629,10 +645,10 @@ class MaintenanceAdmission:
 
         This is the writer counterpart to :func:`admit_existing_lock_fd`.
         The caller must already hold the canonical shared flock.  The method
-        validates the descriptor and state identity without opening a second
-        lock description.  A duplicate of the same open-file-description is
-        used only to verify the existing flock.  The caller retains the
-        descriptor and must keep it open until the capability context exits.
+        validates the descriptor and state identity, then retains a
+        close-on-exec duplicate of the same open-file-description as a lock
+        pin. The caller retains ownership of the original descriptor; this
+        module closes only its own pin on capability exit.
         """
         return cls._from_existing_lock_fd(lock_fd, expected_boot_id)
 
@@ -748,10 +764,13 @@ class MaintenanceAdmission:
 
     def __exit__(self, exc_type, exc_value, traceback):
         if self._fd is not None:
-            if not self._caller_owned_fd:
-                _close_shared_lock(self._fd)
+            fd = self._fd
             self._fd = None
             self._closed = True
+            if self._caller_owned_fd:
+                os.close(fd)
+            else:
+                _close_shared_lock(fd)
         return False
 
 
@@ -767,9 +786,9 @@ def maintenance_admission_from_lock_fd(lock_fd, expected_boot_id=None):
     """Yield a capability over a caller-owned, already-held lock descriptor.
 
     The caller retains responsibility for releasing ``lock_fd`` after this
-    context exits.  No second lock description is opened; a duplicate of the
-    same open-file-description is used only to verify the existing flock. The
-    descriptor is never unlocked or closed by this module.
+    context exits. A close-on-exec duplicate of the same open-file-description
+    is retained as the capability pin. The caller's descriptor is never
+    unlocked or closed by this module.
     """
     capability = MaintenanceAdmission.from_existing_lock_fd(lock_fd, expected_boot_id)
     try:

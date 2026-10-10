@@ -321,6 +321,77 @@ class MaintenancePendingTest(unittest.TestCase):
             os.close(caller)
             os.close(competitor)
 
+    def test_existing_fd_capability_pins_open_file_description_across_fd_reuse(self):
+        caller = os.open(self.lock, os.O_RDWR)
+        source_number = caller
+        foreign_path = os.path.join(self.lock_dir, 'foreign.lock')
+        foreign = None
+        try:
+            fcntl.flock(caller, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            capability = MODULE.MaintenanceAdmission.from_existing_lock_fd(caller)
+            os.close(caller)
+            caller = None
+            self._write(foreign_path, b'', 0o600)
+            foreign = os.open(foreign_path, os.O_RDWR)
+            os.dup2(foreign, source_number)
+            if foreign != source_number:
+                os.close(foreign)
+                foreign = None
+            else:
+                foreign = None
+            with capability:
+                self.assertEqual('admitted', capability.admit()['status'])
+            os.close(source_number)
+            source_number = None
+        finally:
+            if caller is not None:
+                os.close(caller)
+            if foreign is not None:
+                os.close(foreign)
+            if source_number is not None:
+                os.close(source_number)
+
+    def test_existing_fd_capability_pin_keeps_canonical_lock_across_source_close_and_reopen(self):
+        caller = os.open(self.lock, os.O_RDWR)
+        source_number = caller
+        competitor = None
+        competitor_initial = None
+        reopened = None
+        try:
+            fcntl.flock(caller, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            capability = MODULE.MaintenanceAdmission.from_existing_lock_fd(caller)
+            os.close(caller)
+            caller = None
+
+            competitor_initial = os.open(self.lock, os.O_RDWR)
+            competitor = fcntl.fcntl(competitor_initial, fcntl.F_DUPFD_CLOEXEC,
+                                     source_number + 10)
+            os.close(competitor_initial)
+            competitor_initial = None
+            self.assert_lock_busy(competitor)
+            reopened = os.open(self.lock, os.O_RDWR)
+            os.dup2(reopened, source_number)
+            if reopened != source_number:
+                os.close(reopened)
+            reopened = source_number
+            self.assert_lock_busy(reopened)
+            with capability:
+                self.assertEqual('admitted', capability.admit()['status'])
+
+            # Closing the retained pin releases the lock; the independent
+            # canonical competitor can then acquire it.
+            fcntl.flock(competitor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(competitor, fcntl.LOCK_UN)
+        finally:
+            if caller is not None:
+                os.close(caller)
+            if competitor is not None:
+                os.close(competitor)
+            if competitor_initial is not None:
+                os.close(competitor_initial)
+            if reopened is not None:
+                os.close(reopened)
+
     def test_existing_fd_capability_rejects_reused_descriptor(self):
         caller = os.open(self.lock, os.O_RDWR)
         try:
