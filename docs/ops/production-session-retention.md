@@ -33,6 +33,15 @@ production-change lock, and rejects observable deploy, recovery, dump, replay,
 or UI-smoke activity. Ambiguous paths, owners, modes, hard links,
 types, identities, activity, or marker state fail closed.
 
+The ROB-812 source enrollment adds a pending-state check to the execute path
+after it acquires that same shared lock. It uses the caller's existing lock
+descriptor and a fixed, verified maintenance-admission library; an unresolved
+pending operation or unknown protocol epoch refuses deletion. The dry-run path
+remains read-only. This source change does **not** install the library, state
+directory, helper, or unit on production. Installing only this helper would
+break scheduled retention; a coordinated all-writer installation and rollback
+contract remains required by [the admission contract](maintenance-admission-contract.md).
+
 The systemd service runs as root because the session files are `www-data:0600`
 while its lock and success marker are root-protected. Its capability boundary is
 exactly `CAP_DAC_OVERRIDE`. `AmbientCapabilities` is empty, `NoNewPrivileges`
