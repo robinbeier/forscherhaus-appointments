@@ -331,6 +331,11 @@ def _fsync_state_directory():
 
 def _publish_pending_locked(record):
     """Publish one record while the caller retains the shared lock."""
+    # A clear marker is a durable recovery veto.  Do not allow a new record
+    # to appear beside it while the same lock-held capability is still active;
+    # otherwise recovery could no longer identify which work it settles.
+    if _clear_marker_exists() or _clear_temp_names():
+        reject('pending_clear_unsettled')
     if _pending_exists() or _temp_names():
         reject('pending_already_present')
     raw = _canonical(_validate_record(record))

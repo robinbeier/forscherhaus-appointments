@@ -190,6 +190,24 @@ class MaintenancePendingTest(unittest.TestCase):
         self.assertFalse(os.path.lexists(MODULE.CLEAR_MARKER_PATH))
         self.assertEqual('admitted', MODULE.admit_read_only()['status'])
 
+    def test_publish_after_clear_marker_is_refused_until_recovery(self):
+        record = self.record()
+        replacement = self.record(run='run002')
+        with MODULE.maintenance_admission() as admission:
+            admission.publish_pending(record)
+            self.assertEqual('cleared',
+                             admission.clear_pending(record, lambda _: True)['status'])
+            with self.assertRaisesRegex(MODULE.PendingError,
+                                         'pending_clear_unsettled'):
+                admission.publish_pending(replacement)
+            self.assertFalse(os.path.lexists(self.pending))
+            self.assertTrue(os.path.lexists(self.clear_marker))
+        with MODULE.maintenance_recovery() as recovery:
+            self.assertEqual('recovered',
+                             recovery.recover_clear_marker(lambda _: True)['status'])
+        self.assertFalse(os.path.lexists(self.clear_marker))
+        self.assertEqual('admitted', MODULE.admit_read_only()['status'])
+
     def test_fsync_after_pending_unlink_leaves_recovery_veto(self):
         record = self.record()
         original_fsync = MODULE.os.fsync
