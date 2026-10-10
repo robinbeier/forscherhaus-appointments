@@ -46,3 +46,4 @@ sudo python3 -B -m unittest \
   tests.Unit.Scripts.bound_release_deploy_v1_test \
   tests.Unit.Scripts.bound_release_recovery_inspect_v1_test \
   tests.Unit.Scripts.zero_surprise_canary_fixture_lock_test
+sudo python3 -B -m unittest tests.Unit.Scripts.maintenance_pending_v1_test

@@ -1,8 +1,9 @@
 # Coordinated maintenance admission
 
-ROB-532 tracks replacement of process-name activity inference with a verified
-contract shared by supported maintenance entrypoints. This document is the
-**target contract and migration gate**, not evidence that it is installed.
+ROB-812 tracks the durable pending-state prerequisite for ROB-809. The earlier
+ROB-532 process-identity work is complete, but does not establish this pending
+protocol. This document is the **target contract and migration gate**, not
+evidence that it is installed.
 Keep the current conservative activity veto until every removal criterion below
 passes. A source merge does not authorize production installation.
 
@@ -156,9 +157,9 @@ operations; reverting only some tools must not reopen legacy admission.
 Remove command-name inference only after every supported retained scheduler,
 manual and recovery path is enrolled, versions agree, crash/recovery evidence
 passes, and installed production versions are independently verified. A
-repository-only test or a free flock is insufficient. ROB-532 stays open until
-its agreed operational acceptance criteria are met; child prerequisite issues
-may close independently with their narrower evidence.
+repository-only test or a free flock is insufficient. ROB-812 remains open
+until its enrollment, recovery and mixed-version acceptance criteria pass;
+small local prerequisites may land independently with their narrower evidence.
 
 For host operations and release authority, use
 [the operations harness](agent-operations.md). The
