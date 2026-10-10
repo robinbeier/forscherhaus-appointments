@@ -417,25 +417,20 @@ final class BackupSetProducerContractTest extends TestCase
         self::assertStringNotContainsString('systemctl start', $this->attestationWrapper);
     }
 
-    public function testRecurringUnitInstallRefreshesContinuityProducerBeforeSupervisorAndUnits(): void
+    public function testProducerRolloutUsesExplicitRob812GateWithoutStandaloneInstallRecipe(): void
     {
         $docs = (string) file_get_contents($this->root . '/docs/ops/production-backup-set-producer.md');
-        $installStart = strpos($docs, 'Install and validate the reviewed recurring units');
-        self::assertIsInt($installStart);
-        $install = substr($docs, $installStart);
-        $producer = strpos($install, 'scripts/ops/libexec/backup_set_producer_v1.py');
-        $producerTarget = strpos($install, '/usr/local/libexec/fh-backup-set-producer-v1');
-        $supervisor = strpos($install, 'scripts/ops/libexec/backup_set_producer_supervisor_v1.sh');
-        $producerUnit = strpos($install, 'scripts/ops/systemd/fh-backup-set-producer.service');
+        $opsReadme = (string) file_get_contents($this->root . '/scripts/ops/README.md');
+        $contract = $docs . "\n" . $opsReadme;
 
-        self::assertIsInt($producer);
-        self::assertIsInt($producerTarget);
-        self::assertIsInt($supervisor);
-        self::assertIsInt($producerUnit);
-        self::assertLessThan($producerTarget, $producer);
-        self::assertLessThan($supervisor, $producerTarget);
-        self::assertLessThan($supervisor, $producer);
-        self::assertLessThan($producerUnit, $supervisor);
+        self::assertStringContainsString('not standalone-installable', $docs);
+        self::assertStringContainsString('ROB-812', $docs);
+        self::assertStringContainsString('maintenance-admission migration gate', $docs);
+        self::assertStringContainsString('Do not install either independently', $opsReadme);
+        self::assertDoesNotMatchRegularExpression(
+            '/(?mi)^\s*(?:sudo\s+)?(?:cp|install|chmod|sha256sum|systemctl\s+(?:enable|start|restart|daemon-reload))\b.*(?:backup_set_producer|fh-backup-set-producer)/',
+            $contract,
+        );
     }
 
     public function testContinuityStateClosesTheInterServiceHandoffGap(): void
