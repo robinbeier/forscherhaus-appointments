@@ -469,7 +469,7 @@ class BoundReleaseDeployTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             receipt = os.path.join(directory, 'receipt')
 
-            def run_validator(result_class):
+            def run_validator(result_class, code=75):
                 with open(receipt, 'w', encoding='utf-8') as handle:
                     json.dump({
                         'schema': 'bound_release_deploy.v1',
@@ -477,7 +477,7 @@ class BoundReleaseDeployTest(unittest.TestCase):
                         'result_class': result_class,
                     }, handle)
                 return REAL_SUBPROCESS_RUN(
-                    [sys.executable, '-I', '-B', '-', receipt, '75'],
+                    [sys.executable, '-I', '-B', '-', receipt, str(code)],
                     input=validator,
                     text=True,
                     capture_output=True,
@@ -491,6 +491,12 @@ class BoundReleaseDeployTest(unittest.TestCase):
             unknown = run_validator('unexpected_refusal')
             self.assertEqual(70, unknown.returncode)
             self.assertIn('result_class=transport_or_receipt_unknown', unknown.stdout)
+            swapped = run_validator('maintenance_core_invalid')
+            self.assertEqual(70, swapped.returncode)
+            self.assertIn('result_class=transport_or_receipt_unknown', swapped.stdout)
+            swapped = run_validator('maintenance_pending_present', 70)
+            self.assertEqual(70, swapped.returncode)
+            self.assertIn('result_class=transport_or_receipt_unknown', swapped.stdout)
 
     def test_copied_wrapper_emits_veto_receipt_and_never_acknowledges_exit_75(self):
         """Run the unchanged wrapper decision path with isolated command doubles."""
@@ -567,7 +573,7 @@ fi
 if [[ " $* " == *" --ack "* ]]; then
   printf '%s\n' ack-attempted > "${FH_ACK_MARKER}"
   printf '%s\n' "${FH_ACK_RECEIPT}"
-  exit 75
+  exit "${FH_ACK_RC}"
 fi
 printf '%s\n' "${FH_DEPLOY_RECEIPT}"
 exit "${FH_DEPLOY_RC}"
@@ -591,11 +597,17 @@ exit "${FH_DEPLOY_RC}"
 
             # Preserve the deployment-side veto regression: no acknowledgement
             # is attempted when the deployment itself returns exit 75.
-            for result_class in ('maintenance_pending_present', 'lock_busy', 'unexpected_refusal'):
+            deployment_cases = (
+                ('maintenance_pending_present', 75, True),
+                ('lock_busy', 75, True),
+                ('maintenance_core_invalid', 70, True),
+                ('unexpected_refusal', 70, False),
+            )
+            for result_class, deploy_rc, known_refusal in deployment_cases:
                 marker = os.path.join(directory, 'ack-marker')
                 environment.update({
                     'FH_DEPLOY_RECEIPT': json.dumps({'schema': 'bound_release_deploy.v1', 'status': 'failed', 'result_class': result_class}),
-                    'FH_DEPLOY_RC': '75',
+                    'FH_DEPLOY_RC': str(deploy_rc),
                     'FH_ACK_RECEIPT': json.dumps({'schema': 'bound_release_deploy_ack.v1', 'status': 'passed', 'result_class': 'acknowledged'}),
                     'FH_ACK_MARKER': marker,
                 })
@@ -613,12 +625,21 @@ exit "${FH_DEPLOY_RC}"
                 self.assertIn('ack_status=not_attempted', completed.stdout)
                 self.assertFalse(os.path.exists(marker))
 
-            for result_class in ('maintenance_pending_present', 'lock_busy', 'unexpected_refusal'):
+            ack_cases = (
+                ('maintenance_pending_present', 75, True),
+                ('lock_busy', 75, True),
+                ('maintenance_core_invalid', 70, True),
+                ('unexpected_refusal', 70, False),
+                ('maintenance_core_invalid', 75, False),
+                ('maintenance_pending_present', 70, False),
+            )
+            for result_class, ack_rc, known_refusal in ack_cases:
                 marker = os.path.join(directory, 'ack-marker')
                 environment.update({
                     'FH_DEPLOY_RECEIPT': json.dumps({'schema': 'bound_release_deploy.v1', 'status': 'passed', 'result_class': 'deployed'}),
                     'FH_DEPLOY_RC': '0',
                     'FH_ACK_RECEIPT': json.dumps({'schema': 'bound_release_deploy_ack.v1', 'status': 'failed', 'result_class': result_class}),
+                    'FH_ACK_RC': str(ack_rc),
                     'FH_ACK_MARKER': marker,
                 })
                 completed = REAL_SUBPROCESS_RUN(
@@ -629,8 +650,8 @@ exit "${FH_DEPLOY_RC}"
                 self.assertIn('deployment_status=passed', completed.stdout, completed.stderr)
                 self.assertIn('deployment_result_class=deployed', completed.stdout)
                 self.assertIn('status=failed', completed.stdout)
-                if result_class == 'unexpected_refusal':
-                    self.assertIn('ack_status=uncertain', completed.stdout)
+                if not known_refusal:
+                    self.assertIn('ack_status=uncertain', completed.stdout, f'{result_class}/{ack_rc}: {completed.stdout}')
                     self.assertIn('ack_result_class=transport_or_receipt_unknown', completed.stdout)
                     self.assertIn('result_class=acknowledgment_unknown', completed.stdout)
                 else:

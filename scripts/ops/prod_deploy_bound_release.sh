@@ -208,11 +208,13 @@ try:
             (code == 0 and (value['status'], value['result_class']) != ('passed', 'deployed')) or
             (code not in (0, 30, 31, 32, 70, 75, 143)) or
             (code != 0 and value['status'] != 'failed') or
+            (code == 70 and value['result_class'] != 'maintenance_core_invalid') or
             (code == 30 and value['result_class'] != 'confirmed_failed') or
             (code in (31, 32, 143) and value['result_class'] != 'recovery_required') or
             (code == 75 and not (
                 value['result_class'] == 'lock_busy' or
-                re.fullmatch(r'maintenance_[a-z0-9_]+', value['result_class'])
+                (value['result_class'] != 'maintenance_core_invalid' and
+                 re.fullmatch(r'maintenance_[a-z0-9_]+', value['result_class']))
             ))):
         raise ValueError('contradictory result')
     print('schema=bound_release_deploy.v1')
@@ -254,6 +256,9 @@ elif (( remote_rc == 75 )); then
         deployment_known=1
         deployment_class="$refusal_class"
     fi
+elif (( remote_rc == 70 )) && [[ "$validated_result" == *$'status=failed\nresult_class=maintenance_core_invalid'* ]]; then
+    deployment_known=1
+    deployment_class=maintenance_core_invalid
 fi
 
 ack_status=not_attempted
@@ -294,9 +299,12 @@ try:
         print('ack_status=acknowledged')
         print('ack_result_class=acknowledged')
         sys.exit(0)
-    if (code == 75 and value['status'] == 'failed' and
-            (value['result_class'] == 'lock_busy' or
-             re.fullmatch(r'maintenance_[a-z0-9_]+', value['result_class']))):
+    if (value['status'] == 'failed' and
+            ((code == 70 and value['result_class'] == 'maintenance_core_invalid') or
+             (code == 75 and
+              (value['result_class'] == 'lock_busy' or
+               (value['result_class'] != 'maintenance_core_invalid' and
+                re.fullmatch(r'maintenance_[a-z0-9_]+', value['result_class'])))))):
         print('ack_status=refused')
         print('ack_result_class=' + value['result_class'])
         sys.exit(0)
