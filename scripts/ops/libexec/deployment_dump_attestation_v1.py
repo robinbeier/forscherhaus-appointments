@@ -15,6 +15,8 @@ import stat
 import subprocess
 import sys
 import time
+import types
+import uuid
 
 BACKUP_ROOT = '/root/backups/easyappointments'
 EVIDENCE_ROOT = '/var/lib/fh-deploy-evidence'
@@ -56,6 +58,10 @@ MARKER_TEMP_RE = re.compile(r'^\.last_verify_success\.utc\.tmp-[0-9a-f]{32}$')
 CONTINUITY_STATE_TEMP_RE = re.compile(r'^\.backup_continuity_state\.json\.tmp-[0-9a-f]{32}$')
 RENAME_NOREPLACE = 1
 LIBC = ctypes.CDLL(None, use_errno=True)
+ADMISSION_CORE = '/usr/local/libexec/fh/maintenance_pending_v1.py'
+ADMISSION_CORE_SHA256 = '250d60060d2681a3a09476918cb801ce422366564924f89b480a5a7563af7dc9'
+MAX_ADMISSION_CORE_BYTES = 1_048_576
+ADMISSION_PENDING_ERROR_TYPES = ()
 TERMINAL_STATES = {'succeeded', 'failed_before_write', 'failed_pre_switch',
                    'failed_switch_recovery_required',
                    'failed_post_switch_rollback_succeeded', 'failed_post_switch_rollback_failed',
@@ -522,6 +528,35 @@ class DumpSqlInspector:
 def reject(code=70):
     sys.stderr.write('dump attestation rejected\n')
     raise SystemExit(code)
+
+
+def load_admission_core():
+    before = trusted_program(ADMISSION_CORE, {0o644})
+    descriptor = os.open(ADMISSION_CORE, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        opened = os.fstat(descriptor)
+        if identity(opened) != before or opened.st_size < 1 or opened.st_size > MAX_ADMISSION_CORE_BYTES:
+            reject(75)
+        chunks = bytearray()
+        while len(chunks) <= MAX_ADMISSION_CORE_BYTES:
+            chunk = os.read(descriptor, min(65_536, MAX_ADMISSION_CORE_BYTES + 1 - len(chunks)))
+            if not chunk:
+                break
+            chunks.extend(chunk)
+        source = bytes(chunks)
+        if len(source) != opened.st_size or identity(os.fstat(descriptor)) != before:
+            reject(75)
+    finally:
+        os.close(descriptor)
+    if trusted_program(ADMISSION_CORE, {0o644}) != before or hashlib.sha256(source).hexdigest() != ADMISSION_CORE_SHA256:
+        reject(75)
+    module = types.ModuleType('fh_maintenance_pending_v1')
+    module.__file__ = ADMISSION_CORE
+    try:
+        exec(compile(source, ADMISSION_CORE, 'exec'), module.__dict__)
+    except BaseException:
+        reject(75)
+    return module
 
 
 def bind_to_parent_death():
@@ -1672,6 +1707,36 @@ def attach_existing(attestations, backups, digest, size, unpacked, created_at, n
     return data
 
 
+def registered_restore(admission_core, admission, global_lock, record,
+                       restore_operation, publish_operation, cleanup_operation):
+    """Keep the pending veto until restore, publication, and cleanup succeed.
+
+    Before cleanup, the run tree remains for investigation. After cleanup,
+    the published attestation and success marker are the durable evidence;
+    a future cross-process recovery must also reconcile the exact Docker
+    resource before settling an interrupted pending or clear marker.
+    """
+    admission.publish_pending(record)
+    restored = restore_operation()
+    terminal_proven = True  # restore() returns only after container-exit proof.
+    published = publish_operation(restored)
+    publication_complete = True
+    cleanup_operation()
+    cleanup_complete = True
+    proof = lambda observed: (observed == record and terminal_proven and
+                              publication_complete and cleanup_complete)
+    admission.clear_pending(record, proof)
+    admission.__exit__(None, None, None)
+    recovery = admission_core.MaintenanceAdmission.recovery_from_existing_lock_fd(
+        global_lock, admission_core.current_boot_id(),
+    )
+    try:
+        recovery.recover_clear_marker(proof)
+    finally:
+        recovery.__exit__(None, None, None)
+    return published
+
+
 def main():
     bind_to_parent_death()
     if len(sys.argv) != 2:
@@ -1702,6 +1767,15 @@ def main():
     global_after = os.stat('fh-production-change.lock', dir_fd=locks, follow_symlinks=False)
     if identity(global_meta) != identity(global_after):
         reject()
+    admission_core = load_admission_core()
+    global ADMISSION_PENDING_ERROR_TYPES
+    pending_error_type = getattr(admission_core, 'PendingError', None)
+    ADMISSION_PENDING_ERROR_TYPES = (pending_error_type,) if isinstance(pending_error_type, type) else ()
+    admission = admission_core.MaintenanceAdmission.from_existing_lock_fd(
+        global_lock,
+        admission_core.current_boot_id(),
+    )
+    admission_record = None
     assert_no_nonterminal_runs(orchestrator)
     evidence = open_absolute_directory(EVIDENCE_ROOT, 0o700)
     backups = open_absolute_directory(BACKUP_ROOT)
@@ -1758,6 +1832,7 @@ def main():
             run_path = scratch_path + '/' + run_leaf
             source = None
             pinned = None
+            run_tree_cleaned = False
             try:
                 source, source_meta = open_dump(backup_id)
                 require_capacity(EVIDENCE_ROOT, source_meta.st_size + FIXED_HEADROOM)
@@ -1774,6 +1849,8 @@ def main():
                     os.close(existing)
                     data = attach_existing(attestations, backups, digest, size, unpacked, created_at, nonce)
                     status = 'attached'
+                    if continuity_state is not None:
+                        mark_continuity_verified(backups, continuity_state, nonce)
                 else:
                     if unpacked > (MAX_RESTORE_BYTES - FIXED_HEADROOM) // RESTORE_MULTIPLIER:
                         reject()
@@ -1783,25 +1860,52 @@ def main():
                         size + max_datadir + IBTMP_MAX_BYTES + REDO_MAX_BYTES + FIXED_HEADROOM,
                         max(MIN_FREE_INODES, create_tables * 8 + 4096),
                     )
-                    allocated, inodes = restore(pinned, pinned_meta, unpacked, create_tables, run_path, nonce)
-                    restored_at = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-                    value = {'schema': 'deployment_dump_attestation.v1',
-                             'dump': {'sha256': digest, 'size_bytes': size,
-                                      'uncompressed_size_bytes': unpacked, 'created_at_utc': created_at},
-                             'verification': {'method': 'mariadb_10_11_isolated_restore_v1', 'image': IMAGE,
-                                              'sha256_verified': True, 'gzip_verified': True,
-                                              'restore_verified': True,
-                                              'restored_datadir_allocated_bytes': allocated,
-                                              'restored_datadir_inode_count': inodes,
-                                              'restored_at_utc': restored_at},
-                             'attested_at_utc': restored_at}
-                    data = canonical(value)
-                    if len(data) > MAX_ATTESTATION:
-                        reject()
-                    status = publish(attestations, data, digest, nonce)
-                    success_marker(backups, restored_at, nonce)
-                if continuity_state is not None:
-                    mark_continuity_verified(backups, continuity_state, nonce)
+                    run_id = str(uuid.uuid4())
+                    container_intent = 'fh-dump-attestation-' + nonce
+                    boot_id = admission_core.current_boot_id()
+                    admission_record = admission_core.make_record(
+                        'deployment_dump_attestation',
+                        run_id,
+                        boot_id,
+                        {'backup_set_id': backup_id, 'run_leaf': run_leaf, 'dump_sha256': digest,
+                         'compressed_size_bytes': size, 'uncompressed_size_bytes': unpacked,
+                         'container_intent': container_intent},
+                    )
+                    def publish_restored(result):
+                        allocated, inodes = result
+                        restored_at = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+                        value = {'schema': 'deployment_dump_attestation.v1',
+                                 'dump': {'sha256': digest, 'size_bytes': size,
+                                          'uncompressed_size_bytes': unpacked, 'created_at_utc': created_at},
+                                 'verification': {'method': 'mariadb_10_11_isolated_restore_v1', 'image': IMAGE,
+                                                  'sha256_verified': True, 'gzip_verified': True,
+                                                  'restore_verified': True,
+                                                  'restored_datadir_allocated_bytes': allocated,
+                                                  'restored_datadir_inode_count': inodes,
+                                                  'restored_at_utc': restored_at},
+                                 'attested_at_utc': restored_at}
+                        data = canonical(value)
+                        if len(data) > MAX_ATTESTATION:
+                            reject()
+                        status = publish(attestations, data, digest, nonce)
+                        success_marker(backups, restored_at, nonce)
+                        if continuity_state is not None:
+                            mark_continuity_verified(backups, continuity_state, nonce)
+                        return status, data
+
+                    def cleanup_restored_run():
+                        delete_tree_at(scratch, run_leaf, os.fstat(scratch).st_dev, [0])
+                        os.fsync(scratch)
+
+                    status, data = registered_restore(
+                        admission_core, admission, global_lock, admission_record,
+                        lambda: restore(pinned, pinned_meta, unpacked, create_tables, run_path, nonce),
+                        publish_restored,
+                        cleanup_restored_run,
+                    )
+                    run_tree_cleaned = True
+                    admission = None
+                    admission_record = None
                 output = {'attestation_bytes_base64': base64.b64encode(data).decode('ascii'),
                           'attestation_sha256': hashlib.sha256(data).hexdigest(), 'dump_sha256': digest,
                           'path': EVIDENCE_ROOT + '/dump-attestations/' + digest + '.json', 'status': status}
@@ -1812,16 +1916,19 @@ def main():
                     os.close(pinned)
                 if source is not None:
                     os.close(source)
-                try:
-                    delete_tree_at(scratch, run_leaf, os.fstat(scratch).st_dev, [0])
-                    os.fsync(scratch)
-                except BaseException:
-                    if not original_error:
-                        raise
+                if admission_record is None and not run_tree_cleaned:
+                    try:
+                        delete_tree_at(scratch, run_leaf, os.fstat(scratch).st_dev, [0])
+                        os.fsync(scratch)
+                    except BaseException:
+                        if not original_error:
+                            raise
         finally:
             os.close(scratch)
             os.close(attestations)
     finally:
+        if admission is not None:
+            admission.__exit__(None, None, None)
         os.close(lock)
         os.close(backups)
         os.close(evidence)
@@ -1835,3 +1942,7 @@ if __name__ == '__main__':
         main()
     except (BrokenPipeError, gzip.BadGzipFile, json.JSONDecodeError, OSError, subprocess.SubprocessError, ValueError):
         reject()
+    except Exception as error:
+        if isinstance(error, ADMISSION_PENDING_ERROR_TYPES):
+            reject(75)
+        raise

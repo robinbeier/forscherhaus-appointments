@@ -478,7 +478,9 @@ final class DeploymentDumpAttestationProducerV1RootTest extends TestCase
             $empty = $this->runMainAdmission($trustedRoot);
             self::assertSame(0, $empty['exit'], $empty['stderr']);
             self::assertFileExists($trustedRoot . '/downstream-reached');
+            self::assertFileExists($trustedRoot . '/admission-reached');
             unlink($trustedRoot . '/downstream-reached');
+            unlink($trustedRoot . '/admission-reached');
 
             file_put_contents($lockPath, 'x');
             chmod($lockPath, 0600);
@@ -524,6 +526,129 @@ final class DeploymentDumpAttestationProducerV1RootTest extends TestCase
                 $this->removeTree($trustedRoot);
             }
         }
+    }
+
+    public function testRegisteredRestoreSettlesOnlyAfterRestoreAndPublication(): void
+    {
+        $result = $this->python(
+            <<<'PY'
+            module = load()
+            record = {'run_id': 'run-001'}
+            events = []
+
+            class Admission:
+                def __init__(self, mode):
+                    self.mode = mode
+                    self.pending = False
+                    self.marker = False
+                def publish_pending(self, value):
+                    assert value == record
+                    events.append('pending')
+                    self.pending = True
+                def clear_pending(self, value, proof):
+                    assert value == record and proof(record) is True
+                    events.append('clear')
+                    if self.mode == 'clear':
+                        raise RuntimeError('synthetic clear failure')
+                    self.pending = False
+                    self.marker = True
+                def __exit__(self, *_):
+                    events.append('admission_exit')
+
+            class Recovery:
+                def __init__(self, fail):
+                    self.fail = fail
+                def recover_clear_marker(self, proof):
+                    events.append('recover')
+                    assert proof(record) is True
+                    if self.fail:
+                        raise RuntimeError('synthetic recovery failure')
+                    Core.admission.marker = False
+                def __exit__(self, *_):
+                    events.append('recovery_exit')
+
+            class Core:
+                def __init__(self, fail):
+                    self.fail = fail
+                def current_boot_id(self):
+                    return 'boot'
+                class MaintenanceAdmission:
+                    recovery = None
+                    @staticmethod
+                    def recovery_from_existing_lock_fd(lock, boot):
+                        events.append('recovery_create')
+                        if Core.recovery_create_fail:
+                            raise RuntimeError('synthetic recovery construction failure')
+                        return Core.recovery
+
+            def run(mode):
+                events.clear()
+                admission = Admission(mode)
+                core = Core(mode == 'recovery')
+                Core.recovery = Recovery(mode == 'recovery')
+                Core.recovery_create_fail = mode == 'recovery_create'
+                Core.admission = admission
+                def restore():
+                    events.append('restore')
+                    if mode == 'restore':
+                        raise RuntimeError('synthetic restore failure')
+                    return 'restored'
+                def publish(value):
+                    assert value == 'restored'
+                    events.append('publish')
+                    if mode == 'publish':
+                        raise RuntimeError('synthetic publication failure')
+                    return 'published'
+                def cleanup():
+                    events.append('cleanup')
+                    if mode == 'cleanup':
+                        raise RuntimeError('synthetic cleanup failure')
+                try:
+                    result = module.registered_restore(
+                        core, admission, object(), record, restore, publish, cleanup,
+                    )
+                except Exception:
+                    result = None
+                return result, list(events), admission.pending, admission.marker
+
+            result, observed, pending, marker = run('success')
+            assert result == 'published'
+            assert observed == ['pending', 'restore', 'publish', 'cleanup', 'clear', 'admission_exit',
+                                'recovery_create', 'recover', 'recovery_exit']
+            assert pending is False
+            assert marker is False
+            result, observed, pending, marker = run('restore')
+            assert result is None and pending is True
+            assert marker is False
+            assert observed == ['pending', 'restore']
+            result, observed, pending, marker = run('publish')
+            assert result is None and pending is True
+            assert marker is False
+            assert observed == ['pending', 'restore', 'publish']
+            result, observed, pending, marker = run('cleanup')
+            assert result is None and pending is True
+            assert marker is False
+            assert observed == ['pending', 'restore', 'publish', 'cleanup']
+            result, observed, pending, marker = run('clear')
+            assert result is None and pending is True
+            assert marker is False
+            assert observed == ['pending', 'restore', 'publish', 'cleanup', 'clear']
+            result, observed, pending, marker = run('recovery_create')
+            assert result is None and pending is False
+            assert marker is True
+            assert observed == ['pending', 'restore', 'publish', 'cleanup', 'clear', 'admission_exit',
+                                'recovery_create']
+            result, observed, pending, marker = run('recovery')
+            assert result is None and pending is False
+            assert marker is True
+            assert observed == ['pending', 'restore', 'publish', 'cleanup', 'clear', 'admission_exit',
+                                'recovery_create', 'recover', 'recovery_exit']
+            print('registered restore lifecycle verified')
+            PY
+            ,
+        );
+        self::assertSame(0, $result['exit'], $result['stderr']);
+        self::assertSame("registered restore lifecycle verified\n", $result['stdout']);
     }
 
     public function testClosedStreamingDumpGrammarCountsTablesAndRejectsExecutableBypasses(): void
@@ -779,6 +904,20 @@ final class DeploymentDumpAttestationProducerV1RootTest extends TestCase
                 module.safe_directory(os.fstat(descriptor), exact_mode)
                 return descriptor
             module.open_absolute_directory = fixture_root
+            class FakeCapability:
+                def __exit__(self, *_):
+                    return False
+            class FakeAdmissionCore:
+                @staticmethod
+                def current_boot_id():
+                    return '11111111-1111-4111-8111-111111111111'
+                class MaintenanceAdmission:
+                    @staticmethod
+                    def from_existing_lock_fd(lock, boot):
+                        with open(root + '/admission-reached', 'w', encoding='ascii'):
+                            pass
+                        return FakeCapability()
+            module.load_admission_core = lambda: FakeAdmissionCore
             def downstream(orchestrator):
                 with open(root + '/downstream-reached', 'w', encoding='ascii'):
                     pass

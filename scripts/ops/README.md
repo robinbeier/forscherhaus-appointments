@@ -320,8 +320,13 @@ Security posture reporting:
 
 Dump restore attestation:
 
-- Install `scripts/ops/libexec/deployment_dump_attestation_v1.py` as root-owned
-  mode `0555` at `/usr/local/libexec/fh/deployment_dump_attestation_v1.py`.
+- Do not install the current repository version of
+  `scripts/ops/libexec/deployment_dump_attestation_v1.py` on production. Its
+  ROB-812 pending-state enrollment is source-only until interrupted-owner
+  recovery and the complete mixed-version rollout are independently verified;
+  see `docs/ops/maintenance-admission-contract.md`. Keep the already installed
+  legacy helper unchanged in the meantime. Any later installation requires a
+  separately reviewed, hash-bound rollout with the existing recovery stock.
 - Install `scripts/ops/libexec/validate_deployment_terminal_bundle_v1.php` as
   root-owned mode `0555` and `scripts/ops/lib/DeploymentContractV1.php` as
   root-owned mode `0444` in the same `/usr/local/libexec/fh` directory.
