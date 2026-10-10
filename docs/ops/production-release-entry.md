@@ -71,10 +71,12 @@ authority. A missing, stale, contradictory, or unknown fact blocks the entry.
    deploy/probe command acquire and manage the lock under its own contract. For
    an approved migration, the root operator must first acquire that same lock
    through the verified installed `deploy_ea.sh` helper, then call its
-   `ordinary_assert_no_pending_probe` and
+   `ordinary_assert_pending_admission`, `ordinary_assert_no_pending_probe` and
    `ordinary_assert_no_active_csp_report_only_pilot` checks **while holding the
-   lock and before the first migration write**. Keep the validated descriptor
-   held and exported to the deploy child through completion or rollback as in
+   lock and before the first migration write**. Immediately before handing
+   control to the deploy child, run `ordinary_assert_pending_admission` again
+   under the same held lock descriptor. Keep the validated descriptor held and
+   exported to the deploy child through completion or rollback as in
    [Deployment](../deployment.md#deploy). A read-only snapshot taken before lock
    acquisition does not authorize migration. The
    [coordinated maintenance admission](maintenance-admission-contract.md)
@@ -160,8 +162,9 @@ authority. A missing, stale, contradictory, or unknown fact blocks the entry.
    Accept the CSP lease parent only as a non-symlink root-owned mode-`0700`
    directory. A missing lock, untrusted CSP lease parent, present CSP pilot lease,
    unexpected ordinary marker, or unknown timer state blocks admission before
-   any migration. After acquiring the shared lock, repeat the pending-probe and
-   CSP-lease checks before the first migration write. Recheck immediately before
+   any migration. After acquiring the shared lock, repeat the
+   pending-admission, pending-probe and CSP-lease checks before the first
+   migration write. Recheck immediately before
    the deploy child under the same held lock; a previous absence is not authority.
 
 5. **Prove recovery inputs when required.** If the deployment contract or
@@ -199,8 +202,19 @@ application deploy.
 
 6. **Deploy the reviewed archive through the existing host path.** For a
    normal release without migration, use the checked-main
-   `scripts/ops/prod_deploy_bound_release.sh` entry once the two read-only
-   admission helpers are installed at their reviewed hashes. It requires the
+   `scripts/ops/prod_deploy_bound_release.sh` entry only after the coordinated
+   ROB-812 rollout is fully installed and verified on the host. The release-pair
+   and backup helpers are additional prerequisites, not a substitute for that
+   rollout.
+
+   This source-level bound-release entry is unavailable on a legacy or otherwise
+   un-enrolled production host. Before use, ROB-812 must be coordinated across
+   all writers, the shared admission core, its state directory, and the
+   epoch/marker contract, with every installed hash freshly verified. Installing
+   only release-pair and backup helpers is insufficient. Do not install the
+   admission core alone or run the current repository wrapper against a legacy
+   host; follow the [maintenance admission contract](maintenance-admission-contract.md).
+   The entry still requires the
    already published archive/provenance pair, a fresh verified backup handoff,
    and the exact currently active release. Its inputs are the reviewed commit,
    release and current-release IDs, and the two local artifact paths; it derives

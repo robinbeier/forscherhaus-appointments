@@ -43,6 +43,9 @@ REVIEWED_INDIRECT_PYTHON_ROUTES = {
     "tests/Unit/Scripts/maintenance_pending_v1_test.py": ROOT_DEPLOYMENT_SCRIPT,
     "tests/Unit/Scripts/zero_surprise_canary_fixture_lock_test.py": ROOT_DEPLOYMENT_SCRIPT,
 }
+REVIEWED_INDIRECT_PHP_ROUTES = {
+    "tests/Unit/Scripts/OrdinaryDeploymentAdmissionRootTest.php": ROOT_DEPLOYMENT_SCRIPT,
+}
 
 
 def job_body(workflow: str, name: str) -> str:
@@ -131,6 +134,14 @@ def configured_php_tests() -> tuple[set[str], list[str]]:
 
 
 def has_route(path: str, workflow: str, files: set[str], directories: list[str], root: Path = ROOT) -> bool:
+    php_route_script = REVIEWED_INDIRECT_PHP_ROUTES.get(path)
+    if php_route_script:
+        script = (root / php_route_script).read_text(encoding="utf-8")
+        script_commands = "\n".join(without_shell_comment(line) for line in script.splitlines())
+        return (
+            contains_test_argument(run_commands(workflow), php_route_script)
+            and contains_test_argument(script_commands, path)
+        )
     if path.endswith("Test.php") and (path in files or any(path.startswith(directory) for directory in directories)):
         source = (root / path).read_text(encoding="utf-8")
         # Treat any mention of the excluded group conservatively: PHPUnit may
