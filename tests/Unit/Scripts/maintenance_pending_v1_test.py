@@ -75,6 +75,18 @@ class MaintenancePendingTest(unittest.TestCase):
         with self.assertRaisesRegex(MODULE.PendingError, 'state_identity_invalid'):
             MODULE.admit_read_only()
 
+    def test_public_api_rejects_caller_supplied_alternate_lock_path(self):
+        with self.assertRaises(TypeError):
+            MODULE.MaintenanceAdmission(lock_path=self.lock)
+        with self.assertRaises(TypeError):
+            MODULE.maintenance_admission(lock_path=self.lock)
+        with self.assertRaises(TypeError):
+            MODULE.admit_read_only(lock_path=self.lock)
+        with self.assertRaises(TypeError):
+            MODULE.validate_shared_lock(self.lock)
+        with self.assertRaises(TypeError):
+            MODULE.shared_lock(self.lock)
+
     def test_publish_is_durable_and_duplicate_is_refused(self):
         record = self.record()
         with MODULE.maintenance_admission() as admission:

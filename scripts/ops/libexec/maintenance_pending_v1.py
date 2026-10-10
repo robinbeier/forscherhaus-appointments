@@ -150,10 +150,9 @@ def _validate_epoch():
         reject('epoch_unknown')
 
 
-def validate_shared_lock(path=None):
+def validate_shared_lock():
     """Validate the existing shared lock; never create or replace it."""
-    if path is None:
-        path = SHARED_LOCK_PATH
+    path = SHARED_LOCK_PATH
     st = _exact_regular(path, 0o600, 0)
     if st.st_size != 0:
         reject('shared_lock_identity_invalid')
@@ -167,10 +166,9 @@ def validate_shared_lock(path=None):
         os.close(fd)
 
 
-def _open_shared_lock(path):
+def _open_shared_lock():
     """Open and hold the pre-existing shared lock until the caller closes it."""
-    if path is None:
-        path = SHARED_LOCK_PATH
+    path = SHARED_LOCK_PATH
     _trusted_directory('/var')
     _trusted_directory('/var/lib')
     parent = os.path.dirname(path)
@@ -205,9 +203,9 @@ def _close_shared_lock(fd):
 
 
 @contextmanager
-def shared_lock(path=None):
+def shared_lock():
     """Compatibility context for read-only callers; writers use Admission."""
-    fd, identity = _open_shared_lock(path or SHARED_LOCK_PATH)
+    fd, identity = _open_shared_lock()
     try:
         yield identity
     finally:
@@ -366,8 +364,7 @@ class MaintenanceAdmission:
     invoke :meth:`clear_pending` with an explicit terminal proof.
     """
 
-    def __init__(self, lock_path=None, expected_boot_id=None):
-        self.lock_path = lock_path or SHARED_LOCK_PATH
+    def __init__(self, expected_boot_id=None):
         self.expected_boot_id = expected_boot_id
         self._fd = None
         self.lock_identity = None
@@ -376,7 +373,7 @@ class MaintenanceAdmission:
     def __enter__(self):
         validate_state_layout()
         self._validate_epoch_and_lock()
-        self._fd, self.lock_identity = _open_shared_lock(self.lock_path)
+        self._fd, self.lock_identity = _open_shared_lock()
         try:
             self.admission = _admit_locked(self.expected_boot_id)
             return self
@@ -387,14 +384,14 @@ class MaintenanceAdmission:
 
     def _validate_epoch_and_lock(self):
         _validate_epoch()
-        validate_shared_lock(self.lock_path)
+        validate_shared_lock()
 
     def _assert_held(self):
         if self._fd is None:
             reject('lock_capability_required')
         _trusted_directory(STATE_ROOT, 0o700)
         _validate_epoch()
-        current = os.lstat(self.lock_path)
+        current = os.lstat(SHARED_LOCK_PATH)
         opened = os.fstat(self._fd)
         if _identity(opened) != self.lock_identity or _identity(current) != self.lock_identity:
             reject('shared_lock_identity_changed')
@@ -421,13 +418,13 @@ class MaintenanceAdmission:
 
 
 @contextmanager
-def maintenance_admission(lock_path=None, expected_boot_id=None):
+def maintenance_admission(expected_boot_id=None):
     """Yield one lock-held :class:`MaintenanceAdmission` capability."""
-    with MaintenanceAdmission(lock_path, expected_boot_id) as capability:
+    with MaintenanceAdmission(expected_boot_id) as capability:
         yield capability
 
 
-def admit_read_only(lock_path=None, expected_boot_id=None):
+def admit_read_only(expected_boot_id=None):
     """Take a read-only admission snapshot while briefly holding the lock.
 
     Releasing the lock invalidates this snapshot for mutation. Writers must
@@ -435,7 +432,7 @@ def admit_read_only(lock_path=None, expected_boot_id=None):
     alone does not fence legacy writers.
     """
     validate_state_layout()
-    with MaintenanceAdmission(lock_path, expected_boot_id) as capability:
+    with MaintenanceAdmission(expected_boot_id) as capability:
         return dict(capability.admission)
 
 
