@@ -393,12 +393,37 @@ try {
             if (!is_array($providerServicePair) || !isset($providerServicePair['service_id'])) {
                 throw new GateAssertionException('Provider calendar browser check has no synthetic service fixture.');
             }
-            return dashboardIntegrationSmokeAssertProviderCalendarDialogBrowser(
-                $client,
-                $config,
-                $repoRoot,
-                (int) $providerServicePair['service_id'],
-            );
+            $browserFailure = null;
+            try {
+                $result = dashboardIntegrationSmokeAssertProviderCalendarDialogBrowser(
+                    $client,
+                    $config,
+                    $repoRoot,
+                    (int) $providerServicePair['service_id'],
+                );
+            } catch (Throwable $error) {
+                $browserFailure = $error;
+            }
+            try {
+                ProviderCalendarFixture::resetIsolatedRateLimitCache(rtrim((string) $config['base_url'], '/'));
+            } catch (Throwable $resetError) {
+                if ($browserFailure !== null) {
+                    throw new GateAssertionException(
+                        'Provider browser check failed (' .
+                            $browserFailure->getMessage() .
+                            ') and the isolated rate-limit reset failed (' .
+                            $resetError->getMessage() .
+                            ').',
+                        0,
+                        $browserFailure,
+                    );
+                }
+                throw $resetError;
+            }
+            if ($browserFailure !== null) {
+                throw $browserFailure;
+            }
+            return $result;
         });
     }
 
@@ -1274,6 +1299,8 @@ function dashboardIntegrationSmokeAssertProviderCalendarDialogBrowser(
     dashboardIntegrationSmokeBootstrapApplication($repoRoot);
     $baseUrl = rtrim((string) $config['base_url'], '/');
     $fixture = ProviderCalendarFixture::create($adminClient, $baseUrl, $serviceId);
+    // Keep the random suffix in the visible title, which the calendar shortens.
+    $calendarMarker = 'ROB805-' . substr($fixture['marker'], -16);
 
     try {
         $providerClient = dashboardIntegrationSmokeCreateClient($config);
@@ -1290,29 +1317,59 @@ function dashboardIntegrationSmokeAssertProviderCalendarDialogBrowser(
         if ($cookies === []) {
             throw new GateAssertionException('Provider calendar browser check has no authenticated session cookies.');
         }
-        $input = json_encode(
-            [
-                'mode' => 'provider',
-                'expected_provider_id' => $fixture['provider_id'],
-                'base_url' => dashboardIntegrationSmokeBuildAppUrl($config, ''),
-                'target_url' => $targetUrl,
-                'session_cookies' => $cookies,
-                'browser' => \ReleaseGate\resolveConfiguredPlaywrightBrowser(),
-                'browser_executable_path' => (string) (getenv('PLAYWRIGHT_MCP_EXECUTABLE_PATH') ?: ''),
-                'browser_open_timeout' => (int) $config['browser_open_timeout'],
-            ],
-            JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+        $browserInput = [
+            'mode' => 'provider',
+            'expected_provider_id' => $fixture['provider_id'],
+            'base_url' => dashboardIntegrationSmokeBuildAppUrl($config, ''),
+            'target_url' => $targetUrl,
+            'session_cookies' => $cookies,
+            'browser' => \ReleaseGate\resolveConfiguredPlaywrightBrowser(),
+            'browser_executable_path' => (string) (getenv('PLAYWRIGHT_MCP_EXECUTABLE_PATH') ?: ''),
+            'browser_open_timeout' => (int) $config['browser_open_timeout'],
+        ];
+        $runBrowser = static function (array $extra) use ($browserInput, $repoRoot, $config): array {
+            $input = json_encode(
+                array_merge($browserInput, $extra),
+                JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+            );
+            return GateProcessRunner::run(
+                ['node', $repoRoot . '/scripts/ci/calendar_unavailability_dialog_browser.js'],
+                $repoRoot,
+                null,
+                max(115, (int) $config['browser_open_timeout'] * 3 + 55),
+                $input,
+            );
+        };
+
+        // Preserve the full intercepted provider assertions from ROB-784/804.
+        $intercepted = dashboardIntegrationSmokeParseCalendarDialogBrowserResult($runBrowser([]), true);
+
+        $real = dashboardIntegrationSmokeParseCalendarDialogBrowserResult(
+            $runBrowser([
+                'real_http_db' => true,
+                'real_http_db_marker' => $calendarMarker,
+            ]),
+            true,
+            true,
         );
-        $result = GateProcessRunner::run(
-            ['node', $repoRoot . '/scripts/ci/calendar_unavailability_dialog_browser.js'],
-            $repoRoot,
-            null,
-            max(115, (int) $config['browser_open_timeout'] * 3 + 55),
-            $input,
-        );
-        return dashboardIntegrationSmokeParseCalendarDialogBrowserResult($result, true);
+        // This assertion runs before finally-cleanup so cleanup cannot mask a failed UI delete.
+        ProviderCalendarFixture::assertUnavailabilityAbsent($fixture['provider_id'], $calendarMarker);
+
+        return array_merge($intercepted, [
+            'real_http_db_save_verified' => $real['real_http_db_save_verified'],
+            'real_http_db_reload_verified' => $real['real_http_db_reload_verified'],
+            'real_http_db_persisted_interval_verified' => $real['real_http_db_persisted_interval_verified'],
+            'real_http_db_delete_verified' => $real['real_http_db_delete_verified'],
+            'real_http_db_cleanup_verified' => true,
+        ]);
     } finally {
-        ProviderCalendarFixture::cleanup($adminClient, $baseUrl, $fixture['provider_id'], $fixture['marker']);
+        ProviderCalendarFixture::cleanup(
+            $adminClient,
+            $baseUrl,
+            $fixture['provider_id'],
+            $fixture['marker'],
+            $calendarMarker,
+        );
     }
 }
 
@@ -1548,8 +1605,11 @@ function dashboardIntegrationSmokeWithNameOnlyBookingSettings(
 }
 
 /** @param array<string, mixed> $result */
-function dashboardIntegrationSmokeParseCalendarDialogBrowserResult(array $result, bool $providerMode = false): array
-{
+function dashboardIntegrationSmokeParseCalendarDialogBrowserResult(
+    array $result,
+    bool $providerMode = false,
+    bool $realHttpDbMode = false,
+): array {
     if (($result['timed_out'] ?? false) || ($result['exit_code'] ?? 1) !== 0) {
         $failureClass = trim((string) ($result['stderr'] ?? ''));
         if (
@@ -1560,6 +1620,9 @@ function dashboardIntegrationSmokeParseCalendarDialogBrowserResult(array $result
                     'launch',
                     'auth',
                     'create',
+                    'real_http_db',
+                    'real_http_db_create',
+                    'real_http_db_delete',
                     'dialog',
                     'failure',
                     'success',
@@ -1581,20 +1644,29 @@ function dashboardIntegrationSmokeParseCalendarDialogBrowserResult(array $result
     if (!is_array($payload)) {
         throw new GateAssertionException('Calendar dialog browser check returned no valid result.');
     }
-    $requiredProperties = [
-        'ok',
-        'request_payload_verified',
-        'failure_state_verified',
-        'success_state_verified',
-        'existing_event_prepopulation_verified',
-        'edit_failure_state_verified',
-        'edit_success_reload_verified',
-        'delete_failure_state_verified',
-        'delete_success_reload_verified',
-        'table_view_literal_name_verified',
-        'table_view_write_boundary_verified',
-        'cleanup_verified',
-    ];
+    $requiredProperties = $realHttpDbMode
+        ? [
+            'ok',
+            'real_http_db_save_verified',
+            'real_http_db_reload_verified',
+            'real_http_db_persisted_interval_verified',
+            'real_http_db_delete_verified',
+            'real_http_db_cleanup_verified',
+        ]
+        : [
+            'ok',
+            'request_payload_verified',
+            'failure_state_verified',
+            'success_state_verified',
+            'existing_event_prepopulation_verified',
+            'edit_failure_state_verified',
+            'edit_success_reload_verified',
+            'delete_failure_state_verified',
+            'delete_success_reload_verified',
+            'table_view_literal_name_verified',
+            'table_view_write_boundary_verified',
+            'cleanup_verified',
+        ];
     $requiredProperties = array_merge(
         $requiredProperties,
         $providerMode
@@ -1614,6 +1686,7 @@ function dashboardIntegrationSmokeParseCalendarDialogBrowserResult(array $result
         throw new GateAssertionException('Calendar dialog browser check returned no duration.');
     }
     if (
+        !$realHttpDbMode &&
         !$providerMode &&
         (!is_int($payload['working_plan_duration_ms'] ?? null) || $payload['working_plan_duration_ms'] < 0)
     ) {
@@ -1635,14 +1708,26 @@ function dashboardIntegrationSmokeParseCalendarDialogBrowserResult(array $result
             'cleanup_verified' => true,
             'browser_duration_ms' => $payload['duration_ms'],
         ],
-        $providerMode
-            ? ['provider_role_verified' => true, 'provider_ownership_verified' => true]
-            : [
-                'working_plan_exception_create_verified' => true,
-                'working_plan_exception_edit_verified' => true,
-                'working_plan_exception_delete_verified' => true,
-                'working_plan_browser_duration_ms' => $payload['working_plan_duration_ms'],
-            ],
+        $realHttpDbMode
+            ? [
+                'provider_role_verified' => true,
+                'provider_ownership_verified' => true,
+                'real_http_db_save_verified' => ($payload['real_http_db_save_verified'] ?? false) === true,
+                'real_http_db_reload_verified' => ($payload['real_http_db_reload_verified'] ?? false) === true,
+                'real_http_db_persisted_interval_verified' =>
+                    ($payload['real_http_db_persisted_interval_verified'] ?? false) === true,
+                'real_http_db_delete_verified' => ($payload['real_http_db_delete_verified'] ?? false) === true,
+                'real_http_db_cleanup_verified' => ($payload['real_http_db_cleanup_verified'] ?? false) === true,
+                'browser_duration_ms' => $payload['duration_ms'],
+            ]
+            : ($providerMode
+                ? ['provider_role_verified' => true, 'provider_ownership_verified' => true]
+                : [
+                    'working_plan_exception_create_verified' => true,
+                    'working_plan_exception_edit_verified' => true,
+                    'working_plan_exception_delete_verified' => true,
+                    'working_plan_browser_duration_ms' => $payload['working_plan_duration_ms'],
+                ]),
     );
 }
 

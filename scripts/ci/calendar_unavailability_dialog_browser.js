@@ -123,6 +123,7 @@ function getOpenTimeoutSeconds(input) {
 async function main(input) {
     const baseUrl = assertLoopbackBaseUrl(input.base_url);
     const providerMode = input.mode === 'provider';
+    const providerRealDbMode = providerMode && input.real_http_db === true;
     if (input.mode && !providerMode) {
         fail('input: unsupported calendar browser mode');
     }
@@ -173,6 +174,8 @@ async function main(input) {
     let syntheticFeedBody = null;
     let saveAttempt = 0;
     let deleteAttempt = 0;
+    let realProviderSaveCount = 0;
+    let realProviderDeleteCount = 0;
     let workingPlanSaveAttempt = 0;
     let workingPlanDeleteAttempt = 0;
 
@@ -186,12 +189,25 @@ async function main(input) {
             return;
         }
         const allowedRead = method === 'POST' && url.origin === expectedOrigin && reloadPaths.has(url.pathname);
+        const allowedProviderWrite =
+            providerRealDbMode &&
+            method === 'POST' &&
+            url.origin === expectedOrigin &&
+            [savePath, deletePath].includes(url.pathname);
         const allowedLogin =
             method === 'POST' &&
             !input.session_cookies?.length &&
             url.origin === expectedOrigin &&
             url.pathname === loginPath;
-        if (allowedRead || allowedLogin) {
+        if (allowedProviderWrite) {
+            const count = url.pathname === savePath ? ++realProviderSaveCount : ++realProviderDeleteCount;
+            if (count > 1) {
+                blockedWritePaths.push(url.pathname);
+                await route.abort('blockedbyclient');
+                return;
+            }
+        }
+        if (allowedRead || allowedLogin || allowedProviderWrite) {
             await route.continue();
             return;
         }
@@ -203,6 +219,10 @@ async function main(input) {
         const url = new URL(request.url());
         if (request.method() !== 'POST' || url.origin !== expectedOrigin || url.pathname !== savePath) {
             await route.abort('blockedbyclient');
+            return;
+        }
+        if (providerRealDbMode) {
+            await route.fallback();
             return;
         }
         saveAttempt += 1;
@@ -231,6 +251,10 @@ async function main(input) {
         const url = new URL(request.url());
         if (request.method() !== 'POST' || url.origin !== expectedOrigin || url.pathname !== deletePath) {
             await route.abort('blockedbyclient');
+            return;
+        }
+        if (providerRealDbMode) {
+            await route.fallback();
             return;
         }
         deleteAttempt += 1;
@@ -346,6 +370,146 @@ async function main(input) {
             fail('role: provider calendar exposed an admin action or hid manual unavailability');
         }
     }
+
+    if (providerRealDbMode) {
+        const visibleDate = await page.evaluate(() => {
+            const dates = [...document.querySelectorAll('[data-date]')]
+                .map((element) => element.getAttribute('data-date') || '')
+                .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date));
+            return [...new Set(dates)][0] || '';
+        });
+        if (!visibleDate) {
+            fail('real_http_db: provider calendar did not expose a writable calendar date');
+        }
+        const marker = String(input.real_http_db_marker || `ROB-805 ${visibleDate}`);
+        const start = `${visibleDate} 09:00:00`;
+        const end = `${visibleDate} 10:00:00`;
+        const modal = page.locator('#unavailabilities-modal');
+        // The calendar title intentionally shortens long notes; use a unique prefix
+        // while the server reload still binds the complete marker.
+        const createdEvent = page
+            .locator('.fc-unavailability.fc-custom')
+            .filter({hasText: marker.slice(0, 20)})
+            .first();
+        stage = 'real_http_db_create';
+        await page.locator('#calendar-actions [data-bs-toggle="dropdown"]').click();
+        await page.locator('#insert-unavailability').click();
+        await modal.waitFor({state: 'visible'});
+        const selectableProviders = await modal
+            .locator('#unavailability-provider option')
+            .evaluateAll((options) => options.map((option) => option.value).filter(Boolean));
+        if (selectableProviders.length !== 1 || selectableProviders[0] !== providerId) {
+            fail('real_http_db: provider dialog offered a different provider identity');
+        }
+        await modal.locator('#unavailability-provider').selectOption(providerId);
+        const formattedPickerValues = await page.evaluate(
+            ({start, end}) => {
+                const formatPickerValue = (selector, value) => {
+                    const input = document.querySelector(selector);
+                    const picker = input?._flatpickr;
+                    if (!picker || typeof picker.formatDate !== 'function') return null;
+                    return picker.formatDate(new Date(value.replace(' ', 'T')), picker.config.dateFormat);
+                };
+                return {
+                    start: formatPickerValue('#unavailability-start', start),
+                    end: formatPickerValue('#unavailability-end', end),
+                };
+            },
+            {start, end},
+        );
+        if (!formattedPickerValues.start || !formattedPickerValues.end) {
+            fail('real_http_db: provider date-time Flatpickr instances were not available');
+        }
+        await modal.locator('#unavailability-start').fill(formattedPickerValues.start);
+        await modal.locator('#unavailability-start').press('Tab');
+        await modal.locator('#unavailability-end').fill(formattedPickerValues.end);
+        await modal.locator('#unavailability-end').press('Tab');
+        await modal.locator('#unavailability-notes').fill(marker);
+        const createResponse = page.waitForResponse(
+            (response) => response.request().method() === 'POST' && new URL(response.url()).pathname === savePath,
+            {timeout: interactionTimeoutMs},
+        );
+        const createReload = page.waitForResponse(
+            (response) =>
+                response.request().method() === 'POST' && new URL(response.url()).pathname === expectedReloadPath,
+            {timeout: interactionTimeoutMs},
+        );
+        const [createHttpResponse, createReloadResponse] = await Promise.all([
+            createResponse,
+            createReload,
+            modal.locator('#save-unavailability').click(),
+        ]);
+        if (createHttpResponse.status() !== 200) fail('real_http_db: provider save returned an unexpected status');
+        const createPayload = await createHttpResponse.json().catch(() => null);
+        if (!createPayload || createPayload.success !== true)
+            fail('real_http_db: provider save returned a non-success payload');
+        if (createReloadResponse.status() !== 200) fail('real_http_db: provider reload returned an unexpected status');
+        const reloaded = await createReloadResponse.json().catch(() => null);
+        const persisted = Array.isArray(reloaded?.unavailabilities)
+            ? reloaded.unavailabilities.filter(
+                  (row) => String(row.id_users_provider) === providerId && row.notes === marker,
+              )
+            : [];
+        if (persisted.length !== 1 || persisted[0].start_datetime !== start || persisted[0].end_datetime !== end) {
+            fail('real_http_db: provider reload did not contain the exact stored interval');
+        }
+        await page.waitForFunction(() => window.jQuery && jQuery.active === 0, undefined, {
+            timeout: interactionTimeoutMs,
+        });
+        await modal.waitFor({state: 'hidden'});
+        await createdEvent.waitFor({state: 'visible', timeout: interactionTimeoutMs});
+
+        stage = 'real_http_db_delete';
+        await createdEvent.waitFor({state: 'visible', timeout: interactionTimeoutMs});
+        await createdEvent.click();
+        const deleteResponse = page.waitForResponse(
+            (response) => response.request().method() === 'POST' && new URL(response.url()).pathname === deletePath,
+            {timeout: interactionTimeoutMs},
+        );
+        const deleteReload = page.waitForResponse(
+            (response) =>
+                response.request().method() === 'POST' && new URL(response.url()).pathname === expectedReloadPath,
+            {timeout: interactionTimeoutMs},
+        );
+        const [deleteHttpResponse, deleteReloadResponse] = await Promise.all([
+            deleteResponse,
+            deleteReload,
+            page.locator('.popover .delete-popover').click(),
+        ]);
+        if (deleteHttpResponse.status() !== 200) fail('real_http_db: provider delete returned an unexpected status');
+        const deletePayload = await deleteHttpResponse.json().catch(() => null);
+        if (!deletePayload || deletePayload.success !== true)
+            fail('real_http_db: provider delete returned a non-success payload');
+        if (deleteReloadResponse.status() !== 200)
+            fail('real_http_db: provider delete reload returned an unexpected status');
+        const afterDelete = await deleteReloadResponse.json().catch(() => null);
+        if (
+            !Array.isArray(afterDelete?.unavailabilities) ||
+            afterDelete.unavailabilities.some(
+                (row) => String(row.id_users_provider) === providerId && row.notes === marker,
+            )
+        ) {
+            fail('real_http_db: provider delete reload still contained the owned unavailability');
+        }
+        await page.waitForFunction(() => window.jQuery && jQuery.active === 0, undefined, {
+            timeout: interactionTimeoutMs,
+        });
+        await createdEvent.waitFor({state: 'detached', timeout: interactionTimeoutMs});
+        if (blockedWritePaths.length > 0 || realProviderSaveCount !== 1 || realProviderDeleteCount !== 1) {
+            fail('real_http_db: browser did not perform exactly one bounded save and delete');
+        }
+        return {
+            provider_role_verified: true,
+            provider_ownership_verified: true,
+            real_http_db_marker: marker,
+            real_http_db_save_verified: true,
+            real_http_db_reload_verified: true,
+            real_http_db_persisted_interval_verified: true,
+            real_http_db_delete_verified: true,
+            real_http_db_cleanup_verified: true,
+        };
+    }
+
     const createStartValue = '2030-01-15 09:00:00';
     const createEndValue = '2030-01-15 10:00:00';
     const createNotes = 'ROB-768 synthetic manual unavailability';

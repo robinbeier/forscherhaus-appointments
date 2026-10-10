@@ -87,20 +87,155 @@ final class ProviderCalendarFixture
         }
     }
 
-    public static function cleanup(GateHttpClient $client, string $baseUrl, int $providerId, string $marker): void
-    {
+    public static function cleanup(
+        GateHttpClient $client,
+        string $baseUrl,
+        int $providerId,
+        string $marker,
+        ?string $unavailabilityMarker = null,
+    ): void {
         self::assertAllowedTarget($baseUrl);
         if ($providerId <= 0 || $marker === '') {
             throw new GateAssertionException('Provider calendar fixture identity is incomplete.');
         }
+        if ($unavailabilityMarker !== null && $unavailabilityMarker !== '') {
+            try {
+                foreach (self::ownedUnavailabilityRows($providerId, $unavailabilityMarker) as $row) {
+                    try {
+                        $client->post('calendar/delete_unavailability', ['unavailability_id' => (int) $row['id']]);
+                    } catch (\Throwable) {
+                        // Verify the final DB state after the independent provider cleanup.
+                    }
+                }
+            } catch (\Throwable) {
+                // The provider cleanup is still attempted for this owned fixture.
+            }
+        }
+
         try {
             $client->post('providers/destroy', ['provider_id' => $providerId]);
         } catch (\Throwable) {
             // A lost response does not establish whether the delete committed.
         }
-        if (self::recoverProviderId($client, $marker) !== null) {
-            throw new GateAssertionException('Provider calendar fixture cleanup was not confirmed.');
+        $failures = [];
+        if ($unavailabilityMarker !== null && $unavailabilityMarker !== '') {
+            try {
+                if (self::ownedUnavailabilityRows($providerId, $unavailabilityMarker) !== []) {
+                    $failures[] = 'unavailability remains';
+                }
+            } catch (\Throwable) {
+                $failures[] = 'unavailability state unknown';
+            }
         }
+        try {
+            if (self::recoverProviderId($client, $marker) !== null) {
+                $failures[] = 'provider remains';
+            }
+        } catch (\Throwable) {
+            $failures[] = 'provider state unknown';
+        }
+        if ($failures !== []) {
+            throw new GateAssertionException(
+                'Provider calendar fixture cleanup was not confirmed: ' . implode(', ', $failures),
+            );
+        }
+    }
+
+    public static function assertUnavailabilityAbsent(int $providerId, string $marker): void
+    {
+        if (self::ownedUnavailabilityRows($providerId, $marker) !== []) {
+            throw new GateAssertionException('Provider calendar fixture delete was not confirmed in the database.');
+        }
+    }
+
+    public static function resetIsolatedRateLimitCache(string $baseUrl): void
+    {
+        // The added real browser pass makes this sequential CI suite exceed the
+        // application's shared per-IP limit. Reset only this test client's
+        // counter under the same lock as rate_limit(); production is unchanged.
+        self::assertAllowedTarget($baseUrl);
+        $cacheDirectory = dirname(__DIR__, 3) . '/storage/cache';
+        if (!is_dir($cacheDirectory) || is_link($cacheDirectory)) {
+            throw new GateAssertionException('Isolated rate-limit cache directory is unavailable.');
+        }
+
+        $host = (string) parse_url($baseUrl, PHP_URL_HOST);
+        $port = (int) (parse_url($baseUrl, PHP_URL_PORT) ?: 80);
+        $connection = @stream_socket_client("tcp://{$host}:{$port}", $errorCode, $errorMessage, 2);
+        if ($connection === false) {
+            throw new GateAssertionException('Isolated rate-limit client address could not be determined.');
+        }
+        try {
+            $localEndpoint = stream_socket_get_name($connection, false);
+        } finally {
+            fclose($connection);
+        }
+        $clientIp = is_string($localEndpoint) ? parse_url('tcp://' . $localEndpoint, PHP_URL_HOST) : false;
+        if (!is_string($clientIp) || filter_var($clientIp, FILTER_VALIDATE_IP) === false) {
+            throw new GateAssertionException('Isolated rate-limit client address is invalid.');
+        }
+
+        $cacheKey = str_replace(':', '', 'rate_limit_key_' . $clientIp);
+        $temporaryKey = str_replace(':', '', 'rate_limit_tmp_' . $clientIp);
+        $bucket = hexdec(substr(hash('sha256', $cacheKey), 0, 8)) % 64;
+        $lockPath = dirname($cacheDirectory) . '/rate_limit.lock.' . sprintf('%02x', $bucket);
+        if (is_link($lockPath)) {
+            throw new GateAssertionException('Isolated rate-limit lock path is unsafe.');
+        }
+        $lock = @fopen($lockPath, 'c');
+        if ($lock === false) {
+            throw new GateAssertionException('Isolated rate-limit lock is unavailable.');
+        }
+        $acquired = false;
+        try {
+            $deadline = microtime(true) + 2;
+            do {
+                if (@flock($lock, LOCK_EX | LOCK_NB)) {
+                    $acquired = true;
+                    break;
+                }
+                usleep(5000);
+            } while (microtime(true) < $deadline);
+            if (!$acquired) {
+                throw new GateAssertionException('Isolated rate-limit lock could not be acquired.');
+            }
+
+            foreach ([$cacheKey, $temporaryKey] as $name) {
+                $entry = $cacheDirectory . '/' . $name;
+                if (!file_exists($entry) && !is_link($entry)) {
+                    continue;
+                }
+                if (is_link($entry) || !is_file($entry) || !unlink($entry)) {
+                    throw new GateAssertionException('Isolated rate-limit cache reset failed.');
+                }
+            }
+        } finally {
+            if ($acquired) {
+                @flock($lock, LOCK_UN);
+            }
+            fclose($lock);
+        }
+    }
+
+    /** @return list<array<string, mixed>> */
+    private static function ownedUnavailabilityRows(int $providerId, string $marker): array
+    {
+        if (!function_exists('get_instance')) {
+            throw new GateAssertionException('Provider calendar fixture DB cleanup is unavailable.');
+        }
+
+        $rows = get_instance()
+            ->db->where([
+                'id_users_provider' => $providerId,
+                'notes' => $marker,
+                'is_unavailability' => 1,
+            ])
+            ->get('appointments')
+            ->result_array();
+        if (count($rows) > 1) {
+            throw new GateAssertionException('Provider calendar fixture unavailability marker was ambiguous.');
+        }
+        return $rows;
     }
 
     private static function recoverProviderId(GateHttpClient $client, string $marker): ?int
