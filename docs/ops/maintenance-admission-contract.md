@@ -93,8 +93,9 @@ accepting it, including after an interrupted final marker removal. These core
 mechanics do not supply an operation-specific terminal proof or enroll a writer.
 For a writer that already holds the canonical shared lock, the local core now
 has a descriptor-based admission check. It validates the same lock inode and
-protocol epoch through the caller's open file description, without opening a
-second lock description or creating state. The caller must retain its original
+protocol epoch and checks the caller's exclusive flock through read-only
+/proc/self/fdinfo for that exact descriptor, without attempting to acquire a
+lock, opening a second lock description or creating state. The caller must retain its original
 descriptor through all mutation and close it on every failed admission. This
 check is only a source-level integration primitive: the ordinary deployment
 entry now invokes it in local source and regression fixtures, while the

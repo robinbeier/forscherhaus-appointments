@@ -13,6 +13,7 @@ import json
 import os
 import re
 import stat
+import sys
 import tempfile
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -239,50 +240,63 @@ def _validate_existing_lock_fd(lock_fd):
     return _identity(original)
 
 
-def _exclusive_flock_present(identity):
-    """Return whether Linux currently reports a write flock for identity."""
+FDINFO_MAX_BYTES = 4096
+FDINFO_LOCK = re.compile(
+    r'^lock:\s+\d+:\s+FLOCK\s+ADVISORY\s+WRITE\s+\d+\s+'
+    r'([0-9a-f]+:[0-9a-f]+:\d+)\s+0\s+EOF$')
+
+
+def _fdinfo_exclusive_flock_present(lock_fd, identity):
+    """Return whether this exact descriptor reports its write flock."""
     device = f'{os.major(identity[0]):02x}:{os.minor(identity[0]):02x}'
     needle = f'{device}:{identity[1]}'
+    path = f'/proc/self/fdinfo/{lock_fd}'
     try:
-        with open('/proc/locks', 'rt', encoding='ascii') as handle:
-            for line in handle:
-                fields = line.split()
-                if (len(fields) >= 6 and fields[1] == 'FLOCK' and
-                        fields[3] == 'WRITE' and fields[5] == needle):
-                    return True
-    except (OSError, UnicodeError):
+        info_fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    except OSError:
         reject('shared_lock_state_unknown')
-    return False
+    try:
+        raw = bytearray()
+        while len(raw) <= FDINFO_MAX_BYTES:
+            try:
+                part = os.read(info_fd, min(4096, FDINFO_MAX_BYTES + 1 - len(raw)))
+            except OSError:
+                reject('shared_lock_state_unknown')
+            if not part:
+                break
+            raw.extend(part)
+        if len(raw) > FDINFO_MAX_BYTES:
+            reject('shared_lock_state_unknown')
+        try:
+            text = bytes(raw).decode('ascii')
+        except UnicodeDecodeError:
+            reject('shared_lock_state_unknown')
+        matches = []
+        for line in text.splitlines():
+            if line.startswith('lock:'):
+                match = FDINFO_LOCK.fullmatch(line)
+                if match is None:
+                    reject('shared_lock_state_unknown')
+                matches.append(match.group(1))
+        return needle in matches
+    finally:
+        try:
+            os.close(info_fd)
+        except OSError:
+            # Preserve a more useful classified rejection that is already
+            # propagating; classify close failure only on an otherwise clean
+            # read.
+            if sys.exc_info()[0] is None:
+                reject('shared_lock_state_unknown')
 
 
 def _verify_existing_flock(lock_fd, lock_identity):
     """Prove a caller-owned descriptor already holds the exclusive flock."""
-    # A nonblocking flock on a duplicated descriptor confirms that the
-    # descriptor still refers to the same open-file-description.  The
-    # /proc/locks observation before that operation is essential: flocking an
-    # otherwise unlocked descriptor would acquire a new lock and would not
-    # prove that the caller entered with the required lock already held.
-    if not _exclusive_flock_present(lock_identity):
+    # fdinfo is descriptor-specific. Reading it is deliberately the only
+    # validation operation here: flocking an unlocked descriptor would
+    # silently acquire authority and could race a competing lock handoff.
+    if not _fdinfo_exclusive_flock_present(lock_fd, lock_identity):
         reject('shared_lock_fd_not_held')
-    try:
-        duplicate = os.dup(lock_fd)
-        os.set_inheritable(duplicate, False)
-    except (OSError, ValueError):
-        reject('shared_lock_fd_invalid')
-    try:
-        duplicate_identity = os.fstat(duplicate)
-        if _identity(duplicate_identity) != lock_identity:
-            reject('shared_lock_identity_changed')
-        try:
-            fcntl.flock(duplicate, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError as exc:
-            if exc.errno in (errno.EACCES, errno.EAGAIN):
-                reject('shared_lock_busy')
-            reject('shared_lock_failed')
-        if not _exclusive_flock_present(lock_identity):
-            reject('shared_lock_fd_not_held')
-    finally:
-        os.close(duplicate)
 
 
 def admit_existing_lock_fd(lock_fd, expected_boot_id=None):
@@ -290,10 +304,10 @@ def admit_existing_lock_fd(lock_fd, expected_boot_id=None):
 
     The caller must pass the descriptor opened for ``SHARED_LOCK_PATH`` and
     must retain it until all later mutation work has finished.  This function
-    never opens the path, creates state, or unlocks the caller descriptor.  A
-    duplicate descriptor is used only to renew the exclusive flock on the
-    same open-file-description; callers must close their descriptor on every
-    failure and after successful mutation completion.
+    never opens the path, creates state, or unlocks the caller descriptor.
+    The descriptor-specific fdinfo proof is read-only; callers must close
+    their descriptor on every failure and after successful mutation
+    completion.
     """
     validate_state_layout()
     _validate_epoch()
@@ -304,31 +318,8 @@ def admit_existing_lock_fd(lock_fd, expected_boot_id=None):
     _trusted_directory(os.path.dirname(parent))
     _trusted_directory(parent, 0o700)
     original_identity = _validate_existing_lock_fd(lock_fd)
-    try:
-        duplicate = os.dup(lock_fd)
-        os.set_inheritable(duplicate, False)
-    except (OSError, ValueError):
-        reject('shared_lock_fd_invalid')
-    try:
-        duplicate_identity = os.fstat(duplicate)
-        if original_identity != _identity(duplicate_identity):
-            reject('shared_lock_identity_changed')
-        try:
-            fcntl.flock(duplicate, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError as exc:
-            if exc.errno in (errno.EACCES, errno.EAGAIN):
-                reject('shared_lock_busy')
-            reject('shared_lock_failed')
-        after_original = os.fstat(lock_fd)
-        after_duplicate = os.fstat(duplicate)
-        after_path = os.lstat(path)
-        if (original_identity != _identity(after_original) or
-                original_identity != _identity(after_duplicate) or
-                original_identity != _identity(after_path)):
-            reject('shared_lock_identity_changed')
-        return _admit_locked(expected_boot_id)
-    finally:
-        os.close(duplicate)
+    _verify_existing_flock(lock_fd, original_identity)
+    return _admit_locked(expected_boot_id)
 
 
 def _close_shared_lock(fd):
@@ -696,9 +687,8 @@ class MaintenanceAdmission:
             reject('shared_lock_identity_changed')
         if self._caller_owned_fd:
             # Re-prove the caller still holds the exclusive flock immediately
-            # before every capability operation. This must observe absence
-            # before attempting the duplicate-fd verification so an unlocked
-            # descriptor is never silently reacquired.
+            # before every capability operation using descriptor-specific,
+            # read-only fdinfo. An unlocked descriptor is never reacquired.
             _verify_existing_flock(self._fd, self.lock_identity)
 
     def admit(self):

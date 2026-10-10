@@ -72,18 +72,15 @@ class MaintenancePendingTest(unittest.TestCase):
             fcntl.flock(caller, fcntl.LOCK_UN)
             os.close(caller)
 
-    def test_existing_unlocked_fd_is_locked_until_caller_close(self):
+    def test_existing_unlocked_fd_is_rejected_without_acquiring_lock(self):
         caller = os.open(self.lock, os.O_RDWR)
         competitor = os.open(self.lock, os.O_RDWR)
         try:
-            self.assertEqual('admitted', MODULE.admit_existing_lock_fd(caller)['status'])
-            self.assert_lock_busy(competitor)
-            os.close(caller)
-            caller = None
+            with self.assertRaisesRegex(MODULE.PendingError, 'shared_lock_fd_not_held'):
+                MODULE.admit_existing_lock_fd(caller)
             fcntl.flock(competitor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         finally:
-            if caller is not None:
-                os.close(caller)
+            os.close(caller)
             os.close(competitor)
 
     def test_existing_fd_rejects_wrong_replaced_or_closed_descriptor(self):
@@ -118,13 +115,39 @@ class MaintenancePendingTest(unittest.TestCase):
         before = set(os.listdir(self.state))
         try:
             fcntl.flock(foreign, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            with self.assertRaisesRegex(MODULE.PendingError, 'shared_lock_busy'):
+            with self.assertRaisesRegex(MODULE.PendingError, 'shared_lock_fd_not_held'):
                 MODULE.admit_existing_lock_fd(candidate)
             self.assertEqual(before, set(os.listdir(self.state)))
         finally:
             os.close(candidate)
             fcntl.flock(foreign, fcntl.LOCK_UN)
             os.close(foreign)
+
+    def test_read_only_admission_rejects_unlocked_fd_after_competing_handoff(self):
+        caller = os.open(self.lock, os.O_RDWR)
+        competitor = os.open(self.lock, os.O_RDWR)
+        original_dup = MODULE.os.dup
+        try:
+            fcntl.flock(competitor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+            def releasing_dup(fd):
+                # The old validator could acquire caller after this handoff.
+                fcntl.flock(competitor, fcntl.LOCK_UN)
+                return original_dup(fd)
+
+            MODULE.os.dup = releasing_dup
+            with self.assertRaisesRegex(MODULE.PendingError, 'shared_lock_fd_not_held'):
+                MODULE.admit_existing_lock_fd(caller)
+            self.assertFalse(MODULE._fdinfo_exclusive_flock_present(
+                caller, MODULE._identity(os.fstat(caller))))
+        finally:
+            MODULE.os.dup = original_dup
+            try:
+                fcntl.flock(competitor, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            os.close(caller)
+            os.close(competitor)
 
     def test_existing_fd_capability_publishes_and_clears_without_duplicating_or_owning_fd(self):
         caller = os.open(self.lock, os.O_RDWR)
@@ -157,11 +180,50 @@ class MaintenancePendingTest(unittest.TestCase):
             with self.assertRaisesRegex(MODULE.PendingError, 'shared_lock_fd_not_held'):
                 MODULE.MaintenanceAdmission.from_existing_lock_fd(caller)
             fcntl.flock(competitor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            with self.assertRaisesRegex(MODULE.PendingError, 'shared_lock_busy'):
+            with self.assertRaisesRegex(MODULE.PendingError, 'shared_lock_fd_not_held'):
                 MODULE.MaintenanceAdmission.from_existing_lock_fd(caller)
             self.assert_lock_busy(caller)
-        finally:
+            # Deterministic handoff: the competing lock releases before the
+            # validator runs, but the caller descriptor is still unlocked.
             fcntl.flock(competitor, fcntl.LOCK_UN)
+            with self.assertRaisesRegex(MODULE.PendingError, 'shared_lock_fd_not_held'):
+                MODULE.MaintenanceAdmission.from_existing_lock_fd(caller)
+            self.assertFalse(MODULE._fdinfo_exclusive_flock_present(
+                caller, MODULE._identity(os.fstat(caller))))
+        finally:
+            try:
+                fcntl.flock(competitor, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            os.close(caller)
+            os.close(competitor)
+
+    def test_fdinfo_validator_rejects_handoff_race_without_dup_or_flock(self):
+        """An inode-wide precheck must not turn a lock handoff into authority."""
+        caller = os.open(self.lock, os.O_RDWR)
+        competitor = os.open(self.lock, os.O_RDWR)
+        original_dup = MODULE.os.dup
+        try:
+            fcntl.flock(competitor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+            def releasing_dup(fd):
+                # This models the old /proc/locks check racing a competitor's
+                # release between the precheck and flock(dup(caller)). The
+                # descriptor-specific validator must never invoke this.
+                fcntl.flock(competitor, fcntl.LOCK_UN)
+                return original_dup(fd)
+
+            MODULE.os.dup = releasing_dup
+            identity = MODULE._identity(os.fstat(caller))
+            with self.assertRaisesRegex(MODULE.PendingError, 'shared_lock_fd_not_held'):
+                MODULE._verify_existing_flock(caller, identity)
+            self.assertFalse(MODULE._fdinfo_exclusive_flock_present(caller, identity))
+        finally:
+            MODULE.os.dup = original_dup
+            try:
+                fcntl.flock(competitor, fcntl.LOCK_UN)
+            except OSError:
+                pass
             os.close(caller)
             os.close(competitor)
 
@@ -319,6 +381,7 @@ class MaintenancePendingTest(unittest.TestCase):
                     self._write(os.path.join(self.state, MODULE.CLEAR_MARKER_TEMP_PREFIX + 'blocked'), b'blocked')
                 caller = os.open(self.lock, os.O_RDWR)
                 try:
+                    fcntl.flock(caller, fcntl.LOCK_EX | fcntl.LOCK_NB)
                     with self.assertRaisesRegex(MODULE.PendingError, 'pending_|state_'):
                         MODULE.admit_existing_lock_fd(caller)
                 finally:
