@@ -11,7 +11,7 @@ final class DeployStableResultTest extends TestCase
 {
     private const ADMISSION_ROOT = '/var/lib/fh-maintenance-admission';
     private const ADMISSION_CORE = '/usr/local/libexec/fh/maintenance_pending_v1.py';
-    private const ADMISSION_CORE_HASH = '32f814b338e933dfe73c67fdec03799e68c5c50a97c263a7b7b17481ab7f6d1c';
+    private const ADMISSION_CORE_HASH = '13e20fc733060cf7ec28a80ca40fc8e19a7b2da74bc76a34ffaba00af4839267';
 
     #[Group('root-deployment')]
     public function testDirectEntryAdmissionOrderKeepsCanaryRejectionBeforeReceiptMutation(): void

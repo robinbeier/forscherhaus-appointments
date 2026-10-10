@@ -98,9 +98,12 @@ second lock description or creating state. The caller must retain its original
 descriptor through all mutation and close it on every failed admission. This
 check is only a source-level integration primitive: the ordinary deployment
 entry now invokes it in local source and regression fixtures, while the
-installed production deploy script remains on the older contract. It does
-not replace registration or terminal proof for work that can outlive its
-owner.
+installed production deploy script remains on the older contract. The local
+core also offers recovery through the same already-held lock descriptor, so a
+writer can settle its own clear marker without releasing the shared lock. The
+caller must independently prove its exact operation is terminal and all
+publication or cleanup obligations are complete. Neither API replaces
+registration or terminal proof for work that can outlive its owner.
 Only trusted root integration code may call the recovery capability; its proof
 callback is not an operator-selectable flag or an authorization boundary. Each
 future writer must bind a fixed, reviewed verifier for its own resource before
