@@ -72,18 +72,15 @@ class MaintenancePendingTest(unittest.TestCase):
             fcntl.flock(caller, fcntl.LOCK_UN)
             os.close(caller)
 
-    def test_existing_unlocked_fd_is_locked_until_caller_close(self):
+    def test_existing_unlocked_fd_is_rejected_without_acquiring_lock(self):
         caller = os.open(self.lock, os.O_RDWR)
         competitor = os.open(self.lock, os.O_RDWR)
         try:
-            self.assertEqual('admitted', MODULE.admit_existing_lock_fd(caller)['status'])
-            self.assert_lock_busy(competitor)
-            os.close(caller)
-            caller = None
+            with self.assertRaisesRegex(MODULE.PendingError, 'shared_lock_fd_not_held'):
+                MODULE.admit_existing_lock_fd(caller)
             fcntl.flock(competitor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         finally:
-            if caller is not None:
-                os.close(caller)
+            os.close(caller)
             os.close(competitor)
 
     def test_existing_fd_rejects_wrong_replaced_or_closed_descriptor(self):
@@ -118,13 +115,409 @@ class MaintenancePendingTest(unittest.TestCase):
         before = set(os.listdir(self.state))
         try:
             fcntl.flock(foreign, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            with self.assertRaisesRegex(MODULE.PendingError, 'shared_lock_busy'):
+            with self.assertRaisesRegex(MODULE.PendingError, 'shared_lock_fd_not_held'):
                 MODULE.admit_existing_lock_fd(candidate)
             self.assertEqual(before, set(os.listdir(self.state)))
         finally:
             os.close(candidate)
             fcntl.flock(foreign, fcntl.LOCK_UN)
             os.close(foreign)
+
+    def test_read_only_admission_rejects_unlocked_fd_after_competing_handoff(self):
+        caller = os.open(self.lock, os.O_RDWR)
+        competitor = os.open(self.lock, os.O_RDWR)
+        original_dup = MODULE.os.dup
+        try:
+            fcntl.flock(competitor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+            def releasing_dup(fd):
+                # The old validator could acquire caller after this handoff.
+                fcntl.flock(competitor, fcntl.LOCK_UN)
+                return original_dup(fd)
+
+            MODULE.os.dup = releasing_dup
+            with self.assertRaisesRegex(MODULE.PendingError, 'shared_lock_fd_not_held'):
+                MODULE.admit_existing_lock_fd(caller)
+            self.assertFalse(MODULE._fdinfo_exclusive_flock_present(
+                caller, MODULE._identity(os.fstat(caller))))
+        finally:
+            MODULE.os.dup = original_dup
+            try:
+                fcntl.flock(competitor, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            os.close(caller)
+            os.close(competitor)
+
+    def test_existing_fd_capability_publishes_and_clears_without_duplicating_or_owning_fd(self):
+        caller = os.open(self.lock, os.O_RDWR)
+        competitor = os.open(self.lock, os.O_RDWR)
+        try:
+            fcntl.flock(caller, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with MODULE.MaintenanceAdmission.from_existing_lock_fd(caller) as admission:
+                record = self.record()
+                self.assertEqual(record, admission.publish_pending(record))
+                self.assertEqual('cleared',
+                                 admission.clear_pending(record, lambda _: True)['status'])
+            # Exiting the capability must leave the caller's flock and fd
+            # untouched.  A competing descriptor remains blocked until the
+            # caller explicitly releases its own lock.
+            self.assert_lock_busy(competitor)
+            fcntl.flock(caller, fcntl.LOCK_UN)
+            fcntl.flock(competitor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(competitor, fcntl.LOCK_UN)
+        finally:
+            os.close(caller)
+            os.close(competitor)
+        with MODULE.maintenance_recovery() as recovery:
+            self.assertEqual('recovered',
+                             recovery.recover_clear_marker(lambda _: True)['status'])
+
+    def test_existing_fd_capability_rejects_unlocked_descriptor(self):
+        caller = os.open(self.lock, os.O_RDWR)
+        competitor = os.open(self.lock, os.O_RDWR)
+        try:
+            with self.assertRaisesRegex(MODULE.PendingError, 'shared_lock_fd_not_held'):
+                MODULE.MaintenanceAdmission.from_existing_lock_fd(caller)
+            fcntl.flock(competitor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with self.assertRaisesRegex(MODULE.PendingError, 'shared_lock_fd_not_held'):
+                MODULE.MaintenanceAdmission.from_existing_lock_fd(caller)
+            self.assert_lock_busy(caller)
+            # Deterministic handoff: the competing lock releases before the
+            # validator runs, but the caller descriptor is still unlocked.
+            fcntl.flock(competitor, fcntl.LOCK_UN)
+            with self.assertRaisesRegex(MODULE.PendingError, 'shared_lock_fd_not_held'):
+                MODULE.MaintenanceAdmission.from_existing_lock_fd(caller)
+            self.assertFalse(MODULE._fdinfo_exclusive_flock_present(
+                caller, MODULE._identity(os.fstat(caller))))
+        finally:
+            try:
+                fcntl.flock(competitor, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            os.close(caller)
+            os.close(competitor)
+
+    def test_fdinfo_validator_rejects_handoff_race_without_dup_or_flock(self):
+        """An inode-wide precheck must not turn a lock handoff into authority."""
+        caller = os.open(self.lock, os.O_RDWR)
+        competitor = os.open(self.lock, os.O_RDWR)
+        original_dup = MODULE.os.dup
+        try:
+            fcntl.flock(competitor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+            def releasing_dup(fd):
+                # This models the old /proc/locks check racing a competitor's
+                # release between the precheck and flock(dup(caller)). The
+                # descriptor-specific validator must never invoke this.
+                fcntl.flock(competitor, fcntl.LOCK_UN)
+                return original_dup(fd)
+
+            MODULE.os.dup = releasing_dup
+            identity = MODULE._identity(os.fstat(caller))
+            with self.assertRaisesRegex(MODULE.PendingError, 'shared_lock_fd_not_held'):
+                MODULE._verify_existing_flock(caller, identity)
+            self.assertFalse(MODULE._fdinfo_exclusive_flock_present(caller, identity))
+        finally:
+            MODULE.os.dup = original_dup
+            try:
+                fcntl.flock(competitor, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            os.close(caller)
+            os.close(competitor)
+
+    def test_existing_fd_recovery_capability_settles_marker_without_reopening_lock(self):
+        caller = os.open(self.lock, os.O_RDWR)
+        competitor = os.open(self.lock, os.O_RDWR)
+        record = self.record()
+        try:
+            fcntl.flock(caller, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with MODULE.MaintenanceAdmission.from_existing_lock_fd(caller) as admission:
+                admission.publish_pending(record)
+                self.assertEqual('cleared',
+                                 admission.clear_pending(record, lambda _: True)['status'])
+            with MODULE.MaintenanceAdmission.recovery_from_existing_lock_fd(caller) as recovery:
+                self.assertEqual('recovered',
+                                 recovery.recover_clear_marker(
+                                     lambda value: value == record)['status'])
+            self.assert_lock_busy(competitor)
+            fcntl.flock(caller, fcntl.LOCK_UN)
+            fcntl.flock(competitor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(competitor, fcntl.LOCK_UN)
+            self.assertEqual('admitted', MODULE.admit_read_only()['status'])
+        finally:
+            os.close(caller)
+            os.close(competitor)
+
+    def test_existing_fd_recovery_refuses_wrong_proof_and_lost_flock(self):
+        caller = os.open(self.lock, os.O_RDWR)
+        record = self.record()
+        try:
+            fcntl.flock(caller, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with MODULE.MaintenanceAdmission.from_existing_lock_fd(caller) as admission:
+                admission.publish_pending(record)
+                admission.clear_pending(record, lambda _: True)
+            recovery = MODULE.MaintenanceAdmission.recovery_from_existing_lock_fd(caller)
+            with recovery:
+                with self.assertRaisesRegex(MODULE.PendingError, 'terminal_proof_unknown'):
+                    recovery.recover_clear_marker(lambda _: False)
+            self.assertTrue(os.path.lexists(self.clear_marker))
+            fcntl.flock(caller, fcntl.LOCK_UN)
+            with self.assertRaisesRegex(MODULE.PendingError,
+                                         'shared_lock_fd_not_held|shared_lock_busy'):
+                MODULE.MaintenanceAdmission.recovery_from_existing_lock_fd(caller)
+        finally:
+            if os.path.lexists(self.clear_marker):
+                os.unlink(self.clear_marker)
+            if os.path.lexists(self.pending):
+                os.unlink(self.pending)
+            os.close(caller)
+
+    def test_existing_fd_capability_rejects_unlock_before_publish(self):
+        caller = os.open(self.lock, os.O_RDWR)
+        try:
+            fcntl.flock(caller, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with MODULE.MaintenanceAdmission.from_existing_lock_fd(caller) as admission:
+                fcntl.flock(caller, fcntl.LOCK_UN)
+                with self.assertRaisesRegex(MODULE.PendingError,
+                                             'shared_lock_fd_not_held|shared_lock_busy'):
+                    admission.publish_pending(self.record())
+            self.assertFalse(os.path.lexists(self.pending))
+        finally:
+            os.close(caller)
+
+    def test_existing_fd_capability_rejects_unlock_before_clear_and_preserves_pending(self):
+        caller = os.open(self.lock, os.O_RDWR)
+        try:
+            fcntl.flock(caller, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with MODULE.MaintenanceAdmission.from_existing_lock_fd(caller) as admission:
+                record = self.record()
+                admission.publish_pending(record)
+                fcntl.flock(caller, fcntl.LOCK_UN)
+                with self.assertRaisesRegex(MODULE.PendingError,
+                                             'shared_lock_fd_not_held|shared_lock_busy'):
+                    admission.clear_pending(record, lambda _: True)
+            self.assertTrue(os.path.lexists(self.pending))
+            os.unlink(self.pending)
+        finally:
+            os.close(caller)
+
+    def test_existing_fd_capability_cannot_be_reentered_after_exit(self):
+        caller = os.open(self.lock, os.O_RDWR)
+        competitor = os.open(self.lock, os.O_RDWR)
+        try:
+            fcntl.flock(caller, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            capability = MODULE.MaintenanceAdmission.from_existing_lock_fd(caller)
+            with capability:
+                self.assertEqual('admitted', capability.admit()['status'])
+            with self.assertRaisesRegex(MODULE.PendingError, 'lock_capability_closed'):
+                with capability:
+                    pass
+            fcntl.flock(caller, fcntl.LOCK_UN)
+            fcntl.flock(competitor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(competitor, fcntl.LOCK_UN)
+        finally:
+            os.close(caller)
+            os.close(competitor)
+
+    def test_existing_fd_capability_pins_open_file_description_across_fd_reuse(self):
+        caller = os.open(self.lock, os.O_RDWR)
+        source_number = caller
+        foreign_path = os.path.join(self.lock_dir, 'foreign.lock')
+        foreign = None
+        try:
+            fcntl.flock(caller, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            capability = MODULE.MaintenanceAdmission.from_existing_lock_fd(caller)
+            os.close(caller)
+            caller = None
+            self._write(foreign_path, b'', 0o600)
+            foreign = os.open(foreign_path, os.O_RDWR)
+            os.dup2(foreign, source_number)
+            if foreign != source_number:
+                os.close(foreign)
+                foreign = None
+            else:
+                foreign = None
+            with capability:
+                self.assertEqual('admitted', capability.admit()['status'])
+            os.close(source_number)
+            source_number = None
+        finally:
+            if caller is not None:
+                os.close(caller)
+            if foreign is not None:
+                os.close(foreign)
+            if source_number is not None:
+                os.close(source_number)
+
+    def test_caller_capability_enter_failure_closes_pin_on_epoch_drift(self):
+        caller = os.open(self.lock, os.O_RDWR)
+        contender = os.open(self.lock, os.O_RDWR)
+        moved = self.epoch + '.moved'
+        try:
+            fcntl.flock(caller, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            capability = MODULE.MaintenanceAdmission.from_existing_lock_fd(caller)
+            os.rename(self.epoch, moved)
+            self._write(self.epoch, (MODULE.PROTOCOL_EPOCH + '\n').encode())
+            with self.assertRaisesRegex(MODULE.PendingError, 'epoch_identity_changed'):
+                with capability:
+                    pass
+            os.unlink(self.epoch)
+            os.rename(moved, self.epoch)
+            fcntl.flock(caller, fcntl.LOCK_UN)
+            fcntl.flock(contender, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(contender, fcntl.LOCK_UN)
+        finally:
+            if os.path.lexists(moved):
+                os.unlink(moved)
+            os.close(caller)
+            os.close(contender)
+
+    def test_caller_capability_enter_failure_closes_pin_on_state_drift(self):
+        caller = os.open(self.lock, os.O_RDWR)
+        contender = os.open(self.lock, os.O_RDWR)
+        moved = self.state + '.moved'
+        try:
+            fcntl.flock(caller, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            capability = MODULE.MaintenanceAdmission.from_existing_lock_fd(caller)
+            os.rename(self.state, moved)
+            os.mkdir(self.state, 0o700)
+            self._write(os.path.join(self.state, 'epoch'),
+                        (MODULE.PROTOCOL_EPOCH + '\n').encode())
+            with self.assertRaisesRegex(MODULE.PendingError, 'state_identity_changed'):
+                with capability:
+                    pass
+            os.unlink(os.path.join(self.state, 'epoch'))
+            os.rmdir(self.state)
+            os.rename(moved, self.state)
+            fcntl.flock(caller, fcntl.LOCK_UN)
+            fcntl.flock(contender, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(contender, fcntl.LOCK_UN)
+        finally:
+            if os.path.isdir(self.state) and os.path.isdir(moved):
+                os.unlink(os.path.join(self.state, 'epoch'))
+                os.rmdir(self.state)
+            if os.path.isdir(moved) and not os.path.exists(self.state):
+                os.rename(moved, self.state)
+            os.close(caller)
+            os.close(contender)
+
+    def test_caller_capability_enter_failure_closes_pin_on_lock_replacement(self):
+        caller = os.open(self.lock, os.O_RDWR)
+        contender = None
+        moved = self.lock + '.moved'
+        try:
+            fcntl.flock(caller, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            capability = MODULE.MaintenanceAdmission.from_existing_lock_fd(caller)
+            os.rename(self.lock, moved)
+            self._write(self.lock, b'', 0o600)
+            with self.assertRaisesRegex(MODULE.PendingError, 'shared_lock_identity_changed'):
+                with capability:
+                    pass
+            os.unlink(self.lock)
+            os.rename(moved, self.lock)
+            fcntl.flock(caller, fcntl.LOCK_UN)
+            contender = os.open(self.lock, os.O_RDWR)
+            fcntl.flock(contender, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(contender, fcntl.LOCK_UN)
+        finally:
+            if os.path.lexists(self.lock) and os.path.lexists(moved):
+                os.unlink(self.lock)
+            if os.path.lexists(moved) and not os.path.lexists(self.lock):
+                os.rename(moved, self.lock)
+            os.close(caller)
+            if contender is not None:
+                os.close(contender)
+
+    def test_existing_fd_capability_pin_keeps_canonical_lock_across_source_close_and_reopen(self):
+        caller = os.open(self.lock, os.O_RDWR)
+        source_number = caller
+        competitor = None
+        competitor_initial = None
+        reopened = None
+        try:
+            fcntl.flock(caller, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            capability = MODULE.MaintenanceAdmission.from_existing_lock_fd(caller)
+            os.close(caller)
+            caller = None
+
+            competitor_initial = os.open(self.lock, os.O_RDWR)
+            competitor = fcntl.fcntl(competitor_initial, fcntl.F_DUPFD_CLOEXEC,
+                                     source_number + 10)
+            os.close(competitor_initial)
+            competitor_initial = None
+            self.assert_lock_busy(competitor)
+            reopened = os.open(self.lock, os.O_RDWR)
+            os.dup2(reopened, source_number)
+            if reopened != source_number:
+                os.close(reopened)
+            reopened = source_number
+            self.assert_lock_busy(reopened)
+            with capability:
+                self.assertEqual('admitted', capability.admit()['status'])
+
+            # Closing the retained pin releases the lock; the independent
+            # canonical competitor can then acquire it.
+            fcntl.flock(competitor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(competitor, fcntl.LOCK_UN)
+        finally:
+            if caller is not None:
+                os.close(caller)
+            if competitor is not None:
+                os.close(competitor)
+            if competitor_initial is not None:
+                os.close(competitor_initial)
+            if reopened is not None:
+                os.close(reopened)
+
+    def test_existing_fd_capability_rejects_reused_descriptor(self):
+        caller = os.open(self.lock, os.O_RDWR)
+        try:
+            fcntl.flock(caller, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            os.close(caller)
+            caller = os.open(self.epoch, os.O_RDWR)
+            with self.assertRaisesRegex(MODULE.PendingError,
+                                         'shared_lock_fd_identity_invalid|shared_lock_identity_changed'):
+                MODULE.MaintenanceAdmission.from_existing_lock_fd(caller)
+        finally:
+            os.close(caller)
+
+    def test_existing_fd_capability_refuses_epoch_identity_drift(self):
+        caller = os.open(self.lock, os.O_RDWR)
+        replacement = self.epoch + '.replacement'
+        try:
+            fcntl.flock(caller, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with MODULE.MaintenanceAdmission.from_existing_lock_fd(caller) as admission:
+                os.rename(self.epoch, replacement)
+                self._write(self.epoch, (MODULE.PROTOCOL_EPOCH + '\n').encode())
+                with self.assertRaisesRegex(MODULE.PendingError, 'epoch_identity_changed'):
+                    admission.publish_pending(self.record())
+                os.unlink(self.epoch)
+                os.rename(replacement, self.epoch)
+        finally:
+            if os.path.lexists(replacement):
+                os.unlink(replacement)
+            os.close(caller)
+
+    def test_existing_fd_capability_refuses_state_directory_drift(self):
+        caller = os.open(self.lock, os.O_RDWR)
+        moved = self.state + '.moved'
+        try:
+            fcntl.flock(caller, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with MODULE.MaintenanceAdmission.from_existing_lock_fd(caller) as admission:
+                os.rename(self.state, moved)
+                os.mkdir(self.state, 0o700)
+                with self.assertRaisesRegex(MODULE.PendingError, 'state_identity_changed'):
+                    admission.publish_pending(self.record())
+                os.rmdir(self.state)
+                os.rename(moved, self.state)
+        finally:
+            if os.path.isdir(self.state) and os.path.isdir(moved):
+                os.rmdir(self.state)
+            if os.path.isdir(moved) and not os.path.exists(self.state):
+                os.rename(moved, self.state)
+            os.close(caller)
 
     def test_existing_fd_blocks_pending_clear_marker_and_temp(self):
         cases = ('pending', 'clear_marker', 'clear_temp')
@@ -138,6 +531,7 @@ class MaintenancePendingTest(unittest.TestCase):
                     self._write(os.path.join(self.state, MODULE.CLEAR_MARKER_TEMP_PREFIX + 'blocked'), b'blocked')
                 caller = os.open(self.lock, os.O_RDWR)
                 try:
+                    fcntl.flock(caller, fcntl.LOCK_EX | fcntl.LOCK_NB)
                     with self.assertRaisesRegex(MODULE.PendingError, 'pending_|state_'):
                         MODULE.admit_existing_lock_fd(caller)
                 finally:

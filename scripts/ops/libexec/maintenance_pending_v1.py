@@ -13,6 +13,7 @@ import json
 import os
 import re
 import stat
+import sys
 import tempfile
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -55,6 +56,11 @@ def _inode_binding(st):
     """Identity fields stable across hardlink creation (excluding nlink/ctime)."""
     return (st.st_dev, st.st_ino, st.st_mode, st.st_uid, st.st_gid,
             st.st_size, st.st_mtime_ns)
+
+
+def _directory_identity(st):
+    """Stable identity for a trusted directory whose entries may change."""
+    return (st.st_dev, st.st_ino, st.st_mode, st.st_uid, st.st_gid)
 
 
 def _exact_regular(path, mode, maximum=None):
@@ -203,24 +209,14 @@ def _open_shared_lock():
         raise
 
 
-def admit_existing_lock_fd(lock_fd, expected_boot_id=None):
-    """Admit through a trusted caller-owned canonical lock descriptor.
+def _validate_existing_lock_fd(lock_fd):
+    """Validate a caller-owned descriptor for the canonical shared lock.
 
-    The caller must pass the descriptor opened for ``SHARED_LOCK_PATH`` and
-    must retain it until all later mutation work has finished.  This function
-    never opens the path, creates state, or unlocks the caller descriptor.  A
-    duplicate descriptor is used only to renew the exclusive flock on the
-    same open-file-description; callers must close their descriptor on every
-    failure and after successful mutation completion.
+    This intentionally does not open, duplicate, lock, unlock, or close the
+    descriptor.  The caller must already hold the shared flock and retains
+    ownership of its descriptor for the whole capability lifetime.
     """
-    validate_state_layout()
-    _validate_epoch()
     path = SHARED_LOCK_PATH
-    _trusted_directory('/var')
-    _trusted_directory('/var/lib')
-    parent = os.path.dirname(path)
-    _trusted_directory(os.path.dirname(parent))
-    _trusted_directory(parent, 0o700)
     try:
         flags = fcntl.fcntl(lock_fd, fcntl.F_GETFL)
         original = os.fstat(lock_fd)
@@ -241,31 +237,89 @@ def admit_existing_lock_fd(lock_fd, expected_boot_id=None):
             before.st_nlink != 1 or before.st_size != 0 or
             _identity(original) != _identity(before)):
         reject('shared_lock_identity_changed')
+    return _identity(original)
+
+
+FDINFO_MAX_BYTES = 4096
+FDINFO_LOCK = re.compile(
+    r'^lock:\s+\d+:\s+FLOCK\s+ADVISORY\s+WRITE\s+\d+\s+'
+    r'([0-9a-f]+:[0-9a-f]+:\d+)\s+0\s+EOF$')
+
+
+def _fdinfo_exclusive_flock_present(lock_fd, identity):
+    """Return whether this exact descriptor reports its write flock."""
+    device = f'{os.major(identity[0]):02x}:{os.minor(identity[0]):02x}'
+    needle = f'{device}:{identity[1]}'
+    path = f'/proc/self/fdinfo/{lock_fd}'
     try:
-        duplicate = os.dup(lock_fd)
-        os.set_inheritable(duplicate, False)
-    except (OSError, ValueError):
-        reject('shared_lock_fd_invalid')
+        info_fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    except OSError:
+        reject('shared_lock_state_unknown')
     try:
-        duplicate_identity = os.fstat(duplicate)
-        if _identity(original) != _identity(duplicate_identity):
-            reject('shared_lock_identity_changed')
+        raw = bytearray()
+        while len(raw) <= FDINFO_MAX_BYTES:
+            try:
+                part = os.read(info_fd, min(4096, FDINFO_MAX_BYTES + 1 - len(raw)))
+            except OSError:
+                reject('shared_lock_state_unknown')
+            if not part:
+                break
+            raw.extend(part)
+        if len(raw) > FDINFO_MAX_BYTES:
+            reject('shared_lock_state_unknown')
         try:
-            fcntl.flock(duplicate, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError as exc:
-            if exc.errno in (errno.EACCES, errno.EAGAIN):
-                reject('shared_lock_busy')
-            reject('shared_lock_failed')
-        after_original = os.fstat(lock_fd)
-        after_duplicate = os.fstat(duplicate)
-        after_path = os.lstat(path)
-        if (_identity(original) != _identity(after_original) or
-                _identity(original) != _identity(after_duplicate) or
-                _identity(original) != _identity(after_path)):
-            reject('shared_lock_identity_changed')
-        return _admit_locked(expected_boot_id)
+            text = bytes(raw).decode('ascii')
+        except UnicodeDecodeError:
+            reject('shared_lock_state_unknown')
+        matches = []
+        for line in text.splitlines():
+            if line.startswith('lock:'):
+                match = FDINFO_LOCK.fullmatch(line)
+                if match is None:
+                    reject('shared_lock_state_unknown')
+                matches.append(match.group(1))
+        return needle in matches
     finally:
-        os.close(duplicate)
+        try:
+            os.close(info_fd)
+        except OSError:
+            # Preserve a more useful classified rejection that is already
+            # propagating; classify close failure only on an otherwise clean
+            # read.
+            if sys.exc_info()[0] is None:
+                reject('shared_lock_state_unknown')
+
+
+def _verify_existing_flock(lock_fd, lock_identity):
+    """Prove a caller-owned descriptor already holds the exclusive flock."""
+    # fdinfo is descriptor-specific. Reading it is deliberately the only
+    # validation operation here: flocking an unlocked descriptor would
+    # silently acquire authority and could race a competing lock handoff.
+    if not _fdinfo_exclusive_flock_present(lock_fd, lock_identity):
+        reject('shared_lock_fd_not_held')
+
+
+def admit_existing_lock_fd(lock_fd, expected_boot_id=None):
+    """Admit through a trusted caller-owned canonical lock descriptor.
+
+    The caller must pass the descriptor opened for ``SHARED_LOCK_PATH`` and
+    must retain it until all later mutation work has finished.  This function
+    never opens the path, creates state, or unlocks the caller descriptor.
+    The descriptor-specific fdinfo proof is read-only; callers must close
+    their descriptor on every failure and after successful mutation
+    completion.
+    """
+    validate_state_layout()
+    _validate_epoch()
+    path = SHARED_LOCK_PATH
+    _trusted_directory('/var')
+    _trusted_directory('/var/lib')
+    parent = os.path.dirname(path)
+    _trusted_directory(os.path.dirname(parent))
+    _trusted_directory(parent, 0o700)
+    original_identity = _validate_existing_lock_fd(lock_fd)
+    _verify_existing_flock(lock_fd, original_identity)
+    return _admit_locked(expected_boot_id)
 
 
 def _close_shared_lock(fd):
@@ -533,12 +587,99 @@ class MaintenanceAdmission:
         self.expected_boot_id = expected_boot_id
         self.recovery = recovery
         self._fd = None
+        self._caller_owned_fd = False
+        self._closed = False
+        self._state_identity = None
+        self._epoch_identity = None
         self.lock_identity = None
         self.admission = None
 
+    @classmethod
+    def _from_existing_lock_fd(cls, lock_fd, expected_boot_id=None, recovery=False):
+        """Create a capability over an already-held lock descriptor."""
+        capability = cls(expected_boot_id, recovery=recovery)
+        capability._caller_owned_fd = True
+        pinned_fd = None
+        try:
+            epoch = validate_state_layout()
+            _validate_epoch()
+            _trusted_directory('/var')
+            _trusted_directory('/var/lib')
+            parent = os.path.dirname(SHARED_LOCK_PATH)
+            _trusted_directory(os.path.dirname(parent))
+            _trusted_directory(parent, 0o700)
+            # Directory contents change during publication and recovery, so
+            # bind only its stable inode and trust-boundary fields.
+            capability._state_identity = _directory_identity(
+                _trusted_directory(STATE_ROOT, 0o700))
+            capability._epoch_identity = _identity(epoch)
+            capability.lock_identity = _validate_existing_lock_fd(lock_fd)
+            try:
+                pinned_fd = fcntl.fcntl(lock_fd, fcntl.F_DUPFD_CLOEXEC, 0)
+            except (AttributeError, OSError, ValueError):
+                reject('shared_lock_fd_invalid')
+            pinned_identity = os.fstat(pinned_fd)
+            if _identity(pinned_identity) != capability.lock_identity:
+                reject('shared_lock_identity_changed')
+            # The pin is the capability's lock descriptor for its entire
+            # lifetime. Do not flock it: the descriptor-specific fdinfo proof
+            # must observe an already-held lock and never acquire one.
+            capability._fd = pinned_fd
+            pinned_fd = None
+            _verify_existing_flock(capability._fd, capability.lock_identity)
+            capability.admission = ({'schema': SCHEMA, 'epoch': PROTOCOL_EPOCH,
+                                     'status': 'recovery'} if recovery else
+                                    _admit_locked(expected_boot_id))
+            return capability
+        except Exception:
+            if pinned_fd is not None:
+                os.close(pinned_fd)
+            if capability._fd is not None:
+                os.close(capability._fd)
+            capability._fd = None
+            raise
+
+    @classmethod
+    def from_existing_lock_fd(cls, lock_fd, expected_boot_id=None):
+        """Create a mutation capability over an already-held lock descriptor.
+
+        This is the writer counterpart to :func:`admit_existing_lock_fd`.
+        The caller must already hold the canonical shared flock.  The method
+        validates the descriptor and state identity, then retains a
+        close-on-exec duplicate of the same open-file-description as a lock
+        pin. The caller retains ownership of the original descriptor; this
+        module closes only its own pin on capability exit.
+        """
+        return cls._from_existing_lock_fd(lock_fd, expected_boot_id)
+
+    @classmethod
+    def recovery_from_existing_lock_fd(cls, lock_fd, expected_boot_id=None):
+        """Create recovery capability over an already-held lock descriptor."""
+        return cls._from_existing_lock_fd(lock_fd, expected_boot_id, recovery=True)
+
     def __enter__(self):
+        if self._closed:
+            reject('lock_capability_closed')
+        if self._caller_owned_fd and self._fd is not None:
+            # from_existing_lock_fd has already admitted state while holding
+            # the caller's lock. Do not acquire a second lock description or
+            # run admission a second time when used as a context manager.
+            try:
+                self._assert_held()
+            except Exception:
+                # Python does not call __exit__ when __enter__ raises. Close
+                # only this capability's retained pin; the caller-owned
+                # original descriptor is never stored or touched here.
+                fd = self._fd
+                self._fd = None
+                self._closed = True
+                os.close(fd)
+                raise
+            return self
         validate_state_layout()
         self._validate_epoch_and_lock()
+        self._state_identity = _directory_identity(_trusted_directory(STATE_ROOT, 0o700))
+        self._epoch_identity = _identity(_exact_regular(EPOCH_PATH, 0o600, 128))
         self._fd, self.lock_identity = _open_shared_lock()
         try:
             self.admission = ({'schema': SCHEMA, 'epoch': PROTOCOL_EPOCH,
@@ -557,12 +698,24 @@ class MaintenanceAdmission:
     def _assert_held(self):
         if self._fd is None:
             reject('lock_capability_required')
-        _trusted_directory(STATE_ROOT, 0o700)
+        current_state = _trusted_directory(STATE_ROOT, 0o700)
+        if (self._state_identity is not None and
+                _directory_identity(current_state) != self._state_identity):
+            reject('state_identity_changed')
         _validate_epoch()
+        current_epoch = _exact_regular(EPOCH_PATH, 0o600, 128)
+        if (self._epoch_identity is not None and
+                _identity(current_epoch) != self._epoch_identity):
+            reject('epoch_identity_changed')
         current = os.lstat(SHARED_LOCK_PATH)
         opened = os.fstat(self._fd)
         if _identity(opened) != self.lock_identity or _identity(current) != self.lock_identity:
             reject('shared_lock_identity_changed')
+        if self._caller_owned_fd:
+            # Re-prove the caller still holds the exclusive flock immediately
+            # before every capability operation using descriptor-specific,
+            # read-only fdinfo. An unlocked descriptor is never reacquired.
+            _verify_existing_flock(self._fd, self.lock_identity)
 
     def admit(self):
         self._assert_held()
@@ -621,8 +774,13 @@ class MaintenanceAdmission:
 
     def __exit__(self, exc_type, exc_value, traceback):
         if self._fd is not None:
-            _close_shared_lock(self._fd)
+            fd = self._fd
             self._fd = None
+            self._closed = True
+            if self._caller_owned_fd:
+                os.close(fd)
+            else:
+                _close_shared_lock(fd)
         return False
 
 
@@ -631,6 +789,33 @@ def maintenance_admission(expected_boot_id=None):
     """Yield one lock-held :class:`MaintenanceAdmission` capability."""
     with MaintenanceAdmission(expected_boot_id) as capability:
         yield capability
+
+
+@contextmanager
+def maintenance_admission_from_lock_fd(lock_fd, expected_boot_id=None):
+    """Yield a capability over a caller-owned, already-held lock descriptor.
+
+    The caller retains responsibility for releasing ``lock_fd`` after this
+    context exits. A close-on-exec duplicate of the same open-file-description
+    is retained as the capability pin. The caller's descriptor is never
+    unlocked or closed by this module.
+    """
+    capability = MaintenanceAdmission.from_existing_lock_fd(lock_fd, expected_boot_id)
+    try:
+        yield capability
+    finally:
+        capability.__exit__(None, None, None)
+
+
+@contextmanager
+def maintenance_recovery_from_lock_fd(lock_fd, expected_boot_id=None):
+    """Yield recovery capability over a caller-owned lock descriptor."""
+    capability = MaintenanceAdmission.recovery_from_existing_lock_fd(
+        lock_fd, expected_boot_id)
+    try:
+        yield capability
+    finally:
+        capability.__exit__(None, None, None)
 
 
 @contextmanager

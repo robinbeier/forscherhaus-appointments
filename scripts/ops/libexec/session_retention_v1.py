@@ -27,7 +27,7 @@ MAX_SCAN = 1_000_000
 MAX_SESSION_ID_BYTES = 256
 MAX_ADMISSION_CORE_BYTES = 1_048_576
 ADMISSION_CORE_PATH = '/usr/local/libexec/fh/maintenance_pending_v1.py'
-ADMISSION_CORE_SHA256 = '32f814b338e933dfe73c67fdec03799e68c5c50a97c263a7b7b17481ab7f6d1c'
+ADMISSION_CORE_SHA256 = '6cf32ab5d6fafc48264a743ebb78fcd64e2dc5dbcd05ab643bae39ab8e17efb9'
 
 
 class RetentionError(Exception):
