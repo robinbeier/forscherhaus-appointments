@@ -199,8 +199,19 @@ application deploy.
 
 6. **Deploy the reviewed archive through the existing host path.** For a
    normal release without migration, use the checked-main
-   `scripts/ops/prod_deploy_bound_release.sh` entry once the two read-only
-   admission helpers are installed at their reviewed hashes. It requires the
+   `scripts/ops/prod_deploy_bound_release.sh` entry only after the coordinated
+   ROB-812 rollout is fully installed and verified on the host. The release-pair
+   and backup helpers are additional prerequisites, not a substitute for that
+   rollout.
+
+   This source-level bound-release entry is unavailable on a legacy or otherwise
+   un-enrolled production host. Before use, ROB-812 must be coordinated across
+   all writers, the shared admission core, its state directory, and the
+   epoch/marker contract, with every installed hash freshly verified. Installing
+   only release-pair and backup helpers is insufficient. Do not install the
+   admission core alone or run the current repository wrapper against a legacy
+   host; follow the [maintenance admission contract](maintenance-admission-contract.md).
+   The entry still requires the
    already published archive/provenance pair, a fresh verified backup handoff,
    and the exact currently active release. Its inputs are the reviewed commit,
    release and current-release IDs, and the two local artifact paths; it derives

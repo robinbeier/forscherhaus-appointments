@@ -494,12 +494,18 @@ class BoundReleaseDeployTest(unittest.TestCase):
             swapped = run_validator('maintenance_core_invalid')
             self.assertEqual(70, swapped.returncode)
             self.assertIn('result_class=transport_or_receipt_unknown', swapped.stdout)
+            known = run_validator('maintenance_admission_unknown', 70)
+            self.assertEqual(70, known.returncode)
+            self.assertIn('result_class=maintenance_admission_unknown', known.stdout)
+            swapped = run_validator('maintenance_admission_unknown', 75)
+            self.assertEqual(70, swapped.returncode)
+            self.assertIn('result_class=transport_or_receipt_unknown', swapped.stdout)
             swapped = run_validator('maintenance_pending_present', 70)
             self.assertEqual(70, swapped.returncode)
             self.assertIn('result_class=transport_or_receipt_unknown', swapped.stdout)
 
-    def test_copied_wrapper_emits_veto_receipt_and_never_acknowledges_exit_75(self):
-        """Run the unchanged wrapper decision path with isolated command doubles."""
+    def test_copied_wrapper_preserves_deploy_and_ack_refusal_receipts(self):
+        """Run unchanged deploy and acknowledgement refusal paths with isolated doubles."""
         with tempfile.TemporaryDirectory() as directory:
             project = os.path.join(directory, 'project')
             bin_dir = os.path.join(directory, 'bin')
@@ -598,12 +604,13 @@ exit "${FH_DEPLOY_RC}"
             # Preserve the deployment-side veto regression: no acknowledgement
             # is attempted when the deployment itself returns exit 75.
             deployment_cases = (
-                ('maintenance_pending_present', 75, True),
-                ('lock_busy', 75, True),
-                ('maintenance_core_invalid', 70, True),
-                ('unexpected_refusal', 70, False),
+                ('maintenance_pending_present', 75),
+                ('lock_busy', 75),
+                ('maintenance_core_invalid', 70),
+                ('maintenance_admission_unknown', 70),
+                ('unexpected_refusal', 70),
             )
-            for result_class, deploy_rc, known_refusal in deployment_cases:
+            for result_class, deploy_rc in deployment_cases:
                 marker = os.path.join(directory, 'ack-marker')
                 environment.update({
                     'FH_DEPLOY_RECEIPT': json.dumps({'schema': 'bound_release_deploy.v1', 'status': 'failed', 'result_class': result_class}),
@@ -629,8 +636,10 @@ exit "${FH_DEPLOY_RC}"
                 ('maintenance_pending_present', 75, True),
                 ('lock_busy', 75, True),
                 ('maintenance_core_invalid', 70, True),
+                ('maintenance_admission_unknown', 70, True),
                 ('unexpected_refusal', 70, False),
                 ('maintenance_core_invalid', 75, False),
+                ('maintenance_admission_unknown', 75, False),
                 ('maintenance_pending_present', 70, False),
             )
             for result_class, ack_rc, known_refusal in ack_cases:
