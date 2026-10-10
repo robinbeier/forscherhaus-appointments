@@ -22,6 +22,8 @@ import types
 PAIR_HELPER = '/usr/local/libexec/fh/release_pair_admission_v1.py'
 BACKUP_HELPER = '/usr/local/libexec/fh/backup_handoff_admission_v1.py'
 DEPLOY = '/root/deploy_ea.sh'
+ADMISSION_CORE = '/usr/local/libexec/fh/maintenance_pending_v1.py'
+ADMISSION_CORE_SHA256 = '32f814b338e933dfe73c67fdec03799e68c5c50a97c263a7b7b17481ab7f6d1c'
 LOCK = '/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock'
 CONTINUITY = '/root/backups/easyappointments/backup_continuity_state.json'
 MARKER = '/var/www/html/easyappointments/_RELEASE'
@@ -145,6 +147,33 @@ def active_release(expected):
     if data.split(b'  ', 1)[0] != expected.encode('ascii'):
         fail('active_release_mismatch')
     return observed
+
+
+def admit_maintenance(lock_fd):
+    """Run the fixed admission core against the already-held shared lock."""
+    try:
+        source, _ = bound_hash(
+            ADMISSION_CORE, 1024 * 1024, 0o644, 0, 0, ADMISSION_CORE_SHA256,
+        )
+    except (AdmissionError, OSError, ValueError, TypeError):
+        fail('maintenance_core_invalid')
+
+    namespace = {'__name__': 'fh_maintenance_pending_v1', '__file__': ADMISSION_CORE}
+    try:
+        exec(compile(source, ADMISSION_CORE, 'exec'), namespace)
+    except BaseException:
+        fail('maintenance_admission_unknown')
+
+    pending_error = namespace.get('PendingError')
+    try:
+        result = namespace['admit_existing_lock_fd'](lock_fd)
+    except Exception as error:
+        if isinstance(pending_error, type) and isinstance(error, pending_error):
+            fail('maintenance_' + error.reason, error.code)
+        fail('maintenance_admission_unknown')
+    if not isinstance(result, dict) or result.get('status') != 'admitted':
+        fail('maintenance_admission_unknown')
+    return result
 
 
 def open_lock():
@@ -370,6 +399,7 @@ def acknowledge(args):
     result_path = '/root/fh-deploy-result-' + args.run_id + '.json'
     lock_fd = open_lock()
     try:
+        admit_maintenance(lock_fd)
         guard_data, guard_observed = read_bound_file(RECOVERY_GUARD, 4096, 0o600, 0, 0)
         try:
             guard = json.loads(guard_data)
@@ -439,6 +469,7 @@ def run(args):
     intent_path = '/root/fh-deploy-intent-' + args.release + '.json'
     lock_fd = open_lock()
     try:
+        admit_maintenance(lock_fd)
         no_recovery()
         active_release(args.expected_active_release)
         if os.path.lexists(result_path) or os.path.lexists(intent_path):

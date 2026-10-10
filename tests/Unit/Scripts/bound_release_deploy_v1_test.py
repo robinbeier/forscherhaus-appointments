@@ -17,6 +17,7 @@ SPEC = importlib.util.spec_from_file_location('bound_release_deploy_v1', PATH)
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 ORIGINAL_CONFIG_BINDINGS = MODULE.config_bindings
+ORIGINAL_ADMIT_MAINTENANCE = MODULE.admit_maintenance
 ORIGINAL_OPEN_LOCK = MODULE.open_lock
 REAL_EUID = os.geteuid()
 ORIGINAL_NO_RECOVERY = MODULE.no_recovery
@@ -48,6 +49,7 @@ class BoundReleaseDeployTest(unittest.TestCase):
         self.stack.enter_context(mock.patch.object(MODULE.os, 'geteuid', return_value=0))
         self.stack.enter_context(mock.patch.object(MODULE.os, 'uname', return_value=argparse.Namespace(nodename='booking-server')))
         self.stack.enter_context(mock.patch.object(MODULE, 'checked_module', side_effect=lambda *_: next(self.module_sequence)))
+        self.admit = self.stack.enter_context(mock.patch.object(MODULE, 'admit_maintenance'))
         self.stack.enter_context(mock.patch.object(MODULE, 'trusted_parent'))
         self.stack.enter_context(mock.patch.object(MODULE, 'bound_hash'))
         self.no_recovery = self.stack.enter_context(mock.patch.object(MODULE, 'no_recovery'))
@@ -72,6 +74,7 @@ class BoundReleaseDeployTest(unittest.TestCase):
 
     def test_verified_inputs_invoke_existing_deploy_once_with_bound_dump(self):
         self.assertEqual(('deployed', 0), MODULE.run(arguments()))
+        self.admit.assert_called_once_with(self.lock_fd)
         self.child.assert_called_once()
         command = self.child.call_args.args[0]
         self.assertEqual(MODULE.DEPLOY, command[0])
@@ -79,6 +82,30 @@ class BoundReleaseDeployTest(unittest.TestCase):
         self.assertEqual(arguments().run_id, self.child.call_args.kwargs['env']['BOUND_RELEASE_RUN_ID'])
         self.assertEqual(1, self.reserve.call_count)
         self.assertEqual(1, self.receipt.call_count)
+
+    def test_pending_admission_refuses_before_reservation_or_child(self):
+        self.admit.side_effect = MODULE.AdmissionError('maintenance_pending_present', 75)
+        with self.assertRaisesRegex(MODULE.AdmissionError, 'maintenance_pending_present'):
+            MODULE.run(arguments())
+        self.reserve.assert_not_called()
+        self.guard.assert_not_called()
+        self.child.assert_not_called()
+
+    def test_missing_admission_core_maps_to_stable_result_class(self):
+        MODULE.bound_hash.side_effect = FileNotFoundError('/usr/local/libexec/fh/maintenance_pending_v1.py')
+        with self.assertRaisesRegex(MODULE.AdmissionError, 'maintenance_core_invalid'):
+            ORIGINAL_ADMIT_MAINTENANCE(self.lock_fd)
+
+    def test_admission_core_binding_is_fixed_and_precedes_reservation(self):
+        with open(PATH, encoding='utf-8') as handle:
+            source = handle.read()
+        self.assertIn("ADMISSION_CORE = '/usr/local/libexec/fh/maintenance_pending_v1.py'", source)
+        self.assertIn(
+            "ADMISSION_CORE_SHA256 = '32f814b338e933dfe73c67fdec03799e68c5c50a97c263a7b7b17481ab7f6d1c'",
+            source,
+        )
+        run = source[source.index('def run(args):'):source.index('def main():')]
+        self.assertLess(run.index('admit_maintenance(lock_fd)'), run.index('reserve_intent(intent_path'))
 
     def test_open_lock_returns_read_write_descriptor_for_durable_admission(self):
         if REAL_EUID != 0:
@@ -282,6 +309,12 @@ class BoundReleaseDeployTest(unittest.TestCase):
         self.retire_guard.assert_called_once_with(
             args.release, args.expected_active_release, args.run_id, intent_path, result_path,
         )
+
+    def test_acknowledgement_admission_refusal_precedes_guard_reads_and_retirement(self):
+        self.admit.side_effect = MODULE.AdmissionError('maintenance_pending_present', 75)
+        with self.assertRaisesRegex(MODULE.AdmissionError, 'maintenance_pending_present'):
+            MODULE.acknowledge(arguments())
+        self.retire_guard.assert_not_called()
 
     def test_acknowledgement_rejects_intent_identity_or_hash_mismatch(self):
         args = arguments()
