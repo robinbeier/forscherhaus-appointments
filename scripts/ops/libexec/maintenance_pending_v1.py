@@ -772,6 +772,43 @@ class MaintenanceAdmission:
         return {'schema': SCHEMA, 'epoch': PROTOCOL_EPOCH, 'status': 'recovered',
                 'run_id': marker['run_id']}
 
+    def recover_pending(self, expected_record, terminal_proof=None):
+        """Recover a pending record left by an interrupted owner.
+
+        The caller must hold this recovery capability's shared lock.  The
+        record is bound and the terminal proof is evaluated before the durable
+        clear-marker hardlink is created.  Recovery then uses the same marker
+        settlement path as a normal clear, so an interrupted transition
+        remains a recovery veto.
+        """
+        self._assert_held()
+        if not self.recovery:
+            reject('recovery_capability_required')
+        if not callable(terminal_proof):
+            reject('terminal_proof_missing')
+        try:
+            expected_raw = _canonical(_validate_record(expected_record))
+        except (KeyError, TypeError, ValueError):
+            reject('pending_binding_changed')
+        pending = read_pending(self.expected_boot_id)
+        if pending is None:
+            reject('pending_missing')
+        record, before, raw = pending
+        if raw != expected_raw:
+            reject('pending_binding_changed')
+        try:
+            proven = terminal_proof(record)
+        except Exception:
+            reject('terminal_proof_unknown')
+        if proven is not True:
+            reject('terminal_proof_unknown')
+        current = os.lstat(PENDING_PATH)
+        if _identity(before) != _identity(current):
+            reject('pending_binding_changed')
+        _link_clear_marker_locked(raw, current)
+        return self.recover_clear_marker(
+            lambda marker: marker == record and terminal_proof(marker) is True)
+
     def __exit__(self, exc_type, exc_value, traceback):
         if self._fd is not None:
             fd = self._fd

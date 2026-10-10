@@ -750,6 +750,96 @@ class MaintenancePendingTest(unittest.TestCase):
         self.assertFalse(os.path.lexists(self.pending))
         self.assertFalse(os.path.lexists(self.clear_marker))
 
+    def test_recovery_settles_pending_record_left_without_clear_marker(self):
+        record = self.record()
+        with MODULE.maintenance_admission() as admission:
+            admission.publish_pending(record)
+        with MODULE.maintenance_recovery() as recovery:
+            result = recovery.recover_pending(record, lambda value: value == record)
+        self.assertEqual('recovered', result['status'])
+        self.assertFalse(os.path.lexists(self.pending))
+        self.assertFalse(os.path.lexists(self.clear_marker))
+        self.assertEqual('admitted', MODULE.admit_read_only()['status'])
+
+    def test_recovery_pending_requires_exact_record_and_proof_before_mutation(self):
+        record = self.record()
+        wrong = self.record(run='run002')
+        with MODULE.maintenance_admission() as admission:
+            admission.publish_pending(record)
+        with MODULE.maintenance_recovery() as recovery:
+            with self.assertRaisesRegex(MODULE.PendingError, 'pending_binding_changed'):
+                recovery.recover_pending(wrong, lambda _: True)
+            self.assertTrue(os.path.lexists(self.pending))
+            self.assertFalse(os.path.lexists(self.clear_marker))
+            with self.assertRaisesRegex(MODULE.PendingError, 'terminal_proof_unknown'):
+                recovery.recover_pending(record, lambda _: False)
+            self.assertTrue(os.path.lexists(self.pending))
+            self.assertFalse(os.path.lexists(self.clear_marker))
+            with self.assertRaisesRegex(MODULE.PendingError, 'terminal_proof_unknown'):
+                recovery.recover_pending(record, lambda _: (_ for _ in ()).throw(RuntimeError('unknown')))
+            self.assertTrue(os.path.lexists(self.pending))
+            self.assertFalse(os.path.lexists(self.clear_marker))
+
+    def test_recovery_pending_rejects_torn_transition_without_mutation(self):
+        record = self.record()
+        with MODULE.maintenance_admission() as admission:
+            admission.publish_pending(record)
+        self._write(os.path.join(self.state, MODULE.PENDING_TEMP_PREFIX + 'torn'), b'partial')
+        with MODULE.maintenance_recovery() as recovery:
+            with self.assertRaisesRegex(MODULE.PendingError, 'pending_temp_present'):
+                recovery.recover_pending(record, lambda _: True)
+        self.assertTrue(os.path.lexists(self.pending))
+        self.assertFalse(os.path.lexists(self.clear_marker))
+
+    def test_existing_fd_recovery_pending_keeps_caller_lock_until_release(self):
+        caller = os.open(self.lock, os.O_RDWR)
+        competitor = os.open(self.lock, os.O_RDWR)
+        record = self.record()
+        try:
+            fcntl.flock(caller, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with MODULE.MaintenanceAdmission.from_existing_lock_fd(caller) as admission:
+                admission.publish_pending(record)
+            with MODULE.MaintenanceAdmission.recovery_from_existing_lock_fd(caller) as recovery:
+                self.assertEqual(
+                    'recovered',
+                    recovery.recover_pending(record, lambda value: value == record)['status'],
+                )
+            self.assert_lock_busy(competitor)
+            fcntl.flock(caller, fcntl.LOCK_UN)
+            fcntl.flock(competitor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(competitor, fcntl.LOCK_UN)
+            self.assertEqual('admitted', MODULE.admit_read_only()['status'])
+        finally:
+            os.close(caller)
+            os.close(competitor)
+
+    def test_recovery_pending_rechecks_proof_after_marker_creation(self):
+        record = self.record()
+        proof_calls = 0
+
+        def proof(value):
+            nonlocal proof_calls
+            proof_calls += 1
+            return proof_calls == 1 and value == record
+
+        with MODULE.maintenance_admission() as admission:
+            admission.publish_pending(record)
+        with MODULE.maintenance_recovery() as recovery:
+            # The second proof is deliberate: it protects the existing marker
+            # settlement path if the terminal observation changes after the
+            # hardlink has been durably created.
+            with self.assertRaisesRegex(MODULE.PendingError, 'terminal_proof_unknown'):
+                recovery.recover_pending(record, proof)
+        self.assertEqual(2, proof_calls)
+        self.assertTrue(os.path.lexists(self.pending))
+        self.assertTrue(os.path.lexists(self.clear_marker))
+        with MODULE.maintenance_recovery() as recovery:
+            self.assertEqual(
+                'recovered',
+                recovery.recover_clear_marker(lambda value: value == record)['status'],
+            )
+        self.assertEqual('admitted', MODULE.admit_read_only()['status'])
+
     def test_marker_link_failure_leaves_pending_and_no_marker(self):
         record = self.record()
         original_link = MODULE.os.link

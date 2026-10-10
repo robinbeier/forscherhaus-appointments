@@ -91,6 +91,13 @@ matching two-name inode state after interruption; an identity mismatch remains
 blocked. Admission also synchronizes an apparently empty state directory before
 accepting it, including after an interrupted final marker removal. These core
 mechanics do not supply an operation-specific terminal proof or enroll a writer.
+The local recovery capability can also settle an unchanged pending record
+left before the clear marker was created. It requires the same held lock,
+an exact record binding, and a trusted operation-specific terminal proof
+both before and after marker creation; an unknown second proof retains
+the marker veto. No generic operator success flag or time limit can
+supply that proof. The capability does not make a writer with unfinished
+resource reconciliation ready for production installation.
 For a writer that already holds the canonical shared lock, the local core now
 has a descriptor-based admission check. It validates the same lock inode and
 protocol epoch and checks the caller's exclusive flock through read-only
