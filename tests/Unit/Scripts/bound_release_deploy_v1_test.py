@@ -6,6 +6,8 @@ import fcntl
 import importlib.util
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -20,6 +22,7 @@ ORIGINAL_CONFIG_BINDINGS = MODULE.config_bindings
 ORIGINAL_ADMIT_MAINTENANCE = MODULE.admit_maintenance
 ORIGINAL_OPEN_LOCK = MODULE.open_lock
 REAL_EUID = os.geteuid()
+REAL_SUBPROCESS_RUN = subprocess.run
 ORIGINAL_NO_RECOVERY = MODULE.no_recovery
 ORIGINAL_RESERVE_GUARD = MODULE.reserve_recovery_guard
 ORIGINAL_RETIRE_GUARD = MODULE.retire_recovery_guard
@@ -448,6 +451,166 @@ class BoundReleaseDeployTest(unittest.TestCase):
         self.assertIn("if code == 0 and value['status'] == 'passed' and value['result_class'] == 'acknowledged':", source)
         self.assertNotIn("if code in (70, 75) and value['status'] == 'failed':", source)
         self.assertNotIn("if code != 0 and value['status'] == 'failed':", source)
+
+    def test_wrapper_preserves_known_maintenance_refusal_but_rejects_unknown_exit_75(self):
+        with open(WRAPPER_PATH, encoding='utf-8') as handle:
+            source = handle.read()
+        # Exit 75 is a known no-mutation veto only for lock_busy or a bounded
+        # maintenance_* result.  Unknown classes must stay fail-closed.
+        self.assertIn("re.fullmatch(r'maintenance_[a-z0-9_]+', value['result_class'])", source)
+        self.assertIn('refusal_class="${validated_result##*result_class=}"', source)
+        self.assertIn('deployment_class="$refusal_class"', source)
+        self.assertIn('if [[ "$refusal_class" == lock_busy || "$refusal_class" == maintenance_* ]]; then', source)
+
+        validator_start = source.index('if validated_result=')
+        marker = "<<'PY'\n"
+        marker_start = source.index(marker, validator_start)
+        validator = source[marker_start + len(marker):source.index("\nPY\n )", marker_start)]
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = os.path.join(directory, 'receipt')
+
+            def run_validator(result_class):
+                with open(receipt, 'w', encoding='utf-8') as handle:
+                    json.dump({
+                        'schema': 'bound_release_deploy.v1',
+                        'status': 'failed',
+                        'result_class': result_class,
+                    }, handle)
+                return REAL_SUBPROCESS_RUN(
+                    [sys.executable, '-I', '-B', '-', receipt, '75'],
+                    input=validator,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+
+            known = run_validator('maintenance_pending_present')
+            self.assertEqual(70, known.returncode)
+            self.assertIn('result_class=maintenance_pending_present', known.stdout)
+
+            unknown = run_validator('unexpected_refusal')
+            self.assertEqual(70, unknown.returncode)
+            self.assertIn('result_class=transport_or_receipt_unknown', unknown.stdout)
+
+    def test_copied_wrapper_emits_veto_receipt_and_never_acknowledges_exit_75(self):
+        """Run the unchanged wrapper decision path with isolated command doubles."""
+        with tempfile.TemporaryDirectory() as directory:
+            project = os.path.join(directory, 'project')
+            bin_dir = os.path.join(directory, 'bin')
+            fixture = os.path.join(directory, 'fixture')
+            os.makedirs(os.path.join(project, 'scripts/ops/libexec'))
+            os.makedirs(os.path.join(bin_dir))
+            for relative in (
+                'build_release.sh', 'composer.lock', 'package-lock.json', 'deploy_ea.sh',
+                'scripts/ops/verify_local_release_pair.php',
+                'scripts/ops/lib/ReleaseBuildProvenanceProducerV1.php',
+                'scripts/ops/lib/DeploymentEvidenceAuthorityV1.php',
+                'scripts/ops/lib/DeploymentContractV1.php',
+                'scripts/ops/libexec/inspect_release_archive_v1.py',
+                'scripts/release-gate/validate_release_artifact.php',
+                'scripts/release-gate/lib/ReleaseArtifactValidator.php',
+                'scripts/ops/prod_release_readiness_preflight.sh',
+                'scripts/ops/lib/prod_common.sh',
+                'scripts/ops/libexec/backup_set_producer_v1.py',
+                'scripts/ops/libexec/backup_timer_transition_v1.py',
+                'scripts/ops/libexec/deployment_dump_attestation_v1.py',
+                'scripts/ops/libexec/bound_release_deploy_v1.py',
+                'scripts/ops/libexec/release_pair_admission_v1.py',
+                'scripts/ops/libexec/backup_handoff_admission_v1.py',
+            ):
+                for root in (project, fixture):
+                    path = os.path.join(root, relative)
+                    os.makedirs(os.path.dirname(path), exist_ok=True)
+                    with open(path, 'w', encoding='utf-8') as handle:
+                        if relative.endswith('prod_release_readiness_preflight.sh'):
+                            handle.write("printf 'schema=production_release_readiness.v1\\nstatus=passed\\nresult_class=readiness_verified\\nextra=isolated\\n'\n")
+                        else:
+                            handle.write('placeholder\n')
+            wrapper = os.path.join(project, 'scripts/ops/prod_deploy_bound_release.sh')
+            with open(WRAPPER_PATH, encoding='utf-8') as source, open(wrapper, 'w', encoding='utf-8') as target:
+                target.write(source.read())
+            archive = os.path.join(directory, 'archive.tar')
+            provenance = os.path.join(directory, 'provenance.json')
+            with open(archive, 'wb') as handle:
+                handle.write(b'archive')
+            with open(provenance, 'wb') as handle:
+                handle.write(b'provenance')
+
+            def command(name, body):
+                path = os.path.join(bin_dir, name)
+                with open(path, 'w', encoding='utf-8') as handle:
+                    handle.write('#!/bin/bash\nset -eu\n' + body)
+                os.chmod(path, 0o755)
+
+            command('git', r'''
+case " $* " in
+  *" symbolic-ref --short HEAD "*) printf 'main\n' ;;
+  *" rev-parse HEAD "*) printf '%s\n' "${FH_COMMIT}" ;;
+  *" rev-parse --verify "*) printf '%s\n' "${FH_COMMIT}" ;;
+  *" rev-parse --absolute-git-dir "*) printf '/tmp/fh-test-git\n' ;;
+  *" diff --quiet "*) exit 0 ;;
+  *" ls-files --error-unmatch "*) exit 0 ;;
+  *" archive "*) tar -cf - -C "${FH_FIXTURE}" . ;;
+  *" cat-file blob "*) printf 'bound-test-source' ;;
+  *) exit 0 ;;
+esac
+''')
+            command('php', "printf 'verified\\n'\n")
+            command('openssl', "printf '0123456789abcdef0123456789abcdef\\n'\n")
+            command('shasum', "cat >/dev/null; printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  file\\n'\n")
+            command('ssh', r'''
+cat >/dev/null
+if [[ " $* " == *" /usr/bin/sha256sum "* ]]; then
+  printf 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  /root/backups/easyappointments/backup_continuity_state.json\n'
+  exit 0
+fi
+if [[ " $* " == *" --ack "* ]]; then
+  printf '%s\n' ack-attempted > "${FH_ACK_MARKER}"
+fi
+printf '%s\n' "${FH_RECEIPT}"
+exit 75
+''')
+
+            environment = os.environ.copy()
+            environment.update({
+                'PATH': bin_dir + os.pathsep + environment['PATH'],
+                'FH_COMMIT': 'a' * 40,
+                'FH_FIXTURE': fixture,
+            })
+            bash_env = os.path.join(directory, 'bash-env')
+            with open(bash_env, 'w', encoding='utf-8') as handle:
+                handle.write("bash() { printf 'schema=production_release_readiness.v1\\nstatus=passed\\nresult_class=readiness_verified\\nextra=isolated\\n'; }\n")
+            environment['BASH_ENV'] = bash_env
+            args = [
+                '/bin/bash', wrapper, '--rel', 'ea_candidate', '--expected-commit', 'a' * 40,
+                '--expected-active-release', 'ea_previous', '--archive', archive,
+                '--provenance', provenance, '--execute', '--confirm-live-deploy', 'ROB-618',
+            ]
+            for result_class in ('maintenance_pending_present', 'lock_busy'):
+                marker = os.path.join(directory, 'ack-marker')
+                environment.update({
+                    'FH_RECEIPT': json.dumps({'schema': 'bound_release_deploy.v1', 'status': 'failed', 'result_class': result_class}),
+                    'FH_ACK_MARKER': marker,
+                })
+                completed = REAL_SUBPROCESS_RUN(
+                    args, env=environment, stdin=subprocess.DEVNULL, text=True,
+                    capture_output=True, check=False,
+                )
+                self.assertEqual(70, completed.returncode, completed.stderr)
+                self.assertIn('deployment_result_class=' + result_class, completed.stdout, completed.stderr)
+                self.assertIn('ack_status=not_attempted', completed.stdout)
+                self.assertFalse(os.path.exists(marker))
+
+            environment['FH_RECEIPT'] = json.dumps({'schema': 'bound_release_deploy.v1', 'status': 'failed', 'result_class': 'unexpected_refusal'})
+            completed = REAL_SUBPROCESS_RUN(
+                args, env=environment, stdin=subprocess.DEVNULL, text=True,
+                capture_output=True, check=False,
+            )
+            self.assertEqual(70, completed.returncode, completed.stderr)
+            self.assertIn('deployment_status=unknown', completed.stdout)
+            self.assertIn('deployment_result_class=transport_or_receipt_unknown', completed.stdout)
+            self.assertIn('ack_status=not_attempted', completed.stdout)
+            self.assertFalse(os.path.exists(os.path.join(directory, 'ack-marker')))
 
     def test_stale_config_binding_blocks_before_reservation(self):
         old = tuple((((1, 2), b'\0' * 32) for _ in MODULE.CONFIGS))
