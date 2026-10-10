@@ -29,6 +29,16 @@ The repository desired state now pins the official `2.5.6-slim` OCI index in
 `2.5.5-slim`; changing this repository pin does not claim that production has
 been upgraded.
 
+The live Compose file is host-owned (observed at
+`/opt/uptime-kuma/docker-compose.yml` on 2026-10-10) and may differ from the
+repository template. Before an authorized live upgrade, recheck its location,
+preserve that exact file, and change only its image reference. Do not overwrite
+it with `docker/compose.uptime-kuma.yml` or allow an unset `KUMA_DATA_PATH` to switch
+the live bind mount to the template's default named volume. Re-render and
+verify the live port binding, data mount, restart policy, and image before
+starting the new container; keep the exact prior file, old image, and data
+backup together for rollback.
+
 On 2026-09-16, the production update to the then-current `2.5.5-slim` image
 completed successfully: the live instance was healthy at 19:36 UTC after the
 change, 18 configuration tables were preserved, and the full-backup old-image
