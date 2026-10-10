@@ -5,9 +5,11 @@ declare(strict_types=1);
 use PHPUnit\Framework\TestCase;
 use Tests\Integration\Support\DefenseCycleFixtures;
 use Tests\Integration\Support\DefenseCycleHttpServer;
+use Tests\Integration\Support\SessionFileReader;
 
 require_once dirname(__DIR__) . '/Support/DefenseCycleFixtures.php';
 require_once dirname(__DIR__) . '/Support/DefenseCycleHttpServer.php';
+require_once dirname(__DIR__) . '/Support/SessionFileReader.php';
 
 /** Real HTTP regression coverage for the public booking CAPTCHA prerequisite. */
 final class BookingCaptchaHttpTest extends TestCase
@@ -383,8 +385,7 @@ final class BookingCaptchaHttpTest extends TestCase
         $path = $this->server?->directory . '/sessions/ea_session' . $sessionId;
         self::assertIsString($path);
         self::assertFileExists($path);
-        $serialized = file_get_contents($path);
-        self::assertIsString($serialized);
+        $serialized = SessionFileReader::read($path);
         self::assertSame(1, preg_match('/(?:^|;)captcha_phrase\|s:\d+:"([^"]*)";/', $serialized, $match));
 
         return $match[1];

@@ -6,9 +6,11 @@ use PHPUnit\Framework\TestCase;
 use ReleaseGate\GateHttpClient;
 use Tests\Integration\Support\DefenseCycleFixtures;
 use Tests\Integration\Support\DefenseCycleHttpServer;
+use Tests\Integration\Support\SessionFileReader;
 
 require_once dirname(__DIR__) . '/Support/DefenseCycleFixtures.php';
 require_once dirname(__DIR__) . '/Support/DefenseCycleHttpServer.php';
+require_once dirname(__DIR__) . '/Support/SessionFileReader.php';
 
 /** Bounded HTTP/DB coverage for the classic Api_settings controller. */
 final class ApiSettingsLegacyHttpTest extends TestCase
@@ -354,18 +356,7 @@ final class ApiSettingsLegacyHttpTest extends TestCase
         $ipBinding = config('sess_match_ip') ? md5('127.0.0.1') : '';
         $path = $this->server?->directory . '/sessions/' . $cookieName . $ipBinding . $sessionId;
         self::assertFileExists($path);
-        $handle = fopen($path, 'rb');
-        self::assertIsResource($handle);
-        try {
-            self::assertTrue(flock($handle, LOCK_SH));
-            $contents = stream_get_contents($handle);
-            self::assertIsString($contents);
-        } finally {
-            if (is_resource($handle)) {
-                flock($handle, LOCK_UN);
-                fclose($handle);
-            }
-        }
+        $contents = SessionFileReader::read($path);
         self::assertSame(1, preg_match('/dest_url\|s:\d+:"([^"]*)";/', $contents, $matches));
         return $matches[1];
     }
