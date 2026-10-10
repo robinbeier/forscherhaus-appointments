@@ -17,7 +17,7 @@ final class SessionRetentionRootTest extends TestCase
     private const ORCHESTRATOR_ROOT = '/var/lib/fh-deploy-orchestrator';
     private const ADMISSION_ROOT = '/var/lib/fh-maintenance-admission';
     private const ADMISSION_CORE = '/usr/local/libexec/fh/maintenance_pending_v1.py';
-    private const ADMISSION_CORE_HASH = '78da04cc6c66c7e140dcc6f4a924acf92062ea5860c8bb424115129b922c6bb5';
+    private const ADMISSION_CORE_HASH = '6cf32ab5d6fafc48264a743ebb78fcd64e2dc5dbcd05ab643bae39ab8e17efb9';
     private string $helper;
     private int $webUid;
     private int $webGid;

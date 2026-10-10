@@ -664,7 +664,17 @@ class MaintenanceAdmission:
             # from_existing_lock_fd has already admitted state while holding
             # the caller's lock. Do not acquire a second lock description or
             # run admission a second time when used as a context manager.
-            self._assert_held()
+            try:
+                self._assert_held()
+            except Exception:
+                # Python does not call __exit__ when __enter__ raises. Close
+                # only this capability's retained pin; the caller-owned
+                # original descriptor is never stored or touched here.
+                fd = self._fd
+                self._fd = None
+                self._closed = True
+                os.close(fd)
+                raise
             return self
         validate_state_layout()
         self._validate_epoch_and_lock()

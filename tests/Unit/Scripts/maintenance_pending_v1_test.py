@@ -351,6 +351,85 @@ class MaintenancePendingTest(unittest.TestCase):
             if source_number is not None:
                 os.close(source_number)
 
+    def test_caller_capability_enter_failure_closes_pin_on_epoch_drift(self):
+        caller = os.open(self.lock, os.O_RDWR)
+        contender = os.open(self.lock, os.O_RDWR)
+        moved = self.epoch + '.moved'
+        try:
+            fcntl.flock(caller, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            capability = MODULE.MaintenanceAdmission.from_existing_lock_fd(caller)
+            os.rename(self.epoch, moved)
+            self._write(self.epoch, (MODULE.PROTOCOL_EPOCH + '\n').encode())
+            with self.assertRaisesRegex(MODULE.PendingError, 'epoch_identity_changed'):
+                with capability:
+                    pass
+            os.unlink(self.epoch)
+            os.rename(moved, self.epoch)
+            fcntl.flock(caller, fcntl.LOCK_UN)
+            fcntl.flock(contender, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(contender, fcntl.LOCK_UN)
+        finally:
+            if os.path.lexists(moved):
+                os.unlink(moved)
+            os.close(caller)
+            os.close(contender)
+
+    def test_caller_capability_enter_failure_closes_pin_on_state_drift(self):
+        caller = os.open(self.lock, os.O_RDWR)
+        contender = os.open(self.lock, os.O_RDWR)
+        moved = self.state + '.moved'
+        try:
+            fcntl.flock(caller, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            capability = MODULE.MaintenanceAdmission.from_existing_lock_fd(caller)
+            os.rename(self.state, moved)
+            os.mkdir(self.state, 0o700)
+            self._write(os.path.join(self.state, 'epoch'),
+                        (MODULE.PROTOCOL_EPOCH + '\n').encode())
+            with self.assertRaisesRegex(MODULE.PendingError, 'state_identity_changed'):
+                with capability:
+                    pass
+            os.unlink(os.path.join(self.state, 'epoch'))
+            os.rmdir(self.state)
+            os.rename(moved, self.state)
+            fcntl.flock(caller, fcntl.LOCK_UN)
+            fcntl.flock(contender, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(contender, fcntl.LOCK_UN)
+        finally:
+            if os.path.isdir(self.state) and os.path.isdir(moved):
+                os.unlink(os.path.join(self.state, 'epoch'))
+                os.rmdir(self.state)
+            if os.path.isdir(moved) and not os.path.exists(self.state):
+                os.rename(moved, self.state)
+            os.close(caller)
+            os.close(contender)
+
+    def test_caller_capability_enter_failure_closes_pin_on_lock_replacement(self):
+        caller = os.open(self.lock, os.O_RDWR)
+        contender = None
+        moved = self.lock + '.moved'
+        try:
+            fcntl.flock(caller, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            capability = MODULE.MaintenanceAdmission.from_existing_lock_fd(caller)
+            os.rename(self.lock, moved)
+            self._write(self.lock, b'', 0o600)
+            with self.assertRaisesRegex(MODULE.PendingError, 'shared_lock_identity_changed'):
+                with capability:
+                    pass
+            os.unlink(self.lock)
+            os.rename(moved, self.lock)
+            fcntl.flock(caller, fcntl.LOCK_UN)
+            contender = os.open(self.lock, os.O_RDWR)
+            fcntl.flock(contender, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(contender, fcntl.LOCK_UN)
+        finally:
+            if os.path.lexists(self.lock) and os.path.lexists(moved):
+                os.unlink(self.lock)
+            if os.path.lexists(moved) and not os.path.lexists(self.lock):
+                os.rename(moved, self.lock)
+            os.close(caller)
+            if contender is not None:
+                os.close(contender)
+
     def test_existing_fd_capability_pin_keeps_canonical_lock_across_source_close_and_reopen(self):
         caller = os.open(self.lock, os.O_RDWR)
         source_number = caller
