@@ -1,6 +1,10 @@
 # ROB-809 Tailscale-only SSH cutover
 
-Status: prepared; the night-window live write has not been executed.
+Status: **blocked before live cutover**; no SSH firewall write has been
+executed. The current shared `flock` alone cannot fence another writer after
+the cutover operator dies or the host reboots. This document records the
+required admission and recovery contract; it does not authorize running the
+draft operator until the two gates below are implemented and verified.
 
 This runbook defines a narrowly bounded production SSH reachability change. It
 removes the two currently bound general `22/tcp` UFW allows (one per published
@@ -54,6 +58,15 @@ Do not record raw addresses, keys, fingerprints, tokens, or configuration.
   is not sufficient. Verify that lifetime with an isolated controller-loss
   test, then verify service admission and identity in a production
   no-mutation rehearsal before the live write.
+- Before approving that operator, install and verify a **durable pending
+  admission veto** that every supported production writer checks before
+  mutation, including after operator death and reboot. Register the cutover
+  pending state durably before removing any rule; clear it only after the
+  firewall and recovery result are independently verified. A free `flock`,
+  elapsed timer, or human instruction to stop is not a substitute. The
+  enrollment and mixed-version requirements in
+  [coordinated maintenance admission](../ops/maintenance-admission-contract.md)
+  apply. Because that protocol is not installed, the live cutover is blocked.
 - The operator must register one bounded rollback before deletion. If
   confirmation fails or times out, it may restore only the two currently
   bound general `22/tcp` allows, one per published address family. It must
@@ -83,6 +96,15 @@ same host:
   Bind the complete ordered rule-class inventory, not just the four SSH rows;
   any unexpected rule, family, placement, or default policy is a stop. Record
   only classes and counts in shared evidence.
+- Inventory the **complete effective firewall** before claiming that public
+  SSH will be blocked: `ufw show raw`, the identities and hashes of all
+  relevant `/etc/ufw/before*.rules`, `/etc/ufw/after*.rules`,
+  `/etc/ufw/user*.rules`, and the active netfilter/nftables ruleset. Compare
+  the effective port-22 decision for each published address family, including
+  source- or interface-specific exceptions and rules not shown by `ufw
+  status`. If the full inventory cannot be classified or bound, stop before
+  mutation. Recheck it after a future cutover and after any rollback. The
+  current read-only inventory has **not** established this complete gate.
 - `ufw show added` contains **exactly one** literal `ufw allow 22/tcp` command
   and no other general SSH allowance. Use this only to confirm the command
   form: UFW normalizes this display, so it does **not** establish rule order.
@@ -90,16 +112,18 @@ same host:
   is a stop, not an invitation to choose a similar-looking numbered rule.
 - Bind the UFW version and SHA-256 of `/etc/ufw/user.rules` and
   `/etc/ufw/user6.rules` to the run. Recheck both hashes immediately before
-  `ufw delete allow 22/tcp` and confirm the four SSH rows still have the
-  expected classes. Any drift stops before mutation.
+  `ufw delete allow 22/tcp` and confirm the four SSH rows and complete
+  effective-firewall inventory still have the expected classes. Any drift
+  stops before mutation.
 - Bind the managed operator's exact file identity and SHA-256. Its single
   service must own the production lock while it checks the bound starting
   state, executes deletion, waits for explicit confirmation, and either
   verifies rollback or settles success. There must be no gap in which a
   separately scheduled rollback can run after another writer acquires the
-  lock. If the operator dies or its result is unknown, do not treat a free
-  lock or elapsed timer as proof of settlement; stop production writes and
-  recover under the independent console path.
+  lock. If the operator dies or its result is unknown, the durable veto must
+  mechanically block every enrolled writer until console recovery establishes
+  and records the terminal firewall state. Do not treat a free lock or elapsed
+  timer as proof of settlement.
 
 Immediately after deletion, compare the full redacted UFW rule-class inventory
 with the bound inventory. The only allowed difference is the absence of the
