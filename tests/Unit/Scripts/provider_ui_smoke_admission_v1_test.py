@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import fcntl
+import hashlib
 import importlib.util
 import io
 import json
@@ -141,6 +142,25 @@ class ProviderUiSmokeAdmissionBehaviorTest(unittest.TestCase):
             lock_fd=3 if action == "assert-bound-fd" else None,
             lifecycle_action="deactivate" if action == "assert-bound-fd" else None,
         )
+
+    def test_load_core_refuses_mixed_version_before_import(self):
+        source_path = ROOT / "scripts/ops/libexec/maintenance_pending_v1.py"
+        source = source_path.read_bytes()
+        self.assertEqual(COORD.CORE_SHA256, hashlib.sha256(source).hexdigest())
+        with tempfile.TemporaryDirectory() as directory:
+            candidate = Path(directory) / "maintenance_pending_v1.py"
+            candidate.write_bytes(source + b"\n# mixed-version fixture\n")
+            os.chmod(candidate, 0o600)
+            fake_stat = types.SimpleNamespace(
+                st_mode=stat.S_IFREG | 0o600, st_uid=0, st_gid=0, st_nlink=1,
+                st_size=candidate.stat().st_size, st_dev=1, st_ino=2,
+                st_mtime_ns=3, st_ctime_ns=4,
+            )
+            with patch.object(COORD, "CORE_PATH", str(candidate)), \
+                 patch.object(COORD.os, "fstat", return_value=fake_stat):
+                with self.assertRaises(SystemExit) as raised:
+                    COORD.load_core()
+        self.assertEqual(raised.exception.code, 75)
 
     def test_unit_terminal_rejects_unknown_unit_identity(self):
         result = types.SimpleNamespace(returncode=0, stdout="Id=other.service\nLoadState=loaded\n", stderr="")

@@ -294,6 +294,11 @@ fi
     printf 'ERROR: installed maintenance admission core is unavailable\n' >&2
     exit 1
 }
+core_sha256=\"\$(sha256sum -- '/usr/local/libexec/fh/maintenance_pending_v1.py')\"
+[[ \"\${core_sha256}\" == 'a26bb85908f40b784539576d85013c7123522adbeac92e53ebbb3d5cd03ee9fd  /usr/local/libexec/fh/maintenance_pending_v1.py' ]] || {
+    printf 'ERROR: installed maintenance admission core hash is not the reviewed version\n' >&2
+    exit 1
+}
 [[ \"\$(stat -Lc '%h' '${wrapper}')\" == '1' ]] || {
     printf 'ERROR: deployed principal wrapper link count is unsafe\n' >&2
     exit 1

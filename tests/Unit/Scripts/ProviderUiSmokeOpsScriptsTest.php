@@ -267,6 +267,26 @@ final class ProviderUiSmokeOpsScriptsTest extends TestCase
         }
     }
 
+    public function testMismatchedAdmissionCoreHashStopsBeforeAdmission(): void
+    {
+        $workspace = $this->createWorkspace();
+
+        try {
+            $result = $this->runOrchestrator($workspace, ['PROD_SMOKE_CORE_HASH_MISMATCH' => '1']);
+
+            self::assertSame(20, $result['exit_code'], $result['stderr']);
+            self::assertStringContainsString('remote read-only preflight failed', $result['stderr']);
+
+            $events = (string) file_get_contents($workspace . '/events.log');
+            self::assertStringContainsString("preflight\n", $events);
+            self::assertStringNotContainsString("admission_begin\n", $events);
+            self::assertStringNotContainsString("arm\n", $events);
+            self::assertStringNotContainsString("activate\n", $events);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
     public function testOrchestratorStopsBeforeActivationWhenRemoteViewIsSymlinked(): void
     {
         $this->assertUnsafeRemoteViewStopsBeforeActivation(
@@ -550,6 +570,12 @@ final class ProviderUiSmokeOpsScriptsTest extends TestCase
                 if [[ "${PROD_SMOKE_MISSING_BUSCTL:-0}" == '1' \
                     && "${remote_command}" == *'systemd-run busctl stat'* ]]; then
                     printf 'ERROR: a required remote command is unavailable\n' >&2
+                    exit 1
+                fi
+                if [[ "${PROD_SMOKE_CORE_HASH_MISMATCH:-0}" == '1' ]]; then
+                    [[ "${remote_command}" == *"sha256sum -- '/usr/local/libexec/fh/maintenance_pending_v1.py'"* \
+                        && "${remote_command}" == *'a26bb85908f40b784539576d85013c7123522adbeac92e53ebbb3d5cd03ee9fd'* ]] || exit 99
+                    printf 'ERROR: installed maintenance admission core hash is not the reviewed version\n' >&2
                     exit 1
                 fi
                 case "${PROD_SMOKE_REMOTE_VIEW_STATE:-safe}" in

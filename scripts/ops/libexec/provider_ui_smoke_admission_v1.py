@@ -13,6 +13,7 @@ import argparse
 import contextlib
 import errno
 import fcntl
+import hashlib
 import importlib.util
 import json
 import os
@@ -26,6 +27,10 @@ from pathlib import Path
 
 
 CORE_PATH = '/usr/local/libexec/fh/maintenance_pending_v1.py'
+# This pin must be updated together with the core rollout.  Loading a core
+# with the same protocol epoch but without the recovery API is unsafe because
+# it can publish a veto that this coordinator cannot reconcile.
+CORE_SHA256 = 'a26bb85908f40b784539576d85013c7123522adbeac92e53ebbb3d5cd03ee9fd'
 OPERATION = 'provider_ui_smoke'
 RUN_ID_BYTES = 16
 ACTION_NAMES = {'install', 'remove', 'smoke'}
@@ -50,11 +55,40 @@ def fail(reason: str, code: int = 75) -> 'NoReturn':
 
 def load_core():
     try:
+        fd = os.open(CORE_PATH, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+        try:
+            before = os.fstat(fd)
+            if (not stat.S_ISREG(before.st_mode) or before.st_uid != 0 or
+                    before.st_gid != 0 or stat.S_IMODE(before.st_mode) & 0o022 or
+                    before.st_nlink != 1 or before.st_size > 2 * 1024 * 1024):
+                fail('admission_core_identity_unknown', 75)
+            source = bytearray()
+            while len(source) <= 2 * 1024 * 1024:
+                chunk = os.read(fd, min(65536, 2 * 1024 * 1024 + 1 - len(source)))
+                if not chunk:
+                    break
+                source.extend(chunk)
+            after = os.fstat(fd)
+            if (len(source) > 2 * 1024 * 1024 or
+                    (before.st_dev, before.st_ino, before.st_mode, before.st_uid,
+                     before.st_gid, before.st_nlink, before.st_size,
+                     before.st_mtime_ns, before.st_ctime_ns) !=
+                    (after.st_dev, after.st_ino, after.st_mode, after.st_uid,
+                     after.st_gid, after.st_nlink, after.st_size,
+                     after.st_mtime_ns, after.st_ctime_ns)):
+                fail('admission_core_identity_changed', 75)
+        finally:
+            os.close(fd)
+        if hashlib.sha256(source).hexdigest() != CORE_SHA256:
+            fail('admission_core_hash_mismatch', 75)
         spec = importlib.util.spec_from_file_location('fh_maintenance_pending_v1', CORE_PATH)
         if spec is None or spec.loader is None:
             fail('admission_core_unavailable', 69)
         module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        exec(compile(bytes(source), CORE_PATH, 'exec'), module.__dict__)
+        if not hasattr(module, 'MaintenanceAdmission') or not hasattr(
+                module.MaintenanceAdmission, 'recover_interrupted_pending'):
+            fail('admission_core_api_incompatible', 75)
         return module
     except SystemExit:
         raise

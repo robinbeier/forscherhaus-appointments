@@ -67,6 +67,13 @@ lifecycle. Customers is not enrolled yet and remains
 subject to the obligations below. Both operator scripts otherwise run a
 read-only preflight, arm an independent ten-minute systemd lease, invoke a
 root-only server-local principal wrapper, and perform cleanup in an exit trap.
+The current pinned core digest is
+`a26bb85908f40b784539576d85013c7123522adbeac92e53ebbb3d5cd03ee9fd`.
+Before `begin` or any admission, the coordinator opens the installed
+maintenance core through a no-follow descriptor, hashes the exact bytes, and
+requires the pinned SHA-256 plus the recovery API. A same-epoch core from an
+older rollout is therefore refused before it can publish Pending; source and
+installed core versions must be rolled out together.
 After `systemd-run` positively returns, a separate server-side acknowledgement
 checks the exact transient timer, service and run identity under the private
 cleanup lock, then durably records that observation. The finalizer takes that
