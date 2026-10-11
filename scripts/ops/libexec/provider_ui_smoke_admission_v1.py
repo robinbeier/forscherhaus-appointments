@@ -760,6 +760,53 @@ def recover_install_empty(args: argparse.Namespace) -> None:
     print('provider_ui_smoke_admission=result=install-empty-recovered')
 
 
+def recover_remove_dormant(args: argparse.Namespace) -> None:
+    """Retire an exact remove run that failed before the fixture transaction.
+
+    ``remove`` publishes its pending veto before entering the application
+    transaction.  If that transaction never starts (or fails before changing
+    state), the fixture is still dormant and ordinary settlement cannot be
+    used because it deliberately requires ``removed``.  This recovery only
+    clears the exact persisted remove record after proving that the fixture,
+    credentials, acknowledgement sidecars, and any cleanup units are in the
+    expected pre-run state.  It never removes or repairs fixture state.
+    """
+    if args.operation != 'remove':
+        fail('recover_remove_operation_invalid', 64)
+    core = load_core()
+    resource = resource_from(args)
+    try:
+        with private_cleanup_lock():
+            with core.maintenance_recovery() as admission:
+                record = expected_record(core, args.run_id, args.operation, resource,
+                                         allow_prior_boot=True)
+
+                def terminal_proof(current):
+                    if current != record:
+                        return False
+                    try:
+                        # A remove run never arms these units.  Proving both
+                        # terminal/absent states prevents a stale smoke timer
+                        # or service from racing the dormant verification.
+                        _ensure_arm_ack_absent(resource)
+                        _ensure_credential_temp_absent(resource)
+                        unit_terminal(args.cleanup_unit + '.timer', resource, args.run_id)
+                        unit_terminal(args.cleanup_unit + '.service', resource, args.run_id)
+                        dormant_clean(resource, 'dormant')
+                        return True
+                    except BaseException:
+                        return False
+
+                if not terminal_proof(record):
+                    fail('terminal_proof_unknown')
+                result = admission.recover_pending(record, terminal_proof)
+                if result.get('status') != 'recovered':
+                    fail('pending_recovery_unknown')
+    except core.PendingError as error:
+        fail(error.reason, error.code)
+    print('provider_ui_smoke_admission=result=remove-dormant-recovered')
+
+
 def recover_clear_marker(args: argparse.Namespace) -> None:
     """Finish only the exact terminal clear interrupted after marker creation."""
     core = load_core()
@@ -854,7 +901,7 @@ def recover_arm_ack(args: argparse.Namespace) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=('begin', 'ack-arm', 'assert-bound-fd', 'settle', 'recover-arm-ack', 'recover-unarmed', 'recover-install-empty', 'recover-clear-marker'))
+    parser.add_argument('action', choices=('begin', 'ack-arm', 'assert-bound-fd', 'settle', 'recover-arm-ack', 'recover-unarmed', 'recover-install-empty', 'recover-remove-dormant', 'recover-clear-marker'))
     parser.add_argument('--operation', choices=sorted(ACTION_NAMES), required=True)
     parser.add_argument('--run-id')
     parser.add_argument('--lock-fd', type=int)
@@ -888,6 +935,8 @@ def main() -> None:
         recover_unarmed(args)
     elif args.action == 'recover-install-empty':
         recover_install_empty(args)
+    elif args.action == 'recover-remove-dormant':
+        recover_remove_dormant(args)
     elif args.action == 'recover-clear-marker':
         recover_clear_marker(args)
     else:

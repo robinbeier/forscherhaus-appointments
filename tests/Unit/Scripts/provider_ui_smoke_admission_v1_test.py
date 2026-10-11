@@ -710,6 +710,83 @@ class ProviderUiSmokeAdmissionBehaviorTest(unittest.TestCase):
         self.assertEqual(raised.exception.code, 75)
         ack.assert_not_called()
 
+    def test_recover_remove_dormant_accepts_exact_old_boot_pending_record(self):
+        resource = self.resource("remove")
+        record = {
+            "schema": "maintenance_pending_v1", "epoch": 1,
+            "operation": "provider_ui_smoke", "run_id": "a" * 32,
+            "boot_id": "old-boot", "resource_identity": resource,
+        }
+        core = FakeCore(record)
+        boots = []
+        core.read_pending = lambda boot_id: boots.append(boot_id) or [record] if boot_id is None else None
+        with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+             patch.object(COORD, "load_core", return_value=core), \
+             patch.object(COORD, "_ensure_arm_ack_absent") as ack, \
+             patch.object(COORD, "_ensure_credential_temp_absent") as credential_temp, \
+             patch.object(COORD, "unit_terminal", return_value=True) as units, \
+             patch.object(COORD, "dormant_clean", return_value=True) as fixture, \
+             contextlib.redirect_stdout(io.StringIO()):
+            COORD.recover_remove_dormant(self.args("recover-remove-dormant", operation="remove"))
+        self.assertIn(None, boots)
+        self.assertTrue(core.recovery.asserted)
+        self.assertTrue(core.recovery.asserted_again)
+        self.assertEqual(units.call_count, 6)
+        self.assertEqual(fixture.call_count, 3)
+        ack.assert_called_with(resource)
+        credential_temp.assert_called_with(resource)
+        fixture.assert_called_with(resource, "dormant")
+
+    def test_recover_remove_dormant_rejects_non_remove_operation(self):
+        with patch.object(COORD, "load_core") as load_core:
+            with self.assertRaises(SystemExit) as raised:
+                COORD.recover_remove_dormant(self.args("recover-remove-dormant"))
+        self.assertEqual(raised.exception.code, 64)
+        load_core.assert_not_called()
+
+    def test_recover_remove_dormant_retains_pending_when_fixture_is_removed(self):
+        resource = self.resource("remove")
+        record = {
+            "schema": "maintenance_pending_v1", "epoch": 1,
+            "operation": "provider_ui_smoke", "run_id": "a" * 32,
+            "boot_id": "boot-test", "resource_identity": resource,
+        }
+        core = FakeCore(record)
+        with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+             patch.object(COORD, "load_core", return_value=core), \
+             patch.object(COORD, "_ensure_arm_ack_absent"), \
+             patch.object(COORD, "_ensure_credential_temp_absent"), \
+             patch.object(COORD, "unit_terminal", return_value=True), \
+             patch.object(COORD, "dormant_clean", side_effect=SystemExit(75)) as fixture, \
+             patch.object(COORD, "_remove_arm_ack") as remove_ack:
+            with self.assertRaises(SystemExit) as raised:
+                COORD.recover_remove_dormant(self.args("recover-remove-dormant", operation="remove"))
+        self.assertEqual(raised.exception.code, 75)
+        self.assertEqual(core.recovery.proof_calls, 0)
+        fixture.assert_called_once_with(resource, "dormant")
+        remove_ack.assert_not_called()
+
+    def test_recover_remove_dormant_rejects_timer_contamination(self):
+        resource = self.resource("remove")
+        record = {
+            "schema": "maintenance_pending_v1", "epoch": 1,
+            "operation": "provider_ui_smoke", "run_id": "a" * 32,
+            "boot_id": "boot-test", "resource_identity": resource,
+        }
+        core = FakeCore(record)
+        with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+             patch.object(COORD, "load_core", return_value=core), \
+             patch.object(COORD, "_ensure_arm_ack_absent"), \
+             patch.object(COORD, "_ensure_credential_temp_absent"), \
+             patch.object(COORD, "unit_terminal", side_effect=SystemExit(75)) as units, \
+             patch.object(COORD, "dormant_clean") as fixture:
+            with self.assertRaises(SystemExit) as raised:
+                COORD.recover_remove_dormant(self.args("recover-remove-dormant", operation="remove"))
+        self.assertEqual(raised.exception.code, 75)
+        self.assertEqual(core.recovery.proof_calls, 0)
+        units.assert_called_once()
+        fixture.assert_not_called()
+
     def test_stale_arm_ack_refuses_settlement(self):
         resource = self.resource("smoke")
         record = {

@@ -238,6 +238,14 @@ left untouched; the action performs no file deletion or repair. Dormant or
 partial state, credential temporaries, and binding mismatches retain the
 pending veto. This path is distinct from smoke recovery and is never an
 automatic retry.
+An interrupted Provider UI `remove` may be aborted only by the separate
+server-local `recover-remove-dormant` action for the exact current- or
+prior-boot remove record. Under the private and shared locks it proves no arm
+acknowledgement or credential temporary, terminal-or-absent cleanup units,
+and the unchanged dormant fixture before clearing Pending. It never deletes
+credentials or treats a committed `removed`, active, partial, or unknown state
+as an abort. A committed removal remains eligible only for the existing
+`removed` settlement proof.
 For a writer that already holds the canonical shared lock, the local core now
 has a descriptor-based admission check. It validates the same lock inode and
 protocol epoch and checks the caller's exclusive flock through read-only

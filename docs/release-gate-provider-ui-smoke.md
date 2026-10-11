@@ -211,6 +211,16 @@ repairs it. Dormant or partial state, a credential temporary, or any
 run/resource binding mismatch retains the pending veto. This recovery is
 distinct from the smoke path and is not an automatic retry.
 
+An interrupted `remove` that left the fixture fully dormant can use the
+separate server-local `recover-remove-dormant` abort action for the exact
+current- or prior-boot remove run. It holds the private and shared locks,
+proves that no arm acknowledgement or temporary credential file remains,
+that cleanup units are absent or terminal, and that the PHP verifier still
+reports `dormant` before clearing Pending. It does not retry removal, delete
+credentials, or accept an active, removed, partial, or unknown fixture. If
+the remove transaction committed, ordinary settlement instead requires the
+`removed` proof.
+
 If settlement has already created the core's immutable `clear-state.json`
 marker and is interrupted, the separate server-local `recover-clear-marker`
 action may finish only that exact transition. It validates the marker schema,
