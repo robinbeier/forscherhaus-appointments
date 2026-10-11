@@ -49,6 +49,8 @@ class ProviderUiSmokeFixtureContractTest extends TestCase
         $this->assertStringContainsString('SELECT GET_LOCK(?, 10)', $source);
         $this->assertStringContainsString('/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock', $source);
         $this->assertStringContainsString('LOCK_EX | LOCK_NB', $source);
+        $this->assertStringContainsString("\$action === 'deactivate' ? self::DEACTIVATE_LOCK_WAIT_MS : 0", $source);
+        $this->assertStringContainsString('lockWithDeadline($handle, $waitMs)', $source);
         $this->assertStringContainsString("'assert-bound-fd'", $source);
         $this->assertStringContainsString('3 => $this->sharedLockHandle', $source);
         $this->assertStringContainsString('new Provider_ui_smoke_default_admission_guard', $source);
@@ -60,6 +62,61 @@ class ProviderUiSmokeFixtureContractTest extends TestCase
         $this->assertStringNotContainsString('$this->notifications', $source);
         $this->assertStringNotContainsString('$this->webhooks_client', $source);
         $this->assertStringNotContainsString('$this->synchronization', $source);
+    }
+
+    public function testDeactivationLockWaitSurvivesBriefContention(): void
+    {
+        $lockPath = tempnam(sys_get_temp_dir(), 'provider-ui-lock-');
+        $readyPath = tempnam(sys_get_temp_dir(), 'provider-ui-ready-');
+        $this->assertIsString($lockPath);
+        $this->assertIsString($readyPath);
+        unlink($readyPath);
+
+        $script = <<<'PHP'
+        $handle = fopen($argv[1], 'c+');
+        if ($handle === false || !flock($handle, LOCK_EX)) { exit(2); }
+        file_put_contents($argv[2], 'ready');
+        usleep(1000000);
+        flock($handle, LOCK_UN);
+        fclose($handle);
+        PHP;
+        $process = proc_open(
+            [PHP_BINARY, '-r', $script, $lockPath, $readyPath],
+            [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            $pipes,
+        );
+        $this->assertIsResource($process);
+        $handle = null;
+
+        try {
+            $deadline = hrtime(true) + 2000000000;
+            while (!file_exists($readyPath) && hrtime(true) < $deadline) {
+                usleep(10000);
+            }
+            $this->assertFileExists($readyPath, 'Lock holder did not start.');
+
+            $handle = fopen($lockPath, 'c+');
+            $this->assertIsResource($handle);
+            $reflection = new ReflectionClass(Provider_ui_smoke_fixture::class);
+            $fixture = $reflection->newInstanceWithoutConstructor();
+            $lockWithDeadline = $reflection->getMethod('lockWithDeadline');
+
+            $this->assertFalse($lockWithDeadline->invoke($fixture, $handle, 0));
+            $this->assertTrue($lockWithDeadline->invoke($fixture, $handle, 2000));
+        } finally {
+            if (is_resource($handle)) {
+                flock($handle, LOCK_UN);
+                fclose($handle);
+            }
+            foreach ($pipes as $pipe) {
+                fclose($pipe);
+            }
+            proc_close($process);
+            unlink($lockPath);
+            if (file_exists($readyPath)) {
+                unlink($readyPath);
+            }
+        }
     }
 
     public function testActivationSnapshotsStateOnlyAfterTheLifecycleLock(): void

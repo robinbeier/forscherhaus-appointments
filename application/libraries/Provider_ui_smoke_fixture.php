@@ -107,6 +107,8 @@ final class Provider_ui_smoke_fixture
 
     private const SHARED_LOCK_PATH = '/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock';
 
+    private const DEACTIVATE_LOCK_WAIT_MS = 300000;
+
     private const DORMANT_ROLE_NAME = 'Provider UI Smoke Dormant';
 
     private const CREDENTIAL_USERNAME_KEY = 'PROVIDER_UI_SMOKE_USERNAME';
@@ -1469,7 +1471,7 @@ final class Provider_ui_smoke_fixture
 
     private function enterAdmission(string $action, string $credentialFile, string $stateFile): void
     {
-        $this->acquireSharedLock();
+        $this->acquireSharedLock($action);
 
         try {
             $this->assertAdmission($action, $credentialFile, $stateFile);
@@ -1488,7 +1490,7 @@ final class Provider_ui_smoke_fixture
      * Open the pre-created canonical production lock before any lifecycle
      * reads or writes. The lock is intentionally not created by this code.
      */
-    private function acquireSharedLock(): void
+    private function acquireSharedLock(string $action): void
     {
         $stat = @lstat(self::SHARED_LOCK_PATH);
 
@@ -1502,7 +1504,12 @@ final class Provider_ui_smoke_fixture
 
         $handle = @fopen(self::SHARED_LOCK_PATH, 'r+b');
 
-        if ($handle === false || !flock($handle, LOCK_EX | LOCK_NB)) {
+        // The independent systemd cleanup is a one-shot. A momentary lock
+        // collision must not abandon deactivation with the fixture still
+        // active. Other lifecycle actions keep their fail-fast admission.
+        $waitMs = $action === 'deactivate' ? self::DEACTIVATE_LOCK_WAIT_MS : 0;
+
+        if ($handle === false || !$this->lockWithDeadline($handle, $waitMs)) {
             if (is_resource($handle)) {
                 fclose($handle);
             }
@@ -1510,7 +1517,45 @@ final class Provider_ui_smoke_fixture
             throw new RuntimeException('Provider UI smoke shared lock is busy.');
         }
 
+        $current = @lstat(self::SHARED_LOCK_PATH);
+        $opened = @fstat($handle);
+
+        if (
+            $current === false ||
+            $opened === false ||
+            $current['dev'] !== $stat['dev'] ||
+            $current['ino'] !== $stat['ino'] ||
+            $opened['dev'] !== $stat['dev'] ||
+            $opened['ino'] !== $stat['ino'] ||
+            $current['nlink'] !== 1 ||
+            $current['uid'] !== 0 ||
+            $current['gid'] !== 0 ||
+            ($current['mode'] & 0177777) !== 0100600
+        ) {
+            flock($handle, LOCK_UN);
+            fclose($handle);
+            throw new RuntimeException('Provider UI smoke shared lock identity changed.');
+        }
+
         $this->sharedLockHandle = $handle;
+    }
+
+    /** @param resource $handle */
+    private function lockWithDeadline($handle, int $waitMs): bool
+    {
+        $deadline = hrtime(true) + $waitMs * 1000000;
+
+        do {
+            if (@flock($handle, LOCK_EX | LOCK_NB)) {
+                return true;
+            }
+
+            if (hrtime(true) >= $deadline) {
+                return false;
+            }
+
+            usleep(100000);
+        } while (true);
     }
 
     private function releaseSharedLock(): void

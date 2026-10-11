@@ -192,6 +192,10 @@ template, or a release switch during the run is therefore a hard gate failure.
 The transient systemd timer is independent of the operator shell. It runs the
 same secret-free server-local `deactivate` wrapper if the workstation loses
 power, SSH disappears, or the process is killed before its shell cleanup.
+The one-shot cleanup waits up to five minutes for the canonical production
+lock before it reports a failure; brief competing admissions therefore cannot
+strand the active fixture. A longer conflict remains an explicit recovery
+state with the durable pending veto intact, not an unobserved retry.
 An already-active unit with the same name is a hard preflight stop; it is not
 overwritten or assumed stale.
 
