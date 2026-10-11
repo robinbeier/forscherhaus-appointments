@@ -1,9 +1,15 @@
 # Coordinated maintenance admission
 
-ROB-812 tracks the durable pending-state prerequisite for ROB-809. The earlier
-ROB-532 process-identity work is complete, but does not establish this pending
-protocol. This document is the **target contract and migration gate**, not
-evidence that it is installed.
+**Status 2026-10-11:** Robin removed this global pending-state protocol as a
+prerequisite for the optional ROB-809 SSH cutover. The code merged through
+PR #867 still contains its uninstalled source integrations; ROB-812 is being
+reassessed separately. This document records that historical candidate and
+its migration constraints. It is **not** evidence of installation or a gate
+for ROB-809. Do not install parts of it or use a source-only merge as proof
+that the production release path is ready.
+
+The earlier ROB-532 process-identity work is complete, but does not establish
+this pending protocol.
 Keep the current conservative activity veto until every removal criterion below
 passes. A source merge does not authorize production installation.
 
@@ -40,7 +46,7 @@ scheduler, operator and recovery entrypoints, including direct supported calls.
 | Restore verification | `scripts/ops/libexec/deployment_dump_attestation_v1.py`; detached container, lease watcher, orphan and continuity checks | Repository source admits before reconciliation, registers pending before Docker launch, and settles after terminal restore and publication. The source now includes a narrowly scoped recovery proof for the post-publication/post-cleanup state; installed recovery and production installation remain open. |
 | Session retention | `scripts/ops/libexec/session_retention_v1.py`; shared lock and protected local state | Repository execute path reads the pending-state contract through its existing lock descriptor before mutation; installed helper and unit remain legacy until the coordinated rollout |
 | Manual build-cache retention | `scripts/ops/prod_build_cache_retention.sh`; private lock and activity veto | Require the shared lock for execute, including when its path is absent; ROB-579 tracks this prerequisite |
-| Manual release/archive/dump retention | Source `scripts/ops/prod_release_archive_dump_retention.sh` still exposes `--execute`. The read-only Tailscale snapshot at 2026-10-11 03:52 UTC, recorded in the ROB-812 Workpad, found the installed helper at SHA-256 `e5e29a78eee9d7659df36caac587f194af752e83962edb237912e5da37b493ac`, `root:root`, mode `0555`, nlink 1, with its timer inactive | Repository source now requires the fixed, hash-bound maintenance core and its pending-state admission under the held shared lock before creating retention state or cleaning marker temporaries. The installed helper is still legacy. Recheck helper identity and unit state immediately before rollout; install/fence every supported manual path or explicitly retire it before the ROB-809 cutover. Keep automatic retention disabled |
+| Manual release/archive/dump retention | Source `scripts/ops/prod_release_archive_dump_retention.sh` still exposes `--execute`. The read-only Tailscale snapshot at 2026-10-11 03:52 UTC, recorded in the ROB-812 Workpad, found the installed helper at SHA-256 `e5e29a78eee9d7659df36caac587f194af752e83962edb237912e5da37b493ac`, `root:root`, mode `0555`, nlink 1, with its timer inactive | Repository source now requires the fixed, hash-bound maintenance core and its pending-state admission under the held shared lock before creating retention state or cleaning marker temporaries. The installed helper is still legacy. Recheck helper identity and unit state before any separately approved protocol rollout; keep automatic retention disabled |
 | Retained manual backup/restore wrappers | Installed operator paths, verified by bounded read-only inventory | Enroll or explicitly retire every supported path before removing the veto |
 
 Native Docker/BuildKit garbage collection remains a separate engine-managed
@@ -407,7 +413,7 @@ mechanism, or keep manual prune unavailable under the new protocol. Do not
 substitute container inspection, process names or elapsed time for that proof.
 This requirement does not change native BuildKit GC's separate boundary.
 
-The local ROB-812 prerequisite fences the legacy manual entrypoint at the
+The local ROB-812 source candidate fences the legacy manual entrypoint at the
 fixed `/var/lib/fh-maintenance-admission` path. Execute mode acquires the
 canonical shared `fh-production-change.lock` before checking that path, then
 treats its presence as `maintenance_protocol_unenrolled` and refuses to
@@ -495,11 +501,11 @@ verified unreachable.
 Remove command-name inference only after every supported retained scheduler,
 manual and recovery path is enrolled, versions agree, crash/recovery evidence
 passes, and installed production versions are independently verified. A
-repository-only test or a free flock is insufficient. ROB-812 remains open
-until its local writer enrollment, recovery and mixed-version acceptance
-criteria pass; small local prerequisites may land independently with their
-narrower evidence. Production installation and the SSH cutover remain separate
-nighttime steps under ROB-809 after those local criteria are met.
+repository-only test or a free flock is insufficient. These prior ROB-812
+acceptance criteria are superseded for ROB-809. A future decision to install
+this generic protocol would need its own reviewed scope and production
+authorization. The optional SSH cutover is a separate, deferred decision under
+ROB-809 and does not depend on this protocol.
 
 For host operations and release authority, use
 [the operations harness](agent-operations.md). The
