@@ -66,6 +66,14 @@ class FakeAdmission:
             return {"status": "unknown"}
         return {"status": "recovered"}
 
+    def recover_interrupted_pending_temp(self, operation, resource, proof):
+        self.temp_proof_calls = getattr(self, "temp_proof_calls", 0) + 1
+        self.temp_asserted = proof(self.record)
+        self.temp_asserted_again = proof(self.record)
+        if not self.temp_asserted or not self.temp_asserted_again:
+            return {"status": "unknown"}
+        return {"status": "recovered"}
+
 
 class FakeCore:
     SCHEMA = "maintenance_pending_v1"
@@ -307,6 +315,64 @@ class ProviderUiSmokeAdmissionBehaviorTest(unittest.TestCase):
         self.assertTrue(core.recovery.asserted_again)
         remove_ack.assert_called_once_with(resource)
 
+    def test_begin_refuses_stale_credential_temp_before_publishing_pending(self):
+        resource = self.resource("smoke")
+        record = {
+            "schema": "maintenance_pending_v1", "epoch": 1,
+            "operation": "provider_ui_smoke", "run_id": "a" * 32,
+            "boot_id": "boot-test", "resource_identity": resource,
+        }
+        core = FakeCore(record)
+        args = self.args("begin", operation="smoke", run_id=None)
+        with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+             patch.object(COORD, "load_core", return_value=core), \
+             patch.object(COORD, "_ensure_arm_ack_absent"), \
+             patch.object(COORD, "_ensure_credential_temp_absent", side_effect=SystemExit(75)), \
+             patch.object(COORD, "secrets") as secrets:
+            secrets.token_hex.return_value = "a" * 32
+            with self.assertRaises(SystemExit) as raised:
+                COORD.begin(args)
+        self.assertEqual(raised.exception.code, 75)
+        self.assertFalse(hasattr(core.recovery, "published"))
+
+    def test_settle_keeps_pending_when_credential_temp_appears_before_terminal_proof(self):
+        resource = self.resource("install")
+        record = {
+            "schema": "maintenance_pending_v1", "epoch": 1,
+            "operation": "provider_ui_smoke", "run_id": "a" * 32,
+            "boot_id": "boot-test", "resource_identity": resource,
+        }
+        core = FakeCore(record)
+        args = self.args("settle", operation="install")
+        with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+             patch.object(COORD, "load_core", return_value=core), \
+             patch.object(COORD, "_ensure_credential_temp_absent", side_effect=SystemExit(75)) as credential_temp, \
+             patch.object(COORD, "dormant_clean") as fixture:
+            with self.assertRaises(SystemExit) as raised:
+                COORD.settle(args)
+        self.assertEqual(raised.exception.code, 75)
+        self.assertEqual(core.recovery.proof_calls, 0)
+        credential_temp.assert_called_once_with(resource)
+        fixture.assert_not_called()
+
+    def test_credential_temp_presence_is_a_fail_closed_read_only_check(self):
+        with tempfile.TemporaryDirectory() as directory:
+            credential_dir = Path(directory)
+            temporary = credential_dir / ".provider-ui-smoke.env.stale"
+            temporary.write_text("secret\n")
+            resource = self.resource("install")
+            resource["credentials_file"] = str(credential_dir / "provider.env")
+            metadata = types.SimpleNamespace(
+                st_mode=stat.S_IFDIR | 0o700,
+                st_uid=0,
+                st_gid=0,
+            )
+            with patch.object(COORD.os, "stat", return_value=metadata):
+                with self.assertRaises(SystemExit) as raised:
+                    COORD._ensure_credential_temp_absent(resource)
+            self.assertEqual(raised.exception.code, 75)
+            self.assertTrue(temporary.exists())
+
     def test_settle_refuses_missing_arm_ack_even_when_units_are_not_found(self):
         resource = self.resource("smoke")
         record = {
@@ -360,14 +426,91 @@ class ProviderUiSmokeAdmissionBehaviorTest(unittest.TestCase):
              patch.object(COORD, "load_core", return_value=core), \
              patch.object(COORD, "_ensure_arm_ack_absent") as absent, \
              patch.object(COORD, "unit_terminal", return_value=True) as units, \
-             patch.object(COORD, "dormant_clean", return_value=True) as fixture, \
+             patch.object(COORD, "fixture_terminal_state", return_value="dormant") as fixture, \
              contextlib.redirect_stdout(io.StringIO()):
             COORD.recover_unarmed(self.args("recover-unarmed"))
         self.assertEqual(core.recovery.proof_calls, 1)
         absent.assert_called_once_with(resource)
         self.assertEqual(units.call_count, 6)
         self.assertEqual(fixture.call_count, 3)
-        fixture.assert_called_with(resource, "dormant")
+        fixture.assert_called_with(resource)
+
+    def test_interrupted_pending_temp_recovery_derives_run_and_proves_smoke(self):
+        resource = self.resource("smoke")
+        record = {
+            "schema": "maintenance_pending_v1", "epoch": 1,
+            "operation": "provider_ui_smoke", "run_id": "a" * 32,
+            "boot_id": "old-boot", "resource_identity": resource,
+        }
+        core = FakeCore(record)
+        args = self.args("recover-interrupted-pending-temp", operation="smoke", run_id=None)
+        with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+             patch.object(COORD, "load_core", return_value=core), \
+             patch.object(COORD, "_ensure_arm_ack_absent") as ack, \
+             patch.object(COORD, "_ensure_credential_temp_absent") as creds, \
+             patch.object(COORD, "unit_terminal", return_value=True) as units, \
+             patch.object(COORD, "fixture_terminal_state", return_value="dormant") as fixture, \
+             contextlib.redirect_stdout(io.StringIO()):
+            COORD.recover_interrupted_pending_temp(args)
+        self.assertEqual(core.recovery.temp_proof_calls, 1)
+        ack.assert_called_with(resource)
+        creds.assert_called_with(resource)
+        self.assertEqual(units.call_count, 4)
+        fixture.assert_called_with(resource)
+
+    def test_interrupted_pending_temp_recovery_refuses_unverifiable_removed_state(self):
+        resource = self.resource("install")
+        record = {
+            "schema": "maintenance_pending_v1", "epoch": 1,
+            "operation": "provider_ui_smoke", "run_id": "a" * 32,
+            "boot_id": "old-boot", "resource_identity": resource,
+        }
+        core = FakeCore(record)
+        args = self.args("recover-interrupted-pending-temp", operation="install", run_id=None)
+        with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+             patch.object(COORD, "load_core", return_value=core), \
+             patch.object(COORD, "_ensure_arm_ack_absent"), \
+             patch.object(COORD, "_ensure_credential_temp_absent") as creds, \
+             patch.object(COORD, "fixture_terminal_state", side_effect=SystemExit(75)) as fixture:
+            with self.assertRaises(SystemExit) as raised:
+                COORD.recover_interrupted_pending_temp(args)
+        self.assertEqual(raised.exception.code, 75)
+        self.assertEqual(core.recovery.temp_proof_calls, 1)
+        creds.assert_called_with(resource)
+        fixture.assert_called_with(resource)
+
+    def test_interrupted_pending_temp_install_accepts_verified_dormant_state(self):
+        resource = self.resource("install")
+        record = {
+            "schema": "maintenance_pending_v1", "epoch": 1,
+            "operation": "provider_ui_smoke", "run_id": "a" * 32,
+            "boot_id": "old-boot", "resource_identity": resource,
+        }
+        core = FakeCore(record)
+        args = self.args("recover-interrupted-pending-temp", operation="install", run_id=None)
+        with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+             patch.object(COORD, "load_core", return_value=core), \
+             patch.object(COORD, "_ensure_arm_ack_absent"), \
+             patch.object(COORD, "_ensure_credential_temp_absent"), \
+             patch.object(COORD, "fixture_terminal_state", return_value="dormant") as fixture, \
+             contextlib.redirect_stdout(io.StringIO()):
+            COORD.recover_interrupted_pending_temp(args)
+        fixture.assert_called_with(resource)
+
+    def test_interrupted_pending_temp_recovery_rejects_supplied_run_id(self):
+        argv = [
+            "provider_ui_smoke_admission_v1.py", "recover-interrupted-pending-temp",
+            "--operation", "smoke", "--run-id", "a" * 32,
+            "--app-root", "/srv/app", "--credentials-file", "/etc/fh/provider.env",
+            "--state-file", "/var/lib/fh-provider/active.json",
+            "--cleanup-unit", "fh-provider-ui-smoke-cleanup",
+        ]
+        with patch.object(COORD.sys, "argv", argv), \
+             patch.object(COORD, "fail", side_effect=SystemExit(64)) as fail:
+            with self.assertRaises(SystemExit) as raised:
+                COORD.main()
+        self.assertEqual(raised.exception.code, 64)
+        fail.assert_called_once_with("run_id_not_allowed", 64)
 
     def test_recover_unarmed_refuses_acknowledged_run(self):
         resource = self.resource("smoke")
@@ -623,7 +766,7 @@ class ProviderUiSmokeAdmissionBehaviorTest(unittest.TestCase):
              patch.object(COORD, "load_core", return_value=core), \
              patch.object(COORD, "_ensure_arm_ack_absent") as ack, \
              patch.object(COORD, "_ensure_credential_temp_absent") as credential_temp, \
-             patch.object(COORD, "dormant_clean", return_value=True) as fixture, \
+             patch.object(COORD, "fixture_terminal_state", return_value="removed") as fixture, \
              patch.object(COORD, "_remove_arm_ack") as remove_ack, \
              contextlib.redirect_stdout(io.StringIO()):
             COORD.recover_install_empty(self.args("recover-install-empty", operation="install"))
@@ -633,7 +776,7 @@ class ProviderUiSmokeAdmissionBehaviorTest(unittest.TestCase):
         self.assertGreaterEqual(fixture.call_count, 1)
         ack.assert_called_with(resource)
         credential_temp.assert_called_with(resource)
-        fixture.assert_called_with(resource, "removed")
+        fixture.assert_called_with(resource)
         remove_ack.assert_not_called()
 
     def test_recover_install_empty_accepts_exact_old_boot_pending_record(self):
@@ -650,13 +793,13 @@ class ProviderUiSmokeAdmissionBehaviorTest(unittest.TestCase):
              patch.object(COORD, "load_core", return_value=core), \
              patch.object(COORD, "_ensure_arm_ack_absent"), \
              patch.object(COORD, "_ensure_credential_temp_absent"), \
-             patch.object(COORD, "dormant_clean", return_value=True), \
+             patch.object(COORD, "fixture_terminal_state", return_value="dormant"), \
              contextlib.redirect_stdout(io.StringIO()):
             COORD.recover_install_empty(self.args("recover-install-empty", operation="install"))
         self.assertIn(None, boots)
         self.assertTrue(core.recovery.asserted)
 
-    def test_recover_install_empty_rejects_dormant_or_partial_fixture(self):
+    def test_recover_install_empty_rejects_unknown_fixture(self):
         resource = self.resource("install")
         record = {
             "schema": "maintenance_pending_v1", "epoch": 1,
@@ -668,12 +811,12 @@ class ProviderUiSmokeAdmissionBehaviorTest(unittest.TestCase):
              patch.object(COORD, "load_core", return_value=core), \
              patch.object(COORD, "_ensure_arm_ack_absent"), \
              patch.object(COORD, "_ensure_credential_temp_absent"), \
-             patch.object(COORD, "dormant_clean", side_effect=SystemExit(75)) as fixture:
+             patch.object(COORD, "fixture_terminal_state", side_effect=SystemExit(75)) as fixture:
             with self.assertRaises(SystemExit) as raised:
                 COORD.recover_install_empty(self.args("recover-install-empty", operation="install"))
         self.assertEqual(raised.exception.code, 75)
         self.assertEqual(core.recovery.proof_calls, 0)
-        fixture.assert_called_once_with(resource, "removed")
+        fixture.assert_called_once_with(resource)
 
     def test_recover_install_empty_rejects_credential_temp(self):
         resource = self.resource("install")
@@ -687,7 +830,7 @@ class ProviderUiSmokeAdmissionBehaviorTest(unittest.TestCase):
              patch.object(COORD, "load_core", return_value=core), \
              patch.object(COORD, "_ensure_arm_ack_absent"), \
              patch.object(COORD, "_ensure_credential_temp_absent", side_effect=SystemExit(75)) as credential_temp, \
-             patch.object(COORD, "dormant_clean") as fixture:
+             patch.object(COORD, "fixture_terminal_state") as fixture:
             with self.assertRaises(SystemExit) as raised:
                 COORD.recover_install_empty(self.args("recover-install-empty", operation="install"))
         self.assertEqual(raised.exception.code, 75)
@@ -1259,6 +1402,7 @@ class ProviderUiSmokeAdmissionBehaviorTest(unittest.TestCase):
             with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
                  patch.object(COORD, "load_core", return_value=core), \
                  patch.object(COORD, "_state_dir_identity", return_value=(1, 2, 3, 0, 0, 2)), \
+                 patch.object(COORD, "_ensure_credential_temp_absent"), \
                  patch.object(COORD, "dormant_clean", side_effect=dormant), \
                  contextlib.redirect_stdout(io.StringIO()):
                 COORD.begin(args)

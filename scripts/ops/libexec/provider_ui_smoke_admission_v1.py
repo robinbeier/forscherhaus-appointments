@@ -114,6 +114,7 @@ def begin(args: argparse.Namespace) -> None:
         with private_cleanup_lock():
             with core.maintenance_admission() as admission:
                 _ensure_arm_ack_absent(resource)
+                _ensure_credential_temp_absent(resource)
                 if args.operation == 'smoke':
                     # A failed dormant check must not leave an unarmed Pending
                     # record. Both the check and publication hold the private
@@ -769,6 +770,7 @@ def settle(args: argparse.Namespace) -> None:
                         if args.operation == 'smoke':
                             unit_terminal(args.cleanup_unit + '.timer', resource, args.run_id)
                             unit_terminal(args.cleanup_unit + '.service', resource, args.run_id)
+                        _ensure_credential_temp_absent(resource)
                         dormant_clean(resource, expected_state)
                         return True
                     except BaseException:
@@ -831,7 +833,7 @@ def recover_unarmed(args: argparse.Namespace) -> None:
 
 
 def recover_install_empty(args: argparse.Namespace) -> None:
-    """Abort only an exact install run whose fixture is still fully removed."""
+    """Abort only an exact install run with a verified terminal fixture."""
     if args.operation != 'install':
         fail('recover_install_operation_invalid', 64)
     core = load_core()
@@ -848,7 +850,8 @@ def recover_install_empty(args: argparse.Namespace) -> None:
                     try:
                         _ensure_arm_ack_absent(resource)
                         _ensure_credential_temp_absent(resource)
-                        dormant_clean(resource, 'removed')
+                        if fixture_terminal_state(resource) not in {'dormant', 'removed'}:
+                            fail('fixture_terminal_unknown')
                         return True
                     except BaseException:
                         return False
@@ -908,6 +911,56 @@ def recover_remove_dormant(args: argparse.Namespace) -> None:
     except core.PendingError as error:
         fail(error.reason, error.code)
     print('provider_ui_smoke_admission=result=remove-dormant-recovered')
+
+
+def recover_interrupted_pending_temp(args: argparse.Namespace) -> None:
+    """Recover a torn core pending publication, without automatic admission.
+
+    The core derives the run ID from the validated temp record.  This matters
+    when ``begin`` stopped before returning its generated ID.  The operation
+    proof is deliberately the same non-start/terminal proof used by the
+    corresponding lifecycle and remains fail-closed for missing credentials.
+    """
+    core = load_core()
+    resource = resource_from(args)
+    if args.operation not in {'install', 'remove', 'smoke'}:
+        fail('pending_temp_operation_invalid', 64)
+    allowed_states = {
+        # The begin step for smoke starts only from dormant, while install and
+        # remove are explicitly idempotent and may have either verified end
+        # state before their transaction starts.
+        'smoke': {'dormant'},
+        'install': {'dormant', 'removed'},
+        'remove': {'dormant', 'removed'},
+    }[args.operation]
+    try:
+        with private_cleanup_lock():
+            with core.maintenance_recovery() as admission:
+                def terminal_proof(record):
+                    if (record.get('operation') != OPERATION or
+                            record.get('resource_identity') != resource):
+                        return False
+                    try:
+                        _ensure_arm_ack_absent(resource)
+                        _ensure_credential_temp_absent(resource)
+                        if args.operation in {'smoke', 'remove'}:
+                            unit_terminal(args.cleanup_unit + '.timer', resource,
+                                          record['run_id'])
+                            unit_terminal(args.cleanup_unit + '.service', resource,
+                                          record['run_id'])
+                        if fixture_terminal_state(resource) not in allowed_states:
+                            fail('fixture_terminal_unknown')
+                        return True
+                    except BaseException:
+                        return False
+
+                result = admission.recover_interrupted_pending_temp(
+                    OPERATION, resource, terminal_proof)
+                if result.get('status') != 'recovered':
+                    fail('pending_temp_recovery_unknown')
+    except core.PendingError as error:
+        fail(error.reason, error.code)
+    print('provider_ui_smoke_admission=result=pending-temp-recovered')
 
 
 def recover_clear_marker(args: argparse.Namespace) -> None:
@@ -1129,7 +1182,7 @@ def recover_interrupted_arm_ack_temp(args: argparse.Namespace) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=('begin', 'ack-arm', 'assert-bound-fd', 'settle', 'recover-arm-ack', 'recover-interrupted-arm-ack', 'recover-interrupted-arm-ack-temp', 'recover-unarmed', 'recover-install-empty', 'recover-remove-dormant', 'recover-clear-marker'))
+    parser.add_argument('action', choices=('begin', 'ack-arm', 'assert-bound-fd', 'settle', 'recover-arm-ack', 'recover-interrupted-arm-ack', 'recover-interrupted-arm-ack-temp', 'recover-interrupted-pending-temp', 'recover-unarmed', 'recover-install-empty', 'recover-remove-dormant', 'recover-clear-marker'))
     parser.add_argument('--operation', choices=sorted(ACTION_NAMES), required=True)
     parser.add_argument('--run-id')
     parser.add_argument('--lock-fd', type=int)
@@ -1149,7 +1202,9 @@ def main() -> None:
         fail('lifecycle_action_scope_invalid', 64)
     if args.action == 'begin' and args.run_id:
         fail('run_id_not_allowed', 64)
-    if args.action != 'begin' and (not args.run_id or len(args.run_id) != RUN_ID_BYTES * 2):
+    if args.action == 'recover-interrupted-pending-temp' and args.run_id:
+        fail('run_id_not_allowed', 64)
+    if args.action != 'begin' and args.action != 'recover-interrupted-pending-temp' and (not args.run_id or len(args.run_id) != RUN_ID_BYTES * 2):
         fail('run_id_required', 64)
     if args.action == 'begin':
         begin(args)
@@ -1163,6 +1218,8 @@ def main() -> None:
         recover_interrupted_arm_ack(args)
     elif args.action == 'recover-interrupted-arm-ack-temp':
         recover_interrupted_arm_ack_temp(args)
+    elif args.action == 'recover-interrupted-pending-temp':
+        recover_interrupted_pending_temp(args)
     elif args.action == 'recover-unarmed':
         recover_unarmed(args)
     elif args.action == 'recover-install-empty':

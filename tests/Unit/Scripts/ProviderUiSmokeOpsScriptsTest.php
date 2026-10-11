@@ -53,6 +53,61 @@ final class ProviderUiSmokeOpsScriptsTest extends TestCase
         }
     }
 
+    public function testInstallRejectsInvalidExistingCredentialsBeforePublishingPending(): void
+    {
+        if (!function_exists('posix_geteuid') || posix_geteuid() !== 0) {
+            $this->markTestSkipped('Root-only wrapper behavior runs inside the PHP Docker service.');
+        }
+
+        $workspace = $this->createWorkspace();
+        $credentials = $workspace . '/credentials.env';
+        $admissionCalls = $workspace . '/admission-calls.log';
+        file_put_contents(
+            $credentials,
+            "PROVIDER_UI_SMOKE_USERNAME=__ea_provider_ui_smoke_v1\n" . "PROVIDER_UI_SMOKE_PASSWORD=not-a-credential\n",
+        );
+        chmod($credentials, 0600);
+        $this->writeExecutable(
+            $workspace . '/bin/python3',
+            "#!/usr/bin/env bash\n" . "printf '%s\\n' \"\\$*\" >> \"{$admissionCalls}\"\n" . "exit 99\n",
+        );
+
+        try {
+            $result = $this->runCommand(
+                [
+                    'bash',
+                    'scripts/ops/provider_ui_smoke_principal.sh',
+                    'install',
+                    '--app-root',
+                    $this->repoRoot(),
+                    '--credentials-file',
+                    $credentials,
+                    '--state-dir',
+                    $workspace . '/state',
+                ],
+                $this->repoRoot(),
+                ['PATH' => $workspace . '/bin' . PATH_SEPARATOR . (getenv('PATH') ?: '')],
+            );
+
+            self::assertNotSame(0, $result['exit_code']);
+            self::assertStringContainsString('credential file shape is invalid', $result['stderr']);
+            self::assertFileDoesNotExist($admissionCalls);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testInstallRunsAdmissionBeforeCreatingMissingCredentials(): void
+    {
+        $principal = file_get_contents($this->repoRoot() . '/scripts/ops/provider_ui_smoke_principal.sh');
+
+        self::assertIsString($principal);
+        self::assertMatchesRegularExpression(
+            '/install\)\s+require_command openssl\s+preflight_credentials_before_admission\s+admission_begin install\s+ensure_state_directory\s+create_credentials_file/s',
+            $principal,
+        );
+    }
+
     public function testOrchestratorRejectsNonNormalizedRemotePathsBeforeNetworkAccess(): void
     {
         $result = $this->runCommand(

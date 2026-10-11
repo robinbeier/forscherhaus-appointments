@@ -204,6 +204,19 @@ create_credentials_file() {
     printf 'credential_state=created\n'
 }
 
+preflight_credentials_before_admission() {
+    local parent_dir
+
+    parent_dir="$(dirname "${CREDENTIALS_FILE}")"
+    if [[ -e "${parent_dir}" || -L "${parent_dir}" ]]; then
+        assert_secure_parent_directory "${parent_dir}"
+    fi
+
+    if [[ -e "${CREDENTIALS_FILE}" || -L "${CREDENTIALS_FILE}" ]]; then
+        assert_credentials_file
+    fi
+}
+
 run_lifecycle() {
     local lifecycle_action="$1"
     local expected_state="$2"
@@ -346,6 +359,7 @@ main() {
             ;;
         install)
             require_command openssl
+            preflight_credentials_before_admission
             admission_begin install
             ensure_state_directory
             create_credentials_file

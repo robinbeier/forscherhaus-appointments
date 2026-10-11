@@ -254,11 +254,11 @@ before fixture creation, the coordinator has a separate
 explicit `recover-install-empty` action. It accepts the exact install record
 from the current or previous boot only after proving no arm acknowledgement or
 temporary acknowledgement exists, no credential temporary exists, and the
-PHP verifier reports `removed`. A pre-existing valid credential file may be
-left untouched; the action performs no file deletion or repair. Dormant or
-partial state, credential temporaries, and binding mismatches retain the
-pending veto. This path is distinct from smoke recovery and is never an
-automatic retry.
+PHP verifier reports a valid `dormant` or `removed` state. A pre-existing
+valid credential file may be left untouched; the action performs no file
+deletion or repair. Partial state, credential temporaries, and binding
+mismatches retain the pending veto. This path is distinct from smoke recovery
+and is never an automatic retry.
 An interrupted Provider UI `remove` may be aborted only by the separate
 server-local `recover-remove-dormant` action for the exact current- or
 prior-boot remove record. Under the private and shared locks it proves no arm
@@ -267,6 +267,23 @@ and the unchanged dormant fixture before clearing Pending. It never deletes
 credentials or treats a committed `removed`, active, partial, or unknown state
 as an abort. A committed removal remains eligible only for the existing
 `removed` settlement proof.
+If publication of the core pending record itself is interrupted, the explicit
+server-local `recover-interrupted-pending-temp` action may inspect the pending
+state before any new admission. It derives the run ID from exactly one
+root-owned, mode-0600, canonical temporary record bound to
+`provider_ui_smoke` and the exact requested resource. It accepts only either
+that sole temporary with no `pending.json`, or the exact two-link same-inode
+temporary/`pending.json` pair. Extra names, partial or malformed bytes,
+symlinks, foreign records, clear markers, and unknown link counts retain the
+veto without mutation. Under the private cleanup lock and shared recovery lock
+it requires the operation-specific non-start/terminal proof, including absent
+ACK and credential temporaries and terminal bound systemd units where the
+operation uses them. A temp-only record is first promoted to the canonical
+pending name, then the temporary is durably removed; the existing recovery
+marker path repeats the proof. In particular, an install whose verifier cannot
+prove `removed` because credentials are absent remains blocked; missing
+credentials are never treated as proof of an empty fixture. This is an
+explicit server-local recovery path, never automatic re-admission or retry.
 For a writer that already holds the canonical shared lock, the local core now
 has a descriptor-based admission check. It validates the same lock inode and
 protocol epoch and checks the caller's exclusive flock through read-only

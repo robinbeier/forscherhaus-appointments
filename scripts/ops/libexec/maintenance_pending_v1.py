@@ -395,6 +395,45 @@ def _temp_names():
         reject('state_directory_unreadable')
 
 
+def _read_interrupted_pending_temp(operation, resource_identity):
+    """Return one complete Provider UI pending temp left by torn publish.
+
+    Publication deliberately uses a no-clobber hardlink.  A crash can therefore
+    leave either the temporary name alone or both names for the same inode.
+    Recovery accepts only those two exact shapes; callers still need to supply
+    the operation-specific terminal proof before changing either name.
+    """
+    names = _temp_names()
+    if len(names) != 1:
+        reject('pending_temp_unknown')
+    temporary = os.path.join(STATE_ROOT, names[0])
+    pending_present = _pending_exists()
+    try:
+        temp_raw, temp_stat = _read_bounded(temporary, MAX_RECORD_BYTES, (1, 2))
+        record = _validate_record(_decode(temp_raw))
+    except PendingError:
+        raise
+    except OSError:
+        reject('pending_temp_unknown')
+    if record['operation'] != operation or record['resource_identity'] != resource_identity:
+        reject('pending_binding_changed')
+    if pending_present:
+        try:
+            pending_raw, pending_stat = _read_bounded(PENDING_PATH, MAX_RECORD_BYTES, (2,))
+        except OSError:
+            reject('pending_temp_unknown')
+        if (temp_stat.st_nlink != 2 or pending_stat.st_nlink != 2 or
+                temp_raw != pending_raw or
+                _inode_binding(temp_stat) != _inode_binding(pending_stat)):
+            reject('pending_temp_unknown')
+        pair = True
+    else:
+        if temp_stat.st_nlink != 1:
+            reject('pending_temp_unknown')
+        pair = False
+    return record, temporary, temp_stat, pair
+
+
 def _path_exists_or_refuse(path):
     """Return existence without turning non-ENOENT errors into absence."""
     try:
@@ -808,6 +847,53 @@ class MaintenanceAdmission:
         _link_clear_marker_locked(raw, current)
         return self.recover_clear_marker(
             lambda marker: marker == record and terminal_proof(marker) is True)
+
+    def recover_interrupted_pending_temp(self, operation, resource_identity,
+                                         terminal_proof=None):
+        """Recover a torn no-clobber pending publication.
+
+        The record is derived from the validated temporary itself, so recovery
+        remains possible when ``begin`` never returned its run ID.  A temp-only
+        state is first converted to the canonical pending name under the same
+        lock; both shapes then use the existing marker-based recovery, keeping
+        the admission veto intact if any later step is interrupted.
+        """
+        self._assert_held()
+        if not self.recovery:
+            reject('recovery_capability_required')
+        if not callable(terminal_proof):
+            reject('terminal_proof_missing')
+        if _clear_temp_names() or _clear_marker_exists():
+            reject('pending_clear_unsettled')
+        record, temporary, before, pair = _read_interrupted_pending_temp(
+            operation, resource_identity)
+        try:
+            if terminal_proof(record) is not True:
+                reject('terminal_proof_unknown')
+        except PendingError:
+            raise
+        except Exception:
+            reject('terminal_proof_unknown')
+        current = os.lstat(temporary)
+        if _identity(before) != _identity(current):
+            reject('pending_temp_binding_changed')
+        if not pair:
+            try:
+                os.link(temporary, PENDING_PATH, follow_symlinks=False)
+            except FileExistsError:
+                reject('pending_temp_unknown')
+            except OSError:
+                reject('pending_temp_unknown')
+            _fsync_state_directory()
+        try:
+            os.unlink(temporary)
+        except OSError:
+            reject('pending_temp_cleanup_failed')
+        _fsync_state_directory()
+        # Existing recovery re-reads the canonical record and repeats the
+        # operation proof after marker creation.  If that proof is unknown,
+        # the marker remains as the durable veto.
+        return self.recover_pending(record, terminal_proof)
 
     def __exit__(self, exc_type, exc_value, traceback):
         if self._fd is not None:
