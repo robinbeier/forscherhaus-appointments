@@ -85,6 +85,7 @@ final class DeploymentDumpAttestationProducerV1RootTest extends TestCase
         $accepted = $this->python(
             <<<'PY'
             import os
+            import stat
             module = load()
             fd = os.open(os.environ['ROB465_TEST_ROOT'], os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
             value = module.read_backup_handoff(fd)
@@ -649,6 +650,254 @@ final class DeploymentDumpAttestationProducerV1RootTest extends TestCase
         );
         self::assertSame(0, $result['exit'], $result['stderr']);
         self::assertSame("registered restore lifecycle verified\n", $result['stdout']);
+    }
+
+    public function testCrossProcessRecoveryProofRequiresExactPublishedAndCleanedState(): void
+    {
+        $result = $this->python(
+            <<<'PY'
+            import fcntl
+            import hashlib
+            import importlib.util
+            import os
+            import stat
+            import tempfile
+
+            module = load()
+            core_spec = importlib.util.spec_from_file_location(
+                'maintenance_pending_v1',
+                os.path.join(os.path.dirname(module.__file__), 'maintenance_pending_v1.py'),
+            )
+            core = importlib.util.module_from_spec(core_spec)
+            core_spec.loader.exec_module(core)
+            original_backup_root = module.BACKUP_ROOT
+            original_docker = module.docker
+            original_open_dump = module.open_dump
+            root = tempfile.mkdtemp(prefix='recovery-proof-', dir='/root')
+            dump = b'synthetic closed dump'
+            digest = hashlib.sha256(dump).hexdigest()
+            backup_id = '20260101T010101Z'
+            restored = '2026-01-01T02:02:02Z'
+            current_boot = core.current_boot_id()
+
+            def write(path, data, mode=0o600):
+                with open(path, 'wb') as handle:
+                    handle.write(data)
+                os.chmod(path, mode)
+
+            def prepare(mode):
+                case_root = tempfile.mkdtemp(prefix=mode + '-', dir=root)
+                state = os.path.join(case_root, 'state')
+                locks = os.path.join(case_root, 'locks')
+                evidence = os.path.join(case_root, 'evidence')
+                attestations = os.path.join(evidence, 'dump-attestations')
+                scratch = os.path.join(evidence, 'dump-attestation-scratch')
+                backups = os.path.join(case_root, 'backups')
+                for path in (state, locks, evidence, attestations, scratch, backups):
+                    os.mkdir(path, 0o700)
+                shared_lock_path = os.path.join(locks, 'fh-production-change.lock')
+                write(os.path.join(state, 'epoch'), (core.PROTOCOL_EPOCH + '\n').encode('ascii'))
+                write(shared_lock_path, b'')
+                os.mkdir(os.path.join(backups, backup_id), 0o700)
+                os.mkdir(os.path.join(backups, backup_id, 'db'), 0o700)
+                dump_path = os.path.join(backups, backup_id, 'db', 'easyappointments.sql.gz')
+                write(dump_path, dump)
+                handoff = {'backup_set_id': backup_id, 'compressed_size_bytes': len(dump),
+                           'dump_sha256': digest, 'schema': 'production_backup_set_handoff.v1',
+                           'uncompressed_size_bytes': len(dump)}
+                write(os.path.join(backups, 'last_backup_set.json'), module.canonical(handoff))
+                write(os.path.join(backups, 'last_backup_success.utc'), b'2026-01-01T01:01:01Z\n')
+                write(os.path.join(backups, 'last_verify_success.utc'), (restored + '\n').encode('ascii'))
+                attestation = {'schema': 'deployment_dump_attestation.v1',
+                               'dump': {'sha256': digest, 'size_bytes': len(dump),
+                                        'uncompressed_size_bytes': len(dump),
+                                        'created_at_utc': '2026-01-01T01:01:01Z'},
+                               'verification': {'method': 'mariadb_10_11_isolated_restore_v1',
+                                                'image': module.IMAGE, 'sha256_verified': True,
+                                                'gzip_verified': True, 'restore_verified': True,
+                                                'restored_datadir_allocated_bytes': 1,
+                                                'restored_datadir_inode_count': 1,
+                                                'restored_at_utc': restored},
+                               'attested_at_utc': restored}
+                write(os.path.join(attestations, digest + '.json'), module.canonical(attestation))
+                continuity_handoff = handoff
+                if mode == 'continuity-mismatch':
+                    continuity_handoff = dict(handoff, dump_sha256='f' * 64)
+                if mode in ('continuity-mismatch', 'continuity-ok'):
+                    write(os.path.join(backups, 'backup_continuity_state.json'),
+                          module.continuity_state_bytes('verified', continuity_handoff))
+                continuity_required = mode in ('continuity-mismatch', 'continuity-ok')
+                boot = '11111111-1111-4111-8111-111111111111' if mode == 'old-boot' else current_boot
+                record = core.make_record(
+                    'deployment_dump_attestation', 'r' + mode.replace('-', ''), boot,
+                    {'backup_set_id': backup_id, 'compressed_size_bytes': len(dump),
+                     'container_intent': 'fh-dump-attestation-' + 'a' * 32,
+                     'continuity_required': continuity_required, 'dump_sha256': digest,
+                     'run_leaf': '.run-' + 'a' * 32, 'uncompressed_size_bytes': len(dump)},
+                    '2026-01-01T01:02:00Z',
+                )
+                global_fd = os.open(shared_lock_path, os.O_RDWR | os.O_CLOEXEC)
+                fcntl.flock(global_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                old_values = (core.STATE_ROOT, core.EPOCH_PATH, core.PENDING_PATH,
+                              core.CLEAR_MARKER_PATH, core.SHARED_LOCK_PATH, module.BACKUP_ROOT)
+                core.STATE_ROOT = state
+                core.EPOCH_PATH = os.path.join(state, 'epoch')
+                core.PENDING_PATH = os.path.join(state, 'pending.json')
+                core.CLEAR_MARKER_PATH = os.path.join(state, 'clear-state.json')
+                core.SHARED_LOCK_PATH = shared_lock_path
+                module.BACKUP_ROOT = backups
+                admission = core.MaintenanceAdmission.from_existing_lock_fd(global_fd, boot)
+                admission.publish_pending(record)
+                admission.__exit__(None, None, None)
+                if mode in ('marker-pending', 'marker-only'):
+                    os.link(core.PENDING_PATH, core.CLEAR_MARKER_PATH)
+                    directory_fd = os.open(state, os.O_RDONLY | os.O_DIRECTORY)
+                    os.fsync(directory_fd)
+                    os.close(directory_fd)
+                    if mode == 'marker-only':
+                        os.unlink(core.PENDING_PATH)
+                        directory_fd = os.open(state, os.O_RDONLY | os.O_DIRECTORY)
+                        os.fsync(directory_fd)
+                        os.close(directory_fd)
+                return (global_fd, evidence, attestations, backups, scratch, record, old_values)
+
+            def run(mode):
+                global_fd, evidence, attestations, backups, scratch, record, old_values = prepare(mode)
+                att_fd = os.open(attestations, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+                back_fd = os.open(backups, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+                scratch_fd = os.open(scratch, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+                original_docker = module.docker
+                module.docker = (lambda *_args, **_kwargs: (_ for _ in ()).throw(SystemExit(75))) \
+                    if mode == 'unknown' else (lambda *_args, **_kwargs: '')
+                def fixture_open_dump(_backup_id):
+                    path = os.path.join(backups, backup_id, 'db', 'easyappointments.sql.gz')
+                    before = os.stat(path, follow_symlinks=False)
+                    fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+                    opened = os.fstat(fd)
+                    assert stat.S_ISREG(opened.st_mode) and opened.st_uid == 0 and opened.st_gid == 0
+                    assert opened.st_nlink == 1 and stat.S_IMODE(opened.st_mode) == 0o600
+                    assert module.identity(before) == module.identity(opened)
+                    return fd, opened
+                module.open_dump = fixture_open_dump
+                try:
+                    try:
+                        module.recover_completed_pending(core, global_fd, record, att_fd, back_fd, scratch_fd)
+                    except (core.PendingError, SystemExit):
+                        if mode not in ('old-boot', 'continuity-mismatch', 'unknown'):
+                            raise
+                        assert os.path.exists(core.PENDING_PATH) or os.path.exists(core.CLEAR_MARKER_PATH)
+                        return 'blocked'
+                    assert not os.path.exists(core.PENDING_PATH)
+                    assert not os.path.exists(core.CLEAR_MARKER_PATH)
+                    return 'recovered'
+                finally:
+                    module.docker = original_docker
+                    module.open_dump = original_open_dump
+                    for fd in (att_fd, back_fd, scratch_fd):
+                        os.close(fd)
+                    fcntl.flock(global_fd, fcntl.LOCK_UN)
+                    os.close(global_fd)
+                    (core.STATE_ROOT, core.EPOCH_PATH, core.PENDING_PATH,
+                     core.CLEAR_MARKER_PATH, core.SHARED_LOCK_PATH, module.BACKUP_ROOT) = old_values
+
+            assert run('pending') == 'recovered'
+            assert run('marker-pending') == 'recovered'
+            assert run('marker-only') == 'recovered'
+            assert run('old-boot') == 'blocked'
+            assert run('continuity-mismatch') == 'blocked'
+            assert run('unknown') == 'blocked'
+            module.BACKUP_ROOT = original_backup_root
+            module.docker = original_docker
+            module.open_dump = original_open_dump
+            print('cross-process recovery end-to-end cases verified')
+            PY
+            ,
+        );
+        self::assertSame(0, $result['exit'], $result['stderr']);
+        self::assertSame("cross-process recovery end-to-end cases verified\n", $result['stdout']);
+    }
+
+    public function testRecoveryCliMissingPendingReturnsBoundedExitWithoutTraceback(): void
+    {
+        $result = $this->python(
+            <<<'PY'
+            import hashlib
+            import importlib.util
+            import os
+            import shutil
+            import sys
+            import tempfile
+
+            module = load()
+            original_core = os.path.join(os.path.dirname(module.__file__), 'maintenance_pending_v1.py')
+            root = tempfile.mkdtemp(prefix='rob812-cli-', dir='/var/lib')
+            state = os.path.join(root, 'state')
+            orchestrator = os.path.join(root, 'orchestrator')
+            locks = os.path.join(orchestrator, 'locks')
+            evidence = os.path.join(root, 'evidence')
+            attestations = os.path.join(evidence, 'dump-attestations')
+            scratch = os.path.join(evidence, 'dump-attestation-scratch')
+            backups = os.path.join(root, 'backups')
+            for path in (state, orchestrator, locks, evidence, attestations, scratch, backups):
+                os.mkdir(path, 0o700)
+            shared_lock = os.path.join(locks, 'fh-production-change.lock')
+            dump_lock = os.path.join(evidence, '.dump-attestation.lock')
+            for path in (shared_lock, dump_lock):
+                with open(path, 'wb'):
+                    pass
+                os.chmod(path, 0o600)
+
+            try:
+                with open(os.path.join(state, 'epoch'), 'w', encoding='ascii') as handle:
+                    handle.write('maintenance-admission.v1\n')
+                core_source = open(original_core, encoding='utf-8').read()
+                core_source = core_source.replace(
+                    "STATE_ROOT = '/var/lib/fh-maintenance-admission'",
+                    'STATE_ROOT = ' + repr(state),
+                ).replace(
+                    "SHARED_LOCK_PATH = '/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock'",
+                    'SHARED_LOCK_PATH = ' + repr(shared_lock),
+                )
+                core_path = os.path.join(root, 'maintenance_pending_v1.py')
+                with open(core_path, 'w', encoding='utf-8') as handle:
+                    handle.write(core_source)
+                os.chmod(core_path, 0o644)
+
+                module.ORCHESTRATOR_ROOT = orchestrator
+                module.EVIDENCE_ROOT = evidence
+                module.BACKUP_ROOT = backups
+                module.ADMISSION_CORE = core_path
+                module.ADMISSION_CORE_SHA256 = hashlib.sha256(core_source.encode()).hexdigest()
+
+                def fixture_directory(path, exact_mode=None):
+                    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+                    observed = os.fstat(fd)
+                    assert observed.st_uid == 0 and observed.st_gid == 0
+                    if exact_mode is not None:
+                        assert (observed.st_mode & 0o777) == exact_mode
+                    return fd
+
+                module.open_absolute_directory = fixture_directory
+                source = open(module.__file__, encoding='utf-8').read()
+                tail = source[source.index("\nif __name__ == '__main__':\n"):]
+                original_recovery = module.recover_pending_entrypoint
+
+                def cli_main():
+                    return original_recovery()
+
+                module.main = cli_main
+                module.__name__ = '__main__'
+                sys.argv = ['deployment_dump_attestation_v1.py', '--recover-pending']
+                exec(compile(tail, module.__file__, 'exec'), module.__dict__)
+            finally:
+                shutil.rmtree(root, ignore_errors=True)
+            PY
+            ,
+        );
+        self::assertSame(75, $result['exit'], $result['stderr']);
+        self::assertStringContainsString('dump attestation rejected', $result['stderr']);
+        self::assertStringNotContainsString('Traceback', $result['stderr']);
+        self::assertSame('', $result['stdout']);
     }
 
     public function testClosedStreamingDumpGrammarCountsTablesAndRejectsExecutableBypasses(): void
