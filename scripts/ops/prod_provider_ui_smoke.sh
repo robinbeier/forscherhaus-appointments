@@ -268,7 +268,7 @@ remote_static_preflight() {
     ssh "${SSH_OPTIONS[@]}" "${PROD_SSH_TARGET}" "
 set -euo pipefail
 [[ \"\$(id -u)\" == '0' ]] || { printf 'ERROR: root SSH is required\n' >&2; exit 1; }
-for required_command in bash php python3 systemctl systemd-run stat sha256sum cat flock; do
+for required_command in bash php python3 systemctl systemd-run busctl stat sha256sum cat flock; do
     command -v \"\${required_command}\" >/dev/null 2>&1 || {
         printf 'ERROR: a required remote command is unavailable\n' >&2
         exit 1

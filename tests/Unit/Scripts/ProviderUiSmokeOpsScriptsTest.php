@@ -192,6 +192,26 @@ final class ProviderUiSmokeOpsScriptsTest extends TestCase
         }
     }
 
+    public function testMissingRemoteBusctlStopsBeforePendingOrTimerArm(): void
+    {
+        $workspace = $this->createWorkspace();
+
+        try {
+            $result = $this->runOrchestrator($workspace, ['PROD_SMOKE_MISSING_BUSCTL' => '1']);
+
+            self::assertSame(20, $result['exit_code'], $result['stderr']);
+            self::assertStringContainsString('remote read-only preflight failed', $result['stderr']);
+
+            $events = (string) file_get_contents($workspace . '/events.log');
+            self::assertStringContainsString("preflight\n", $events);
+            self::assertStringNotContainsString("admission_begin\n", $events);
+            self::assertStringNotContainsString("arm\n", $events);
+            self::assertStringNotContainsString("activate\n", $events);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
     public function testOrchestratorStopsBeforeActivationWhenRemoteViewIsSymlinked(): void
     {
         $this->assertUnsafeRemoteViewStopsBeforeActivation(
@@ -472,6 +492,11 @@ final class ProviderUiSmokeOpsScriptsTest extends TestCase
                 printf 'provider_ui_smoke_admission=result=settled\n'
             elif [[ "${remote_command}" == *'remote_preflight=passed'* ]]; then
                 printf 'preflight\n' >>"${PROD_SMOKE_TEST_EVENTS}"
+                if [[ "${PROD_SMOKE_MISSING_BUSCTL:-0}" == '1' \
+                    && "${remote_command}" == *'systemd-run busctl stat'* ]]; then
+                    printf 'ERROR: a required remote command is unavailable\n' >&2
+                    exit 1
+                fi
                 case "${PROD_SMOKE_REMOTE_VIEW_STATE:-safe}" in
                     symlink)
                         [[ "${remote_command}" == *'! -L "${deployed_view}"'* ]] || exit 99
