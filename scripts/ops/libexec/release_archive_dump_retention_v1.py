@@ -13,6 +13,7 @@ import secrets
 import stat
 import sys
 import tarfile
+import types
 
 
 SCHEMA = 'prod_release_archive_dump_retention.v3'
@@ -121,6 +122,9 @@ MAX_RELEASE_DIR_DELETE = 4
 MAX_ARCHIVE_PAIR_DELETE = 8
 MAX_DUMP_SET_DELETE = 4
 MAX_PENDING_ENTRIES = 32
+MAX_ADMISSION_CORE_BYTES = 1_048_576
+ADMISSION_CORE_PATH = '/usr/local/libexec/fh/maintenance_pending_v1.py'
+ADMISSION_CORE_SHA256 = '250d60060d2681a3a09476918cb801ce422366564924f89b480a5a7563af7dc9'
 PENDING_ARCHIVE_SIDECAR = re.compile(r'\.pending-archive-sidecar-[0-9a-f]{32}\Z')
 MAX_CLASS_SCAN = 10_000
 MAX_TREE_ENTRIES = 1_000_000
@@ -1128,6 +1132,63 @@ def open_global_lock():
         return descriptor
     finally:
         os.close(locks)
+
+
+def load_admission_core():
+    """Load the reviewed pending-state core from its fixed install path."""
+    path = ADMISSION_CORE_PATH
+    try:
+        for directory in ('/usr', '/usr/local', '/usr/local/libexec', '/usr/local/libexec/fh'):
+            metadata = os.lstat(directory)
+            if (
+                not stat.S_ISDIR(metadata.st_mode)
+                or metadata.st_uid != 0
+                or (stat.S_IMODE(metadata.st_mode) & 0o022) != 0
+            ):
+                reject('admission_core_untrusted')
+        metadata = os.lstat(path)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != 0
+            or metadata.st_gid != 0
+            or stat.S_IMODE(metadata.st_mode) != 0o644
+            or metadata.st_nlink != 1
+        ):
+            reject('admission_core_untrusted')
+        descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            opened = os.fstat(descriptor)
+            if file_identity(metadata) != file_identity(opened):
+                reject('admission_core_untrusted')
+            source = bytearray()
+            while len(source) <= MAX_ADMISSION_CORE_BYTES:
+                chunk = os.read(descriptor, min(65_536, MAX_ADMISSION_CORE_BYTES + 1 - len(source)))
+                if not chunk:
+                    break
+                source.extend(chunk)
+            after_open = os.fstat(descriptor)
+        finally:
+            os.close(descriptor)
+        source = bytes(source)
+        after = os.lstat(path)
+        if (
+            len(source) > MAX_ADMISSION_CORE_BYTES
+            or file_identity(metadata) != file_identity(after_open)
+            or file_identity(metadata) != file_identity(after)
+            or hashlib.sha256(source).hexdigest() != ADMISSION_CORE_SHA256
+        ):
+            reject('admission_core_untrusted')
+    except FileNotFoundError:
+        reject('admission_core_missing')
+    except OSError:
+        reject('admission_core_untrusted')
+    module = types.ModuleType('fh_maintenance_pending_v1')
+    module.__file__ = path
+    try:
+        exec(compile(source, path, 'exec'), module.__dict__)
+    except Exception:
+        reject('admission_core_untrusted')
+    return module
 
 
 def activity_count(proc_root='/proc', trusted_uid=0):
@@ -2427,9 +2488,22 @@ def execute():
     mount_safety = assert_pre_mutation_mount_safety()
     state = None
     global_lock = None
+    admission_core = None
     first = None
     second = None
     try:
+        # The fixed pending-state admission is deliberately before state
+        # directory creation and marker housekeeping.  A malformed, missing,
+        # or unresolved protocol state therefore cannot be cleaned up by this
+        # helper before it has been admitted.
+        global_lock = open_global_lock()
+        admission_core = load_admission_core()
+        try:
+            admission_core.admit_existing_lock_fd(global_lock)
+        except Exception as error:
+            reject(getattr(error, 'reason', 'maintenance_admission_failed'),
+                   getattr(error, 'code', 75))
+
         state = prepare_state_directory(mount_safety)
         try:
             fcntl.flock(state, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -2439,7 +2513,6 @@ def execute():
         # mount observation immediately before the first cleanup mutation.
         revalidate_pre_mutation_mount_safety(mount_safety)
         clean_marker_temps(state, MUTATIONS)
-        global_lock = open_global_lock()
         if activity_count() != 0:
             reject('active_production_work', 75)
         assert_no_nonterminal_runs()

@@ -18,9 +18,16 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
     private const ATTESTATIONS = '/var/lib/fh-deploy-evidence/dump-attestations';
     private const STATE = '/var/lib/fh-release-retention';
     private const ORCHESTRATOR = '/var/lib/fh-deploy-orchestrator';
+    private const ADMISSION_ROOT = '/var/lib/fh-maintenance-admission';
+    private const ADMISSION_CORE = '/usr/local/libexec/fh/maintenance_pending_v1.py';
+    private const ADMISSION_CORE_HASH = '250d60060d2681a3a09476918cb801ce422366564924f89b480a5a7563af7dc9';
     private const LEGACY_HOLD = '/etc/fh/legacy-release-hold.v1.json';
     private string $helper;
     private bool $legacyHoldFixtureCreated = false;
+    private bool $coreStaged = false;
+    private bool $admissionStateCreated = false;
+    /** @var list<string> */
+    private array $coreDirectoriesStaged = [];
     /** @var array<string, string> */
     private array $dumpLeaves = [];
 
@@ -36,7 +43,15 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
             );
         }
         foreach (
-            [self::APP, self::RELEASES, self::BACKUPS, self::ATTESTATIONS, self::STATE, self::ORCHESTRATOR]
+            [
+                self::APP,
+                self::RELEASES,
+                self::BACKUPS,
+                self::ATTESTATIONS,
+                self::STATE,
+                self::ORCHESTRATOR,
+                self::ADMISSION_ROOT,
+            ]
             as $path
         ) {
             if (file_exists($path) || is_link($path)) {
@@ -103,6 +118,18 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
             }
             @rmdir('/root/backups');
             @rmdir('/var/lib/fh-deploy-evidence');
+            if ($this->admissionStateCreated) {
+                $this->removeTree(self::ADMISSION_ROOT);
+                $this->admissionStateCreated = false;
+            }
+            if ($this->coreStaged) {
+                @unlink(self::ADMISSION_CORE);
+                $this->coreStaged = false;
+            }
+            foreach (array_reverse($this->coreDirectoriesStaged) as $directory) {
+                @rmdir($directory);
+            }
+            $this->coreDirectoriesStaged = [];
         }
         parent::tearDown();
     }
@@ -775,7 +802,7 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         fclose($open);
     }
 
-    public function testMarkerTempCleanupBeforeBusyLockReportsKnownMutation(): void
+    public function testBusyGlobalLockRefusesBeforeMarkerTempCleanup(): void
     {
         mkdir(self::STATE, 0700, true);
         $temp = self::STATE . '/.last-success.json.tmp-' . str_repeat('c', 32);
@@ -794,11 +821,10 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         self::assertSame(75, $result['exit'], $result['stdout'] . $result['stderr']);
         $value = $this->decode($result);
         self::assertSame('active_production_work', $value['reason']);
-        self::assertTrue($value['deletion_performed']);
-        self::assertSame('known', $value['mutation_outcome']);
-        self::assertSame(1, $value['mutation_counts']['marker_temp_files']);
-        self::assertSame(1, array_sum($value['mutation_counts']));
-        self::assertFileDoesNotExist($temp);
+        self::assertFalse($value['deletion_performed']);
+        self::assertSame('none', $value['mutation_outcome']);
+        self::assertSame(0, array_sum($value['mutation_counts']));
+        self::assertFileExists($temp);
         self::assertFileExists(self::RELEASES . '/old.tar.gz');
     }
 
@@ -1516,6 +1542,71 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         mkdir(self::ORCHESTRATOR . '/locks', 0700, true);
         touch(self::ORCHESTRATOR . '/locks/fh-production-change.lock');
         chmod(self::ORCHESTRATOR . '/locks/fh-production-change.lock', 0600);
+        $this->stageAdmissionCore();
+        mkdir(self::ADMISSION_ROOT, 0700);
+        chown(self::ADMISSION_ROOT, 0);
+        chgrp(self::ADMISSION_ROOT, 0);
+        chmod(self::ADMISSION_ROOT, 0700);
+        file_put_contents(self::ADMISSION_ROOT . '/epoch', "maintenance-admission.v1\n");
+        chmod(self::ADMISSION_ROOT . '/epoch', 0600);
+        $this->admissionStateCreated = true;
+    }
+
+    private function stageAdmissionCore(): void
+    {
+        if (is_link(self::ADMISSION_CORE)) {
+            self::fail('Admission core must not be a symlink.');
+        }
+        if (file_exists(self::ADMISSION_CORE)) {
+            $this->assertCoreAncestorLayout();
+            self::assertSame(self::ADMISSION_CORE_HASH, hash_file('sha256', self::ADMISSION_CORE));
+            $metadata = lstat(self::ADMISSION_CORE);
+            self::assertIsArray($metadata);
+            self::assertSame(0, $metadata['uid']);
+            self::assertSame(0644, $metadata['mode'] & 0777);
+            return;
+        }
+        $parent = dirname(self::ADMISSION_CORE);
+        $missing = [];
+        for ($path = $parent; $path !== '/'; $path = dirname($path)) {
+            clearstatcache(true, $path);
+            if (file_exists($path) || is_link($path)) {
+                break;
+            }
+            array_unshift($missing, $path);
+        }
+        foreach ($missing as $path) {
+            $ancestor = dirname($path);
+            $metadata = lstat($ancestor);
+            self::assertIsArray($metadata);
+            self::assertSame(0, $metadata['uid']);
+            self::assertSame(0040000, $metadata['mode'] & 0170000);
+            self::assertSame(0, $metadata['mode'] & 0022);
+            mkdir($path, 0755);
+            chown($path, 0);
+            chgrp($path, 0);
+            chmod($path, 0755);
+            $this->coreDirectoriesStaged[] = $path;
+        }
+        $this->assertCoreAncestorLayout();
+        $source = dirname(__DIR__, 3) . '/scripts/ops/libexec/maintenance_pending_v1.py';
+        self::assertSame(self::ADMISSION_CORE_HASH, hash_file('sha256', $source));
+        file_put_contents(self::ADMISSION_CORE, file_get_contents($source));
+        chown(self::ADMISSION_CORE, 0);
+        chgrp(self::ADMISSION_CORE, 0);
+        chmod(self::ADMISSION_CORE, 0644);
+        $this->coreStaged = true;
+    }
+
+    private function assertCoreAncestorLayout(): void
+    {
+        foreach (['/usr', '/usr/local', '/usr/local/libexec', dirname(self::ADMISSION_CORE)] as $directory) {
+            $metadata = lstat($directory);
+            self::assertIsArray($metadata);
+            self::assertSame(0, $metadata['uid']);
+            self::assertSame(0040000, $metadata['mode'] & 0170000);
+            self::assertSame(0, $metadata['mode'] & 0022);
+        }
     }
 
     private function releaseDirectory(string $path, string $release, int $age): void
