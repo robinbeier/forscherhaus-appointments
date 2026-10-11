@@ -12,6 +12,17 @@ require_once APPPATH . 'controllers/Booking.php';
 require_once APPPATH . 'core/Provider_ui_smoke_access_policy.php';
 require_once APPPATH . 'libraries/Provider_ui_smoke_fixture.php';
 
+final class ProviderUiSmokeTestAdmissionGuard implements \Provider_ui_smoke_admission_guard
+{
+    public function enter(string $action, string $credentialFile, string $stateFile): void
+    {
+        // Explicit test-only seam. Production construction uses the default
+        // root lock and FD-bound admission guard.
+    }
+
+    public function leave(): void {}
+}
+
 class ProviderUiSmokeFixtureLifecycleTest extends TestCase
 {
     private Provider_ui_smoke_fixture $fixture;
@@ -37,7 +48,7 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
 
         $this->CI = &get_instance();
         $this->CI->load->library('provider_ui_smoke_fixture');
-        $this->fixture = $this->CI->provider_ui_smoke_fixture;
+        $this->fixture = new Provider_ui_smoke_fixture(new ProviderUiSmokeTestAdmissionGuard());
         $this->temporaryDirectory = sys_get_temp_dir() . '/fh-provider-ui-smoke-lifecycle-' . bin2hex(random_bytes(8));
         $this->assertTrue(mkdir($this->temporaryDirectory, 0700));
         $this->assertTrue(chmod($this->temporaryDirectory, 0700));
@@ -116,7 +127,7 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
         $this->assertNotEmpty($active['salt']);
         $this->assertTrue(Provider_ui_smoke_access_policy::hasActiveLease((string) $active['notes']));
         $this->assertSame(1, $this->markerCount('services', 'name', Provider_ui_smoke_fixture::SERVICE_NAME));
-        $this->assertSame(1, $this->markerCount('users', 'email', Provider_ui_smoke_fixture::CUSTOMER_EMAIL));
+        $this->assertSame(1, $this->markerCount('users', 'notes', Provider_ui_smoke_fixture::CUSTOMER_NOTES));
         $this->assertSame(
             3,
             $this->CI->db
@@ -151,7 +162,7 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
         $this->assertSame('dormant', $this->fixture->run('deactivate', $this->credentialFile, $this->stateFile));
         $this->assertSame('dormant', $this->fixture->run('verify', $this->credentialFile, $this->stateFile));
         $this->assertSame(0, $this->markerCount('services', 'name', Provider_ui_smoke_fixture::SERVICE_NAME));
-        $this->assertSame(0, $this->markerCount('users', 'email', Provider_ui_smoke_fixture::CUSTOMER_EMAIL));
+        $this->assertSame(0, $this->markerCount('users', 'notes', Provider_ui_smoke_fixture::CUSTOMER_NOTES));
 
         $dormant = $this->loadPrincipal();
         $this->assertSame(Provider_ui_smoke_access_policy::DORMANT_ROLE_SLUG, $dormant['role_slug']);
@@ -189,6 +200,251 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
                 ->get_where('roles', ['slug' => Provider_ui_smoke_access_policy::DORMANT_ROLE_SLUG])
                 ->num_rows(),
         );
+    }
+
+    public function testRemovedVerificationFailsClosedWhenCredentialFileIsMissing(): void
+    {
+        $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+        $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
+        $this->assertTrue(unlink($this->credentialFile));
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/credential|active principal/i');
+        $this->fixture->run('verify', $this->credentialFile, $this->stateFile);
+    }
+
+    public function testDormantVerificationRequiresCredentialFile(): void
+    {
+        $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+        $this->assertTrue(unlink($this->credentialFile));
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('dormant verification requires credentials');
+        $this->fixture->run('verify', $this->credentialFile, $this->stateFile);
+    }
+
+    public function testVerificationRejectsPresentMalformedCredentialFile(): void
+    {
+        $this->assertNotFalse(file_put_contents($this->credentialFile, "invalid=true\n"));
+        $this->assertTrue(chmod($this->credentialFile, 0600));
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('credential schema is invalid');
+        $this->fixture->run('verify', $this->credentialFile, $this->stateFile);
+    }
+
+    public function testStateBackedDeactivationCleansActiveFixtureWithoutCredentialFile(): void
+    {
+        $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+        $this->assertSame('active', $this->fixture->run('activate', $this->credentialFile, $this->stateFile));
+        $credentialContents = file_get_contents($this->credentialFile);
+        $this->assertIsString($credentialContents);
+        $this->assertTrue(unlink($this->credentialFile));
+
+        try {
+            $this->assertSame('dormant', $this->fixture->run('deactivate', $this->credentialFile, $this->stateFile));
+            $this->assertFileDoesNotExist($this->stateFile);
+            $this->assertSame(Provider_ui_smoke_access_policy::DORMANT_ROLE_SLUG, $this->loadPrincipal()['role_slug']);
+            $this->assertSame(0, $this->markerCount('services', 'name', Provider_ui_smoke_fixture::SERVICE_NAME));
+        } finally {
+            $this->assertNotFalse(file_put_contents($this->credentialFile, $credentialContents));
+            $this->assertTrue(chmod($this->credentialFile, 0600));
+        }
+
+        $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
+    }
+
+    public function testStateBackedDeactivationCleansActiveFixtureWithMalformedCredentialFile(): void
+    {
+        $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+        $this->assertSame('active', $this->fixture->run('activate', $this->credentialFile, $this->stateFile));
+        $credentialContents = file_get_contents($this->credentialFile);
+        $this->assertIsString($credentialContents);
+        $this->assertNotFalse(file_put_contents($this->credentialFile, "invalid=true\n"));
+
+        try {
+            $this->assertSame('dormant', $this->fixture->run('deactivate', $this->credentialFile, $this->stateFile));
+            $this->assertFileDoesNotExist($this->stateFile);
+            $this->assertSame(Provider_ui_smoke_access_policy::DORMANT_ROLE_SLUG, $this->loadPrincipal()['role_slug']);
+            $this->assertSame(0, $this->markerCount('services', 'name', Provider_ui_smoke_fixture::SERVICE_NAME));
+        } finally {
+            $this->assertNotFalse(file_put_contents($this->credentialFile, $credentialContents));
+            $this->assertTrue(chmod($this->credentialFile, 0600));
+        }
+
+        $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
+    }
+
+    public function testStateLossStillRequiresCredentialBeforeActiveCleanup(): void
+    {
+        $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+        $this->assertSame('active', $this->fixture->run('activate', $this->credentialFile, $this->stateFile));
+        $credentialContents = file_get_contents($this->credentialFile);
+        $this->assertIsString($credentialContents);
+        $this->assertTrue(unlink($this->stateFile));
+        $this->assertTrue(unlink($this->credentialFile));
+
+        try {
+            try {
+                $this->fixture->run('deactivate', $this->credentialFile, $this->stateFile);
+                $this->fail('State-loss reconstruction must refuse missing credentials.');
+            } catch (RuntimeException $exception) {
+                $this->assertStringContainsString('protected file is invalid', $exception->getMessage());
+            }
+
+            $this->assertSame(DB_SLUG_PROVIDER, $this->loadPrincipal()['role_slug']);
+            $this->assertSame(1, $this->markerCount('services', 'name', Provider_ui_smoke_fixture::SERVICE_NAME));
+        } finally {
+            $this->assertNotFalse(file_put_contents($this->credentialFile, $credentialContents));
+            $this->assertTrue(chmod($this->credentialFile, 0600));
+        }
+
+        $this->assertSame('dormant', $this->fixture->run('deactivate', $this->credentialFile, $this->stateFile));
+        $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
+    }
+
+    public function testPrecredentialEmptyProofRejectsReservedDormantPrincipal(): void
+    {
+        $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+
+        try {
+            $this->assertTrue(unlink($this->credentialFile));
+            $this->fixture->run('precredential-empty', $this->credentialFile, $this->stateFile);
+            $this->fail('A reserved dormant principal must veto the precredential proof.');
+        } catch (RuntimeException $exception) {
+            $this->assertStringContainsString('dormant role remains', $exception->getMessage());
+        } finally {
+            $credentials =
+                'PROVIDER_UI_SMOKE_USERNAME=' .
+                Provider_ui_smoke_access_policy::USERNAME .
+                PHP_EOL .
+                'PROVIDER_UI_SMOKE_PASSWORD=' .
+                str_repeat('a', 64) .
+                PHP_EOL;
+            file_put_contents($this->credentialFile, $credentials);
+            chmod($this->credentialFile, 0600);
+        }
+    }
+
+    public function testPrecredentialEmptyProofAcceptsAnInitiallyEmptyFixture(): void
+    {
+        $this->assertSame('removed', $this->fixture->run('verify', $this->credentialFile, $this->stateFile));
+        $this->assertTrue(unlink($this->credentialFile));
+
+        $this->assertSame(
+            'removed',
+            $this->fixture->run('precredential-empty', $this->credentialFile, $this->stateFile),
+        );
+        $this->assertFileDoesNotExist($this->credentialFile);
+        $this->assertFileDoesNotExist($this->stateFile);
+    }
+
+    public function testPrecredentialEmptyProofRejectsGlobalServiceMarker(): void
+    {
+        $this->assertSame('removed', $this->fixture->run('verify', $this->credentialFile, $this->stateFile));
+        $credentials = file_get_contents($this->credentialFile);
+        $this->assertIsString($credentials);
+        $this->assertTrue(unlink($this->credentialFile));
+        $this->assertTrue(
+            $this->CI->db->insert('services', [
+                'create_datetime' => date('Y-m-d H:i:s'),
+                'update_datetime' => date('Y-m-d H:i:s'),
+                'name' => Provider_ui_smoke_fixture::SERVICE_NAME,
+                'duration' => 30,
+                'buffer_before' => 0,
+                'buffer_after' => 0,
+                'price' => 0,
+                'currency' => 'EUR',
+                'description' => Provider_ui_smoke_fixture::SERVICE_DESCRIPTION,
+                'location' => null,
+                'color' => '#6c757d',
+                'availabilities_type' => AVAILABILITIES_TYPE_FLEXIBLE,
+                'attendants_number' => 1,
+                'is_private' => 1,
+                'id_service_categories' => null,
+            ]),
+        );
+
+        try {
+            $this->fixture->run('precredential-empty', $this->credentialFile, $this->stateFile);
+            $this->fail('A global service marker must veto first-install recovery.');
+        } catch (RuntimeException $exception) {
+            $this->assertStringContainsString('fixture marker collision', $exception->getMessage());
+        } finally {
+            $this->CI->db->delete('services', ['name' => Provider_ui_smoke_fixture::SERVICE_NAME]);
+            $this->assertNotFalse(file_put_contents($this->credentialFile, $credentials));
+            $this->assertTrue(chmod($this->credentialFile, 0600));
+        }
+    }
+
+    public function testPrecredentialEmptyProofRejectsPresentCredentials(): void
+    {
+        $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+
+        try {
+            $this->fixture->run('precredential-empty', $this->credentialFile, $this->stateFile);
+            $this->fail('Precredential proof must not certify a present credential file.');
+        } catch (RuntimeException $exception) {
+            $this->assertStringContainsString('credentials must be absent', $exception->getMessage());
+        }
+
+        $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
+    }
+
+    public function testVerificationRejectsPresentCredentialSymlink(): void
+    {
+        $target = $this->temporaryDirectory . '/credential-target.env';
+        $this->assertNotFalse(
+            file_put_contents(
+                $target,
+                'PROVIDER_UI_SMOKE_USERNAME=' . Provider_ui_smoke_access_policy::USERNAME . "\n",
+            ),
+        );
+        $this->assertTrue(chmod($target, 0600));
+        $this->assertTrue(unlink($this->credentialFile));
+        $this->assertTrue(symlink($target, $this->credentialFile));
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('protected file is invalid');
+        $this->fixture->run('verify', $this->credentialFile, $this->stateFile);
+    }
+
+    public function testDirectActivateWithoutCapabilityFailsBeforeFixtureMutation(): void
+    {
+        $before = [
+            'principal' => $this->markerCount('users', 'email', Provider_ui_smoke_fixture::PROVIDER_EMAIL),
+            'username' => $this->markerCount('user_settings', 'username', Provider_ui_smoke_access_policy::USERNAME),
+            'service' => $this->markerCount('services', 'name', Provider_ui_smoke_fixture::SERVICE_NAME),
+        ];
+        $credentialHashBefore = hash_file('sha256', $this->credentialFile);
+        $environment = $_ENV;
+        unset($environment['FH_PROVIDER_UI_SMOKE_RUN_ID']);
+        $process = proc_open(
+            ['php', 'index.php', 'console', 'provider_ui_smoke', 'activate', $this->credentialFile, $this->stateFile],
+            [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            $pipes,
+            dirname(__DIR__, 3),
+            $environment,
+        );
+
+        $this->assertIsResource($process);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $exitCode = proc_close($process);
+
+        $this->assertNotSame(0, $exitCode);
+        $this->assertIsString($stdout);
+        $this->assertStringContainsString('provider_ui_smoke action=activate state=error result=error', $stdout);
+        $this->assertIsString($stderr);
+        $this->assertSame($credentialHashBefore, hash_file('sha256', $this->credentialFile));
+        $this->assertFileDoesNotExist($this->stateFile);
+        $this->assertSame($before, [
+            'principal' => $this->markerCount('users', 'email', Provider_ui_smoke_fixture::PROVIDER_EMAIL),
+            'username' => $this->markerCount('user_settings', 'username', Provider_ui_smoke_access_policy::USERNAME),
+            'service' => $this->markerCount('services', 'name', Provider_ui_smoke_fixture::SERVICE_NAME),
+        ]);
     }
 
     public function testConcurrentActivationsPreserveTheWinningStateFile(): void
@@ -260,36 +516,274 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
         $this->assertFileDoesNotExist($this->stateFile);
     }
 
-    public function testInstallFailsClosedOnAnExistingSyntheticMarkerWithoutLeavingAPrincipal(): void
+    public function testForeignAppointmentMarkerDoesNotBlockInstallOrRemoval(): void
     {
+        $foreignProviderId = $this->foreignProviderId();
+        $foreignAppointmentId = $this->insertForeignMarkerAppointment($foreignProviderId);
+
+        try {
+            $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+            $this->assertSame('dormant', $this->fixture->run('deactivate', $this->credentialFile, $this->stateFile));
+            $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
+            $this->assertSame('removed', $this->fixture->run('verify', $this->credentialFile, $this->stateFile));
+            $this->assertSame(1, $this->markerCount('appointments', 'id', (string) $foreignAppointmentId));
+        } finally {
+            $this->CI->db->delete('appointments', ['id' => $foreignAppointmentId]);
+        }
+    }
+
+    public function testForeignCustomerEmailsDoNotBlockFixtureOwnershipChecks(): void
+    {
+        $customerRole = $this->CI->db->get_where('roles', ['slug' => DB_SLUG_CUSTOMER])->row_array();
+        $this->assertNotEmpty($customerRole['id'] ?? null);
+        $now = date('Y-m-d H:i:s');
+        $foreignIds = [];
+
+        foreach ([Provider_ui_smoke_fixture::CUSTOMER_EMAIL, Provider_ui_smoke_fixture::PROVIDER_EMAIL] as $email) {
+            $this->assertTrue(
+                $this->CI->db->insert('users', [
+                    'first_name' => 'Foreign',
+                    'last_name' => 'Public Customer',
+                    'email' => $email,
+                    'notes' => null,
+                    'id_roles' => $customerRole['id'],
+                    'create_datetime' => $now,
+                    'update_datetime' => $now,
+                ]),
+            );
+            $foreignIds[] = (int) $this->CI->db->insert_id();
+        }
+
+        try {
+            $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+            $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
+            $this->assertSame('removed', $this->fixture->run('verify', $this->credentialFile, $this->stateFile));
+            $this->assertSame(2, $this->CI->db->where_in('id', $foreignIds)->get('users')->num_rows());
+        } finally {
+            $this->CI->db->where_in('id', $foreignIds)->delete('users');
+        }
+    }
+
+    public function testForeignCustomerNoteDoesNotClaimDormantFixture(): void
+    {
+        $foreignCustomerId = $this->insertForeignCustomerMarker();
+        $foreignCustomer = $this->CI->db->get_where('users', ['id' => $foreignCustomerId])->row_array();
+
+        try {
+            $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+            $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
+            $this->assertSame('removed', $this->fixture->run('verify', $this->credentialFile, $this->stateFile));
+            $this->assertForeignCustomerUnchanged($foreignCustomerId, $foreignCustomer);
+        } finally {
+            $this->CI->db->delete('users', ['id' => $foreignCustomerId]);
+        }
+    }
+
+    public function testForeignCustomerNoteDoesNotAffectActiveCleanup(): void
+    {
+        $foreignCustomerId = $this->insertForeignCustomerMarker();
+        $foreignCustomer = $this->CI->db->get_where('users', ['id' => $foreignCustomerId])->row_array();
+
+        try {
+            $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+            $this->assertSame('active', $this->fixture->run('activate', $this->credentialFile, $this->stateFile));
+            $this->assertSame('dormant', $this->fixture->run('deactivate', $this->credentialFile, $this->stateFile));
+            $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
+            $this->assertForeignCustomerUnchanged($foreignCustomerId, $foreignCustomer);
+        } finally {
+            $this->CI->db->delete('users', ['id' => $foreignCustomerId]);
+        }
+    }
+
+    public function testForeignCustomerNoteDoesNotAffectStateLossReconstruction(): void
+    {
+        $foreignCustomerId = $this->insertForeignCustomerMarker();
+        $foreignCustomer = $this->CI->db->get_where('users', ['id' => $foreignCustomerId])->row_array();
+
+        try {
+            $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+            $this->assertSame('active', $this->fixture->run('activate', $this->credentialFile, $this->stateFile));
+            $this->assertTrue(unlink($this->stateFile));
+            $this->assertSame('dormant', $this->fixture->run('deactivate', $this->credentialFile, $this->stateFile));
+            $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
+            $this->assertForeignCustomerUnchanged($foreignCustomerId, $foreignCustomer);
+        } finally {
+            $this->CI->db->delete('users', ['id' => $foreignCustomerId]);
+        }
+    }
+
+    public function testForeignServiceMarkerDoesNotBlockInstallOrRemoval(): void
+    {
+        $foreignProviderId = $this->foreignProviderId();
+        $foreignServiceId = $this->insertForeignServiceMarker($foreignProviderId);
+        $foreignService = $this->CI->db->get_where('services', ['id' => $foreignServiceId])->row_array();
+
+        try {
+            $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+            $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
+            $this->assertSame(
+                $foreignService,
+                $this->CI->db->get_where('services', ['id' => $foreignServiceId])->row_array(),
+            );
+            $this->assertSame(
+                1,
+                $this->CI->db
+                    ->get_where('services_providers', [
+                        'id_users' => $foreignProviderId,
+                        'id_services' => $foreignServiceId,
+                    ])
+                    ->num_rows(),
+            );
+        } finally {
+            $this->CI->db->delete('services_providers', [
+                'id_users' => $foreignProviderId,
+                'id_services' => $foreignServiceId,
+            ]);
+            $this->CI->db->delete('services', ['id' => $foreignServiceId]);
+        }
+    }
+
+    public function testForeignServiceMarkerDoesNotAffectStateLossReconstruction(): void
+    {
+        $foreignProviderId = $this->foreignProviderId();
+        $foreignServiceId = $this->insertForeignServiceMarker($foreignProviderId);
+        $foreignService = $this->CI->db->get_where('services', ['id' => $foreignServiceId])->row_array();
+
+        try {
+            $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+            $this->assertSame('active', $this->fixture->run('activate', $this->credentialFile, $this->stateFile));
+            $this->assertTrue(unlink($this->stateFile));
+            $this->assertSame('dormant', $this->fixture->run('deactivate', $this->credentialFile, $this->stateFile));
+            $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
+            $this->assertSame(
+                $foreignService,
+                $this->CI->db->get_where('services', ['id' => $foreignServiceId])->row_array(),
+            );
+            $this->assertSame(
+                1,
+                $this->CI->db
+                    ->get_where('services_providers', [
+                        'id_users' => $foreignProviderId,
+                        'id_services' => $foreignServiceId,
+                    ])
+                    ->num_rows(),
+            );
+        } finally {
+            $this->CI->db->delete('services_providers', [
+                'id_users' => $foreignProviderId,
+                'id_services' => $foreignServiceId,
+            ]);
+            $this->CI->db->delete('services', ['id' => $foreignServiceId]);
+        }
+    }
+
+    public function testForeignProviderDormantNoteDoesNotBlockInstallOrRemoval(): void
+    {
+        $foreignProviderId = $this->foreignProviderId();
+        $foreignProvider = $this->CI->db->get_where('users', ['id' => $foreignProviderId])->row_array();
+        $foreignSettings = $this->CI->db->get_where('user_settings', ['id_users' => $foreignProviderId])->row_array();
         $this->assertTrue(
-            $this->CI->db->insert('services', [
-                'name' => Provider_ui_smoke_fixture::SERVICE_NAME,
-                'description' => 'collision',
-            ]),
+            $this->CI->db->update(
+                'users',
+                [
+                    'notes' => Provider_ui_smoke_access_policy::DORMANT_NOTES,
+                    'email' => Provider_ui_smoke_fixture::PROVIDER_EMAIL,
+                ],
+                ['id' => $foreignProviderId],
+            ),
+        );
+        $this->assertTrue(
+            $this->CI->db->update(
+                'user_settings',
+                ['username' => Provider_ui_smoke_access_policy::USERNAME],
+                ['id_users' => $foreignProviderId],
+            ),
         );
 
         try {
-            $this->fixture->run('install', $this->credentialFile, $this->stateFile);
-            $this->fail('A pre-existing marker must stop installation.');
-        } catch (RuntimeException) {
-            $this->addToAssertionCount(1);
+            $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+            $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
+            $this->assertSame(
+                Provider_ui_smoke_access_policy::DORMANT_NOTES,
+                $this->CI->db->get_where('users', ['id' => $foreignProviderId])->row_array()['notes'],
+            );
         } finally {
-            $this->CI->db->delete('services', ['name' => Provider_ui_smoke_fixture::SERVICE_NAME]);
+            $this->CI->db->update(
+                'users',
+                ['notes' => $foreignProvider['notes'], 'email' => $foreignProvider['email']],
+                ['id' => $foreignProviderId],
+            );
+            $this->CI->db->update(
+                'user_settings',
+                ['username' => $foreignSettings['username']],
+                ['id_users' => $foreignProviderId],
+            );
         }
+    }
 
-        $this->assertSame(
-            0,
-            $this->CI->db
-                ->get_where('user_settings', ['username' => Provider_ui_smoke_access_policy::USERNAME])
-                ->num_rows(),
+    public function testForeignProviderActiveNoteDoesNotAffectStateReconstruction(): void
+    {
+        $foreignProviderId = $this->foreignProviderId();
+        $foreignProvider = $this->CI->db->get_where('users', ['id' => $foreignProviderId])->row_array();
+        $foreignSettings = $this->CI->db->get_where('user_settings', ['id_users' => $foreignProviderId])->row_array();
+        $issuedAt = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        $activeNotes = Provider_ui_smoke_access_policy::buildActiveNotes($issuedAt, $issuedAt->modify('+5 minutes'));
+        $this->assertTrue(
+            $this->CI->db->update(
+                'users',
+                [
+                    'notes' => $activeNotes,
+                    'email' => Provider_ui_smoke_fixture::PROVIDER_EMAIL,
+                ],
+                ['id' => $foreignProviderId],
+            ),
         );
-        $this->assertSame(
-            0,
-            $this->CI->db
-                ->get_where('roles', ['slug' => Provider_ui_smoke_access_policy::DORMANT_ROLE_SLUG])
-                ->num_rows(),
+        $this->assertTrue(
+            $this->CI->db->update(
+                'user_settings',
+                ['username' => Provider_ui_smoke_access_policy::USERNAME],
+                ['id_users' => $foreignProviderId],
+            ),
         );
+
+        try {
+            $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+            $this->assertSame('active', $this->fixture->run('activate', $this->credentialFile, $this->stateFile));
+            $this->assertTrue(unlink($this->stateFile));
+            $this->assertSame('dormant', $this->fixture->run('deactivate', $this->credentialFile, $this->stateFile));
+            $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
+            $this->assertSame(
+                $activeNotes,
+                $this->CI->db->get_where('users', ['id' => $foreignProviderId])->row_array()['notes'],
+            );
+        } finally {
+            $this->CI->db->update(
+                'users',
+                ['notes' => $foreignProvider['notes'], 'email' => $foreignProvider['email']],
+                ['id' => $foreignProviderId],
+            );
+            $this->CI->db->update(
+                'user_settings',
+                ['username' => $foreignSettings['username']],
+                ['id_users' => $foreignProviderId],
+            );
+        }
+    }
+
+    public function testForeignAppointmentMarkerDoesNotAffectActiveCleanup(): void
+    {
+        $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+        $this->assertSame('active', $this->fixture->run('activate', $this->credentialFile, $this->stateFile));
+        $foreignAppointmentId = $this->insertForeignMarkerAppointment($this->foreignProviderId());
+
+        try {
+            $this->assertTrue(unlink($this->stateFile));
+            $this->assertSame('dormant', $this->fixture->run('deactivate', $this->credentialFile, $this->stateFile));
+            $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
+            $this->assertSame(1, $this->markerCount('appointments', 'id', (string) $foreignAppointmentId));
+        } finally {
+            $this->CI->db->delete('appointments', ['id' => $foreignAppointmentId]);
+        }
     }
 
     public function testDeactivateRefusesAnUnexpectedChildInsteadOfExpandingCleanupScope(): void
@@ -401,7 +895,130 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
         $this->assertSame('dormant', $this->fixture->run('verify', $this->credentialFile, $this->stateFile));
     }
 
-    public function testIdempotentRemoveFailsClosedOnAReservedPrincipalMarkerCollision(): void
+    public function testActiveVerificationAndRemovalRefuseMissingDormantRoleAndStateFileWithoutMutation(): void
+    {
+        $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+        $this->assertSame('active', $this->fixture->run('activate', $this->credentialFile, $this->stateFile));
+        $active_before = $this->loadPrincipal();
+        $markers_before = [
+            'service' => $this->markerCount('services', 'name', Provider_ui_smoke_fixture::SERVICE_NAME),
+            'customer' => $this->markerCount('users', 'notes', Provider_ui_smoke_fixture::CUSTOMER_NOTES),
+            'appointments' => $this->CI->db
+                ->where_in('notes', [
+                    Provider_ui_smoke_fixture::APPOINTMENT_BOOKED_INSIDE_NOTES,
+                    Provider_ui_smoke_fixture::APPOINTMENT_CANCELLED_INSIDE_NOTES,
+                    Provider_ui_smoke_fixture::APPOINTMENT_BOOKED_OUTSIDE_NOTES,
+                ])
+                ->get('appointments')
+                ->num_rows(),
+        ];
+        $dormant_role = $this->CI->db
+            ->get_where('roles', ['slug' => Provider_ui_smoke_access_policy::DORMANT_ROLE_SLUG])
+            ->row_array();
+        $this->assertNotEmpty($dormant_role['id'] ?? null);
+        $this->assertTrue(
+            $this->CI->db->update(
+                'roles',
+                ['slug' => 'provider-ui-smoke-dormant-renamed'],
+                ['id' => $dormant_role['id']],
+            ),
+        );
+        $this->assertTrue(unlink($this->stateFile));
+        $this->assertSame(
+            0,
+            $this->CI->db
+                ->get_where('roles', ['slug' => Provider_ui_smoke_access_policy::DORMANT_ROLE_SLUG])
+                ->num_rows(),
+        );
+
+        try {
+            $this->assertLifecycleActionThrows(
+                fn(): string => $this->fixture->run('verify', $this->credentialFile, $this->stateFile),
+            );
+            $this->assertLifecycleActionThrows(
+                fn(): string => $this->fixture->run('remove', $this->credentialFile, $this->stateFile),
+            );
+            $this->assertFileDoesNotExist($this->stateFile);
+            $this->assertSame($active_before, $this->loadPrincipal());
+            $this->assertSame($markers_before, [
+                'service' => $this->markerCount('services', 'name', Provider_ui_smoke_fixture::SERVICE_NAME),
+                'customer' => $this->markerCount('users', 'notes', Provider_ui_smoke_fixture::CUSTOMER_NOTES),
+                'appointments' => $this->CI->db
+                    ->where_in('notes', [
+                        Provider_ui_smoke_fixture::APPOINTMENT_BOOKED_INSIDE_NOTES,
+                        Provider_ui_smoke_fixture::APPOINTMENT_CANCELLED_INSIDE_NOTES,
+                        Provider_ui_smoke_fixture::APPOINTMENT_BOOKED_OUTSIDE_NOTES,
+                    ])
+                    ->get('appointments')
+                    ->num_rows(),
+            ]);
+        } finally {
+            $this->assertTrue(
+                $this->CI->db->update('roles', ['slug' => $dormant_role['slug']], ['id' => $dormant_role['id']]),
+            );
+        }
+
+        $this->assertSame('dormant', $this->fixture->run('deactivate', $this->credentialFile, $this->stateFile));
+        $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
+    }
+
+    public function testOrphanActivePrincipalIsDetectedAfterEditableUsernameAndRoleChanges(): void
+    {
+        $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+        $this->assertSame('active', $this->fixture->run('activate', $this->credentialFile, $this->stateFile));
+        $provider_id = (int) $this->loadPrincipal()['id'];
+        $dormant_role = $this->CI->db
+            ->get_where('roles', ['slug' => Provider_ui_smoke_access_policy::DORMANT_ROLE_SLUG])
+            ->row_array();
+        $this->assertNotEmpty($dormant_role['id'] ?? null);
+        $this->assertTrue(unlink($this->stateFile));
+        $this->assertTrue(
+            $this->CI->db->update(
+                'roles',
+                ['slug' => 'provider-ui-smoke-dormant-renamed'],
+                ['id' => $dormant_role['id']],
+            ),
+        );
+        $this->assertTrue(
+            $this->CI->db->update(
+                'user_settings',
+                ['username' => '__ea_provider_ui_smoke_renamed'],
+                ['id_users' => $provider_id],
+            ),
+        );
+        $provider_before = $this->CI->db->get_where('users', ['id' => $provider_id])->row_array();
+        $settings_before = $this->CI->db->get_where('user_settings', ['id_users' => $provider_id])->row_array();
+
+        try {
+            $this->assertLifecycleActionThrows(
+                fn(): string => $this->fixture->run('verify', $this->credentialFile, $this->stateFile),
+            );
+            $this->assertLifecycleActionThrows(
+                fn(): string => $this->fixture->run('remove', $this->credentialFile, $this->stateFile),
+            );
+            $this->assertSame($provider_before, $this->CI->db->get_where('users', ['id' => $provider_id])->row_array());
+            $this->assertSame(
+                $settings_before,
+                $this->CI->db->get_where('user_settings', ['id_users' => $provider_id])->row_array(),
+            );
+        } finally {
+            $this->assertTrue(
+                $this->CI->db->update('roles', ['slug' => $dormant_role['slug']], ['id' => $dormant_role['id']]),
+            );
+            $this->assertTrue(
+                $this->CI->db->update(
+                    'user_settings',
+                    ['username' => Provider_ui_smoke_access_policy::USERNAME],
+                    ['id_users' => $provider_id],
+                ),
+            );
+        }
+
+        $this->assertSame('dormant', $this->fixture->run('deactivate', $this->credentialFile, $this->stateFile));
+        $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
+    }
+
+    public function testIdempotentRemoveIgnoresForeignReservedPrincipalMarkerWithoutMutation(): void
     {
         $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
         $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
@@ -420,17 +1037,15 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
             ]),
         );
         $collision_id = (int) $this->CI->db->insert_id();
+        $foreign_row = $this->CI->db->get_where('users', ['id' => $collision_id])->row_array();
 
         try {
-            $this->fixture->run('remove', $this->credentialFile, $this->stateFile);
-            $this->fail('A reserved principal marker collision must stop idempotent removal.');
-        } catch (RuntimeException) {
-            $this->addToAssertionCount(1);
+            $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
+            $this->assertSame('removed', $this->fixture->run('verify', $this->credentialFile, $this->stateFile));
+            $this->assertSame($foreign_row, $this->CI->db->get_where('users', ['id' => $collision_id])->row_array());
         } finally {
             $this->CI->db->delete('users', ['id' => $collision_id]);
         }
-
-        $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
     }
 
     public function testPublicBookingTargetDetectionRejectsTheReservedProviderAndServiceIds(): void
@@ -670,6 +1285,144 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
         return $this->CI->db->get_where($table, [$field => $value])->num_rows();
     }
 
+    private function assertLifecycleActionThrows(\Closure $action): void
+    {
+        $thrown = false;
+
+        try {
+            $action();
+        } catch (RuntimeException $exception) {
+            $thrown = true;
+        }
+
+        $this->assertTrue($thrown, 'The lifecycle action must fail closed.');
+    }
+
+    private function insertForeignCustomerMarker(): int
+    {
+        $customerRole = $this->CI->db->get_where('roles', ['slug' => DB_SLUG_CUSTOMER])->row_array();
+        $this->assertNotEmpty($customerRole['id'] ?? null);
+        $now = date('Y-m-d H:i:s');
+        $this->assertTrue(
+            $this->CI->db->insert('users', [
+                'first_name' => 'Foreign',
+                'last_name' => 'Marker Customer',
+                'email' => null,
+                'phone_number' => '0000000001',
+                'mobile_number' => null,
+                'address' => null,
+                'city' => null,
+                'state' => null,
+                'zip_code' => null,
+                'notes' => Provider_ui_smoke_fixture::CUSTOMER_NOTES,
+                'room' => null,
+                'class_size_default' => null,
+                'custom_field_1' => null,
+                'custom_field_2' => null,
+                'custom_field_3' => null,
+                'custom_field_4' => null,
+                'custom_field_5' => null,
+                'timezone' => 'UTC',
+                'language' => 'german',
+                'is_private' => 1,
+                'ldap_dn' => null,
+                'id_roles' => $customerRole['id'],
+                'create_datetime' => $now,
+                'update_datetime' => $now,
+            ]),
+        );
+
+        return (int) $this->CI->db->insert_id();
+    }
+
+    /**
+     * @param array<string, mixed> $expected
+     */
+    private function assertForeignCustomerUnchanged(int $customerId, array $expected): void
+    {
+        $this->assertSame(1, $this->markerCount('users', 'id', (string) $customerId));
+        $this->assertSame($expected, $this->CI->db->get_where('users', ['id' => $customerId])->row_array());
+    }
+
+    private function foreignProviderId(): int
+    {
+        $row = $this->CI->db
+            ->select('users.id')
+            ->from('users')
+            ->join('roles', 'roles.id = users.id_roles', 'inner')
+            ->where('roles.slug', DB_SLUG_PROVIDER)
+            ->where('users.email !=', Provider_ui_smoke_fixture::PROVIDER_EMAIL)
+            ->order_by('users.id', 'ASC')
+            ->limit(1)
+            ->get()
+            ->row_array();
+
+        $this->assertNotEmpty($row['id'] ?? null, 'The lifecycle fixture requires a foreign provider row.');
+
+        return (int) $row['id'];
+    }
+
+    private function insertForeignMarkerAppointment(int $providerId): int
+    {
+        $now = date('Y-m-d H:i:s');
+        $this->assertTrue(
+            $this->CI->db->insert('appointments', [
+                'create_datetime' => $now,
+                'update_datetime' => $now,
+                'book_datetime' => $now,
+                'start_datetime' => '2099-04-12 10:00:00',
+                'end_datetime' => '2099-04-12 10:30:00',
+                'location' => null,
+                'color' => '#6c757d',
+                'status' => 'Booked',
+                'notes' => Provider_ui_smoke_fixture::APPOINTMENT_BOOKED_INSIDE_NOTES,
+                'hash' => str_repeat('f', 64),
+                'is_unavailability' => 0,
+                'id_users_provider' => $providerId,
+                'id_users_customer' => null,
+                'id_services' => null,
+                'id_parent_appointment' => null,
+                'id_google_calendar' => null,
+                'id_caldav_calendar' => null,
+            ]),
+        );
+
+        return (int) $this->CI->db->insert_id();
+    }
+
+    private function insertForeignServiceMarker(int $providerId): int
+    {
+        $now = date('Y-m-d H:i:s');
+        $this->assertTrue(
+            $this->CI->db->insert('services', [
+                'create_datetime' => $now,
+                'update_datetime' => $now,
+                'name' => Provider_ui_smoke_fixture::SERVICE_NAME,
+                'duration' => 30,
+                'buffer_before' => 0,
+                'buffer_after' => 0,
+                'price' => 0,
+                'currency' => 'EUR',
+                'description' => Provider_ui_smoke_fixture::SERVICE_DESCRIPTION,
+                'location' => null,
+                'color' => '#6c757d',
+                'availabilities_type' => AVAILABILITIES_TYPE_FLEXIBLE,
+                'attendants_number' => 1,
+                'is_private' => 1,
+                'id_service_categories' => null,
+            ]),
+        );
+        $serviceId = (int) $this->CI->db->insert_id();
+        $this->assertTrue(
+            $this->CI->db->insert('services_providers', [
+                'id_users' => $providerId,
+                'id_services' => $serviceId,
+            ]),
+        );
+
+        return $serviceId;
+    }
+
     /**
      * @return array{process: resource, stdout: resource, stderr: resource}
      */
@@ -681,7 +1434,13 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
             2 => ['pipe', 'w'],
         ];
         $process = proc_open(
-            ['php', 'index.php', 'console', 'provider_ui_smoke', $action, $this->credentialFile, $this->stateFile],
+            [
+                'php',
+                'tests/Support/provider_ui_smoke_fixture_cli.php',
+                $action,
+                $this->credentialFile,
+                $this->stateFile,
+            ],
             $descriptor_spec,
             $pipes,
             dirname(__DIR__, 3),

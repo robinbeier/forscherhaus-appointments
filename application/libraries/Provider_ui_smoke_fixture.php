@@ -2,6 +2,42 @@
 
 require_once __DIR__ . '/../core/Provider_ui_smoke_access_policy.php';
 
+interface Provider_ui_smoke_admission_guard
+{
+    public function enter(string $action, string $credentialFile, string $stateFile): void;
+
+    public function leave(): void;
+}
+
+final class Provider_ui_smoke_default_admission_guard implements Provider_ui_smoke_admission_guard
+{
+    /** @var Closure(string, string, string): void */
+    private Closure $enterCallback;
+
+    /** @var Closure(): void */
+    private Closure $leaveCallback;
+
+    /**
+     * @param Closure(string, string, string): void $enterCallback
+     * @param Closure(): void $leaveCallback
+     */
+    public function __construct(Closure $enterCallback, Closure $leaveCallback)
+    {
+        $this->enterCallback = $enterCallback;
+        $this->leaveCallback = $leaveCallback;
+    }
+
+    public function enter(string $action, string $credentialFile, string $stateFile): void
+    {
+        ($this->enterCallback)($action, $credentialFile, $stateFile);
+    }
+
+    public function leave(): void
+    {
+        ($this->leaveCallback)();
+    }
+}
+
 /* ----------------------------------------------------------------------------
  * Easy!Appointments - Online Appointment Scheduler
  *
@@ -69,6 +105,10 @@ final class Provider_ui_smoke_fixture
 
     private const LOCK_NAME = 'fh-provider-ui-smoke-v1';
 
+    private const SHARED_LOCK_PATH = '/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock';
+
+    private const DEACTIVATE_LOCK_WAIT_MS = 300000;
+
     private const DORMANT_ROLE_NAME = 'Provider UI Smoke Dormant';
 
     private const CREDENTIAL_USERNAME_KEY = 'PROVIDER_UI_SMOKE_USERNAME';
@@ -80,9 +120,25 @@ final class Provider_ui_smoke_fixture
      */
     private EA_Controller|CI_Controller $CI;
 
-    public function __construct()
+    /** @var resource|null */
+    private $sharedLockHandle = null;
+
+    private Provider_ui_smoke_admission_guard $admissionGuard;
+
+    public function __construct(?Provider_ui_smoke_admission_guard $admissionGuard = null)
     {
         $this->CI = &get_instance();
+
+        $this->admissionGuard =
+            $admissionGuard ??
+            new Provider_ui_smoke_default_admission_guard(
+                function (string $action, string $credentialFile, string $stateFile): void {
+                    $this->enterAdmission($action, $credentialFile, $stateFile);
+                },
+                function (): void {
+                    $this->leaveAdmission();
+                },
+            );
 
         $this->CI->load->model('roles_model');
     }
@@ -95,68 +151,94 @@ final class Provider_ui_smoke_fixture
         string $credential_file = self::DEFAULT_CREDENTIAL_FILE,
         string $state_file = self::DEFAULT_STATE_FILE,
     ): string {
-        if (!in_array($action, ['install', 'verify', 'activate', 'deactivate', 'remove'], true)) {
+        if (
+            !in_array($action, ['install', 'verify', 'precredential-empty', 'activate', 'deactivate', 'remove'], true)
+        ) {
             throw new InvalidArgumentException('Unsupported provider UI smoke action.');
         }
 
         $this->assertRootCli();
+        $this->assertSafeAbsolutePath($credential_file);
         $this->assertSafeAbsolutePath($state_file);
 
-        $credentials = null;
+        // Verification is deliberately read-only and is also used by the
+        // lock-held admission finalizer. Reacquiring the shared lock there
+        // would deadlock the finalizer; every mutating action remains bound
+        // to the shared lock and admission capability below.
+        $requiresAdmission = !in_array($action, ['verify', 'precredential-empty'], true);
 
-        if (in_array($action, ['install', 'verify', 'activate'], true)) {
-            $credentials = $this->readCredentials($credential_file);
+        if ($requiresAdmission) {
+            $this->admissionGuard->enter($action, $credential_file, $state_file);
         }
 
-        $this->acquireLock();
-
         try {
-            $state_file_existed_before = file_exists($state_file) || is_link($state_file);
+            $credentials = null;
 
-            if (!$this->CI->db->trans_begin()) {
-                throw new RuntimeException('Provider UI smoke transaction could not start.');
+            $credentials_present = file_exists($credential_file) || is_link($credential_file);
+
+            if (
+                in_array($action, ['install', 'activate', 'remove'], true) ||
+                ($action === 'verify' && $credentials_present)
+            ) {
+                $credentials = $this->readCredentials($credential_file);
             }
 
-            $remove_state_after_commit = false;
+            $this->acquireLock();
 
             try {
-                $state = match ($action) {
-                    'install' => $this->install($state_file),
-                    'verify' => $this->verify($state_file),
-                    'activate' => $this->activate($credentials, $state_file),
-                    'deactivate' => $this->deactivate($state_file, $remove_state_after_commit),
-                    'remove' => $this->remove($state_file),
-                };
+                $state_file_existed_before = file_exists($state_file) || is_link($state_file);
 
-                if (!$this->CI->db->trans_commit()) {
-                    throw new RuntimeException('Provider UI smoke transaction could not commit.');
-                }
-            } catch (Throwable $exception) {
-                $this->CI->db->trans_rollback();
-
-                if ($action === 'activate' && !$state_file_existed_before) {
-                    $this->removeStateFileIfPresent($state_file);
+                if (!$this->CI->db->trans_begin()) {
+                    throw new RuntimeException('Provider UI smoke transaction could not start.');
                 }
 
-                throw $exception;
-            }
+                $remove_state_after_commit = false;
 
-            if ($remove_state_after_commit) {
-                $this->removeStateFileIfPresent($state_file, true);
-            }
+                try {
+                    $state = match ($action) {
+                        'install' => $this->install($credentials, $state_file),
+                        'verify' => $this->verify($state_file, $credentials),
+                        'precredential-empty' => $this->precredentialEmpty($credential_file, $state_file),
+                        'activate' => $this->activate($credentials, $state_file),
+                        'deactivate' => $this->deactivate($credential_file, $state_file, $remove_state_after_commit),
+                        'remove' => $this->remove($state_file, $credentials),
+                    };
 
-            return $state;
+                    if (!$this->CI->db->trans_commit()) {
+                        throw new RuntimeException('Provider UI smoke transaction could not commit.');
+                    }
+                } catch (Throwable $exception) {
+                    $this->CI->db->trans_rollback();
+
+                    if ($action === 'activate' && !$state_file_existed_before) {
+                        $this->removeStateFileIfPresent($state_file);
+                    }
+
+                    throw $exception;
+                }
+
+                if ($remove_state_after_commit) {
+                    $this->removeStateFileIfPresent($state_file, true);
+                }
+
+                return $state;
+            } finally {
+                $this->releaseLock();
+            }
         } finally {
-            $this->releaseLock();
+            if ($requiresAdmission) {
+                $this->admissionGuard->leave();
+            }
         }
     }
 
     /**
      * Install the permanent dormant principal and zero-rights role.
      */
-    private function install(string $state_file): string
+    private function install(array $credentials, string $state_file): string
     {
         $this->assertStateFileAbsent($state_file);
+        $this->assertNoActivePrincipal($credentials);
         $role = $this->findDormantRole();
         $role_name_query = $this->CI->db->get_where('roles', ['name' => self::DORMANT_ROLE_NAME]);
 
@@ -188,10 +270,9 @@ final class Provider_ui_smoke_fixture
         }
 
         $this->assertDormantRole($role);
-        $principal = $this->findPrincipal();
+        $principal = $this->findPrincipalByRoleId((int) $role['id']);
 
         if ($principal === null) {
-            $this->assertPrincipalMarkersUnused();
             $now = date('Y-m-d H:i:s');
 
             $this->insertOrFail('users', [
@@ -245,7 +326,7 @@ final class Provider_ui_smoke_fixture
                 'dashboard_range_end' => null,
             ]);
 
-            $principal = $this->findPrincipal();
+            $principal = $this->findPrincipalByRoleId((int) $role['id']);
         }
 
         $this->assertDormantClean($principal, $role);
@@ -256,14 +337,18 @@ final class Provider_ui_smoke_fixture
     /**
      * Verify the expected safe resting state.
      */
-    private function verify(string $state_file): string
+    private function verify(string $state_file, ?array $credentials): string
     {
         $this->assertStateFileAbsent($state_file);
         $role = $this->findDormantRole();
-        $principal = $this->findPrincipal();
+        $principal = $role === null ? null : $this->findPrincipalByRoleId((int) $role['id']);
 
         if ($role === null && $principal === null) {
-            $this->assertPrincipalMarkersUnused();
+            if ($credentials === null) {
+                throw new RuntimeException('Provider UI smoke removed verification requires credentials.');
+            }
+
+            $this->assertNoActivePrincipal($credentials);
             $this->assertFixtureMarkersUnused();
 
             return 'removed';
@@ -273,9 +358,41 @@ final class Provider_ui_smoke_fixture
             throw new RuntimeException('Provider UI smoke install state is incomplete.');
         }
 
+        if ($credentials === null) {
+            throw new RuntimeException('Provider UI smoke dormant verification requires credentials.');
+        }
+
+        $this->assertNoActivePrincipal($credentials);
         $this->assertDormantClean($principal, $role);
 
         return 'dormant';
+    }
+
+    /**
+     * Prove the narrow first-install crash state before credentials exist.
+     *
+     * This is intentionally reachable only through the root CLI recovery
+     * operator. Ordinary verify keeps requiring credentials so an active
+     * principal can never be mistaken for an absent fixture.
+     */
+    private function assertPreCredentialEmpty(): void
+    {
+        $this->assertPrincipalMarkersUnused();
+        $this->assertPrecredentialFixtureMarkersUnused();
+    }
+
+    private function precredentialEmpty(string $credential_file, string $state_file): string
+    {
+        if (file_exists($credential_file) || is_link($credential_file)) {
+            throw new RuntimeException('Provider UI smoke credentials must be absent during precredential proof.');
+        }
+        $this->assertStateFileAbsent($state_file);
+        if ($this->findDormantRole() !== null) {
+            throw new RuntimeException('Provider UI smoke dormant role remains during precredential proof.');
+        }
+        $this->assertPreCredentialEmpty();
+
+        return 'removed';
     }
 
     /**
@@ -287,7 +404,7 @@ final class Provider_ui_smoke_fixture
     {
         $this->assertStateFileAbsent($state_file);
         $dormant_role = $this->requireDormantRole();
-        $principal = $this->requirePrincipal();
+        $principal = $this->requirePrincipalByRoleId((int) $dormant_role['id']);
         $this->assertDormantClean($principal, $dormant_role);
         $provider_role = $this->requireUniqueRole(DB_SLUG_PROVIDER);
         $customer_role = $this->requireUniqueRole(DB_SLUG_CUSTOMER);
@@ -320,7 +437,7 @@ final class Provider_ui_smoke_fixture
         $this->insertOrFail('users', [
             'first_name' => self::CUSTOMER_FIRST_NAME,
             'last_name' => self::CUSTOMER_LAST_NAME,
-            'email' => self::CUSTOMER_EMAIL,
+            'email' => null,
             'phone_number' => self::CUSTOMER_PHONE,
             'mobile_number' => null,
             'address' => null,
@@ -429,13 +546,26 @@ final class Provider_ui_smoke_fixture
 
     /**
      * Delete the exact active fixture and disable authentication again.
+     *
      */
-    private function deactivate(string $state_file, bool &$remove_state_after_commit): string
+    private function deactivate(string $credential_file, string $state_file, bool &$remove_state_after_commit): string
     {
-        $dormant_role = $this->requireDormantRole();
-        $principal = $this->requirePrincipal();
         $state = $this->readStateFile($state_file);
         $had_state_file = $state !== null;
+        $dormant_role = $this->requireDormantRole();
+        if ($state !== null) {
+            $principal = $this->requirePrincipalById((int) $state['ids']['provider']);
+        } else {
+            $principal = $this->findPrincipalByRoleId((int) $dormant_role['id']);
+
+            if ($principal === null) {
+                // Only state-loss reconstruction needs the protected secret
+                // to identify the active principal. A valid state ID must
+                // remain sufficient to disable a live fixture if the
+                // credential file has been lost or damaged.
+                $principal = $this->requireActivePrincipal($this->readCredentials($credential_file));
+            }
+        }
 
         if ($this->isDormantClean($principal, $dormant_role)) {
             $remove_state_after_commit = $state !== null;
@@ -491,7 +621,7 @@ final class Provider_ui_smoke_fixture
             true,
         );
 
-        $principal = $this->requirePrincipal();
+        $principal = $this->requirePrincipalById((int) $ids['provider']);
         $this->assertDormantClean($principal, $dormant_role);
         $remove_state_after_commit = $had_state_file;
 
@@ -501,14 +631,14 @@ final class Provider_ui_smoke_fixture
     /**
      * Remove the clean dormant principal and its dedicated role.
      */
-    private function remove(string $state_file): string
+    private function remove(string $state_file, array $credentials): string
     {
         $this->assertStateFileAbsent($state_file);
-        $principal = $this->findPrincipal();
+        $this->assertNoActivePrincipal($credentials);
         $role = $this->findDormantRole();
+        $principal = $role === null ? null : $this->findPrincipalByRoleId((int) $role['id']);
 
         if ($principal === null && $role === null) {
-            $this->assertPrincipalMarkersUnused();
             $this->assertFixtureMarkersUnused();
 
             return 'removed';
@@ -529,10 +659,10 @@ final class Provider_ui_smoke_fixture
         }
 
         $this->deleteExactlyOne('roles', ['id' => $role['id']]);
-        $this->assertPrincipalMarkersUnused();
+        $this->assertNoActivePrincipal($credentials);
         $this->assertFixtureMarkersUnused();
 
-        if ($this->findPrincipal() !== null || $this->findDormantRole() !== null) {
+        if ($this->findPrincipalByRoleId((int) $role['id']) !== null || $this->findDormantRole() !== null) {
             throw new RuntimeException('Provider UI smoke removal verification failed.');
         }
 
@@ -542,9 +672,9 @@ final class Provider_ui_smoke_fixture
     /**
      * @return array<string, mixed>|null
      */
-    private function findPrincipal(): ?array
+    private function findPrincipal(?int $id = null, ?int $role_id = null): ?array
     {
-        $query = $this->CI->db
+        $builder = $this->CI->db
             ->select(
                 'users.*, roles.slug AS role_slug, user_settings.username, user_settings.password, ' .
                     'user_settings.salt, user_settings.working_plan, user_settings.working_plan_exceptions, ' .
@@ -556,9 +686,17 @@ final class Provider_ui_smoke_fixture
             )
             ->from('users')
             ->join('roles', 'roles.id = users.id_roles', 'inner')
-            ->join('user_settings', 'user_settings.id_users = users.id', 'inner')
-            ->where('user_settings.username', Provider_ui_smoke_access_policy::USERNAME)
-            ->get();
+            ->join('user_settings', 'user_settings.id_users = users.id', 'inner');
+
+        if ($id !== null) {
+            $builder->where('users.id', $id);
+        } elseif ($role_id !== null) {
+            $builder->where('users.id_roles', $role_id);
+        } else {
+            $builder->where('user_settings.username', Provider_ui_smoke_access_policy::USERNAME);
+        }
+
+        $query = $builder->get();
 
         if ($query->num_rows() > 1) {
             throw new RuntimeException('Provider UI smoke principal cardinality is invalid.');
@@ -567,15 +705,115 @@ final class Provider_ui_smoke_fixture
         return $query->num_rows() === 1 ? $query->row_array() : null;
     }
 
+    private function findPrincipalById(int $id): ?array
+    {
+        return $this->findPrincipal($id);
+    }
+
+    private function findPrincipalByRoleId(int $role_id): ?array
+    {
+        return $this->findPrincipal(null, $role_id);
+    }
+
+    /**
+     * Find the active principal using the root-controlled credential verifier.
+     * Editable username, email, and notes are deliberately not ownership keys.
+     *
+     * @param array{username: string, password: string}|null $credentials
+     */
+    private function findActivePrincipal(?array $credentials): ?array
+    {
+        if ($credentials === null) {
+            throw new RuntimeException('Provider UI smoke active principal requires credentials.');
+        }
+
+        $query = $this->CI->db
+            ->select('users.id, user_settings.salt, user_settings.password')
+            ->from('users')
+            ->join('user_settings', 'user_settings.id_users = users.id', 'inner')
+            ->get();
+        $matches = [];
+
+        foreach ($query->result_array() as $candidate) {
+            if (
+                is_string($candidate['salt']) &&
+                is_string($candidate['password']) &&
+                hash_equals(
+                    (string) $candidate['password'],
+                    hash_password($candidate['salt'], $credentials['password']),
+                )
+            ) {
+                $matches[] = (int) $candidate['id'];
+            }
+        }
+
+        if (count($matches) > 1) {
+            throw new RuntimeException('Provider UI smoke active principal identity is ambiguous.');
+        }
+
+        if ($matches === []) {
+            return null;
+        }
+
+        $principal = $this->findPrincipalById($matches[0]);
+
+        if ($principal === null) {
+            throw new RuntimeException('Provider UI smoke active principal relation is incomplete.');
+        }
+
+        return $principal;
+    }
+
+    /**
+     * Absence must be checked against the root-controlled password verifier.
+     * Editable marker text cannot prove that an orphan active fixture is gone.
+     *
+     * @param array{username: string, password: string} $credentials
+     */
+    private function assertNoActivePrincipal(array $credentials): void
+    {
+        if ($this->findActivePrincipal($credentials) !== null) {
+            throw new RuntimeException('Provider UI smoke active principal remains after state loss.');
+        }
+    }
+
     /**
      * @return array<string, mixed>
      */
-    private function requirePrincipal(): array
+    private function requirePrincipalByRoleId(int $role_id): array
     {
-        $principal = $this->findPrincipal();
+        $principal = $this->findPrincipalByRoleId($role_id);
 
         if ($principal === null) {
             throw new RuntimeException('Provider UI smoke principal is missing.');
+        }
+
+        return $principal;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function requirePrincipalById(int $id): array
+    {
+        $principal = $this->findPrincipalById($id);
+
+        if ($principal === null) {
+            throw new RuntimeException('Provider UI smoke principal is missing.');
+        }
+
+        return $principal;
+    }
+
+    /**
+     * @param array{username: string, password: string}|null $credentials
+     */
+    private function requireActivePrincipal(?array $credentials): array
+    {
+        $principal = $this->findActivePrincipal($credentials);
+
+        if ($principal === null) {
+            throw new RuntimeException('Provider UI smoke active principal is missing.');
         }
 
         return $principal;
@@ -722,21 +960,72 @@ final class Provider_ui_smoke_fixture
 
         $this->assertFixtureMarkersUnused((int) $principal['id']);
 
-        $provider_email_count = $this->CI->db->get_where('users', ['email' => self::PROVIDER_EMAIL])->num_rows();
+        $role_reference_count = $this->CI->db->get_where('users', ['id_roles' => $role['id']])->num_rows();
+
+        if ($role_reference_count !== 1) {
+            throw new RuntimeException('Provider UI smoke dormant ownership invariant failed.');
+        }
+    }
+
+    /**
+     * Prove no reserved principal identity remains during first-install
+     * recovery. Ordinary verify still requires credential-bound proof.
+     */
+    private function assertPrincipalMarkersUnused(): void
+    {
+        $username_count = $this->CI->db
+            ->get_where('user_settings', ['username' => Provider_ui_smoke_access_policy::USERNAME])
+            ->num_rows();
+        $email_count = $this->CI->db->get_where('users', ['email' => self::PROVIDER_EMAIL])->num_rows();
         $dormant_note_count = $this->CI->db
             ->get_where('users', ['notes' => Provider_ui_smoke_access_policy::DORMANT_NOTES])
             ->num_rows();
         $this->CI->db->like('notes', Provider_ui_smoke_access_policy::ACTIVE_NOTES_PREFIX, 'after');
         $active_note_count = $this->CI->db->get('users')->num_rows();
-        $role_reference_count = $this->CI->db->get_where('users', ['id_roles' => $role['id']])->num_rows();
+        $role_name_count = $this->CI->db->get_where('roles', ['name' => self::DORMANT_ROLE_NAME])->num_rows();
+        $role_slug_count = $this->CI->db
+            ->get_where('roles', ['slug' => Provider_ui_smoke_access_policy::DORMANT_ROLE_SLUG])
+            ->num_rows();
 
         if (
-            $provider_email_count !== 1 ||
-            $dormant_note_count !== 1 ||
+            $username_count !== 0 ||
+            $email_count !== 0 ||
+            $dormant_note_count !== 0 ||
             $active_note_count !== 0 ||
-            $role_reference_count !== 1
+            $role_name_count !== 0 ||
+            $role_slug_count !== 0
         ) {
-            throw new RuntimeException('Provider UI smoke dormant ownership invariant failed.');
+            throw new RuntimeException('Provider UI smoke principal marker collision detected.');
+        }
+    }
+
+    /**
+     * Conservative global marker check used only before first installation.
+     * Without an owner relation, any collision must veto recovery.
+     */
+    private function assertPrecredentialFixtureMarkersUnused(): void
+    {
+        $service_count = $this->CI->db
+            ->group_start()
+            ->where('name', self::SERVICE_NAME)
+            ->or_where('description', self::SERVICE_DESCRIPTION)
+            ->group_end()
+            ->get('services')
+            ->num_rows();
+        $customer_count = $this->CI->db
+            ->group_start()
+            ->where('email', self::CUSTOMER_EMAIL)
+            ->or_where('notes', self::CUSTOMER_NOTES)
+            ->group_end()
+            ->get('users')
+            ->num_rows();
+        $appointment_count = $this->CI->db
+            ->where_in('notes', $this->appointmentMarkers())
+            ->get('appointments')
+            ->num_rows();
+
+        if ($service_count !== 0 || $customer_count !== 0 || $appointment_count !== 0) {
+            throw new RuntimeException('Provider UI smoke fixture marker collision detected.');
         }
     }
 
@@ -755,50 +1044,39 @@ final class Provider_ui_smoke_fixture
         }
     }
 
-    private function assertPrincipalMarkersUnused(): void
-    {
-        $username_count = $this->CI->db
-            ->get_where('user_settings', ['username' => Provider_ui_smoke_access_policy::USERNAME])
-            ->num_rows();
-        $email_count = $this->CI->db->get_where('users', ['email' => self::PROVIDER_EMAIL])->num_rows();
-
-        if ($username_count !== 0 || $email_count !== 0) {
-            throw new RuntimeException('Provider UI smoke principal marker collision detected.');
-        }
-
-        $this->CI->db->like('notes', Provider_ui_smoke_access_policy::ACTIVE_NOTES_PREFIX, 'after');
-        $active_note_count = $this->CI->db->get('users')->num_rows();
-        $dormant_note_count = $this->CI->db
-            ->get_where('users', ['notes' => Provider_ui_smoke_access_policy::DORMANT_NOTES])
-            ->num_rows();
-
-        if ($active_note_count !== 0 || $dormant_note_count !== 0) {
-            throw new RuntimeException('Provider UI smoke principal state collision detected.');
-        }
-    }
-
     private function assertFixtureMarkersUnused(?int $provider_id = null): void
     {
-        $this->CI->db
-            ->group_start()
-            ->where('name', self::SERVICE_NAME)
-            ->or_where('description', self::SERVICE_DESCRIPTION)
-            ->group_end();
-        $service_count = $this->CI->db->get('services')->num_rows();
+        if ($provider_id !== null) {
+            $this->CI->db
+                ->select('services.id')
+                ->from('services')
+                ->join('services_providers', 'services_providers.id_services = services.id', 'inner')
+                ->where('services_providers.id_users', $provider_id)
+                ->group_start()
+                ->where('services.name', self::SERVICE_NAME)
+                ->or_where('services.description', self::SERVICE_DESCRIPTION)
+                ->group_end();
+        } else {
+            // Service names and descriptions are also user-editable. Without
+            // a reserved-provider relation there is no trustworthy ownership
+            // signal, so a foreign marker must not veto install/remove.
+            $service_count = 0;
+        }
+        if ($provider_id !== null) {
+            $service_count = $this->CI->db->get()->num_rows();
+        }
 
-        $this->CI->db
-            ->group_start()
-            ->where('email', self::CUSTOMER_EMAIL)
-            ->or_where('notes', self::CUSTOMER_NOTES)
-            ->group_end();
-        $customer_count = $this->CI->db->get('users')->num_rows();
+        $appointment_count = 0;
 
-        $appointment_count = $this->CI->db
-            ->where_in('notes', $this->appointmentMarkers())
-            ->get('appointments')
-            ->num_rows();
+        if ($provider_id !== null) {
+            $appointment_count = $this->CI->db
+                ->where('id_users_provider', $provider_id)
+                ->where_in('notes', $this->appointmentMarkers())
+                ->get('appointments')
+                ->num_rows();
+        }
 
-        if ($service_count !== 0 || $customer_count !== 0 || $appointment_count !== 0) {
+        if ($service_count !== 0 || $appointment_count !== 0) {
             throw new RuntimeException('Provider UI smoke fixture marker collision detected.');
         }
 
@@ -928,47 +1206,7 @@ final class Provider_ui_smoke_fixture
             throw new RuntimeException('Provider UI smoke service invariant failed.');
         }
 
-        $customer_query = $this->CI->db->get_where('users', ['id' => $ids['customer']]);
-
-        if ($customer_query->num_rows() !== 1) {
-            throw new RuntimeException('Provider UI smoke customer cardinality is invalid.');
-        }
-
-        $customer = $customer_query->row_array();
-        $customer_role = $this->requireUniqueRole(DB_SLUG_CUSTOMER);
-        $customer_settings_count = $this->CI->db
-            ->get_where('user_settings', ['id_users' => $ids['customer']])
-            ->num_rows();
-
-        if (
-            $customer['first_name'] !== self::CUSTOMER_FIRST_NAME ||
-            $customer['last_name'] !== self::CUSTOMER_LAST_NAME ||
-            $customer['email'] !== self::CUSTOMER_EMAIL ||
-            $customer['phone_number'] !== self::CUSTOMER_PHONE ||
-            $customer['notes'] !== self::CUSTOMER_NOTES ||
-            (int) $customer['id_roles'] !== (int) $customer_role['id'] ||
-            (int) $customer['is_private'] !== 1 ||
-            $customer['ldap_dn'] !== null ||
-            $customer['mobile_number'] !== null ||
-            $customer['address'] !== null ||
-            $customer['city'] !== null ||
-            $customer['state'] !== null ||
-            $customer['zip_code'] !== null ||
-            $customer['room'] !== null ||
-            $customer['class_size_default'] !== null ||
-            $customer['custom_field_1'] !== null ||
-            $customer['custom_field_2'] !== null ||
-            $customer['custom_field_3'] !== null ||
-            $customer['custom_field_4'] !== null ||
-            $customer['custom_field_5'] !== null ||
-            $customer['timezone'] !== 'UTC' ||
-            $customer['language'] !== 'german' ||
-            empty($customer['create_datetime']) ||
-            $customer['create_datetime'] !== $customer['update_datetime'] ||
-            $customer_settings_count !== 0
-        ) {
-            throw new RuntimeException('Provider UI smoke customer invariant failed.');
-        }
+        $this->assertExactCustomer((int) $ids['customer']);
 
         $this->assertExactAppointment(
             $ids['appointments']['booked_inside'],
@@ -1017,20 +1255,24 @@ final class Provider_ui_smoke_fixture
             ->get_where('secretaries_providers', ['id_users_provider' => $ids['provider']])
             ->num_rows();
 
-        $this->CI->db
+        $service_marker_count = $this->CI->db
+            ->select('services.id')
+            ->from('services')
+            ->join('services_providers', 'services_providers.id_services = services.id', 'inner')
+            ->where('services_providers.id_users', $ids['provider'])
+            ->where('services.id', $ids['service'])
             ->group_start()
-            ->where('name', self::SERVICE_NAME)
-            ->or_where('description', self::SERVICE_DESCRIPTION)
-            ->group_end();
-        $service_marker_count = $this->CI->db->get('services')->num_rows();
+            ->where('services.name', self::SERVICE_NAME)
+            ->or_where('services.description', self::SERVICE_DESCRIPTION)
+            ->group_end()
+            ->get()
+            ->num_rows();
 
-        $this->CI->db
-            ->group_start()
-            ->where('email', self::CUSTOMER_EMAIL)
-            ->or_where('notes', self::CUSTOMER_NOTES)
-            ->group_end();
-        $customer_marker_count = $this->CI->db->get('users')->num_rows();
+        $customer_marker_count = $this->CI->db
+            ->get_where('users', ['id' => $ids['customer'], 'notes' => self::CUSTOMER_NOTES])
+            ->num_rows();
         $appointment_marker_count = $this->CI->db
+            ->where('id_users_provider', $ids['provider'])
             ->where_in('notes', $this->appointmentMarkers())
             ->get('appointments')
             ->num_rows();
@@ -1049,6 +1291,49 @@ final class Provider_ui_smoke_fixture
             $appointment_marker_count !== 3
         ) {
             throw new RuntimeException('Provider UI smoke active relation invariant failed.');
+        }
+    }
+
+    private function assertExactCustomer(int $customer_id): void
+    {
+        $customer_query = $this->CI->db->get_where('users', ['id' => $customer_id]);
+
+        if ($customer_query->num_rows() !== 1) {
+            throw new RuntimeException('Provider UI smoke customer cardinality is invalid.');
+        }
+
+        $customer = $customer_query->row_array();
+        $customer_role = $this->requireUniqueRole(DB_SLUG_CUSTOMER);
+        $customer_settings_count = $this->CI->db->get_where('user_settings', ['id_users' => $customer_id])->num_rows();
+
+        if (
+            $customer['first_name'] !== self::CUSTOMER_FIRST_NAME ||
+            $customer['last_name'] !== self::CUSTOMER_LAST_NAME ||
+            $customer['email'] !== null ||
+            $customer['phone_number'] !== self::CUSTOMER_PHONE ||
+            $customer['notes'] !== self::CUSTOMER_NOTES ||
+            (int) $customer['id_roles'] !== (int) $customer_role['id'] ||
+            (int) $customer['is_private'] !== 1 ||
+            $customer['ldap_dn'] !== null ||
+            $customer['mobile_number'] !== null ||
+            $customer['address'] !== null ||
+            $customer['city'] !== null ||
+            $customer['state'] !== null ||
+            $customer['zip_code'] !== null ||
+            $customer['room'] !== null ||
+            $customer['class_size_default'] !== null ||
+            $customer['custom_field_1'] !== null ||
+            $customer['custom_field_2'] !== null ||
+            $customer['custom_field_3'] !== null ||
+            $customer['custom_field_4'] !== null ||
+            $customer['custom_field_5'] !== null ||
+            $customer['timezone'] !== 'UTC' ||
+            $customer['language'] !== 'german' ||
+            empty($customer['create_datetime']) ||
+            $customer['create_datetime'] !== $customer['update_datetime'] ||
+            $customer_settings_count !== 0
+        ) {
+            throw new RuntimeException('Provider UI smoke customer invariant failed.');
         }
     }
 
@@ -1154,26 +1439,12 @@ final class Provider_ui_smoke_fixture
             throw new RuntimeException('Provider UI smoke crash recovery precondition failed.');
         }
 
-        $this->CI->db
-            ->group_start()
-            ->where('name', self::SERVICE_NAME)
-            ->or_where('description', self::SERVICE_DESCRIPTION)
-            ->group_end();
-        $service_query = $this->CI->db->get('services');
+        $appointment_query = $this->CI->db
+            ->where('id_users_provider', (int) $principal['id'])
+            ->where_in('notes', $this->appointmentMarkers())
+            ->get('appointments');
 
-        $this->CI->db
-            ->group_start()
-            ->where('email', self::CUSTOMER_EMAIL)
-            ->or_where('notes', self::CUSTOMER_NOTES)
-            ->group_end();
-        $customer_query = $this->CI->db->get('users');
-        $appointment_query = $this->CI->db->where_in('notes', $this->appointmentMarkers())->get('appointments');
-
-        if (
-            $service_query->num_rows() !== 1 ||
-            $customer_query->num_rows() !== 1 ||
-            $appointment_query->num_rows() !== 3
-        ) {
+        if ($appointment_query->num_rows() !== 3) {
             throw new RuntimeException('Provider UI smoke crash recovery cardinality is invalid.');
         }
 
@@ -1198,6 +1469,48 @@ final class Provider_ui_smoke_fixture
             throw new RuntimeException('Provider UI smoke crash recovery marker set is incomplete.');
         }
 
+        $service_ids = [];
+        foreach ($appointment_query->result_array() as $appointment) {
+            if (!is_numeric($appointment['id_services'])) {
+                throw new RuntimeException('Provider UI smoke crash recovery service relation is invalid.');
+            }
+
+            $service_ids[] = (int) $appointment['id_services'];
+        }
+
+        if (count(array_unique($service_ids)) !== 1) {
+            throw new RuntimeException('Provider UI smoke crash recovery service relation is ambiguous.');
+        }
+
+        $service_id = $service_ids[0];
+        $service_relation_count = $this->CI->db
+            ->get_where('services_providers', [
+                'id_users' => (int) $principal['id'],
+                'id_services' => $service_id,
+            ])
+            ->num_rows();
+        $service_query = $this->CI->db->get_where('services', ['id' => $service_id]);
+
+        if ($service_relation_count !== 1 || $service_query->num_rows() !== 1) {
+            throw new RuntimeException('Provider UI smoke crash recovery service ownership is invalid.');
+        }
+
+        $customer_ids = [];
+        foreach ($appointment_query->result_array() as $appointment) {
+            if (!is_numeric($appointment['id_users_customer'])) {
+                throw new RuntimeException('Provider UI smoke crash recovery customer relation is invalid.');
+            }
+
+            $customer_ids[] = (int) $appointment['id_users_customer'];
+        }
+
+        if (count(array_unique($customer_ids)) !== 1) {
+            throw new RuntimeException('Provider UI smoke crash recovery customer relation is ambiguous.');
+        }
+
+        $customer_id = $customer_ids[0];
+        $this->assertExactCustomer($customer_id);
+
         $lease = Provider_ui_smoke_access_policy::parseActiveNotes((string) $principal['notes']);
 
         return [
@@ -1209,8 +1522,8 @@ final class Provider_ui_smoke_fixture
             'expires_at' => $lease['expires_at']->format('Y-m-d\TH:i:s\Z'),
             'ids' => [
                 'provider' => (int) $principal['id'],
-                'service' => (int) $service_query->row_array()['id'],
-                'customer' => (int) $customer_query->row_array()['id'],
+                'service' => $service_id,
+                'customer' => $customer_id,
                 'appointments' => $appointments,
             ],
         ];
@@ -1393,6 +1706,167 @@ final class Provider_ui_smoke_fixture
     {
         if (!is_cli() || !function_exists('posix_geteuid') || posix_geteuid() !== 0) {
             throw new RuntimeException('Provider UI smoke lifecycle requires root CLI.');
+        }
+    }
+
+    private function enterAdmission(string $action, string $credentialFile, string $stateFile): void
+    {
+        $this->acquireSharedLock($action);
+
+        try {
+            $this->assertAdmission($action, $credentialFile, $stateFile);
+        } catch (Throwable $exception) {
+            $this->releaseSharedLock();
+            throw $exception;
+        }
+    }
+
+    private function leaveAdmission(): void
+    {
+        $this->releaseSharedLock();
+    }
+
+    /**
+     * Open the pre-created canonical production lock before any lifecycle
+     * reads or writes. The lock is intentionally not created by this code.
+     */
+    private function acquireSharedLock(string $action): void
+    {
+        $stat = @lstat(self::SHARED_LOCK_PATH);
+
+        if ($stat === false || (($stat['mode'] ?? 0) & 0170000) !== 0100000 || ($stat['nlink'] ?? 0) !== 1) {
+            throw new RuntimeException('Provider UI smoke shared lock is unavailable.');
+        }
+
+        if (($stat['uid'] ?? -1) !== 0 || ($stat['gid'] ?? -1) !== 0 || (($stat['mode'] ?? 0) & 0777) !== 0600) {
+            throw new RuntimeException('Provider UI smoke shared lock identity is unsafe.');
+        }
+
+        $handle = @fopen(self::SHARED_LOCK_PATH, 'r+b');
+
+        // The independent systemd cleanup is a one-shot. A momentary lock
+        // collision must not abandon deactivation with the fixture still
+        // active. Other lifecycle actions keep their fail-fast admission.
+        $waitMs = $action === 'deactivate' ? self::DEACTIVATE_LOCK_WAIT_MS : 0;
+
+        if ($handle === false || !$this->lockWithDeadline($handle, $waitMs)) {
+            if (is_resource($handle)) {
+                fclose($handle);
+            }
+
+            throw new RuntimeException('Provider UI smoke shared lock is busy.');
+        }
+
+        $current = @lstat(self::SHARED_LOCK_PATH);
+        $opened = @fstat($handle);
+
+        if (
+            $current === false ||
+            $opened === false ||
+            $current['dev'] !== $stat['dev'] ||
+            $current['ino'] !== $stat['ino'] ||
+            $opened['dev'] !== $stat['dev'] ||
+            $opened['ino'] !== $stat['ino'] ||
+            $current['nlink'] !== 1 ||
+            $current['uid'] !== 0 ||
+            $current['gid'] !== 0 ||
+            ($current['mode'] & 0177777) !== 0100600
+        ) {
+            flock($handle, LOCK_UN);
+            fclose($handle);
+            throw new RuntimeException('Provider UI smoke shared lock identity changed.');
+        }
+
+        $this->sharedLockHandle = $handle;
+    }
+
+    /** @param resource $handle */
+    private function lockWithDeadline($handle, int $waitMs): bool
+    {
+        $deadline = hrtime(true) + $waitMs * 1000000;
+
+        do {
+            if (@flock($handle, LOCK_EX | LOCK_NB)) {
+                return true;
+            }
+
+            if (hrtime(true) >= $deadline) {
+                return false;
+            }
+
+            usleep(100000);
+        } while (true);
+    }
+
+    private function releaseSharedLock(): void
+    {
+        if (!is_resource($this->sharedLockHandle)) {
+            return;
+        }
+
+        flock($this->sharedLockHandle, LOCK_UN);
+        fclose($this->sharedLockHandle);
+        $this->sharedLockHandle = null;
+    }
+
+    private function assertAdmission(string $action, string $credentialFile, string $stateFile): void
+    {
+        $runId = getenv('FH_PROVIDER_UI_SMOKE_RUN_ID');
+
+        if (!is_string($runId) || preg_match('/\A[a-f0-9]{32}\z/', $runId) !== 1) {
+            throw new RuntimeException('Provider UI smoke admission capability is missing.');
+        }
+
+        $operation = in_array($action, ['activate', 'deactivate', 'verify'], true) ? 'smoke' : $action;
+        $appRoot = realpath(APPPATH . '..');
+        $coordinator = $appRoot === false ? false : $appRoot . '/scripts/ops/libexec/provider_ui_smoke_admission_v1.py';
+
+        if ($appRoot === false || !is_file($coordinator) || is_link($coordinator)) {
+            throw new RuntimeException('Provider UI smoke admission coordinator is unavailable.');
+        }
+
+        $command = [
+            'python3',
+            $coordinator,
+            'assert-bound-fd',
+            '--lock-fd',
+            '3',
+            '--operation',
+            $operation,
+            '--lifecycle-action',
+            $action,
+            '--run-id',
+            $runId,
+            '--app-root',
+            $appRoot,
+            '--credentials-file',
+            $credentialFile,
+            '--state-file',
+            $stateFile,
+            '--cleanup-unit',
+            'fh-provider-ui-smoke-cleanup',
+        ];
+        $descriptors = [
+            0 => ['file', '/dev/null', 'r'],
+            1 => ['pipe', 'w'],
+            2 => ['pipe', 'w'],
+            3 => $this->sharedLockHandle,
+        ];
+        $pipes = [];
+        $process = @proc_open($command, $descriptors, $pipes, $appRoot);
+
+        if (!is_resource($process)) {
+            throw new RuntimeException('Provider UI smoke admission check could not start.');
+        }
+
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $status = proc_close($process);
+
+        if ($status !== 0 || $stdout === false || $stderr === false) {
+            throw new RuntimeException('Provider UI smoke admission was not accepted.');
         }
     }
 

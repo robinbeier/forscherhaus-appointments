@@ -4,6 +4,7 @@ set +x
 umask 077
 
 readonly SMOKE_USERNAME='__ea_provider_ui_smoke_v1'
+readonly CLEANUP_UNIT='fh-provider-ui-smoke-cleanup'
 
 APP_ROOT='/var/www/html/easyappointments'
 CREDENTIALS_FILE='/etc/fh/release-gate-provider-ui-smoke.env'
@@ -12,6 +13,9 @@ STATE_FILE=''
 REMOVE_CREDENTIALS=0
 ACTION=''
 ACTIVE_TEMP_FILE=''
+ADMISSION_RUN_ID=''
+ADMISSION_OPERATION=''
+ADMISSION_COORDINATOR=''
 
 cleanup_temp_file() {
     if [[ -n "${ACTIVE_TEMP_FILE}" ]]; then
@@ -43,6 +47,7 @@ Options:
   --app-root PATH             Active production app root.
   --credentials-file PATH    Root-only INI credential file.
   --state-dir PATH            Root-only lease state directory.
+  --admission-run-id ID       Existing maintenance admission run for activate/deactivate.
   --remove-credentials        With remove only: move the credential into a
                               root-only retired directory after verified removal.
   -h, --help                  Show this help.
@@ -58,6 +63,28 @@ die() {
 
 require_command() {
     command -v "$1" >/dev/null 2>&1 || die "required command is unavailable" 69
+}
+
+admission_begin() {
+    ADMISSION_OPERATION="$1"
+    ADMISSION_RUN_ID="$(python3 "${ADMISSION_COORDINATOR}" begin \
+        --operation "${ADMISSION_OPERATION}" \
+        --app-root "${APP_ROOT}" \
+        --credentials-file "${CREDENTIALS_FILE}" \
+        --state-file "${STATE_FILE}" \
+        --cleanup-unit "${CLEANUP_UNIT}")" || die "maintenance admission registration failed" 75
+    [[ "${ADMISSION_RUN_ID}" =~ ^[a-f0-9]{32}$ ]] || die "maintenance admission run identity is invalid" 75
+}
+
+admission_settle() {
+    python3 "${ADMISSION_COORDINATOR}" settle \
+        --run-id "${ADMISSION_RUN_ID}" \
+        --operation "${ADMISSION_OPERATION}" \
+        --app-root "${APP_ROOT}" \
+        --credentials-file "${CREDENTIALS_FILE}" \
+        --state-file "${STATE_FILE}" \
+        --cleanup-unit "${CLEANUP_UNIT}" >/dev/null \
+        || die "maintenance admission terminal proof failed" 75
 }
 
 validate_absolute_path() {
@@ -147,13 +174,24 @@ assert_credentials_file() {
 
 create_credentials_file() {
     local parent_dir
+    local grandparent_dir
+    local parent_created=0
     local password
 
     parent_dir="$(dirname "${CREDENTIALS_FILE}")"
     if [[ ! -e "${parent_dir}" && ! -L "${parent_dir}" ]]; then
+        grandparent_dir="$(dirname "${parent_dir}")"
+        [[ -d "${grandparent_dir}" && ! -L "${grandparent_dir}" ]] \
+            || die "credential parent ancestry is unavailable or unsafe"
+        assert_secure_parent_directory "${grandparent_dir}"
         install -d -m 0700 -o root -g root "${parent_dir}"
+        parent_created=1
     fi
     assert_secure_parent_directory "${parent_dir}"
+    if (( parent_created )); then
+        python3 -c 'import os,sys; fd=os.open(sys.argv[1], os.O_RDONLY|os.O_DIRECTORY|os.O_CLOEXEC|os.O_NOFOLLOW); os.fsync(fd); os.close(fd)' \
+            "$(dirname "${parent_dir}")" || die "credential parent durability sync failed"
+    fi
 
     if [[ -e "${CREDENTIALS_FILE}" || -L "${CREDENTIALS_FILE}" ]]; then
         assert_credentials_file
@@ -170,11 +208,28 @@ create_credentials_file() {
     unset password
     chown root:root "${ACTIVE_TEMP_FILE}"
     chmod 0600 "${ACTIVE_TEMP_FILE}"
+    python3 -c 'import os,sys; fd=os.open(sys.argv[1], os.O_RDONLY|os.O_CLOEXEC|os.O_NOFOLLOW); os.fsync(fd); os.close(fd)' \
+        "${ACTIVE_TEMP_FILE}" || die "credential temp durability sync failed"
     mv -T -- "${ACTIVE_TEMP_FILE}" "${CREDENTIALS_FILE}"
     ACTIVE_TEMP_FILE=''
+    python3 -c 'import os,sys; fd=os.open(sys.argv[1], os.O_RDONLY|os.O_DIRECTORY|os.O_CLOEXEC|os.O_NOFOLLOW); os.fsync(fd); os.close(fd)' \
+        "${parent_dir}" || die "credential directory durability sync failed"
 
     assert_credentials_file
     printf 'credential_state=created\n'
+}
+
+preflight_credentials_before_admission() {
+    local parent_dir
+
+    parent_dir="$(dirname "${CREDENTIALS_FILE}")"
+    if [[ -e "${parent_dir}" || -L "${parent_dir}" ]]; then
+        assert_secure_parent_directory "${parent_dir}"
+    fi
+
+    if [[ -e "${CREDENTIALS_FILE}" || -L "${CREDENTIALS_FILE}" ]]; then
+        assert_credentials_file
+    fi
 }
 
 run_lifecycle() {
@@ -182,64 +237,46 @@ run_lifecycle() {
     local expected_state="$2"
     local status
     local expected_line
+    local output
 
-    ACTIVE_TEMP_FILE="$(mktemp "${STATE_DIR}/.lifecycle-output.XXXXXX")"
-    expected_line="provider_ui_smoke action=${lifecycle_action} state=${expected_state} result=ok"
+    expected_line="provider_ui_smoke action=${lifecycle_action} state=${expected_state} result=ok"$'\n'
+
+    if [[ "${lifecycle_action}" != 'verify' ]]; then
+        [[ "${ADMISSION_RUN_ID}" =~ ^[a-f0-9]{32}$ ]] \
+            || die "maintenance admission run identity is required" 75
+    fi
 
     set +e
-    (
-        cd "${APP_ROOT}"
-        php index.php console provider_ui_smoke \
-            "${lifecycle_action}" \
-            "${CREDENTIALS_FILE}" \
-            "${STATE_FILE}"
-    ) >"${ACTIVE_TEMP_FILE}" 2>&1
-    status=$?
+    output="$(
+        if cd "${APP_ROOT}"; then
+            FH_PROVIDER_UI_SMOKE_RUN_ID="${ADMISSION_RUN_ID}" php index.php console provider_ui_smoke \
+                "${lifecycle_action}" \
+                "${CREDENTIALS_FILE}" \
+                "${STATE_FILE}" 2>&1
+            printf '\037%s' "$?"
+        else
+            printf '\037%s' '2'
+        fi
+    )"
     set -e
+    status="${output##*$'\037'}"
+    output="${output%$'\037'*}"
 
+    if [[ ! "${status}" =~ ^[0-9]+$ ]]; then
+        die "application lifecycle command returned an invalid status" 75
+    fi
     if [[ "${status}" -ne 0 ]]; then
         die "application lifecycle command returned a failure" "${status}"
     fi
 
-    if [[ "$(wc -l <"${ACTIVE_TEMP_FILE}" | tr -d '[:space:]')" != '1' ]] \
-        || ! grep -Fqx -- "${expected_line}" "${ACTIVE_TEMP_FILE}"; then
+    if [[ "${output}" != "${expected_line}" ]]; then
         die "application lifecycle command returned an unexpected result"
     fi
-
-    rm -f -- "${ACTIVE_TEMP_FILE}"
-    ACTIVE_TEMP_FILE=''
 }
 
 verify_dormant() {
     run_lifecycle verify dormant
     assert_state_file_if_present
-}
-
-retire_credentials_file() {
-    local retired_dir
-    local retired_path
-
-    [[ -f "${CREDENTIALS_FILE}" && ! -L "${CREDENTIALS_FILE}" ]] || {
-        printf 'credential_state=absent\n'
-        return
-    }
-    assert_credentials_file
-
-    retired_dir="$(dirname "${CREDENTIALS_FILE}")/retired-provider-ui-smoke"
-    if [[ -e "${retired_dir}" || -L "${retired_dir}" ]]; then
-        [[ -d "${retired_dir}" && ! -L "${retired_dir}" ]] || die "retired credential directory is unsafe"
-        [[ "$(stat_owner_group "${retired_dir}")" == 'root:root' ]] || die "retired credential directory ownership is unsafe"
-        [[ "$(stat_mode "${retired_dir}")" == '700' ]] || die "retired credential directory permissions are unsafe"
-    else
-        install -d -m 0700 -o root -g root "${retired_dir}"
-    fi
-
-    retired_path="${retired_dir}/provider-ui-smoke.$(date -u +%Y%m%dT%H%M%SZ).$$.env"
-    [[ ! -e "${retired_path}" && ! -L "${retired_path}" ]] || die "retired credential target already exists"
-    mv -T -- "${CREDENTIALS_FILE}" "${retired_path}"
-    chown root:root "${retired_path}"
-    chmod 0600 "${retired_path}"
-    printf 'credential_state=retired\n'
 }
 
 parse_args() {
@@ -271,6 +308,11 @@ parse_args() {
             --state-dir)
                 [[ $# -ge 2 ]] || die "missing value for --state-dir" 64
                 STATE_DIR="$2"
+                shift 2
+                ;;
+            --admission-run-id)
+                [[ $# -ge 2 ]] || die "missing value for --admission-run-id" 64
+                ADMISSION_RUN_ID="$2"
                 shift 2
                 ;;
             --remove-credentials)
@@ -309,14 +351,16 @@ main() {
     require_command stat
     require_command install
     require_command mktemp
-    require_command grep
-    require_command wc
-    require_command tr
+    require_command python3
 
     validate_absolute_path "${APP_ROOT}"
     validate_absolute_path "${CREDENTIALS_FILE}"
     validate_absolute_path "${STATE_DIR}"
     STATE_FILE="${STATE_DIR}/active.json"
+    ADMISSION_COORDINATOR="${APP_ROOT}/scripts/ops/libexec/provider_ui_smoke_admission_v1.py"
+
+    [[ -f "${ADMISSION_COORDINATOR}" && ! -L "${ADMISSION_COORDINATOR}" ]] \
+        || die "maintenance admission coordinator is unavailable"
 
     [[ -d "${APP_ROOT}" && ! -L "${APP_ROOT}/index.php" && -f "${APP_ROOT}/index.php" ]] \
         || die "active application root is unavailable or unsafe"
@@ -330,13 +374,19 @@ main() {
             ;;
         install)
             require_command openssl
+            preflight_credentials_before_admission
+            admission_begin install
             ensure_state_directory
             create_credentials_file
             run_lifecycle install dormant
             verify_dormant
+            admission_settle
             ;;
         activate)
-            ensure_state_directory
+            [[ "${ADMISSION_RUN_ID}" =~ ^[a-f0-9]{32}$ ]] \
+                || die "admission run identity is required for activation" 75
+            ADMISSION_OPERATION='smoke'
+            assert_state_directory
             assert_credentials_file
             assert_state_file_if_present
             run_lifecycle activate active
@@ -344,12 +394,19 @@ main() {
             [[ -f "${STATE_FILE}" && ! -L "${STATE_FILE}" ]] || die "active lease state was not created"
             ;;
         deactivate)
-            ensure_state_directory
+            [[ "${ADMISSION_RUN_ID}" =~ ^[a-f0-9]{32}$ ]] \
+                || die "admission run identity is required for deactivation" 75
+            ADMISSION_OPERATION='smoke'
+            assert_state_directory
             assert_state_file_if_present
             run_lifecycle deactivate dormant
             verify_dormant
             ;;
         remove)
+            [[ "${REMOVE_CREDENTIALS}" == '0' ]] \
+                || die "credential retirement is not enrolled in maintenance admission" 75
+            assert_credentials_file
+            admission_begin remove
             ensure_state_directory
             assert_state_file_if_present
             run_lifecycle remove removed
@@ -358,11 +415,11 @@ main() {
             # retirement can happen.
             run_lifecycle remove removed
             assert_state_file_if_present
-            if [[ "${REMOVE_CREDENTIALS}" == '1' ]]; then
-                retire_credentials_file
-            else
-                printf 'credential_state=retained\n'
-            fi
+            admission_settle
+            # Credential retirement is deliberately refused above.  The
+            # admission remains settled only after the retained credentials
+            # have been re-checked by the lifecycle verifier.
+            printf 'credential_state=retained\n'
             ;;
     esac
 

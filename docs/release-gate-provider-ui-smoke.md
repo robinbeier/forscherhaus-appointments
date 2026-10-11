@@ -23,6 +23,22 @@ While dormant, the principal has no provider permissions and its database
 password verifier and salt are `NULL`. The root-only credential file therefore
 does not create a usable standing login.
 
+Fixture ownership is deliberately narrow. Appointment and principal notes,
+customer email, and service name/description fields are not global ownership
+markers: unrelated rows carrying the same text must never block the Provider
+UI fixture. The dormant principal is identified through its dedicated role;
+while active it is bound to the exact state-file ID or, after state loss, to
+the root-held credential verifier. Username, email, and notes are editable and
+cannot establish ownership. The synthetic appointment marker is bound to that provider.
+The private synthetic customer uses `email = NULL`, and its server-side notes
+sentinel is checked only on the run-owned customer ID. If the state file is
+lost, the customer and service IDs are reconstructed from the reserved
+provider's exact appointments and service relation, not from global text
+searches. Unrelated rows with matching text cannot claim fixture ownership or
+block cleanup.
+This prevents cleanup and verification from claiming unrelated real data while
+preserving the no-email production contract.
+
 `activate` installs the verifier only for a bounded ten-minute lease and creates
 an exact synthetic provider/service/customer/appointment fixture. The lifecycle
 uses direct internal writes with notifications and public booking
@@ -50,6 +66,8 @@ not treated as authorization.
 - `scripts/ops/prod_provider_ui_smoke.sh`: operator-side production
   orchestrator with preflight, bounded activation, browser gate, and mandatory
   cleanup.
+- `scripts/ops/libexec/provider_ui_smoke_admission_v1.py`: server-local
+  admission coordinator for the durable maintenance-pending record.
 - `scripts/release-gate/provider_ui_smoke.php`: PII-free HTTP, browser, and PDF
   assertions.
 - `scripts/release-gate/playwright/playwright_cli.sh`: operator-side Playwright
@@ -66,8 +84,10 @@ or put in a shell trace.
 
 Before the first production run:
 
-1. Deploy the guarded application, lifecycle command, gate, and both ops
-   wrappers through the normal artifact-based rollout.
+1. Deploy the guarded application, lifecycle command, coordinator, gate, and
+   both ops wrappers as one reviewed, hash-bound set. Install the compatible
+   maintenance-pending core and protocol epoch first under the ROB-812 rollout
+   contract. An app release alone does not complete this prerequisite.
 2. Confirm the normal read-only production baseline is green.
 3. Confirm the active release contains both wrappers and the Provider UI gate.
 4. Keep host Node/npm absent.
@@ -99,6 +119,13 @@ ssh root@booking-server \
 3. creates the state directory as `root:root` `0700`;
 4. installs the permanent dormant principal;
 5. runs the application verifier.
+
+The wrapper registers a pending maintenance run before creating a credential
+or state directory. Every mutating application action holds the canonical
+production lock throughout its transaction and verifies that exact run through
+the inherited lock descriptor. Direct mutating `console provider_ui_smoke`
+calls without this capability are rejected. A failed or unknown operation can
+leave the pending record for explicit recovery; do not retry it blindly.
 
 For an existing credential, the wrapper fails closed on a symlink, multiple
 hard links, unexpected owner, mode, size, username, password shape, or extra
@@ -141,20 +168,110 @@ The orchestrator:
 1. checks local runtime dependencies and prepares Playwright;
 2. checks the app endpoint;
 3. performs a read-only remote preflight, including credential/state
-   permissions, deployed-wrapper/template shape, dormant principal
-   verification, production Node/npm absence, and absence of an existing
-   cleanup lease;
-4. arms a transient `fh-provider-ui-smoke-cleanup.timer` with
-   `systemd-run --on-active=10m`;
-5. activates the synthetic lease;
-6. binds the locally reviewed four-line preparation template to the active
+   permissions, deployed-wrapper/template shape, production Node/npm absence,
+   and absence of an existing cleanup lease;
+4. binds the deployed template, proves the principal is dormant while holding
+   the private and shared admission locks, then registers the durable pending
+   run. A failed dormant proof publishes no pending run and does not proceed;
+5. arms a transient `fh-provider-ui-smoke-cleanup.timer` with
+   `systemd-run --on-active=10m`, and durably acknowledges its exact loaded
+   identity under the private and shared locks before activation;
+6. activates the synthetic lease;
+   the server rechecks the acknowledged, still-waiting timer under the same
+   shared lock as the fixture transaction immediately before activation. It
+   reads the timer's monotonic deadline through systemd's D-Bus API and
+   requires at least five minutes of remaining cleanup time. An expired,
+   nearly expired, or unknown deadline refuses activation without rearming
+   the timer;
+7. binds the locally reviewed four-line preparation template to the active
    deployment by SHA-256, then streams `ssh ... cat` directly into the local
    gate's standard input;
-7. re-reads the active template SHA-256 after the browser/PDF assertions and
+8. re-reads the active template SHA-256 after the browser/PDF assertions and
    fails closed if the deployment changed during the gate;
-8. always deactivates and verifies from an `EXIT`/signal cleanup handler;
-9. stops and resets the transient cleanup unit only after synchronous
-   `deactivate` and dormant `verify` both pass.
+9. deactivates and verifies from an `EXIT`/signal cleanup handler;
+10. stops and resets the transient cleanup unit only after synchronous
+    `deactivate` and dormant `verify` both pass;
+11. clears the pending run only after a fresh, lock-held terminal proof bound
+    to the durable timer acknowledgement. Unknown arm or acknowledgement
+    results leave the pending veto for deliberate recovery.
+
+An intact, root-bound `active.json` contains the exact provider ID needed for
+`deactivate`; that cleanup must still disable the live fixture if the protected
+credential file is missing or malformed. Reconstruction after state-file loss
+requires the credential verifier and fails closed without it. The subsequent
+independent dormant `verify` still requires a valid credential file, so a
+missing or damaged file may retain Pending after the active fixture has been
+disabled; it does not authorize clearing the veto without repair and proof.
+Likewise, a `removed` result requires the valid protected credential: the
+verifier must exclude an active principal whose state and now-unreferenced
+dormant role were both lost. `install`, `remove`, and `verify` fail closed on
+that orphan instead of accepting absence of editable marker text as proof.
+
+The systemd proof binds the cleanup service's complete command to this app,
+credential, state directory and run ID. If pending was already cleared but an
+interruption left only the acknowledgement, the separate `recover-arm-ack`
+action retains its original boot binding and requires a fresh terminal proof
+before removing that orphan, including after a reboot. It is not used to infer
+success from an unknown timer-arm result. A lost arm acknowledgement instead
+leaves pending in place. An explicit server-local `recover-unarmed` action may
+clear only an exact smoke record with no acknowledgement after both bound units
+are terminal or absent and a fresh dormant proof succeeds under both locks;
+ordinary settlement never clears a missing-ack record. A previous operator's root-owned,
+empty private lock at mode `0644` is narrowed in place to `0600` under that
+lock before the coordinator admits work.
+
+An interrupted `install` before fixture creation has its own explicit
+server-local `recover-install-empty` action. It accepts the exact install
+record from the current or previous boot only after proving that the
+acknowledgement and its temporary files are absent, no credential temporary
+file exists, and the PHP verifier reports the `removed` state. A pre-existing
+valid credential file may remain untouched; this recovery never deletes or
+repairs it. Dormant or partial state, a credential temporary, or any
+run/resource binding mismatch retains the pending veto. This recovery is
+distinct from the smoke path and is not an automatic retry.
+
+An interrupted `remove` that left the fixture fully dormant can use the
+separate server-local `recover-remove-dormant` abort action for the exact
+current- or prior-boot remove run. It holds the private and shared locks,
+proves that no arm acknowledgement or temporary credential file remains,
+that cleanup units are absent or terminal, and that the PHP verifier still
+reports `dormant` before clearing Pending. It does not retry removal, delete
+credentials, or accept an active, removed, partial, or unknown fixture. If
+the remove transaction committed, ordinary settlement instead requires the
+`removed` proof.
+
+If ACK publication stops after writing its temporary file but before creating
+the final hardlink, `recover-interrupted-arm-ack-temp` is the explicit
+server-local path. It accepts only the sole root-owned, run-bound temporary
+ACK with no final name. Under the private and shared locks, it requires no
+credential temporary, terminal cleanup units, and a fresh dormant proof before
+removing that exact temporary name and settling the pending run with another
+proof. A crash after its removal can be handled by `recover-unarmed`; unknown
+content, identity, or extra temporaries retain the veto.
+
+If ACK publication is interrupted after the final hardlink appears but before
+the temporary name is removed, `recover-interrupted-arm-ack` is the explicit
+server-local path. Under the private and shared locks, it requires the exact
+two-link final/temporary inode and ACK content bound to the pending run, no
+credential temporary, terminal cleanup units, and a fresh dormant proof. It
+removes only the verified temporary name, then settles the same pending run;
+an extra link, mismatched content, active unit, or unknown fixture retains the
+veto. This is not an automatic rerun of the smoke.
+
+If settlement has already created the core's immutable `clear-state.json`
+marker and is interrupted, the separate server-local `recover-clear-marker`
+action may finish only that exact transition. It validates the marker schema,
+protocol epoch, operation, run ID and complete resource identity. For a smoke
+record it accepts either the exact acknowledgement or a proven absence of both
+acknowledgement and temporary acknowledgement files, then requires both bound
+units to be terminal or absent and a fresh dormant proof. A remove record uses
+the corresponding removed-state proof. Every operation also requires the
+credential temporary-file check, and install accepts only the exact verifier
+state (`dormant` or `removed`). Marker-only and marker-plus-pending states are
+both handled by the core; stale ACKs, active units, unknown fixture state,
+credential temporaries or an interrupted acknowledgement retain the recovery
+veto. This action is explicit and server-local; ordinary settlement never
+clears a marker.
 
 During operator-to-gate transfer, the credential is never stored in a local
 temporary file, shell variable, command argument, process title, report, or
@@ -170,6 +287,10 @@ template, or a release switch during the run is therefore a hard gate failure.
 The transient systemd timer is independent of the operator shell. It runs the
 same secret-free server-local `deactivate` wrapper if the workstation loses
 power, SSH disappears, or the process is killed before its shell cleanup.
+The one-shot cleanup waits up to five minutes for the canonical production
+lock before it reports a failure; brief competing admissions therefore cannot
+strand the active fixture. A longer conflict remains an explicit recovery
+state with the durable pending veto intact, not an unobserved retry.
 An already-active unit with the same name is a hard preflight stop; it is not
 overwritten or assumed stale.
 
@@ -229,8 +350,8 @@ The operator orchestrator uses:
 | `2` | Gate runtime or configuration failed; cleanup still passed. |
 | `20` | Local or read-only remote preflight failed; no lease was activated. |
 | `21` | Activation failed; compensating deactivate was attempted. |
-| `22` | Independent cleanup timer could not be armed; activation did not proceed. |
-| `90` | Hard stop: deactivate, dormant verification, or timer disarm failed. |
+| `22` | Independent cleanup timer could not be armed; activation did not proceed. A lost response leaves the pending run unresolved. |
+| `90` | Hard stop: lifecycle cleanup, dormant verification, timer disarm, or admission settlement is unproven. |
 
 Exit `90` overrides the original gate result. Keep the guarded release active,
 do not clear the transient unit by hand, and investigate server-locally without
@@ -247,17 +368,9 @@ ssh root@booking-server \
   'bash /var/www/html/easyappointments/scripts/ops/provider_ui_smoke_principal.sh remove'
 ```
 
-Credential retirement is a separate explicit action and is allowed only after
-two successful, idempotent application-level `remove` transactions have
-confirmed complete absence:
-
-```bash
-ssh root@booking-server \
-  'bash /var/www/html/easyappointments/scripts/ops/provider_ui_smoke_principal.sh remove --remove-credentials'
-```
-
-The latter moves the credential into a root-only retired directory instead of
-destroying it irreversibly. The standard `remove` path keeps it.
+Credential retirement is not enrolled in the maintenance-admission protocol.
+`remove --remove-credentials` therefore fails closed; retain the protected
+credential and handle any later retirement as a separately reviewed change.
 
 Before rolling back to any release that predates the reserved-account route
 containment:

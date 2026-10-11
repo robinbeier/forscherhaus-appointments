@@ -591,6 +591,192 @@ class MaintenancePendingTest(unittest.TestCase):
         with self.assertRaisesRegex(MODULE.PendingError, 'pending_temp_present'):
             MODULE.admit_read_only()
 
+    def test_recovery_derives_and_settles_provider_temp_only(self):
+        record = MODULE.make_record(
+            'provider_ui_smoke', 'run001', '11111111-1111-1111-1111-111111111111',
+            {'app_root': '/srv/app', 'state_file': '/var/lib/fh-provider/active.json'},
+        )
+        temporary = os.path.join(self.state, MODULE.PENDING_TEMP_PREFIX + 'crashed')
+        self._write(temporary, MODULE._canonical(record))
+        proof_calls = []
+        with MODULE.maintenance_recovery() as recovery:
+            result = recovery.recover_interrupted_pending_temp(
+                'provider_ui_smoke', record['resource_identity'],
+                lambda value: proof_calls.append(value['run_id']) or value == record,
+            )
+        self.assertEqual('recovered', result['status'])
+        self.assertGreaterEqual(len(proof_calls), 2)
+        self.assertFalse(os.path.lexists(temporary))
+        self.assertFalse(os.path.lexists(self.pending))
+        self.assertEqual('admitted', MODULE.admit_read_only()['status'])
+
+    def test_recovery_settles_provider_temp_pending_hardlink_pair(self):
+        record = MODULE.make_record(
+            'provider_ui_smoke', 'run001', '11111111-1111-1111-1111-111111111111',
+            {'app_root': '/srv/app', 'state_file': '/var/lib/fh-provider/active.json'},
+        )
+        temporary = os.path.join(self.state, MODULE.PENDING_TEMP_PREFIX + 'crashed')
+        self._write(temporary, MODULE._canonical(record))
+        os.link(temporary, self.pending)
+        with MODULE.maintenance_recovery() as recovery:
+            result = recovery.recover_interrupted_pending_temp(
+                'provider_ui_smoke', record['resource_identity'], lambda value: value == record)
+        self.assertEqual('recovered', result['status'])
+        self.assertFalse(os.path.lexists(temporary))
+        self.assertFalse(os.path.lexists(self.pending))
+
+    def test_recovery_rejects_extra_or_partial_provider_temps_without_mutation(self):
+        record = MODULE.make_record(
+            'provider_ui_smoke', 'run001', '11111111-1111-1111-1111-111111111111',
+            {'app_root': '/srv/app', 'state_file': '/var/lib/fh-provider/active.json'},
+        )
+        first = os.path.join(self.state, MODULE.PENDING_TEMP_PREFIX + 'first')
+        second = os.path.join(self.state, MODULE.PENDING_TEMP_PREFIX + 'second')
+        self._write(first, MODULE._canonical(record))
+        self._write(second, b'partial')
+        with MODULE.maintenance_recovery() as recovery:
+            with self.assertRaisesRegex(MODULE.PendingError, 'pending_temp_unknown'):
+                recovery.recover_interrupted_pending_temp(
+                    'provider_ui_smoke', record['resource_identity'], lambda _: True)
+        self.assertTrue(os.path.lexists(first))
+        self.assertTrue(os.path.lexists(second))
+        self.assertFalse(os.path.lexists(self.pending))
+
+    def test_recovery_rejects_provider_temp_binding_and_clear_marker(self):
+        record = MODULE.make_record(
+            'provider_ui_smoke', 'run001', '11111111-1111-1111-1111-111111111111',
+            {'app_root': '/srv/app', 'state_file': '/var/lib/fh-provider/active.json'},
+        )
+        temporary = os.path.join(self.state, MODULE.PENDING_TEMP_PREFIX + 'crashed')
+        self._write(temporary, MODULE._canonical(record))
+        with MODULE.maintenance_recovery() as recovery:
+            with self.assertRaisesRegex(MODULE.PendingError, 'pending_binding_changed'):
+                recovery.recover_interrupted_pending_temp(
+                    'provider_ui_smoke', {'app_root': '/srv/other'}, lambda _: True)
+        self.assertTrue(os.path.lexists(temporary))
+        with MODULE.maintenance_recovery() as recovery:
+            with self.assertRaisesRegex(MODULE.PendingError, 'pending_binding_changed'):
+                recovery.recover_interrupted_pending_temp(
+                    'other_operation', record['resource_identity'], lambda _: True)
+        self.assertTrue(os.path.lexists(temporary))
+        self._write(self.clear_marker, MODULE._canonical(record))
+        with MODULE.maintenance_recovery() as recovery:
+            with self.assertRaisesRegex(MODULE.PendingError, 'pending_clear_unsettled'):
+                recovery.recover_interrupted_pending_temp(
+                    'provider_ui_smoke', record['resource_identity'], lambda _: True)
+        self.assertTrue(os.path.lexists(temporary))
+
+    def test_recovery_rejects_symlink_and_extra_link_without_mutation(self):
+        record = MODULE.make_record(
+            'provider_ui_smoke', 'run001', '11111111-1111-1111-1111-111111111111',
+            {'app_root': '/srv/app', 'state_file': '/var/lib/fh-provider/active.json'},
+        )
+        target = os.path.join(self.state, 'target')
+        temporary = os.path.join(self.state, MODULE.PENDING_TEMP_PREFIX + 'symlink')
+        self._write(target, MODULE._canonical(record))
+        os.symlink(target, temporary)
+        with MODULE.maintenance_recovery() as recovery:
+            with self.assertRaisesRegex(MODULE.PendingError, 'pending_temp_unknown'):
+                recovery.recover_interrupted_pending_temp(
+                    'provider_ui_smoke', record['resource_identity'], lambda _: True)
+        self.assertTrue(os.path.islink(temporary))
+        os.unlink(temporary)
+        temporary = os.path.join(self.state, MODULE.PENDING_TEMP_PREFIX + 'linked')
+        extra = os.path.join(self.state, 'unexpected-link')
+        self._write(temporary, MODULE._canonical(record))
+        os.link(temporary, extra)
+        with MODULE.maintenance_recovery() as recovery:
+            with self.assertRaisesRegex(MODULE.PendingError, 'pending_temp_unknown'):
+                recovery.recover_interrupted_pending_temp(
+                    'provider_ui_smoke', record['resource_identity'], lambda _: True)
+        self.assertTrue(os.path.lexists(temporary))
+        self.assertTrue(os.path.lexists(extra))
+
+    def test_recovery_proof_failure_retains_temp_veto(self):
+        record = MODULE.make_record(
+            'provider_ui_smoke', 'run001', '11111111-1111-1111-1111-111111111111',
+            {'app_root': '/srv/app', 'state_file': '/var/lib/fh-provider/active.json'},
+        )
+        temporary = os.path.join(self.state, MODULE.PENDING_TEMP_PREFIX + 'proof-fails')
+        self._write(temporary, MODULE._canonical(record))
+        with MODULE.maintenance_recovery() as recovery:
+            with self.assertRaisesRegex(MODULE.PendingError, 'terminal_proof_unknown'):
+                recovery.recover_interrupted_pending_temp(
+                    'provider_ui_smoke', record['resource_identity'], lambda _: False)
+        self.assertTrue(os.path.lexists(temporary))
+        self.assertFalse(os.path.lexists(self.pending))
+        with self.assertRaisesRegex(MODULE.PendingError, 'pending_temp_present'):
+            MODULE.admit_read_only()
+
+    def test_recovery_link_failure_retains_temp_without_pending(self):
+        record = MODULE.make_record(
+            'provider_ui_smoke', 'run001', '11111111-1111-1111-1111-111111111111',
+            {'app_root': '/srv/app', 'state_file': '/var/lib/fh-provider/active.json'},
+        )
+        temporary = os.path.join(self.state, MODULE.PENDING_TEMP_PREFIX + 'link-fails')
+        self._write(temporary, MODULE._canonical(record))
+        original_link = MODULE.os.link
+        MODULE.os.link = lambda *args, **kwargs: (_ for _ in ()).throw(OSError(errno.EIO, 'link'))
+        try:
+            with MODULE.maintenance_recovery() as recovery:
+                with self.assertRaisesRegex(MODULE.PendingError, 'pending_temp_unknown'):
+                    recovery.recover_interrupted_pending_temp(
+                        'provider_ui_smoke', record['resource_identity'], lambda _: True)
+        finally:
+            MODULE.os.link = original_link
+        self.assertTrue(os.path.lexists(temporary))
+        self.assertFalse(os.path.lexists(self.pending))
+
+    def test_recovery_fsync_failure_retains_two_link_veto(self):
+        record = MODULE.make_record(
+            'provider_ui_smoke', 'run001', '11111111-1111-1111-1111-111111111111',
+            {'app_root': '/srv/app', 'state_file': '/var/lib/fh-provider/active.json'},
+        )
+        temporary = os.path.join(self.state, MODULE.PENDING_TEMP_PREFIX + 'fsync-fails')
+        self._write(temporary, MODULE._canonical(record))
+        original_fsync = MODULE._fsync_state_directory
+        MODULE._fsync_state_directory = lambda: MODULE.reject('state_directory_sync_unknown')
+        try:
+            with MODULE.maintenance_recovery() as recovery:
+                with self.assertRaisesRegex(MODULE.PendingError, 'state_directory_sync_unknown'):
+                    recovery.recover_interrupted_pending_temp(
+                        'provider_ui_smoke', record['resource_identity'], lambda _: True)
+        finally:
+            MODULE._fsync_state_directory = original_fsync
+        self.assertTrue(os.path.lexists(temporary))
+        self.assertTrue(os.path.lexists(self.pending))
+        self.assertEqual(2, os.lstat(temporary).st_nlink)
+
+    def test_recovery_unlink_failure_retains_two_link_veto(self):
+        record = MODULE.make_record(
+            'provider_ui_smoke', 'run001', '11111111-1111-1111-1111-111111111111',
+            {'app_root': '/srv/app', 'state_file': '/var/lib/fh-provider/active.json'},
+        )
+        temporary = os.path.join(self.state, MODULE.PENDING_TEMP_PREFIX + 'unlink-fails')
+        self._write(temporary, MODULE._canonical(record))
+        original_unlink = MODULE.os.unlink
+        def fail_temp_unlink(path):
+            if path == temporary:
+                raise OSError(errno.EIO, 'unlink')
+            return original_unlink(path)
+        MODULE.os.unlink = fail_temp_unlink
+        try:
+            with MODULE.maintenance_recovery() as recovery:
+                with self.assertRaisesRegex(MODULE.PendingError, 'pending_temp_cleanup_failed'):
+                    recovery.recover_interrupted_pending_temp(
+                        'provider_ui_smoke', record['resource_identity'], lambda _: True)
+        finally:
+            MODULE.os.unlink = original_unlink
+        self.assertTrue(os.path.lexists(temporary))
+        self.assertTrue(os.path.lexists(self.pending))
+        self.assertEqual(2, os.lstat(temporary).st_nlink)
+        self._write(self.clear_marker, MODULE._canonical(record))
+        with MODULE.maintenance_recovery() as recovery:
+            with self.assertRaisesRegex(MODULE.PendingError, 'pending_clear_unsettled'):
+                recovery.recover_interrupted_pending_temp(
+                    'provider_ui_smoke', record['resource_identity'], lambda _: True)
+        self.assertTrue(os.path.lexists(temporary))
+
     def test_pending_across_boot_change_is_not_admitted(self):
         record = self.record()
         with MODULE.maintenance_admission() as admission:
@@ -760,6 +946,57 @@ class MaintenancePendingTest(unittest.TestCase):
         self.assertFalse(os.path.lexists(self.pending))
         self.assertFalse(os.path.lexists(self.clear_marker))
         self.assertEqual('admitted', MODULE.admit_read_only()['status'])
+
+    def provider_record(self):
+        return MODULE.make_record(
+            'provider_ui_smoke', 'run001', '11111111-1111-1111-1111-111111111111',
+            {'app_root': '/srv/app', 'state_file': '/var/lib/fh-provider/active.json'},
+        )
+
+    def test_recovery_after_temp_unlink_derives_pending_record(self):
+        record = self.provider_record()
+        with MODULE.maintenance_admission() as admission:
+            admission.publish_pending(record)
+        with MODULE.maintenance_recovery() as recovery:
+            result = recovery.recover_interrupted_pending(
+                'provider_ui_smoke', record['resource_identity'], lambda value: value == record)
+        self.assertEqual('recovered', result['status'])
+        self.assertEqual('admitted', MODULE.admit_read_only()['status'])
+
+    def test_recovery_after_marker_creation_derives_pending_pair(self):
+        record = self.provider_record()
+        with MODULE.maintenance_admission() as admission:
+            admission.publish_pending(record)
+            _, identity = MODULE._read_bounded(self.pending, MODULE.MAX_RECORD_BYTES)
+            MODULE._link_clear_marker_locked(MODULE._canonical(record), identity)
+        with MODULE.maintenance_recovery() as recovery:
+            result = recovery.recover_interrupted_pending(
+                'provider_ui_smoke', record['resource_identity'], lambda value: value == record)
+        self.assertEqual('recovered', result['status'])
+        self.assertFalse(os.path.lexists(self.pending))
+        self.assertFalse(os.path.lexists(self.clear_marker))
+
+    def test_recovery_after_pending_unlink_derives_marker_only_state(self):
+        record = self.provider_record()
+        with MODULE.maintenance_admission() as admission:
+            admission.publish_pending(record)
+            admission.clear_pending(record, lambda value: value == record)
+        with MODULE.maintenance_recovery() as recovery:
+            result = recovery.recover_interrupted_pending(
+                'provider_ui_smoke', record['resource_identity'], lambda value: value == record)
+        self.assertEqual('recovered', result['status'])
+        self.assertFalse(os.path.lexists(self.clear_marker))
+
+    def test_recovery_after_temp_unlink_retains_pending_on_proof_failure(self):
+        record = self.provider_record()
+        with MODULE.maintenance_admission() as admission:
+            admission.publish_pending(record)
+        with MODULE.maintenance_recovery() as recovery:
+            with self.assertRaisesRegex(MODULE.PendingError, 'terminal_proof_unknown'):
+                recovery.recover_interrupted_pending(
+                    'provider_ui_smoke', record['resource_identity'], lambda _: False)
+        self.assertTrue(os.path.lexists(self.pending))
+        self.assertFalse(os.path.lexists(self.clear_marker))
 
     def test_recovery_pending_requires_exact_record_and_proof_before_mutation(self):
         record = self.record()
