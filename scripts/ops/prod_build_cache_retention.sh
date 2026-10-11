@@ -96,6 +96,7 @@ MIN_AGE_HOURS=168
 KEEP_STORAGE_BYTES=2147483648
 LOCK_DIR="${BUILD_CACHE_RETENTION_LOCK_DIR:-/var/lib/fh-build-cache-retention}"
 GLOBAL_LOCK_PATH="${BUILD_CACHE_RETENTION_GLOBAL_LOCK_PATH:-/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock}"
+ADMISSION_ROOT='/var/lib/fh-maintenance-admission'
 PYTHON_BIN="${BUILD_CACHE_RETENTION_PYTHON_BIN:-/usr/bin/python3}"
 DELETION_PERFORMED=no
 
@@ -358,6 +359,32 @@ prune_space_flag() {
     printf '%s' unsupported
 }
 
+admission_state_status() {
+    "$PYTHON_BIN" -I -B - "$ADMISSION_ROOT" <<'PY'
+import os
+import stat
+import sys
+
+for ancestor in ('/', '/var', '/var/lib'):
+    try:
+        item = os.lstat(ancestor)
+    except OSError:
+        raise SystemExit(2)
+    if (not stat.S_ISDIR(item.st_mode) or item.st_uid != 0 or
+            item.st_gid != 0 or item.st_nlink < 1 or
+            stat.S_IMODE(item.st_mode) & 0o022):
+        raise SystemExit(2)
+
+try:
+    os.lstat(sys.argv[1])
+except FileNotFoundError:
+    raise SystemExit(1)
+except OSError:
+    raise SystemExit(2)
+raise SystemExit(0)
+PY
+}
+
 timeout 30 docker info >/dev/null 2>&1 || blocked docker_unavailable 2
 
 space_flag="$(prune_space_flag)" || blocked prune_capability_failed 2
@@ -392,6 +419,14 @@ section preflight
 kv activity_state clear
 kv activity_match_count "$activity"
 kv cleanup_lock "$([[ "$MODE" == 'execute' ]] && printf pending || printf not_acquired)"
+admission_state_result=absent
+if admission_state_status; then
+    admission_state_result=present
+else
+    admission_state_exit=$?
+    (( admission_state_exit == 1 )) || admission_state_result=lookup_error
+fi
+kv maintenance_admission_state "$admission_state_result"
 
 section before
 kv cache.record_count "$cache_count_before"
@@ -445,6 +480,17 @@ global_lock_after="$(stat -Lc '%F|%a|%u|%h|%d|%i' "$GLOBAL_LOCK_PATH" 2>/dev/nul
 [[ "$global_lock_fd_meta" == "$global_lock_meta" && "$global_lock_after" == "$global_lock_meta" ]] \
     || blocked global_change_lock_unsafe 2
 global_lock_state=acquired
+
+# The pending-state protocol is deliberately a fixed-path fence.  Check it
+# only after taking the canonical shared lock so installation cannot race this
+# decision.  A symlink, dangling symlink, or any other path representation is
+# presence and therefore blocks legacy daemon-side prune.
+if admission_state_status; then
+    blocked maintenance_protocol_unenrolled 75
+else
+    admission_state_exit=$?
+    (( admission_state_exit == 1 )) || blocked maintenance_protocol_lookup_failed 2
+fi
 
 activity="$(activity_count)" || blocked activity_unknown 2
 [[ "$activity" == '0' ]] || blocked active_production_work 75
