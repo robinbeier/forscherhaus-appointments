@@ -168,9 +168,12 @@ uploaded archive only after the coordinated ROB-812 rollout is fully installed
 and verified: all writers, the fixed admission core, its state directory, and
 the epoch/marker contract must agree with freshly verified installed hashes.
 On a legacy or partially enrolled host this direct path is unavailable and must
-stop before receipt or deployment; installing the admission core alone or using
-the current repository wrapper against that host is not permitted. The
-following remains the direct-path example after that gate:
+stop before receipt or deployment; installing the admission core alone is not
+permitted. The reviewed, manifest-bound repository wrapper is a separate path:
+it may run on the verified legacy host only while both the ROB-812 admission
+core and its state directory are absent, as required by its read-only preflight
+and lock-held admission. A partially enrolled host is refused by that wrapper
+as well. The following remains the direct-path example after that gate:
 
 ```bash
 /root/deploy_ea.sh \
