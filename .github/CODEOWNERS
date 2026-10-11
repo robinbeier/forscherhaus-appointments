@@ -66,7 +66,6 @@
 /application/libraries/Ldap_client.php @robinbeier
 /application/libraries/Pdf_renderer.php @robinbeier
 /application/libraries/Permissions.php @robinbeier
-/application/libraries/Provider_ui_smoke_fixture.php @robinbeier
 /application/libraries/Provider_utilization.php @robinbeier
 /application/libraries/Request_normalizer.php @robinbeier
 /application/libraries/Reschedule_authority.php @robinbeier
@@ -151,7 +150,6 @@
 /docs/release-gate-booking-confirmation-pdf.md @robinbeier
 /docs/release-gate-customers-ui-smoke.md @robinbeier
 /docs/release-gate-dashboard.md @robinbeier
-/docs/release-gate-provider-ui-smoke.md @robinbeier
 /docs/rest-api.md @robinbeier
 /openapi.yml @robinbeier
 /scripts/ci/** @robinbeier
@@ -159,7 +157,5 @@
 /scripts/ops/lib/DeployResultV1.php @robinbeier
 /scripts/ops/lib/DeploymentContractV1.php @robinbeier
 /scripts/ops/prod_customers_ui_smoke.sh @robinbeier
-/scripts/ops/prod_provider_ui_smoke.sh @robinbeier
-/scripts/ops/provider_ui_smoke_principal.sh @robinbeier
 /scripts/ops/zero_surprise_canary_fixture.sh @robinbeier
 /scripts/release-gate/** @robinbeier

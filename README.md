@@ -110,7 +110,7 @@ Primary references:
 - [Zero-surprise restore-dump replay + live canary](docs/release-gate-zero-surprise.md)
 - [Dashboard release gate](docs/release-gate-dashboard.md)
 - [Booking confirmation PDF gate](docs/release-gate-booking-confirmation-pdf.md)
-- [Production Provider UI smoke](docs/release-gate-provider-ui-smoke.md)
+- [Retired Provider UI smoke note](docs/release-gate-provider-ui-smoke.md)
 - [Production Customers UI smoke](docs/release-gate-customers-ui-smoke.md)
 - [Deployment runbook](docs/deployment.md)
 - [Production release and operator entry](docs/ops/production-release-entry.md)

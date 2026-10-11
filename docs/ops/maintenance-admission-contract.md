@@ -41,7 +41,7 @@ scheduler, operator and recovery entrypoints, including direct supported calls.
 | --- | --- | --- |
 | Ordinary deploy | `deploy_ea.sh`; validated shared descriptor | Preserve deployment state, recovery and delegated descriptor checks |
 | Ordinary live probe | `scripts/ops/run_ordinary_live_probe.sh`; interruption markers and cleanup callback | Refuse every wrapper action and the separately invoked cleanup path when fixed `/var/lib/fh-maintenance-admission` is present or its root-controlled absence is unknown; even preflight and verify may initialize fixture state or lock files |
-| Provider/customer UI smokes | Provider uses `scripts/ops/prod_provider_ui_smoke.sh`, `scripts/ops/provider_ui_smoke_principal.sh` and the source coordinator `scripts/ops/libexec/provider_ui_smoke_admission_v1.py`; Customers remains on `scripts/ops/prod_customers_ui_smoke.sh` and `scripts/ops/customers_ui_smoke_principals.sh` | Provider source binds install/remove and the foreground/delayed cleanup lifecycle to one pending record; Customers still requires enrollment of its foreground mutation, delayed cleanup units and disarm cleanup as separate writer entrypoints |
+| Provider/customer UI smokes | Provider UI smoke is retired; Customers remains on `scripts/ops/prod_customers_ui_smoke.sh` and `scripts/ops/customers_ui_smoke_principals.sh` | Provider has no active lifecycle or admission entrypoint. Customers still requires enrollment of its foreground mutation, delayed cleanup units and disarm cleanup as separate writer entrypoints |
 | Backup producer | `scripts/ops/libexec/backup_set_producer_v1.py`; shared and private locks, continuity state | Repository source registers pending before dump dispatch and clears only after direct-child termination and publication. The source now also has a bounded `--recover-pending` path for a current-boot, fully published pending run; installed helper remains legacy and production rollout remains open. |
 | Restore verification | `scripts/ops/libexec/deployment_dump_attestation_v1.py`; detached container, lease watcher, orphan and continuity checks | Repository source admits before reconciliation, registers pending before Docker launch, and settles after terminal restore and publication. The source now includes a narrowly scoped recovery proof for the post-publication/post-cleanup state; installed recovery and production installation remain open. |
 | Session retention | `scripts/ops/libexec/session_retention_v1.py`; shared lock and protected local state | Repository execute path reads the pending-state contract through its existing lock descriptor before mutation; installed helper and unit remain legacy until the coordinated rollout |
@@ -61,6 +61,11 @@ prerequisites (ROB-578 and ROB-579). They do not resolve ROB-532's original
 command-name availability finding or the detached-container interval.
 
 ## UI-smoke maintenance-pending enrollment obligations
+
+The Provider UI smoke lifecycle was retired after the legacy principal and
+credential were removed from production. The historical Provider details below
+are retained only as migration evidence and do not describe an active entry
+point. Current enrollment obligations apply to Customers only.
 
 Provider's source operator now uses the coordinator
 `scripts/ops/libexec/provider_ui_smoke_admission_v1.py`: it registers one

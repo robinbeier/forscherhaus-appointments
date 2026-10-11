@@ -575,9 +575,7 @@ class CiWorkflowContractTest extends TestCase
         foreach (
             [
                 'customers-ui-smoke-fixture-lifecycle.junit.xml',
-                'provider-ui-smoke-fixture-lifecycle.junit.xml',
                 'tests/Unit/Libraries/CustomersUiSmokeFixtureLifecycleTest.php',
-                'tests/Unit/Libraries/ProviderUiSmokeFixtureLifecycleTest.php',
                 'csp-report-only-root.junit.xml',
                 'tests/Unit/Scripts/CspReportOnlyActivationScriptTest.php',
                 'tests/Unit/Scripts/CspReportOnlyStatusScriptTest.php',
@@ -586,16 +584,16 @@ class CiWorkflowContractTest extends TestCase
         ) {
             self::assertStringContainsString($expected, $run);
         }
-        self::assertSame(5, substr_count($run, '--fail-on-skipped'));
-        self::assertSame(5, substr_count($run, '--log-junit'));
-        self::assertSame(5, substr_count($run, '--log-otr'));
+        self::assertSame(4, substr_count($run, '--fail-on-skipped'));
+        self::assertSame(4, substr_count($run, '--log-junit'));
+        self::assertSame(4, substr_count($run, '--log-otr'));
         self::assertStringContainsString('suite_status=0', $run);
-        self::assertSame(5, substr_count($run, '|| suite_status=1'));
+        self::assertSame(4, substr_count($run, '|| suite_status=1'));
         self::assertStringContainsString('exit "$suite_status"', $run);
         self::assertSame('always()', $steps['Summarize application root test cases']['if']);
-        self::assertSame(5, substr_count($this->stepRun($steps, 'Summarize application root test cases'), '--input'));
+        self::assertSame(4, substr_count($this->stepRun($steps, 'Summarize application root test cases'), '--input'));
         self::assertSame(
-            5,
+            4,
             substr_count($this->stepRun($steps, 'Summarize application root test cases'), '--otr-input'),
         );
         self::assertStringContainsString('--bootstrap tests/bootstrap.php', $run);
@@ -610,10 +608,6 @@ class CiWorkflowContractTest extends TestCase
         self::assertSame('actions/upload-artifact@v7', $receipt['uses']);
         self::assertStringContainsString(
             'storage/logs/ci/customers-ui-smoke-fixture-lifecycle.junit.xml',
-            $receipt['with']['path'],
-        );
-        self::assertStringContainsString(
-            'storage/logs/ci/provider-ui-smoke-fixture-lifecycle.junit.xml',
             $receipt['with']['path'],
         );
         self::assertStringContainsString(

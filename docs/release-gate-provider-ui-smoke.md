@@ -1,15 +1,23 @@
 # Provider UI Smoke Release Gate
 
-**Status (2026-10-11): suspended.** This optional production smoke is not a
-required release gate. Do not bootstrap, activate, or run it under the current
-mixed-version ROB-812 state. The installed legacy wrappers can still be
-started, while the repository's global maintenance core is not installed.
+> **Retirement sequence:** first use the existing, hash-bound production
+> operator to remove its dormant synthetic principal and retire its credential.
+> Verify that cleanup independently. Only then merge and release the source
+> deletion in this change. The installed legacy operator still exposes
+> `install` and `activate` until it is retired; neither action is authorized by
+> this document. The local HTTP, authorization, and PDF-handoff tests remain.
+
+**Status (2026-10-12): suspended pending controlled retirement.** This optional
+production smoke is not a required release gate. The proposed source change
+removes its lifecycle commands and browser gate after the production principal
+has been removed. Until then, the installed legacy wrapper is the supported
+teardown path and must not be treated as a teardown-only wrapper. The
+repository's local HTTP, authorization, and PDF-handoff tests remain active.
 An interrupted run could leave an active synthetic login that ordinary backup
 or deployment does not currently veto. The existing production principal was
 verified dormant and clean on 2026-10-11; that point-in-time observation does
 not authorize a future run. The instructions below document the historical
-design and are not an executable operator procedure until a separate review
-establishes a safe lifecycle and rollout.
+design and are retained only to support controlled cleanup of a legacy state.
 
 Local provider HTTP tests cover authorization and the renderer handoff;
 the shared PDF monitor and release canary cover the common renderer path.

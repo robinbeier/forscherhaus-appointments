@@ -66,7 +66,7 @@ bash ./scripts/ci/pre_pr_quick.sh
 - Console commands: `docs/console.md`
 - Write-path contracts: `docs/ci-write-contracts.md`
 - Defense Factory cycles and evidence handoffs: `docs/defense-factory.md`
-- Release gates: `docs/release-gate-dashboard.md`, `docs/release-gate-booking-confirmation-pdf.md`, `docs/release-gate-provider-ui-smoke.md`, `docs/release-gate-customers-ui-smoke.md`, `docs/release-gate-zero-surprise.md`
+- Release gates: `docs/release-gate-dashboard.md`, `docs/release-gate-booking-confirmation-pdf.md`, `docs/release-gate-customers-ui-smoke.md`, `docs/release-gate-zero-surprise.md`
 - Observability and ops monitors: `docs/observability.md`, `scripts/ops/README.md`
 - Production SSH operations harness: `docs/ops/agent-operations.md`
 - Architecture and ownership: `docs/architecture-map.md`, `docs/ownership-map.md`, `docs/maps/component_ownership_map.json`
