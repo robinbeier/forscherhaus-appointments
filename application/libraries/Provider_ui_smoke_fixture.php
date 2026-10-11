@@ -172,7 +172,9 @@ final class Provider_ui_smoke_fixture
         try {
             $credentials = null;
 
-            if (in_array($action, ['install', 'verify', 'activate'], true)) {
+            $credentials_present = file_exists($credential_file) || is_link($credential_file);
+
+            if (in_array($action, ['install', 'activate'], true) || ($action === 'verify' && $credentials_present)) {
                 $credentials = $this->readCredentials($credential_file);
             }
 
@@ -190,7 +192,7 @@ final class Provider_ui_smoke_fixture
                 try {
                     $state = match ($action) {
                         'install' => $this->install($state_file),
-                        'verify' => $this->verify($state_file),
+                        'verify' => $this->verify($state_file, $credentials !== null),
                         'activate' => $this->activate($credentials, $state_file),
                         'deactivate' => $this->deactivate($state_file, $remove_state_after_commit),
                         'remove' => $this->remove($state_file),
@@ -329,7 +331,7 @@ final class Provider_ui_smoke_fixture
     /**
      * Verify the expected safe resting state.
      */
-    private function verify(string $state_file): string
+    private function verify(string $state_file, bool $credentials_present): string
     {
         $this->assertStateFileAbsent($state_file);
         $role = $this->findDormantRole();
@@ -344,6 +346,10 @@ final class Provider_ui_smoke_fixture
 
         if ($role === null || $principal === null) {
             throw new RuntimeException('Provider UI smoke install state is incomplete.');
+        }
+
+        if (!$credentials_present) {
+            throw new RuntimeException('Provider UI smoke dormant verification requires credentials.');
         }
 
         $this->assertDormantClean($principal, $role);
@@ -393,7 +399,7 @@ final class Provider_ui_smoke_fixture
         $this->insertOrFail('users', [
             'first_name' => self::CUSTOMER_FIRST_NAME,
             'last_name' => self::CUSTOMER_LAST_NAME,
-            'email' => self::CUSTOMER_EMAIL,
+            'email' => null,
             'phone_number' => self::CUSTOMER_PHONE,
             'mobile_number' => null,
             'address' => null,
@@ -795,7 +801,14 @@ final class Provider_ui_smoke_fixture
 
         $this->assertFixtureMarkersUnused((int) $principal['id']);
 
-        $provider_email_count = $this->CI->db->get_where('users', ['email' => self::PROVIDER_EMAIL])->num_rows();
+        $provider_email_count = $this->CI->db
+            ->select('users.id')
+            ->from('users')
+            ->join('roles', 'roles.id = users.id_roles', 'inner')
+            ->where('roles.slug !=', DB_SLUG_CUSTOMER)
+            ->where('users.email', self::PROVIDER_EMAIL)
+            ->get()
+            ->num_rows();
         $dormant_note_count = $this->CI->db
             ->get_where('users', ['notes' => Provider_ui_smoke_access_policy::DORMANT_NOTES])
             ->num_rows();
@@ -833,7 +846,14 @@ final class Provider_ui_smoke_fixture
         $username_count = $this->CI->db
             ->get_where('user_settings', ['username' => Provider_ui_smoke_access_policy::USERNAME])
             ->num_rows();
-        $email_count = $this->CI->db->get_where('users', ['email' => self::PROVIDER_EMAIL])->num_rows();
+        $email_count = $this->CI->db
+            ->select('users.id')
+            ->from('users')
+            ->join('roles', 'roles.id = users.id_roles', 'inner')
+            ->where('roles.slug !=', DB_SLUG_CUSTOMER)
+            ->where('users.email', self::PROVIDER_EMAIL)
+            ->get()
+            ->num_rows();
 
         if ($username_count !== 0 || $email_count !== 0) {
             throw new RuntimeException('Provider UI smoke principal marker collision detected.');
@@ -859,17 +879,18 @@ final class Provider_ui_smoke_fixture
             ->group_end();
         $service_count = $this->CI->db->get('services')->num_rows();
 
-        $this->CI->db
-            ->group_start()
-            ->where('email', self::CUSTOMER_EMAIL)
-            ->or_where('notes', self::CUSTOMER_NOTES)
-            ->group_end();
+        $this->CI->db->group_start()->where('notes', self::CUSTOMER_NOTES)->group_end();
         $customer_count = $this->CI->db->get('users')->num_rows();
 
-        $appointment_count = $this->CI->db
-            ->where_in('notes', $this->appointmentMarkers())
-            ->get('appointments')
-            ->num_rows();
+        $appointment_count = 0;
+
+        if ($provider_id !== null) {
+            $appointment_count = $this->CI->db
+                ->where('id_users_provider', $provider_id)
+                ->where_in('notes', $this->appointmentMarkers())
+                ->get('appointments')
+                ->num_rows();
+        }
 
         if ($service_count !== 0 || $customer_count !== 0 || $appointment_count !== 0) {
             throw new RuntimeException('Provider UI smoke fixture marker collision detected.');
@@ -1016,7 +1037,7 @@ final class Provider_ui_smoke_fixture
         if (
             $customer['first_name'] !== self::CUSTOMER_FIRST_NAME ||
             $customer['last_name'] !== self::CUSTOMER_LAST_NAME ||
-            $customer['email'] !== self::CUSTOMER_EMAIL ||
+            $customer['email'] !== null ||
             $customer['phone_number'] !== self::CUSTOMER_PHONE ||
             $customer['notes'] !== self::CUSTOMER_NOTES ||
             (int) $customer['id_roles'] !== (int) $customer_role['id'] ||
@@ -1097,13 +1118,10 @@ final class Provider_ui_smoke_fixture
             ->group_end();
         $service_marker_count = $this->CI->db->get('services')->num_rows();
 
-        $this->CI->db
-            ->group_start()
-            ->where('email', self::CUSTOMER_EMAIL)
-            ->or_where('notes', self::CUSTOMER_NOTES)
-            ->group_end();
+        $this->CI->db->group_start()->where('notes', self::CUSTOMER_NOTES)->group_end();
         $customer_marker_count = $this->CI->db->get('users')->num_rows();
         $appointment_marker_count = $this->CI->db
+            ->where('id_users_provider', $ids['provider'])
             ->where_in('notes', $this->appointmentMarkers())
             ->get('appointments')
             ->num_rows();
@@ -1234,13 +1252,12 @@ final class Provider_ui_smoke_fixture
             ->group_end();
         $service_query = $this->CI->db->get('services');
 
-        $this->CI->db
-            ->group_start()
-            ->where('email', self::CUSTOMER_EMAIL)
-            ->or_where('notes', self::CUSTOMER_NOTES)
-            ->group_end();
+        $this->CI->db->group_start()->where('notes', self::CUSTOMER_NOTES)->group_end();
         $customer_query = $this->CI->db->get('users');
-        $appointment_query = $this->CI->db->where_in('notes', $this->appointmentMarkers())->get('appointments');
+        $appointment_query = $this->CI->db
+            ->where('id_users_provider', (int) $principal['id'])
+            ->where_in('notes', $this->appointmentMarkers())
+            ->get('appointments');
 
         if (
             $service_query->num_rows() !== 1 ||

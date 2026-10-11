@@ -91,6 +91,13 @@ coordinator's lock-held terminal proof. The wrapper captures lifecycle output
 in memory; a direct `verify` does not create a temporary file. A lost cleanup
 timer acknowledgement retains the pending record and requires reconciliation;
 it must not be interpreted as a completed disarm.
+Fixture ownership is deliberately narrow: appointment notes and customer email
+fields are not global ownership markers. The synthetic appointment marker is
+bound to the reserved smoke provider; the private synthetic customer uses
+`email = NULL`, and a server-side notes sentinel plus run-owned IDs identify
+only records created by that fixture. This prevents cleanup from claiming
+unrelated real appointments or customers while preserving the no-email
+production contract.
 The smoke coordinator performs the initial dormant proof while holding both
 the private lifecycle lock and the shared maintenance lock, immediately before
 publishing the pending record. A failed proof therefore publishes no new
@@ -205,6 +212,32 @@ both before and after marker creation; an unknown second proof retains
 the marker veto. No generic operator success flag or time limit can
 supply that proof. The capability does not make a writer with unfinished
 resource reconciliation ready for production installation.
+The provider UI coordinator's explicit `recover-clear-marker` action is a
+separate server-local recovery path for the exact interruption after this
+core has created `clear-state.json`. It runs under the private cleanup lock
+and the shared recovery lock, validates the marker's schema, epoch, operation,
+run ID and full resource identity, and then proves the operation-specific
+terminal state before asking the core to remove the marker. Smoke recovery
+requires either the exact arm acknowledgement or a proven absence of both the
+acknowledgement and its temporary publication files, plus terminal-or-absent
+bound units and a fresh dormant fixture. Every operation also proves that
+credential temporary files are absent; remove requires the removed fixture
+state, while install accepts only verifier state `dormant` or `removed`. The
+same proof covers marker-only and marker-plus-pending states; binding
+mismatches, stale ACKs or ACK temporaries, active units, unknown fixture state,
+credential temporaries and interrupted acknowledgement publication retain the
+veto. Ordinary settlement and generic success flags cannot clear this marker,
+and this path is not an automatic retry.
+For an interrupted Provider UI `install` that may have published pending state
+before fixture creation, the coordinator has a separate
+explicit `recover-install-empty` action. It accepts the exact install record
+from the current or previous boot only after proving no arm acknowledgement or
+temporary acknowledgement exists, no credential temporary exists, and the
+PHP verifier reports `removed`. A pre-existing valid credential file may be
+left untouched; the action performs no file deletion or repair. Dormant or
+partial state, credential temporaries, and binding mismatches retain the
+pending veto. This path is distinct from smoke recovery and is never an
+automatic retry.
 For a writer that already holds the canonical shared lock, the local core now
 has a descriptor-based admission check. It validates the same lock inode and
 protocol epoch and checks the caller's exclusive flock through read-only

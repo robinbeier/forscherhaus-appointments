@@ -23,6 +23,15 @@ While dormant, the principal has no provider permissions and its database
 password verifier and salt are `NULL`. The root-only credential file therefore
 does not create a usable standing login.
 
+Fixture ownership is deliberately narrow. Appointment notes and customer email
+fields are not global ownership markers: a public appointment note or an
+unrelated customer's email must never block the Provider UI fixture. The
+synthetic appointment marker is bound to the reserved smoke provider; the
+private synthetic customer uses `email = NULL`, and the server-side notes
+sentinel plus the fixture's own IDs identify only records created by this run.
+This prevents cleanup and verification from claiming unrelated real data while
+preserving the no-email production contract.
+
 `activate` installs the verifier only for a bounded ten-minute lease and creates
 an exact synthetic provider/service/customer/appointment fixture. The lifecycle
 uses direct internal writes with notifications and public booking
@@ -189,6 +198,31 @@ are terminal or absent and a fresh dormant proof succeeds under both locks;
 ordinary settlement never clears a missing-ack record. A previous operator's root-owned,
 empty private lock at mode `0644` is narrowed in place to `0600` under that
 lock before the coordinator admits work.
+
+An interrupted `install` before fixture creation has its own explicit
+server-local `recover-install-empty` action. It accepts the exact install
+record from the current or previous boot only after proving that the
+acknowledgement and its temporary files are absent, no credential temporary
+file exists, and the PHP verifier reports the `removed` state. A pre-existing
+valid credential file may remain untouched; this recovery never deletes or
+repairs it. Dormant or partial state, a credential temporary, or any
+run/resource binding mismatch retains the pending veto. This recovery is
+distinct from the smoke path and is not an automatic retry.
+
+If settlement has already created the core's immutable `clear-state.json`
+marker and is interrupted, the separate server-local `recover-clear-marker`
+action may finish only that exact transition. It validates the marker schema,
+protocol epoch, operation, run ID and complete resource identity. For a smoke
+record it accepts either the exact acknowledgement or a proven absence of both
+acknowledgement and temporary acknowledgement files, then requires both bound
+units to be terminal or absent and a fresh dormant proof. A remove record uses
+the corresponding removed-state proof. Every operation also requires the
+credential temporary-file check, and install accepts only the exact verifier
+state (`dormant` or `removed`). Marker-only and marker-plus-pending states are
+both handled by the core; stale ACKs, active units, unknown fixture state,
+credential temporaries or an interrupted acknowledgement retain the recovery
+veto. This action is explicit and server-local; ordinary settlement never
+clears a marker.
 
 During operator-to-gate transfer, the credential is never stored in a local
 temporary file, shell variable, command argument, process title, report, or

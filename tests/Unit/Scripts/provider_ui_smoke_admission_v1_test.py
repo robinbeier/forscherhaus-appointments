@@ -33,8 +33,9 @@ SPEC.loader.exec_module(COORD)
 
 
 class FakeAdmission:
-    def __init__(self, record):
+    def __init__(self, record, marker=None):
         self.record = record
+        self.marker = marker if marker is not None else record
         self.admitted = False
         self.proof_calls = 0
 
@@ -58,15 +59,22 @@ class FakeAdmission:
             return {"status": "unknown"}
         return {"status": "recovered"}
 
+    def recover_clear_marker(self, proof):
+        self.marker_proof_calls = getattr(self, "marker_proof_calls", 0) + 1
+        self.marker_asserted = proof(self.marker)
+        if not self.marker_asserted:
+            return {"status": "unknown"}
+        return {"status": "recovered"}
+
 
 class FakeCore:
     SCHEMA = "maintenance_pending_v1"
     PROTOCOL_EPOCH = 1
     PendingError = type("PendingError", (Exception,), {})
 
-    def __init__(self, record):
+    def __init__(self, record, marker=None):
         self.record = record
-        self.recovery = FakeAdmission(record)
+        self.recovery = FakeAdmission(record, marker)
 
     def current_boot_id(self):
         return "boot-test"
@@ -375,6 +383,269 @@ class ProviderUiSmokeAdmissionBehaviorTest(unittest.TestCase):
                 COORD.recover_unarmed(self.args("recover-unarmed"))
         self.assertEqual(raised.exception.code, 75)
         self.assertEqual(core.recovery.proof_calls, 0)
+
+    def test_recover_clear_marker_accepts_exact_smoke_marker_with_ack(self):
+        resource = self.resource("smoke")
+        record = {
+            "schema": "maintenance_pending_v1", "epoch": 1,
+            "operation": "provider_ui_smoke", "run_id": "a" * 32,
+            "boot_id": "boot-test", "resource_identity": resource,
+        }
+        core = FakeCore(record)
+        with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+             patch.object(COORD, "load_core", return_value=core), \
+             patch.object(COORD, "_read_arm_ack", return_value=COORD._ack_record(record)), \
+             patch.object(COORD, "_ensure_arm_ack_temporaries_absent") as temps, \
+             patch.object(COORD, "unit_terminal", return_value=True) as units, \
+             patch.object(COORD, "dormant_clean", return_value=True) as fixture, \
+             patch.object(COORD, "_remove_arm_ack") as remove_ack, \
+             contextlib.redirect_stdout(io.StringIO()):
+            COORD.recover_clear_marker(self.args("recover-clear-marker"))
+        self.assertEqual(core.recovery.marker_proof_calls, 1)
+        self.assertTrue(core.recovery.marker_asserted)
+        self.assertEqual(units.call_count, 2)
+        fixture.assert_called_once_with(resource, "dormant")
+        temps.assert_called_once_with(resource)
+        remove_ack.assert_called_once_with(resource)
+
+    def test_recover_clear_marker_accepts_marker_only_remove_state(self):
+        resource = self.resource("remove")
+        record = {
+            "schema": "maintenance_pending_v1", "epoch": 1,
+            "operation": "provider_ui_smoke", "run_id": "a" * 32,
+            "boot_id": "old-boot", "resource_identity": resource,
+        }
+        core = FakeCore(record)
+        args = self.args("recover-clear-marker", operation="remove")
+        with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+             patch.object(COORD, "load_core", return_value=core), \
+             patch.object(COORD, "_ensure_credential_temp_absent") as credential_temp, \
+             patch.object(COORD, "_ensure_arm_ack_absent") as ack, \
+             patch.object(COORD, "unit_terminal") as units, \
+             patch.object(COORD, "dormant_clean", return_value=True) as fixture, \
+             contextlib.redirect_stdout(io.StringIO()):
+            COORD.recover_clear_marker(args)
+        units.assert_not_called()
+        fixture.assert_called_once_with(resource, "removed")
+        credential_temp.assert_called_once_with(resource)
+        ack.assert_called_once_with(resource)
+        self.assertTrue(core.recovery.marker_asserted)
+
+    def test_recover_clear_marker_install_requires_dormant_fixture(self):
+        resource = self.resource("install")
+        record = {
+            "schema": "maintenance_pending_v1", "epoch": 1,
+            "operation": "provider_ui_smoke", "run_id": "a" * 32,
+            "boot_id": "boot-test", "resource_identity": resource,
+        }
+        core = FakeCore(record)
+        with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+             patch.object(COORD, "load_core", return_value=core), \
+             patch.object(COORD, "_ensure_credential_temp_absent") as credential_temp, \
+             patch.object(COORD, "_ensure_arm_ack_absent") as ack, \
+             patch.object(COORD, "fixture_terminal_state", return_value="dormant") as fixture, \
+             contextlib.redirect_stdout(io.StringIO()):
+            COORD.recover_clear_marker(self.args("recover-clear-marker", operation="install"))
+        fixture.assert_called_once_with(resource)
+        credential_temp.assert_called_once_with(resource)
+        ack.assert_called_once_with(resource)
+        self.assertTrue(core.recovery.marker_asserted)
+
+    def test_recover_clear_marker_install_rejects_unknown_or_removed_fixture(self):
+        resource = self.resource("install")
+        record = {
+            "schema": "maintenance_pending_v1", "epoch": 1,
+            "operation": "provider_ui_smoke", "run_id": "a" * 32,
+            "boot_id": "boot-test", "resource_identity": resource,
+        }
+        core = FakeCore(record)
+        with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+             patch.object(COORD, "load_core", return_value=core), \
+             patch.object(COORD, "_ensure_credential_temp_absent"), \
+             patch.object(COORD, "_ensure_arm_ack_absent"), \
+             patch.object(COORD, "fixture_terminal_state", side_effect=SystemExit(75)) as fixture:
+            with self.assertRaises(SystemExit) as raised:
+                COORD.recover_clear_marker(self.args("recover-clear-marker", operation="install"))
+        self.assertEqual(raised.exception.code, 75)
+        fixture.assert_called_once_with(resource)
+        self.assertFalse(core.recovery.marker_asserted)
+
+    def test_recover_clear_marker_install_rejects_stale_ack_or_ack_temp(self):
+        resource = self.resource("install")
+        record = {
+            "schema": "maintenance_pending_v1", "epoch": 1,
+            "operation": "provider_ui_smoke", "run_id": "a" * 32,
+            "boot_id": "boot-test", "resource_identity": resource,
+        }
+        core = FakeCore(record)
+        with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+             patch.object(COORD, "load_core", return_value=core), \
+             patch.object(COORD, "_ensure_credential_temp_absent"), \
+             patch.object(COORD, "_ensure_arm_ack_absent", side_effect=SystemExit(75)) as ack, \
+             patch.object(COORD, "fixture_terminal_state") as fixture:
+            with self.assertRaises(SystemExit) as raised:
+                COORD.recover_clear_marker(self.args("recover-clear-marker", operation="install"))
+        self.assertEqual(raised.exception.code, 75)
+        ack.assert_called_once_with(resource)
+        fixture.assert_not_called()
+
+    def test_recover_clear_marker_remove_rejects_credential_temp_before_fixture(self):
+        resource = self.resource("remove")
+        record = {
+            "schema": "maintenance_pending_v1", "epoch": 1,
+            "operation": "provider_ui_smoke", "run_id": "a" * 32,
+            "boot_id": "boot-test", "resource_identity": resource,
+        }
+        core = FakeCore(record)
+        with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+             patch.object(COORD, "load_core", return_value=core), \
+             patch.object(COORD, "_ensure_credential_temp_absent", side_effect=SystemExit(75)) as credential_temp, \
+             patch.object(COORD, "_ensure_arm_ack_absent") as ack, \
+             patch.object(COORD, "dormant_clean") as fixture:
+            with self.assertRaises(SystemExit) as raised:
+                COORD.recover_clear_marker(self.args("recover-clear-marker", operation="remove"))
+        self.assertEqual(raised.exception.code, 75)
+        credential_temp.assert_called_once_with(resource)
+        ack.assert_not_called()
+        fixture.assert_not_called()
+
+    def test_recover_clear_marker_rejects_marker_binding_mismatch(self):
+        resource = self.resource("smoke")
+        record = {
+            "schema": "maintenance_pending_v1", "epoch": 1,
+            "operation": "provider_ui_smoke", "run_id": "a" * 32,
+            "boot_id": "boot-test", "resource_identity": resource,
+        }
+        marker = dict(record, run_id="b" * 32)
+        core = FakeCore(record, marker=marker)
+        with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+             patch.object(COORD, "load_core", return_value=core), \
+             patch.object(COORD, "unit_terminal") as units, \
+             patch.object(COORD, "dormant_clean") as fixture:
+            with self.assertRaises(SystemExit) as raised:
+                COORD.recover_clear_marker(self.args("recover-clear-marker"))
+        self.assertEqual(raised.exception.code, 75)
+        units.assert_not_called()
+        fixture.assert_not_called()
+
+    def test_recover_clear_marker_keeps_veto_when_terminal_proof_is_unknown(self):
+        resource = self.resource("smoke")
+        record = {
+            "schema": "maintenance_pending_v1", "epoch": 1,
+            "operation": "provider_ui_smoke", "run_id": "a" * 32,
+            "boot_id": "boot-test", "resource_identity": resource,
+        }
+        core = FakeCore(record)
+        with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+             patch.object(COORD, "load_core", return_value=core), \
+             patch.object(COORD, "_read_arm_ack", return_value=None), \
+             patch.object(COORD, "_ensure_arm_ack_absent") as absent, \
+             patch.object(COORD, "unit_terminal", side_effect=SystemExit(75)) as units:
+            with self.assertRaises(SystemExit) as raised:
+                COORD.recover_clear_marker(self.args("recover-clear-marker"))
+        self.assertEqual(raised.exception.code, 75)
+        absent.assert_called_once_with(resource)
+        units.assert_called_once()
+        self.assertFalse(core.recovery.marker_asserted)
+
+    def test_recover_install_empty_accepts_current_boot_and_does_not_delete(self):
+        resource = self.resource("install")
+        record = {
+            "schema": "maintenance_pending_v1", "epoch": 1,
+            "operation": "provider_ui_smoke", "run_id": "a" * 32,
+            "boot_id": "boot-test", "resource_identity": resource,
+        }
+        core = FakeCore(record)
+        with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+             patch.object(COORD, "load_core", return_value=core), \
+             patch.object(COORD, "_ensure_arm_ack_absent") as ack, \
+             patch.object(COORD, "_ensure_credential_temp_absent") as credential_temp, \
+             patch.object(COORD, "dormant_clean", return_value=True) as fixture, \
+             patch.object(COORD, "_remove_arm_ack") as remove_ack, \
+             contextlib.redirect_stdout(io.StringIO()):
+            COORD.recover_install_empty(self.args("recover-install-empty", operation="install"))
+        self.assertEqual(core.recovery.proof_calls, 1)
+        self.assertGreaterEqual(ack.call_count, 1)
+        self.assertGreaterEqual(credential_temp.call_count, 1)
+        self.assertGreaterEqual(fixture.call_count, 1)
+        ack.assert_called_with(resource)
+        credential_temp.assert_called_with(resource)
+        fixture.assert_called_with(resource, "removed")
+        remove_ack.assert_not_called()
+
+    def test_recover_install_empty_accepts_exact_old_boot_pending_record(self):
+        resource = self.resource("install")
+        record = {
+            "schema": "maintenance_pending_v1", "epoch": 1,
+            "operation": "provider_ui_smoke", "run_id": "a" * 32,
+            "boot_id": "old-boot", "resource_identity": resource,
+        }
+        core = FakeCore(record)
+        boots = []
+        core.read_pending = lambda boot_id: boots.append(boot_id) or [record] if boot_id is None else None
+        with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+             patch.object(COORD, "load_core", return_value=core), \
+             patch.object(COORD, "_ensure_arm_ack_absent"), \
+             patch.object(COORD, "_ensure_credential_temp_absent"), \
+             patch.object(COORD, "dormant_clean", return_value=True), \
+             contextlib.redirect_stdout(io.StringIO()):
+            COORD.recover_install_empty(self.args("recover-install-empty", operation="install"))
+        self.assertIn(None, boots)
+        self.assertTrue(core.recovery.asserted)
+
+    def test_recover_install_empty_rejects_dormant_or_partial_fixture(self):
+        resource = self.resource("install")
+        record = {
+            "schema": "maintenance_pending_v1", "epoch": 1,
+            "operation": "provider_ui_smoke", "run_id": "a" * 32,
+            "boot_id": "boot-test", "resource_identity": resource,
+        }
+        core = FakeCore(record)
+        with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+             patch.object(COORD, "load_core", return_value=core), \
+             patch.object(COORD, "_ensure_arm_ack_absent"), \
+             patch.object(COORD, "_ensure_credential_temp_absent"), \
+             patch.object(COORD, "dormant_clean", side_effect=SystemExit(75)) as fixture:
+            with self.assertRaises(SystemExit) as raised:
+                COORD.recover_install_empty(self.args("recover-install-empty", operation="install"))
+        self.assertEqual(raised.exception.code, 75)
+        self.assertEqual(core.recovery.proof_calls, 0)
+        fixture.assert_called_once_with(resource, "removed")
+
+    def test_recover_install_empty_rejects_credential_temp(self):
+        resource = self.resource("install")
+        record = {
+            "schema": "maintenance_pending_v1", "epoch": 1,
+            "operation": "provider_ui_smoke", "run_id": "a" * 32,
+            "boot_id": "boot-test", "resource_identity": resource,
+        }
+        core = FakeCore(record)
+        with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+             patch.object(COORD, "load_core", return_value=core), \
+             patch.object(COORD, "_ensure_arm_ack_absent"), \
+             patch.object(COORD, "_ensure_credential_temp_absent", side_effect=SystemExit(75)) as credential_temp, \
+             patch.object(COORD, "dormant_clean") as fixture:
+            with self.assertRaises(SystemExit) as raised:
+                COORD.recover_install_empty(self.args("recover-install-empty", operation="install"))
+        self.assertEqual(raised.exception.code, 75)
+        credential_temp.assert_called_once_with(resource)
+        fixture.assert_not_called()
+
+    def test_recover_install_empty_rejects_wrong_run_binding(self):
+        resource = self.resource("install")
+        record = {
+            "schema": "maintenance_pending_v1", "epoch": 1,
+            "operation": "provider_ui_smoke", "run_id": "b" * 32,
+            "boot_id": "boot-test", "resource_identity": resource,
+        }
+        core = FakeCore(record)
+        with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+             patch.object(COORD, "load_core", return_value=core), \
+             patch.object(COORD, "_ensure_arm_ack_absent") as ack:
+            with self.assertRaises(SystemExit) as raised:
+                COORD.recover_install_empty(self.args("recover-install-empty", operation="install"))
+        self.assertEqual(raised.exception.code, 75)
+        ack.assert_not_called()
 
     def test_stale_arm_ack_refuses_settlement(self):
         resource = self.resource("smoke")

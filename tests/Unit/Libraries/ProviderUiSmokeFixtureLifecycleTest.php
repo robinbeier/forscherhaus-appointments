@@ -127,7 +127,7 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
         $this->assertNotEmpty($active['salt']);
         $this->assertTrue(Provider_ui_smoke_access_policy::hasActiveLease((string) $active['notes']));
         $this->assertSame(1, $this->markerCount('services', 'name', Provider_ui_smoke_fixture::SERVICE_NAME));
-        $this->assertSame(1, $this->markerCount('users', 'email', Provider_ui_smoke_fixture::CUSTOMER_EMAIL));
+        $this->assertSame(1, $this->markerCount('users', 'notes', Provider_ui_smoke_fixture::CUSTOMER_NOTES));
         $this->assertSame(
             3,
             $this->CI->db
@@ -162,7 +162,7 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
         $this->assertSame('dormant', $this->fixture->run('deactivate', $this->credentialFile, $this->stateFile));
         $this->assertSame('dormant', $this->fixture->run('verify', $this->credentialFile, $this->stateFile));
         $this->assertSame(0, $this->markerCount('services', 'name', Provider_ui_smoke_fixture::SERVICE_NAME));
-        $this->assertSame(0, $this->markerCount('users', 'email', Provider_ui_smoke_fixture::CUSTOMER_EMAIL));
+        $this->assertSame(0, $this->markerCount('users', 'notes', Provider_ui_smoke_fixture::CUSTOMER_NOTES));
 
         $dormant = $this->loadPrincipal();
         $this->assertSame(Provider_ui_smoke_access_policy::DORMANT_ROLE_SLUG, $dormant['role_slug']);
@@ -200,6 +200,53 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
                 ->get_where('roles', ['slug' => Provider_ui_smoke_access_policy::DORMANT_ROLE_SLUG])
                 ->num_rows(),
         );
+    }
+
+    public function testRemovedVerificationSucceedsWhenCredentialFileWasNeverCreated(): void
+    {
+        $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+        $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
+        $this->assertTrue(unlink($this->credentialFile));
+
+        $this->assertSame('removed', $this->fixture->run('verify', $this->credentialFile, $this->stateFile));
+    }
+
+    public function testDormantVerificationRequiresCredentialFile(): void
+    {
+        $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+        $this->assertTrue(unlink($this->credentialFile));
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('dormant verification requires credentials');
+        $this->fixture->run('verify', $this->credentialFile, $this->stateFile);
+    }
+
+    public function testVerificationRejectsPresentMalformedCredentialFile(): void
+    {
+        $this->assertNotFalse(file_put_contents($this->credentialFile, "invalid=true\n"));
+        $this->assertTrue(chmod($this->credentialFile, 0600));
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('credential schema is invalid');
+        $this->fixture->run('verify', $this->credentialFile, $this->stateFile);
+    }
+
+    public function testVerificationRejectsPresentCredentialSymlink(): void
+    {
+        $target = $this->temporaryDirectory . '/credential-target.env';
+        $this->assertNotFalse(
+            file_put_contents(
+                $target,
+                'PROVIDER_UI_SMOKE_USERNAME=' . Provider_ui_smoke_access_policy::USERNAME . "\n",
+            ),
+        );
+        $this->assertTrue(chmod($target, 0600));
+        $this->assertTrue(unlink($this->credentialFile));
+        $this->assertTrue(symlink($target, $this->credentialFile));
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('protected file is invalid');
+        $this->fixture->run('verify', $this->credentialFile, $this->stateFile);
     }
 
     public function testDirectActivateWithoutCapabilityFailsBeforeFixtureMutation(): void
@@ -339,6 +386,69 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
                 ->get_where('roles', ['slug' => Provider_ui_smoke_access_policy::DORMANT_ROLE_SLUG])
                 ->num_rows(),
         );
+    }
+
+    public function testForeignAppointmentMarkerDoesNotBlockInstallOrRemoval(): void
+    {
+        $foreignProviderId = $this->foreignProviderId();
+        $foreignAppointmentId = $this->insertForeignMarkerAppointment($foreignProviderId);
+
+        try {
+            $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+            $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
+            $this->assertSame('removed', $this->fixture->run('verify', $this->credentialFile, $this->stateFile));
+            $this->assertSame(1, $this->markerCount('appointments', 'id', (string) $foreignAppointmentId));
+        } finally {
+            $this->CI->db->delete('appointments', ['id' => $foreignAppointmentId]);
+        }
+    }
+
+    public function testForeignCustomerEmailsDoNotBlockFixtureOwnershipChecks(): void
+    {
+        $customerRole = $this->CI->db->get_where('roles', ['slug' => DB_SLUG_CUSTOMER])->row_array();
+        $this->assertNotEmpty($customerRole['id'] ?? null);
+        $now = date('Y-m-d H:i:s');
+        $foreignIds = [];
+
+        foreach ([Provider_ui_smoke_fixture::CUSTOMER_EMAIL, Provider_ui_smoke_fixture::PROVIDER_EMAIL] as $email) {
+            $this->assertTrue(
+                $this->CI->db->insert('users', [
+                    'first_name' => 'Foreign',
+                    'last_name' => 'Public Customer',
+                    'email' => $email,
+                    'notes' => null,
+                    'id_roles' => $customerRole['id'],
+                    'create_datetime' => $now,
+                    'update_datetime' => $now,
+                ]),
+            );
+            $foreignIds[] = (int) $this->CI->db->insert_id();
+        }
+
+        try {
+            $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+            $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
+            $this->assertSame('removed', $this->fixture->run('verify', $this->credentialFile, $this->stateFile));
+            $this->assertSame(2, $this->CI->db->where_in('id', $foreignIds)->get('users')->num_rows());
+        } finally {
+            $this->CI->db->where_in('id', $foreignIds)->delete('users');
+        }
+    }
+
+    public function testForeignAppointmentMarkerDoesNotAffectActiveCleanup(): void
+    {
+        $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+        $this->assertSame('active', $this->fixture->run('activate', $this->credentialFile, $this->stateFile));
+        $foreignAppointmentId = $this->insertForeignMarkerAppointment($this->foreignProviderId());
+
+        try {
+            $this->assertTrue(unlink($this->stateFile));
+            $this->assertSame('dormant', $this->fixture->run('deactivate', $this->credentialFile, $this->stateFile));
+            $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
+            $this->assertSame(1, $this->markerCount('appointments', 'id', (string) $foreignAppointmentId));
+        } finally {
+            $this->CI->db->delete('appointments', ['id' => $foreignAppointmentId]);
+        }
     }
 
     public function testDeactivateRefusesAnUnexpectedChildInsteadOfExpandingCleanupScope(): void
@@ -717,6 +827,52 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
     private function markerCount(string $table, string $field, string $value): int
     {
         return $this->CI->db->get_where($table, [$field => $value])->num_rows();
+    }
+
+    private function foreignProviderId(): int
+    {
+        $row = $this->CI->db
+            ->select('users.id')
+            ->from('users')
+            ->join('roles', 'roles.id = users.id_roles', 'inner')
+            ->where('roles.slug', DB_SLUG_PROVIDER)
+            ->where('users.email !=', Provider_ui_smoke_fixture::PROVIDER_EMAIL)
+            ->order_by('users.id', 'ASC')
+            ->limit(1)
+            ->get()
+            ->row_array();
+
+        $this->assertNotEmpty($row['id'] ?? null, 'The lifecycle fixture requires a foreign provider row.');
+
+        return (int) $row['id'];
+    }
+
+    private function insertForeignMarkerAppointment(int $providerId): int
+    {
+        $now = date('Y-m-d H:i:s');
+        $this->assertTrue(
+            $this->CI->db->insert('appointments', [
+                'create_datetime' => $now,
+                'update_datetime' => $now,
+                'book_datetime' => $now,
+                'start_datetime' => '2099-04-12 10:00:00',
+                'end_datetime' => '2099-04-12 10:30:00',
+                'location' => null,
+                'color' => '#6c757d',
+                'status' => 'Booked',
+                'notes' => Provider_ui_smoke_fixture::APPOINTMENT_BOOKED_INSIDE_NOTES,
+                'hash' => str_repeat('f', 64),
+                'is_unavailability' => 0,
+                'id_users_provider' => $providerId,
+                'id_users_customer' => null,
+                'id_services' => null,
+                'id_parent_appointment' => null,
+                'id_google_calendar' => null,
+                'id_caldav_calendar' => null,
+            ]),
+        );
+
+        return (int) $this->CI->db->insert_id();
     }
 
     /**

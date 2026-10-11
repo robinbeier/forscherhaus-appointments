@@ -294,6 +294,11 @@ def _ensure_arm_ack_absent(resource):
         fail('arm_ack_unsafe')
     else:
         fail('arm_ack_stale')
+    _ensure_arm_ack_temporaries_absent(resource)
+
+
+def _ensure_arm_ack_temporaries_absent(resource):
+    directory, _identity = _require_state_directory(resource)
     try:
         interrupted = [entry for entry in directory.iterdir()
                        if entry.name.startswith(_ack_temp_prefix()) and entry.name.endswith('.tmp')]
@@ -530,7 +535,7 @@ def private_cleanup_lock():
                 os.close(fd)
 
 
-def dormant_clean(resource: dict[str, str], expected_state: str) -> bool:
+def fixture_terminal_state(resource: dict[str, str]) -> str:
     state = Path(resource['state_file'])
     if state.exists() or state.is_symlink():
         fail('fixture_state_present')
@@ -546,10 +551,37 @@ def dormant_clean(resource: dict[str, str], expected_state: str) -> bool:
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False,
         timeout=45,
     )
-    expected = f'provider_ui_smoke action=verify state={expected_state} result=ok\n'
-    if result.returncode != 0 or result.stdout != expected or result.stderr:
+    if result.returncode != 0 or result.stderr:
+        fail('fixture_terminal_unknown')
+    for state_name in ('dormant', 'removed'):
+        expected = f'provider_ui_smoke action=verify state={state_name} result=ok\n'
+        if result.stdout == expected:
+            return state_name
+    fail('fixture_terminal_unknown')
+
+
+def dormant_clean(resource: dict[str, str], expected_state: str) -> bool:
+    if fixture_terminal_state(resource) != expected_state:
         fail('fixture_terminal_unknown')
     return True
+
+
+def _ensure_credential_temp_absent(resource: dict[str, str]) -> None:
+    directory = Path(resource['credentials_file']).parent
+    try:
+        metadata = os.stat(directory, follow_symlinks=False)
+    except FileNotFoundError:
+        return
+    except OSError:
+        fail('credential_directory_unsafe')
+    if (not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != 0 or
+            metadata.st_gid != 0 or stat.S_IMODE(metadata.st_mode) & 0o022):
+        fail('credential_directory_unsafe')
+    try:
+        if any(entry.name.startswith('.provider-ui-smoke.env.') for entry in directory.iterdir()):
+            fail('credential_temp_present')
+    except OSError:
+        fail('credential_directory_unsafe')
 
 
 def settle(args: argparse.Namespace) -> None:
@@ -636,6 +668,91 @@ def recover_unarmed(args: argparse.Namespace) -> None:
     print('provider_ui_smoke_admission=result=unarmed-recovered')
 
 
+def recover_install_empty(args: argparse.Namespace) -> None:
+    """Abort only an exact install run whose fixture is still fully removed."""
+    if args.operation != 'install':
+        fail('recover_install_operation_invalid', 64)
+    core = load_core()
+    resource = resource_from(args)
+    try:
+        with private_cleanup_lock():
+            with core.maintenance_recovery() as admission:
+                record = expected_record(core, args.run_id, args.operation, resource,
+                                         allow_prior_boot=True)
+
+                def terminal_proof(current):
+                    if current != record:
+                        return False
+                    try:
+                        _ensure_arm_ack_absent(resource)
+                        _ensure_credential_temp_absent(resource)
+                        dormant_clean(resource, 'removed')
+                        return True
+                    except BaseException:
+                        return False
+
+                if not terminal_proof(record):
+                    fail('terminal_proof_unknown')
+                result = admission.recover_pending(record, terminal_proof)
+                if result.get('status') != 'recovered':
+                    fail('pending_recovery_unknown')
+    except core.PendingError as error:
+        fail(error.reason, error.code)
+    print('provider_ui_smoke_admission=result=install-empty-recovered')
+
+
+def recover_clear_marker(args: argparse.Namespace) -> None:
+    """Finish only the exact terminal clear interrupted after marker creation."""
+    core = load_core()
+    resource = resource_from(args)
+    expected_state = 'removed' if args.operation == 'remove' else 'dormant'
+    try:
+        with private_cleanup_lock():
+            with core.maintenance_recovery() as admission:
+                def terminal_proof(marker):
+                    if (not isinstance(marker, dict) or
+                            marker.get('schema') != core.SCHEMA or
+                            marker.get('epoch') != core.PROTOCOL_EPOCH or
+                            marker.get('operation') != OPERATION or
+                            marker.get('run_id') != args.run_id or
+                            marker.get('resource_identity') != resource):
+                        return False
+                    try:
+                        _ensure_credential_temp_absent(resource)
+                        if args.operation == 'smoke':
+                            arm_ack = _read_arm_ack(resource)
+                            if arm_ack is None:
+                                _ensure_arm_ack_absent(resource)
+                            else:
+                                if arm_ack != _ack_record(marker):
+                                    return False
+                                _ensure_arm_ack_temporaries_absent(resource)
+                            unit_terminal(args.cleanup_unit + '.timer', resource, args.run_id)
+                            unit_terminal(args.cleanup_unit + '.service', resource, args.run_id)
+                        else:
+                            _ensure_arm_ack_absent(resource)
+                        if args.operation == 'install':
+                            # A marker may follow either successful install
+                            # settlement (dormant) or the explicit empty
+                            # install abort (removed). Verify once and accept
+                            # only those two exact terminal states.
+                            fixture_terminal_state(resource)
+                        else:
+                            dormant_clean(resource, expected_state)
+                        return True
+                    except BaseException:
+                        return False
+
+                result = admission.recover_clear_marker(terminal_proof)
+                if result.get('status') != 'recovered':
+                    fail('clear_marker_recovery_unknown')
+                if args.operation == 'smoke' and _read_arm_ack(resource) is not None:
+                    _remove_arm_ack(resource)
+    except core.PendingError as error:
+        fail(error.reason, error.code)
+    print('provider_ui_smoke_admission=result=clear-marker-recovered')
+
+
 def recover_arm_ack(args: argparse.Namespace) -> None:
     """Retire an orphan acknowledgement only after pending was durably cleared.
 
@@ -678,7 +795,7 @@ def recover_arm_ack(args: argparse.Namespace) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=('begin', 'ack-arm', 'assert-bound-fd', 'settle', 'recover-arm-ack', 'recover-unarmed'))
+    parser.add_argument('action', choices=('begin', 'ack-arm', 'assert-bound-fd', 'settle', 'recover-arm-ack', 'recover-unarmed', 'recover-install-empty', 'recover-clear-marker'))
     parser.add_argument('--operation', choices=sorted(ACTION_NAMES), required=True)
     parser.add_argument('--run-id')
     parser.add_argument('--lock-fd', type=int)
@@ -710,6 +827,10 @@ def main() -> None:
         recover_arm_ack(args)
     elif args.action == 'recover-unarmed':
         recover_unarmed(args)
+    elif args.action == 'recover-install-empty':
+        recover_install_empty(args)
+    elif args.action == 'recover-clear-marker':
+        recover_clear_marker(args)
     else:
         settle(args)
 
