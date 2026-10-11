@@ -279,6 +279,8 @@ final class ProviderUiSmokeOpsScriptsTest extends TestCase
             self::assertStringContainsString("arm\n", $events);
             self::assertStringContainsString("admission_ack_arm\n", $events);
             self::assertDoesNotMatchRegularExpression('/^activate$/m', $events);
+            self::assertStringNotContainsString("deactivate\n", $events);
+            self::assertStringNotContainsString("disarm\n", $events);
             self::assertStringNotContainsString("credential_stream\n", $events);
             self::assertStringNotContainsString("admission_settle\n", $events);
         } finally {

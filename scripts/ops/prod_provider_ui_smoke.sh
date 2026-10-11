@@ -548,7 +548,8 @@ cleanup_remote_lease() {
     # SSH/systemd-run response was lost, the unit may still be starting; keep
     # the durable admission pending for server-local recovery instead of
     # treating a transient not-found observation as terminal.
-    if [[ "${REMOTE_CLEANUP_ARMED}" == '1' ]]; then
+    if [[ "${REMOTE_CLEANUP_ARMED}" == '1' \
+        && "${REMOTE_ADMISSION_ARM_ACKNOWLEDGED}" == '1' ]]; then
         remote_principal deactivate
         deactivate_status=$?
 
