@@ -91,6 +91,18 @@ coordinator's lock-held terminal proof. The wrapper captures lifecycle output
 in memory; a direct `verify` does not create a temporary file. A lost cleanup
 timer acknowledgement retains the pending record and requires reconciliation;
 it must not be interpreted as a completed disarm.
+The smoke coordinator performs the initial dormant proof while holding both
+the private lifecycle lock and the shared maintenance lock, immediately before
+publishing the pending record. A failed proof therefore publishes no new
+pending run. Ordinary `ack-arm` and `activate` accept only a current-boot
+record. Exact old-boot records are accepted only by `deactivate` and by the
+lock-held terminal `settle` path, with the matching acknowledgement and fresh
+terminal proof. Ordinary settlement never clears a pending record without that
+acknowledgement. If arming returned without an acknowledgement, the separate
+server-local `recover-unarmed` action may clear a smoke record only when the
+exact record has no acknowledgement, both bound units are terminal or absent,
+and a fresh dormant proof succeeds under both locks. It is an explicit
+recovery action, never an automatic retry or an inference from a lost response.
 Provider uses `fh-provider-ui-smoke-cleanup` and
 `scripts/ops/provider_ui_smoke_principal.sh`; Customers uses
 `fh-customers-ui-smoke-cleanup` and

@@ -678,12 +678,6 @@ main() {
     trap 'exit 129' HUP
     trap 'exit 130' INT
     trap 'exit 143' TERM
-
-    # Reverify the dormant fixture after registration. The PHP verify action
-    # performs no fixture writes and may run while the pending veto is live.
-    if ! remote_principal verify; then
-        die "remote principal is not dormant and clean" 20
-    fi
     set +e
     arm_remote_cleanup
     arm_status=$?

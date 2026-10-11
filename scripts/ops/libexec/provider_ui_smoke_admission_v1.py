@@ -79,8 +79,9 @@ def resource_from(args: argparse.Namespace) -> dict[str, str]:
     return resource
 
 
-def expected_record(core, run_id: str, operation: str, resource: dict[str, str]):
-    pending = core.read_pending(core.current_boot_id())
+def expected_record(core, run_id: str, operation: str, resource: dict[str, str],
+                    allow_prior_boot: bool = False):
+    pending = core.read_pending(None if allow_prior_boot else core.current_boot_id())
     if pending is None:
         fail('pending_missing')
     record = pending[0]
@@ -104,6 +105,12 @@ def begin(args: argparse.Namespace) -> None:
         with private_cleanup_lock():
             with core.maintenance_admission() as admission:
                 _ensure_arm_ack_absent(resource)
+                if args.operation == 'smoke':
+                    # A failed dormant check must not leave an unarmed Pending
+                    # record. Both the check and publication hold the private
+                    # and shared locks; activation independently rechecks the
+                    # fixture under its transaction lock.
+                    dormant_clean(resource, 'dormant')
                 admission.publish_pending(record)
     except core.PendingError as error:
         fail(error.reason, error.code)
@@ -125,7 +132,8 @@ def assert_bound_fd(args: argparse.Namespace) -> None:
         fail('lifecycle_operation_mismatch', 64)
     try:
         with core.maintenance_recovery_from_lock_fd(args.lock_fd) as admission:
-            record = expected_record(core, args.run_id, args.operation, resource)
+            record = expected_record(core, args.run_id, args.operation, resource,
+                                     allow_prior_boot=args.lifecycle_action == 'deactivate')
             if args.lifecycle_action == 'activate':
                 # This check runs on the server while PHP holds the canonical
                 # shared lock through its fixture transaction. If the timer
@@ -550,7 +558,8 @@ def settle(args: argparse.Namespace) -> None:
     try:
         with private_cleanup_lock():
             with core.maintenance_recovery() as admission:
-                record = expected_record(core, args.run_id, args.operation, resource)
+                record = expected_record(core, args.run_id, args.operation, resource,
+                                         allow_prior_boot=True)
                 expected_state = 'removed' if args.operation == 'remove' else 'dormant'
                 if args.operation == 'smoke':
                     arm_ack = _read_arm_ack(resource)
@@ -583,6 +592,48 @@ def settle(args: argparse.Namespace) -> None:
     except core.PendingError as error:
         fail(error.reason, error.code)
     print('provider_ui_smoke_admission=result=settled')
+
+
+def recover_unarmed(args: argparse.Namespace) -> None:
+    """Explicitly retire a bound, unacknowledged smoke after terminal proof.
+
+    An interrupted arm response is never treated as success. The private
+    lifecycle lock fences an in-flight arm while the shared maintenance lock
+    holds the pending veto through both terminal proofs and its durable clear.
+    """
+    if args.operation != 'smoke':
+        fail('recover_unarmed_operation_invalid', 64)
+    core = load_core()
+    resource = resource_from(args)
+    try:
+        with private_cleanup_lock():
+            with core.maintenance_recovery() as admission:
+                record = expected_record(core, args.run_id, args.operation, resource,
+                                         allow_prior_boot=True)
+                # Absence of the final sidecar alone is insufficient: a
+                # crash during no-clobber publication can leave a temporary
+                # acknowledgement that must remain a recovery veto.
+                _ensure_arm_ack_absent(resource)
+
+                def terminal_proof(current):
+                    if current != record:
+                        return False
+                    try:
+                        unit_terminal(args.cleanup_unit + '.timer', resource, args.run_id)
+                        unit_terminal(args.cleanup_unit + '.service', resource, args.run_id)
+                        dormant_clean(resource, 'dormant')
+                        return True
+                    except BaseException:
+                        return False
+
+                if not terminal_proof(record):
+                    fail('terminal_proof_unknown')
+                result = admission.recover_pending(record, terminal_proof)
+                if result.get('status') != 'recovered':
+                    fail('pending_recovery_unknown')
+    except core.PendingError as error:
+        fail(error.reason, error.code)
+    print('provider_ui_smoke_admission=result=unarmed-recovered')
 
 
 def recover_arm_ack(args: argparse.Namespace) -> None:
@@ -627,7 +678,7 @@ def recover_arm_ack(args: argparse.Namespace) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=('begin', 'ack-arm', 'assert-bound-fd', 'settle', 'recover-arm-ack'))
+    parser.add_argument('action', choices=('begin', 'ack-arm', 'assert-bound-fd', 'settle', 'recover-arm-ack', 'recover-unarmed'))
     parser.add_argument('--operation', choices=sorted(ACTION_NAMES), required=True)
     parser.add_argument('--run-id')
     parser.add_argument('--lock-fd', type=int)
@@ -657,6 +708,8 @@ def main() -> None:
         assert_bound_fd(args)
     elif args.action == 'recover-arm-ack':
         recover_arm_ack(args)
+    elif args.action == 'recover-unarmed':
+        recover_unarmed(args)
     else:
         settle(args)
 

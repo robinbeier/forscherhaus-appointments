@@ -128,7 +128,7 @@ final class ProviderUiSmokeOpsScriptsTest extends TestCase
             self::assertSame(1, $result['exit_code'], $result['stderr']);
             $events = (string) file_get_contents($workspace . '/events.log');
             self::assertMatchesRegularExpression(
-                '/preflight.*view_hash_before.*admission_begin.*verify.*arm.*admission_ack_arm.*activate.*credential_stream.*gate.*' .
+                '/preflight.*view_hash_before.*admission_begin.*arm.*admission_ack_arm.*activate.*credential_stream.*gate.*' .
                     'view_hash_after.*deactivate.*verify.*disarm/s',
                 $events,
             );

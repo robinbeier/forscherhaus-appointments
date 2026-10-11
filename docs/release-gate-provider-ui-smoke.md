@@ -154,8 +154,9 @@ The orchestrator:
 3. performs a read-only remote preflight, including credential/state
    permissions, deployed-wrapper/template shape, production Node/npm absence,
    and absence of an existing cleanup lease;
-4. binds the deployed template, registers the durable pending run, then
-   verifies the dormant principal without fixture writes;
+4. binds the deployed template, proves the principal is dormant while holding
+   the private and shared admission locks, then registers the durable pending
+   run. A failed dormant proof publishes no pending run and does not proceed;
 5. arms a transient `fh-provider-ui-smoke-cleanup.timer` with
    `systemd-run --on-active=10m`, and durably acknowledges its exact loaded
    identity under the private and shared locks before activation;
@@ -181,7 +182,11 @@ credential, state directory and run ID. If pending was already cleared but an
 interruption left only the acknowledgement, the separate `recover-arm-ack`
 action retains its original boot binding and requires a fresh terminal proof
 before removing that orphan, including after a reboot. It is not used to infer
-success from an unknown timer-arm result. A previous operator's root-owned,
+success from an unknown timer-arm result. A lost arm acknowledgement instead
+leaves pending in place. An explicit server-local `recover-unarmed` action may
+clear only an exact smoke record with no acknowledgement after both bound units
+are terminal or absent and a fresh dormant proof succeeds under both locks;
+ordinary settlement never clears a missing-ack record. A previous operator's root-owned,
 empty private lock at mode `0644` is narrowed in place to `0600` under that
 lock before the coordinator admits work.
 

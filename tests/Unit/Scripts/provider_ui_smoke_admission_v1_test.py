@@ -254,6 +254,128 @@ class ProviderUiSmokeAdmissionBehaviorTest(unittest.TestCase):
         self.assertEqual(raised.exception.code, 75)
         self.assertEqual(core.recovery.proof_calls, 0)
 
+    def test_settle_accepts_exact_old_boot_record_with_matching_ack(self):
+        resource = self.resource("smoke")
+        record = {
+            "schema": "maintenance_pending_v1", "epoch": 1,
+            "operation": "provider_ui_smoke", "run_id": "a" * 32,
+            "boot_id": "old-boot", "resource_identity": resource,
+        }
+        core = FakeCore(record)
+        read_boots = []
+        core.read_pending = lambda boot_id: (
+            read_boots.append(boot_id) or [record] if boot_id is None else None
+        )
+        with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+             patch.object(COORD, "load_core", return_value=core), \
+             patch.object(COORD, "_read_arm_ack", return_value=COORD._ack_record(record)), \
+             patch.object(COORD, "_remove_arm_ack"), \
+             patch.object(COORD, "unit_terminal", return_value=True), \
+             patch.object(COORD, "dormant_clean", return_value=True), \
+             contextlib.redirect_stdout(io.StringIO()):
+            COORD.settle(self.args("settle"))
+        self.assertIn(None, read_boots)
+        self.assertEqual(core.recovery.proof_calls, 1)
+
+    def test_recover_unarmed_requires_terminal_and_dormant_proof(self):
+        resource = self.resource("smoke")
+        record = {
+            "schema": "maintenance_pending_v1", "epoch": 1,
+            "operation": "provider_ui_smoke", "run_id": "a" * 32,
+            "boot_id": "old-boot", "resource_identity": resource,
+        }
+        core = FakeCore(record)
+        with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+             patch.object(COORD, "load_core", return_value=core), \
+             patch.object(COORD, "_ensure_arm_ack_absent") as absent, \
+             patch.object(COORD, "unit_terminal", return_value=True) as units, \
+             patch.object(COORD, "dormant_clean", return_value=True) as fixture, \
+             contextlib.redirect_stdout(io.StringIO()):
+            COORD.recover_unarmed(self.args("recover-unarmed"))
+        self.assertEqual(core.recovery.proof_calls, 1)
+        absent.assert_called_once_with(resource)
+        self.assertEqual(units.call_count, 6)
+        self.assertEqual(fixture.call_count, 3)
+        fixture.assert_called_with(resource, "dormant")
+
+    def test_recover_unarmed_refuses_acknowledged_run(self):
+        resource = self.resource("smoke")
+        record = {
+            "schema": "maintenance_pending_v1", "epoch": 1,
+            "operation": "provider_ui_smoke", "run_id": "a" * 32,
+            "boot_id": "boot-test", "resource_identity": resource,
+        }
+        core = FakeCore(record)
+        with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+             patch.object(COORD, "load_core", return_value=core), \
+             patch.object(COORD, "_ensure_arm_ack_absent", side_effect=SystemExit(75)) as absent, \
+             patch.object(COORD, "unit_terminal") as units, \
+             patch.object(COORD, "dormant_clean") as fixture:
+            with self.assertRaises(SystemExit) as raised:
+                COORD.recover_unarmed(self.args("recover-unarmed"))
+        self.assertEqual(raised.exception.code, 75)
+        absent.assert_called_once_with(resource)
+        units.assert_not_called()
+        fixture.assert_not_called()
+
+    def test_recover_unarmed_retains_pending_for_interrupted_ack_publication(self):
+        with tempfile.TemporaryDirectory() as directory:
+            args = self.args("recover-unarmed")
+            args.state_file = str(Path(directory) / "active.json")
+            resource = self.resource("smoke")
+            resource["state_file"] = args.state_file
+            record = FakeCore(None).make_record(
+                COORD.OPERATION, args.run_id, "boot-test", resource)
+            core = FakeCore(record)
+            interrupted = Path(directory) / f".{COORD.ARM_ACK_LEAF}.{args.run_id}.tmp"
+            interrupted.write_text("partial\n")
+            with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+                 patch.object(COORD, "load_core", return_value=core), \
+                 patch.object(COORD, "_state_dir_identity", return_value=(1, 2, 3, 0, 0, 2)), \
+                 patch.object(COORD, "unit_terminal") as units:
+                with self.assertRaises(SystemExit) as raised:
+                    COORD.recover_unarmed(args)
+            self.assertEqual(raised.exception.code, 75)
+            self.assertEqual(core.recovery.proof_calls, 0)
+            self.assertTrue(interrupted.is_file())
+            units.assert_not_called()
+
+    def test_recover_unarmed_retains_pending_when_unit_is_not_terminal(self):
+        resource = self.resource("smoke")
+        record = {
+            "schema": "maintenance_pending_v1", "epoch": 1,
+            "operation": "provider_ui_smoke", "run_id": "a" * 32,
+            "boot_id": "boot-test", "resource_identity": resource,
+        }
+        core = FakeCore(record)
+        with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+             patch.object(COORD, "load_core", return_value=core), \
+             patch.object(COORD, "_read_arm_ack", return_value=None), \
+             patch.object(COORD, "unit_terminal", side_effect=SystemExit(75)), \
+             patch.object(COORD, "dormant_clean", return_value=True):
+            with self.assertRaises(SystemExit) as raised:
+                COORD.recover_unarmed(self.args("recover-unarmed"))
+        self.assertEqual(raised.exception.code, 75)
+        self.assertEqual(core.recovery.proof_calls, 0)
+
+    def test_recover_unarmed_retains_pending_when_dormant_proof_fails(self):
+        resource = self.resource("smoke")
+        record = {
+            "schema": "maintenance_pending_v1", "epoch": 1,
+            "operation": "provider_ui_smoke", "run_id": "a" * 32,
+            "boot_id": "boot-test", "resource_identity": resource,
+        }
+        core = FakeCore(record)
+        with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+             patch.object(COORD, "load_core", return_value=core), \
+             patch.object(COORD, "_read_arm_ack", return_value=None), \
+             patch.object(COORD, "unit_terminal", return_value=True), \
+             patch.object(COORD, "dormant_clean", side_effect=SystemExit(75)):
+            with self.assertRaises(SystemExit) as raised:
+                COORD.recover_unarmed(self.args("recover-unarmed"))
+        self.assertEqual(raised.exception.code, 75)
+        self.assertEqual(core.recovery.proof_calls, 0)
+
     def test_stale_arm_ack_refuses_settlement(self):
         resource = self.resource("smoke")
         record = {
@@ -343,6 +465,23 @@ class ProviderUiSmokeAdmissionBehaviorTest(unittest.TestCase):
             ack = Path(directory) / COORD.ARM_ACK_LEAF
             self.assertEqual(json.loads(ack.read_text()), COORD._ack_record(record))
 
+    def test_ack_arm_rejects_old_boot_pending_record(self):
+        resource = self.resource("smoke")
+        record = {
+            "schema": "maintenance_pending_v1", "epoch": 1,
+            "operation": "provider_ui_smoke", "run_id": "a" * 32,
+            "boot_id": "old-boot", "resource_identity": resource,
+        }
+        core = FakeCore(record)
+        core.read_pending = lambda boot_id: [record] if boot_id is None else None
+        with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+             patch.object(COORD, "load_core", return_value=core), \
+             patch.object(COORD, "unit_armed") as armed:
+            with self.assertRaises(SystemExit) as raised:
+                COORD.ack_arm(self.args("ack-arm"))
+        self.assertEqual(raised.exception.code, 75)
+        armed.assert_not_called()
+
     def test_ack_arm_write_failure_does_not_settle_pending(self):
         resource = self.resource("smoke")
         record = {
@@ -405,6 +544,60 @@ class ProviderUiSmokeAdmissionBehaviorTest(unittest.TestCase):
             with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
                  patch.object(COORD, "load_core", return_value=core), \
                  patch.object(COORD, "_state_dir_identity", return_value=(1, 2, 3, 0, 0, 2)):
+                with self.assertRaises(SystemExit) as raised:
+                    COORD.begin(args)
+            self.assertEqual(raised.exception.code, 75)
+            self.assertFalse(hasattr(core.recovery, "published"))
+
+    def test_begin_smoke_proves_dormant_before_publishing_pending(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = Path(directory) / "app"
+            app.mkdir()
+            (app / "index.php").write_text("<?php\n")
+            state_dir = Path(directory) / "state"
+            state_dir.mkdir()
+            state = state_dir / "active.json"
+            args = self.args("begin", operation="smoke")
+            args.app_root = str(app)
+            args.state_file = str(state)
+            args.credentials_file = str(Path(directory) / "credentials.env")
+            core = FakeCore({})
+            calls = []
+
+            def dormant(resource, expected):
+                calls.append("dormant")
+                self.assertEqual(expected, "dormant")
+                return True
+
+            def publish(record):
+                calls.append("publish")
+                core.recovery.published = record
+
+            core.recovery.publish_pending = publish
+            with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+                 patch.object(COORD, "load_core", return_value=core), \
+                 patch.object(COORD, "_state_dir_identity", return_value=(1, 2, 3, 0, 0, 2)), \
+                 patch.object(COORD, "dormant_clean", side_effect=dormant), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                COORD.begin(args)
+            self.assertEqual(calls, ["dormant", "publish"])
+
+    def test_begin_smoke_dormant_failure_does_not_publish_pending(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = Path(directory) / "app"
+            app.mkdir()
+            (app / "index.php").write_text("<?php\n")
+            state_dir = Path(directory) / "state"
+            state_dir.mkdir()
+            args = self.args("begin", operation="smoke")
+            args.app_root = str(app)
+            args.state_file = str(state_dir / "active.json")
+            args.credentials_file = str(Path(directory) / "credentials.env")
+            core = FakeCore({})
+            with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+                 patch.object(COORD, "load_core", return_value=core), \
+                 patch.object(COORD, "_state_dir_identity", return_value=(1, 2, 3, 0, 0, 2)), \
+                 patch.object(COORD, "dormant_clean", side_effect=SystemExit(75)):
                 with self.assertRaises(SystemExit) as raised:
                     COORD.begin(args)
             self.assertEqual(raised.exception.code, 75)
@@ -648,6 +841,23 @@ class ProviderUiSmokeAdmissionBehaviorTest(unittest.TestCase):
         self.assertEqual(
             armed.call_args_list[0].args[0], "fh-provider-ui-smoke-cleanup.timer")
 
+    def test_activate_rejects_old_boot_pending_record(self):
+        resource = self.resource("smoke")
+        record = FakeCore(None).make_record(
+            COORD.OPERATION, "a" * 32, "old-boot", resource)
+        core = FakeCore(record)
+        core.read_pending = lambda boot_id: [record] if boot_id is None else None
+        args = self.args("assert-bound-fd")
+        args.lifecycle_action = "activate"
+        with patch.object(COORD, "load_core", return_value=core), \
+             patch.object(COORD, "_read_arm_ack") as ack, \
+             patch.object(COORD, "unit_armed") as armed:
+            with self.assertRaises(SystemExit) as raised:
+                COORD.assert_bound_fd(args)
+        self.assertEqual(raised.exception.code, 75)
+        ack.assert_not_called()
+        armed.assert_not_called()
+
     def test_activate_refuses_missing_arm_ack_before_admission(self):
         resource = self.resource()
         record = FakeCore(None).make_record(
@@ -674,6 +884,18 @@ class ProviderUiSmokeAdmissionBehaviorTest(unittest.TestCase):
             COORD.assert_bound_fd(self.args("assert-bound-fd"))
         self.assertTrue(core.recovery.admitted)
         armed.assert_not_called()
+
+    def test_deactivate_accepts_exact_old_boot_pending_record(self):
+        resource = self.resource()
+        record = FakeCore(None).make_record(
+            COORD.OPERATION, "a" * 32, "old-boot", resource)
+        core = FakeCore(record)
+        core.read_pending = lambda boot_id: [record] if boot_id is None else None
+        args = self.args("assert-bound-fd")
+        args.lifecycle_action = "deactivate"
+        with patch.object(COORD, "load_core", return_value=core):
+            COORD.assert_bound_fd(args)
+        self.assertTrue(core.recovery.admitted)
 
     def test_late_php_child_cannot_start_after_pending_was_settled(self):
         resource = self.resource("smoke")
