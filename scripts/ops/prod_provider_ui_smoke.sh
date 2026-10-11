@@ -40,7 +40,8 @@ PDFINFO_BIN="${PROVIDER_UI_SMOKE_PDFINFO_BIN:-pdfinfo}"
 PDFTOTEXT_BIN="${PROVIDER_UI_SMOKE_PDFTOTEXT_BIN:-pdftotext}"
 
 REMOTE_CLEANUP_ARMED=0
-REMOTE_CLEANUP_REQUIRED=0
+REMOTE_ADMISSION_ARM_ACKNOWLEDGED=0
+REMOTE_ADMISSION_RUN_ID=''
 DEPLOYED_VIEW_SHA256=''
 
 usage() {
@@ -211,26 +212,63 @@ remote_wrapper_path() {
     printf '%s/scripts/ops/provider_ui_smoke_principal.sh' "${APP_ROOT}"
 }
 
+remote_admission_coordinator_path() {
+    printf '%s/scripts/ops/libexec/provider_ui_smoke_admission_v1.py' "${APP_ROOT}"
+}
+
 remote_principal() {
     local action="$1"
     local wrapper
+    local run_id_argument=''
 
     wrapper="$(remote_wrapper_path)"
+    if [[ "${action}" == 'activate' || "${action}" == 'deactivate' ]]; then
+        [[ "${REMOTE_ADMISSION_RUN_ID}" =~ ^[a-f0-9]{32}$ ]] || die "provider UI smoke admission run is unavailable" 75
+        run_id_argument=" --admission-run-id '${REMOTE_ADMISSION_RUN_ID}'"
+    fi
     ssh "${SSH_OPTIONS[@]}" "${PROD_SSH_TARGET}" \
-        "exec bash '${wrapper}' '${action}' --app-root '${APP_ROOT}' --credentials-file '${CREDENTIALS_FILE}' --state-dir '${STATE_DIR}'"
+        "exec bash '${wrapper}' '${action}' --app-root '${APP_ROOT}' --credentials-file '${CREDENTIALS_FILE}' --state-dir '${STATE_DIR}'${run_id_argument}"
+}
+
+remote_admission_begin() {
+    local coordinator
+    coordinator="$(remote_admission_coordinator_path)"
+    REMOTE_ADMISSION_RUN_ID="$(ssh "${SSH_OPTIONS[@]}" "${PROD_SSH_TARGET}" \
+        "exec python3 '${coordinator}' begin --operation smoke --app-root '${APP_ROOT}' --credentials-file '${CREDENTIALS_FILE}' --state-file '${STATE_DIR}/active.json' --cleanup-unit '${CLEANUP_UNIT}'")" \
+        || die "maintenance admission registration failed" 75
+    [[ "${REMOTE_ADMISSION_RUN_ID}" =~ ^[a-f0-9]{32}$ ]] \
+        || die "maintenance admission run identity is invalid" 75
+}
+
+remote_admission_ack_arm() {
+    local coordinator
+    coordinator="$(remote_admission_coordinator_path)"
+    ssh "${SSH_OPTIONS[@]}" "${PROD_SSH_TARGET}" \
+        "exec python3 '${coordinator}' ack-arm --operation smoke --run-id '${REMOTE_ADMISSION_RUN_ID}' --app-root '${APP_ROOT}' --credentials-file '${CREDENTIALS_FILE}' --state-file '${STATE_DIR}/active.json' --cleanup-unit '${CLEANUP_UNIT}'" \
+        >/dev/null
+}
+
+remote_admission_settle() {
+    local coordinator
+    coordinator="$(remote_admission_coordinator_path)"
+    ssh "${SSH_OPTIONS[@]}" "${PROD_SSH_TARGET}" \
+        "exec python3 '${coordinator}' settle --operation smoke --run-id '${REMOTE_ADMISSION_RUN_ID}' --app-root '${APP_ROOT}' --credentials-file '${CREDENTIALS_FILE}' --state-file '${STATE_DIR}/active.json' --cleanup-unit '${CLEANUP_UNIT}'" \
+        >/dev/null
 }
 
 remote_static_preflight() {
     local wrapper
     local state_file
+    local coordinator
 
     wrapper="$(remote_wrapper_path)"
     state_file="${STATE_DIR}/active.json"
+    coordinator="$(remote_admission_coordinator_path)"
 
     ssh "${SSH_OPTIONS[@]}" "${PROD_SSH_TARGET}" "
 set -euo pipefail
 [[ \"\$(id -u)\" == '0' ]] || { printf 'ERROR: root SSH is required\n' >&2; exit 1; }
-for required_command in bash php systemctl systemd-run stat sha256sum cat flock; do
+for required_command in bash php python3 systemctl systemd-run stat sha256sum cat flock; do
     command -v \"\${required_command}\" >/dev/null 2>&1 || {
         printf 'ERROR: a required remote command is unavailable\n' >&2
         exit 1
@@ -246,6 +284,14 @@ fi
 }
 [[ -f '${wrapper}' && ! -L '${wrapper}' ]] || {
     printf 'ERROR: deployed principal wrapper is unavailable or unsafe\n' >&2
+    exit 1
+}
+[[ -f '${coordinator}' && ! -L '${coordinator}' ]] || {
+    printf 'ERROR: deployed Provider UI admission coordinator is unavailable\n' >&2
+    exit 1
+}
+[[ -f '/usr/local/libexec/fh/maintenance_pending_v1.py' && ! -L '/usr/local/libexec/fh/maintenance_pending_v1.py' ]] || {
+    printf 'ERROR: installed maintenance admission core is unavailable\n' >&2
     exit 1
 }
 [[ \"\$(stat -Lc '%h' '${wrapper}')\" == '1' ]] || {
@@ -390,13 +436,36 @@ flock -n 9 || {
     printf 'ERROR: another Provider UI smoke lifecycle operation is in progress\n' >&2
     exit 75
 }
+stop_cleanup_units() {
+    local unit load_state
+    for unit in '${CLEANUP_UNIT}.timer' '${CLEANUP_UNIT}.service'; do
+        load_state=\"\$(systemctl show --no-pager --property=LoadState --value \"\${unit}\")\" || return 1
+        case \"\${load_state}\" in
+            not-found) continue ;;
+            loaded) systemctl stop \"\${unit}\" || return 1 ;;
+            *) return 1 ;;
+        esac
+        load_state=\"\$(systemctl show --no-pager --property=LoadState --value \"\${unit}\")\" || return 1
+        case \"\${load_state}\" in
+            not-found) continue ;;
+            loaded) ;;
+            *) return 1 ;;
+        esac
+        if ! systemctl reset-failed \"\${unit}\"; then
+            load_state=\"\$(systemctl show --no-pager --property=LoadState --value \"\${unit}\")\" || return 1
+            [[ \"\${load_state}\" == 'not-found' ]] || return 1
+        fi
+    done
+}
 if systemctl is-active --quiet '${CLEANUP_UNIT}.timer' \
     || systemctl is-active --quiet '${CLEANUP_UNIT}.service'; then
     printf 'ERROR: an existing Provider UI smoke cleanup lease is still active\n' >&2
     exit 75
 fi
-systemctl stop '${CLEANUP_UNIT}.timer' '${CLEANUP_UNIT}.service' >/dev/null 2>&1 || true
-systemctl reset-failed '${CLEANUP_UNIT}.timer' '${CLEANUP_UNIT}.service' >/dev/null 2>&1 || true
+stop_cleanup_units || {
+    printf 'ERROR: existing cleanup units could not be reset safely\n' >&2
+    exit 75
+}
 if ! systemd-run \
         --quiet \
         --unit='${CLEANUP_UNIT}' \
@@ -406,17 +475,22 @@ if ! systemd-run \
         /bin/bash '${wrapper}' deactivate \
             --app-root '${APP_ROOT}' \
             --credentials-file '${CREDENTIALS_FILE}' \
-            --state-dir '${STATE_DIR}'; then
+            --state-dir '${STATE_DIR}' \
+            --admission-run-id '${REMOTE_ADMISSION_RUN_ID}'; then
     if systemctl is-active --quiet '${CLEANUP_UNIT}.timer'; then
-        systemctl stop '${CLEANUP_UNIT}.timer' '${CLEANUP_UNIT}.service' >/dev/null 2>&1 || true
-        systemctl reset-failed '${CLEANUP_UNIT}.timer' '${CLEANUP_UNIT}.service' >/dev/null 2>&1 || true
+        stop_cleanup_units || {
+            printf 'ERROR: cleanup units could not be reset after failed timer launch\n' >&2
+            exit 1
+        }
     fi
     printf 'ERROR: independent cleanup timer could not be created\n' >&2
     exit 1
 fi
 if ! systemctl is-active --quiet '${CLEANUP_UNIT}.timer'; then
-    systemctl stop '${CLEANUP_UNIT}.timer' '${CLEANUP_UNIT}.service' >/dev/null 2>&1 || true
-    systemctl reset-failed '${CLEANUP_UNIT}.timer' '${CLEANUP_UNIT}.service' >/dev/null 2>&1 || true
+    stop_cleanup_units || {
+        printf 'ERROR: cleanup units could not be reset after inactive timer\n' >&2
+        exit 1
+    }
     printf 'ERROR: independent cleanup timer did not become active\n' >&2
     exit 1
 fi
@@ -429,8 +503,28 @@ disarm_remote_cleanup() {
 set -euo pipefail
 exec 9>/run/lock/fh-provider-ui-smoke.lock
 flock 9
-systemctl stop '${CLEANUP_UNIT}.timer' '${CLEANUP_UNIT}.service' >/dev/null 2>&1 || true
-systemctl reset-failed '${CLEANUP_UNIT}.timer' '${CLEANUP_UNIT}.service' >/dev/null 2>&1 || true
+stop_cleanup_units() {
+    local unit load_state
+    for unit in '${CLEANUP_UNIT}.timer' '${CLEANUP_UNIT}.service'; do
+        load_state=\"\$(systemctl show --no-pager --property=LoadState --value \"\${unit}\")\" || exit 1
+        case \"\${load_state}\" in
+            not-found) continue ;;
+            loaded) systemctl stop \"\${unit}\" || exit 1 ;;
+            *) exit 1 ;;
+        esac
+        load_state=\"\$(systemctl show --no-pager --property=LoadState --value \"\${unit}\")\" || exit 1
+        case \"\${load_state}\" in
+            not-found) continue ;;
+            loaded) ;;
+            *) exit 1 ;;
+        esac
+        if ! systemctl reset-failed \"\${unit}\"; then
+            load_state=\"\$(systemctl show --no-pager --property=LoadState --value \"\${unit}\")\" || exit 1
+            [[ \"\${load_state}\" == 'not-found' ]] || exit 1
+        fi
+    done
+}
+stop_cleanup_units
 if systemctl is-active --quiet '${CLEANUP_UNIT}.timer' \
     || systemctl is-active --quiet '${CLEANUP_UNIT}.service'; then
     printf 'ERROR: independent cleanup timer remains active\n' >&2
@@ -445,11 +539,16 @@ cleanup_remote_lease() {
     local deactivate_status=0
     local verify_status=0
     local disarm_status=0
+    local settle_status=1
 
     trap - EXIT HUP INT TERM
     set +e
 
-    if [[ "${REMOTE_CLEANUP_REQUIRED}" == '1' || "${REMOTE_CLEANUP_ARMED}" == '1' ]]; then
+    # Only a positively acknowledged arm permits a remote deactivate.  If the
+    # SSH/systemd-run response was lost, the unit may still be starting; keep
+    # the durable admission pending for server-local recovery instead of
+    # treating a transient not-found observation as terminal.
+    if [[ "${REMOTE_CLEANUP_ARMED}" == '1' ]]; then
         remote_principal deactivate
         deactivate_status=$?
 
@@ -468,7 +567,22 @@ cleanup_remote_lease() {
         fi
     fi
 
-    if [[ "${deactivate_status}" != '0' || "${verify_status}" != '0' || "${disarm_status}" != '0' ]]; then
+    settle_status=1
+    if [[ "${REMOTE_CLEANUP_ARMED}" == '1' \
+        && "${REMOTE_ADMISSION_ARM_ACKNOWLEDGED}" == '1' \
+        && "${deactivate_status}" == '0' \
+        && "${verify_status}" == '0' \
+        && "${disarm_status}" == '0' ]]; then
+        remote_admission_settle
+        settle_status=$?
+    fi
+
+    if [[ "${REMOTE_CLEANUP_ARMED}" != '1' \
+        || "${REMOTE_ADMISSION_ARM_ACKNOWLEDGED}" != '1' \
+        || "${deactivate_status}" != '0' \
+        || "${verify_status}" != '0' \
+        || "${disarm_status}" != '0' \
+        || "${settle_status}" != '0' ]]; then
         printf '%s\n' \
             'HARD STOP: Provider UI smoke cleanup or dormant verification failed.' \
             'Keep the guarded application release active. Do not roll back to an unguarded release.' \
@@ -543,7 +657,7 @@ main() {
 
     prod_print_plan "prod-provider-ui-smoke" "${PROD_SSH_TARGET}" "write: temporary isolated lease"
     printf '  execution  : operator-side browser; production host Node/npm stays absent\n'
-    printf '  cleanup    : shell finally + independent 10m systemd lease\n'
+    printf '  cleanup    : shell finally + independent 10m systemd lease + durable admission\n'
 
     if ! local_preflight; then
         die "local read-only/runtime preflight failed" 20
@@ -551,32 +665,39 @@ main() {
     if ! remote_static_preflight; then
         die "remote read-only preflight failed" 20
     fi
-    if ! remote_principal verify; then
-        die "remote principal is not dormant and clean" 20
-    fi
+    # Bind the read-only deployed view before publishing a pending run. A
+    # malformed view identity requires no lifecycle mutation or recovery.
     if ! DEPLOYED_VIEW_SHA256="$(read_remote_deployed_view_sha256)"; then
         die "active deployed PDF view could not be bound to the operator gate" 20
     fi
-
+    remote_admission_begin
     trap cleanup_remote_lease EXIT
     trap 'exit 129' HUP
     trap 'exit 130' INT
     trap 'exit 143' TERM
 
-    REMOTE_CLEANUP_REQUIRED=1
+    # Reverify the dormant fixture after registration. The PHP verify action
+    # performs no fixture writes and may run while the pending veto is live.
+    if ! remote_principal verify; then
+        die "remote principal is not dormant and clean" 20
+    fi
     set +e
     arm_remote_cleanup
     arm_status=$?
     set -e
     if [[ "${arm_status}" != '0' ]]; then
-        if [[ "${arm_status}" == '75' ]]; then
-            # A separately owned active lease must never be torn down by this
-            # invocation.
-            REMOTE_CLEANUP_REQUIRED=0
-        fi
+        # No positive arm acknowledgement means no remote deactivate or
+        # settle is permitted; durable admission remains for recovery.
         die "independent remote cleanup timer could not be armed" 22
     fi
     REMOTE_CLEANUP_ARMED=1
+    # A positive systemd-run response is not durable proof by itself. Record
+    # the server-verified timer identity before the fixture is activated; an
+    # unknown acknowledgement leaves the pending veto for recovery.
+    if ! remote_admission_ack_arm; then
+        die "independent cleanup timer acknowledgement could not be bound" 22
+    fi
+    REMOTE_ADMISSION_ARM_ACKNOWLEDGED=1
 
     if ! remote_principal activate; then
         die "remote smoke lease activation failed" 21

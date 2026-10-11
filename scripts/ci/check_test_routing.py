@@ -41,6 +41,7 @@ REVIEWED_INDIRECT_PYTHON_ROUTES = {
     "tests/Unit/Scripts/manual_archive_cleanup_v1_test.py": ROOT_DEPLOYMENT_SCRIPT,
     "tests/Unit/Scripts/manual_release_cleanup_v1_test.py": ROOT_DEPLOYMENT_SCRIPT,
     "tests/Unit/Scripts/maintenance_pending_v1_test.py": ROOT_DEPLOYMENT_SCRIPT,
+    "tests/Unit/Scripts/provider_ui_smoke_admission_v1_test.py": ROOT_DEPLOYMENT_SCRIPT,
     "tests/Unit/Scripts/zero_surprise_canary_fixture_lock_test.py": ROOT_DEPLOYMENT_SCRIPT,
 }
 REVIEWED_INDIRECT_PHP_ROUTES = {

@@ -20,6 +20,39 @@ final class ProviderUiSmokeOpsScriptsTest extends TestCase
         self::assertStringNotContainsString('PROVIDER_UI_SMOKE_PASSWORD=', $result['stdout']);
     }
 
+    public function testInvalidRunCannotCreateStateDirectoryBeforeAdmission(): void
+    {
+        if (!function_exists('posix_geteuid') || posix_geteuid() !== 0) {
+            $this->markTestSkipped('Root-only wrapper behavior runs inside the PHP Docker service.');
+        }
+
+        $workspace = $this->createWorkspace();
+        $missingStateDirectory = $workspace . '/not-created';
+        try {
+            $result = $this->runCommand(
+                [
+                    'bash',
+                    'scripts/ops/provider_ui_smoke_principal.sh',
+                    'activate',
+                    '--app-root',
+                    $this->repoRoot(),
+                    '--credentials-file',
+                    $workspace . '/unused.env',
+                    '--state-dir',
+                    $missingStateDirectory,
+                    '--admission-run-id',
+                    str_repeat('a', 32),
+                ],
+                $this->repoRoot(),
+            );
+            self::assertNotSame(0, $result['exit_code']);
+            self::assertStringContainsString('state directory is unavailable', $result['stderr']);
+            self::assertDirectoryDoesNotExist($missingStateDirectory);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
     public function testOrchestratorRejectsNonNormalizedRemotePathsBeforeNetworkAccess(): void
     {
         $result = $this->runCommand(
@@ -37,6 +70,41 @@ final class ProviderUiSmokeOpsScriptsTest extends TestCase
 
         self::assertIsString($source);
         self::assertStringContainsString('trap - EXIT HUP INT TERM', $source);
+    }
+
+    public function testProviderLifecycleIsBoundToDurableAdmissionCoordinator(): void
+    {
+        $principal = file_get_contents($this->repoRoot() . '/scripts/ops/provider_ui_smoke_principal.sh');
+        $orchestrator = file_get_contents($this->repoRoot() . '/scripts/ops/prod_provider_ui_smoke.sh');
+        $coordinator = file_get_contents($this->repoRoot() . '/scripts/ops/libexec/provider_ui_smoke_admission_v1.py');
+
+        self::assertIsString($principal);
+        self::assertIsString($orchestrator);
+        self::assertIsString($coordinator);
+        self::assertStringContainsString('admission_begin install', $principal);
+        self::assertStringContainsString('admission_begin remove', $principal);
+        self::assertStringContainsString('FH_PROVIDER_UI_SMOKE_RUN_ID="${ADMISSION_RUN_ID}" php', $principal);
+        self::assertStringContainsString('maintenance_recovery_from_lock_fd(args.lock_fd)', $coordinator);
+        self::assertStringNotContainsString('admission_assert_bound', $principal);
+        self::assertStringNotContainsString('.lifecycle-output.', $principal);
+        self::assertStringContainsString('admission_settle', $principal);
+        self::assertStringContainsString('remote_admission_begin', $orchestrator);
+        self::assertStringContainsString('remote_admission_ack_arm', $orchestrator);
+        self::assertStringContainsString('remote_admission_settle', $orchestrator);
+        self::assertStringContainsString('admission.publish_pending(record)', $coordinator);
+        self::assertStringContainsString('admission.recover_pending(record', $coordinator);
+        self::assertStringContainsString("CORE_PATH = '/usr/local/libexec/fh/maintenance_pending_v1.py'", $coordinator);
+        self::assertStringContainsString('credential retirement is not enrolled in maintenance admission', $principal);
+    }
+
+    public function testAdmissionCoordinatorKeepsUnknownTimerStateAsFailure(): void
+    {
+        $coordinator = file_get_contents($this->repoRoot() . '/scripts/ops/libexec/provider_ui_smoke_admission_v1.py');
+
+        self::assertIsString($coordinator);
+        self::assertStringContainsString("fail('systemd_state_unknown')", $coordinator);
+        self::assertStringContainsString("fail('systemd_not_terminal')", $coordinator);
+        self::assertStringContainsString("fail('fixture_terminal_unknown')", $coordinator);
     }
 
     public function testOrchestratorSelectsAndForwardsAnExplicitBrowser(): void
@@ -60,7 +128,7 @@ final class ProviderUiSmokeOpsScriptsTest extends TestCase
             self::assertSame(1, $result['exit_code'], $result['stderr']);
             $events = (string) file_get_contents($workspace . '/events.log');
             self::assertMatchesRegularExpression(
-                '/preflight.*verify.*view_hash_before.*arm.*activate.*credential_stream.*gate.*' .
+                '/preflight.*view_hash_before.*admission_begin.*verify.*arm.*admission_ack_arm.*activate.*credential_stream.*gate.*' .
                     'view_hash_after.*deactivate.*verify.*disarm/s',
                 $events,
             );
@@ -113,7 +181,9 @@ final class ProviderUiSmokeOpsScriptsTest extends TestCase
             );
 
             $events = (string) file_get_contents($workspace . '/events.log');
-            self::assertMatchesRegularExpression('/preflight.*verify.*view_hash_before/s', $events);
+            self::assertMatchesRegularExpression('/preflight.*view_hash_before/s', $events);
+            self::assertStringNotContainsString("admission_begin\n", $events);
+            self::assertStringNotContainsString("verify\n", $events);
             self::assertStringNotContainsString("arm\n", $events);
             self::assertStringNotContainsString("activate\n", $events);
             self::assertStringNotContainsString("credential_stream\n", $events);
@@ -170,6 +240,89 @@ final class ProviderUiSmokeOpsScriptsTest extends TestCase
         }
     }
 
+    public function testLostCleanupArmResponseKeepsAdmissionPendingWithoutDeactivation(): void
+    {
+        $workspace = $this->createWorkspace();
+
+        try {
+            $result = $this->runOrchestrator($workspace, [
+                'PROD_SMOKE_ARM_LOST_RESPONSE' => '1',
+            ]);
+
+            self::assertSame(90, $result['exit_code'], $result['stderr']);
+            self::assertStringContainsString('HARD STOP', $result['stderr']);
+            $events = (string) file_get_contents($workspace . '/events.log');
+            self::assertStringContainsString("admission_begin\n", $events);
+            self::assertStringContainsString("arm\n", $events);
+            self::assertStringNotContainsString("admission_ack_arm\n", $events);
+            self::assertStringNotContainsString("activate\n", $events);
+            self::assertStringNotContainsString("deactivate\n", $events);
+            self::assertStringNotContainsString("disarm\n", $events);
+            self::assertStringNotContainsString("admission_settle\n", $events);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testLostArmAcknowledgementKeepsPendingAndNeverActivatesFixture(): void
+    {
+        $workspace = $this->createWorkspace();
+
+        try {
+            $result = $this->runOrchestrator($workspace, [
+                'PROD_SMOKE_ACK_ARM_FAIL' => '1',
+            ]);
+
+            self::assertSame(90, $result['exit_code'], $result['stderr']);
+            self::assertStringContainsString('HARD STOP', $result['stderr']);
+            $events = (string) file_get_contents($workspace . '/events.log');
+            self::assertStringContainsString("arm\n", $events);
+            self::assertStringContainsString("admission_ack_arm\n", $events);
+            self::assertDoesNotMatchRegularExpression('/^activate$/m', $events);
+            self::assertStringNotContainsString("credential_stream\n", $events);
+            self::assertStringNotContainsString("admission_settle\n", $events);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testDisarmAcceptsTransientUnitUnloadedAfterSuccessfulStop(): void
+    {
+        $workspace = $this->createWorkspace();
+
+        try {
+            $result = $this->runOrchestrator($workspace, [
+                'PROD_SMOKE_SYSTEMD_AUTO_UNLOAD' => '1',
+            ]);
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            $events = (string) file_get_contents($workspace . '/events.log');
+            self::assertStringContainsString("systemctl_stop fh-provider-ui-smoke-cleanup.timer\n", $events);
+            self::assertStringContainsString("systemctl_stop fh-provider-ui-smoke-cleanup.service\n", $events);
+            self::assertStringNotContainsString('systemctl_reset', $events);
+            self::assertStringContainsString("admission_settle\n", $events);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testDisarmAcceptsUnitUnloadedDuringResetFailedRace(): void
+    {
+        $workspace = $this->createWorkspace();
+
+        try {
+            $result = $this->runOrchestrator($workspace, [
+                'PROD_SMOKE_SYSTEMD_RESET_RACE' => '1',
+            ]);
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            $events = (string) file_get_contents($workspace . '/events.log');
+            self::assertStringContainsString("systemctl_reset fh-provider-ui-smoke-cleanup.timer\n", $events);
+            self::assertStringContainsString("systemctl_reset fh-provider-ui-smoke-cleanup.service\n", $events);
+            self::assertStringContainsString("admission_settle\n", $events);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
     /**
      * @param array<string, string> $extraEnv
      * @return array{exit_code:int,stdout:string,stderr:string}
@@ -201,6 +354,7 @@ final class ProviderUiSmokeOpsScriptsTest extends TestCase
                 [
                     'PATH' => $stubBin . PATH_SEPARATOR . (getenv('PATH') ?: ''),
                     'PROD_SMOKE_TEST_EVENTS' => $events,
+                    'PROD_SMOKE_TEST_WORKSPACE' => $workspace,
                     'PROD_SMOKE_TEST_HASH_COUNT' => $workspace . '/hash-count',
                     'PROD_SMOKE_DEPLOYED_VIEW_SHA256' => $deployedViewSha256,
                     'PROVIDER_UI_SMOKE_PHP_BIN' => $stubBin . '/php',
@@ -299,7 +453,22 @@ final class ProviderUiSmokeOpsScriptsTest extends TestCase
             done
             remote_command="${1:-}"
 
-            if [[ "${remote_command}" == *'remote_preflight=passed'* ]]; then
+            if [[ "${remote_command}" == *provider_ui_smoke_admission_v1.py*begin\ --operation\ smoke* ]]; then
+                printf 'admission_begin\n' >>"${PROD_SMOKE_TEST_EVENTS}"
+                printf '%s\n' "${PROD_SMOKE_ADMISSION_RUN_ID:-0123456789abcdef0123456789abcdef}"
+            elif [[ "${remote_command}" == *provider_ui_smoke_admission_v1.py*ack-arm\ --operation\ smoke* ]]; then
+                printf 'admission_ack_arm\n' >>"${PROD_SMOKE_TEST_EVENTS}"
+                if [[ "${PROD_SMOKE_ACK_ARM_FAIL:-0}" == '1' ]]; then
+                    exit 75
+                fi
+                printf 'provider_ui_smoke_admission=result=arm_acknowledged\n'
+            elif [[ "${remote_command}" == *provider_ui_smoke_admission_v1.py*settle\ --operation\ smoke* ]]; then
+                if [[ "${PROD_SMOKE_ACK_ARM_FAIL:-0}" == '1' ]]; then
+                    exit 75
+                fi
+                printf 'admission_settle\n' >>"${PROD_SMOKE_TEST_EVENTS}"
+                printf 'provider_ui_smoke_admission=result=settled\n'
+            elif [[ "${remote_command}" == *'remote_preflight=passed'* ]]; then
                 printf 'preflight\n' >>"${PROD_SMOKE_TEST_EVENTS}"
                 case "${PROD_SMOKE_REMOTE_VIEW_STATE:-safe}" in
                     symlink)
@@ -344,6 +513,9 @@ final class ProviderUiSmokeOpsScriptsTest extends TestCase
                 fi
             elif [[ "${remote_command}" == *'systemd-run'* ]]; then
                 printf 'arm\n' >>"${PROD_SMOKE_TEST_EVENTS}"
+                if [[ "${PROD_SMOKE_ARM_LOST_RESPONSE:-0}" == '1' ]]; then
+                    exit 255
+                fi
                 printf 'cleanup_lease=armed duration=10m\n'
             elif [[ "${remote_command}" == *"provider_ui_smoke_principal.sh' 'activate'"* ]]; then
                 printf 'activate\n' >>"${PROD_SMOKE_TEST_EVENTS}"
@@ -361,11 +533,55 @@ final class ProviderUiSmokeOpsScriptsTest extends TestCase
                 printf 'provider_ui_smoke_wrapper action=deactivate result=ok\n'
             elif [[ "${remote_command}" == *'cleanup_lease=disarmed'* ]]; then
                 printf 'disarm\n' >>"${PROD_SMOKE_TEST_EVENTS}"
-                printf 'cleanup_lease=disarmed\n'
+                if [[ "${PROD_SMOKE_SYSTEMD_AUTO_UNLOAD:-0}" == '1' \
+                    || "${PROD_SMOKE_SYSTEMD_RESET_RACE:-0}" == '1' ]]; then
+                    remote_command="${remote_command//\/run\/lock\/fh-provider-ui-smoke.lock/${PROD_SMOKE_TEST_WORKSPACE}\/private.lock}"
+                    bash -c "${remote_command}"
+                else
+                    printf 'cleanup_lease=disarmed\n'
+                fi
             else
                 printf 'ERROR: unexpected ssh invocation\n' >&2
                 exit 99
             fi
+            BASH
+            ,
+        );
+        $this->writeExecutable($stubBin . '/flock', "#!/usr/bin/env bash\nexit 0\n");
+        $this->writeExecutable(
+            $stubBin . '/systemctl',
+            <<<'BASH'
+            #!/usr/bin/env bash
+            set -euo pipefail
+            command="${1:-}"
+            unit="${@: -1}"
+            marker="${PROD_SMOKE_TEST_WORKSPACE}/stopped-${unit}"
+            reset_marker="${PROD_SMOKE_TEST_WORKSPACE}/reset-${unit}"
+            case "${command}" in
+                show)
+                    if [[ -e "${reset_marker}" \
+                        || ( -e "${marker}" && "${PROD_SMOKE_SYSTEMD_AUTO_UNLOAD:-0}" == '1' ) ]]; then
+                        printf 'not-found\n'
+                    else
+                        printf 'loaded\n'
+                    fi
+                    ;;
+                stop)
+                    printf 'systemctl_stop %s\n' "${unit}" >>"${PROD_SMOKE_TEST_EVENTS}"
+                    : >"${marker}"
+                    ;;
+                reset-failed)
+                    printf 'systemctl_reset %s\n' "${unit}" >>"${PROD_SMOKE_TEST_EVENTS}"
+                    : >"${reset_marker}"
+                    exit 1
+                    ;;
+                is-active)
+                    exit 1
+                    ;;
+                *)
+                    exit 99
+                    ;;
+            esac
             BASH
             ,
         );

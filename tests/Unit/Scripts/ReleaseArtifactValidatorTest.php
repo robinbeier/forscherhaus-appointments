@@ -99,6 +99,7 @@ final class ReleaseArtifactValidatorTest extends TestCase
             'scripts/ops/lib/prod_common.sh',
             'scripts/ops/prod_provider_ui_smoke.sh',
             'scripts/ops/provider_ui_smoke_principal.sh',
+            'scripts/ops/libexec/provider_ui_smoke_admission_v1.py',
             'scripts/release-gate/lib/GateAssertions.php',
             'scripts/release-gate/lib/GateHttpClient.php',
             'scripts/release-gate/lib/GateProcessRunner.php',

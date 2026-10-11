@@ -12,6 +12,17 @@ require_once APPPATH . 'controllers/Booking.php';
 require_once APPPATH . 'core/Provider_ui_smoke_access_policy.php';
 require_once APPPATH . 'libraries/Provider_ui_smoke_fixture.php';
 
+final class ProviderUiSmokeTestAdmissionGuard implements \Provider_ui_smoke_admission_guard
+{
+    public function enter(string $action, string $credentialFile, string $stateFile): void
+    {
+        // Explicit test-only seam. Production construction uses the default
+        // root lock and FD-bound admission guard.
+    }
+
+    public function leave(): void {}
+}
+
 class ProviderUiSmokeFixtureLifecycleTest extends TestCase
 {
     private Provider_ui_smoke_fixture $fixture;
@@ -37,7 +48,7 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
 
         $this->CI = &get_instance();
         $this->CI->load->library('provider_ui_smoke_fixture');
-        $this->fixture = $this->CI->provider_ui_smoke_fixture;
+        $this->fixture = new Provider_ui_smoke_fixture(new ProviderUiSmokeTestAdmissionGuard());
         $this->temporaryDirectory = sys_get_temp_dir() . '/fh-provider-ui-smoke-lifecycle-' . bin2hex(random_bytes(8));
         $this->assertTrue(mkdir($this->temporaryDirectory, 0700));
         $this->assertTrue(chmod($this->temporaryDirectory, 0700));
@@ -189,6 +200,44 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
                 ->get_where('roles', ['slug' => Provider_ui_smoke_access_policy::DORMANT_ROLE_SLUG])
                 ->num_rows(),
         );
+    }
+
+    public function testDirectActivateWithoutCapabilityFailsBeforeFixtureMutation(): void
+    {
+        $before = [
+            'principal' => $this->markerCount('users', 'email', Provider_ui_smoke_fixture::PROVIDER_EMAIL),
+            'username' => $this->markerCount('user_settings', 'username', Provider_ui_smoke_access_policy::USERNAME),
+            'service' => $this->markerCount('services', 'name', Provider_ui_smoke_fixture::SERVICE_NAME),
+        ];
+        $credentialHashBefore = hash_file('sha256', $this->credentialFile);
+        $environment = $_ENV;
+        unset($environment['FH_PROVIDER_UI_SMOKE_RUN_ID']);
+        $process = proc_open(
+            ['php', 'index.php', 'console', 'provider_ui_smoke', 'activate', $this->credentialFile, $this->stateFile],
+            [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            $pipes,
+            dirname(__DIR__, 3),
+            $environment,
+        );
+
+        $this->assertIsResource($process);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $exitCode = proc_close($process);
+
+        $this->assertNotSame(0, $exitCode);
+        $this->assertIsString($stdout);
+        $this->assertStringContainsString('provider_ui_smoke action=activate state=error result=error', $stdout);
+        $this->assertIsString($stderr);
+        $this->assertSame($credentialHashBefore, hash_file('sha256', $this->credentialFile));
+        $this->assertFileDoesNotExist($this->stateFile);
+        $this->assertSame($before, [
+            'principal' => $this->markerCount('users', 'email', Provider_ui_smoke_fixture::PROVIDER_EMAIL),
+            'username' => $this->markerCount('user_settings', 'username', Provider_ui_smoke_access_policy::USERNAME),
+            'service' => $this->markerCount('services', 'name', Provider_ui_smoke_fixture::SERVICE_NAME),
+        ]);
     }
 
     public function testConcurrentActivationsPreserveTheWinningStateFile(): void
@@ -681,7 +730,13 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
             2 => ['pipe', 'w'],
         ];
         $process = proc_open(
-            ['php', 'index.php', 'console', 'provider_ui_smoke', $action, $this->credentialFile, $this->stateFile],
+            [
+                'php',
+                'tests/Support/provider_ui_smoke_fixture_cli.php',
+                $action,
+                $this->credentialFile,
+                $this->stateFile,
+            ],
             $descriptor_spec,
             $pipes,
             dirname(__DIR__, 3),

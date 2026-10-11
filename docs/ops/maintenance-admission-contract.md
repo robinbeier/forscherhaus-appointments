@@ -35,7 +35,7 @@ scheduler, operator and recovery entrypoints, including direct supported calls.
 | --- | --- | --- |
 | Ordinary deploy | `deploy_ea.sh`; validated shared descriptor | Preserve deployment state, recovery and delegated descriptor checks |
 | Ordinary live probe | `scripts/ops/run_ordinary_live_probe.sh`; interruption markers and cleanup callback | Refuse every wrapper action and the separately invoked cleanup path when fixed `/var/lib/fh-maintenance-admission` is present or its root-controlled absence is unknown; even preflight and verify may initialize fixture state or lock files |
-| Provider/customer UI smokes | `scripts/ops/prod_provider_ui_smoke.sh`, `scripts/ops/prod_customers_ui_smoke.sh`; private cleanup locks and delayed systemd cleanup | Enroll foreground mutation, delayed cleanup units and disarm cleanup as separate writer entrypoints |
+| Provider/customer UI smokes | Provider uses `scripts/ops/prod_provider_ui_smoke.sh`, `scripts/ops/provider_ui_smoke_principal.sh` and the source coordinator `scripts/ops/libexec/provider_ui_smoke_admission_v1.py`; Customers remains on `scripts/ops/prod_customers_ui_smoke.sh` and `scripts/ops/customers_ui_smoke_principals.sh` | Provider source binds install/remove and the foreground/delayed cleanup lifecycle to one pending record; Customers still requires enrollment of its foreground mutation, delayed cleanup units and disarm cleanup as separate writer entrypoints |
 | Backup producer | `scripts/ops/libexec/backup_set_producer_v1.py`; shared and private locks, continuity state | Repository source registers pending before dump dispatch and clears only after direct-child termination and publication. The source now also has a bounded `--recover-pending` path for a current-boot, fully published pending run; installed helper remains legacy and production rollout remains open. |
 | Restore verification | `scripts/ops/libexec/deployment_dump_attestation_v1.py`; detached container, lease watcher, orphan and continuity checks | Repository source admits before reconciliation, registers pending before Docker launch, and settles after terminal restore and publication. The source now includes a narrowly scoped recovery proof for the post-publication/post-cleanup state; installed recovery and production installation remain open. |
 | Session retention | `scripts/ops/libexec/session_retention_v1.py`; shared lock and protected local state | Repository execute path reads the pending-state contract through its existing lock descriptor before mutation; installed helper and unit remain legacy until the coordinated rollout |
@@ -56,12 +56,38 @@ command-name availability finding or the detached-container interval.
 
 ## UI-smoke maintenance-pending enrollment obligations
 
-The Provider and Customers UI smoke scripts are not enrolled by this document;
-the following is the bounded proof required before either path can participate
-in pending-state admission. The operator scripts currently run a read-only
-preflight, arm an independent ten-minute systemd lease, invoke the root-only
-server-local principal wrapper, and perform cleanup in an exit trap. Provider
-uses `fh-provider-ui-smoke-cleanup` and
+Provider's source operator now uses the coordinator
+`scripts/ops/libexec/provider_ui_smoke_admission_v1.py`: it registers one
+pending record before timer/fixture mutation, binds the cleanup unit and run
+identity, and clears only after the lock-held finalizer proves the
+operation-specific terminal state (`dormant` for install/smoke and `removed`
+for remove) and terminal systemd units. Credential retirement remains an
+explicit fail-closed refusal because its terminal proof is a separate
+lifecycle. Customers is not enrolled yet and remains
+subject to the obligations below. Both operator scripts otherwise run a
+read-only preflight, arm an independent ten-minute systemd lease, invoke a
+root-only server-local principal wrapper, and perform cleanup in an exit trap.
+After `systemd-run` positively returns, a separate server-side acknowledgement
+checks the exact transient timer, service and run identity under the private
+cleanup lock, then durably records that observation. The finalizer takes that
+private lock before the shared production lock and requires the bound
+acknowledgement before treating unloaded units as terminal. A lost arm or
+acknowledgement response leaves Pending for deliberate recovery; an earlier or
+interrupted acknowledgement cannot be overwritten by a new run.
+If pending was already durably cleared but the process stopped before removing
+the acknowledgement, `recover-arm-ack` requires the exact run and resource,
+rechecks absence of pending plus terminal units and dormant fixture under both
+locks, then retires only that orphan. It does not repair an unknown timer arm.
+The Provider application fixture holds the pre-existing canonical shared lock
+through every mutating PHP action and verifies the matching pending record
+through a child process that inherits that locked descriptor. A run ID or
+direct `console provider_ui_smoke` call without that descriptor is not an
+admission capability. Its `verify` action is read-only and may run inside the
+coordinator's lock-held terminal proof. The wrapper captures lifecycle output
+in memory; a direct `verify` does not create a temporary file. A lost cleanup
+timer acknowledgement retains the pending record and requires reconciliation;
+it must not be interpreted as a completed disarm.
+Provider uses `fh-provider-ui-smoke-cleanup` and
 `scripts/ops/provider_ui_smoke_principal.sh`; Customers uses
 `fh-customers-ui-smoke-cleanup` and
 `scripts/ops/customers_ui_smoke_principals.sh`.
@@ -82,7 +108,8 @@ uses `fh-provider-ui-smoke-cleanup` and
   not treat a generic recovery capability as permission to process another
   run. A service cannot prove its own terminal systemd state while it is still
   executing. The pending veto remains until a separate lock-held finalizer
-  proves the exact service terminal, timer disarmed, and fixture dormant/clean.
+  proves the exact service terminal, timer disarmed, and the fixture's
+  operation-specific terminal state.
   Timer ownership and elapsed time are not terminal cleanup proof.
 * **Unknown `systemd-run` response:** a lost SSH or `systemd-run` response is
   an unresolved pending operation, never evidence that no timer or service was
@@ -90,12 +117,11 @@ uses `fh-provider-ui-smoke-cleanup` and
   both the exact `.timer` and `.service`; do not clear state from the caller's
   exit status, a quiet response, or a free lock. An inability to distinguish
   absent, queued, running, or completed cleanup remains blocked.
-* **Timer disarm:** the present disarm sequence uses the private smoke lock
-  and masks `systemctl stop`/`reset-failed` errors before checking whether the
-  units remain active. That is insufficient as a pending-state terminal proof.
-  The enrolled finalizer must hold the shared lock, check each command result,
+* **Timer disarm:** the enrolled disarm sequence uses the private smoke lock,
+  checks each `systemctl stop`/`reset-failed` result, and then checks whether
+  the exact units remain active. The finalizer must hold the shared lock,
   establish that neither exact unit can still dispatch or execute, and verify
-  wrapper deactivation plus dormant/clean fixture state before clearing the
+  wrapper deactivation plus the operation-specific terminal fixture state before clearing the
   record. An unknown stop, unit status, or fixture result retains the veto;
   preserve the existing independent cleanup protection when its state is not
   proven terminal.

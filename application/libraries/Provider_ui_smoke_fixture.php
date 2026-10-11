@@ -2,6 +2,42 @@
 
 require_once __DIR__ . '/../core/Provider_ui_smoke_access_policy.php';
 
+interface Provider_ui_smoke_admission_guard
+{
+    public function enter(string $action, string $credentialFile, string $stateFile): void;
+
+    public function leave(): void;
+}
+
+final class Provider_ui_smoke_default_admission_guard implements Provider_ui_smoke_admission_guard
+{
+    /** @var Closure(string, string, string): void */
+    private Closure $enterCallback;
+
+    /** @var Closure(): void */
+    private Closure $leaveCallback;
+
+    /**
+     * @param Closure(string, string, string): void $enterCallback
+     * @param Closure(): void $leaveCallback
+     */
+    public function __construct(Closure $enterCallback, Closure $leaveCallback)
+    {
+        $this->enterCallback = $enterCallback;
+        $this->leaveCallback = $leaveCallback;
+    }
+
+    public function enter(string $action, string $credentialFile, string $stateFile): void
+    {
+        ($this->enterCallback)($action, $credentialFile, $stateFile);
+    }
+
+    public function leave(): void
+    {
+        ($this->leaveCallback)();
+    }
+}
+
 /* ----------------------------------------------------------------------------
  * Easy!Appointments - Online Appointment Scheduler
  *
@@ -69,6 +105,8 @@ final class Provider_ui_smoke_fixture
 
     private const LOCK_NAME = 'fh-provider-ui-smoke-v1';
 
+    private const SHARED_LOCK_PATH = '/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock';
+
     private const DORMANT_ROLE_NAME = 'Provider UI Smoke Dormant';
 
     private const CREDENTIAL_USERNAME_KEY = 'PROVIDER_UI_SMOKE_USERNAME';
@@ -80,9 +118,25 @@ final class Provider_ui_smoke_fixture
      */
     private EA_Controller|CI_Controller $CI;
 
-    public function __construct()
+    /** @var resource|null */
+    private $sharedLockHandle = null;
+
+    private Provider_ui_smoke_admission_guard $admissionGuard;
+
+    public function __construct(?Provider_ui_smoke_admission_guard $admissionGuard = null)
     {
         $this->CI = &get_instance();
+
+        $this->admissionGuard =
+            $admissionGuard ??
+            new Provider_ui_smoke_default_admission_guard(
+                function (string $action, string $credentialFile, string $stateFile): void {
+                    $this->enterAdmission($action, $credentialFile, $stateFile);
+                },
+                function (): void {
+                    $this->leaveAdmission();
+                },
+            );
 
         $this->CI->load->model('roles_model');
     }
@@ -100,54 +154,71 @@ final class Provider_ui_smoke_fixture
         }
 
         $this->assertRootCli();
+        $this->assertSafeAbsolutePath($credential_file);
         $this->assertSafeAbsolutePath($state_file);
 
-        $credentials = null;
+        // Verification is deliberately read-only and is also used by the
+        // lock-held admission finalizer. Reacquiring the shared lock there
+        // would deadlock the finalizer; every mutating action remains bound
+        // to the shared lock and admission capability below.
+        $requiresAdmission = $action !== 'verify';
 
-        if (in_array($action, ['install', 'verify', 'activate'], true)) {
-            $credentials = $this->readCredentials($credential_file);
+        if ($requiresAdmission) {
+            $this->admissionGuard->enter($action, $credential_file, $state_file);
         }
 
-        $this->acquireLock();
-
         try {
-            $state_file_existed_before = file_exists($state_file) || is_link($state_file);
+            $credentials = null;
 
-            if (!$this->CI->db->trans_begin()) {
-                throw new RuntimeException('Provider UI smoke transaction could not start.');
+            if (in_array($action, ['install', 'verify', 'activate'], true)) {
+                $credentials = $this->readCredentials($credential_file);
             }
 
-            $remove_state_after_commit = false;
+            $this->acquireLock();
 
             try {
-                $state = match ($action) {
-                    'install' => $this->install($state_file),
-                    'verify' => $this->verify($state_file),
-                    'activate' => $this->activate($credentials, $state_file),
-                    'deactivate' => $this->deactivate($state_file, $remove_state_after_commit),
-                    'remove' => $this->remove($state_file),
-                };
+                $state_file_existed_before = file_exists($state_file) || is_link($state_file);
 
-                if (!$this->CI->db->trans_commit()) {
-                    throw new RuntimeException('Provider UI smoke transaction could not commit.');
-                }
-            } catch (Throwable $exception) {
-                $this->CI->db->trans_rollback();
-
-                if ($action === 'activate' && !$state_file_existed_before) {
-                    $this->removeStateFileIfPresent($state_file);
+                if (!$this->CI->db->trans_begin()) {
+                    throw new RuntimeException('Provider UI smoke transaction could not start.');
                 }
 
-                throw $exception;
-            }
+                $remove_state_after_commit = false;
 
-            if ($remove_state_after_commit) {
-                $this->removeStateFileIfPresent($state_file, true);
-            }
+                try {
+                    $state = match ($action) {
+                        'install' => $this->install($state_file),
+                        'verify' => $this->verify($state_file),
+                        'activate' => $this->activate($credentials, $state_file),
+                        'deactivate' => $this->deactivate($state_file, $remove_state_after_commit),
+                        'remove' => $this->remove($state_file),
+                    };
 
-            return $state;
+                    if (!$this->CI->db->trans_commit()) {
+                        throw new RuntimeException('Provider UI smoke transaction could not commit.');
+                    }
+                } catch (Throwable $exception) {
+                    $this->CI->db->trans_rollback();
+
+                    if ($action === 'activate' && !$state_file_existed_before) {
+                        $this->removeStateFileIfPresent($state_file);
+                    }
+
+                    throw $exception;
+                }
+
+                if ($remove_state_after_commit) {
+                    $this->removeStateFileIfPresent($state_file, true);
+                }
+
+                return $state;
+            } finally {
+                $this->releaseLock();
+            }
         } finally {
-            $this->releaseLock();
+            if ($requiresAdmission) {
+                $this->admissionGuard->leave();
+            }
         }
     }
 
@@ -1393,6 +1464,122 @@ final class Provider_ui_smoke_fixture
     {
         if (!is_cli() || !function_exists('posix_geteuid') || posix_geteuid() !== 0) {
             throw new RuntimeException('Provider UI smoke lifecycle requires root CLI.');
+        }
+    }
+
+    private function enterAdmission(string $action, string $credentialFile, string $stateFile): void
+    {
+        $this->acquireSharedLock();
+
+        try {
+            $this->assertAdmission($action, $credentialFile, $stateFile);
+        } catch (Throwable $exception) {
+            $this->releaseSharedLock();
+            throw $exception;
+        }
+    }
+
+    private function leaveAdmission(): void
+    {
+        $this->releaseSharedLock();
+    }
+
+    /**
+     * Open the pre-created canonical production lock before any lifecycle
+     * reads or writes. The lock is intentionally not created by this code.
+     */
+    private function acquireSharedLock(): void
+    {
+        $stat = @lstat(self::SHARED_LOCK_PATH);
+
+        if ($stat === false || (($stat['mode'] ?? 0) & 0170000) !== 0100000 || ($stat['nlink'] ?? 0) !== 1) {
+            throw new RuntimeException('Provider UI smoke shared lock is unavailable.');
+        }
+
+        if (($stat['uid'] ?? -1) !== 0 || ($stat['gid'] ?? -1) !== 0 || (($stat['mode'] ?? 0) & 0777) !== 0600) {
+            throw new RuntimeException('Provider UI smoke shared lock identity is unsafe.');
+        }
+
+        $handle = @fopen(self::SHARED_LOCK_PATH, 'r+b');
+
+        if ($handle === false || !flock($handle, LOCK_EX | LOCK_NB)) {
+            if (is_resource($handle)) {
+                fclose($handle);
+            }
+
+            throw new RuntimeException('Provider UI smoke shared lock is busy.');
+        }
+
+        $this->sharedLockHandle = $handle;
+    }
+
+    private function releaseSharedLock(): void
+    {
+        if (!is_resource($this->sharedLockHandle)) {
+            return;
+        }
+
+        flock($this->sharedLockHandle, LOCK_UN);
+        fclose($this->sharedLockHandle);
+        $this->sharedLockHandle = null;
+    }
+
+    private function assertAdmission(string $action, string $credentialFile, string $stateFile): void
+    {
+        $runId = getenv('FH_PROVIDER_UI_SMOKE_RUN_ID');
+
+        if (!is_string($runId) || preg_match('/\A[a-f0-9]{32}\z/', $runId) !== 1) {
+            throw new RuntimeException('Provider UI smoke admission capability is missing.');
+        }
+
+        $operation = in_array($action, ['activate', 'deactivate', 'verify'], true) ? 'smoke' : $action;
+        $appRoot = realpath(APPPATH . '..');
+        $coordinator = $appRoot === false ? false : $appRoot . '/scripts/ops/libexec/provider_ui_smoke_admission_v1.py';
+
+        if ($appRoot === false || !is_file($coordinator) || is_link($coordinator)) {
+            throw new RuntimeException('Provider UI smoke admission coordinator is unavailable.');
+        }
+
+        $command = [
+            'python3',
+            $coordinator,
+            'assert-bound-fd',
+            '--lock-fd',
+            '3',
+            '--operation',
+            $operation,
+            '--run-id',
+            $runId,
+            '--app-root',
+            $appRoot,
+            '--credentials-file',
+            $credentialFile,
+            '--state-file',
+            $stateFile,
+            '--cleanup-unit',
+            'fh-provider-ui-smoke-cleanup',
+        ];
+        $descriptors = [
+            0 => ['file', '/dev/null', 'r'],
+            1 => ['pipe', 'w'],
+            2 => ['pipe', 'w'],
+            3 => $this->sharedLockHandle,
+        ];
+        $pipes = [];
+        $process = @proc_open($command, $descriptors, $pipes, $appRoot);
+
+        if (!is_resource($process)) {
+            throw new RuntimeException('Provider UI smoke admission check could not start.');
+        }
+
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $status = proc_close($process);
+
+        if ($status !== 0 || $stdout === false || $stderr === false) {
+            throw new RuntimeException('Provider UI smoke admission was not accepted.');
         }
     }
 

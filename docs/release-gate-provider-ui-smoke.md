@@ -50,6 +50,8 @@ not treated as authorization.
 - `scripts/ops/prod_provider_ui_smoke.sh`: operator-side production
   orchestrator with preflight, bounded activation, browser gate, and mandatory
   cleanup.
+- `scripts/ops/libexec/provider_ui_smoke_admission_v1.py`: server-local
+  admission coordinator for the durable maintenance-pending record.
 - `scripts/release-gate/provider_ui_smoke.php`: PII-free HTTP, browser, and PDF
   assertions.
 - `scripts/release-gate/playwright/playwright_cli.sh`: operator-side Playwright
@@ -66,8 +68,10 @@ or put in a shell trace.
 
 Before the first production run:
 
-1. Deploy the guarded application, lifecycle command, gate, and both ops
-   wrappers through the normal artifact-based rollout.
+1. Deploy the guarded application, lifecycle command, coordinator, gate, and
+   both ops wrappers as one reviewed, hash-bound set. Install the compatible
+   maintenance-pending core and protocol epoch first under the ROB-812 rollout
+   contract. An app release alone does not complete this prerequisite.
 2. Confirm the normal read-only production baseline is green.
 3. Confirm the active release contains both wrappers and the Provider UI gate.
 4. Keep host Node/npm absent.
@@ -99,6 +103,13 @@ ssh root@booking-server \
 3. creates the state directory as `root:root` `0700`;
 4. installs the permanent dormant principal;
 5. runs the application verifier.
+
+The wrapper registers a pending maintenance run before creating a credential
+or state directory. Every mutating application action holds the canonical
+production lock throughout its transaction and verifies that exact run through
+the inherited lock descriptor. Direct mutating `console provider_ui_smoke`
+calls without this capability are rejected. A failed or unknown operation can
+leave the pending record for explicit recovery; do not retry it blindly.
 
 For an existing credential, the wrapper fails closed on a symlink, multiple
 hard links, unexpected owner, mode, size, username, password shape, or extra
@@ -141,20 +152,31 @@ The orchestrator:
 1. checks local runtime dependencies and prepares Playwright;
 2. checks the app endpoint;
 3. performs a read-only remote preflight, including credential/state
-   permissions, deployed-wrapper/template shape, dormant principal
-   verification, production Node/npm absence, and absence of an existing
-   cleanup lease;
-4. arms a transient `fh-provider-ui-smoke-cleanup.timer` with
-   `systemd-run --on-active=10m`;
-5. activates the synthetic lease;
-6. binds the locally reviewed four-line preparation template to the active
+   permissions, deployed-wrapper/template shape, production Node/npm absence,
+   and absence of an existing cleanup lease;
+4. binds the deployed template, registers the durable pending run, then
+   verifies the dormant principal without fixture writes;
+5. arms a transient `fh-provider-ui-smoke-cleanup.timer` with
+   `systemd-run --on-active=10m`, and durably acknowledges its exact loaded
+   identity under the private and shared locks before activation;
+6. activates the synthetic lease;
+7. binds the locally reviewed four-line preparation template to the active
    deployment by SHA-256, then streams `ssh ... cat` directly into the local
    gate's standard input;
-7. re-reads the active template SHA-256 after the browser/PDF assertions and
+8. re-reads the active template SHA-256 after the browser/PDF assertions and
    fails closed if the deployment changed during the gate;
-8. always deactivates and verifies from an `EXIT`/signal cleanup handler;
-9. stops and resets the transient cleanup unit only after synchronous
-   `deactivate` and dormant `verify` both pass.
+9. deactivates and verifies from an `EXIT`/signal cleanup handler;
+10. stops and resets the transient cleanup unit only after synchronous
+    `deactivate` and dormant `verify` both pass;
+11. clears the pending run only after a fresh, lock-held terminal proof bound
+    to the durable timer acknowledgement. Unknown arm or acknowledgement
+    results leave the pending veto for deliberate recovery.
+
+The systemd proof binds the cleanup service's complete command to this app,
+credential, state directory and run ID. If pending was already cleared but an
+interruption left only the acknowledgement, the separate `recover-arm-ack`
+action requires a fresh terminal proof before removing that orphan. It is not
+used to infer success from an unknown timer-arm result.
 
 During operator-to-gate transfer, the credential is never stored in a local
 temporary file, shell variable, command argument, process title, report, or
@@ -229,8 +251,8 @@ The operator orchestrator uses:
 | `2` | Gate runtime or configuration failed; cleanup still passed. |
 | `20` | Local or read-only remote preflight failed; no lease was activated. |
 | `21` | Activation failed; compensating deactivate was attempted. |
-| `22` | Independent cleanup timer could not be armed; activation did not proceed. |
-| `90` | Hard stop: deactivate, dormant verification, or timer disarm failed. |
+| `22` | Independent cleanup timer could not be armed; activation did not proceed. A lost response leaves the pending run unresolved. |
+| `90` | Hard stop: lifecycle cleanup, dormant verification, timer disarm, or admission settlement is unproven. |
 
 Exit `90` overrides the original gate result. Keep the guarded release active,
 do not clear the transient unit by hand, and investigate server-locally without
@@ -247,17 +269,9 @@ ssh root@booking-server \
   'bash /var/www/html/easyappointments/scripts/ops/provider_ui_smoke_principal.sh remove'
 ```
 
-Credential retirement is a separate explicit action and is allowed only after
-two successful, idempotent application-level `remove` transactions have
-confirmed complete absence:
-
-```bash
-ssh root@booking-server \
-  'bash /var/www/html/easyappointments/scripts/ops/provider_ui_smoke_principal.sh remove --remove-credentials'
-```
-
-The latter moves the credential into a root-only retired directory instead of
-destroying it irreversibly. The standard `remove` path keeps it.
+Credential retirement is not enrolled in the maintenance-admission protocol.
+`remove --remove-credentials` therefore fails closed; retain the protected
+credential and handle any later retirement as a separately reviewed change.
 
 Before rolling back to any release that predates the reserved-account route
 containment:

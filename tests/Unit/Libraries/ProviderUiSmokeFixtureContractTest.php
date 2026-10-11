@@ -47,6 +47,11 @@ class ProviderUiSmokeFixtureContractTest extends TestCase
         $this->assertStringContainsString("'google_sync' => 0", $source);
         $this->assertStringContainsString("'caldav_sync' => 0", $source);
         $this->assertStringContainsString('SELECT GET_LOCK(?, 10)', $source);
+        $this->assertStringContainsString('/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock', $source);
+        $this->assertStringContainsString('LOCK_EX | LOCK_NB', $source);
+        $this->assertStringContainsString("'assert-bound-fd'", $source);
+        $this->assertStringContainsString('3 => $this->sharedLockHandle', $source);
+        $this->assertStringContainsString('new Provider_ui_smoke_default_admission_guard', $source);
         $this->assertStringContainsString('$this->CI->db->trans_begin()', $source);
         $this->assertStringContainsString('$this->CI->db->trans_commit()', $source);
         $this->assertStringContainsString('$this->CI->db->trans_rollback()', $source);
@@ -74,6 +79,49 @@ class ProviderUiSmokeFixtureContractTest extends TestCase
         $this->assertIsInt($transaction_position);
         $this->assertTrue($lock_position < $snapshot_position);
         $this->assertTrue($snapshot_position < $transaction_position);
+    }
+
+    public function testAdmissionIsRequiredBeforeCredentialsOrDatabaseWork(): void
+    {
+        $source = file_get_contents(APPPATH . 'libraries/Provider_ui_smoke_fixture.php');
+
+        $this->assertIsString($source);
+        $admission_position = strpos($source, '$this->admissionGuard->enter($action, $credential_file, $state_file);');
+        $credential_position = strpos($source, '$this->readCredentials($credential_file);');
+        $transaction_position = strpos($source, '$this->CI->db->trans_begin()');
+
+        $this->assertIsInt($admission_position);
+        $this->assertIsInt($credential_position);
+        $this->assertIsInt($transaction_position);
+        $this->assertTrue($admission_position < $credential_position);
+        $this->assertTrue($credential_position < $transaction_position);
+        $this->assertStringContainsString("getenv('FH_PROVIDER_UI_SMOKE_RUN_ID')", $source);
+    }
+
+    public function testVerifyIsTheReadOnlyExceptionForTheLockHeldFinalizer(): void
+    {
+        $source = file_get_contents(APPPATH . 'libraries/Provider_ui_smoke_fixture.php');
+
+        $this->assertIsString($source);
+        $run_position = strpos($source, 'public function run(');
+        $verify_position = strpos($source, 'private function verify(');
+
+        $this->assertIsInt($run_position);
+        $this->assertIsInt($verify_position);
+        $run_source = substr($source, $run_position, $verify_position - $run_position);
+        $this->assertIsString($run_source);
+        $this->assertStringContainsString("\$requiresAdmission = \$action !== 'verify';", $run_source);
+        $this->assertStringContainsString('if ($requiresAdmission) {', $run_source);
+
+        $verify_end = strpos($source, '    /**', $verify_position + 1);
+        $this->assertIsInt($verify_end);
+        $verify_source = substr($source, $verify_position, $verify_end - $verify_position);
+        $this->assertIsString($verify_source);
+        $this->assertStringContainsString('assertStateFileAbsent', $verify_source);
+        $this->assertStringContainsString('assertDormantClean', $verify_source);
+        $this->assertStringNotContainsString('insertOrFail', $verify_source);
+        $this->assertStringNotContainsString('writeStateFile', $verify_source);
+        $this->assertStringNotContainsString('unlink(', $verify_source);
     }
 
     public function testConsoleExposesOnlyTheFiveBoundedLifecycleActions(): void
@@ -123,5 +171,36 @@ class ProviderUiSmokeFixtureContractTest extends TestCase
                 $this->addToAssertionCount(1);
             }
         }
+    }
+
+    public function testDirectProductionCliWithoutCapabilityStopsBeforeStateMutation(): void
+    {
+        $directory = sys_get_temp_dir() . '/fh-provider-ui-smoke-negative-' . bin2hex(random_bytes(6));
+        $this->assertTrue(mkdir($directory, 0700, true));
+        $credentialFile = $directory . '/credentials.env';
+        $stateFile = $directory . '/active.json';
+        $environment = $_ENV;
+        unset($environment['FH_PROVIDER_UI_SMOKE_RUN_ID']);
+        $process = proc_open(
+            ['php', 'index.php', 'console', 'provider_ui_smoke', 'install', $credentialFile, $stateFile],
+            [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            $pipes,
+            dirname(__DIR__, 3),
+            $environment,
+        );
+
+        $this->assertIsResource($process);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $exitCode = proc_close($process);
+
+        $this->assertNotSame(0, $exitCode);
+        $this->assertIsString($stdout);
+        $this->assertIsString($stderr);
+        $this->assertFileDoesNotExist($stateFile);
+        $this->assertFileDoesNotExist($credentialFile);
+        rmdir($directory);
     }
 }
