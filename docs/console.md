@@ -83,11 +83,11 @@ You can also provide a custom directory for your backup files.
 
 ##### Provider UI Smoke
 
-The root-only `provider_ui_smoke` lifecycle supports the isolated production
-Provider UI release gate. Operators must use the guarded wrappers rather than
-calling it directly. See
+The root-only `provider_ui_smoke` lifecycle belongs to the currently suspended,
+optional production Provider UI smoke. Do not call it directly or through its
+wrappers under the ROB-812 mixed-version state. See
 [`release-gate-provider-ui-smoke.md`](release-gate-provider-ui-smoke.md) for
-bootstrap, activation, cleanup, and rollback rules.
+the evidence gap and historical lifecycle design.
 
 ##### Customers UI Smoke
 

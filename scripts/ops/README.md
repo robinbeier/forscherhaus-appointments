@@ -125,11 +125,10 @@ Script inventory:
   for the release/root binding and evidence boundary.
 - `prod_logs_summary.sh` prints redacted recent production log summaries
 - `prod_validate_after_change.sh` runs the standard post-change production gate
-- `provider_ui_smoke_principal.sh` is the server-local root-only bootstrap and
-  lifecycle wrapper for the permanently dormant Provider UI smoke principal
-- `prod_provider_ui_smoke.sh` runs the operator-side Provider UI smoke with a
-  short synthetic lease, shell cleanup, and an independent ten-minute systemd
-  cleanup timer
+- `provider_ui_smoke_principal.sh` is the historical root-only lifecycle
+  wrapper for the dormant Provider UI smoke principal; it is suspended
+- `prod_provider_ui_smoke.sh` is the suspended operator-side Provider UI smoke;
+  do not start a lease under the current ROB-812 mixed-version state
 - `customers_ui_smoke_principals.sh` manages the four root-protected dormant
   Customers role principals
 - `prod_customers_ui_smoke.sh` runs their operator-side Customers view/search
