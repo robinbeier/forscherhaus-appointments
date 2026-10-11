@@ -1,5 +1,22 @@
 # Provider UI Smoke Release Gate
 
+**Status (2026-10-11): suspended.** This optional production smoke is not a
+required release gate. Do not bootstrap, activate, or run it under the current
+mixed-version ROB-812 state. The installed legacy wrappers can still be
+started, while the repository's global maintenance core is not installed.
+An interrupted run could leave an active synthetic login that ordinary backup
+or deployment does not currently veto. The existing production principal was
+verified dormant and clean on 2026-10-11; that point-in-time observation does
+not authorize a future run. The instructions below document the historical
+design and are not an executable operator procedure until a separate review
+establishes a safe lifecycle and rollout.
+
+Local provider HTTP tests cover authorization and the renderer handoff;
+the shared PDF monitor and release canary cover the common renderer path.
+They do not prove the provider-specific browser journey or both printable
+PDFs on production. Record that gap rather than treating another check as
+equivalent.
+
 Purpose: verify the provider dashboard and both provider PDF exports in
 production without reusing a real account or exposing real customer data.
 

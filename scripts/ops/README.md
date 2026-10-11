@@ -8,9 +8,10 @@ Current production monitor roles are documented in `docs/uptime-kuma.md`.
 For agent-first production diagnostics and post-change validation, start with
 `docs/ops/agent-operations.md` and the `prod_*.sh` scripts in this directory.
 
-For the on-demand, synthetic-only production Provider UI browser smoke, use
-`docs/release-gate-provider-ui-smoke.md`. It deliberately runs Playwright on the
-operator workstation, not on the production host or in Kuma.
+The optional production Provider UI browser smoke is suspended under ROB-812.
+`docs/release-gate-provider-ui-smoke.md` records its evidence boundary and
+historical design; do not run the operator during the current mixed-version
+state.
 
 For the on-demand, no-customer-data Customers UI role smoke, use
 `docs/release-gate-customers-ui-smoke.md`. It is likewise operator-side and
