@@ -23,8 +23,18 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
         file_put_contents(
             $this->wrapper,
             str_replace(
-                ['/root/deploy_ea.sh', '/var/lib/fh-defense-ordinary'],
-                [$this->sandbox . '/installed-deploy.sh', $this->sandbox . '/ordinary-state'],
+                [
+                    '/root/deploy_ea.sh',
+                    '/var/lib/fh-defense-ordinary',
+                    '/var/lib/fh-maintenance-admission',
+                    '/usr/bin/python3',
+                ],
+                [
+                    $this->sandbox . '/installed-deploy.sh',
+                    $this->sandbox . '/ordinary-state',
+                    $this->sandbox . '/maintenance-admission',
+                    $this->bin . '/python3',
+                ],
                 file_get_contents(__DIR__ . '/../../../scripts/ops/run_ordinary_live_probe.sh'),
             ),
         );
@@ -90,6 +100,10 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
         file_put_contents($this->sandbox . '/app/original-marker', 'owned');
         file_put_contents($this->log, '');
         $this->writeMock('id', "#!/bin/sh\necho 0\n");
+        $this->writeMock(
+            'python3',
+            "#!/bin/sh\nfor last do :; done\ncase \"\${MOCK_ADMISSION_STATE:-absent}\" in unknown) exit 2;; after-arm) [ -f \"\$MOCK_LOG.armed\" ] && exit 1 || exit 0;; esac\n[ -e \"\$last\" ] || [ -L \"\$last\" ] && exit 1\nexit 0\n",
+        );
         $this->writeMock(
             'realpath',
             '#!/bin/sh' . PHP_EOL . 'for last do :; done' . PHP_EOL . 'printf "%s\\n" "$last"' . PHP_EOL,
@@ -175,6 +189,7 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
     {
         $result = $this->executeWrapper('account');
         self::assertSame(0, $result['status'], $result['error'] . implode("\\n", $result['lines']));
+        self::assertSame('', $result['stdout']);
         self::assertSame(
             ['preflight', 'activate', 'account', 'deactivate', 'verify'],
             $this->actions($result['lines']),
@@ -290,6 +305,148 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
         self::assertNotEmpty($result['lines']);
         self::assertNotContains('php', $this->prefixes($result['lines']));
         self::assertNotContains('systemd-run', $this->prefixes($result['lines']));
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('presentAdmissionStates')]
+    public function testPresentAdmissionPathRefusesBeforeAnyWriter(string $state): void
+    {
+        if ($state === 'directory') {
+            mkdir($this->sandbox . '/maintenance-admission', 0700);
+        } else {
+            symlink($this->sandbox . '/missing-admission-target', $this->sandbox . '/maintenance-admission');
+        }
+        $result = $this->executeWrapper('account', ['MOCK_ADMISSION_STATE' => 'present']);
+        self::assertSame(1, $result['status']);
+        self::assertSame([], $this->actions($result['lines']));
+        self::assertNotContains('systemd-run', $this->prefixes($result['lines']));
+        self::assertNotContains('pending-begin', $result['lines']);
+    }
+
+    /** @return iterable<string,array{string}> */
+    public static function presentAdmissionStates(): iterable
+    {
+        yield 'directory' => ['directory'];
+        yield 'dangling symlink' => ['symlink'];
+    }
+
+    public function testUnknownAdmissionLookupRefusesBeforeAnyWriter(): void
+    {
+        $result = $this->executeWrapper('account', ['MOCK_ADMISSION_STATE' => 'unknown']);
+        self::assertSame(2, $result['status']);
+        self::assertSame([], $this->actions($result['lines']));
+        self::assertNotContains('systemd-run', $this->prefixes($result['lines']));
+        self::assertNotContains('pending-begin', $result['lines']);
+    }
+
+    public function testPreflightAndVerifyRefuseBeforePhpWhenAdmissionIsPresentOrUnknown(): void
+    {
+        mkdir($this->sandbox . '/maintenance-admission', 0700);
+        foreach (['preflight', 'verify'] as $action) {
+            foreach (['present' => 1, 'unknown' => 2] as $state => $expectedStatus) {
+                file_put_contents($this->log, '');
+                $result = $this->executeWrapper($action, ['MOCK_ADMISSION_STATE' => $state]);
+                self::assertSame($expectedStatus, $result['status'], $action . '/' . $state . ': ' . $result['error']);
+                self::assertSame([], $this->actions($result['lines']));
+                self::assertNotContains('systemd-run', $this->prefixes($result['lines']));
+                self::assertNotContains('pending-begin', $result['lines']);
+            }
+        }
+    }
+
+    public function testPreflightAndVerifyRemainAvailableWhenAdmissionIsAbsent(): void
+    {
+        foreach (['preflight', 'verify'] as $action) {
+            file_put_contents($this->log, '');
+            $result = $this->executeWrapper($action);
+            self::assertSame(0, $result['status'], $action . ': ' . $result['error']);
+            self::assertSame([$action], $this->actions($result['lines']));
+            self::assertNotContains('systemd-run', $this->prefixes($result['lines']));
+        }
+    }
+
+    public function testEmbeddedGuardClassifiesSymlinkAncestorAndMissingLeafFailClosed(): void
+    {
+        $wrapper = file_get_contents($this->wrapper);
+        self::assertIsString($wrapper);
+        self::assertSame(
+            1,
+            preg_match(
+                "~ordinary_assert_maintenance_admission_absent\(\) \{.*?<<'PY'\\n(.*?)\\nPY~s",
+                $wrapper,
+                $match,
+            ),
+        );
+        $guard = $match[1];
+
+        $run = function (string $lstatStub) use ($guard): array {
+            $program = str_replace('path = sys.argv[1]', $lstatStub . "\npath = sys.argv[1]", $guard);
+            $process = proc_open(
+                ['/usr/bin/python3', '-I', '-B', '-', '/safe/leaf'],
+                [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+                $pipes,
+            );
+            self::assertIsResource($process);
+            fwrite($pipes[0], $program);
+            fclose($pipes[0]);
+            $stdout = stream_get_contents($pipes[1]);
+            $stderr = stream_get_contents($pipes[2]);
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+            return ['status' => proc_close($process), 'stdout' => $stdout, 'stderr' => $stderr];
+        };
+
+        $symlinkAncestor = $run(
+            <<<'PY'
+            class Metadata:
+                st_uid = 0
+                st_mode = 0o120777
+
+            def fake_lstat(path):
+                return Metadata()
+
+            os.lstat = fake_lstat
+            PY
+            ,
+        );
+        self::assertSame(2, $symlinkAncestor['status']);
+        self::assertSame('', $symlinkAncestor['stdout']);
+
+        $missingLeaf = $run(
+            <<<'PY'
+            class Directory:
+                st_uid = 0
+                st_mode = 0o40755
+
+            def fake_lstat(path):
+                if path == '/safe/leaf':
+                    raise FileNotFoundError()
+                return Directory()
+
+            os.lstat = fake_lstat
+            PY
+            ,
+        );
+        self::assertSame(0, $missingLeaf['status']);
+        self::assertSame('', $missingLeaf['stdout']);
+    }
+
+    public function testDelayedCallbackRechecksAdmissionAfterPathAppears(): void
+    {
+        $result = $this->executeWrapper('account', [
+            'MOCK_ADMISSION_STATE' => 'after-arm',
+            'MOCK_CALLBACK_RENAME' => '1',
+        ]);
+        self::assertSame(1, $result['status']);
+        self::assertContains('callback-exit:1', $result['lines']);
+        self::assertSame(['preflight', 'deactivate', 'verify'], $this->actions($result['lines']));
+        self::assertCount(
+            1,
+            array_filter(
+                $result['lines'],
+                static fn(string $line): bool => str_starts_with($line, 'php ') &&
+                    str_contains($line, '--action=deactivate'),
+            ),
+        );
     }
 
     public function testBusySharedLockAndPendingRecoveryPreventAnyProbe(): void
@@ -462,7 +619,7 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
         );
     }
 
-    /** @param array<string,string> $extra @return array{status:int,lines:list<string>,error:string} */
+    /** @param array<string,string> $extra @return array{status:int,lines:list<string>,error:string,stdout:string} */
     private function executeWrapper(string $action, array $extra = []): array
     {
         $env = array_merge(
@@ -483,14 +640,14 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
             $env,
         );
         self::assertIsResource($process);
-        stream_get_contents($pipes[1]);
+        $stdout = stream_get_contents($pipes[1]);
         $error = stream_get_contents($pipes[2]);
         $status = proc_close($process);
         $lines = file($this->log, FILE_IGNORE_NEW_LINES) ?: [];
         if ($status !== 0 && $error !== '') {
             $lines[] = 'STDERR ' . trim($error);
         }
-        return ['status' => $status, 'lines' => $lines, 'error' => $error];
+        return ['status' => $status, 'lines' => $lines, 'error' => $error, 'stdout' => $stdout];
     }
 
     private function writeMock(string $name, string $body): void
