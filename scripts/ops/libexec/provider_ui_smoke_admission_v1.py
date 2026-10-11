@@ -119,9 +119,24 @@ def assert_bound_fd(args: argparse.Namespace) -> None:
     # descriptor locked for the whole fixture transaction after this check.
     if args.lock_fd != 3:
         fail('lock_fd_invalid', 64)
+    expected_operation = {'install': 'install', 'activate': 'smoke',
+                          'deactivate': 'smoke', 'remove': 'remove'}[args.lifecycle_action]
+    if args.operation != expected_operation:
+        fail('lifecycle_operation_mismatch', 64)
     try:
         with core.maintenance_recovery_from_lock_fd(args.lock_fd) as admission:
-            expected_record(core, args.run_id, args.operation, resource)
+            record = expected_record(core, args.run_id, args.operation, resource)
+            if args.lifecycle_action == 'activate':
+                # This check runs on the server while PHP holds the canonical
+                # shared lock through its fixture transaction. If the timer
+                # already fired during a delayed SSH acknowledgement, refuse
+                # activation. If it fires after this check, its cleanup
+                # service cannot mutate until PHP releases the same lock.
+                arm_ack = _read_arm_ack(resource)
+                if arm_ack != _ack_record(record):
+                    fail('arm_ack_binding_changed')
+                unit_armed(args.cleanup_unit + '.timer', resource, args.run_id)
+                unit_armed(args.cleanup_unit + '.service', resource, args.run_id)
             admission.admit()
     except core.PendingError as error:
         fail(error.reason, error.code)
@@ -598,6 +613,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--operation', choices=sorted(ACTION_NAMES), required=True)
     parser.add_argument('--run-id')
     parser.add_argument('--lock-fd', type=int)
+    parser.add_argument('--lifecycle-action', choices=('install', 'activate', 'deactivate', 'remove'))
     parser.add_argument('--app-root', required=True)
     parser.add_argument('--credentials-file', required=True)
     parser.add_argument('--state-file', required=True)
@@ -609,6 +625,8 @@ def main() -> None:
     args = build_parser().parse_args()
     if (args.action == 'assert-bound-fd') != (args.lock_fd is not None):
         fail('lock_fd_scope_invalid', 64)
+    if (args.action == 'assert-bound-fd') != (args.lifecycle_action is not None):
+        fail('lifecycle_action_scope_invalid', 64)
     if args.action == 'begin' and args.run_id:
         fail('run_id_not_allowed', 64)
     if args.action != 'begin' and (not args.run_id or len(args.run_id) != RUN_ID_BYTES * 2):

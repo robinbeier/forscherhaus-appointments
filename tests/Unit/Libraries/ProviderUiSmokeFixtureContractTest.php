@@ -153,6 +153,7 @@ class ProviderUiSmokeFixtureContractTest extends TestCase
         $this->assertTrue($admission_position < $credential_position);
         $this->assertTrue($credential_position < $transaction_position);
         $this->assertStringContainsString("getenv('FH_PROVIDER_UI_SMOKE_RUN_ID')", $source);
+        $this->assertStringContainsString("'--lifecycle-action'", $source);
     }
 
     public function testVerifyIsTheReadOnlyExceptionForTheLockHeldFinalizer(): void

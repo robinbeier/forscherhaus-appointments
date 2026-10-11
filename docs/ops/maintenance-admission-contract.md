@@ -110,6 +110,12 @@ Provider uses `fh-provider-ui-smoke-cleanup` and
   executing. The pending veto remains until a separate lock-held finalizer
   proves the exact service terminal, timer disarmed, and the fixture's
   operation-specific terminal state.
+  Activation rechecks the run-bound acknowledgement and still-waiting timer
+  while holding the same shared lock as its fixture transaction. A timer that
+  expired during a delayed operator response therefore cannot precede a new
+  activation; one that fires afterward waits for that transaction. The
+  one-shot deactivation waits up to five minutes for lock contention before failing into
+  the explicit recovery state.
   Timer ownership and elapsed time are not terminal cleanup proof.
 * **Unknown `systemd-run` response:** a lost SSH or `systemd-run` response is
   an unresolved pending operation, never evidence that no timer or service was

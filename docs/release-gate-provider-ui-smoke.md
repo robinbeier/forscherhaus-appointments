@@ -160,6 +160,10 @@ The orchestrator:
    `systemd-run --on-active=10m`, and durably acknowledges its exact loaded
    identity under the private and shared locks before activation;
 6. activates the synthetic lease;
+   the server rechecks the acknowledged, still-waiting timer under the same
+   shared lock as the fixture transaction immediately before activation;
+   a timer that expired during a delayed operator acknowledgement refuses the
+   activation;
 7. binds the locally reviewed four-line preparation template to the active
    deployment by SHA-256, then streams `ssh ... cat` directly into the local
    gate's standard input;

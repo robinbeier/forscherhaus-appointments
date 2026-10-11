@@ -114,6 +114,7 @@ class ProviderUiSmokeAdmissionBehaviorTest(unittest.TestCase):
             state_file="/var/lib/fh-provider/active.json",
             cleanup_unit="fh-provider-ui-smoke-cleanup",
             lock_fd=3 if action == "assert-bound-fd" else None,
+            lifecycle_action="deactivate" if action == "assert-bound-fd" else None,
         )
 
     def test_unit_terminal_rejects_unknown_unit_identity(self):
@@ -139,6 +140,20 @@ class ProviderUiSmokeAdmissionBehaviorTest(unittest.TestCase):
         with patch.object(COORD.subprocess, "run", return_value=result):
             with self.assertRaises(SystemExit) as raised:
                 COORD.unit_terminal(unit, resource, "a" * 32)
+        self.assertEqual(raised.exception.code, 75)
+
+    def test_unit_armed_rejects_elapsed_one_shot_timer(self):
+        unit = "fh-provider-ui-smoke-cleanup.timer"
+        result = types.SimpleNamespace(
+            returncode=0,
+            stdout=(f"Id={unit}\nLoadState=loaded\nTransient=yes\n"
+                    "ActiveState=active\nSubState=elapsed\n"
+                    "Triggers=fh-provider-ui-smoke-cleanup.service\n"),
+            stderr="",
+        )
+        with patch.object(COORD.subprocess, "run", return_value=result):
+            with self.assertRaises(SystemExit) as raised:
+                COORD.unit_armed(unit, self.resource(), "a" * 32)
         self.assertEqual(raised.exception.code, 75)
 
     def test_cleanup_service_rejects_wrong_command_even_with_correct_run_id(self):
@@ -551,6 +566,66 @@ class ProviderUiSmokeAdmissionBehaviorTest(unittest.TestCase):
                 COORD.assert_bound_fd(args)
         self.assertEqual(raised.exception.code, 64)
         self.assertFalse(core.recovery.admitted)
+
+    def test_activate_refuses_timer_that_expired_after_arm_ack(self):
+        resource = self.resource()
+        record = FakeCore(None).make_record(
+            COORD.OPERATION, "a" * 32, "boot-test", resource)
+        core = FakeCore(record)
+        args = self.args("assert-bound-fd")
+        args.lifecycle_action = "activate"
+        with patch.object(COORD, "load_core", return_value=core), \
+             patch.object(COORD, "_read_arm_ack", return_value=COORD._ack_record(record)), \
+             patch.object(COORD, "unit_armed", side_effect=SystemExit(75)) as armed:
+            with self.assertRaises(SystemExit) as raised:
+                COORD.assert_bound_fd(args)
+        self.assertEqual(raised.exception.code, 75)
+        armed.assert_called_once_with(
+            "fh-provider-ui-smoke-cleanup.timer", resource, "a" * 32)
+        self.assertFalse(core.recovery.admitted)
+
+    def test_activate_requires_current_ack_and_live_timer_before_admission(self):
+        resource = self.resource()
+        record = FakeCore(None).make_record(
+            COORD.OPERATION, "a" * 32, "boot-test", resource)
+        core = FakeCore(record)
+        args = self.args("assert-bound-fd")
+        args.lifecycle_action = "activate"
+        with patch.object(COORD, "load_core", return_value=core), \
+             patch.object(COORD, "_read_arm_ack", return_value=COORD._ack_record(record)), \
+             patch.object(COORD, "unit_armed", return_value=True) as armed:
+            COORD.assert_bound_fd(args)
+        self.assertTrue(core.recovery.admitted)
+        self.assertEqual(armed.call_count, 2)
+        self.assertEqual(
+            armed.call_args_list[0].args[0], "fh-provider-ui-smoke-cleanup.timer")
+
+    def test_activate_refuses_missing_arm_ack_before_admission(self):
+        resource = self.resource()
+        record = FakeCore(None).make_record(
+            COORD.OPERATION, "a" * 32, "boot-test", resource)
+        core = FakeCore(record)
+        args = self.args("assert-bound-fd")
+        args.lifecycle_action = "activate"
+        with patch.object(COORD, "load_core", return_value=core), \
+             patch.object(COORD, "_read_arm_ack", return_value=None), \
+             patch.object(COORD, "unit_armed") as armed:
+            with self.assertRaises(SystemExit) as raised:
+                COORD.assert_bound_fd(args)
+        self.assertEqual(raised.exception.code, 75)
+        self.assertFalse(core.recovery.admitted)
+        armed.assert_not_called()
+
+    def test_deactivate_remains_admissible_after_timer_has_fired(self):
+        resource = self.resource()
+        record = FakeCore(None).make_record(
+            COORD.OPERATION, "a" * 32, "boot-test", resource)
+        core = FakeCore(record)
+        with patch.object(COORD, "load_core", return_value=core), \
+             patch.object(COORD, "unit_armed") as armed:
+            COORD.assert_bound_fd(self.args("assert-bound-fd"))
+        self.assertTrue(core.recovery.admitted)
+        armed.assert_not_called()
 
     def test_late_php_child_cannot_start_after_pending_was_settled(self):
         resource = self.resource("smoke")

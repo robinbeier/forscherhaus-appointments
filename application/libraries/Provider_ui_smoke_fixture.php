@@ -1593,6 +1593,8 @@ final class Provider_ui_smoke_fixture
             '3',
             '--operation',
             $operation,
+            '--lifecycle-action',
+            $action,
             '--run-id',
             $runId,
             '--app-root',
