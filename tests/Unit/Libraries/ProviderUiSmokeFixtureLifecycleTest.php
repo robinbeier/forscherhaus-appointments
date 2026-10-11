@@ -356,38 +356,6 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
         $this->assertFileDoesNotExist($this->stateFile);
     }
 
-    public function testInstallFailsClosedOnAnExistingSyntheticMarkerWithoutLeavingAPrincipal(): void
-    {
-        $this->assertTrue(
-            $this->CI->db->insert('services', [
-                'name' => Provider_ui_smoke_fixture::SERVICE_NAME,
-                'description' => 'collision',
-            ]),
-        );
-
-        try {
-            $this->fixture->run('install', $this->credentialFile, $this->stateFile);
-            $this->fail('A pre-existing marker must stop installation.');
-        } catch (RuntimeException) {
-            $this->addToAssertionCount(1);
-        } finally {
-            $this->CI->db->delete('services', ['name' => Provider_ui_smoke_fixture::SERVICE_NAME]);
-        }
-
-        $this->assertSame(
-            0,
-            $this->CI->db
-                ->get_where('user_settings', ['username' => Provider_ui_smoke_access_policy::USERNAME])
-                ->num_rows(),
-        );
-        $this->assertSame(
-            0,
-            $this->CI->db
-                ->get_where('roles', ['slug' => Provider_ui_smoke_access_policy::DORMANT_ROLE_SLUG])
-                ->num_rows(),
-        );
-    }
-
     public function testForeignAppointmentMarkerDoesNotBlockInstallOrRemoval(): void
     {
         $foreignProviderId = $this->foreignProviderId();
@@ -480,6 +448,128 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
             $this->assertForeignCustomerUnchanged($foreignCustomerId, $foreignCustomer);
         } finally {
             $this->CI->db->delete('users', ['id' => $foreignCustomerId]);
+        }
+    }
+
+    public function testForeignServiceMarkerDoesNotBlockInstallOrRemoval(): void
+    {
+        $foreignProviderId = $this->foreignProviderId();
+        $foreignServiceId = $this->insertForeignServiceMarker($foreignProviderId);
+        $foreignService = $this->CI->db->get_where('services', ['id' => $foreignServiceId])->row_array();
+
+        try {
+            $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+            $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
+            $this->assertSame(
+                $foreignService,
+                $this->CI->db->get_where('services', ['id' => $foreignServiceId])->row_array(),
+            );
+            $this->assertSame(
+                1,
+                $this->CI->db
+                    ->get_where('services_providers', [
+                        'id_users' => $foreignProviderId,
+                        'id_services' => $foreignServiceId,
+                    ])
+                    ->num_rows(),
+            );
+        } finally {
+            $this->CI->db->delete('services_providers', [
+                'id_users' => $foreignProviderId,
+                'id_services' => $foreignServiceId,
+            ]);
+            $this->CI->db->delete('services', ['id' => $foreignServiceId]);
+        }
+    }
+
+    public function testForeignServiceMarkerDoesNotAffectStateLossReconstruction(): void
+    {
+        $foreignProviderId = $this->foreignProviderId();
+        $foreignServiceId = $this->insertForeignServiceMarker($foreignProviderId);
+        $foreignService = $this->CI->db->get_where('services', ['id' => $foreignServiceId])->row_array();
+
+        try {
+            $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+            $this->assertSame('active', $this->fixture->run('activate', $this->credentialFile, $this->stateFile));
+            $this->assertTrue(unlink($this->stateFile));
+            $this->assertSame('dormant', $this->fixture->run('deactivate', $this->credentialFile, $this->stateFile));
+            $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
+            $this->assertSame(
+                $foreignService,
+                $this->CI->db->get_where('services', ['id' => $foreignServiceId])->row_array(),
+            );
+            $this->assertSame(
+                1,
+                $this->CI->db
+                    ->get_where('services_providers', [
+                        'id_users' => $foreignProviderId,
+                        'id_services' => $foreignServiceId,
+                    ])
+                    ->num_rows(),
+            );
+        } finally {
+            $this->CI->db->delete('services_providers', [
+                'id_users' => $foreignProviderId,
+                'id_services' => $foreignServiceId,
+            ]);
+            $this->CI->db->delete('services', ['id' => $foreignServiceId]);
+        }
+    }
+
+    public function testForeignProviderDormantNoteDoesNotBlockInstallOrRemoval(): void
+    {
+        $foreignProviderId = $this->foreignProviderId();
+        $foreignProvider = $this->CI->db->get_where('users', ['id' => $foreignProviderId])->row_array();
+        $this->assertTrue(
+            $this->CI->db->update(
+                'users',
+                [
+                    'notes' => Provider_ui_smoke_access_policy::DORMANT_NOTES,
+                ],
+                ['id' => $foreignProviderId],
+            ),
+        );
+
+        try {
+            $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+            $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
+            $this->assertSame(
+                Provider_ui_smoke_access_policy::DORMANT_NOTES,
+                $this->CI->db->get_where('users', ['id' => $foreignProviderId])->row_array()['notes'],
+            );
+        } finally {
+            $this->CI->db->update('users', ['notes' => $foreignProvider['notes']], ['id' => $foreignProviderId]);
+        }
+    }
+
+    public function testForeignProviderActiveNoteDoesNotAffectStateReconstruction(): void
+    {
+        $foreignProviderId = $this->foreignProviderId();
+        $foreignProvider = $this->CI->db->get_where('users', ['id' => $foreignProviderId])->row_array();
+        $issuedAt = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        $activeNotes = Provider_ui_smoke_access_policy::buildActiveNotes($issuedAt, $issuedAt->modify('+5 minutes'));
+        $this->assertTrue(
+            $this->CI->db->update(
+                'users',
+                [
+                    'notes' => $activeNotes,
+                ],
+                ['id' => $foreignProviderId],
+            ),
+        );
+
+        try {
+            $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+            $this->assertSame('active', $this->fixture->run('activate', $this->credentialFile, $this->stateFile));
+            $this->assertTrue(unlink($this->stateFile));
+            $this->assertSame('dormant', $this->fixture->run('deactivate', $this->credentialFile, $this->stateFile));
+            $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
+            $this->assertSame(
+                $activeNotes,
+                $this->CI->db->get_where('users', ['id' => $foreignProviderId])->row_array()['notes'],
+            );
+        } finally {
+            $this->CI->db->update('users', ['notes' => $foreignProvider['notes']], ['id' => $foreignProviderId]);
         }
     }
 
@@ -967,6 +1057,39 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
         );
 
         return (int) $this->CI->db->insert_id();
+    }
+
+    private function insertForeignServiceMarker(int $providerId): int
+    {
+        $now = date('Y-m-d H:i:s');
+        $this->assertTrue(
+            $this->CI->db->insert('services', [
+                'create_datetime' => $now,
+                'update_datetime' => $now,
+                'name' => Provider_ui_smoke_fixture::SERVICE_NAME,
+                'duration' => 30,
+                'buffer_before' => 0,
+                'buffer_after' => 0,
+                'price' => 0,
+                'currency' => 'EUR',
+                'description' => Provider_ui_smoke_fixture::SERVICE_DESCRIPTION,
+                'location' => null,
+                'color' => '#6c757d',
+                'availabilities_type' => AVAILABILITIES_TYPE_FLEXIBLE,
+                'attendants_number' => 1,
+                'is_private' => 1,
+                'id_service_categories' => null,
+            ]),
+        );
+        $serviceId = (int) $this->CI->db->insert_id();
+        $this->assertTrue(
+            $this->CI->db->insert('services_providers', [
+                'id_users' => $providerId,
+                'id_services' => $serviceId,
+            ]),
+        );
+
+        return $serviceId;
     }
 
     /**

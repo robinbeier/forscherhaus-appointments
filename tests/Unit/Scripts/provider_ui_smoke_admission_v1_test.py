@@ -853,6 +853,127 @@ class ProviderUiSmokeAdmissionBehaviorTest(unittest.TestCase):
         self.assertEqual(raised.exception.code, 75)
         remove.assert_not_called()
 
+    def test_interrupted_arm_ack_pair_recovery_removes_only_temporary_link(self):
+        resource = self.resource('smoke')
+        record = {
+            'schema': 'maintenance_pending_v1', 'epoch': 1,
+            'run_id': 'a' * 32, 'boot_id': 'boot-test',
+            'operation': 'provider_ui_smoke', 'resource_identity': resource,
+        }
+        core = FakeCore(record)
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory)
+            resource['state_file'] = str(state_dir / 'active.json')
+            payload = (json.dumps(COORD._ack_record(record), sort_keys=True,
+                                  separators=(',', ':')) + '\n').encode()
+            temporary = state_dir / f'.{COORD.ARM_ACK_LEAF}.{record["run_id"]}.tmp'
+            final = state_dir / COORD.ARM_ACK_LEAF
+            temporary.write_bytes(payload)
+            os.link(temporary, final)
+            with patch.object(COORD, 'private_cleanup_lock', lambda: contextlib.nullcontext()), \
+                 patch.object(COORD, 'load_core', return_value=core), \
+                 patch.object(COORD, '_require_state_directory', return_value=(state_dir, (1, 2, 0o40700, 0, 0, 2))), \
+                 patch.object(COORD, '_read_interrupted_arm_ack_pair', return_value=temporary), \
+                 patch.object(COORD, '_ensure_credential_temp_absent'), \
+                 patch.object(COORD, 'unit_terminal', return_value=True), \
+                 patch.object(COORD, 'dormant_clean', return_value=True), \
+                 patch.object(COORD, '_read_arm_ack', return_value=COORD._ack_record(record)), \
+                 patch.object(COORD, '_remove_arm_ack') as remove_ack, \
+                 contextlib.redirect_stdout(io.StringIO()):
+                args = self.args('recover-interrupted-arm-ack')
+                args.state_file = str(state_dir / 'active.json')
+                COORD.recover_interrupted_arm_ack(args)
+            self.assertFalse(temporary.exists())
+            self.assertTrue(final.exists())
+            remove_ack.assert_called_once_with(resource)
+
+    def test_interrupted_arm_ack_pair_recovery_refuses_nonterminal_units(self):
+        resource = self.resource('smoke')
+        record = {
+            'run_id': 'a' * 32, 'boot_id': 'boot-test',
+            'operation': 'provider_ui_smoke', 'resource_identity': resource,
+        }
+        core = FakeCore(record)
+        temporary = Path('/tmp/provider-ui-smoke-test.tmp')
+        with patch.object(COORD, 'private_cleanup_lock', lambda: contextlib.nullcontext()), \
+             patch.object(COORD, 'load_core', return_value=core), \
+             patch.object(COORD, '_read_interrupted_arm_ack_pair', return_value=temporary), \
+             patch.object(COORD, '_ensure_credential_temp_absent'), \
+             patch.object(COORD, 'unit_terminal', side_effect=SystemExit(75)):
+            with self.assertRaises(SystemExit) as raised:
+                COORD.recover_interrupted_arm_ack(self.args('recover-interrupted-arm-ack'))
+        self.assertEqual(raised.exception.code, 75)
+
+    def test_interrupted_arm_ack_pair_reader_accepts_exact_pair(self):
+        resource = self.resource('smoke')
+        record = {
+            'run_id': 'a' * 32, 'boot_id': 'boot-test',
+            'operation': 'provider_ui_smoke', 'resource_identity': resource,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory)
+            resource['state_file'] = str(state_dir / 'active.json')
+            payload = (json.dumps(COORD._ack_record(record), sort_keys=True,
+                                  separators=(',', ':')) + '\n').encode()
+            temporary = state_dir / f'.{COORD.ARM_ACK_LEAF}.{record["run_id"]}.tmp'
+            final = state_dir / COORD.ARM_ACK_LEAF
+            temporary.write_bytes(payload)
+            os.link(temporary, final)
+            real_stat = COORD.os.stat
+
+            def fake_stat(path, *args, **kwargs):
+                value = Path(path)
+                actual = real_stat(path, *args, **kwargs)
+                if value in (final, temporary):
+                    return os.stat_result((stat.S_IFREG | 0o600, 22, 1, 2,
+                                           0, 0, len(payload), 0, 0, 0))
+                if value == state_dir:
+                    return os.stat_result((stat.S_IFDIR | 0o700, 2, 1, 2,
+                                           0, 0, 0, 0, 0, 0))
+                return actual
+
+            with patch.object(COORD, '_require_state_directory',
+                              return_value=(state_dir, (1, 2, 0o40700, 0, 0, 2))), \
+                 patch.object(COORD.os, 'stat', side_effect=fake_stat):
+                self.assertEqual(
+                    COORD._read_interrupted_arm_ack_pair(resource, record),
+                    temporary)
+
+    def test_interrupted_arm_ack_pair_refuses_extra_hardlink(self):
+        resource = self.resource('smoke')
+        record = {
+            'run_id': 'a' * 32, 'boot_id': 'boot-test',
+            'operation': 'provider_ui_smoke', 'resource_identity': resource,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory)
+            resource['state_file'] = str(state_dir / 'active.json')
+            payload = (json.dumps(COORD._ack_record(record), sort_keys=True,
+                                  separators=(',', ':')) + '\n').encode()
+            temporary = state_dir / f'.{COORD.ARM_ACK_LEAF}.{record["run_id"]}.tmp'
+            final = state_dir / COORD.ARM_ACK_LEAF
+            extra = state_dir / 'unrelated-link'
+            temporary.write_bytes(payload)
+            os.link(temporary, final)
+            os.link(temporary, extra)
+            real_stat = COORD.os.stat
+
+            def fake_stat(path, *args, **kwargs):
+                value = Path(path)
+                actual = real_stat(path, *args, **kwargs)
+                if value in (final, temporary, extra):
+                    return os.stat_result((stat.S_IFREG | 0o600, 22, 1, 3,
+                                           0, 0, len(payload), 0, 0, 0))
+                if value == state_dir:
+                    return os.stat_result((stat.S_IFDIR | 0o700, 2, 1, 2,
+                                           0, 0, 0, 0, 0, 0))
+                return actual
+
+            with patch.object(COORD.os, 'stat', side_effect=fake_stat):
+                with self.assertRaises(SystemExit) as raised:
+                    COORD._read_interrupted_arm_ack_pair(resource, record)
+            self.assertEqual(raised.exception.code, 75)
+
     def test_ack_arm_persists_exact_positive_run_and_resource_binding(self):
         resource = self.resource("smoke")
         record = {

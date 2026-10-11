@@ -91,13 +91,15 @@ coordinator's lock-held terminal proof. The wrapper captures lifecycle output
 in memory; a direct `verify` does not create a temporary file. A lost cleanup
 timer acknowledgement retains the pending record and requires reconciliation;
 it must not be interpreted as a completed disarm.
-Fixture ownership is deliberately narrow: appointment notes and customer email
-fields are not global ownership markers. The synthetic appointment marker is
-bound to the reserved smoke provider; the private synthetic customer uses
-`email = NULL`. Its server-side notes sentinel is checked only on the run-owned
-customer ID, reconstructed from the reserved provider's exact appointments if
-the state file is lost. A global customer-notes match cannot claim ownership
-or block cleanup. This preserves the no-email production contract.
+Fixture ownership is deliberately narrow: appointment and principal notes,
+customer email, and service name/description fields are not global ownership
+markers. The reserved principal is identified by server-controlled username
+and email. The synthetic appointment marker is bound to that provider; the
+private synthetic customer uses `email = NULL`. Its server-side notes sentinel
+is checked only on the run-owned customer ID. If the state file is lost, the
+customer and service IDs are reconstructed from exact provider-owned
+appointments and the service relation. A global text match cannot claim
+ownership or block cleanup. This preserves the no-email production contract.
 The smoke coordinator performs the initial dormant proof while holding both
 the private lifecycle lock and the shared maintenance lock, immediately before
 publishing the pending record. A failed proof therefore publishes no new
@@ -228,6 +230,14 @@ mismatches, stale ACKs or ACK temporaries, active units, unknown fixture state,
 credential temporaries and interrupted acknowledgement publication retain the
 veto. Ordinary settlement and generic success flags cannot clear this marker,
 and this path is not an automatic retry.
+An ACK publication interrupted between creation of its final hardlink and
+removal of its temporary name requires the explicit server-local
+`recover-interrupted-arm-ack` action. It accepts only the exact two-link
+root-owned inode and ACK content bound to the persisted smoke run, with
+credential temporaries absent, bound cleanup units terminal, and the fixture
+freshly dormant under the private and shared locks. It removes only the
+verified temporary name before normal pending settlement; mismatched or
+unknown state keeps the veto. This path never retries activation.
 For an interrupted Provider UI `install` that may have published pending state
 before fixture creation, the coordinator has a separate
 explicit `recover-install-empty` action. It accepts the exact install record

@@ -23,15 +23,17 @@ While dormant, the principal has no provider permissions and its database
 password verifier and salt are `NULL`. The root-only credential file therefore
 does not create a usable standing login.
 
-Fixture ownership is deliberately narrow. Appointment notes and customer email
-fields are not global ownership markers: a public appointment note or an
-unrelated customer's email must never block the Provider UI fixture. The
-synthetic appointment marker is bound to the reserved smoke provider; the
-private synthetic customer uses `email = NULL`. Its server-side notes sentinel
-is checked only on the run-owned customer ID. If the state file is lost, that
-ID is reconstructed from the reserved provider's exact appointments, not from
-a global search for customer notes. An unrelated customer with the same notes
-cannot claim fixture ownership or block cleanup.
+Fixture ownership is deliberately narrow. Appointment and principal notes,
+customer email, and service name/description fields are not global ownership
+markers: unrelated rows carrying the same text must never block the Provider
+UI fixture. The reserved principal is identified by its server-controlled
+username and email; the synthetic appointment marker is bound to that provider.
+The private synthetic customer uses `email = NULL`, and its server-side notes
+sentinel is checked only on the run-owned customer ID. If the state file is
+lost, the customer and service IDs are reconstructed from the reserved
+provider's exact appointments and service relation, not from global text
+searches. Unrelated rows with matching text cannot claim fixture ownership or
+block cleanup.
 This prevents cleanup and verification from claiming unrelated real data while
 preserving the no-email production contract.
 
@@ -223,6 +225,15 @@ reports `dormant` before clearing Pending. It does not retry removal, delete
 credentials, or accept an active, removed, partial, or unknown fixture. If
 the remove transaction committed, ordinary settlement instead requires the
 `removed` proof.
+
+If ACK publication is interrupted after the final hardlink appears but before
+the temporary name is removed, `recover-interrupted-arm-ack` is the explicit
+server-local path. Under the private and shared locks, it requires the exact
+two-link final/temporary inode and ACK content bound to the pending run, no
+credential temporary, terminal cleanup units, and a fresh dormant proof. It
+removes only the verified temporary name, then settles the same pending run;
+an extra link, mismatched content, active unit, or unknown fixture retains the
+veto. This is not an automatic rerun of the smoke.
 
 If settlement has already created the core's immutable `clear-state.json`
 marker and is interrupted, the separate server-local `recover-clear-marker`

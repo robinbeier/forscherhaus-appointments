@@ -420,6 +420,60 @@ def _read_arm_ack(resource):
     return value
 
 
+def _read_interrupted_arm_ack_pair(resource, record):
+    """Read the exact hardlink pair left by a crash during ACK publication.
+
+    The normal reader deliberately rejects a two-link ACK.  Recovery may
+    inspect that state only when the final and run-specific temporary names
+    are the same root-owned inode, contain identical bytes, and decode to the
+    exact pending record.  Any extra link or disagreement remains unknown.
+    """
+    directory, directory_identity = _require_state_directory(resource)
+    final_path = _ack_path(resource)
+    temporary = directory / f'.{ARM_ACK_LEAF}.{record["run_id"]}.tmp'
+    try:
+        final_metadata = os.stat(final_path, follow_symlinks=False)
+        temporary_metadata = os.stat(temporary, follow_symlinks=False)
+    except (FileNotFoundError, OSError):
+        fail('arm_ack_interrupted_unknown')
+    pair_metadata_valid = lambda metadata: (
+        stat.S_ISREG(metadata.st_mode) and metadata.st_uid == 0 and
+        metadata.st_gid == 0 and metadata.st_nlink == 2 and
+        metadata.st_size <= MAX_ARM_ACK_BYTES and
+        stat.S_IMODE(metadata.st_mode) == 0o600)
+    if (not pair_metadata_valid(final_metadata) or
+            not pair_metadata_valid(temporary_metadata) or
+            final_metadata.st_dev != temporary_metadata.st_dev or
+            final_metadata.st_ino != temporary_metadata.st_ino or
+            final_metadata.st_size != temporary_metadata.st_size):
+        fail('arm_ack_interrupted_unknown')
+    try:
+        with os.fdopen(os.open(final_path, os.O_RDONLY | os.O_CLOEXEC |
+                               os.O_NOFOLLOW | os.O_NONBLOCK), 'rb') as handle:
+            final_bytes = handle.read(MAX_ARM_ACK_BYTES + 1)
+        with os.fdopen(os.open(temporary, os.O_RDONLY | os.O_CLOEXEC |
+                               os.O_NOFOLLOW | os.O_NONBLOCK), 'rb') as handle:
+            temporary_bytes = handle.read(MAX_ARM_ACK_BYTES + 1)
+        final_after = os.stat(final_path, follow_symlinks=False)
+        temporary_after = os.stat(temporary, follow_symlinks=False)
+        directory_after = os.stat(directory, follow_symlinks=False)
+    except (OSError, ValueError):
+        fail('arm_ack_interrupted_unknown')
+    if (final_bytes != temporary_bytes or len(final_bytes) > MAX_ARM_ACK_BYTES or
+            _state_dir_identity(directory_after) != directory_identity or
+            final_after.st_dev != temporary_after.st_dev or
+            final_after.st_ino != temporary_after.st_ino or
+            final_after.st_nlink != 2 or temporary_after.st_nlink != 2):
+        fail('arm_ack_interrupted_unknown')
+    try:
+        value = json.loads(final_bytes.decode('utf-8'))
+    except (ValueError, UnicodeError):
+        fail('arm_ack_interrupted_unknown')
+    if value != _ack_record(record):
+        fail('arm_ack_interrupted_unknown')
+    return temporary
+
+
 def _write_arm_ack(resource, record):
     directory, directory_identity = _require_state_directory(resource)
     path = _ack_path(resource)
@@ -899,9 +953,75 @@ def recover_arm_ack(args: argparse.Namespace) -> None:
     print('provider_ui_smoke_admission=result=arm-ack-recovered')
 
 
+def recover_interrupted_arm_ack(args: argparse.Namespace) -> None:
+    """Recover only a crash after ACK hardlink publication.
+
+    The final and temporary names must first prove to be the exact two-link
+    ACK for the pending run.  Terminal timer/service and dormant-fixture
+    proofs are required before unlinking the temporary name.  The remaining
+    final ACK is then settled through the normal pending recovery capability;
+    if that last step is interrupted, ``recover-arm-ack`` can retire it.
+    """
+    if args.operation != 'smoke':
+        fail('arm_ack_operation_invalid', 64)
+    core = load_core()
+    resource = resource_from(args)
+    try:
+        with private_cleanup_lock():
+            with core.maintenance_recovery() as admission:
+                record = expected_record(core, args.run_id, args.operation, resource,
+                                         allow_prior_boot=True)
+                temporary = _read_interrupted_arm_ack_pair(resource, record)
+
+                def terminal_proof(current):
+                    if current != record:
+                        return False
+                    try:
+                        _ensure_credential_temp_absent(resource)
+                        unit_terminal(args.cleanup_unit + '.timer', resource, args.run_id)
+                        unit_terminal(args.cleanup_unit + '.service', resource, args.run_id)
+                        dormant_clean(resource, 'dormant')
+                        return True
+                    except BaseException:
+                        return False
+
+                if not terminal_proof(record):
+                    fail('terminal_proof_unknown')
+                # Only the exact pair's temporary name may be removed.  The
+                # final name remains available for the ordinary ACK reader.
+                os.unlink(temporary)
+                directory_fd = os.open(Path(resource['state_file']).parent,
+                                       os.O_RDONLY | os.O_DIRECTORY |
+                                       os.O_CLOEXEC | os.O_NOFOLLOW)
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+
+                def settled_proof(current):
+                    if current != record:
+                        return False
+                    try:
+                        if _read_arm_ack(resource) != _ack_record(record):
+                            return False
+                        return terminal_proof(current)
+                    except BaseException:
+                        return False
+
+                result = admission.recover_pending(record, settled_proof)
+                if result.get('status') != 'recovered':
+                    fail('pending_recovery_unknown')
+                _remove_arm_ack(resource)
+    except core.PendingError as error:
+        fail(error.reason, error.code)
+    except OSError:
+        fail('arm_ack_cleanup_failed')
+    print('provider_ui_smoke_admission=result=arm-ack-pair-recovered')
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=('begin', 'ack-arm', 'assert-bound-fd', 'settle', 'recover-arm-ack', 'recover-unarmed', 'recover-install-empty', 'recover-remove-dormant', 'recover-clear-marker'))
+    parser.add_argument('action', choices=('begin', 'ack-arm', 'assert-bound-fd', 'settle', 'recover-arm-ack', 'recover-interrupted-arm-ack', 'recover-unarmed', 'recover-install-empty', 'recover-remove-dormant', 'recover-clear-marker'))
     parser.add_argument('--operation', choices=sorted(ACTION_NAMES), required=True)
     parser.add_argument('--run-id')
     parser.add_argument('--lock-fd', type=int)
@@ -931,6 +1051,8 @@ def main() -> None:
         assert_bound_fd(args)
     elif args.action == 'recover-arm-ack':
         recover_arm_ack(args)
+    elif args.action == 'recover-interrupted-arm-ack':
+        recover_interrupted_arm_ack(args)
     elif args.action == 'recover-unarmed':
         recover_unarmed(args)
     elif args.action == 'recover-install-empty':

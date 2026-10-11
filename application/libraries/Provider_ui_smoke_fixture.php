@@ -809,19 +809,9 @@ final class Provider_ui_smoke_fixture
             ->where('users.email', self::PROVIDER_EMAIL)
             ->get()
             ->num_rows();
-        $dormant_note_count = $this->CI->db
-            ->get_where('users', ['notes' => Provider_ui_smoke_access_policy::DORMANT_NOTES])
-            ->num_rows();
-        $this->CI->db->like('notes', Provider_ui_smoke_access_policy::ACTIVE_NOTES_PREFIX, 'after');
-        $active_note_count = $this->CI->db->get('users')->num_rows();
         $role_reference_count = $this->CI->db->get_where('users', ['id_roles' => $role['id']])->num_rows();
 
-        if (
-            $provider_email_count !== 1 ||
-            $dormant_note_count !== 1 ||
-            $active_note_count !== 0 ||
-            $role_reference_count !== 1
-        ) {
+        if ($provider_email_count !== 1 || $role_reference_count !== 1) {
             throw new RuntimeException('Provider UI smoke dormant ownership invariant failed.');
         }
     }
@@ -859,25 +849,33 @@ final class Provider_ui_smoke_fixture
             throw new RuntimeException('Provider UI smoke principal marker collision detected.');
         }
 
-        $this->CI->db->like('notes', Provider_ui_smoke_access_policy::ACTIVE_NOTES_PREFIX, 'after');
-        $active_note_count = $this->CI->db->get('users')->num_rows();
-        $dormant_note_count = $this->CI->db
-            ->get_where('users', ['notes' => Provider_ui_smoke_access_policy::DORMANT_NOTES])
-            ->num_rows();
-
-        if ($active_note_count !== 0 || $dormant_note_count !== 0) {
-            throw new RuntimeException('Provider UI smoke principal state collision detected.');
-        }
+        // Notes are user-editable and therefore cannot establish ownership.
+        // The reserved username and non-customer email above remain the
+        // server-controlled collision checks; lifecycle methods validate the
+        // marker on the exact principal row they own.
     }
 
     private function assertFixtureMarkersUnused(?int $provider_id = null): void
     {
-        $this->CI->db
-            ->group_start()
-            ->where('name', self::SERVICE_NAME)
-            ->or_where('description', self::SERVICE_DESCRIPTION)
-            ->group_end();
-        $service_count = $this->CI->db->get('services')->num_rows();
+        if ($provider_id !== null) {
+            $this->CI->db
+                ->select('services.id')
+                ->from('services')
+                ->join('services_providers', 'services_providers.id_services = services.id', 'inner')
+                ->where('services_providers.id_users', $provider_id)
+                ->group_start()
+                ->where('services.name', self::SERVICE_NAME)
+                ->or_where('services.description', self::SERVICE_DESCRIPTION)
+                ->group_end();
+        } else {
+            // Service names and descriptions are also user-editable. Without
+            // a reserved-provider relation there is no trustworthy ownership
+            // signal, so a foreign marker must not veto install/remove.
+            $service_count = 0;
+        }
+        if ($provider_id !== null) {
+            $service_count = $this->CI->db->get()->num_rows();
+        }
 
         $appointment_count = 0;
 
@@ -1068,12 +1066,18 @@ final class Provider_ui_smoke_fixture
             ->get_where('secretaries_providers', ['id_users_provider' => $ids['provider']])
             ->num_rows();
 
-        $this->CI->db
+        $service_marker_count = $this->CI->db
+            ->select('services.id')
+            ->from('services')
+            ->join('services_providers', 'services_providers.id_services = services.id', 'inner')
+            ->where('services_providers.id_users', $ids['provider'])
+            ->where('services.id', $ids['service'])
             ->group_start()
-            ->where('name', self::SERVICE_NAME)
-            ->or_where('description', self::SERVICE_DESCRIPTION)
-            ->group_end();
-        $service_marker_count = $this->CI->db->get('services')->num_rows();
+            ->where('services.name', self::SERVICE_NAME)
+            ->or_where('services.description', self::SERVICE_DESCRIPTION)
+            ->group_end()
+            ->get()
+            ->num_rows();
 
         $customer_marker_count = $this->CI->db
             ->get_where('users', ['id' => $ids['customer'], 'notes' => self::CUSTOMER_NOTES])
@@ -1246,19 +1250,12 @@ final class Provider_ui_smoke_fixture
             throw new RuntimeException('Provider UI smoke crash recovery precondition failed.');
         }
 
-        $this->CI->db
-            ->group_start()
-            ->where('name', self::SERVICE_NAME)
-            ->or_where('description', self::SERVICE_DESCRIPTION)
-            ->group_end();
-        $service_query = $this->CI->db->get('services');
-
         $appointment_query = $this->CI->db
             ->where('id_users_provider', (int) $principal['id'])
             ->where_in('notes', $this->appointmentMarkers())
             ->get('appointments');
 
-        if ($service_query->num_rows() !== 1 || $appointment_query->num_rows() !== 3) {
+        if ($appointment_query->num_rows() !== 3) {
             throw new RuntimeException('Provider UI smoke crash recovery cardinality is invalid.');
         }
 
@@ -1281,6 +1278,32 @@ final class Provider_ui_smoke_fixture
 
         if (count($appointments) !== 3) {
             throw new RuntimeException('Provider UI smoke crash recovery marker set is incomplete.');
+        }
+
+        $service_ids = [];
+        foreach ($appointment_query->result_array() as $appointment) {
+            if (!is_numeric($appointment['id_services'])) {
+                throw new RuntimeException('Provider UI smoke crash recovery service relation is invalid.');
+            }
+
+            $service_ids[] = (int) $appointment['id_services'];
+        }
+
+        if (count(array_unique($service_ids)) !== 1) {
+            throw new RuntimeException('Provider UI smoke crash recovery service relation is ambiguous.');
+        }
+
+        $service_id = $service_ids[0];
+        $service_relation_count = $this->CI->db
+            ->get_where('services_providers', [
+                'id_users' => (int) $principal['id'],
+                'id_services' => $service_id,
+            ])
+            ->num_rows();
+        $service_query = $this->CI->db->get_where('services', ['id' => $service_id]);
+
+        if ($service_relation_count !== 1 || $service_query->num_rows() !== 1) {
+            throw new RuntimeException('Provider UI smoke crash recovery service ownership is invalid.');
         }
 
         $customer_ids = [];
@@ -1310,7 +1333,7 @@ final class Provider_ui_smoke_fixture
             'expires_at' => $lease['expires_at']->format('Y-m-d\TH:i:s\Z'),
             'ids' => [
                 'provider' => (int) $principal['id'],
-                'service' => (int) $service_query->row_array()['id'],
+                'service' => $service_id,
                 'customer' => $customer_id,
                 'appointments' => $appointments,
             ],
