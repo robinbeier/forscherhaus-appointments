@@ -59,7 +59,7 @@ CONTINUITY_STATE_TEMP_RE = re.compile(r'^\.backup_continuity_state\.json\.tmp-[0
 RENAME_NOREPLACE = 1
 LIBC = ctypes.CDLL(None, use_errno=True)
 ADMISSION_CORE = '/usr/local/libexec/fh/maintenance_pending_v1.py'
-ADMISSION_CORE_SHA256 = '69b3f86aa4758056d0727e3914e6a0113cedfdedc08b1b351d7af167f44032b6'
+ADMISSION_CORE_SHA256 = 'a26bb85908f40b784539576d85013c7123522adbeac92e53ebbb3d5cd03ee9fd'
 MAX_ADMISSION_CORE_BYTES = 1_048_576
 ADMISSION_PENDING_ERROR_TYPES = ()
 TERMINAL_STATES = {'succeeded', 'failed_before_write', 'failed_pre_switch',

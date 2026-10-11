@@ -104,7 +104,7 @@ class BoundReleaseDeployTest(unittest.TestCase):
             source = handle.read()
         self.assertIn("ADMISSION_CORE = '/usr/local/libexec/fh/maintenance_pending_v1.py'", source)
         self.assertIn(
-            "ADMISSION_CORE_SHA256 = '69b3f86aa4758056d0727e3914e6a0113cedfdedc08b1b351d7af167f44032b6'",
+            "ADMISSION_CORE_SHA256 = 'a26bb85908f40b784539576d85013c7123522adbeac92e53ebbb3d5cd03ee9fd'",
             source,
         )
         run = source[source.index('def run(args):'):source.index('def main():')]

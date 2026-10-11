@@ -229,7 +229,7 @@ final class OrdinaryDeploymentCoordinationTest extends TestCase
         self::assertSame(1, substr_count($entry, 'ordinary_assert_pending_admission'));
         self::assertStringContainsString("local core='/usr/local/libexec/fh/maintenance_pending_v1.py'", $source);
         self::assertStringContainsString(
-            "local expected_hash='69b3f86aa4758056d0727e3914e6a0113cedfdedc08b1b351d7af167f44032b6'",
+            "local expected_hash='a26bb85908f40b784539576d85013c7123522adbeac92e53ebbb3d5cd03ee9fd'",
             $source,
         );
         self::assertStringNotContainsString('spec_from_file_location', $source);

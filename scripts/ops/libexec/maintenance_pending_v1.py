@@ -895,6 +895,50 @@ class MaintenanceAdmission:
         # the marker remains as the durable veto.
         return self.recover_pending(record, terminal_proof)
 
+    def recover_interrupted_pending(self, operation, resource_identity,
+                                    terminal_proof=None):
+        """Recover after the pending temp name was durably removed.
+
+        A crash can occur after the temp name is removed and before the
+        existing recovery method creates or settles its clear marker.  The
+        canonical pending record or its exact marker is then the only source
+        of the run ID.  This method accepts only that bound state and keeps
+        ordinary admission vetoed throughout recovery.
+        """
+        self._assert_held()
+        if not self.recovery:
+            reject('recovery_capability_required')
+        if not callable(terminal_proof):
+            reject('terminal_proof_missing')
+        if _temp_names() or _clear_temp_names():
+            reject('pending_temp_present')
+        marker_pair = _matching_clear_pair()
+        if marker_pair is not None:
+            record = marker_pair[0][0]
+            if (record['operation'] != operation or
+                    record['resource_identity'] != resource_identity):
+                reject('pending_binding_changed')
+            try:
+                if terminal_proof(record) is not True:
+                    reject('terminal_proof_unknown')
+            except PendingError:
+                raise
+            except Exception:
+                reject('terminal_proof_unknown')
+            result = self.recover_clear_marker(
+                lambda marker: marker == record and terminal_proof(marker) is True)
+            return result
+        if not _pending_exists():
+            reject('pending_missing')
+        pending = read_pending(None)
+        if pending is None:
+            reject('pending_missing')
+        record = pending[0]
+        if (record['operation'] != operation or
+                record['resource_identity'] != resource_identity):
+            reject('pending_binding_changed')
+        return self.recover_pending(record, terminal_proof)
+
     def __exit__(self, exc_type, exc_value, traceback):
         if self._fd is not None:
             fd = self._fd

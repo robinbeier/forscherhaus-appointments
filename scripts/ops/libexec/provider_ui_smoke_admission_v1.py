@@ -963,6 +963,47 @@ def recover_interrupted_pending_temp(args: argparse.Namespace) -> None:
     print('provider_ui_smoke_admission=result=pending-temp-recovered')
 
 
+def recover_interrupted_pending(args: argparse.Namespace) -> None:
+    """Recover a bound pending/marker state after its temp name is gone."""
+    core = load_core()
+    resource = resource_from(args)
+    if args.operation not in {'install', 'remove', 'smoke'}:
+        fail('pending_recovery_operation_invalid', 64)
+    allowed_states = {
+        'smoke': {'dormant'},
+        'install': {'dormant', 'removed'},
+        'remove': {'dormant', 'removed'},
+    }[args.operation]
+    try:
+        with private_cleanup_lock():
+            with core.maintenance_recovery() as admission:
+                def terminal_proof(record):
+                    if (record.get('operation') != OPERATION or
+                            record.get('resource_identity') != resource):
+                        return False
+                    try:
+                        _ensure_arm_ack_absent(resource)
+                        _ensure_credential_temp_absent(resource)
+                        if args.operation in {'smoke', 'remove'}:
+                            unit_terminal(args.cleanup_unit + '.timer', resource,
+                                          record['run_id'])
+                            unit_terminal(args.cleanup_unit + '.service', resource,
+                                          record['run_id'])
+                        if fixture_terminal_state(resource) not in allowed_states:
+                            fail('fixture_terminal_unknown')
+                        return True
+                    except BaseException:
+                        return False
+
+                result = admission.recover_interrupted_pending(
+                    OPERATION, resource, terminal_proof)
+                if result.get('status') != 'recovered':
+                    fail('pending_recovery_unknown')
+    except core.PendingError as error:
+        fail(error.reason, error.code)
+    print('provider_ui_smoke_admission=result=pending-recovered')
+
+
 def recover_clear_marker(args: argparse.Namespace) -> None:
     """Finish only the exact terminal clear interrupted after marker creation."""
     core = load_core()
@@ -1182,7 +1223,7 @@ def recover_interrupted_arm_ack_temp(args: argparse.Namespace) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=('begin', 'ack-arm', 'assert-bound-fd', 'settle', 'recover-arm-ack', 'recover-interrupted-arm-ack', 'recover-interrupted-arm-ack-temp', 'recover-interrupted-pending-temp', 'recover-unarmed', 'recover-install-empty', 'recover-remove-dormant', 'recover-clear-marker'))
+    parser.add_argument('action', choices=('begin', 'ack-arm', 'assert-bound-fd', 'settle', 'recover-arm-ack', 'recover-interrupted-arm-ack', 'recover-interrupted-arm-ack-temp', 'recover-interrupted-pending-temp', 'recover-interrupted-pending', 'recover-unarmed', 'recover-install-empty', 'recover-remove-dormant', 'recover-clear-marker'))
     parser.add_argument('--operation', choices=sorted(ACTION_NAMES), required=True)
     parser.add_argument('--run-id')
     parser.add_argument('--lock-fd', type=int)
@@ -1202,9 +1243,9 @@ def main() -> None:
         fail('lifecycle_action_scope_invalid', 64)
     if args.action == 'begin' and args.run_id:
         fail('run_id_not_allowed', 64)
-    if args.action == 'recover-interrupted-pending-temp' and args.run_id:
+    if args.action in {'recover-interrupted-pending-temp', 'recover-interrupted-pending'} and args.run_id:
         fail('run_id_not_allowed', 64)
-    if args.action != 'begin' and args.action != 'recover-interrupted-pending-temp' and (not args.run_id or len(args.run_id) != RUN_ID_BYTES * 2):
+    if args.action != 'begin' and args.action not in {'recover-interrupted-pending-temp', 'recover-interrupted-pending'} and (not args.run_id or len(args.run_id) != RUN_ID_BYTES * 2):
         fail('run_id_required', 64)
     if args.action == 'begin':
         begin(args)
@@ -1220,6 +1261,8 @@ def main() -> None:
         recover_interrupted_arm_ack_temp(args)
     elif args.action == 'recover-interrupted-pending-temp':
         recover_interrupted_pending_temp(args)
+    elif args.action == 'recover-interrupted-pending':
+        recover_interrupted_pending(args)
     elif args.action == 'recover-unarmed':
         recover_unarmed(args)
     elif args.action == 'recover-install-empty':

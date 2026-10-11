@@ -947,6 +947,57 @@ class MaintenancePendingTest(unittest.TestCase):
         self.assertFalse(os.path.lexists(self.clear_marker))
         self.assertEqual('admitted', MODULE.admit_read_only()['status'])
 
+    def provider_record(self):
+        return MODULE.make_record(
+            'provider_ui_smoke', 'run001', '11111111-1111-1111-1111-111111111111',
+            {'app_root': '/srv/app', 'state_file': '/var/lib/fh-provider/active.json'},
+        )
+
+    def test_recovery_after_temp_unlink_derives_pending_record(self):
+        record = self.provider_record()
+        with MODULE.maintenance_admission() as admission:
+            admission.publish_pending(record)
+        with MODULE.maintenance_recovery() as recovery:
+            result = recovery.recover_interrupted_pending(
+                'provider_ui_smoke', record['resource_identity'], lambda value: value == record)
+        self.assertEqual('recovered', result['status'])
+        self.assertEqual('admitted', MODULE.admit_read_only()['status'])
+
+    def test_recovery_after_marker_creation_derives_pending_pair(self):
+        record = self.provider_record()
+        with MODULE.maintenance_admission() as admission:
+            admission.publish_pending(record)
+            _, identity = MODULE._read_bounded(self.pending, MODULE.MAX_RECORD_BYTES)
+            MODULE._link_clear_marker_locked(MODULE._canonical(record), identity)
+        with MODULE.maintenance_recovery() as recovery:
+            result = recovery.recover_interrupted_pending(
+                'provider_ui_smoke', record['resource_identity'], lambda value: value == record)
+        self.assertEqual('recovered', result['status'])
+        self.assertFalse(os.path.lexists(self.pending))
+        self.assertFalse(os.path.lexists(self.clear_marker))
+
+    def test_recovery_after_pending_unlink_derives_marker_only_state(self):
+        record = self.provider_record()
+        with MODULE.maintenance_admission() as admission:
+            admission.publish_pending(record)
+            admission.clear_pending(record, lambda value: value == record)
+        with MODULE.maintenance_recovery() as recovery:
+            result = recovery.recover_interrupted_pending(
+                'provider_ui_smoke', record['resource_identity'], lambda value: value == record)
+        self.assertEqual('recovered', result['status'])
+        self.assertFalse(os.path.lexists(self.clear_marker))
+
+    def test_recovery_after_temp_unlink_retains_pending_on_proof_failure(self):
+        record = self.provider_record()
+        with MODULE.maintenance_admission() as admission:
+            admission.publish_pending(record)
+        with MODULE.maintenance_recovery() as recovery:
+            with self.assertRaisesRegex(MODULE.PendingError, 'terminal_proof_unknown'):
+                recovery.recover_interrupted_pending(
+                    'provider_ui_smoke', record['resource_identity'], lambda _: False)
+        self.assertTrue(os.path.lexists(self.pending))
+        self.assertFalse(os.path.lexists(self.clear_marker))
+
     def test_recovery_pending_requires_exact_record_and_proof_before_mutation(self):
         record = self.record()
         wrong = self.record(run='run002')

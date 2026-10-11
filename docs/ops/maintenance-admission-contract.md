@@ -284,6 +284,15 @@ marker path repeats the proof. In particular, an install whose verifier cannot
 prove `removed` because credentials are absent remains blocked; missing
 credentials are never treated as proof of an empty fixture. This is an
 explicit server-local recovery path, never automatic re-admission or retry.
+If that recovery itself is interrupted after the temporary name is durably
+removed, the separate no-run-ID `recover-interrupted-pending` action derives
+the run from only the exact root-owned canonical `pending.json`, its matching
+two-link clear-marker pair, or its marker-only state. It repeats the same
+operation-specific proof and settles through the existing marker capability.
+Extra temporary names, marker temporaries, malformed or foreign records,
+binding changes, and unknown states remain vetoes without mutation. This
+second recovery path is also explicit and server-local; it never turns a
+pending or marker state into ordinary admission by itself.
 For a writer that already holds the canonical shared lock, the local core now
 has a descriptor-based admission check. It validates the same lock inode and
 protocol epoch and checks the caller's exclusive flock through read-only

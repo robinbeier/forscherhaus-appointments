@@ -74,6 +74,14 @@ class FakeAdmission:
             return {"status": "unknown"}
         return {"status": "recovered"}
 
+    def recover_interrupted_pending(self, operation, resource, proof):
+        self.pending_proof_calls = getattr(self, "pending_proof_calls", 0) + 1
+        self.pending_asserted = proof(self.record)
+        self.pending_asserted_again = proof(self.record)
+        if not self.pending_asserted or not self.pending_asserted_again:
+            return {"status": "unknown"}
+        return {"status": "recovered"}
+
 
 class FakeCore:
     SCHEMA = "maintenance_pending_v1"
@@ -511,6 +519,43 @@ class ProviderUiSmokeAdmissionBehaviorTest(unittest.TestCase):
                 COORD.main()
         self.assertEqual(raised.exception.code, 64)
         fail.assert_called_once_with("run_id_not_allowed", 64)
+
+    def test_interrupted_pending_recovery_derives_run_without_run_id(self):
+        resource = self.resource("smoke")
+        record = {
+            "schema": "maintenance_pending_v1", "epoch": 1,
+            "operation": "provider_ui_smoke", "run_id": "a" * 32,
+            "boot_id": "old-boot", "resource_identity": resource,
+        }
+        core = FakeCore(record)
+        args = self.args("recover-interrupted-pending", operation="smoke", run_id=None)
+        with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+             patch.object(COORD, "load_core", return_value=core), \
+             patch.object(COORD, "_ensure_arm_ack_absent"), \
+             patch.object(COORD, "_ensure_credential_temp_absent"), \
+             patch.object(COORD, "unit_terminal", return_value=True), \
+             patch.object(COORD, "fixture_terminal_state", return_value="dormant"), \
+             contextlib.redirect_stdout(io.StringIO()):
+            COORD.recover_interrupted_pending(args)
+        self.assertEqual(core.recovery.pending_proof_calls, 1)
+
+    def test_interrupted_pending_recovery_refuses_unknown_proof(self):
+        resource = self.resource("smoke")
+        record = {
+            "schema": "maintenance_pending_v1", "epoch": 1,
+            "operation": "provider_ui_smoke", "run_id": "a" * 32,
+            "boot_id": "old-boot", "resource_identity": resource,
+        }
+        core = FakeCore(record)
+        args = self.args("recover-interrupted-pending", operation="smoke", run_id=None)
+        with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+             patch.object(COORD, "load_core", return_value=core), \
+             patch.object(COORD, "_ensure_arm_ack_absent"), \
+             patch.object(COORD, "_ensure_credential_temp_absent", side_effect=SystemExit(75)):
+            with self.assertRaises(SystemExit) as raised:
+                COORD.recover_interrupted_pending(args)
+        self.assertEqual(raised.exception.code, 75)
+        self.assertEqual(core.recovery.pending_proof_calls, 1)
 
     def test_recover_unarmed_refuses_acknowledged_run(self):
         resource = self.resource("smoke")
