@@ -202,6 +202,10 @@ requires the credential verifier and fails closed without it. The subsequent
 independent dormant `verify` still requires a valid credential file, so a
 missing or damaged file may retain Pending after the active fixture has been
 disabled; it does not authorize clearing the veto without repair and proof.
+Likewise, a `removed` result requires the valid protected credential: the
+verifier must exclude an active principal whose state and now-unreferenced
+dormant role were both lost. `install`, `remove`, and `verify` fail closed on
+that orphan instead of accepting absence of editable marker text as proof.
 
 The systemd proof binds the cleanup service's complete command to this app,
 credential, state directory and run ID. If pending was already cleared but an

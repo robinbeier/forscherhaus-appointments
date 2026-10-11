@@ -174,7 +174,10 @@ final class Provider_ui_smoke_fixture
 
             $credentials_present = file_exists($credential_file) || is_link($credential_file);
 
-            if (in_array($action, ['install', 'activate'], true) || ($action === 'verify' && $credentials_present)) {
+            if (
+                in_array($action, ['install', 'activate', 'remove'], true) ||
+                ($action === 'verify' && $credentials_present)
+            ) {
                 $credentials = $this->readCredentials($credential_file);
             }
 
@@ -191,11 +194,11 @@ final class Provider_ui_smoke_fixture
 
                 try {
                     $state = match ($action) {
-                        'install' => $this->install($state_file),
-                        'verify' => $this->verify($state_file, $credentials !== null),
+                        'install' => $this->install($credentials, $state_file),
+                        'verify' => $this->verify($state_file, $credentials),
                         'activate' => $this->activate($credentials, $state_file),
                         'deactivate' => $this->deactivate($credential_file, $state_file, $remove_state_after_commit),
-                        'remove' => $this->remove($state_file),
+                        'remove' => $this->remove($state_file, $credentials),
                     };
 
                     if (!$this->CI->db->trans_commit()) {
@@ -229,9 +232,10 @@ final class Provider_ui_smoke_fixture
     /**
      * Install the permanent dormant principal and zero-rights role.
      */
-    private function install(string $state_file): string
+    private function install(array $credentials, string $state_file): string
     {
         $this->assertStateFileAbsent($state_file);
+        $this->assertNoActivePrincipal($credentials);
         $role = $this->findDormantRole();
         $role_name_query = $this->CI->db->get_where('roles', ['name' => self::DORMANT_ROLE_NAME]);
 
@@ -330,13 +334,18 @@ final class Provider_ui_smoke_fixture
     /**
      * Verify the expected safe resting state.
      */
-    private function verify(string $state_file, bool $credentials_present): string
+    private function verify(string $state_file, ?array $credentials): string
     {
         $this->assertStateFileAbsent($state_file);
         $role = $this->findDormantRole();
         $principal = $role === null ? null : $this->findPrincipalByRoleId((int) $role['id']);
 
         if ($role === null && $principal === null) {
+            if ($credentials === null) {
+                throw new RuntimeException('Provider UI smoke removed verification requires credentials.');
+            }
+
+            $this->assertNoActivePrincipal($credentials);
             $this->assertFixtureMarkersUnused();
 
             return 'removed';
@@ -346,10 +355,11 @@ final class Provider_ui_smoke_fixture
             throw new RuntimeException('Provider UI smoke install state is incomplete.');
         }
 
-        if (!$credentials_present) {
+        if ($credentials === null) {
             throw new RuntimeException('Provider UI smoke dormant verification requires credentials.');
         }
 
+        $this->assertNoActivePrincipal($credentials);
         $this->assertDormantClean($principal, $role);
 
         return 'dormant';
@@ -591,9 +601,10 @@ final class Provider_ui_smoke_fixture
     /**
      * Remove the clean dormant principal and its dedicated role.
      */
-    private function remove(string $state_file): string
+    private function remove(string $state_file, array $credentials): string
     {
         $this->assertStateFileAbsent($state_file);
+        $this->assertNoActivePrincipal($credentials);
         $role = $this->findDormantRole();
         $principal = $role === null ? null : $this->findPrincipalByRoleId((int) $role['id']);
 
@@ -618,6 +629,7 @@ final class Provider_ui_smoke_fixture
         }
 
         $this->deleteExactlyOne('roles', ['id' => $role['id']]);
+        $this->assertNoActivePrincipal($credentials);
         $this->assertFixtureMarkersUnused();
 
         if ($this->findPrincipalByRoleId((int) $role['id']) !== null || $this->findDormantRole() !== null) {
@@ -688,10 +700,7 @@ final class Provider_ui_smoke_fixture
         $query = $this->CI->db
             ->select('users.id, user_settings.salt, user_settings.password')
             ->from('users')
-            ->join('roles', 'roles.id = users.id_roles', 'inner')
             ->join('user_settings', 'user_settings.id_users = users.id', 'inner')
-            ->where('roles.slug', DB_SLUG_PROVIDER)
-            ->where('user_settings.username', Provider_ui_smoke_access_policy::USERNAME)
             ->get();
         $matches = [];
 
@@ -712,7 +721,30 @@ final class Provider_ui_smoke_fixture
             throw new RuntimeException('Provider UI smoke active principal identity is ambiguous.');
         }
 
-        return $matches === [] ? null : $this->findPrincipalById($matches[0]);
+        if ($matches === []) {
+            return null;
+        }
+
+        $principal = $this->findPrincipalById($matches[0]);
+
+        if ($principal === null) {
+            throw new RuntimeException('Provider UI smoke active principal relation is incomplete.');
+        }
+
+        return $principal;
+    }
+
+    /**
+     * Absence must be checked against the root-controlled password verifier.
+     * Editable marker text cannot prove that an orphan active fixture is gone.
+     *
+     * @param array{username: string, password: string} $credentials
+     */
+    private function assertNoActivePrincipal(array $credentials): void
+    {
+        if ($this->findActivePrincipal($credentials) !== null) {
+            throw new RuntimeException('Provider UI smoke active principal remains after state loss.');
+        }
     }
 
     /**

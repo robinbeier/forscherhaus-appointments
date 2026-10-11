@@ -202,13 +202,15 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
         );
     }
 
-    public function testRemovedVerificationSucceedsWhenCredentialFileWasNeverCreated(): void
+    public function testRemovedVerificationFailsClosedWhenCredentialFileIsMissing(): void
     {
         $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
         $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
         $this->assertTrue(unlink($this->credentialFile));
 
-        $this->assertSame('removed', $this->fixture->run('verify', $this->credentialFile, $this->stateFile));
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/credential|active principal/i');
+        $this->fixture->run('verify', $this->credentialFile, $this->stateFile);
     }
 
     public function testDormantVerificationRequiresCredentialFile(): void
@@ -805,7 +807,130 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
         $this->assertSame('dormant', $this->fixture->run('verify', $this->credentialFile, $this->stateFile));
     }
 
-    public function testIdempotentRemoveFailsClosedOnAReservedPrincipalMarkerCollision(): void
+    public function testActiveVerificationAndRemovalRefuseMissingDormantRoleAndStateFileWithoutMutation(): void
+    {
+        $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+        $this->assertSame('active', $this->fixture->run('activate', $this->credentialFile, $this->stateFile));
+        $active_before = $this->loadPrincipal();
+        $markers_before = [
+            'service' => $this->markerCount('services', 'name', Provider_ui_smoke_fixture::SERVICE_NAME),
+            'customer' => $this->markerCount('users', 'notes', Provider_ui_smoke_fixture::CUSTOMER_NOTES),
+            'appointments' => $this->CI->db
+                ->where_in('notes', [
+                    Provider_ui_smoke_fixture::APPOINTMENT_BOOKED_INSIDE_NOTES,
+                    Provider_ui_smoke_fixture::APPOINTMENT_CANCELLED_INSIDE_NOTES,
+                    Provider_ui_smoke_fixture::APPOINTMENT_BOOKED_OUTSIDE_NOTES,
+                ])
+                ->get('appointments')
+                ->num_rows(),
+        ];
+        $dormant_role = $this->CI->db
+            ->get_where('roles', ['slug' => Provider_ui_smoke_access_policy::DORMANT_ROLE_SLUG])
+            ->row_array();
+        $this->assertNotEmpty($dormant_role['id'] ?? null);
+        $this->assertTrue(
+            $this->CI->db->update(
+                'roles',
+                ['slug' => 'provider-ui-smoke-dormant-renamed'],
+                ['id' => $dormant_role['id']],
+            ),
+        );
+        $this->assertTrue(unlink($this->stateFile));
+        $this->assertSame(
+            0,
+            $this->CI->db
+                ->get_where('roles', ['slug' => Provider_ui_smoke_access_policy::DORMANT_ROLE_SLUG])
+                ->num_rows(),
+        );
+
+        try {
+            $this->assertLifecycleActionThrows(
+                fn(): string => $this->fixture->run('verify', $this->credentialFile, $this->stateFile),
+            );
+            $this->assertLifecycleActionThrows(
+                fn(): string => $this->fixture->run('remove', $this->credentialFile, $this->stateFile),
+            );
+            $this->assertFileDoesNotExist($this->stateFile);
+            $this->assertSame($active_before, $this->loadPrincipal());
+            $this->assertSame($markers_before, [
+                'service' => $this->markerCount('services', 'name', Provider_ui_smoke_fixture::SERVICE_NAME),
+                'customer' => $this->markerCount('users', 'notes', Provider_ui_smoke_fixture::CUSTOMER_NOTES),
+                'appointments' => $this->CI->db
+                    ->where_in('notes', [
+                        Provider_ui_smoke_fixture::APPOINTMENT_BOOKED_INSIDE_NOTES,
+                        Provider_ui_smoke_fixture::APPOINTMENT_CANCELLED_INSIDE_NOTES,
+                        Provider_ui_smoke_fixture::APPOINTMENT_BOOKED_OUTSIDE_NOTES,
+                    ])
+                    ->get('appointments')
+                    ->num_rows(),
+            ]);
+        } finally {
+            $this->assertTrue(
+                $this->CI->db->update('roles', ['slug' => $dormant_role['slug']], ['id' => $dormant_role['id']]),
+            );
+        }
+
+        $this->assertSame('dormant', $this->fixture->run('deactivate', $this->credentialFile, $this->stateFile));
+        $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
+    }
+
+    public function testOrphanActivePrincipalIsDetectedAfterEditableUsernameAndRoleChanges(): void
+    {
+        $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+        $this->assertSame('active', $this->fixture->run('activate', $this->credentialFile, $this->stateFile));
+        $provider_id = (int) $this->loadPrincipal()['id'];
+        $dormant_role = $this->CI->db
+            ->get_where('roles', ['slug' => Provider_ui_smoke_access_policy::DORMANT_ROLE_SLUG])
+            ->row_array();
+        $this->assertNotEmpty($dormant_role['id'] ?? null);
+        $this->assertTrue(unlink($this->stateFile));
+        $this->assertTrue(
+            $this->CI->db->update(
+                'roles',
+                ['slug' => 'provider-ui-smoke-dormant-renamed'],
+                ['id' => $dormant_role['id']],
+            ),
+        );
+        $this->assertTrue(
+            $this->CI->db->update(
+                'user_settings',
+                ['username' => '__ea_provider_ui_smoke_renamed'],
+                ['id_users' => $provider_id],
+            ),
+        );
+        $provider_before = $this->CI->db->get_where('users', ['id' => $provider_id])->row_array();
+        $settings_before = $this->CI->db->get_where('user_settings', ['id_users' => $provider_id])->row_array();
+
+        try {
+            $this->assertLifecycleActionThrows(
+                fn(): string => $this->fixture->run('verify', $this->credentialFile, $this->stateFile),
+            );
+            $this->assertLifecycleActionThrows(
+                fn(): string => $this->fixture->run('remove', $this->credentialFile, $this->stateFile),
+            );
+            $this->assertSame($provider_before, $this->CI->db->get_where('users', ['id' => $provider_id])->row_array());
+            $this->assertSame(
+                $settings_before,
+                $this->CI->db->get_where('user_settings', ['id_users' => $provider_id])->row_array(),
+            );
+        } finally {
+            $this->assertTrue(
+                $this->CI->db->update('roles', ['slug' => $dormant_role['slug']], ['id' => $dormant_role['id']]),
+            );
+            $this->assertTrue(
+                $this->CI->db->update(
+                    'user_settings',
+                    ['username' => Provider_ui_smoke_access_policy::USERNAME],
+                    ['id_users' => $provider_id],
+                ),
+            );
+        }
+
+        $this->assertSame('dormant', $this->fixture->run('deactivate', $this->credentialFile, $this->stateFile));
+        $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
+    }
+
+    public function testIdempotentRemoveIgnoresForeignReservedPrincipalMarkerWithoutMutation(): void
     {
         $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
         $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
@@ -824,17 +949,15 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
             ]),
         );
         $collision_id = (int) $this->CI->db->insert_id();
+        $foreign_row = $this->CI->db->get_where('users', ['id' => $collision_id])->row_array();
 
         try {
-            $this->fixture->run('remove', $this->credentialFile, $this->stateFile);
-            $this->fail('A reserved principal marker collision must stop idempotent removal.');
-        } catch (RuntimeException) {
-            $this->addToAssertionCount(1);
+            $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
+            $this->assertSame('removed', $this->fixture->run('verify', $this->credentialFile, $this->stateFile));
+            $this->assertSame($foreign_row, $this->CI->db->get_where('users', ['id' => $collision_id])->row_array());
         } finally {
             $this->CI->db->delete('users', ['id' => $collision_id]);
         }
-
-        $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
     }
 
     public function testPublicBookingTargetDetectionRejectsTheReservedProviderAndServiceIds(): void
@@ -1072,6 +1195,19 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
     private function markerCount(string $table, string $field, string $value): int
     {
         return $this->CI->db->get_where($table, [$field => $value])->num_rows();
+    }
+
+    private function assertLifecycleActionThrows(\Closure $action): void
+    {
+        $thrown = false;
+
+        try {
+            $action();
+        } catch (RuntimeException $exception) {
+            $thrown = true;
+        }
+
+        $this->assertTrue($thrown, 'The lifecycle action must fail closed.');
     }
 
     private function insertForeignCustomerMarker(): int
