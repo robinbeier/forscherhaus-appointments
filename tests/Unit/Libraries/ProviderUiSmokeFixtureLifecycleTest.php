@@ -435,6 +435,54 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
         }
     }
 
+    public function testForeignCustomerNoteDoesNotClaimDormantFixture(): void
+    {
+        $foreignCustomerId = $this->insertForeignCustomerMarker();
+        $foreignCustomer = $this->CI->db->get_where('users', ['id' => $foreignCustomerId])->row_array();
+
+        try {
+            $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+            $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
+            $this->assertSame('removed', $this->fixture->run('verify', $this->credentialFile, $this->stateFile));
+            $this->assertForeignCustomerUnchanged($foreignCustomerId, $foreignCustomer);
+        } finally {
+            $this->CI->db->delete('users', ['id' => $foreignCustomerId]);
+        }
+    }
+
+    public function testForeignCustomerNoteDoesNotAffectActiveCleanup(): void
+    {
+        $foreignCustomerId = $this->insertForeignCustomerMarker();
+        $foreignCustomer = $this->CI->db->get_where('users', ['id' => $foreignCustomerId])->row_array();
+
+        try {
+            $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+            $this->assertSame('active', $this->fixture->run('activate', $this->credentialFile, $this->stateFile));
+            $this->assertSame('dormant', $this->fixture->run('deactivate', $this->credentialFile, $this->stateFile));
+            $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
+            $this->assertForeignCustomerUnchanged($foreignCustomerId, $foreignCustomer);
+        } finally {
+            $this->CI->db->delete('users', ['id' => $foreignCustomerId]);
+        }
+    }
+
+    public function testForeignCustomerNoteDoesNotAffectStateLossReconstruction(): void
+    {
+        $foreignCustomerId = $this->insertForeignCustomerMarker();
+        $foreignCustomer = $this->CI->db->get_where('users', ['id' => $foreignCustomerId])->row_array();
+
+        try {
+            $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+            $this->assertSame('active', $this->fixture->run('activate', $this->credentialFile, $this->stateFile));
+            $this->assertTrue(unlink($this->stateFile));
+            $this->assertSame('dormant', $this->fixture->run('deactivate', $this->credentialFile, $this->stateFile));
+            $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
+            $this->assertForeignCustomerUnchanged($foreignCustomerId, $foreignCustomer);
+        } finally {
+            $this->CI->db->delete('users', ['id' => $foreignCustomerId]);
+        }
+    }
+
     public function testForeignAppointmentMarkerDoesNotAffectActiveCleanup(): void
     {
         $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
@@ -827,6 +875,52 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
     private function markerCount(string $table, string $field, string $value): int
     {
         return $this->CI->db->get_where($table, [$field => $value])->num_rows();
+    }
+
+    private function insertForeignCustomerMarker(): int
+    {
+        $customerRole = $this->CI->db->get_where('roles', ['slug' => DB_SLUG_CUSTOMER])->row_array();
+        $this->assertNotEmpty($customerRole['id'] ?? null);
+        $now = date('Y-m-d H:i:s');
+        $this->assertTrue(
+            $this->CI->db->insert('users', [
+                'first_name' => 'Foreign',
+                'last_name' => 'Marker Customer',
+                'email' => null,
+                'phone_number' => '0000000001',
+                'mobile_number' => null,
+                'address' => null,
+                'city' => null,
+                'state' => null,
+                'zip_code' => null,
+                'notes' => Provider_ui_smoke_fixture::CUSTOMER_NOTES,
+                'room' => null,
+                'class_size_default' => null,
+                'custom_field_1' => null,
+                'custom_field_2' => null,
+                'custom_field_3' => null,
+                'custom_field_4' => null,
+                'custom_field_5' => null,
+                'timezone' => 'UTC',
+                'language' => 'german',
+                'is_private' => 1,
+                'ldap_dn' => null,
+                'id_roles' => $customerRole['id'],
+                'create_datetime' => $now,
+                'update_datetime' => $now,
+            ]),
+        );
+
+        return (int) $this->CI->db->insert_id();
+    }
+
+    /**
+     * @param array<string, mixed> $expected
+     */
+    private function assertForeignCustomerUnchanged(int $customerId, array $expected): void
+    {
+        $this->assertSame(1, $this->markerCount('users', 'id', (string) $customerId));
+        $this->assertSame($expected, $this->CI->db->get_where('users', ['id' => $customerId])->row_array());
     }
 
     private function foreignProviderId(): int

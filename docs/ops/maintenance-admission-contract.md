@@ -94,10 +94,10 @@ it must not be interpreted as a completed disarm.
 Fixture ownership is deliberately narrow: appointment notes and customer email
 fields are not global ownership markers. The synthetic appointment marker is
 bound to the reserved smoke provider; the private synthetic customer uses
-`email = NULL`, and a server-side notes sentinel plus run-owned IDs identify
-only records created by that fixture. This prevents cleanup from claiming
-unrelated real appointments or customers while preserving the no-email
-production contract.
+`email = NULL`. Its server-side notes sentinel is checked only on the run-owned
+customer ID, reconstructed from the reserved provider's exact appointments if
+the state file is lost. A global customer-notes match cannot claim ownership
+or block cleanup. This preserves the no-email production contract.
 The smoke coordinator performs the initial dormant proof while holding both
 the private lifecycle lock and the shared maintenance lock, immediately before
 publishing the pending record. A failed proof therefore publishes no new

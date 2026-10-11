@@ -27,8 +27,11 @@ Fixture ownership is deliberately narrow. Appointment notes and customer email
 fields are not global ownership markers: a public appointment note or an
 unrelated customer's email must never block the Provider UI fixture. The
 synthetic appointment marker is bound to the reserved smoke provider; the
-private synthetic customer uses `email = NULL`, and the server-side notes
-sentinel plus the fixture's own IDs identify only records created by this run.
+private synthetic customer uses `email = NULL`. Its server-side notes sentinel
+is checked only on the run-owned customer ID. If the state file is lost, that
+ID is reconstructed from the reserved provider's exact appointments, not from
+a global search for customer notes. An unrelated customer with the same notes
+cannot claim fixture ownership or block cleanup.
 This prevents cleanup and verification from claiming unrelated real data while
 preserving the no-email production contract.
 

@@ -879,9 +879,6 @@ final class Provider_ui_smoke_fixture
             ->group_end();
         $service_count = $this->CI->db->get('services')->num_rows();
 
-        $this->CI->db->group_start()->where('notes', self::CUSTOMER_NOTES)->group_end();
-        $customer_count = $this->CI->db->get('users')->num_rows();
-
         $appointment_count = 0;
 
         if ($provider_id !== null) {
@@ -892,7 +889,7 @@ final class Provider_ui_smoke_fixture
                 ->num_rows();
         }
 
-        if ($service_count !== 0 || $customer_count !== 0 || $appointment_count !== 0) {
+        if ($service_count !== 0 || $appointment_count !== 0) {
             throw new RuntimeException('Provider UI smoke fixture marker collision detected.');
         }
 
@@ -1022,47 +1019,7 @@ final class Provider_ui_smoke_fixture
             throw new RuntimeException('Provider UI smoke service invariant failed.');
         }
 
-        $customer_query = $this->CI->db->get_where('users', ['id' => $ids['customer']]);
-
-        if ($customer_query->num_rows() !== 1) {
-            throw new RuntimeException('Provider UI smoke customer cardinality is invalid.');
-        }
-
-        $customer = $customer_query->row_array();
-        $customer_role = $this->requireUniqueRole(DB_SLUG_CUSTOMER);
-        $customer_settings_count = $this->CI->db
-            ->get_where('user_settings', ['id_users' => $ids['customer']])
-            ->num_rows();
-
-        if (
-            $customer['first_name'] !== self::CUSTOMER_FIRST_NAME ||
-            $customer['last_name'] !== self::CUSTOMER_LAST_NAME ||
-            $customer['email'] !== null ||
-            $customer['phone_number'] !== self::CUSTOMER_PHONE ||
-            $customer['notes'] !== self::CUSTOMER_NOTES ||
-            (int) $customer['id_roles'] !== (int) $customer_role['id'] ||
-            (int) $customer['is_private'] !== 1 ||
-            $customer['ldap_dn'] !== null ||
-            $customer['mobile_number'] !== null ||
-            $customer['address'] !== null ||
-            $customer['city'] !== null ||
-            $customer['state'] !== null ||
-            $customer['zip_code'] !== null ||
-            $customer['room'] !== null ||
-            $customer['class_size_default'] !== null ||
-            $customer['custom_field_1'] !== null ||
-            $customer['custom_field_2'] !== null ||
-            $customer['custom_field_3'] !== null ||
-            $customer['custom_field_4'] !== null ||
-            $customer['custom_field_5'] !== null ||
-            $customer['timezone'] !== 'UTC' ||
-            $customer['language'] !== 'german' ||
-            empty($customer['create_datetime']) ||
-            $customer['create_datetime'] !== $customer['update_datetime'] ||
-            $customer_settings_count !== 0
-        ) {
-            throw new RuntimeException('Provider UI smoke customer invariant failed.');
-        }
+        $this->assertExactCustomer((int) $ids['customer']);
 
         $this->assertExactAppointment(
             $ids['appointments']['booked_inside'],
@@ -1118,8 +1075,9 @@ final class Provider_ui_smoke_fixture
             ->group_end();
         $service_marker_count = $this->CI->db->get('services')->num_rows();
 
-        $this->CI->db->group_start()->where('notes', self::CUSTOMER_NOTES)->group_end();
-        $customer_marker_count = $this->CI->db->get('users')->num_rows();
+        $customer_marker_count = $this->CI->db
+            ->get_where('users', ['id' => $ids['customer'], 'notes' => self::CUSTOMER_NOTES])
+            ->num_rows();
         $appointment_marker_count = $this->CI->db
             ->where('id_users_provider', $ids['provider'])
             ->where_in('notes', $this->appointmentMarkers())
@@ -1140,6 +1098,49 @@ final class Provider_ui_smoke_fixture
             $appointment_marker_count !== 3
         ) {
             throw new RuntimeException('Provider UI smoke active relation invariant failed.');
+        }
+    }
+
+    private function assertExactCustomer(int $customer_id): void
+    {
+        $customer_query = $this->CI->db->get_where('users', ['id' => $customer_id]);
+
+        if ($customer_query->num_rows() !== 1) {
+            throw new RuntimeException('Provider UI smoke customer cardinality is invalid.');
+        }
+
+        $customer = $customer_query->row_array();
+        $customer_role = $this->requireUniqueRole(DB_SLUG_CUSTOMER);
+        $customer_settings_count = $this->CI->db->get_where('user_settings', ['id_users' => $customer_id])->num_rows();
+
+        if (
+            $customer['first_name'] !== self::CUSTOMER_FIRST_NAME ||
+            $customer['last_name'] !== self::CUSTOMER_LAST_NAME ||
+            $customer['email'] !== null ||
+            $customer['phone_number'] !== self::CUSTOMER_PHONE ||
+            $customer['notes'] !== self::CUSTOMER_NOTES ||
+            (int) $customer['id_roles'] !== (int) $customer_role['id'] ||
+            (int) $customer['is_private'] !== 1 ||
+            $customer['ldap_dn'] !== null ||
+            $customer['mobile_number'] !== null ||
+            $customer['address'] !== null ||
+            $customer['city'] !== null ||
+            $customer['state'] !== null ||
+            $customer['zip_code'] !== null ||
+            $customer['room'] !== null ||
+            $customer['class_size_default'] !== null ||
+            $customer['custom_field_1'] !== null ||
+            $customer['custom_field_2'] !== null ||
+            $customer['custom_field_3'] !== null ||
+            $customer['custom_field_4'] !== null ||
+            $customer['custom_field_5'] !== null ||
+            $customer['timezone'] !== 'UTC' ||
+            $customer['language'] !== 'german' ||
+            empty($customer['create_datetime']) ||
+            $customer['create_datetime'] !== $customer['update_datetime'] ||
+            $customer_settings_count !== 0
+        ) {
+            throw new RuntimeException('Provider UI smoke customer invariant failed.');
         }
     }
 
@@ -1252,18 +1253,12 @@ final class Provider_ui_smoke_fixture
             ->group_end();
         $service_query = $this->CI->db->get('services');
 
-        $this->CI->db->group_start()->where('notes', self::CUSTOMER_NOTES)->group_end();
-        $customer_query = $this->CI->db->get('users');
         $appointment_query = $this->CI->db
             ->where('id_users_provider', (int) $principal['id'])
             ->where_in('notes', $this->appointmentMarkers())
             ->get('appointments');
 
-        if (
-            $service_query->num_rows() !== 1 ||
-            $customer_query->num_rows() !== 1 ||
-            $appointment_query->num_rows() !== 3
-        ) {
+        if ($service_query->num_rows() !== 1 || $appointment_query->num_rows() !== 3) {
             throw new RuntimeException('Provider UI smoke crash recovery cardinality is invalid.');
         }
 
@@ -1288,6 +1283,22 @@ final class Provider_ui_smoke_fixture
             throw new RuntimeException('Provider UI smoke crash recovery marker set is incomplete.');
         }
 
+        $customer_ids = [];
+        foreach ($appointment_query->result_array() as $appointment) {
+            if (!is_numeric($appointment['id_users_customer'])) {
+                throw new RuntimeException('Provider UI smoke crash recovery customer relation is invalid.');
+            }
+
+            $customer_ids[] = (int) $appointment['id_users_customer'];
+        }
+
+        if (count(array_unique($customer_ids)) !== 1) {
+            throw new RuntimeException('Provider UI smoke crash recovery customer relation is ambiguous.');
+        }
+
+        $customer_id = $customer_ids[0];
+        $this->assertExactCustomer($customer_id);
+
         $lease = Provider_ui_smoke_access_policy::parseActiveNotes((string) $principal['notes']);
 
         return [
@@ -1300,7 +1311,7 @@ final class Provider_ui_smoke_fixture
             'ids' => [
                 'provider' => (int) $principal['id'],
                 'service' => (int) $service_query->row_array()['id'],
-                'customer' => (int) $customer_query->row_array()['id'],
+                'customer' => $customer_id,
                 'appointments' => $appointments,
             ],
         ];
