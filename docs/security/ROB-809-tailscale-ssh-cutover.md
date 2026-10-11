@@ -22,15 +22,17 @@ synthetic smoke may pause during the short SSH window.
 2. Inventory the effective firewall for **both** published address families,
    not only the abbreviated UFW status. Bind the ordered rules, default policy,
    relevant rules-file hashes and exact public versus `tailscale0` SSH permits.
-   Unknown or overlapping rules stop the cutover. Use a controlled public-route
-   client with a positive SSH and HTTPS connection before the change.
+   Unknown or overlapping rules stop the cutover. From a controlled public-route
+   client, prove SSH and HTTPS separately for **each published address family**
+   before the change. If either control cannot be established for a published
+   family, stop instead of treating that family as untested.
 3. Prepare one reviewed, narrowly scoped rollback for exactly the removed
    public SSH permits. Test its scheduling, cancellation, dispatch races and
    idempotent restore behavior in isolation. A dispatched rollback must wait
    for the shared lock and verify the restored rules; it must not exit merely
    because the lock is temporarily held. The Hetzner console is the independent
-   recovery path;
-   the rollback is an additional short-window guard, not a replacement for it.
+   recovery path; the rollback is an additional short-window guard, not a
+   replacement for it.
    The shared production-change lock protects the firewall mutation and
    immediate verification; the rollback operator must acquire that same lock
    before its own write. No all-writer pending journal is needed for this
@@ -43,10 +45,11 @@ acquire and validate the shared production-change lock **before** scheduling
 the rollback. Keep that same lock continuously through timer activation,
 firewall mutation, verification and terminal rollback settlement. Remove only
 the verified public SSH permits after the rollback is armed.
-After the change, prove a fresh Tailscale SSH connection, public SSH
-nonreachability for each previously reachable family, continued public HTTPS,
-the intended firewall diff, and application/monitor health. While holding the
-shared lock, cancel the timer only after those facts and the final firewall
+After the change, prove a fresh Tailscale SSH connection. For **each published
+address family** that passed the required pre-change controls, prove public SSH
+nonreachability and continued public HTTPS. Verify the intended firewall diff
+and application/monitor health. While holding the shared lock, cancel the timer
+only after those facts and the final firewall
 state agree. Before declaring success or releasing the lock, prove that neither
 the timer nor a dispatched rollback service is queued or running. If rollback
 has already started, abandon the success path, release the lock so it can
