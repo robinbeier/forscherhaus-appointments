@@ -363,6 +363,7 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
 
         try {
             $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+            $this->assertSame('dormant', $this->fixture->run('deactivate', $this->credentialFile, $this->stateFile));
             $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
             $this->assertSame('removed', $this->fixture->run('verify', $this->credentialFile, $this->stateFile));
             $this->assertSame(1, $this->markerCount('appointments', 'id', (string) $foreignAppointmentId));
@@ -520,13 +521,22 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
     {
         $foreignProviderId = $this->foreignProviderId();
         $foreignProvider = $this->CI->db->get_where('users', ['id' => $foreignProviderId])->row_array();
+        $foreignSettings = $this->CI->db->get_where('user_settings', ['id_users' => $foreignProviderId])->row_array();
         $this->assertTrue(
             $this->CI->db->update(
                 'users',
                 [
                     'notes' => Provider_ui_smoke_access_policy::DORMANT_NOTES,
+                    'email' => Provider_ui_smoke_fixture::PROVIDER_EMAIL,
                 ],
                 ['id' => $foreignProviderId],
+            ),
+        );
+        $this->assertTrue(
+            $this->CI->db->update(
+                'user_settings',
+                ['username' => Provider_ui_smoke_access_policy::USERNAME],
+                ['id_users' => $foreignProviderId],
             ),
         );
 
@@ -538,7 +548,16 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
                 $this->CI->db->get_where('users', ['id' => $foreignProviderId])->row_array()['notes'],
             );
         } finally {
-            $this->CI->db->update('users', ['notes' => $foreignProvider['notes']], ['id' => $foreignProviderId]);
+            $this->CI->db->update(
+                'users',
+                ['notes' => $foreignProvider['notes'], 'email' => $foreignProvider['email']],
+                ['id' => $foreignProviderId],
+            );
+            $this->CI->db->update(
+                'user_settings',
+                ['username' => $foreignSettings['username']],
+                ['id_users' => $foreignProviderId],
+            );
         }
     }
 
@@ -546,6 +565,7 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
     {
         $foreignProviderId = $this->foreignProviderId();
         $foreignProvider = $this->CI->db->get_where('users', ['id' => $foreignProviderId])->row_array();
+        $foreignSettings = $this->CI->db->get_where('user_settings', ['id_users' => $foreignProviderId])->row_array();
         $issuedAt = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
         $activeNotes = Provider_ui_smoke_access_policy::buildActiveNotes($issuedAt, $issuedAt->modify('+5 minutes'));
         $this->assertTrue(
@@ -553,8 +573,16 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
                 'users',
                 [
                     'notes' => $activeNotes,
+                    'email' => Provider_ui_smoke_fixture::PROVIDER_EMAIL,
                 ],
                 ['id' => $foreignProviderId],
+            ),
+        );
+        $this->assertTrue(
+            $this->CI->db->update(
+                'user_settings',
+                ['username' => Provider_ui_smoke_access_policy::USERNAME],
+                ['id_users' => $foreignProviderId],
             ),
         );
 
@@ -569,7 +597,16 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
                 $this->CI->db->get_where('users', ['id' => $foreignProviderId])->row_array()['notes'],
             );
         } finally {
-            $this->CI->db->update('users', ['notes' => $foreignProvider['notes']], ['id' => $foreignProviderId]);
+            $this->CI->db->update(
+                'users',
+                ['notes' => $foreignProvider['notes'], 'email' => $foreignProvider['email']],
+                ['id' => $foreignProviderId],
+            );
+            $this->CI->db->update(
+                'user_settings',
+                ['username' => $foreignSettings['username']],
+                ['id_users' => $foreignProviderId],
+            );
         }
     }
 

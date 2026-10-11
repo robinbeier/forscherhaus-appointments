@@ -26,8 +26,10 @@ does not create a usable standing login.
 Fixture ownership is deliberately narrow. Appointment and principal notes,
 customer email, and service name/description fields are not global ownership
 markers: unrelated rows carrying the same text must never block the Provider
-UI fixture. The reserved principal is identified by its server-controlled
-username and email; the synthetic appointment marker is bound to that provider.
+UI fixture. The dormant principal is identified through its dedicated role;
+while active it is bound to the exact state-file ID or, after state loss, to
+the root-held credential verifier. Username, email, and notes are editable and
+cannot establish ownership. The synthetic appointment marker is bound to that provider.
 The private synthetic customer uses `email = NULL`, and its server-side notes
 sentinel is checked only on the run-owned customer ID. If the state file is
 lost, the customer and service IDs are reconstructed from the reserved
@@ -225,6 +227,15 @@ reports `dormant` before clearing Pending. It does not retry removal, delete
 credentials, or accept an active, removed, partial, or unknown fixture. If
 the remove transaction committed, ordinary settlement instead requires the
 `removed` proof.
+
+If ACK publication stops after writing its temporary file but before creating
+the final hardlink, `recover-interrupted-arm-ack-temp` is the explicit
+server-local path. It accepts only the sole root-owned, run-bound temporary
+ACK with no final name. Under the private and shared locks, it requires no
+credential temporary, terminal cleanup units, and a fresh dormant proof before
+removing that exact temporary name and settling the pending run with another
+proof. A crash after its removal can be handled by `recover-unarmed`; unknown
+content, identity, or extra temporaries retain the veto.
 
 If ACK publication is interrupted after the final hardlink appears but before
 the temporary name is removed, `recover-interrupted-arm-ack` is the explicit

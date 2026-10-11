@@ -93,8 +93,10 @@ timer acknowledgement retains the pending record and requires reconciliation;
 it must not be interpreted as a completed disarm.
 Fixture ownership is deliberately narrow: appointment and principal notes,
 customer email, and service name/description fields are not global ownership
-markers. The reserved principal is identified by server-controlled username
-and email. The synthetic appointment marker is bound to that provider; the
+markers. The dormant principal is bound to its dedicated role; the active
+principal is bound to the exact state-file ID or, after state loss, to the
+root-held credential verifier. Editable username, email, and notes cannot
+establish ownership. The synthetic appointment marker is bound to that provider; the
 private synthetic customer uses `email = NULL`. Its server-side notes sentinel
 is checked only on the run-owned customer ID. If the state file is lost, the
 customer and service IDs are reconstructed from exact provider-owned
@@ -230,6 +232,15 @@ mismatches, stale ACKs or ACK temporaries, active units, unknown fixture state,
 credential temporaries and interrupted acknowledgement publication retain the
 veto. Ordinary settlement and generic success flags cannot clear this marker,
 and this path is not an automatic retry.
+An ACK publication interrupted after the temporary ACK was written but before
+creation of the final hardlink requires the explicit server-local
+`recover-interrupted-arm-ack-temp` action. It accepts only one exact
+root-owned, run-bound temporary and no final ACK. Under both locks, it requires
+credential temporaries absent, bound cleanup units terminal and the fixture
+freshly dormant; it removes only that temporary and settles Pending with a
+second proof. If interrupted after removal, `recover-unarmed` may finish from
+the independently verified no-ACK state. Unknown or extra temporaries retain
+the veto.
 An ACK publication interrupted between creation of its final hardlink and
 removal of its temporary name requires the explicit server-local
 `recover-interrupted-arm-ack` action. It accepts only the exact two-link

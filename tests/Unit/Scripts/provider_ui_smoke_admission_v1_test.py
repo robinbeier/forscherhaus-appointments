@@ -974,6 +974,156 @@ class ProviderUiSmokeAdmissionBehaviorTest(unittest.TestCase):
                     COORD._read_interrupted_arm_ack_pair(resource, record)
             self.assertEqual(raised.exception.code, 75)
 
+    def test_interrupted_arm_ack_temp_reader_accepts_exact_temp_only(self):
+        resource = self.resource('smoke')
+        record = {
+            'run_id': 'a' * 32, 'boot_id': 'boot-test',
+            'operation': 'provider_ui_smoke', 'resource_identity': resource,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory)
+            resource['state_file'] = str(state_dir / 'active.json')
+            payload = (json.dumps(COORD._ack_record(record), sort_keys=True,
+                                  separators=(',', ':')) + '\n').encode()
+            temporary = state_dir / f'.{COORD.ARM_ACK_LEAF}.{record["run_id"]}.tmp'
+            temporary.write_bytes(payload)
+            real_stat = COORD.os.stat
+
+            def fake_stat(path, *args, **kwargs):
+                value = Path(path)
+                actual = real_stat(path, *args, **kwargs)
+                if value == temporary:
+                    return os.stat_result((stat.S_IFREG | 0o600, 22, 1, 1,
+                                           0, 0, len(payload), 0, 0, 0))
+                if value == state_dir:
+                    return os.stat_result((stat.S_IFDIR | 0o700, 2, 1, 2,
+                                           0, 0, 0, 0, 0, 0))
+                return actual
+
+            with patch.object(COORD, '_require_state_directory',
+                              return_value=(state_dir, (1, 2, 0o40700, 0, 0, 2))), \
+                 patch.object(COORD.os, 'stat', side_effect=fake_stat):
+                self.assertEqual(
+                    COORD._read_interrupted_arm_ack_temp(resource, record),
+                    temporary)
+
+    def test_interrupted_arm_ack_temp_reader_rejects_binding_mismatch(self):
+        resource = self.resource('smoke')
+        record = {
+            'run_id': 'a' * 32, 'boot_id': 'boot-test',
+            'operation': 'provider_ui_smoke', 'resource_identity': resource,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory)
+            resource['state_file'] = str(state_dir / 'active.json')
+            wrong = dict(record, run_id='b' * 32)
+            payload = (json.dumps(COORD._ack_record(wrong), sort_keys=True,
+                                  separators=(',', ':')) + '\n').encode()
+            temporary = state_dir / f'.{COORD.ARM_ACK_LEAF}.{record["run_id"]}.tmp'
+            temporary.write_bytes(payload)
+            real_stat = COORD.os.stat
+
+            def fake_stat(path, *args, **kwargs):
+                value = Path(path)
+                actual = real_stat(path, *args, **kwargs)
+                if value == temporary:
+                    return os.stat_result((stat.S_IFREG | 0o600, 22, 1, 1,
+                                           0, 0, len(payload), 0, 0, 0))
+                if value == state_dir:
+                    return os.stat_result((stat.S_IFDIR | 0o700, 2, 1, 2,
+                                           0, 0, 0, 0, 0, 0))
+                return actual
+
+            with patch.object(COORD, '_require_state_directory',
+                              return_value=(state_dir, (1, 2, 0o40700, 0, 0, 2))), \
+                 patch.object(COORD.os, 'stat', side_effect=fake_stat):
+                with self.assertRaises(SystemExit) as raised:
+                    COORD._read_interrupted_arm_ack_temp(resource, record)
+            self.assertEqual(raised.exception.code, 75)
+
+    def test_interrupted_arm_ack_temp_reader_rejects_extra_temp(self):
+        resource = self.resource('smoke')
+        record = {
+            'run_id': 'a' * 32, 'boot_id': 'boot-test',
+            'operation': 'provider_ui_smoke', 'resource_identity': resource,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory)
+            resource['state_file'] = str(state_dir / 'active.json')
+            temporary = state_dir / f'.{COORD.ARM_ACK_LEAF}.{record["run_id"]}.tmp'
+            temporary.write_text('one')
+            (state_dir / f'.{COORD.ARM_ACK_LEAF}.other.tmp').write_text('two')
+            with patch.object(COORD, '_require_state_directory',
+                              return_value=(state_dir, (1, 2, 0o40700, 0, 0, 2))):
+                with self.assertRaises(SystemExit) as raised:
+                    COORD._read_interrupted_arm_ack_temp(resource, record)
+            self.assertEqual(raised.exception.code, 75)
+
+    def test_interrupted_arm_ack_temp_reader_rejects_existing_final(self):
+        resource = self.resource('smoke')
+        record = {
+            'run_id': 'a' * 32, 'boot_id': 'boot-test',
+            'operation': 'provider_ui_smoke', 'resource_identity': resource,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory)
+            resource['state_file'] = str(state_dir / 'active.json')
+            temporary = state_dir / f'.{COORD.ARM_ACK_LEAF}.{record["run_id"]}.tmp'
+            temporary.write_text('one')
+            (state_dir / COORD.ARM_ACK_LEAF).write_text('final')
+            with patch.object(COORD, '_require_state_directory',
+                              return_value=(state_dir, (1, 2, 0o40700, 0, 0, 2))):
+                with self.assertRaises(SystemExit) as raised:
+                    COORD._read_interrupted_arm_ack_temp(resource, record)
+            self.assertEqual(raised.exception.code, 75)
+
+    def test_interrupted_arm_ack_temp_recovery_removes_only_temp(self):
+        resource = self.resource('smoke')
+        record = {
+            'schema': 'maintenance_pending_v1', 'epoch': 1,
+            'run_id': 'a' * 32, 'boot_id': 'boot-test',
+            'operation': 'provider_ui_smoke', 'resource_identity': resource,
+        }
+        core = FakeCore(record)
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory)
+            resource['state_file'] = str(state_dir / 'active.json')
+            temporary = state_dir / f'.{COORD.ARM_ACK_LEAF}.{record["run_id"]}.tmp'
+            temporary.write_text('synthetic')
+            with patch.object(COORD, 'private_cleanup_lock', lambda: contextlib.nullcontext()), \
+                 patch.object(COORD, 'load_core', return_value=core), \
+                 patch.object(COORD, '_read_interrupted_arm_ack_temp', return_value=temporary), \
+                 patch.object(COORD, '_ensure_credential_temp_absent'), \
+                 patch.object(COORD, 'unit_terminal', return_value=True), \
+                 patch.object(COORD, 'dormant_clean', return_value=True), \
+                 patch.object(COORD, '_ensure_arm_ack_absent'), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                args = self.args('recover-interrupted-arm-ack-temp')
+                args.state_file = str(state_dir / 'active.json')
+                COORD.recover_interrupted_arm_ack_temp(args)
+            self.assertFalse(temporary.exists())
+
+    def test_interrupted_arm_ack_temp_recovery_preserves_temp_when_nonterminal(self):
+        resource = self.resource('smoke')
+        record = {
+            'schema': 'maintenance_pending_v1', 'epoch': 1,
+            'run_id': 'a' * 32, 'boot_id': 'boot-test',
+            'operation': 'provider_ui_smoke', 'resource_identity': resource,
+        }
+        core = FakeCore(record)
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory) / 'provider-ui-smoke-temp-test.tmp'
+            temporary.write_text('synthetic')
+            with patch.object(COORD, 'private_cleanup_lock', lambda: contextlib.nullcontext()), \
+                 patch.object(COORD, 'load_core', return_value=core), \
+                 patch.object(COORD, '_read_interrupted_arm_ack_temp', return_value=temporary), \
+                 patch.object(COORD, '_ensure_credential_temp_absent'), \
+                 patch.object(COORD, 'unit_terminal', side_effect=SystemExit(75)):
+                with self.assertRaises(SystemExit) as raised:
+                    COORD.recover_interrupted_arm_ack_temp(self.args('recover-interrupted-arm-ack-temp'))
+            self.assertEqual(raised.exception.code, 75)
+            self.assertTrue(temporary.exists())
+
     def test_ack_arm_persists_exact_positive_run_and_resource_binding(self):
         resource = self.resource("smoke")
         record = {

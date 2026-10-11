@@ -474,6 +474,55 @@ def _read_interrupted_arm_ack_pair(resource, record):
     return temporary
 
 
+def _read_interrupted_arm_ack_temp(resource, record):
+    """Read the sole run-bound temp left before ACK hardlink publication."""
+    directory, directory_identity = _require_state_directory(resource)
+    final_path = _ack_path(resource)
+    temporary = directory / f'.{ARM_ACK_LEAF}.{record["run_id"]}.tmp'
+    try:
+        os.stat(final_path, follow_symlinks=False)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        fail('arm_ack_interrupted_unknown')
+    else:
+        fail('arm_ack_interrupted_unknown')
+    try:
+        temporary_names = [entry for entry in directory.iterdir()
+                           if entry.name.startswith(_ack_temp_prefix()) and
+                           entry.name.endswith('.tmp')]
+    except OSError:
+        fail('arm_ack_interrupted_unknown')
+    if temporary_names != [temporary]:
+        fail('arm_ack_interrupted_unknown')
+    try:
+        metadata = os.stat(temporary, follow_symlinks=False)
+    except OSError:
+        fail('arm_ack_interrupted_unknown')
+    identity = _ack_file_identity(metadata)
+    if identity is None:
+        fail('arm_ack_interrupted_unknown')
+    try:
+        fd = os.open(temporary, os.O_RDONLY | os.O_CLOEXEC |
+                     os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, 'rb') as handle:
+            payload = handle.read(MAX_ARM_ACK_BYTES + 1)
+        after = os.stat(temporary, follow_symlinks=False)
+        directory_after = os.stat(directory, follow_symlinks=False)
+    except (OSError, ValueError):
+        fail('arm_ack_interrupted_unknown')
+    if (len(payload) > MAX_ARM_ACK_BYTES or _ack_file_identity(after) != identity or
+            _state_dir_identity(directory_after) != directory_identity):
+        fail('arm_ack_interrupted_unknown')
+    try:
+        value = json.loads(payload.decode('utf-8'))
+    except (ValueError, UnicodeError):
+        fail('arm_ack_interrupted_unknown')
+    if value != _ack_record(record):
+        fail('arm_ack_interrupted_unknown')
+    return temporary
+
+
 def _write_arm_ack(resource, record):
     directory, directory_identity = _require_state_directory(resource)
     path = _ack_path(resource)
@@ -1019,9 +1068,68 @@ def recover_interrupted_arm_ack(args: argparse.Namespace) -> None:
     print('provider_ui_smoke_admission=result=arm-ack-pair-recovered')
 
 
+def recover_interrupted_arm_ack_temp(args: argparse.Namespace) -> None:
+    """Recover a crash after temp ACK fsync and before final link creation."""
+    if args.operation != 'smoke':
+        fail('arm_ack_operation_invalid', 64)
+    core = load_core()
+    resource = resource_from(args)
+    try:
+        with private_cleanup_lock():
+            with core.maintenance_recovery() as admission:
+                record = expected_record(core, args.run_id, args.operation, resource,
+                                         allow_prior_boot=True)
+                temporary = _read_interrupted_arm_ack_temp(resource, record)
+
+                def terminal_before_unlink(current):
+                    if current != record:
+                        return False
+                    try:
+                        _ensure_credential_temp_absent(resource)
+                        unit_terminal(args.cleanup_unit + '.timer', resource, args.run_id)
+                        unit_terminal(args.cleanup_unit + '.service', resource, args.run_id)
+                        dormant_clean(resource, 'dormant')
+                        return True
+                    except BaseException:
+                        return False
+
+                if not terminal_before_unlink(record):
+                    fail('terminal_proof_unknown')
+                # Re-read immediately before unlinking so the exact temp and
+                # the absence of the final name remain bound to this proof.
+                if _read_interrupted_arm_ack_temp(resource, record) != temporary:
+                    fail('arm_ack_interrupted_unknown')
+                os.unlink(temporary)
+                directory_fd = os.open(Path(resource['state_file']).parent,
+                                       os.O_RDONLY | os.O_DIRECTORY |
+                                       os.O_CLOEXEC | os.O_NOFOLLOW)
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+
+                def terminal_after_unlink(current):
+                    if current != record:
+                        return False
+                    try:
+                        _ensure_arm_ack_absent(resource)
+                        return terminal_before_unlink(current)
+                    except BaseException:
+                        return False
+
+                result = admission.recover_pending(record, terminal_after_unlink)
+                if result.get('status') != 'recovered':
+                    fail('pending_recovery_unknown')
+    except core.PendingError as error:
+        fail(error.reason, error.code)
+    except OSError:
+        fail('arm_ack_cleanup_failed')
+    print('provider_ui_smoke_admission=result=arm-ack-temp-recovered')
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=('begin', 'ack-arm', 'assert-bound-fd', 'settle', 'recover-arm-ack', 'recover-interrupted-arm-ack', 'recover-unarmed', 'recover-install-empty', 'recover-remove-dormant', 'recover-clear-marker'))
+    parser.add_argument('action', choices=('begin', 'ack-arm', 'assert-bound-fd', 'settle', 'recover-arm-ack', 'recover-interrupted-arm-ack', 'recover-interrupted-arm-ack-temp', 'recover-unarmed', 'recover-install-empty', 'recover-remove-dormant', 'recover-clear-marker'))
     parser.add_argument('--operation', choices=sorted(ACTION_NAMES), required=True)
     parser.add_argument('--run-id')
     parser.add_argument('--lock-fd', type=int)
@@ -1053,6 +1161,8 @@ def main() -> None:
         recover_arm_ack(args)
     elif args.action == 'recover-interrupted-arm-ack':
         recover_interrupted_arm_ack(args)
+    elif args.action == 'recover-interrupted-arm-ack-temp':
+        recover_interrupted_arm_ack_temp(args)
     elif args.action == 'recover-unarmed':
         recover_unarmed(args)
     elif args.action == 'recover-install-empty':

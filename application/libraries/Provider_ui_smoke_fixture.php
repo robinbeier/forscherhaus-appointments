@@ -174,7 +174,10 @@ final class Provider_ui_smoke_fixture
 
             $credentials_present = file_exists($credential_file) || is_link($credential_file);
 
-            if (in_array($action, ['install', 'activate'], true) || ($action === 'verify' && $credentials_present)) {
+            if (
+                in_array($action, ['install', 'activate', 'deactivate'], true) ||
+                ($action === 'verify' && $credentials_present)
+            ) {
                 $credentials = $this->readCredentials($credential_file);
             }
 
@@ -194,7 +197,7 @@ final class Provider_ui_smoke_fixture
                         'install' => $this->install($state_file),
                         'verify' => $this->verify($state_file, $credentials !== null),
                         'activate' => $this->activate($credentials, $state_file),
-                        'deactivate' => $this->deactivate($state_file, $remove_state_after_commit),
+                        'deactivate' => $this->deactivate($credentials, $state_file, $remove_state_after_commit),
                         'remove' => $this->remove($state_file),
                     };
 
@@ -263,10 +266,9 @@ final class Provider_ui_smoke_fixture
         }
 
         $this->assertDormantRole($role);
-        $principal = $this->findPrincipal();
+        $principal = $this->findPrincipalByRoleId((int) $role['id']);
 
         if ($principal === null) {
-            $this->assertPrincipalMarkersUnused();
             $now = date('Y-m-d H:i:s');
 
             $this->insertOrFail('users', [
@@ -320,7 +322,7 @@ final class Provider_ui_smoke_fixture
                 'dashboard_range_end' => null,
             ]);
 
-            $principal = $this->findPrincipal();
+            $principal = $this->findPrincipalByRoleId((int) $role['id']);
         }
 
         $this->assertDormantClean($principal, $role);
@@ -335,10 +337,9 @@ final class Provider_ui_smoke_fixture
     {
         $this->assertStateFileAbsent($state_file);
         $role = $this->findDormantRole();
-        $principal = $this->findPrincipal();
+        $principal = $role === null ? null : $this->findPrincipalByRoleId((int) $role['id']);
 
         if ($role === null && $principal === null) {
-            $this->assertPrincipalMarkersUnused();
             $this->assertFixtureMarkersUnused();
 
             return 'removed';
@@ -366,7 +367,7 @@ final class Provider_ui_smoke_fixture
     {
         $this->assertStateFileAbsent($state_file);
         $dormant_role = $this->requireDormantRole();
-        $principal = $this->requirePrincipal();
+        $principal = $this->requirePrincipalByRoleId((int) $dormant_role['id']);
         $this->assertDormantClean($principal, $dormant_role);
         $provider_role = $this->requireUniqueRole(DB_SLUG_PROVIDER);
         $customer_role = $this->requireUniqueRole(DB_SLUG_CUSTOMER);
@@ -508,13 +509,18 @@ final class Provider_ui_smoke_fixture
 
     /**
      * Delete the exact active fixture and disable authentication again.
+     *
+     * @param array{username: string, password: string}|null $credentials
      */
-    private function deactivate(string $state_file, bool &$remove_state_after_commit): string
+    private function deactivate(?array $credentials, string $state_file, bool &$remove_state_after_commit): string
     {
-        $dormant_role = $this->requireDormantRole();
-        $principal = $this->requirePrincipal();
         $state = $this->readStateFile($state_file);
         $had_state_file = $state !== null;
+        $dormant_role = $this->requireDormantRole();
+        $principal =
+            $state === null
+                ? $this->findPrincipalByRoleId((int) $dormant_role['id']) ?? $this->requireActivePrincipal($credentials)
+                : $this->requirePrincipalById((int) $state['ids']['provider']);
 
         if ($this->isDormantClean($principal, $dormant_role)) {
             $remove_state_after_commit = $state !== null;
@@ -570,7 +576,7 @@ final class Provider_ui_smoke_fixture
             true,
         );
 
-        $principal = $this->requirePrincipal();
+        $principal = $this->requirePrincipalById((int) $ids['provider']);
         $this->assertDormantClean($principal, $dormant_role);
         $remove_state_after_commit = $had_state_file;
 
@@ -583,11 +589,10 @@ final class Provider_ui_smoke_fixture
     private function remove(string $state_file): string
     {
         $this->assertStateFileAbsent($state_file);
-        $principal = $this->findPrincipal();
         $role = $this->findDormantRole();
+        $principal = $role === null ? null : $this->findPrincipalByRoleId((int) $role['id']);
 
         if ($principal === null && $role === null) {
-            $this->assertPrincipalMarkersUnused();
             $this->assertFixtureMarkersUnused();
 
             return 'removed';
@@ -608,10 +613,9 @@ final class Provider_ui_smoke_fixture
         }
 
         $this->deleteExactlyOne('roles', ['id' => $role['id']]);
-        $this->assertPrincipalMarkersUnused();
         $this->assertFixtureMarkersUnused();
 
-        if ($this->findPrincipal() !== null || $this->findDormantRole() !== null) {
+        if ($this->findPrincipalByRoleId((int) $role['id']) !== null || $this->findDormantRole() !== null) {
             throw new RuntimeException('Provider UI smoke removal verification failed.');
         }
 
@@ -621,9 +625,9 @@ final class Provider_ui_smoke_fixture
     /**
      * @return array<string, mixed>|null
      */
-    private function findPrincipal(): ?array
+    private function findPrincipal(?int $id = null, ?int $role_id = null): ?array
     {
-        $query = $this->CI->db
+        $builder = $this->CI->db
             ->select(
                 'users.*, roles.slug AS role_slug, user_settings.username, user_settings.password, ' .
                     'user_settings.salt, user_settings.working_plan, user_settings.working_plan_exceptions, ' .
@@ -635,9 +639,17 @@ final class Provider_ui_smoke_fixture
             )
             ->from('users')
             ->join('roles', 'roles.id = users.id_roles', 'inner')
-            ->join('user_settings', 'user_settings.id_users = users.id', 'inner')
-            ->where('user_settings.username', Provider_ui_smoke_access_policy::USERNAME)
-            ->get();
+            ->join('user_settings', 'user_settings.id_users = users.id', 'inner');
+
+        if ($id !== null) {
+            $builder->where('users.id', $id);
+        } elseif ($role_id !== null) {
+            $builder->where('users.id_roles', $role_id);
+        } else {
+            $builder->where('user_settings.username', Provider_ui_smoke_access_policy::USERNAME);
+        }
+
+        $query = $builder->get();
 
         if ($query->num_rows() > 1) {
             throw new RuntimeException('Provider UI smoke principal cardinality is invalid.');
@@ -646,15 +658,95 @@ final class Provider_ui_smoke_fixture
         return $query->num_rows() === 1 ? $query->row_array() : null;
     }
 
+    private function findPrincipalById(int $id): ?array
+    {
+        return $this->findPrincipal($id);
+    }
+
+    private function findPrincipalByRoleId(int $role_id): ?array
+    {
+        return $this->findPrincipal(null, $role_id);
+    }
+
+    /**
+     * Find the active principal using the root-controlled credential verifier.
+     * Editable username, email, and notes are deliberately not ownership keys.
+     *
+     * @param array{username: string, password: string}|null $credentials
+     */
+    private function findActivePrincipal(?array $credentials): ?array
+    {
+        if ($credentials === null) {
+            throw new RuntimeException('Provider UI smoke active principal requires credentials.');
+        }
+
+        $query = $this->CI->db
+            ->select('users.id, user_settings.salt, user_settings.password')
+            ->from('users')
+            ->join('roles', 'roles.id = users.id_roles', 'inner')
+            ->join('user_settings', 'user_settings.id_users = users.id', 'inner')
+            ->where('roles.slug', DB_SLUG_PROVIDER)
+            ->where('user_settings.username', Provider_ui_smoke_access_policy::USERNAME)
+            ->get();
+        $matches = [];
+
+        foreach ($query->result_array() as $candidate) {
+            if (
+                is_string($candidate['salt']) &&
+                is_string($candidate['password']) &&
+                hash_equals(
+                    (string) $candidate['password'],
+                    hash_password($candidate['salt'], $credentials['password']),
+                )
+            ) {
+                $matches[] = (int) $candidate['id'];
+            }
+        }
+
+        if (count($matches) > 1) {
+            throw new RuntimeException('Provider UI smoke active principal identity is ambiguous.');
+        }
+
+        return $matches === [] ? null : $this->findPrincipalById($matches[0]);
+    }
+
     /**
      * @return array<string, mixed>
      */
-    private function requirePrincipal(): array
+    private function requirePrincipalByRoleId(int $role_id): array
     {
-        $principal = $this->findPrincipal();
+        $principal = $this->findPrincipalByRoleId($role_id);
 
         if ($principal === null) {
             throw new RuntimeException('Provider UI smoke principal is missing.');
+        }
+
+        return $principal;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function requirePrincipalById(int $id): array
+    {
+        $principal = $this->findPrincipalById($id);
+
+        if ($principal === null) {
+            throw new RuntimeException('Provider UI smoke principal is missing.');
+        }
+
+        return $principal;
+    }
+
+    /**
+     * @param array{username: string, password: string}|null $credentials
+     */
+    private function requireActivePrincipal(?array $credentials): array
+    {
+        $principal = $this->findActivePrincipal($credentials);
+
+        if ($principal === null) {
+            throw new RuntimeException('Provider UI smoke active principal is missing.');
         }
 
         return $principal;
@@ -801,17 +893,9 @@ final class Provider_ui_smoke_fixture
 
         $this->assertFixtureMarkersUnused((int) $principal['id']);
 
-        $provider_email_count = $this->CI->db
-            ->select('users.id')
-            ->from('users')
-            ->join('roles', 'roles.id = users.id_roles', 'inner')
-            ->where('roles.slug !=', DB_SLUG_CUSTOMER)
-            ->where('users.email', self::PROVIDER_EMAIL)
-            ->get()
-            ->num_rows();
         $role_reference_count = $this->CI->db->get_where('users', ['id_roles' => $role['id']])->num_rows();
 
-        if ($provider_email_count !== 1 || $role_reference_count !== 1) {
+        if ($role_reference_count !== 1) {
             throw new RuntimeException('Provider UI smoke dormant ownership invariant failed.');
         }
     }
@@ -829,30 +913,6 @@ final class Provider_ui_smoke_fixture
         } catch (Throwable) {
             return false;
         }
-    }
-
-    private function assertPrincipalMarkersUnused(): void
-    {
-        $username_count = $this->CI->db
-            ->get_where('user_settings', ['username' => Provider_ui_smoke_access_policy::USERNAME])
-            ->num_rows();
-        $email_count = $this->CI->db
-            ->select('users.id')
-            ->from('users')
-            ->join('roles', 'roles.id = users.id_roles', 'inner')
-            ->where('roles.slug !=', DB_SLUG_CUSTOMER)
-            ->where('users.email', self::PROVIDER_EMAIL)
-            ->get()
-            ->num_rows();
-
-        if ($username_count !== 0 || $email_count !== 0) {
-            throw new RuntimeException('Provider UI smoke principal marker collision detected.');
-        }
-
-        // Notes are user-editable and therefore cannot establish ownership.
-        // The reserved username and non-customer email above remain the
-        // server-controlled collision checks; lifecycle methods validate the
-        // marker on the exact principal row they own.
     }
 
     private function assertFixtureMarkersUnused(?int $provider_id = null): void
