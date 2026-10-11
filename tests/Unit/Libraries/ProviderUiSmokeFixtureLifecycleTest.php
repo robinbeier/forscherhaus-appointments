@@ -231,6 +231,76 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
         $this->fixture->run('verify', $this->credentialFile, $this->stateFile);
     }
 
+    public function testStateBackedDeactivationCleansActiveFixtureWithoutCredentialFile(): void
+    {
+        $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+        $this->assertSame('active', $this->fixture->run('activate', $this->credentialFile, $this->stateFile));
+        $credentialContents = file_get_contents($this->credentialFile);
+        $this->assertIsString($credentialContents);
+        $this->assertTrue(unlink($this->credentialFile));
+
+        try {
+            $this->assertSame('dormant', $this->fixture->run('deactivate', $this->credentialFile, $this->stateFile));
+            $this->assertFileDoesNotExist($this->stateFile);
+            $this->assertSame(Provider_ui_smoke_access_policy::DORMANT_ROLE_SLUG, $this->loadPrincipal()['role_slug']);
+            $this->assertSame(0, $this->markerCount('services', 'name', Provider_ui_smoke_fixture::SERVICE_NAME));
+        } finally {
+            $this->assertNotFalse(file_put_contents($this->credentialFile, $credentialContents));
+            $this->assertTrue(chmod($this->credentialFile, 0600));
+        }
+
+        $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
+    }
+
+    public function testStateBackedDeactivationCleansActiveFixtureWithMalformedCredentialFile(): void
+    {
+        $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+        $this->assertSame('active', $this->fixture->run('activate', $this->credentialFile, $this->stateFile));
+        $credentialContents = file_get_contents($this->credentialFile);
+        $this->assertIsString($credentialContents);
+        $this->assertNotFalse(file_put_contents($this->credentialFile, "invalid=true\n"));
+
+        try {
+            $this->assertSame('dormant', $this->fixture->run('deactivate', $this->credentialFile, $this->stateFile));
+            $this->assertFileDoesNotExist($this->stateFile);
+            $this->assertSame(Provider_ui_smoke_access_policy::DORMANT_ROLE_SLUG, $this->loadPrincipal()['role_slug']);
+            $this->assertSame(0, $this->markerCount('services', 'name', Provider_ui_smoke_fixture::SERVICE_NAME));
+        } finally {
+            $this->assertNotFalse(file_put_contents($this->credentialFile, $credentialContents));
+            $this->assertTrue(chmod($this->credentialFile, 0600));
+        }
+
+        $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
+    }
+
+    public function testStateLossStillRequiresCredentialBeforeActiveCleanup(): void
+    {
+        $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+        $this->assertSame('active', $this->fixture->run('activate', $this->credentialFile, $this->stateFile));
+        $credentialContents = file_get_contents($this->credentialFile);
+        $this->assertIsString($credentialContents);
+        $this->assertTrue(unlink($this->stateFile));
+        $this->assertTrue(unlink($this->credentialFile));
+
+        try {
+            try {
+                $this->fixture->run('deactivate', $this->credentialFile, $this->stateFile);
+                $this->fail('State-loss reconstruction must refuse missing credentials.');
+            } catch (RuntimeException $exception) {
+                $this->assertStringContainsString('protected file is invalid', $exception->getMessage());
+            }
+
+            $this->assertSame(DB_SLUG_PROVIDER, $this->loadPrincipal()['role_slug']);
+            $this->assertSame(1, $this->markerCount('services', 'name', Provider_ui_smoke_fixture::SERVICE_NAME));
+        } finally {
+            $this->assertNotFalse(file_put_contents($this->credentialFile, $credentialContents));
+            $this->assertTrue(chmod($this->credentialFile, 0600));
+        }
+
+        $this->assertSame('dormant', $this->fixture->run('deactivate', $this->credentialFile, $this->stateFile));
+        $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
+    }
+
     public function testVerificationRejectsPresentCredentialSymlink(): void
     {
         $target = $this->temporaryDirectory . '/credential-target.env';

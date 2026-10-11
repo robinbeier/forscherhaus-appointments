@@ -195,6 +195,14 @@ The orchestrator:
     to the durable timer acknowledgement. Unknown arm or acknowledgement
     results leave the pending veto for deliberate recovery.
 
+An intact, root-bound `active.json` contains the exact provider ID needed for
+`deactivate`; that cleanup must still disable the live fixture if the protected
+credential file is missing or malformed. Reconstruction after state-file loss
+requires the credential verifier and fails closed without it. The subsequent
+independent dormant `verify` still requires a valid credential file, so a
+missing or damaged file may retain Pending after the active fixture has been
+disabled; it does not authorize clearing the veto without repair and proof.
+
 The systemd proof binds the cleanup service's complete command to this app,
 credential, state directory and run ID. If pending was already cleared but an
 interruption left only the acknowledgement, the separate `recover-arm-ack`

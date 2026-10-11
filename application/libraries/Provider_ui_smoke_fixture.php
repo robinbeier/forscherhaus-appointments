@@ -174,10 +174,7 @@ final class Provider_ui_smoke_fixture
 
             $credentials_present = file_exists($credential_file) || is_link($credential_file);
 
-            if (
-                in_array($action, ['install', 'activate', 'deactivate'], true) ||
-                ($action === 'verify' && $credentials_present)
-            ) {
+            if (in_array($action, ['install', 'activate'], true) || ($action === 'verify' && $credentials_present)) {
                 $credentials = $this->readCredentials($credential_file);
             }
 
@@ -197,7 +194,7 @@ final class Provider_ui_smoke_fixture
                         'install' => $this->install($state_file),
                         'verify' => $this->verify($state_file, $credentials !== null),
                         'activate' => $this->activate($credentials, $state_file),
-                        'deactivate' => $this->deactivate($credentials, $state_file, $remove_state_after_commit),
+                        'deactivate' => $this->deactivate($credential_file, $state_file, $remove_state_after_commit),
                         'remove' => $this->remove($state_file),
                     };
 
@@ -510,17 +507,25 @@ final class Provider_ui_smoke_fixture
     /**
      * Delete the exact active fixture and disable authentication again.
      *
-     * @param array{username: string, password: string}|null $credentials
      */
-    private function deactivate(?array $credentials, string $state_file, bool &$remove_state_after_commit): string
+    private function deactivate(string $credential_file, string $state_file, bool &$remove_state_after_commit): string
     {
         $state = $this->readStateFile($state_file);
         $had_state_file = $state !== null;
         $dormant_role = $this->requireDormantRole();
-        $principal =
-            $state === null
-                ? $this->findPrincipalByRoleId((int) $dormant_role['id']) ?? $this->requireActivePrincipal($credentials)
-                : $this->requirePrincipalById((int) $state['ids']['provider']);
+        if ($state !== null) {
+            $principal = $this->requirePrincipalById((int) $state['ids']['provider']);
+        } else {
+            $principal = $this->findPrincipalByRoleId((int) $dormant_role['id']);
+
+            if ($principal === null) {
+                // Only state-loss reconstruction needs the protected secret
+                // to identify the active principal. A valid state ID must
+                // remain sufficient to disable a live fixture if the
+                // credential file has been lost or damaged.
+                $principal = $this->requireActivePrincipal($this->readCredentials($credential_file));
+            }
+        }
 
         if ($this->isDormantClean($principal, $dormant_role)) {
             $remove_state_after_commit = $state !== null;
