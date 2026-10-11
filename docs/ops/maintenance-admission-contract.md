@@ -40,7 +40,7 @@ scheduler, operator and recovery entrypoints, including direct supported calls.
 | Restore verification | `scripts/ops/libexec/deployment_dump_attestation_v1.py`; detached container, lease watcher, orphan and continuity checks | Repository source admits before reconciliation, registers pending before Docker launch, and settles after terminal restore and publication. The source now includes a narrowly scoped recovery proof for the post-publication/post-cleanup state; installed recovery and production installation remain open. |
 | Session retention | `scripts/ops/libexec/session_retention_v1.py`; shared lock and protected local state | Repository execute path reads the pending-state contract through its existing lock descriptor before mutation; installed helper and unit remain legacy until the coordinated rollout |
 | Manual build-cache retention | `scripts/ops/prod_build_cache_retention.sh`; private lock and activity veto | Require the shared lock for execute, including when its path is absent; ROB-579 tracks this prerequisite |
-| Retired release/archive/dump retention | Retired helper and existing hold/retention controls | Remain disabled; do not reactivate as part of enrollment |
+| Manual release/archive/dump retention (not enrolled) | `scripts/ops/prod_release_archive_dump_retention.sh` still exposes `--execute`; the root-controlled helper is installed and its timer is inactive | Manual execute remains supported and accessible, but is outside pending-state admission. Enroll/fence every supported manual path or explicitly retire it before the ROB-809 cutover; keep automatic retention disabled |
 | Retained manual backup/restore wrappers | Installed operator paths, verified by bounded read-only inventory | Enroll or explicitly retire every supported path before removing the veto |
 
 Native Docker/BuildKit garbage collection remains a separate engine-managed
@@ -314,6 +314,11 @@ tests must exercise direct legacy invocation and prove refusal or unavailability
 not attribute new protocol awareness to unchanged code. Epoch checks apply only
 to updated participants. Rollback requires the same fence and settled pending
 operations; reverting only some tools must not reopen legacy admission.
+
+The inactive retention timer does not retire the manual `--execute` wrapper. Its
+continued accessibility is therefore a migration blocker until that entrypoint
+is enrolled in the pending-state protocol or explicitly retired and verified
+unreachable.
 
 Remove command-name inference only after every supported retained scheduler,
 manual and recovery path is enrolled, versions agree, crash/recovery evidence
