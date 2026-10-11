@@ -209,6 +209,22 @@ mechanism, or keep manual prune unavailable under the new protocol. Do not
 substitute container inspection, process names or elapsed time for that proof.
 This requirement does not change native BuildKit GC's separate boundary.
 
+The local ROB-812 prerequisite fences the legacy manual entrypoint at the
+fixed `/var/lib/fh-maintenance-admission` path. Execute mode acquires the
+canonical shared `fh-production-change.lock` before checking that path, then
+treats its presence as `maintenance_protocol_unenrolled` and refuses to
+dispatch the Docker daemon. The check includes directories, regular files,
+symlinks and dangling symlinks; the path is never created and no caller or environment
+override exists. A missing path preserves the existing bounded execute
+behavior. Dry-run may report whether the path was observed, but remains
+read-only and does not acquire or create protocol state.
+
+This fence closes the legacy writer during protocol installation only when
+installation and the check use the same shared lock. It does not prove
+completion of a previously dispatched prune, reconcile daemon state, or
+serialize native BuildKit garbage collection, which remains a separate
+engine-managed mechanism.
+
 The state directory, bounded schema, atomic publication protocol, per-service
 write permissions and recovery interface must be implemented and reviewed
 before enabling this contract. They are proposed requirements, not permissions

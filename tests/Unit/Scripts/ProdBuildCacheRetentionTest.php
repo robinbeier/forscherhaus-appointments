@@ -102,6 +102,81 @@ final class ProdBuildCacheRetentionTest extends TestCase
         }
     }
 
+    public function testExecutePermitsLegacyPruneWhenAdmissionStateIsAbsent(): void
+    {
+        $workspace = $this->workspace();
+
+        try {
+            $environment = $this->prepareStubs($workspace);
+            self::assertFileDoesNotExist($environment['ADMISSION_ROOT']);
+            $result = $this->runScript(['--execute', '--confirm-live-write', 'ROB-450'], $environment);
+
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            self::assertStringContainsString('maintenance_admission_state=absent', $result['stdout']);
+            self::assertStringContainsString('deletion_performed=yes', $result['stdout']);
+            self::assertStringContainsString(
+                'builder prune --force',
+                (string) file_get_contents($environment['DOCKER_LOG']),
+            );
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testExecuteBlocksWhenAdmissionStateIsPresentBeforePrune(): void
+    {
+        $workspace = $this->workspace();
+
+        try {
+            $environment = $this->prepareStubs($workspace);
+            mkdir($environment['ADMISSION_ROOT'], 0700);
+            $result = $this->runScript(['--execute', '--confirm-live-write', 'ROB-450'], $environment);
+
+            self::assertSame(75, $result['exit_code']);
+            self::assertStringContainsString('maintenance_admission_state=present', $result['stdout']);
+            self::assertStringContainsString('reason=maintenance_protocol_unenrolled', $result['stdout']);
+            self::assertStringContainsString('deletion_performed=no', $result['stdout']);
+            self::assertDoesNotMatchRegularExpression(
+                '/builder prune .*--force/',
+                (string) file_get_contents($environment['DOCKER_LOG']),
+            );
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testExecuteBlocksForAdmissionStateSymlinkAndDryRunOnlyObserves(): void
+    {
+        $workspace = $this->workspace();
+
+        try {
+            $environment = $this->prepareStubs($workspace);
+            symlink($workspace . '/missing-admission-target', $environment['ADMISSION_ROOT']);
+            $execute = $this->runScript(['--execute', '--confirm-live-write', 'ROB-450'], $environment);
+
+            self::assertSame(75, $execute['exit_code']);
+            self::assertStringContainsString('maintenance_admission_state=present', $execute['stdout']);
+            self::assertStringContainsString('reason=maintenance_protocol_unenrolled', $execute['stdout']);
+            self::assertStringContainsString('deletion_performed=no', $execute['stdout']);
+            self::assertDoesNotMatchRegularExpression(
+                '/builder prune .*--force/',
+                (string) file_get_contents($environment['DOCKER_LOG']),
+            );
+
+            file_put_contents($environment['DOCKER_LOG'], '');
+            $dryRun = $this->runScript([], $environment);
+            self::assertSame(0, $dryRun['exit_code'], $dryRun['stderr']);
+            self::assertStringContainsString('maintenance_admission_state=present', $dryRun['stdout']);
+            self::assertStringContainsString('deletion_performed=no', $dryRun['stdout']);
+            self::assertStringNotContainsString(
+                'builder prune --force',
+                (string) file_get_contents($environment['DOCKER_LOG']),
+            );
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
     public function testExecuteSupportsReservedSpaceWithoutWeakeningPolicy(): void
     {
         $workspace = $this->workspace();
@@ -498,6 +573,7 @@ final class ProdBuildCacheRetentionTest extends TestCase
         $dockerLog = $workspace . '/docker.log';
         $sshLog = $workspace . '/ssh.log';
         $counter = $workspace . '/df-counter';
+        $admissionRoot = $workspace . '/maintenance-admission';
         $lockDirectory = $workspace . '/build-cache-lock';
         file_put_contents($dockerLog, '');
         file_put_contents($counter, '0');
@@ -525,7 +601,9 @@ final class ProdBuildCacheRetentionTest extends TestCase
                 esac
             done
             [[ -n "$remote_cmd" ]] || remote_cmd='bash -s'
-            bash -c "$remote_cmd"
+            payload="$(cat)"
+            payload="${payload//\/var\/lib\/fh-maintenance-admission/$ADMISSION_ROOT}"
+            bash -c "$remote_cmd" <<<"$payload"
             BASH
             ,
         );
@@ -647,6 +725,7 @@ final class ProdBuildCacheRetentionTest extends TestCase
             'IMAGE_LIST' => "sha256:image-a\nsha256:image-b\n",
             'CONTAINER_LIST' => "container-a\ncontainer-b\n",
             'VOLUME_LIST' => "volume-a\nvolume-b\n",
+            'ADMISSION_ROOT' => $admissionRoot,
         ];
 
         return array_merge($environment, $overrides);
