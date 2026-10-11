@@ -25,8 +25,11 @@ synthetic smoke may pause during the short SSH window.
    Unknown or overlapping rules stop the cutover. Use a controlled public-route
    client with a positive SSH and HTTPS connection before the change.
 3. Prepare one reviewed, narrowly scoped rollback for exactly the removed
-   public SSH permits. Test its scheduling, cancellation and idempotent restore
-   behavior in isolation. The Hetzner console is the independent recovery path;
+   public SSH permits. Test its scheduling, cancellation, dispatch races and
+   idempotent restore behavior in isolation. A dispatched rollback must wait
+   for the shared lock and verify the restored rules; it must not exit merely
+   because the lock is temporarily held. The Hetzner console is the independent
+   recovery path;
    the rollback is an additional short-window guard, not a replacement for it.
    The shared production-change lock protects the firewall mutation and
    immediate verification; the rollback operator must acquire that same lock
@@ -39,10 +42,16 @@ Pause the synthetic Provider UI test, verify the bound preflight again, and
 schedule the rollback before removing only the verified public SSH permits.
 After the change, prove a fresh Tailscale SSH connection, public SSH
 nonreachability for each previously reachable family, continued public HTTPS,
-the intended firewall diff, and application/monitor health. Cancel the
-rollback only after those facts and the final firewall state agree. Resume the
-synthetic test after the SSH window. Never interpret a lost session or timer
-expiry alone as proof of success or rollback.
+the intended firewall diff, and application/monitor health. While holding the
+shared lock, cancel the timer only after those facts and the final firewall
+state agree. Before declaring success or releasing the lock, prove that neither
+the timer nor a dispatched rollback service is queued or running. If rollback
+has already started, abandon the success path, release the lock so it can
+finish, and verify the restored public SSH permits and service state. Unknown
+rollback state requires inspection through the confirmed console; never cancel
+an active restoration to manufacture success. Resume the synthetic test only
+after the SSH window has a verified final state. Never interpret a lost session
+or timer expiry alone as proof of success or rollback.
 
 If identity, rule state, route, rollback state or outcome is unknown, stop and
 use the confirmed console path to inspect or restore the exact public permits.
