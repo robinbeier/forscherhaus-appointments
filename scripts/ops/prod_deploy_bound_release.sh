@@ -193,7 +193,7 @@ runner_unchanged || {
 }
 
 if validated_result="$(python3 -I -B - "$receipt_file" "$remote_rc" <<'PY'
-import json, re, sys
+import json, sys
 try:
     with open(sys.argv[1], 'rb') as handle:
         raw = handle.read(1025)
@@ -208,14 +208,10 @@ try:
             (code == 0 and (value['status'], value['result_class']) != ('passed', 'deployed')) or
             (code not in (0, 30, 31, 32, 70, 75, 143)) or
             (code != 0 and value['status'] != 'failed') or
-            (code == 70 and value['result_class'] not in ('maintenance_core_invalid', 'maintenance_admission_unknown')) or
+            (code == 70) or
             (code == 30 and value['result_class'] != 'confirmed_failed') or
             (code in (31, 32, 143) and value['result_class'] != 'recovery_required') or
-            (code == 75 and not (
-                value['result_class'] == 'lock_busy' or
-                (value['result_class'] not in ('maintenance_core_invalid', 'maintenance_admission_unknown') and
-                 re.fullmatch(r'maintenance_[a-z0-9_]+', value['result_class']))
-            ))):
+            (code == 75 and value['result_class'] != 'lock_busy')):
         raise ValueError('contradictory result')
     print('schema=bound_release_deploy.v1')
     print('status=' + value['status'])
@@ -248,20 +244,13 @@ elif (( remote_rc == 31 || remote_rc == 32 || remote_rc == 143 )) &&
     deployment_known=1
     deployment_class=recovery_required
 elif (( remote_rc == 75 )); then
-    # Admission refusals are known no-mutation outcomes.  The validator above
-    # admits only lock_busy and bounded maintenance_* classes; preserve the
-    # exact class in the receipt while keeping the deployment failed.
+    # Lock contention is the only stable no-mutation refusal emitted by this
+    # release path. Preserve its exact class while keeping deployment failed.
     refusal_class="${validated_result##*result_class=}"
-    if [[ "$refusal_class" == lock_busy || "$refusal_class" == maintenance_* ]]; then
+    if [[ "$refusal_class" == lock_busy ]]; then
         deployment_known=1
         deployment_class="$refusal_class"
     fi
-elif (( remote_rc == 70 )) && {
-    [[ "$validated_result" == *$'status=failed\nresult_class=maintenance_core_invalid'* ]] ||
-    [[ "$validated_result" == *$'status=failed\nresult_class=maintenance_admission_unknown'* ]]
-}; then
-    deployment_known=1
-    deployment_class="${validated_result##*result_class=}"
 fi
 
 ack_status=not_attempted
@@ -287,7 +276,7 @@ if (( deployment_known == 1 )) && { (( remote_rc == 0 )) || (( remote_rc == 30 )
         ack_rc=$?
     fi
 if ack_output="$(python3 -I -B - "$ack_receipt_file" "$ack_rc" <<'PY'
-import json, re, sys
+import json, sys
 try:
     with open(sys.argv[1], 'rb') as handle:
         raw = handle.read(1025)
@@ -303,11 +292,7 @@ try:
         print('ack_result_class=acknowledged')
         sys.exit(0)
     if (value['status'] == 'failed' and
-            ((code == 70 and value['result_class'] in ('maintenance_core_invalid', 'maintenance_admission_unknown')) or
-             (code == 75 and
-              (value['result_class'] == 'lock_busy' or
-               (value['result_class'] not in ('maintenance_core_invalid', 'maintenance_admission_unknown') and
-                re.fullmatch(r'maintenance_[a-z0-9_]+', value['result_class'])))))):
+            (code == 75 and value['result_class'] == 'lock_busy')):
         print('ack_status=refused')
         print('ack_result_class=' + value['result_class'])
         sys.exit(0)

@@ -19,7 +19,6 @@ SPEC = importlib.util.spec_from_file_location('bound_release_deploy_v1', PATH)
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 ORIGINAL_CONFIG_BINDINGS = MODULE.config_bindings
-ORIGINAL_ADMIT_MAINTENANCE = MODULE.admit_maintenance
 ORIGINAL_OPEN_LOCK = MODULE.open_lock
 REAL_EUID = os.geteuid()
 REAL_SUBPROCESS_RUN = subprocess.run
@@ -52,7 +51,6 @@ class BoundReleaseDeployTest(unittest.TestCase):
         self.stack.enter_context(mock.patch.object(MODULE.os, 'geteuid', return_value=0))
         self.stack.enter_context(mock.patch.object(MODULE.os, 'uname', return_value=argparse.Namespace(nodename='booking-server')))
         self.stack.enter_context(mock.patch.object(MODULE, 'checked_module', side_effect=lambda *_: next(self.module_sequence)))
-        self.admit = self.stack.enter_context(mock.patch.object(MODULE, 'admit_maintenance'))
         self.stack.enter_context(mock.patch.object(MODULE, 'trusted_parent'))
         self.stack.enter_context(mock.patch.object(MODULE, 'bound_hash'))
         self.no_recovery = self.stack.enter_context(mock.patch.object(MODULE, 'no_recovery'))
@@ -77,7 +75,6 @@ class BoundReleaseDeployTest(unittest.TestCase):
 
     def test_verified_inputs_invoke_existing_deploy_once_with_bound_dump(self):
         self.assertEqual(('deployed', 0), MODULE.run(arguments()))
-        self.admit.assert_called_once_with(self.lock_fd)
         self.child.assert_called_once()
         command = self.child.call_args.args[0]
         self.assertEqual(MODULE.DEPLOY, command[0])
@@ -86,29 +83,20 @@ class BoundReleaseDeployTest(unittest.TestCase):
         self.assertEqual(1, self.reserve.call_count)
         self.assertEqual(1, self.receipt.call_count)
 
-    def test_pending_admission_refuses_before_reservation_or_child(self):
-        self.admit.side_effect = MODULE.AdmissionError('maintenance_pending_present', 75)
-        with self.assertRaisesRegex(MODULE.AdmissionError, 'maintenance_pending_present'):
-            MODULE.run(arguments())
-        self.reserve.assert_not_called()
-        self.guard.assert_not_called()
-        self.child.assert_not_called()
-
-    def test_missing_admission_core_maps_to_stable_result_class(self):
-        MODULE.bound_hash.side_effect = FileNotFoundError('/usr/local/libexec/fh/maintenance_pending_v1.py')
-        with self.assertRaisesRegex(MODULE.AdmissionError, 'maintenance_core_invalid'):
-            ORIGINAL_ADMIT_MAINTENANCE(self.lock_fd)
-
-    def test_admission_core_binding_is_fixed_and_precedes_reservation(self):
+    def test_release_path_has_no_uninstalled_global_admission_dependency(self):
         with open(PATH, encoding='utf-8') as handle:
             source = handle.read()
-        self.assertIn("ADMISSION_CORE = '/usr/local/libexec/fh/maintenance_pending_v1.py'", source)
-        self.assertIn(
-            "ADMISSION_CORE_SHA256 = 'a26bb85908f40b784539576d85013c7123522adbeac92e53ebbb3d5cd03ee9fd'",
-            source,
-        )
-        run = source[source.index('def run(args):'):source.index('def main():')]
-        self.assertLess(run.index('admit_maintenance(lock_fd)'), run.index('reserve_intent(intent_path'))
+        self.assertNotIn('maintenance_pending_v1.py', source)
+        self.assertNotIn('admit_maintenance', source)
+
+    def test_shared_lock_and_recovery_gate_precede_reservation_and_child(self):
+        order = []
+        self.no_recovery.side_effect = lambda: order.append('recovery')
+        self.pair.verify_pair.side_effect = lambda *args: order.append('pair')
+        self.reserve.side_effect = lambda *args: order.append('reserve')
+        self.child.side_effect = lambda *args, **kwargs: (order.append('child') or argparse.Namespace(returncode=0))
+        MODULE.run(arguments())
+        self.assertEqual(['recovery', 'pair', 'recovery', 'reserve', 'child'], order)
 
     def test_open_lock_returns_read_write_descriptor_for_durable_admission(self):
         if REAL_EUID != 0:
@@ -313,12 +301,6 @@ class BoundReleaseDeployTest(unittest.TestCase):
             args.release, args.expected_active_release, args.run_id, intent_path, result_path,
         )
 
-    def test_acknowledgement_admission_refusal_precedes_guard_reads_and_retirement(self):
-        self.admit.side_effect = MODULE.AdmissionError('maintenance_pending_present', 75)
-        with self.assertRaisesRegex(MODULE.AdmissionError, 'maintenance_pending_present'):
-            MODULE.acknowledge(arguments())
-        self.retire_guard.assert_not_called()
-
     def test_acknowledgement_rejects_intent_identity_or_hash_mismatch(self):
         args = arguments()
         observed = (1, 2, 0, 0, 0, 1, 1, 1, 1)
@@ -452,15 +434,14 @@ class BoundReleaseDeployTest(unittest.TestCase):
         self.assertNotIn("if code in (70, 75) and value['status'] == 'failed':", source)
         self.assertNotIn("if code != 0 and value['status'] == 'failed':", source)
 
-    def test_wrapper_preserves_known_maintenance_refusal_but_rejects_unknown_exit_75(self):
+    def test_wrapper_preserves_only_known_lock_refusal_and_rejects_unknown_exit_75(self):
         with open(WRAPPER_PATH, encoding='utf-8') as handle:
             source = handle.read()
-        # Exit 75 is a known no-mutation veto only for lock_busy or a bounded
-        # maintenance_* result.  Unknown classes must stay fail-closed.
-        self.assertIn("re.fullmatch(r'maintenance_[a-z0-9_]+', value['result_class'])", source)
+        # Exit 75 is a known no-mutation veto only for lock_busy. Unknown
+        # classes must stay fail-closed.
         self.assertIn('refusal_class="${validated_result##*result_class=}"', source)
         self.assertIn('deployment_class="$refusal_class"', source)
-        self.assertIn('if [[ "$refusal_class" == lock_busy || "$refusal_class" == maintenance_* ]]; then', source)
+        self.assertIn('if [[ "$refusal_class" == lock_busy ]]; then', source)
 
         validator_start = source.index('if validated_result=')
         marker = "<<'PY'\n"
@@ -484,9 +465,9 @@ class BoundReleaseDeployTest(unittest.TestCase):
                     check=False,
                 )
 
-            known = run_validator('maintenance_pending_present')
+            known = run_validator('lock_busy')
             self.assertEqual(70, known.returncode)
-            self.assertIn('result_class=maintenance_pending_present', known.stdout)
+            self.assertIn('result_class=lock_busy', known.stdout)
 
             unknown = run_validator('unexpected_refusal')
             self.assertEqual(70, unknown.returncode)
@@ -494,9 +475,6 @@ class BoundReleaseDeployTest(unittest.TestCase):
             swapped = run_validator('maintenance_core_invalid')
             self.assertEqual(70, swapped.returncode)
             self.assertIn('result_class=transport_or_receipt_unknown', swapped.stdout)
-            known = run_validator('maintenance_admission_unknown', 70)
-            self.assertEqual(70, known.returncode)
-            self.assertIn('result_class=maintenance_admission_unknown', known.stdout)
             swapped = run_validator('maintenance_admission_unknown', 75)
             self.assertEqual(70, swapped.returncode)
             self.assertIn('result_class=transport_or_receipt_unknown', swapped.stdout)
@@ -604,7 +582,6 @@ exit "${FH_DEPLOY_RC}"
             # Preserve the deployment-side veto regression: no acknowledgement
             # is attempted when the deployment itself returns exit 75.
             deployment_cases = (
-                ('maintenance_pending_present', 75),
                 ('lock_busy', 75),
                 ('maintenance_core_invalid', 70),
                 ('maintenance_admission_unknown', 70),
@@ -623,7 +600,7 @@ exit "${FH_DEPLOY_RC}"
                     capture_output=True, check=False,
                 )
                 self.assertEqual(70, completed.returncode, completed.stderr)
-                if result_class == 'unexpected_refusal':
+                if result_class != 'lock_busy':
                     self.assertIn('deployment_status=unknown', completed.stdout)
                     self.assertIn('deployment_result_class=transport_or_receipt_unknown', completed.stdout)
                 else:
@@ -633,10 +610,9 @@ exit "${FH_DEPLOY_RC}"
                 self.assertFalse(os.path.exists(marker))
 
             ack_cases = (
-                ('maintenance_pending_present', 75, True),
                 ('lock_busy', 75, True),
-                ('maintenance_core_invalid', 70, True),
-                ('maintenance_admission_unknown', 70, True),
+                ('maintenance_core_invalid', 70, False),
+                ('maintenance_admission_unknown', 70, False),
                 ('unexpected_refusal', 70, False),
                 ('maintenance_core_invalid', 75, False),
                 ('maintenance_admission_unknown', 75, False),

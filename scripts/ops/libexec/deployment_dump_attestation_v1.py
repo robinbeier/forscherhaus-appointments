@@ -15,8 +15,6 @@ import stat
 import subprocess
 import sys
 import time
-import types
-import uuid
 
 BACKUP_ROOT = '/root/backups/easyappointments'
 EVIDENCE_ROOT = '/var/lib/fh-deploy-evidence'
@@ -58,10 +56,6 @@ MARKER_TEMP_RE = re.compile(r'^\.last_verify_success\.utc\.tmp-[0-9a-f]{32}$')
 CONTINUITY_STATE_TEMP_RE = re.compile(r'^\.backup_continuity_state\.json\.tmp-[0-9a-f]{32}$')
 RENAME_NOREPLACE = 1
 LIBC = ctypes.CDLL(None, use_errno=True)
-ADMISSION_CORE = '/usr/local/libexec/fh/maintenance_pending_v1.py'
-ADMISSION_CORE_SHA256 = 'a26bb85908f40b784539576d85013c7123522adbeac92e53ebbb3d5cd03ee9fd'
-MAX_ADMISSION_CORE_BYTES = 1_048_576
-ADMISSION_PENDING_ERROR_TYPES = ()
 TERMINAL_STATES = {'succeeded', 'failed_before_write', 'failed_pre_switch',
                    'failed_switch_recovery_required',
                    'failed_post_switch_rollback_succeeded', 'failed_post_switch_rollback_failed',
@@ -530,33 +524,8 @@ def reject(code=70):
     raise SystemExit(code)
 
 
-def load_admission_core():
-    before = trusted_program(ADMISSION_CORE, {0o644})
-    descriptor = os.open(ADMISSION_CORE, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK)
-    try:
-        opened = os.fstat(descriptor)
-        if identity(opened) != before or opened.st_size < 1 or opened.st_size > MAX_ADMISSION_CORE_BYTES:
-            reject(75)
-        chunks = bytearray()
-        while len(chunks) <= MAX_ADMISSION_CORE_BYTES:
-            chunk = os.read(descriptor, min(65_536, MAX_ADMISSION_CORE_BYTES + 1 - len(chunks)))
-            if not chunk:
-                break
-            chunks.extend(chunk)
-        source = bytes(chunks)
-        if len(source) != opened.st_size or identity(os.fstat(descriptor)) != before:
-            reject(75)
-    finally:
-        os.close(descriptor)
-    if trusted_program(ADMISSION_CORE, {0o644}) != before or hashlib.sha256(source).hexdigest() != ADMISSION_CORE_SHA256:
-        reject(75)
-    module = types.ModuleType('fh_maintenance_pending_v1')
-    module.__file__ = ADMISSION_CORE
-    try:
-        exec(compile(source, ADMISSION_CORE, 'exec'), module.__dict__)
-    except BaseException:
-        reject(75)
-    return module
+class RecoveryRequired(Exception):
+    """The restore resource outcome is not safe to collapse into cleanup."""
 
 
 def bind_to_parent_death():
@@ -843,6 +812,18 @@ def reconcile_files(directory, prefix, pattern, directories):
     os.fsync(directory)
 
 
+def reject_preserved_runs(directory):
+    """Refuse a retry while an earlier restore's run evidence remains.
+
+    A run tree is deliberately retained after an unknown restore/container
+    outcome.  It is evidence for investigation, not a stale temporary that a
+    later invocation may reconcile away before starting another restore.
+    """
+    for leaf in os.listdir(directory):
+        if RUN_RE.fullmatch(leaf):
+            reject(76)
+
+
 def docker(arguments, timeout=120):
     before = trusted_executable(DOCKER)
     try:
@@ -938,6 +919,50 @@ def shutdown_and_observe(name, run_path):
             return
         time.sleep(1)
     reject()
+
+
+def stop_or_preserve(name):
+    """Stop an interrupted container only when Docker proves it is gone."""
+    try:
+        result = docker_run(
+            ['stop', '--time', '30', name],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=60,
+            check=False,
+        )
+    except BaseException as error:
+        raise RecoveryRequired('container stop outcome unknown') from error
+    if result.returncode != 0:
+        raise RecoveryRequired('container stop failed')
+    for _ in range(60):
+        try:
+            probe = docker_run(
+                ['ps', '-aq', '--filter', 'name=^/' + name + '$'],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        except BaseException as error:
+            raise RecoveryRequired('container absence outcome unknown') from error
+        if probe.returncode != 0:
+            raise RecoveryRequired('container absence outcome unknown')
+        if not probe.stdout.strip():
+            return
+        time.sleep(1)
+    raise RecoveryRequired('container remained after stop')
+
+
+def cleanup_run_if_terminal(scratch, run_leaf, restore_terminal):
+    """Remove scratch only after restore/container termination is proven."""
+    if not restore_terminal:
+        os.fsync(scratch)
+        return False
+    delete_tree_at(scratch, run_leaf, os.fstat(scratch).st_dev, [0])
+    os.fsync(scratch)
+    return True
 
 
 def verify_docker_after(before):
@@ -1583,8 +1608,7 @@ def restore(pinned, pinned_meta, unpacked, create_tables, run_path, nonce):
         return values
     finally:
         if started:
-            docker_run(['stop', '--time', '30', name], stdout=subprocess.DEVNULL,
-                       stderr=subprocess.DEVNULL, timeout=60, check=False)
+            stop_or_preserve(name)
         os.close(lease_fd)
 
 
@@ -1592,7 +1616,7 @@ def canonical(value):
     return (json.dumps(value, sort_keys=True, separators=(',', ':')) + '\n').encode('ascii')
 
 
-def validate_attestation(data, digest, size, unpacked, created_at, enforce_freshness=True):
+def validate_attestation(data, digest, size, unpacked, created_at):
     try:
         value = json.loads(data)
     except json.JSONDecodeError:
@@ -1622,9 +1646,7 @@ def validate_attestation(data, digest, size, unpacked, created_at, enforce_fresh
     except (KeyError, TypeError, ValueError):
         reject()
     now = datetime.datetime.utcnow()
-    if created > restored or restored > attested or attested > now:
-        reject()
-    if enforce_freshness and (now - created).total_seconds() >= 14_400:
+    if created > restored or restored > attested or attested > now or (now - created).total_seconds() >= 14_400:
         reject()
     return value
 
@@ -1705,326 +1727,13 @@ def attach_existing(attestations, backups, digest, size, unpacked, created_at, n
     leaf = digest + '.json'
     data = read_stable_bytes(attestations, leaf, MAX_ATTESTATION)
     value = validate_attestation(data, digest, size, unpacked, created_at)
-    success_marker(backups, value['verification']['restored_at_utc'], nonce)
-    return data
-
-
-def read_verify_success_marker(backups):
-    """Read the restore-success marker without treating absence as success.
-
-    This is deliberately separate from ``last_backup_success.utc``: the latter
-    identifies the backup producer handoff, while this marker identifies the
-    restore attestation that was published for the exact dump.
-    """
-    before = os.stat('last_verify_success.utc', dir_fd=backups, follow_symlinks=False)
-    descriptor = os.open(
-        'last_verify_success.utc',
-        os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK,
-        dir_fd=backups,
-    )
-    try:
-        opened = os.fstat(descriptor)
-        data = os.read(descriptor, 64)
-        if os.read(descriptor, 1):
-            reject()
-    finally:
-        os.close(descriptor)
-    after = os.stat('last_verify_success.utc', dir_fd=backups, follow_symlinks=False)
-    if (identity(before) != identity(opened) or identity(opened) != identity(after) or
-            not stat.S_ISREG(opened.st_mode) or opened.st_uid != 0 or opened.st_gid != 0 or
-            opened.st_nlink != 1 or stat.S_IMODE(opened.st_mode) != 0o600 or
-            re.fullmatch(rb'20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\n', data) is None):
-        reject()
-    try:
-        return datetime.datetime.strptime(data.decode('ascii').strip(), '%Y-%m-%dT%H:%M:%SZ')
-    except (UnicodeDecodeError, ValueError):
-        reject()
-
-
-def read_verified_continuity_state(backups):
-    """Read a verified continuity state using the same closed grammar."""
-    leaf = 'backup_continuity_state.json'
-    before = os.stat(leaf, dir_fd=backups, follow_symlinks=False)
-    descriptor = os.open(leaf, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK,
-                         dir_fd=backups)
-    try:
-        data = os.read(descriptor, 8193)
-        opened = os.fstat(descriptor)
-    finally:
-        os.close(descriptor)
-    after = os.stat(leaf, dir_fd=backups, follow_symlinks=False)
-    if (identity(before) != identity(opened) or identity(opened) != identity(after) or
-            not stat.S_ISREG(opened.st_mode) or opened.st_uid != 0 or opened.st_gid != 0 or
-            opened.st_nlink != 1 or stat.S_IMODE(opened.st_mode) != 0o600 or
-            len(data) == 0 or len(data) > 8192):
-        reject()
-    try:
-        value = json.loads(data)
-    except json.JSONDecodeError:
-        reject()
-    handoff = value.get('handoff') if isinstance(value, dict) else None
-    if (not isinstance(value, dict) or set(value) != {'handoff', 'schema', 'status'} or
-            value.get('schema') != 'production_backup_continuity_state.v1' or
-            value.get('status') != 'verified' or not isinstance(handoff, dict) or
-            continuity_state_bytes('verified', handoff) != data):
-        reject()
-    # Reuse the handoff validator for all field and identity constraints.
-    expected = canonical(handoff)
-    if len(expected) > MAX_HANDOFF:
-        reject()
-    if (not isinstance(handoff.get('backup_set_id'), str) or
-            ID_RE.fullmatch(handoff['backup_set_id']) is None or
-            not isinstance(handoff.get('dump_sha256'), str) or
-            re.fullmatch(r'[0-9a-f]{64}', handoff['dump_sha256']) is None or
-            isinstance(handoff.get('compressed_size_bytes'), bool) or
-            not isinstance(handoff.get('compressed_size_bytes'), int) or
-            handoff['compressed_size_bytes'] <= 0 or
-            handoff['compressed_size_bytes'] > MAX_COMPRESSED or
-            isinstance(handoff.get('uncompressed_size_bytes'), bool) or
-            not isinstance(handoff.get('uncompressed_size_bytes'), int) or
-            handoff['uncompressed_size_bytes'] <= 0 or
-            handoff['uncompressed_size_bytes'] > MAX_UNCOMPRESSED or
-            handoff.get('schema') != 'production_backup_set_handoff.v1' or
-            set(handoff) != {'backup_set_id', 'compressed_size_bytes', 'dump_sha256', 'schema',
-                             'uncompressed_size_bytes'}):
-        reject()
-    return value
-
-
-def _recovery_record_binding(record):
-    """Return the fixed restore identity, or refuse a different operation."""
-    resource = record.get('resource_identity') if isinstance(record, dict) else None
-    if (not isinstance(record, dict) or record.get('operation') != 'deployment_dump_attestation' or
-            not isinstance(resource, dict) or set(resource) != {
-                'backup_set_id', 'compressed_size_bytes', 'container_intent', 'continuity_required',
-                'dump_sha256', 'run_leaf', 'uncompressed_size_bytes'}):
-        return None
-    backup_id = resource['backup_set_id']
-    run_leaf = resource['run_leaf']
-    container_intent = resource['container_intent']
-    continuity_required = resource['continuity_required']
-    digest = resource['dump_sha256']
-    compressed = resource['compressed_size_bytes']
-    unpacked = resource['uncompressed_size_bytes']
-    if (not isinstance(backup_id, str) or ID_RE.fullmatch(backup_id) is None or
-            not isinstance(run_leaf, str) or RUN_RE.fullmatch(run_leaf) is None or
-            not isinstance(container_intent, str) or
-            container_intent != 'fh-dump-attestation-' + run_leaf[5:] or
-            not isinstance(continuity_required, bool) or
-            not isinstance(digest, str) or re.fullmatch(r'[0-9a-f]{64}', digest) is None or
-            isinstance(compressed, bool) or not isinstance(compressed, int) or compressed <= 0 or
-            compressed > MAX_COMPRESSED or isinstance(unpacked, bool) or not isinstance(unpacked, int) or
-            unpacked <= 0 or unpacked > MAX_UNCOMPRESSED):
-        return None
-    return backup_id, run_leaf, container_intent, digest, compressed, unpacked, continuity_required
-
-
-def _source_dump_matches(backup_id, digest, compressed):
-    """Hash the exact backup file while checking its identity remains stable."""
-    source, source_meta = open_dump(backup_id)
-    try:
-        if source_meta.st_size != compressed:
-            return False
-        hasher = hashlib.sha256()
-        total = 0
-        while True:
-            chunk = os.read(source, 1024 * 1024)
-            if not chunk:
-                break
-            total += len(chunk)
-            if total > MAX_COMPRESSED:
-                return False
-            hasher.update(chunk)
-        return (total == compressed and hasher.hexdigest() == digest and
-                identity(source_meta) == identity(os.fstat(source)))
-    finally:
-        os.close(source)
-
-
-def prove_completed_restore(record, attestations, backups, scratch):
-    """Prove only the post-publication, post-cleanup restore state.
-
-    The function is a read-only proof callback for ``recover_pending``.  It
-    returns ``True`` only when every identity is bound to the pending record;
-    missing, changed, malformed, or unknown state returns ``False`` and leaves
-    the pending veto untouched.
-    """
-    binding = _recovery_record_binding(record)
-    if binding is None:
-        return False
-    backup_id, run_leaf, container_intent, digest, compressed, unpacked, record_continuity_required = binding
-    created_at = backup_id[:4] + '-' + backup_id[4:6] + '-' + backup_id[6:8] + 'T' + \
-        backup_id[9:11] + ':' + backup_id[11:13] + ':' + backup_id[13:15] + 'Z'
-    try:
-        handoff = read_backup_handoff(backups)
-        if (handoff.get('backup_set_id') != backup_id or
-                handoff.get('compressed_size_bytes') != compressed or
-                handoff.get('uncompressed_size_bytes') != unpacked or
-                handoff.get('dump_sha256') != digest or
-                read_backup_success_marker(backups) != backup_id):
-            return False
-        data = read_stable_bytes(attestations, digest + '.json', MAX_ATTESTATION)
-        value = validate_attestation(data, digest, compressed, unpacked, created_at, enforce_freshness=False)
-        restored_at = value['verification']['restored_at_utc']
-        if read_verify_success_marker(backups).strftime('%Y-%m-%dT%H:%M:%SZ') != restored_at:
-            return False
-        if record_continuity_required:
-            continuity = read_verified_continuity_state(backups)
-            if continuity['handoff'] != handoff:
-                return False
-        scratch_before = identity(os.fstat(scratch))
-        try:
-            os.lstat(run_leaf, dir_fd=scratch)
-            return False
-        except FileNotFoundError:
-            pass
-        if scratch_before != identity(os.fstat(scratch)):
-            return False
-        if docker(['ps', '-aq', '--filter', 'name=^/' + container_intent + '$'], 30).strip():
-            return False
-        if docker(['ps', '-aq', '--filter', 'label=fh.dump-attestation=v1'], 30).strip():
-            return False
-        if docker(['volume', 'ls', '-q', '--filter', 'label=fh.dump-attestation=v1'], 30).strip():
-            return False
-        return _source_dump_matches(backup_id, digest, compressed)
-    except (FileNotFoundError, OSError, ValueError, SystemExit, subprocess.SubprocessError):
-        return False
-
-
-def recover_completed_pending(admission_core, global_lock, record, attestations, backups, scratch):
-    """Settle one pending restore only after a fresh exact terminal proof.
-
-    ``global_lock`` must already be held by trusted root integration code.  The
-    recovery capability retains that lock and delegates the durable marker
-    transition to ``maintenance_pending_v1``; no caller flag can bypass proof.
-    """
-    boot_id = admission_core.current_boot_id()
-    if not isinstance(record, dict) or record.get('boot_id') != boot_id:
-        admission_core.reject('pending_boot_changed')
-    recovery = admission_core.MaintenanceAdmission.recovery_from_existing_lock_fd(global_lock, boot_id)
-    try:
-        proof = lambda observed: observed == record and prove_completed_restore(
-            observed, attestations, backups, scratch)
-        pair = admission_core._matching_clear_pair()
-        if pair is None:
-            return recovery.recover_pending(record, proof)
-        marker_info, _pending_info = pair
-        if marker_info[0] != record:
-            admission_core.reject('pending_binding_changed')
-        return recovery.recover_clear_marker(proof)
-    finally:
-        recovery.__exit__(None, None, None)
-
-
-def recover_pending_entrypoint():
-    """Root-only CLI entrypoint for one already-recorded restore recovery.
-
-    It opens only pre-existing state and locks.  It never admits a normal
-    restore, creates a pending record, starts Docker, or reconciles a record
-    from a different boot.
-    """
-    orchestrator = open_absolute_directory(ORCHESTRATOR_ROOT, 0o700)
-    locks = open_child(orchestrator, 'locks', 0o700)
-    global_lock = os.open('fh-production-change.lock', os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW,
-                          dir_fd=locks)
-    global_meta = os.fstat(global_lock)
-    if (not stat.S_ISREG(global_meta.st_mode) or global_meta.st_uid != 0 or global_meta.st_gid != 0 or
-            global_meta.st_nlink != 1 or stat.S_IMODE(global_meta.st_mode) != 0o600 or global_meta.st_size != 0):
-        reject()
-    try:
-        fcntl.flock(global_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        reject(75)
-    global_after = os.stat('fh-production-change.lock', dir_fd=locks, follow_symlinks=False)
-    if identity(global_meta) != identity(global_after):
-        reject()
-    admission_core = load_admission_core()
-    global ADMISSION_PENDING_ERROR_TYPES
-    pending_error_type = getattr(admission_core, 'PendingError', None)
-    ADMISSION_PENDING_ERROR_TYPES = (pending_error_type,) if isinstance(pending_error_type, type) else ()
-    boot_id = admission_core.current_boot_id()
-    admission_core.validate_state_layout()
-    admission_core._validate_epoch()
-    evidence = open_absolute_directory(EVIDENCE_ROOT, 0o700)
-    backups = open_absolute_directory(BACKUP_ROOT)
-    lock = os.open('.dump-attestation.lock', os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW,
-                   dir_fd=evidence)
-    try:
-        lock_meta = os.fstat(lock)
-        if (not stat.S_ISREG(lock_meta.st_mode) or lock_meta.st_uid != 0 or lock_meta.st_gid != 0 or
-                lock_meta.st_nlink != 1 or stat.S_IMODE(lock_meta.st_mode) != 0o600):
-            reject()
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            reject(75)
-        lock_after = os.stat('.dump-attestation.lock', dir_fd=evidence, follow_symlinks=False)
-        if identity(lock_meta) != identity(lock_after):
-            reject()
-        attestations = open_child(evidence, 'dump-attestations')
-        scratch = open_child(evidence, 'dump-attestation-scratch')
-        try:
-            pair = admission_core._matching_clear_pair()
-            if pair is None:
-                pending = admission_core.read_pending(boot_id)
-                if pending is None:
-                    admission_core.reject('pending_missing')
-                record = pending[0]
-            else:
-                record = pair[0][0]
-            result = recover_completed_pending(
-                admission_core, global_lock, record, attestations, backups, scratch,
-            )
-            sys.stdout.write(json.dumps(result, sort_keys=True, separators=(',', ':')) + '\n')
-        finally:
-            os.close(scratch)
-            os.close(attestations)
-    finally:
-        os.close(lock)
-        os.close(backups)
-        os.close(evidence)
-        os.close(global_lock)
-        os.close(locks)
-        os.close(orchestrator)
-
-
-def registered_restore(admission_core, admission, global_lock, record,
-                       restore_operation, publish_operation, cleanup_operation):
-    """Keep the pending veto until restore, publication, and cleanup succeed.
-
-    Before cleanup, the run tree remains for investigation. After cleanup,
-    the published attestation and success marker are the durable evidence;
-    a future cross-process recovery must also reconcile the exact Docker
-    resource before settling an interrupted pending or clear marker.
-    """
-    admission.publish_pending(record)
-    restored = restore_operation()
-    terminal_proven = True  # restore() returns only after container-exit proof.
-    published = publish_operation(restored)
-    publication_complete = True
-    cleanup_operation()
-    cleanup_complete = True
-    proof = lambda observed: (observed == record and terminal_proven and
-                              publication_complete and cleanup_complete)
-    admission.clear_pending(record, proof)
-    admission.__exit__(None, None, None)
-    recovery = admission_core.MaintenanceAdmission.recovery_from_existing_lock_fd(
-        global_lock, admission_core.current_boot_id(),
-    )
-    try:
-        recovery.recover_clear_marker(proof)
-    finally:
-        recovery.__exit__(None, None, None)
-    return published
+    return data, value['verification']['restored_at_utc']
 
 
 def main():
     bind_to_parent_death()
     if len(sys.argv) != 2:
         reject()
-    if sys.argv[1] == '--recover-pending':
-        recover_pending_entrypoint()
-        return
     latest_handoff = sys.argv[1] == '--latest-handoff'
     continuity_selector = sys.argv[1] == '--continuity-state'
     if not latest_handoff and not continuity_selector and not ID_RE.fullmatch(sys.argv[1]):
@@ -2051,15 +1760,6 @@ def main():
     global_after = os.stat('fh-production-change.lock', dir_fd=locks, follow_symlinks=False)
     if identity(global_meta) != identity(global_after):
         reject()
-    admission_core = load_admission_core()
-    global ADMISSION_PENDING_ERROR_TYPES
-    pending_error_type = getattr(admission_core, 'PendingError', None)
-    ADMISSION_PENDING_ERROR_TYPES = (pending_error_type,) if isinstance(pending_error_type, type) else ()
-    admission = admission_core.MaintenanceAdmission.from_existing_lock_fd(
-        global_lock,
-        admission_core.current_boot_id(),
-    )
-    admission_record = None
     assert_no_nonterminal_runs(orchestrator)
     evidence = open_absolute_directory(EVIDENCE_ROOT, 0o700)
     backups = open_absolute_directory(BACKUP_ROOT)
@@ -2096,11 +1796,12 @@ def main():
         lock_after = os.stat('.dump-attestation.lock', dir_fd=evidence, follow_symlinks=False)
         if identity(lock_meta) != identity(lock_after):
             reject()
-        reject_docker_orphans()
-        attestations = ensure_child(evidence, 'dump-attestations')
         scratch = ensure_child(evidence, 'dump-attestation-scratch')
+        attestations = ensure_child(evidence, 'dump-attestations')
         scratch_path = EVIDENCE_ROOT + '/dump-attestation-scratch'
         try:
+            reject_preserved_runs(scratch)
+            reject_docker_orphans()
             reconcile_files(scratch, '.run-', RUN_RE, True)
             reconcile_files(attestations, '.attestation-', TEMP_RE, False)
             reconcile_files(backups, '.last_verify_success.utc.tmp-', MARKER_TEMP_RE, False)
@@ -2116,7 +1817,10 @@ def main():
             run_path = scratch_path + '/' + run_leaf
             source = None
             pinned = None
-            run_tree_cleaned = False
+            status = None
+            data = None
+            restored_at = None
+            restore_terminal = False
             try:
                 source, source_meta = open_dump(backup_id)
                 require_capacity(EVIDENCE_ROOT, source_meta.st_size + FIXED_HEADROOM)
@@ -2131,10 +1835,9 @@ def main():
                     existing = None
                 if existing is not None:
                     os.close(existing)
-                    data = attach_existing(attestations, backups, digest, size, unpacked, created_at, nonce)
+                    data, restored_at = attach_existing(attestations, backups, digest, size, unpacked, created_at, nonce)
                     status = 'attached'
-                    if continuity_state is not None:
-                        mark_continuity_verified(backups, continuity_state, nonce)
+                    restore_terminal = True
                 else:
                     if unpacked > (MAX_RESTORE_BYTES - FIXED_HEADROOM) // RESTORE_MULTIPLIER:
                         reject()
@@ -2144,76 +1847,55 @@ def main():
                         size + max_datadir + IBTMP_MAX_BYTES + REDO_MAX_BYTES + FIXED_HEADROOM,
                         max(MIN_FREE_INODES, create_tables * 8 + 4096),
                     )
-                    run_id = str(uuid.uuid4())
-                    container_intent = 'fh-dump-attestation-' + nonce
-                    boot_id = admission_core.current_boot_id()
-                    admission_record = admission_core.make_record(
-                        'deployment_dump_attestation',
-                        run_id,
-                        boot_id,
-                        {'backup_set_id': backup_id, 'run_leaf': run_leaf, 'dump_sha256': digest,
-                         'compressed_size_bytes': size, 'uncompressed_size_bytes': unpacked,
-                         'continuity_required': continuity_state is not None,
-                         'container_intent': container_intent},
-                    )
-                    def publish_restored(result):
-                        allocated, inodes = result
-                        restored_at = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-                        value = {'schema': 'deployment_dump_attestation.v1',
-                                 'dump': {'sha256': digest, 'size_bytes': size,
-                                          'uncompressed_size_bytes': unpacked, 'created_at_utc': created_at},
-                                 'verification': {'method': 'mariadb_10_11_isolated_restore_v1', 'image': IMAGE,
-                                                  'sha256_verified': True, 'gzip_verified': True,
-                                                  'restore_verified': True,
-                                                  'restored_datadir_allocated_bytes': allocated,
-                                                  'restored_datadir_inode_count': inodes,
-                                                  'restored_at_utc': restored_at},
-                                 'attested_at_utc': restored_at}
-                        data = canonical(value)
-                        if len(data) > MAX_ATTESTATION:
-                            reject()
-                        status = publish(attestations, data, digest, nonce)
-                        success_marker(backups, restored_at, nonce)
-                        if continuity_state is not None:
-                            mark_continuity_verified(backups, continuity_state, nonce)
-                        return status, data
-
-                    def cleanup_restored_run():
-                        delete_tree_at(scratch, run_leaf, os.fstat(scratch).st_dev, [0])
-                        os.fsync(scratch)
-
-                    status, data = registered_restore(
-                        admission_core, admission, global_lock, admission_record,
-                        lambda: restore(pinned, pinned_meta, unpacked, create_tables, run_path, nonce),
-                        publish_restored,
-                        cleanup_restored_run,
-                    )
-                    run_tree_cleaned = True
-                    admission = None
-                    admission_record = None
-                output = {'attestation_bytes_base64': base64.b64encode(data).decode('ascii'),
-                          'attestation_sha256': hashlib.sha256(data).hexdigest(), 'dump_sha256': digest,
-                          'path': EVIDENCE_ROOT + '/dump-attestations/' + digest + '.json', 'status': status}
-                sys.stdout.write(json.dumps(output, sort_keys=True, separators=(',', ':')) + '\n')
+                    allocated, inodes = restore(pinned, pinned_meta, unpacked, create_tables, run_path, nonce)
+                    restore_terminal = True
+                    restored_at = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+                    value = {'schema': 'deployment_dump_attestation.v1',
+                             'dump': {'sha256': digest, 'size_bytes': size,
+                                      'uncompressed_size_bytes': unpacked, 'created_at_utc': created_at},
+                             'verification': {'method': 'mariadb_10_11_isolated_restore_v1', 'image': IMAGE,
+                                              'sha256_verified': True, 'gzip_verified': True,
+                                              'restore_verified': True,
+                                              'restored_datadir_allocated_bytes': allocated,
+                                              'restored_datadir_inode_count': inodes,
+                                              'restored_at_utc': restored_at},
+                             'attested_at_utc': restored_at}
+                    data = canonical(value)
+                    if len(data) > MAX_ATTESTATION:
+                        reject()
             finally:
                 original_error = sys.exc_info()[0] is not None
                 if pinned is not None:
                     os.close(pinned)
                 if source is not None:
                     os.close(source)
-                if admission_record is None and not run_tree_cleaned:
+                if restore_terminal:
                     try:
-                        delete_tree_at(scratch, run_leaf, os.fstat(scratch).st_dev, [0])
-                        os.fsync(scratch)
+                        cleanup_run_if_terminal(scratch, run_leaf, True)
                     except BaseException:
                         if not original_error:
                             raise
+                else:
+                    # Keep the run directory and evidence for explicit
+                    # recovery inspection after an unknown restore outcome.
+                    cleanup_run_if_terminal(scratch, run_leaf, False)
+            # Publication, the success marker, and continuity transition are
+            # deliberately after scratch cleanup. A cleanup error must leave
+            # the pending continuity state untouched and must never publish a
+            # seemingly admissible handoff.
+            if status != 'attached':
+                status = publish(attestations, data, digest, nonce)
+            success_marker(backups, restored_at, nonce)
+            if continuity_state is not None:
+                mark_continuity_verified(backups, continuity_state, nonce)
+            output = {'attestation_bytes_base64': base64.b64encode(data).decode('ascii'),
+                      'attestation_sha256': hashlib.sha256(data).hexdigest(), 'dump_sha256': digest,
+                      'path': EVIDENCE_ROOT + '/dump-attestations/' + digest + '.json', 'status': status}
+            sys.stdout.write(json.dumps(output, sort_keys=True, separators=(',', ':')) + '\n')
         finally:
             os.close(scratch)
             os.close(attestations)
     finally:
-        if admission is not None:
-            admission.__exit__(None, None, None)
         os.close(lock)
         os.close(backups)
         os.close(evidence)
@@ -2225,9 +1907,6 @@ def main():
 if __name__ == '__main__':
     try:
         main()
-    except (BrokenPipeError, gzip.BadGzipFile, json.JSONDecodeError, OSError, subprocess.SubprocessError, ValueError):
+    except (BrokenPipeError, gzip.BadGzipFile, json.JSONDecodeError, OSError, RecoveryRequired,
+            subprocess.SubprocessError, ValueError):
         reject()
-    except Exception as error:
-        if isinstance(error, ADMISSION_PENDING_ERROR_TYPES):
-            reject(75)
-        raise

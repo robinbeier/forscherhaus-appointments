@@ -127,11 +127,11 @@ For a release with pending migrations:
    extraction of that exact release; do not run the old live release's migration
    code or use the browser update endpoint. After acquiring the validated shared
    lock through the verified installed deploy helper, run
-   `ordinary_assert_pending_admission`, `ordinary_assert_no_pending_probe`, and
-   `ordinary_assert_no_active_csp_report_only_pilot` before the first migration
-   mutation, and retain the validated lock descriptor across migration and
-   deployment. On a legacy or partially enrolled host, stop before any
-   migration write; the coordinated ROB-812 rollout is required.
+   `ordinary_assert_bound_recovery_guard`, `ordinary_assert_no_pending_probe`,
+   and `ordinary_assert_no_active_csp_report_only_pilot` before the first
+   migration mutation, and retain the validated lock descriptor across
+   migration and deployment. The ordinary release path does not depend on the
+   retired global maintenance-admission helper.
 3. Verify the live migration version and required schema, then invoke the
    deployment below. See [Console](console.md) for migration command behavior.
 
@@ -164,13 +164,10 @@ from the clean main checkout. It validates the already published archive and
 provenance, the verified backup handoff and current host state, then calls the
 same `deploy_ea.sh` primitive once. A separately authorized migration or
 recovery can invoke the primitive directly on the production host using the
-uploaded archive only after the coordinated ROB-812 rollout is fully installed
-and verified: all writers, the fixed admission core, its state directory, and
-the epoch/marker contract must agree with freshly verified installed hashes.
-On a legacy or partially enrolled host this direct path is unavailable and must
-stop before receipt or deployment; installing the admission core alone or using
-the current repository wrapper against that host is not permitted. The
-following remains the direct-path example after that gate:
+uploaded archive after the ordinary lock, recovery-marker, backup, predeploy,
+canary, and rollback prerequisites have been verified. The ordinary release
+path has no dependency on the retired global maintenance-admission helper.
+The following remains the direct-path example after those gates:
 
 ```bash
 /root/deploy_ea.sh \

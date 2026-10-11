@@ -10,8 +10,6 @@ use PHPUnit\Framework\TestCase;
 final class DeployStableResultTest extends TestCase
 {
     private const ADMISSION_ROOT = '/var/lib/fh-maintenance-admission';
-    private const ADMISSION_CORE = '/usr/local/libexec/fh/maintenance_pending_v1.py';
-    private const ADMISSION_CORE_HASH = 'a26bb85908f40b784539576d85013c7123522adbeac92e53ebbb3d5cd03ee9fd';
 
     #[Group('root-deployment')]
     public function testDirectEntryAdmissionOrderKeepsCanaryRejectionBeforeReceiptMutation(): void
@@ -2099,7 +2097,7 @@ final class DeployStableResultTest extends TestCase
         BASH;
     }
 
-    /** @return array{state_identity:array<string,mixed>,core_created:bool,core_identity:?array<string,mixed>,core_parent_created:bool} */
+    /** @return array{state_identity:array<string,mixed>} */
     private function stageAdmissionPrerequisite(): array
     {
         if (file_exists(self::ADMISSION_ROOT) || is_link(self::ADMISSION_ROOT)) {
@@ -2125,98 +2123,18 @@ final class DeployStableResultTest extends TestCase
             self::markTestSkipped('fixed admission state root unavailable');
         }
 
-        $coreCreated = false;
-        $coreParentCreated = false;
-        $coreIdentity = null;
-        $parent = dirname(self::ADMISSION_CORE);
-        if (is_link($parent) || (file_exists($parent) && !is_dir($parent))) {
-            $this->cleanupAdmissionPrerequisite([
-                'state_identity' => $stateIdentity,
-                'core_created' => false,
-                'core_identity' => null,
-                'core_parent_created' => false,
-            ]);
-            self::markTestSkipped('fixed admission core parent is not a directory');
-        }
-        if (!file_exists($parent)) {
-            if (!mkdir($parent, 0755, true)) {
-                $this->cleanupAdmissionPrerequisite([
-                    'state_identity' => $stateIdentity,
-                    'core_created' => false,
-                    'core_identity' => null,
-                    'core_parent_created' => false,
-                ]);
-                self::markTestSkipped('fixed admission core parent unavailable');
-            }
-            $coreParentCreated = true;
-        }
-        if (is_link(self::ADMISSION_CORE)) {
-            $this->cleanupAdmissionPrerequisite([
-                'state_identity' => $stateIdentity,
-                'core_created' => false,
-                'core_identity' => null,
-                'core_parent_created' => $coreParentCreated,
-            ]);
-            self::markTestSkipped('fixed admission core is a symlink');
-        }
-        if (is_file(self::ADMISSION_CORE)) {
-            $coreIdentity = lstat(self::ADMISSION_CORE);
-            if (
-                !is_array($coreIdentity) ||
-                $coreIdentity['uid'] !== 0 ||
-                $coreIdentity['gid'] !== 0 ||
-                ($coreIdentity['mode'] & 0777) !== 0644 ||
-                $coreIdentity['nlink'] !== 1 ||
-                hash_file('sha256', self::ADMISSION_CORE) !== self::ADMISSION_CORE_HASH
-            ) {
-                $this->cleanupAdmissionPrerequisite([
-                    'state_identity' => $stateIdentity,
-                    'core_created' => false,
-                    'core_identity' => null,
-                    'core_parent_created' => $coreParentCreated,
-                ]);
-                self::markTestSkipped('fixed admission core is not the reviewed root-controlled file');
-            }
-        } else {
-            $source = dirname(__DIR__, 3) . '/scripts/ops/libexec/maintenance_pending_v1.py';
-            if (hash_file('sha256', $source) !== self::ADMISSION_CORE_HASH || !copy($source, self::ADMISSION_CORE)) {
-                $this->cleanupAdmissionPrerequisite([
-                    'state_identity' => $stateIdentity,
-                    'core_created' => false,
-                    'core_identity' => null,
-                    'core_parent_created' => $coreParentCreated,
-                ]);
-                self::markTestSkipped('fixed admission core fixture unavailable');
-            }
-            chmod(self::ADMISSION_CORE, 0644);
-            $coreCreated = true;
-            $coreIdentity = lstat(self::ADMISSION_CORE);
-        }
-
         return [
             'state_identity' => $stateIdentity,
-            'core_created' => $coreCreated,
-            'core_identity' => $coreIdentity,
-            'core_parent_created' => $coreParentCreated,
         ];
     }
 
-    /** @param array{state_identity:array<string,mixed>,core_created:bool,core_identity:?array<string,mixed>,core_parent_created:bool} $admission */
+    /** @param array{state_identity:array<string,mixed>} $admission */
     private function cleanupAdmissionPrerequisite(array $admission): void
     {
         $currentState = @lstat(self::ADMISSION_ROOT);
         if ($this->sameProtectedIdentity($currentState, $admission['state_identity'])) {
             @unlink(self::ADMISSION_ROOT . '/epoch');
             @rmdir(self::ADMISSION_ROOT);
-        }
-        if ($admission['core_created'] && is_array($admission['core_identity'])) {
-            $currentCore = @lstat(self::ADMISSION_CORE);
-            if ($this->sameProtectedIdentity($currentCore, $admission['core_identity'])) {
-                @unlink(self::ADMISSION_CORE);
-            }
-        }
-        if ($admission['core_parent_created']) {
-            @rmdir(dirname(self::ADMISSION_CORE));
         }
     }
 

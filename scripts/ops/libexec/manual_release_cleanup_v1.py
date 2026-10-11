@@ -27,7 +27,7 @@ WEB_ROOT = '/var/www/html'
 RELEASES_ROOT = '/root/releases'
 STATE_ROOT = '/var/lib/fh-release-retention'
 HELPER_PATH = '/usr/local/libexec/fh-release-archive-dump-retention-v1'
-HELPER_SHA256 = '1efaeef43f5632983f57d4a56854a124cd60c31a06b6d7bb5255711892d436a0'
+HELPER_SHA256 = 'e5e29a78eee9d7659df36caac587f194af752e83962edb237912e5da37b493ac'
 MAX_PER_PASS = 4
 MAX_PREVIOUS_SCAN = 64
 PREVIOUS = re.compile(r'easyappointments_prev_([A-Za-z0-9._-]{1,128})\Z')
@@ -98,21 +98,6 @@ def archive_pair_identity(helper, releases, release_id):
         'provenance_identity': sidecar_identity,
         'provenance_sha256': hashlib.sha256(sidecar).hexdigest(),
     }
-
-
-def admit_maintenance(helper, global_lock):
-    """Require the reviewed pending-state protocol before any execute path."""
-    try:
-        admission_core = helper.load_admission_core()
-        admission_core.admit_existing_lock_fd(global_lock)
-    except CleanupError:
-        raise
-    except Exception as error:
-        reason = getattr(error, 'reason', None)
-        code = getattr(error, 'code', 75)
-        if isinstance(reason, str) and isinstance(code, int) and not isinstance(code, bool):
-            reject(reason, code)
-        reject('maintenance_admission_unknown', 75)
 
 
 def tree_metadata_sha256(web, name, expected_identity):
@@ -344,8 +329,6 @@ def run(mode, expected_plan_sha=None, helper=None):
     global_lock = helper.open_global_lock()
     web = current = rollback_fd = releases = state = orchestrator = None
     try:
-        if mode == 'execute':
-            admit_maintenance(helper, global_lock)
         if helper.activity_count() != 0:
             reject('active_production_work', 75)
         helper.assert_no_nonterminal_runs()

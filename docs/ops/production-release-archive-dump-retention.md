@@ -184,14 +184,11 @@ bash scripts/ops/prod_release_archive_dump_retention.sh \
 ```
 
 This command is documentation, not current production authorization. The
-execute path now requires the complete, verified ROB-812 pending-state rollout:
-all registered maintenance writers, the root-controlled admission core, the
-protocol state directory, and its exact epoch must be installed and verified
-as one coordinated change. Follow
-[`maintenance-admission-contract.md`](maintenance-admission-contract.md) for
-that rollout. Do not install this helper, its units, or an admission core
-independently. Once ROB-812 has reached that verified state, the remaining
-helper rollout has this exact order:
+execute path gathers candidates afresh and uses its own cleanup lock, the
+canonical production lock, bounded inventory, quarantine, identity, and
+postflight health checks. A prior dry-run is not a frozen execute plan. The
+retired ROB-812 pending-state protocol is not a prerequisite and must not be
+installed as an independent helper. The remaining helper rollout has this exact order:
 
 1. Merge the reviewed change. From that exact checkout, install the helper as
    the regular, single-link, root-owned `0555` production copy; never execute

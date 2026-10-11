@@ -32,7 +32,7 @@ try {
     fwrite(STDERR, "dump attestation busy\n");
     exit(75);
 } catch (DeploymentDumpAttestationExpiredV1) {
-    fwrite(STDERR, "dump attestation continuity state is stale\n");
+    fwrite(STDERR, "dump attestation requires operator review\n");
     exit(76);
 } catch (Throwable) {
     fwrite(STDERR, "dump attestation rejected\n");
