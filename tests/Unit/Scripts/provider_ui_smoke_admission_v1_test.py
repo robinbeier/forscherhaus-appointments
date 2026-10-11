@@ -162,8 +162,71 @@ class ProviderUiSmokeAdmissionBehaviorTest(unittest.TestCase):
         )
         with patch.object(COORD.subprocess, "run", return_value=result):
             with self.assertRaises(SystemExit) as raised:
-                COORD.unit_armed(unit, self.resource(), "a" * 32)
+                COORD.unit_armed(unit, self.resource(), "a" * 32,
+                                 require_remaining=True)
         self.assertEqual(raised.exception.code, 75)
+
+    def test_unit_armed_rejects_timer_with_unknown_deadline(self):
+        unit = "fh-provider-ui-smoke-cleanup.timer"
+        result = types.SimpleNamespace(
+            returncode=0,
+            stdout=(f"Id={unit}\nLoadState=loaded\nTransient=yes\n"
+                    "ActiveState=active\nSubState=waiting\n"
+                    "Triggers=fh-provider-ui-smoke-cleanup.service\n"
+                    "NextElapseUSecMonotonic=2min 0s\n"),
+            stderr="",
+        )
+        busctl_error = types.SimpleNamespace(returncode=1, stdout="", stderr="failed")
+        with patch.object(COORD.subprocess, "run", side_effect=[result, busctl_error]):
+            with self.assertRaises(SystemExit) as raised:
+                COORD.unit_armed(unit, self.resource(), "a" * 32,
+                                 require_remaining=True)
+        self.assertEqual(raised.exception.code, 75)
+
+    def test_unit_armed_rejects_timer_with_insufficient_remaining_time(self):
+        unit = "fh-provider-ui-smoke-cleanup.timer"
+        now_us = COORD.time.monotonic_ns() // 1_000
+        result = types.SimpleNamespace(
+            returncode=0,
+            stdout=(f"Id={unit}\nLoadState=loaded\nTransient=yes\n"
+                    "ActiveState=active\nSubState=waiting\n"
+                    "Triggers=fh-provider-ui-smoke-cleanup.service\n"),
+            stderr="",
+        )
+        resolved = types.SimpleNamespace(returncode=0, stdout='o "/org/freedesktop/systemd1/unit/fh_2dprovider_2dui_2dsmoke_2dcleanup_2etimer"\n', stderr="")
+        deadline = types.SimpleNamespace(returncode=0, stdout=f"t {now_us + 60_000_000}\n", stderr="")
+        with patch.object(COORD.subprocess, "run", side_effect=[result, resolved, deadline]):
+            with self.assertRaises(SystemExit) as raised:
+                COORD.unit_armed(unit, self.resource(), "a" * 32,
+                                 require_remaining=True)
+        self.assertEqual(raised.exception.code, 75)
+
+    def test_unit_armed_accepts_timer_with_ample_remaining_time(self):
+        unit = "fh-provider-ui-smoke-cleanup.timer"
+        now_us = COORD.time.monotonic_ns() // 1_000
+        result = types.SimpleNamespace(
+            returncode=0,
+            stdout=(f"Id={unit}\nLoadState=loaded\nTransient=yes\n"
+                    "ActiveState=active\nSubState=waiting\n"
+                    "Triggers=fh-provider-ui-smoke-cleanup.service\n"),
+            stderr="",
+        )
+        resolved = types.SimpleNamespace(returncode=0, stdout='o "/org/freedesktop/systemd1/unit/fh_2dprovider_2dui_2dsmoke_2dcleanup_2etimer"\n', stderr="")
+        deadline = types.SimpleNamespace(returncode=0, stdout=f"t {now_us + (COORD.MIN_CLEANUP_REMAINING_SECONDS + 60) * 1_000_000}\n", stderr="")
+        with patch.object(COORD.subprocess, "run", side_effect=[result, resolved, deadline]) as run:
+            self.assertTrue(COORD.unit_armed(
+                unit, self.resource(), "a" * 32, require_remaining=True))
+        self.assertEqual(run.call_args_list[1].args[0], [
+            "busctl", "--system", "call",
+            "org.freedesktop.systemd1", "/org/freedesktop/systemd1",
+            "org.freedesktop.systemd1.Manager", "GetUnit", "s", unit,
+        ])
+        self.assertEqual(run.call_args_list[2].args[0], [
+            "busctl", "--system", "get-property",
+            "org.freedesktop.systemd1",
+            "/org/freedesktop/systemd1/unit/fh_2dprovider_2dui_2dsmoke_2dcleanup_2etimer",
+            "org.freedesktop.systemd1.Timer", "NextElapseUSecMonotonic",
+        ])
 
     def test_cleanup_service_rejects_wrong_command_even_with_correct_run_id(self):
         unit = "fh-provider-ui-smoke-cleanup.service"
@@ -1093,7 +1156,8 @@ class ProviderUiSmokeAdmissionBehaviorTest(unittest.TestCase):
                 COORD.assert_bound_fd(args)
         self.assertEqual(raised.exception.code, 75)
         armed.assert_called_once_with(
-            "fh-provider-ui-smoke-cleanup.timer", resource, "a" * 32)
+            "fh-provider-ui-smoke-cleanup.timer", resource, "a" * 32,
+            require_remaining=True)
         self.assertFalse(core.recovery.admitted)
 
     def test_activate_requires_current_ack_and_live_timer_before_admission(self):

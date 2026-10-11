@@ -171,9 +171,11 @@ The orchestrator:
    identity under the private and shared locks before activation;
 6. activates the synthetic lease;
    the server rechecks the acknowledged, still-waiting timer under the same
-   shared lock as the fixture transaction immediately before activation;
-   a timer that expired during a delayed operator acknowledgement refuses the
-   activation;
+   shared lock as the fixture transaction immediately before activation. It
+   reads the timer's monotonic deadline through systemd's D-Bus API and
+   requires at least five minutes of remaining cleanup time. An expired,
+   nearly expired, or unknown deadline refuses activation without rearming
+   the timer;
 7. binds the locally reviewed four-line preparation template to the active
    deployment by SHA-256, then streams `ssh ... cat` directly into the local
    gate's standard input;

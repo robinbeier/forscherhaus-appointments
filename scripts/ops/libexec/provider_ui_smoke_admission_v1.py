@@ -21,6 +21,7 @@ import secrets
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -31,7 +32,15 @@ ACTION_NAMES = {'install', 'remove', 'smoke'}
 PRIVATE_CLEANUP_LOCK_PATH = '/run/lock/fh-provider-ui-smoke.lock'
 ARM_ACK_LEAF = '.provider-ui-smoke-arm-ack.json'
 MAX_ARM_ACK_BYTES = 4096
+# The local browser gate has bounded bootstrap/open/download timeouts, and the
+# cleanup service must still have enough time left to acquire the private lock,
+# remove the fixture, and prove its terminal state.  Treat a timer with less
+# than this much remaining time as unsafe, even when systemd reports it as
+# active/waiting.
+MIN_CLEANUP_REMAINING_SECONDS = 5 * 60
 SAFE_PATH = re.compile(r'\A/[A-Za-z0-9_./-]+\Z')
+SYSTEMD_UNIT_OBJECT_PATH = re.compile(
+    r'\A/org/freedesktop/systemd1/unit/[A-Za-z0-9_]+\Z')
 
 
 def fail(reason: str, code: int = 75) -> 'NoReturn':
@@ -143,7 +152,8 @@ def assert_bound_fd(args: argparse.Namespace) -> None:
                 arm_ack = _read_arm_ack(resource)
                 if arm_ack != _ack_record(record):
                     fail('arm_ack_binding_changed')
-                unit_armed(args.cleanup_unit + '.timer', resource, args.run_id)
+                unit_armed(args.cleanup_unit + '.timer', resource, args.run_id,
+                           require_remaining=True)
                 unit_armed(args.cleanup_unit + '.service', resource, args.run_id)
             admission.admit()
     except core.PendingError as error:
@@ -208,7 +218,45 @@ def unit_terminal(unit: str, resource: dict[str, str], run_id: str) -> bool:
     return True
 
 
-def unit_armed(unit: str, resource: dict[str, str], run_id: str) -> bool:
+def _raw_timer_deadline_monotonic_us(unit: str) -> int:
+    """Read the timer deadline as a raw uint64 from systemd's D-Bus API.
+
+    ``systemctl show`` humanizes ``*USec`` fields on some systemd versions,
+    so its textual value is not a stable numeric interface.  Resolve the
+    exact requested unit through the manager first, then query only the Timer
+    property on that returned object.  Any unknown, malformed, or failed
+    response remains fail-closed.
+    """
+    resolved = subprocess.run(
+        ['busctl', '--system', 'call',
+         'org.freedesktop.systemd1', '/org/freedesktop/systemd1',
+         'org.freedesktop.systemd1.Manager', 'GetUnit', 's', unit],
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, check=False, timeout=10,
+    )
+    if resolved.returncode != 0 or resolved.stderr:
+        fail('cleanup_deadline_unknown')
+    match = re.fullmatch(r'o\s+"([^"]+)"', resolved.stdout.strip())
+    if match is None or SYSTEMD_UNIT_OBJECT_PATH.fullmatch(match.group(1)) is None:
+        fail('cleanup_deadline_unknown')
+    object_path = match.group(1)
+    deadline = subprocess.run(
+        ['busctl', '--system', 'get-property',
+         'org.freedesktop.systemd1', object_path,
+         'org.freedesktop.systemd1.Timer', 'NextElapseUSecMonotonic'],
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, check=False, timeout=10,
+    )
+    if deadline.returncode != 0 or deadline.stderr:
+        fail('cleanup_deadline_unknown')
+    match = re.fullmatch(r't\s+([0-9]+)', deadline.stdout.strip())
+    if match is None:
+        fail('cleanup_deadline_unknown')
+    return int(match.group(1))
+
+
+def unit_armed(unit: str, resource: dict[str, str], run_id: str,
+               require_remaining: bool = False) -> bool:
     result = subprocess.run(
         ['systemctl', 'show', '--no-pager',
          '--property=Id,LoadState,ActiveState,SubState,Transient,Triggers,ExecStart', unit],
@@ -228,6 +276,17 @@ def unit_armed(unit: str, resource: dict[str, str], run_id: str) -> bool:
     if unit.endswith('.timer'):
         if values.get('ActiveState') != 'active' or values.get('SubState') != 'waiting':
             fail('systemd_not_armed')
+        if not require_remaining:
+            return True
+        # An active/waiting transient timer may nevertheless be almost due.
+        # Use systemd's monotonic deadline so wall-clock changes cannot extend
+        # the lease. Missing, non-numeric, zero, or already-expired values are
+        # deliberately unknown and fail closed.
+        deadline_us = _raw_timer_deadline_monotonic_us(unit)
+        now_us = time.monotonic_ns() // 1_000
+        minimum_us = MIN_CLEANUP_REMAINING_SECONDS * 1_000_000
+        if deadline_us <= now_us or deadline_us - now_us < minimum_us:
+            fail('cleanup_deadline_insufficient')
     return True
 
 
