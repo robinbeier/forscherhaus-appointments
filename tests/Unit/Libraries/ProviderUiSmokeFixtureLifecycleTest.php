@@ -303,6 +303,94 @@ class ProviderUiSmokeFixtureLifecycleTest extends TestCase
         $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
     }
 
+    public function testPrecredentialEmptyProofRejectsReservedDormantPrincipal(): void
+    {
+        $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+
+        try {
+            $this->assertTrue(unlink($this->credentialFile));
+            $this->fixture->run('precredential-empty', $this->credentialFile, $this->stateFile);
+            $this->fail('A reserved dormant principal must veto the precredential proof.');
+        } catch (RuntimeException $exception) {
+            $this->assertStringContainsString('dormant role remains', $exception->getMessage());
+        } finally {
+            $credentials =
+                'PROVIDER_UI_SMOKE_USERNAME=' .
+                Provider_ui_smoke_access_policy::USERNAME .
+                PHP_EOL .
+                'PROVIDER_UI_SMOKE_PASSWORD=' .
+                str_repeat('a', 64) .
+                PHP_EOL;
+            file_put_contents($this->credentialFile, $credentials);
+            chmod($this->credentialFile, 0600);
+        }
+    }
+
+    public function testPrecredentialEmptyProofAcceptsAnInitiallyEmptyFixture(): void
+    {
+        $this->assertSame('removed', $this->fixture->run('verify', $this->credentialFile, $this->stateFile));
+        $this->assertTrue(unlink($this->credentialFile));
+
+        $this->assertSame(
+            'removed',
+            $this->fixture->run('precredential-empty', $this->credentialFile, $this->stateFile),
+        );
+        $this->assertFileDoesNotExist($this->credentialFile);
+        $this->assertFileDoesNotExist($this->stateFile);
+    }
+
+    public function testPrecredentialEmptyProofRejectsGlobalServiceMarker(): void
+    {
+        $this->assertSame('removed', $this->fixture->run('verify', $this->credentialFile, $this->stateFile));
+        $credentials = file_get_contents($this->credentialFile);
+        $this->assertIsString($credentials);
+        $this->assertTrue(unlink($this->credentialFile));
+        $this->assertTrue(
+            $this->CI->db->insert('services', [
+                'create_datetime' => date('Y-m-d H:i:s'),
+                'update_datetime' => date('Y-m-d H:i:s'),
+                'name' => Provider_ui_smoke_fixture::SERVICE_NAME,
+                'duration' => 30,
+                'buffer_before' => 0,
+                'buffer_after' => 0,
+                'price' => 0,
+                'currency' => 'EUR',
+                'description' => Provider_ui_smoke_fixture::SERVICE_DESCRIPTION,
+                'location' => null,
+                'color' => '#6c757d',
+                'availabilities_type' => AVAILABILITIES_TYPE_FLEXIBLE,
+                'attendants_number' => 1,
+                'is_private' => 1,
+                'id_service_categories' => null,
+            ]),
+        );
+
+        try {
+            $this->fixture->run('precredential-empty', $this->credentialFile, $this->stateFile);
+            $this->fail('A global service marker must veto first-install recovery.');
+        } catch (RuntimeException $exception) {
+            $this->assertStringContainsString('fixture marker collision', $exception->getMessage());
+        } finally {
+            $this->CI->db->delete('services', ['name' => Provider_ui_smoke_fixture::SERVICE_NAME]);
+            $this->assertNotFalse(file_put_contents($this->credentialFile, $credentials));
+            $this->assertTrue(chmod($this->credentialFile, 0600));
+        }
+    }
+
+    public function testPrecredentialEmptyProofRejectsPresentCredentials(): void
+    {
+        $this->assertSame('dormant', $this->fixture->run('install', $this->credentialFile, $this->stateFile));
+
+        try {
+            $this->fixture->run('precredential-empty', $this->credentialFile, $this->stateFile);
+            $this->fail('Precredential proof must not certify a present credential file.');
+        } catch (RuntimeException $exception) {
+            $this->assertStringContainsString('credentials must be absent', $exception->getMessage());
+        }
+
+        $this->assertSame('removed', $this->fixture->run('remove', $this->credentialFile, $this->stateFile));
+    }
+
     public function testVerificationRejectsPresentCredentialSymlink(): void
     {
         $target = $this->temporaryDirectory . '/credential-target.env';

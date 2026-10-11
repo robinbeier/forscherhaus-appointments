@@ -126,14 +126,23 @@ class Console extends EA_Controller
      *
      * php index.php console provider_ui_smoke install [credential-file] [state-file]
      * php index.php console provider_ui_smoke verify [credential-file] [state-file]
+     * php index.php console provider_ui_smoke precredential-empty [credential-file] [state-file]
      * php index.php console provider_ui_smoke activate [credential-file] [state-file]
      * php index.php console provider_ui_smoke deactivate [credential-file] [state-file]
      * php index.php console provider_ui_smoke remove [credential-file] [state-file]
      */
     public function provider_ui_smoke(string $action = ''): void
     {
-        if (!in_array($action, ['install', 'verify', 'activate', 'deactivate', 'remove'], true)) {
+        if (
+            !in_array($action, ['install', 'verify', 'precredential-empty', 'activate', 'deactivate', 'remove'], true)
+        ) {
             $this->exit_provider_ui_smoke_error('invalid', 64);
+        }
+
+        // The credential-less proof is a server-local recovery operation. It
+        // must never become an unprivileged application-facing probe.
+        if ($action === 'precredential-empty' && (!function_exists('posix_geteuid') || posix_geteuid() !== 0)) {
+            $this->exit_provider_ui_smoke_error('root_required', 64);
         }
 
         $credential_file = $GLOBALS['argv'][4] ?? Provider_ui_smoke_fixture::DEFAULT_CREDENTIAL_FILE;

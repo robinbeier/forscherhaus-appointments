@@ -151,7 +151,9 @@ final class Provider_ui_smoke_fixture
         string $credential_file = self::DEFAULT_CREDENTIAL_FILE,
         string $state_file = self::DEFAULT_STATE_FILE,
     ): string {
-        if (!in_array($action, ['install', 'verify', 'activate', 'deactivate', 'remove'], true)) {
+        if (
+            !in_array($action, ['install', 'verify', 'precredential-empty', 'activate', 'deactivate', 'remove'], true)
+        ) {
             throw new InvalidArgumentException('Unsupported provider UI smoke action.');
         }
 
@@ -163,7 +165,7 @@ final class Provider_ui_smoke_fixture
         // lock-held admission finalizer. Reacquiring the shared lock there
         // would deadlock the finalizer; every mutating action remains bound
         // to the shared lock and admission capability below.
-        $requiresAdmission = $action !== 'verify';
+        $requiresAdmission = !in_array($action, ['verify', 'precredential-empty'], true);
 
         if ($requiresAdmission) {
             $this->admissionGuard->enter($action, $credential_file, $state_file);
@@ -196,6 +198,7 @@ final class Provider_ui_smoke_fixture
                     $state = match ($action) {
                         'install' => $this->install($credentials, $state_file),
                         'verify' => $this->verify($state_file, $credentials),
+                        'precredential-empty' => $this->precredentialEmpty($credential_file, $state_file),
                         'activate' => $this->activate($credentials, $state_file),
                         'deactivate' => $this->deactivate($credential_file, $state_file, $remove_state_after_commit),
                         'remove' => $this->remove($state_file, $credentials),
@@ -363,6 +366,33 @@ final class Provider_ui_smoke_fixture
         $this->assertDormantClean($principal, $role);
 
         return 'dormant';
+    }
+
+    /**
+     * Prove the narrow first-install crash state before credentials exist.
+     *
+     * This is intentionally reachable only through the root CLI recovery
+     * operator. Ordinary verify keeps requiring credentials so an active
+     * principal can never be mistaken for an absent fixture.
+     */
+    private function assertPreCredentialEmpty(): void
+    {
+        $this->assertPrincipalMarkersUnused();
+        $this->assertPrecredentialFixtureMarkersUnused();
+    }
+
+    private function precredentialEmpty(string $credential_file, string $state_file): string
+    {
+        if (file_exists($credential_file) || is_link($credential_file)) {
+            throw new RuntimeException('Provider UI smoke credentials must be absent during precredential proof.');
+        }
+        $this->assertStateFileAbsent($state_file);
+        if ($this->findDormantRole() !== null) {
+            throw new RuntimeException('Provider UI smoke dormant role remains during precredential proof.');
+        }
+        $this->assertPreCredentialEmpty();
+
+        return 'removed';
     }
 
     /**
@@ -934,6 +964,68 @@ final class Provider_ui_smoke_fixture
 
         if ($role_reference_count !== 1) {
             throw new RuntimeException('Provider UI smoke dormant ownership invariant failed.');
+        }
+    }
+
+    /**
+     * Prove no reserved principal identity remains during first-install
+     * recovery. Ordinary verify still requires credential-bound proof.
+     */
+    private function assertPrincipalMarkersUnused(): void
+    {
+        $username_count = $this->CI->db
+            ->get_where('user_settings', ['username' => Provider_ui_smoke_access_policy::USERNAME])
+            ->num_rows();
+        $email_count = $this->CI->db->get_where('users', ['email' => self::PROVIDER_EMAIL])->num_rows();
+        $dormant_note_count = $this->CI->db
+            ->get_where('users', ['notes' => Provider_ui_smoke_access_policy::DORMANT_NOTES])
+            ->num_rows();
+        $this->CI->db->like('notes', Provider_ui_smoke_access_policy::ACTIVE_NOTES_PREFIX, 'after');
+        $active_note_count = $this->CI->db->get('users')->num_rows();
+        $role_name_count = $this->CI->db->get_where('roles', ['name' => self::DORMANT_ROLE_NAME])->num_rows();
+        $role_slug_count = $this->CI->db
+            ->get_where('roles', ['slug' => Provider_ui_smoke_access_policy::DORMANT_ROLE_SLUG])
+            ->num_rows();
+
+        if (
+            $username_count !== 0 ||
+            $email_count !== 0 ||
+            $dormant_note_count !== 0 ||
+            $active_note_count !== 0 ||
+            $role_name_count !== 0 ||
+            $role_slug_count !== 0
+        ) {
+            throw new RuntimeException('Provider UI smoke principal marker collision detected.');
+        }
+    }
+
+    /**
+     * Conservative global marker check used only before first installation.
+     * Without an owner relation, any collision must veto recovery.
+     */
+    private function assertPrecredentialFixtureMarkersUnused(): void
+    {
+        $service_count = $this->CI->db
+            ->group_start()
+            ->where('name', self::SERVICE_NAME)
+            ->or_where('description', self::SERVICE_DESCRIPTION)
+            ->group_end()
+            ->get('services')
+            ->num_rows();
+        $customer_count = $this->CI->db
+            ->group_start()
+            ->where('email', self::CUSTOMER_EMAIL)
+            ->or_where('notes', self::CUSTOMER_NOTES)
+            ->group_end()
+            ->get('users')
+            ->num_rows();
+        $appointment_count = $this->CI->db
+            ->where_in('notes', $this->appointmentMarkers())
+            ->get('appointments')
+            ->num_rows();
+
+        if ($service_count !== 0 || $customer_count !== 0 || $appointment_count !== 0) {
+            throw new RuntimeException('Provider UI smoke fixture marker collision detected.');
         }
     }
 

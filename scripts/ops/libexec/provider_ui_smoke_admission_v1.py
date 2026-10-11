@@ -149,7 +149,13 @@ def begin(args: argparse.Namespace) -> None:
             with core.maintenance_admission() as admission:
                 _ensure_arm_ack_absent(resource)
                 _ensure_credential_temp_absent(resource)
-                if args.operation == 'smoke':
+                if args.operation == 'install':
+                    if Path(resource['credentials_file']).exists() or Path(resource['credentials_file']).is_symlink():
+                        if fixture_install_terminal_state(resource) not in {'dormant', 'removed'}:
+                            fail('fixture_terminal_unknown')
+                    elif fixture_install_terminal_state(resource) != 'removed':
+                        fail('fixture_terminal_unknown')
+                elif args.operation == 'smoke':
                     # A failed dormant check must not leave an unarmed Pending
                     # record. Both the check and publication hold the private
                     # and shared locks; activation independently rechecks the
@@ -732,7 +738,7 @@ def private_cleanup_lock():
                 os.close(fd)
 
 
-def fixture_terminal_state(resource: dict[str, str]) -> str:
+def fixture_terminal_state(resource: dict[str, str], precredential_empty: bool = False) -> str:
     state = Path(resource['state_file'])
     if state.exists() or state.is_symlink():
         fail('fixture_state_present')
@@ -743,6 +749,8 @@ def fixture_terminal_state(resource: dict[str, str]) -> str:
         '/usr/bin/php', 'index.php', 'console', 'provider_ui_smoke', 'verify',
         resource['credentials_file'], resource['state_file'],
     ]
+    if precredential_empty:
+        command[4] = 'precredential-empty'
     result = subprocess.run(
         command, cwd=resource['app_root'], stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False,
@@ -750,11 +758,20 @@ def fixture_terminal_state(resource: dict[str, str]) -> str:
     )
     if result.returncode != 0 or result.stderr:
         fail('fixture_terminal_unknown')
+    action_name = 'precredential-empty' if precredential_empty else 'verify'
     for state_name in ('dormant', 'removed'):
-        expected = f'provider_ui_smoke action=verify state={state_name} result=ok\n'
+        expected = f'provider_ui_smoke action={action_name} state={state_name} result=ok\n'
         if result.stdout == expected:
             return state_name
     fail('fixture_terminal_unknown')
+
+
+def fixture_install_terminal_state(resource: dict[str, str]) -> str:
+    """Prove an install terminal state, including first-install emptiness."""
+    credentials = Path(resource['credentials_file'])
+    if credentials.exists() or credentials.is_symlink():
+        return fixture_terminal_state(resource)
+    return fixture_terminal_state(resource, precredential_empty=True)
 
 
 def dormant_clean(resource: dict[str, str], expected_state: str) -> bool:
@@ -781,6 +798,114 @@ def _ensure_credential_temp_absent(resource: dict[str, str]) -> None:
         fail('credential_directory_unsafe')
 
 
+def _remove_single_install_credential_temp(resource: dict[str, str]) -> None:
+    """Remove only the exact first-install credential temp after proof."""
+    final_path = Path(resource['credentials_file'])
+    if final_path.exists() or final_path.is_symlink():
+        fail('credential_file_present')
+    directory = final_path.parent
+    try:
+        metadata = os.stat(directory, follow_symlinks=False)
+    except OSError:
+        fail('credential_directory_unsafe')
+    if (not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != 0 or
+            metadata.st_gid != 0 or stat.S_IMODE(metadata.st_mode) & 0o022):
+        fail('credential_directory_unsafe')
+    try:
+        directory_descriptor = os.open(
+            directory, os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError:
+        fail('credential_directory_unsafe')
+    try:
+        candidates = sorted(
+            entry for entry in directory.iterdir()
+            if entry.name.startswith('.provider-ui-smoke.env.')
+        )
+    except OSError:
+        os.close(directory_descriptor)
+        fail('credential_directory_unsafe')
+    if len(candidates) > 1:
+        os.close(directory_descriptor)
+        fail('credential_temp_unknown')
+    if not candidates:
+        try:
+            os.fsync(directory_descriptor)
+        except OSError:
+            os.close(directory_descriptor)
+            fail('credential_directory_sync_failed')
+        os.close(directory_descriptor)
+        return
+    temporary = candidates[0]
+    if re.fullmatch(r'\.provider-ui-smoke\.env\.[A-Za-z0-9]{6}', temporary.name) is None:
+        os.close(directory_descriptor)
+        fail('credential_temp_unknown')
+    descriptor = None
+    try:
+        descriptor = os.open(temporary, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+        before = os.fstat(descriptor)
+        if (not stat.S_ISREG(before.st_mode) or before.st_uid != 0 or
+                before.st_gid != 0 or stat.S_IMODE(before.st_mode) != 0o600 or
+                before.st_nlink != 1 or before.st_size < 1 or before.st_size > 512):
+            fail('credential_temp_unsafe')
+        content = os.read(descriptor, 513)
+    except (OSError, ValueError):
+        os.close(directory_descriptor)
+        fail('credential_temp_unsafe')
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+    if re.fullmatch(
+            rb'PROVIDER_UI_SMOKE_USERNAME=__ea_provider_ui_smoke_v1\n'
+            rb'PROVIDER_UI_SMOKE_PASSWORD=[a-f0-9]{64}\n', content) is None:
+        os.close(directory_descriptor)
+        fail('credential_temp_shape_invalid')
+    try:
+        current = os.lstat(temporary)
+        if ((current.st_dev, current.st_ino, current.st_nlink, current.st_uid,
+             current.st_gid, current.st_mode, current.st_size) !=
+                (before.st_dev, before.st_ino, before.st_nlink, before.st_uid,
+                 before.st_gid, before.st_mode, before.st_size)):
+            fail('credential_temp_identity_changed')
+        os.unlink(temporary)
+        os.fsync(directory_descriptor)
+        if temporary.exists() or temporary.is_symlink():
+            fail('credential_temp_cleanup_failed')
+    except OSError:
+        fail('credential_temp_cleanup_failed')
+    finally:
+        if directory_descriptor is not None:
+            os.close(directory_descriptor)
+
+
+def recover_interrupted_install_credential_temp(args: argparse.Namespace) -> None:
+    """Recover first-install interruption during credential publication."""
+    if args.operation != 'install':
+        fail('credential_temp_operation_invalid', 64)
+    core = load_core()
+    resource = resource_from(args)
+    try:
+        with private_cleanup_lock():
+            with core.maintenance_recovery() as admission:
+                def terminal_proof(record):
+                    if (record.get('operation') != OPERATION or
+                            record.get('resource_identity') != resource):
+                        return False
+                    try:
+                        _ensure_arm_ack_absent(resource)
+                        if fixture_install_terminal_state(resource) != 'removed':
+                            fail('fixture_terminal_unknown')
+                        _remove_single_install_credential_temp(resource)
+                        return fixture_install_terminal_state(resource) == 'removed'
+                    except BaseException:
+                        return False
+
+                result = admission.recover_interrupted_pending(
+                    OPERATION, resource, terminal_proof)
+                if result.get('status') != 'recovered':
+                    fail('credential_temp_recovery_unknown')
+    except core.PendingError as error:
+        fail(error.reason, error.code)
+    print('provider_ui_smoke_admission=result=credential-temp-recovered')
 def settle(args: argparse.Namespace) -> None:
     core = load_core()
     resource = resource_from(args)
@@ -884,7 +1009,7 @@ def recover_install_empty(args: argparse.Namespace) -> None:
                     try:
                         _ensure_arm_ack_absent(resource)
                         _ensure_credential_temp_absent(resource)
-                        if fixture_terminal_state(resource) not in {'dormant', 'removed'}:
+                        if fixture_install_terminal_state(resource) not in {'dormant', 'removed'}:
                             fail('fixture_terminal_unknown')
                         return True
                     except BaseException:
@@ -982,7 +1107,10 @@ def recover_interrupted_pending_temp(args: argparse.Namespace) -> None:
                                           record['run_id'])
                             unit_terminal(args.cleanup_unit + '.service', resource,
                                           record['run_id'])
-                        if fixture_terminal_state(resource) not in allowed_states:
+                        terminal_state = (fixture_install_terminal_state(resource)
+                                          if args.operation == 'install'
+                                          else fixture_terminal_state(resource))
+                        if terminal_state not in allowed_states:
                             fail('fixture_terminal_unknown')
                         return True
                     except BaseException:
@@ -1023,7 +1151,10 @@ def recover_interrupted_pending(args: argparse.Namespace) -> None:
                                           record['run_id'])
                             unit_terminal(args.cleanup_unit + '.service', resource,
                                           record['run_id'])
-                        if fixture_terminal_state(resource) not in allowed_states:
+                        terminal_state = (fixture_install_terminal_state(resource)
+                                          if args.operation == 'install'
+                                          else fixture_terminal_state(resource))
+                        if terminal_state not in allowed_states:
                             fail('fixture_terminal_unknown')
                         return True
                     except BaseException:
@@ -1073,7 +1204,7 @@ def recover_clear_marker(args: argparse.Namespace) -> None:
                             # settlement (dormant) or the explicit empty
                             # install abort (removed). Verify once and accept
                             # only those two exact terminal states.
-                            fixture_terminal_state(resource)
+                            fixture_install_terminal_state(resource)
                         else:
                             dormant_clean(resource, expected_state)
                         return True
@@ -1257,7 +1388,7 @@ def recover_interrupted_arm_ack_temp(args: argparse.Namespace) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=('begin', 'ack-arm', 'assert-bound-fd', 'settle', 'recover-arm-ack', 'recover-interrupted-arm-ack', 'recover-interrupted-arm-ack-temp', 'recover-interrupted-pending-temp', 'recover-interrupted-pending', 'recover-unarmed', 'recover-install-empty', 'recover-remove-dormant', 'recover-clear-marker'))
+    parser.add_argument('action', choices=('begin', 'ack-arm', 'assert-bound-fd', 'settle', 'recover-arm-ack', 'recover-interrupted-arm-ack', 'recover-interrupted-arm-ack-temp', 'recover-interrupted-pending-temp', 'recover-interrupted-pending', 'recover-interrupted-install-credential-temp', 'recover-unarmed', 'recover-install-empty', 'recover-remove-dormant', 'recover-clear-marker'))
     parser.add_argument('--operation', choices=sorted(ACTION_NAMES), required=True)
     parser.add_argument('--run-id')
     parser.add_argument('--lock-fd', type=int)
@@ -1277,9 +1408,9 @@ def main() -> None:
         fail('lifecycle_action_scope_invalid', 64)
     if args.action == 'begin' and args.run_id:
         fail('run_id_not_allowed', 64)
-    if args.action in {'recover-interrupted-pending-temp', 'recover-interrupted-pending'} and args.run_id:
+    if args.action in {'recover-interrupted-pending-temp', 'recover-interrupted-pending', 'recover-interrupted-install-credential-temp'} and args.run_id:
         fail('run_id_not_allowed', 64)
-    if args.action != 'begin' and args.action not in {'recover-interrupted-pending-temp', 'recover-interrupted-pending'} and (not args.run_id or len(args.run_id) != RUN_ID_BYTES * 2):
+    if args.action != 'begin' and args.action not in {'recover-interrupted-pending-temp', 'recover-interrupted-pending', 'recover-interrupted-install-credential-temp'} and (not args.run_id or len(args.run_id) != RUN_ID_BYTES * 2):
         fail('run_id_required', 64)
     if args.action == 'begin':
         begin(args)
@@ -1297,6 +1428,8 @@ def main() -> None:
         recover_interrupted_pending_temp(args)
     elif args.action == 'recover-interrupted-pending':
         recover_interrupted_pending(args)
+    elif args.action == 'recover-interrupted-install-credential-temp':
+        recover_interrupted_install_credential_temp(args)
     elif args.action == 'recover-unarmed':
         recover_unarmed(args)
     elif args.action == 'recover-install-empty':

@@ -168,7 +168,7 @@ class ProviderUiSmokeFixtureContractTest extends TestCase
         $this->assertIsInt($verify_position);
         $run_source = substr($source, $run_position, $verify_position - $run_position);
         $this->assertIsString($run_source);
-        $this->assertStringContainsString("\$requiresAdmission = \$action !== 'verify';", $run_source);
+        $this->assertStringContainsString("!in_array(\$action, ['verify', 'precredential-empty'], true)", $run_source);
         $this->assertStringContainsString('if ($requiresAdmission) {', $run_source);
 
         $verify_end = strpos($source, '    /**', $verify_position + 1);
@@ -180,14 +180,22 @@ class ProviderUiSmokeFixtureContractTest extends TestCase
         $this->assertStringNotContainsString('insertOrFail', $verify_source);
         $this->assertStringNotContainsString('writeStateFile', $verify_source);
         $this->assertStringNotContainsString('unlink(', $verify_source);
+        $this->assertStringContainsString('precredential-empty', $source);
+        $this->assertStringContainsString('assertPreCredentialEmpty', $source);
+        $this->assertStringNotContainsString('FH_PROVIDER_UI_SMOKE_PRE_CREDENTIAL_EMPTY', $source);
     }
 
-    public function testConsoleExposesOnlyTheFiveBoundedLifecycleActions(): void
+    public function testConsoleExposesOnlyTheBoundedLifecycleActions(): void
     {
         $source = file_get_contents(APPPATH . 'controllers/Console.php');
 
         $this->assertIsString($source);
-        $this->assertStringContainsString("['install', 'verify', 'activate', 'deactivate', 'remove']", $source);
+        $this->assertStringContainsString(
+            "['install', 'verify', 'precredential-empty', 'activate', 'deactivate', 'remove']",
+            $source,
+        );
+        $this->assertStringContainsString("\$action === 'precredential-empty'", $source);
+        $this->assertStringContainsString('posix_geteuid() !== 0', $source);
         $this->assertStringContainsString(
             "'provider_ui_smoke action=' . \$action . ' state=' . \$state . ' result=ok'",
             $source,

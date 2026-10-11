@@ -17,7 +17,7 @@ $action = $argv[1] ?? '';
 $credentialFile = $argv[2] ?? '';
 $stateFile = $argv[3] ?? '';
 
-if (!in_array($action, ['install', 'verify', 'activate', 'deactivate', 'remove'], true)) {
+if (!in_array($action, ['install', 'verify', 'precredential-empty', 'activate', 'deactivate', 'remove'], true)) {
     fwrite(STDERR, "invalid test lifecycle action\n");
     exit(64);
 }

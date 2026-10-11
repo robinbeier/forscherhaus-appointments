@@ -69,6 +69,23 @@ read-only preflight, arm an independent ten-minute systemd lease, invoke a
 root-only server-local principal wrapper, and perform cleanup in an exit trap.
 The current pinned core digest is
 `a26bb85908f40b784539576d85013c7123522adbeac92e53ebbb3d5cd03ee9fd`.
+First-install recovery has a separate root-CLI action,
+`provider_ui_smoke precredential-empty`: it proves that the state file,
+dedicated role, reserved username/email markers, and fixture markers are all
+absent without weakening ordinary credential-bound `verify`. An interrupted
+first-install credential temp may be removed only when exactly one protected,
+root-owned `0600` temp with the expected name and complete credential shape is
+present; unsafe, multiple, foreign, or partial temps remain a veto. The
+explicit `recover-interrupted-install-credential-temp` action performs this
+proof and removal under the private and shared recovery locks, then uses the
+normal pending/marker recovery path. It never admits a new lifecycle run.
+The precredential proof is sound only for the install ordering: the final
+credential is durably published before PHP installation or activation starts.
+Thus an exact install Pending record plus an absent final credential and a
+protected, marker-free database proves that this run did not reach PHP. Marker
+text cannot detect an arbitrary renamed or orphaned principal; if that state
+is distinguishable, recovery remains fail-closed rather than treating it as a
+first install.
 Before `begin` or any admission, the coordinator opens the installed
 maintenance core through a no-follow descriptor, hashes the exact bytes, and
 requires the pinned SHA-256 plus the recovery API. A same-epoch core from an
