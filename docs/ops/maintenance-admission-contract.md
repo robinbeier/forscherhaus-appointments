@@ -54,6 +54,65 @@ The backup descriptor change and manual cache refusal are compatible local
 prerequisites (ROB-578 and ROB-579). They do not resolve ROB-532's original
 command-name availability finding or the detached-container interval.
 
+## UI-smoke maintenance-pending enrollment obligations
+
+The Provider and Customers UI smoke scripts are not enrolled by this document;
+the following is the bounded proof required before either path can participate
+in pending-state admission. The operator scripts currently run a read-only
+preflight, arm an independent ten-minute systemd lease, invoke the root-only
+server-local principal wrapper, and perform cleanup in an exit trap. Provider
+uses `fh-provider-ui-smoke-cleanup` and
+`scripts/ops/provider_ui_smoke_principal.sh`; Customers uses
+`fh-customers-ui-smoke-cleanup` and
+`scripts/ops/customers_ui_smoke_principals.sh`.
+
+* **One lifecycle record:** register one pending run while holding the shared
+  lock *before* arming the timer. Bind its fixed application root, state
+  directory, smoke family, run identity, and intended unit name. The fixture
+  file does not yet exist at registration, so its later observed identity
+  needs separate protected evidence; a caller-supplied filename or claimed ID
+  cannot retroactively bind the immutable pending record. Keep the veto
+  through foreground activation, the local browser gate, deactivation, and
+  timer disarm. Clearing it immediately after successful activation would
+  admit other writers while the fixture and delayed cleanup remain live.
+* **Delayed systemd cleanup:** enrollment must cover the independently owned
+  timer and its oneshot service, including the exact wrapper and arguments
+  passed by `systemd-run --unit=... --on-active=10m`. The service must
+  reconcile the same run under the shared lock before deactivation; it may
+  not treat a generic recovery capability as permission to process another
+  run. A service cannot prove its own terminal systemd state while it is still
+  executing. The pending veto remains until a separate lock-held finalizer
+  proves the exact service terminal, timer disarmed, and fixture dormant/clean.
+  Timer ownership and elapsed time are not terminal cleanup proof.
+* **Unknown `systemd-run` response:** a lost SSH or `systemd-run` response is
+  an unresolved pending operation, never evidence that no timer or service was
+  created. Keep the pending record and perform a server-local reconciliation of
+  both the exact `.timer` and `.service`; do not clear state from the caller's
+  exit status, a quiet response, or a free lock. An inability to distinguish
+  absent, queued, running, or completed cleanup remains blocked.
+* **Timer disarm:** the present disarm sequence uses the private smoke lock
+  and masks `systemctl stop`/`reset-failed` errors before checking whether the
+  units remain active. That is insufficient as a pending-state terminal proof.
+  The enrolled finalizer must hold the shared lock, check each command result,
+  establish that neither exact unit can still dispatch or execute, and verify
+  wrapper deactivation plus dormant/clean fixture state before clearing the
+  record. An unknown stop, unit status, or fixture result retains the veto;
+  preserve the existing independent cleanup protection when its state is not
+  proven terminal.
+* **Direct server-local entrypoints:** direct root calls to either principal
+  wrapper, including `bash` invocations that bypass the operator script, are
+  separate writer entrypoints. `install` and `remove` require their own
+  lock-held admission, registration, and terminal proof. `activate` and
+  `deactivate` must bind to the existing lifecycle run or refuse; they cannot
+  open a second independent record while that run is pending. Any supported
+  shell alias must obey the same rule. A PID, action name, caller-supplied
+  state path, or wrapper success line is not authority.
+
+These are source-derived proof obligations only. They do not install, authorize
+or imply production enrollment; production installation remains a separately
+approved change after the recovery, mixed-version, and direct-entrypoint
+evidence in this contract passes.
+
 ## Required state transitions
 
 1. **Admit:** validate and acquire the existing shared inode; verify the
