@@ -36,7 +36,7 @@ scheduler, operator and recovery entrypoints, including direct supported calls.
 | Ordinary deploy | `deploy_ea.sh`; validated shared descriptor | Preserve deployment state, recovery and delegated descriptor checks |
 | Ordinary live probe | `scripts/ops/run_ordinary_live_probe.sh`; interruption markers and cleanup callback | Refuse every wrapper action and the separately invoked cleanup path when fixed `/var/lib/fh-maintenance-admission` is present or its root-controlled absence is unknown; even preflight and verify may initialize fixture state or lock files |
 | Provider/customer UI smokes | `scripts/ops/prod_provider_ui_smoke.sh`, `scripts/ops/prod_customers_ui_smoke.sh`; private cleanup locks and delayed systemd cleanup | Enroll foreground mutation, delayed cleanup units and disarm cleanup as separate writer entrypoints |
-| Backup producer | `scripts/ops/libexec/backup_set_producer_v1.py`; shared and private locks, continuity state | Repository source registers pending before dump dispatch and clears only after direct-child termination and publication. Installed helper remains legacy; interrupted-run recovery and coordinated rollout remain open. |
+| Backup producer | `scripts/ops/libexec/backup_set_producer_v1.py`; shared and private locks, continuity state | Repository source registers pending before dump dispatch and clears only after direct-child termination and publication. The source now also has a bounded `--recover-pending` path for a current-boot, fully published pending run; installed helper remains legacy and production rollout remains open. |
 | Restore verification | `scripts/ops/libexec/deployment_dump_attestation_v1.py`; detached container, lease watcher, orphan and continuity checks | Repository source admits before reconciliation, registers pending before Docker launch, and settles after terminal restore and publication. The source now includes a narrowly scoped recovery proof for the post-publication/post-cleanup state; installed recovery and production installation remain open. |
 | Session retention | `scripts/ops/libexec/session_retention_v1.py`; shared lock and protected local state | Repository execute path reads the pending-state contract through its existing lock descriptor before mutation; installed helper and unit remain legacy until the coordinated rollout |
 | Manual build-cache retention | `scripts/ops/prod_build_cache_retention.sh`; private lock and activity veto | Require the shared lock for execute, including when its path is absent; ROB-579 tracks this prerequisite |
@@ -211,6 +211,21 @@ Only trusted root integration code may call the recovery capability; its proof
 callback is not an operator-selectable flag or an authorization boundary. Each
 future writer must bind a fixed, reviewed verifier for its own resource before
 this core can be installed or used on production.
+
+The backup producer has the same source-only limitation in a narrower form.
+Its `--recover-pending` entrypoint opens an already existing private lock and
+never creates one during recovery. It accepts only a current-boot producer
+record whose backup set, closed metadata, handoff, success marker and pending
+continuity state all match, with no producer staging or temporary files. It
+settles pending-only, marker-plus-pending and marker-only state through the
+existing recovery capability; old-boot, partial or mismatched evidence keeps
+the veto. Publication is operation-specific evidence that the direct dump
+child had already terminated successfully because the producer publishes the
+handoff and continuity state only after `create_backup()` returns. Before
+settlement, recovery also synchronizes the backup directory after the complete
+proof; an fsync failure leaves the pending or clear-marker veto untouched.
+This is source-only evidence; the installed helper and production recovery
+path remain unchanged until a separate rollout review.
 
 Manual `docker builder prune` needs an operation-specific terminal proof. Its
 CLI delegates mutation to the Docker daemon; CLI termination, timeout or a free

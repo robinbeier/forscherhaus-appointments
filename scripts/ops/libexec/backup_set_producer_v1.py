@@ -914,6 +914,86 @@ def reconcile_temporary_files(backups):
             reject()
 
 
+def assert_no_recovery_temporary_files(backups):
+    """Recovery never cleans producer residue; any residue keeps the veto."""
+    names = os.listdir(backups)
+    if len(names) > 10_000:
+        reject(75)
+    for name in names:
+        if (STAGING_LEAF.fullmatch(name) or MARKER_TEMP.fullmatch(name) or
+                HANDOFF_TEMP.fullmatch(name) or CONTINUITY_STATE_TEMP.fullmatch(name) or
+                name.startswith('.backup-set-producer-') or
+                name.startswith('.last_backup_success.utc.tmp-') or
+                name.startswith('.last_backup_set.json.tmp-') or
+                name.startswith('.backup_continuity_state.json.tmp-')):
+            reject(75)
+
+
+def _recovery_terminal_proof(admission_core, backups, record, current_boot):
+    """Prove publication completed before settling an interrupted pending run."""
+    if record.get('operation') != 'backup_set_producer' or record.get('boot_id') != current_boot:
+        reject(75)
+    resource_identity = record.get('resource_identity')
+    if (not isinstance(resource_identity, dict) or set(resource_identity) != {'backup_set_id', 'database'} or
+            resource_identity.get('database') != DATABASE or
+            not isinstance(resource_identity.get('backup_set_id'), str) or
+            BACKUP_ID.fullmatch(resource_identity['backup_set_id']) is None):
+        reject(75)
+    backup_id = resource_identity['backup_set_id']
+    state = stable_continuity_state(backups)
+    handoff = stable_handoff(backups)
+    marker = stable_marker(backups)
+    if state[0]['status'] != 'pending' or state[0]['handoff'] != handoff[0]:
+        reject(75)
+    if handoff[0]['backup_set_id'] != backup_id or marker is None:
+        reject(75)
+    if marker[0].strftime('%Y%m%dT%H%M%SZ') != backup_id:
+        reject(75)
+    digest, compressed, unpacked, created = validate_backup_set(backups, backup_id)
+    expected = handoff_bytes(backup_id, digest, compressed, unpacked)
+    if expected != stable_handoff(backups)[2] or state[2] != continuity_state_bytes('pending', handoff[0]):
+        reject(75)
+    if marker[0].strftime('%Y-%m-%dT%H:%M:%SZ') != created:
+        reject(75)
+    # Publication follows create_backup(), which returns only after its direct
+    # dump child has exited successfully and the closed dump has been checked.
+    return True
+
+
+def recover_published_pending(admission_core, global_lock, backups):
+    """Settle one fully published, current-boot producer record; never create a dump."""
+    assert_no_recovery_temporary_files(backups)
+    current_boot = admission_core.current_boot_id()
+    pair = admission_core._matching_clear_pair()
+    if pair is None:
+        pending = admission_core.read_pending(current_boot)
+        if pending is None:
+            admission_core.reject('pending_missing')
+        record = pending[0]
+        mode = 'pending'
+    else:
+        record = pair[0][0]
+        mode = 'marker'
+    proof = lambda observed: _recovery_terminal_proof(admission_core, backups, observed, current_boot)
+    proof(record)
+    try:
+        os.fsync(backups)
+    except OSError:
+        reject(75)
+    recovery = None
+    try:
+        recovery = admission_core.MaintenanceAdmission.recovery_from_existing_lock_fd(
+            global_lock, current_boot)
+        if mode == 'pending':
+            result = recovery.recover_pending(record, proof)
+        else:
+            result = recovery.recover_clear_marker(proof)
+        return result
+    finally:
+        if recovery is not None:
+            recovery.__exit__(None, None, None)
+
+
 def validate_backup_set(backups, backup_id):
     gzip_mtime = int(datetime.datetime.strptime(backup_id, '%Y%m%dT%H%M%SZ').replace(
         tzinfo=datetime.timezone.utc).timestamp())
@@ -1015,7 +1095,9 @@ def attach_unmarked_set(backups, current_marker, current_state, nonce):
 
 def main():
     bind_to_parent_death()
-    if len(sys.argv) != 1 or os.geteuid() != 0 or os.getuid() != 0 or os.getegid() != 0 or os.getgid() != 0:
+    recovery_mode = len(sys.argv) == 2 and sys.argv[1] == '--recover-pending'
+    if (len(sys.argv) not in (1, 2) or (len(sys.argv) == 2 and not recovery_mode) or
+            os.geteuid() != 0 or os.getuid() != 0 or os.getegid() != 0 or os.getgid() != 0):
         reject()
     os.umask(0o077)
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
@@ -1044,6 +1126,15 @@ def main():
         global ADMISSION_PENDING_ERROR_TYPES
         pending_error_type = getattr(admission_core, 'PendingError', None)
         ADMISSION_PENDING_ERROR_TYPES = (pending_error_type,) if isinstance(pending_error_type, type) else ()
+        if recovery_mode:
+            backups = open_absolute_directory(BACKUP_ROOT)
+            try:
+                private_lock = open_lock(backups, PRIVATE_LOCK_LEAF)
+            except FileNotFoundError:
+                reject(75)
+            result = recover_published_pending(admission_core, global_lock, backups)
+            emit('recovered', backup_sets_published=0, result=result.get('status', 'recovered'))
+            return
         try:
             admission = admission_core.MaintenanceAdmission.from_existing_lock_fd(
                 global_lock,

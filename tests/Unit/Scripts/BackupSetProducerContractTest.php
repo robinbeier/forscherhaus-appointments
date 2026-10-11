@@ -51,7 +51,8 @@ final class BackupSetProducerContractTest extends TestCase
         self::assertStringContainsString("DATABASE = 'easyappointments'", $this->helper);
         self::assertStringContainsString("user=fh_backup\\n", $this->helper);
         self::assertStringContainsString("host=127.0.0.1\\n", $this->helper);
-        self::assertStringContainsString('if len(sys.argv) != 1', $this->helper);
+        self::assertStringContainsString("sys.argv[1] == '--recover-pending'", $this->helper);
+        self::assertStringContainsString('len(sys.argv) not in (1, 2)', $this->helper);
         self::assertStringContainsString('resource.setrlimit(resource.RLIMIT_CORE, (0, 0))', $this->helper);
         self::assertStringNotContainsString('os.environ.get', $this->helper);
         self::assertStringNotContainsString("'mysqldump'", $this->helper);

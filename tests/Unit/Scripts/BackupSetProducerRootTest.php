@@ -159,7 +159,11 @@ final class BackupSetProducerRootTest extends TestCase
             # Parent-death semantics are covered by the shared ROB-465 primitive; this
             # filesystem suite exercises the producer after that entry guard.
             module.bind_to_parent_death = lambda: None
-            sys.argv = [sys.argv[0]]
+            if os.environ.get('ROB812_RECOVERY_FSYNC_FAIL') and os.environ.get('ROB812_RECOVER'):
+                def fail_recovery_fsync(_descriptor):
+                    raise OSError(5, 'synthetic recovery fsync failure')
+                module.os.fsync = fail_recovery_fsync
+            sys.argv = [sys.argv[0], '--recover-pending'] if os.environ.get('ROB812_RECOVER') else [sys.argv[0]]
             module.run()
             PY
             ,
@@ -440,6 +444,139 @@ final class BackupSetProducerRootTest extends TestCase
         self::assertStringNotContainsString('synthetic settlement refusal', $result['stdout'] . $result['stderr']);
         self::assertFileExists('/var/lib/fh-maintenance-admission/pending.json');
         self::assertFileExists($this->root . '/backups/backup_continuity_state.json');
+    }
+
+    public function testRecoverySettlesOnlyFullyPublishedCurrentBootPendingRun(): void
+    {
+        $published = $this->runProducer('2026-08-13T00:00:00Z', ['ROB812_INJECT_PENDING' => 'clear']);
+        self::assertSame(75, $published['exit']);
+        $recovered = $this->runProducer(null, ['ROB812_RECOVER' => '1']);
+        self::assertSame(0, $recovered['exit'], $recovered['stderr']);
+        self::assertSame('recovered', json_decode($recovered['stdout'], true, flags: JSON_THROW_ON_ERROR)['status']);
+        self::assertFileDoesNotExist('/var/lib/fh-maintenance-admission/pending.json');
+        self::assertFileDoesNotExist('/var/lib/fh-maintenance-admission/clear-state.json');
+        self::assertFileExists($this->root . '/backups/backup_continuity_state.json');
+        $state = json_decode(
+            (string) file_get_contents($this->root . '/backups/backup_continuity_state.json'),
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertSame('pending', $state['status']);
+        self::assertSame([], glob($this->root . '/backups/.backup-set-producer-*.tmp') ?: []);
+    }
+
+    public function testRecoveryRejectsOldBootAndLeavesPendingVeto(): void
+    {
+        $published = $this->runProducer('2026-08-13T00:00:00Z', ['ROB812_INJECT_PENDING' => 'clear']);
+        self::assertSame(75, $published['exit']);
+        $this->writePendingWithOldBoot();
+        $recovered = $this->runProducer(null, ['ROB812_RECOVER' => '1']);
+        self::assertSame(75, $recovered['exit']);
+        self::assertSame(
+            ['schema' => 'production_backup_set_result.v1', 'status' => 'busy'],
+            json_decode($recovered['stdout'], true, flags: JSON_THROW_ON_ERROR),
+        );
+        self::assertFileExists('/var/lib/fh-maintenance-admission/pending.json');
+        self::assertFileExists($this->root . '/backups/backup_continuity_state.json');
+    }
+
+    public function testRecoverySettlesMarkerPendingState(): void
+    {
+        $published = $this->runProducer('2026-08-13T00:00:00Z', ['ROB812_INJECT_PENDING' => 'clear']);
+        self::assertSame(75, $published['exit']);
+        self::assertTrue(
+            link(
+                '/var/lib/fh-maintenance-admission/pending.json',
+                '/var/lib/fh-maintenance-admission/clear-state.json',
+            ),
+        );
+        $markerPending = $this->runProducer(null, ['ROB812_RECOVER' => '1']);
+        self::assertSame(0, $markerPending['exit'], $markerPending['stderr']);
+        self::assertFileDoesNotExist('/var/lib/fh-maintenance-admission/clear-state.json');
+    }
+
+    public function testRecoverySettlesMarkerOnlyState(): void
+    {
+        $published = $this->runProducer(null, ['ROB812_INJECT_PENDING' => 'clear']);
+        self::assertSame(75, $published['exit']);
+        self::assertTrue(
+            link(
+                '/var/lib/fh-maintenance-admission/pending.json',
+                '/var/lib/fh-maintenance-admission/clear-state.json',
+            ),
+        );
+        self::assertTrue(unlink('/var/lib/fh-maintenance-admission/pending.json'));
+        $markerOnly = $this->runProducer(null, ['ROB812_RECOVER' => '1']);
+        self::assertSame(0, $markerOnly['exit'], $markerOnly['stderr']);
+        self::assertFileDoesNotExist('/var/lib/fh-maintenance-admission/clear-state.json');
+    }
+
+    public function testRecoveryRejectsContinuityMismatchWithoutSettlement(): void
+    {
+        $published = $this->runProducer('2026-08-13T00:00:00Z', ['ROB812_INJECT_PENDING' => 'clear']);
+        self::assertSame(75, $published['exit']);
+        $statePath = $this->root . '/backups/backup_continuity_state.json';
+        $state = json_decode((string) file_get_contents($statePath), true, flags: JSON_THROW_ON_ERROR);
+        $state['handoff']['dump_sha256'] = str_repeat('f', 64);
+        ksort($state['handoff']);
+        ksort($state);
+        file_put_contents($statePath, json_encode($state, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n");
+        chmod($statePath, 0600);
+        $recovered = $this->runProducer(null, ['ROB812_RECOVER' => '1']);
+        self::assertSame(75, $recovered['exit']);
+        self::assertFileExists('/var/lib/fh-maintenance-admission/pending.json');
+        self::assertFileExists($statePath);
+    }
+
+    public function testRecoveryRejectsMissingPrivateLockWithoutCreatingIt(): void
+    {
+        $published = $this->runProducer(null, ['ROB812_INJECT_PENDING' => 'clear']);
+        self::assertSame(75, $published['exit']);
+        $privateLock = $this->root . '/backups/.backup-set-producer.lock';
+        self::assertFileExists($privateLock);
+        self::assertTrue(unlink($privateLock));
+        $recovered = $this->runProducer(null, ['ROB812_RECOVER' => '1']);
+        self::assertSame(75, $recovered['exit']);
+        self::assertSame(
+            ['schema' => 'production_backup_set_result.v1', 'status' => 'busy'],
+            json_decode($recovered['stdout'], true, flags: JSON_THROW_ON_ERROR),
+        );
+        self::assertFileDoesNotExist($privateLock);
+        self::assertFileExists('/var/lib/fh-maintenance-admission/pending.json');
+    }
+
+    public function testRecoveryFsyncFailureRetainsPendingVetoAndAllowsLaterRetry(): void
+    {
+        $published = $this->runProducer(null, ['ROB812_INJECT_PENDING' => 'clear']);
+        self::assertSame(75, $published['exit']);
+        $failed = $this->runProducer(null, ['ROB812_RECOVER' => '1', 'ROB812_RECOVERY_FSYNC_FAIL' => '1']);
+        self::assertSame(75, $failed['exit']);
+        self::assertSame(
+            ['schema' => 'production_backup_set_result.v1', 'status' => 'busy'],
+            json_decode($failed['stdout'], true, flags: JSON_THROW_ON_ERROR),
+        );
+        self::assertFileExists('/var/lib/fh-maintenance-admission/pending.json');
+        self::assertFileDoesNotExist('/var/lib/fh-maintenance-admission/clear-state.json');
+        $retry = $this->runProducer(null, ['ROB812_RECOVER' => '1']);
+        self::assertSame(0, $retry['exit'], $retry['stderr']);
+    }
+
+    public function testRecoveryFsyncFailureAfterMarkerPublicationRetainsBothNames(): void
+    {
+        $published = $this->runProducer(null, ['ROB812_INJECT_PENDING' => 'clear']);
+        self::assertSame(75, $published['exit']);
+        self::assertTrue(
+            link(
+                '/var/lib/fh-maintenance-admission/pending.json',
+                '/var/lib/fh-maintenance-admission/clear-state.json',
+            ),
+        );
+        $failed = $this->runProducer(null, ['ROB812_RECOVER' => '1', 'ROB812_RECOVERY_FSYNC_FAIL' => '1']);
+        self::assertSame(75, $failed['exit']);
+        self::assertFileExists('/var/lib/fh-maintenance-admission/pending.json');
+        self::assertFileExists('/var/lib/fh-maintenance-admission/clear-state.json');
+        $retry = $this->runProducer(null, ['ROB812_RECOVER' => '1']);
+        self::assertSame(0, $retry['exit'], $retry['stderr']);
     }
 
     public function testTrustedDumpChildRetainsBothLocksAfterProducerDeath(): void
@@ -875,6 +1012,25 @@ final class BackupSetProducerRootTest extends TestCase
         self::assertSame('pending', $state['status']);
         $state['status'] = 'verified';
         file_put_contents($path, json_encode($state, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n");
+        chmod($path, 0600);
+    }
+
+    private function writePendingWithOldBoot(): void
+    {
+        $path = '/var/lib/fh-maintenance-admission/pending.json';
+        $record = json_decode((string) file_get_contents($path), true, flags: JSON_THROW_ON_ERROR);
+        $record['boot_id'] = '11111111-1111-4111-8111-111111111111';
+        $sort = static function (&$value) use (&$sort): void {
+            if (!is_array($value)) {
+                return;
+            }
+            foreach ($value as &$child) {
+                $sort($child);
+            }
+            ksort($value);
+        };
+        $sort($record);
+        file_put_contents($path, json_encode($record, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n");
         chmod($path, 0600);
     }
 
