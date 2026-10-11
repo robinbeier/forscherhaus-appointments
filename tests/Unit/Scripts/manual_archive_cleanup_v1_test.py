@@ -134,6 +134,10 @@ class ManualArchiveCleanupTest(unittest.TestCase):
         self._pair('current')
         self._pair('rollback')
 
+    def test_pinned_helper_sha_matches_real_retention_source(self):
+        with open(os.path.join(ROOT, 'scripts/ops/libexec/release_archive_dump_retention_v1.py'), 'rb') as source:
+            self.assertEqual(CLEANUP.HELPER_SHA256, hashlib.sha256(source.read()).hexdigest())
+
     def tearDown(self):
         self.tmp.cleanup()
 
