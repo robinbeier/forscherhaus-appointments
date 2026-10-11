@@ -187,16 +187,16 @@ authority. A missing, stale, contradictory, or unknown fact blocks the entry.
 
 ## First installation of the timer helper
 
-The timer-transition helper is initially absent on existing hosts. Before
-its first use, complete a separate, reviewed installation step from the exact
-successfully checked `main` commit: bind the tracked source SHA-256 and the
-absent destination, transfer a no-clobber candidate, and install it as a
+If the timer-transition helper is absent on a host, complete a separate,
+reviewed installation step from the exact successfully checked `main` commit:
+commit and review the expected manifest entry before installation, bind its
+SHA-256 and the absent destination, transfer a no-clobber candidate, and install it as a
 root-owned, single-link regular file with mode `0555` at
 `/usr/local/libexec/fh-backup-timer-transition-v1` while holding the shared
 production lock. Verify installed SHA-256, owner, mode, file identity, and
 unchanged timer and service state before releasing the lock. An occupied
 destination or mismatch stops; do not overwrite it. The read-only release
-preflight binds this fourth helper to the reviewed source and rejects an
+preflight binds this fourth helper to the reviewed manifest and rejects an
 unresolved backup-timer transition marker or prior deployment recovery marker,
 even if the timer appears active.
 Installation alone does not authorize a timer transition, backup, or
@@ -206,28 +206,29 @@ application deploy.
 
 6. **Deploy the reviewed archive through the existing host path.** For a
    normal release without migration, use the checked-main
-   `scripts/ops/prod_deploy_bound_release.sh` entry only after the coordinated
-   ROB-812 rollout is fully installed and verified on the host. The release-pair
-   and backup helpers are additional prerequisites, not a substitute for that
-   rollout.
-
-   This source-level bound-release entry is unavailable on a legacy or otherwise
-   un-enrolled production host. Before use, ROB-812 must be coordinated across
-   all writers, the shared admission core, its state directory, and the
-   epoch/marker contract, with every installed hash freshly verified. Installing
-   only release-pair and backup helpers is insufficient. Do not install the
-   admission core alone or run the current repository wrapper against a legacy
-   host; follow the [maintenance admission contract](maintenance-admission-contract.md).
+   `scripts/ops/prod_deploy_bound_release.sh` entry only with the exact
+   reviewed installed-helper manifest. The current manifest binds the verified
+   legacy host: the coordinated ROB-812 admission core and its state directory
+   must both be absent at preflight and again under the deployment lock. A
+   partial or complete ROB-812 installation is a different protocol and blocks
+   this legacy entry. It requires a separately reviewed manifest and rollout
+   contract; do not install the admission core alone. Follow the
+   [maintenance admission contract](maintenance-admission-contract.md).
+   The installed release-pair and backup helpers remain separate hash-checked
+   prerequisites.
    The entry still requires the
    already published archive/provenance pair, a fresh verified backup handoff,
    and the exact currently active release. Its inputs are the reviewed commit,
    release and current-release IDs, and the two local artifact paths; it derives
-   the artifact hashes from those files and the tool hashes from the pinned
-   commit. It verifies the release
+   the artifact hashes from those files, the installed deploy-helper hash from
+   the pinned commit's manifest, and the other admission-helper hashes from the
+   pinned commit. It verifies the release
    pair and artifact with code from a private snapshot of the checked commit,
    streams the runner from that commit's exact blob, then rechecks production
-   readiness and binds both published files, the restored dump and host
-   configuration under the shared lock, then invokes the existing
+   readiness and all four manifest-bound installed helper identities and
+   hashes under the shared lock before reserving intent. It binds both
+   published files, the restored dump and host configuration under that lock,
+   then invokes the existing
    `/root/deploy_ea.sh` at most once with an absent run-specific result leaf.
    The root-only intent reservation and `deploy_result.v1` receipt stay on the
    host. No old per-release script or copied inode/hash list is an input.

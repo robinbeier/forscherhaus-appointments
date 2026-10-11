@@ -35,6 +35,7 @@ def arguments():
         run_id='a' * 32, commit='b' * 40, archive_sha='c' * 64,
         provenance_sha='d' * 64, continuity_sha='e' * 64,
         deploy_sha='f' * 64, pair_helper_sha='1' * 64, backup_helper_sha='2' * 64,
+        backup_producer_sha='5' * 64, timer_helper_sha='3' * 64, attestation_helper_sha='4' * 64,
         archive_size=123, provenance_size=45,
     )
 
@@ -85,6 +86,24 @@ class BoundReleaseDeployTest(unittest.TestCase):
         self.assertEqual(arguments().run_id, self.child.call_args.kwargs['env']['BOUND_RELEASE_RUN_ID'])
         self.assertEqual(1, self.reserve.call_count)
         self.assertEqual(1, self.receipt.call_count)
+
+    def test_each_installed_helper_drift_blocks_before_reservation_or_child(self):
+        for target in (MODULE.BACKUP_PRODUCER, MODULE.DEPLOY, MODULE.TIMER_HELPER, MODULE.ATTESTATION_HELPER):
+            self.reserve.reset_mock()
+            self.child.reset_mock()
+            self.module_sequence = iter((self.pair, self.backup))
+            self.open_lock.return_value = os.open(os.devnull, os.O_RDONLY)
+
+            def reject_target(path, *args, target=target):
+                if path == target:
+                    raise MODULE.AdmissionError('tool_hash_mismatch')
+                return (b'', (1, 2, 3))
+
+            with mock.patch.object(MODULE, 'bound_hash', side_effect=reject_target):
+                with self.assertRaisesRegex(MODULE.AdmissionError, 'tool_hash_mismatch'):
+                    MODULE.run(arguments())
+            self.reserve.assert_not_called()
+            self.child.assert_not_called()
 
     def test_pending_admission_refuses_before_reservation_or_child(self):
         self.admit.side_effect = MODULE.AdmissionError('maintenance_pending_present', 75)
@@ -311,6 +330,9 @@ class BoundReleaseDeployTest(unittest.TestCase):
                 'deploy_sha256': args.deploy_sha,
                 'pair_helper_sha256': args.pair_helper_sha,
                 'backup_helper_sha256': args.backup_helper_sha,
+                'backup_producer_sha256': args.backup_producer_sha,
+                'timer_helper_sha256': args.timer_helper_sha,
+                'attestation_helper_sha256': args.attestation_helper_sha,
             },
         }
         result = {'schema': 'deploy_result.v1', 'outcome': 'succeeded', 'exit_code': 0}
@@ -363,6 +385,9 @@ class BoundReleaseDeployTest(unittest.TestCase):
             'deploy_sha256': args.deploy_sha,
             'pair_helper_sha256': args.pair_helper_sha,
             'backup_helper_sha256': args.backup_helper_sha,
+            'backup_producer_sha256': args.backup_producer_sha,
+            'timer_helper_sha256': args.timer_helper_sha,
+            'attestation_helper_sha256': args.attestation_helper_sha,
         }
         intent = {
             'schema': 'bound_release_deploy_intent.v1',
@@ -413,6 +438,8 @@ class BoundReleaseDeployTest(unittest.TestCase):
                 'archive_sha256': args.archive_sha, 'provenance_sha256': args.provenance_sha,
                 'continuity_sha256': args.continuity_sha, 'deploy_sha256': args.deploy_sha,
                 'pair_helper_sha256': args.pair_helper_sha, 'backup_helper_sha256': args.backup_helper_sha,
+                'backup_producer_sha256': args.backup_producer_sha,
+                'timer_helper_sha256': args.timer_helper_sha, 'attestation_helper_sha256': args.attestation_helper_sha,
             },
         }
         result = {'schema': 'deploy_result.v1', 'outcome': 'rollback_failed_or_unverifiable', 'exit_code': 31}
@@ -448,6 +475,8 @@ class BoundReleaseDeployTest(unittest.TestCase):
                 'archive_sha256': args.archive_sha, 'provenance_sha256': args.provenance_sha,
                 'continuity_sha256': args.continuity_sha, 'deploy_sha256': args.deploy_sha,
                 'pair_helper_sha256': args.pair_helper_sha, 'backup_helper_sha256': args.backup_helper_sha,
+                'backup_producer_sha256': args.backup_producer_sha,
+                'timer_helper_sha256': args.timer_helper_sha, 'attestation_helper_sha256': args.attestation_helper_sha,
             },
         }
         result = {'schema': 'deploy_result.v1', 'outcome': 'succeeded', 'exit_code': 0}

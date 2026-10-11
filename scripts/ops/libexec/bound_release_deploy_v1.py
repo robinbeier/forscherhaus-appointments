@@ -21,7 +21,10 @@ import types
 
 PAIR_HELPER = '/usr/local/libexec/fh/release_pair_admission_v1.py'
 BACKUP_HELPER = '/usr/local/libexec/fh/backup_handoff_admission_v1.py'
+BACKUP_PRODUCER = '/usr/local/libexec/fh-backup-set-producer-v1'
 DEPLOY = '/root/deploy_ea.sh'
+TIMER_HELPER = '/usr/local/libexec/fh-backup-timer-transition-v1'
+ATTESTATION_HELPER = '/usr/local/libexec/fh/deployment_dump_attestation_v1.py'
 ADMISSION_CORE = '/usr/local/libexec/fh/maintenance_pending_v1.py'
 ADMISSION_CORE_SHA256 = '250d60060d2681a3a09476918cb801ce422366564924f89b480a5a7563af7dc9'
 ADMISSION_STATE = '/var/lib/fh-maintenance-admission'
@@ -367,7 +370,8 @@ def validate_args(args):
     if (not RELEASE_ID.fullmatch(args.release) or not RELEASE_ID.fullmatch(args.expected_active_release) or
             not RUN_ID.fullmatch(args.run_id) or not re.fullmatch(r'[0-9a-f]{40}', args.commit) or
             not all(HEX64.fullmatch(value) for value in (args.archive_sha, args.provenance_sha,
-                    args.continuity_sha, args.deploy_sha, args.pair_helper_sha, args.backup_helper_sha)) or
+                    args.continuity_sha, args.deploy_sha, args.pair_helper_sha, args.backup_helper_sha,
+                    args.backup_producer_sha, args.timer_helper_sha, args.attestation_helper_sha)) or
             args.archive_size <= 0 or args.provenance_size <= 0):
         fail('input_invalid')
     if args.release == args.expected_active_release:
@@ -414,6 +418,9 @@ def acknowledge(args):
             'deploy_sha256': args.deploy_sha,
             'pair_helper_sha256': args.pair_helper_sha,
             'backup_helper_sha256': args.backup_helper_sha,
+            'backup_producer_sha256': args.backup_producer_sha,
+            'timer_helper_sha256': args.timer_helper_sha,
+            'attestation_helper_sha256': args.attestation_helper_sha,
         }
         if (not isinstance(intent, dict) or set(intent) != {'schema', 'release', 'commit', 'run_id', 'bindings'} or
                 intent['schema'] != 'bound_release_deploy_intent.v1' or
@@ -442,10 +449,7 @@ def run(args):
     if os.geteuid() != 0 or os.uname().nodename.split('.')[0] != 'booking-server':
         fail('host_invalid')
     validate_args(args)
-    pair = checked_module('release_pair_admission_v1', PAIR_HELPER, args.pair_helper_sha)
-    backup = checked_module('backup_handoff_admission_v1', BACKUP_HELPER, args.backup_helper_sha)
     trusted_parent('/root', 0o700)
-    bound_hash(DEPLOY, 1024 * 1024, 0o700, 0, 0, args.deploy_sha)
     result_path = '/root/fh-deploy-result-' + args.run_id + '.json'
     # Release IDs are immutable. Keep the reservation across run IDs so an
     # unknown transport result cannot launch the same candidate a second time.
@@ -453,6 +457,14 @@ def run(args):
     lock_fd = open_lock()
     try:
         admit_maintenance(lock_fd)
+        # Bind every installed legacy helper again after acquiring the shared
+        # lock. These exact bytes are the only operator inputs used below.
+        pair = checked_module('release_pair_admission_v1', PAIR_HELPER, args.pair_helper_sha)
+        backup = checked_module('backup_handoff_admission_v1', BACKUP_HELPER, args.backup_helper_sha)
+        bound_hash(BACKUP_PRODUCER, 1024 * 1024, 0o555, 0, 0, args.backup_producer_sha)
+        bound_hash(DEPLOY, 1024 * 1024, 0o700, 0, 0, args.deploy_sha)
+        bound_hash(TIMER_HELPER, 1024 * 1024, 0o555, 0, 0, args.timer_helper_sha)
+        bound_hash(ATTESTATION_HELPER, 1024 * 1024, 0o555, 0, 0, args.attestation_helper_sha)
         no_recovery()
         active_release(args.expected_active_release)
         if os.path.lexists(result_path) or os.path.lexists(intent_path):
@@ -472,7 +484,10 @@ def run(args):
         no_recovery()
         no_canary_recovery()
         active_release(args.expected_active_release)
+        bound_hash(BACKUP_PRODUCER, 1024 * 1024, 0o555, 0, 0, args.backup_producer_sha)
         bound_hash(DEPLOY, 1024 * 1024, 0o700, 0, 0, args.deploy_sha)
+        bound_hash(TIMER_HELPER, 1024 * 1024, 0o555, 0, 0, args.timer_helper_sha)
+        bound_hash(ATTESTATION_HELPER, 1024 * 1024, 0o555, 0, 0, args.attestation_helper_sha)
         bindings = {
             'archive_sha256': args.archive_sha,
             'provenance_sha256': args.provenance_sha,
@@ -480,6 +495,9 @@ def run(args):
             'deploy_sha256': args.deploy_sha,
             'pair_helper_sha256': args.pair_helper_sha,
             'backup_helper_sha256': args.backup_helper_sha,
+            'backup_producer_sha256': args.backup_producer_sha,
+            'timer_helper_sha256': args.timer_helper_sha,
+            'attestation_helper_sha256': args.attestation_helper_sha,
             'config': [{'path': spec[0], 'identity': list(observed[0]),
                         'sha256': observed[1].hex()} for spec, observed in zip(CONFIGS, before)],
         }
@@ -524,6 +542,9 @@ def main():
     parser.add_argument('--deploy-sha', required=True)
     parser.add_argument('--pair-helper-sha', required=True)
     parser.add_argument('--backup-helper-sha', required=True)
+    parser.add_argument('--backup-producer-sha', required=True)
+    parser.add_argument('--timer-helper-sha', required=True)
+    parser.add_argument('--attestation-helper-sha', required=True)
     parser.add_argument('--run-id', required=True)
     parser.add_argument('--ack', action='store_true')
     args = parser.parse_args()

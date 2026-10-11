@@ -133,7 +133,11 @@ fi
 commit_blob_sha() {
     git -C "$PROJECT" cat-file blob "$COMMIT:$1" | shasum -a 256 | awk '{print $1}'
 }
-DEPLOY_SHA="$(python3 -I -B - "$snapshot_dir/scripts/ops/production-installed-helper-manifest.v1.json" <<'PY'
+manifest_hashes_file="$(mktemp "${TMPDIR:-/tmp}/fh-installed-helper-manifest.XXXXXX")" || {
+    echo 'ERROR: manifest staging unavailable.' >&2
+    exit 70
+}
+if ! python3 -I -B - "$snapshot_dir/scripts/ops/production-installed-helper-manifest.v1.json" >"$manifest_hashes_file" <<'PY'
 import json
 import sys
 
@@ -156,16 +160,31 @@ try:
         for item in value['helpers']
     ):
         raise ValueError
-    print(value['helpers'][0]['sha256'])
+    for item in value['helpers']:
+        print(item['sha256'])
 except (OSError, ValueError, TypeError, KeyError, IndexError, json.JSONDecodeError):
     raise SystemExit(70)
 PY
-)" || {
+then
+    rm -f -- "$manifest_hashes_file"
     echo 'ERROR: commit-bound installed helper manifest is invalid.' >&2
     exit 70
-}
-[[ "$DEPLOY_SHA" =~ ^[a-f0-9]{64}$ ]] || {
+fi
+MANIFEST_HASHES=()
+while IFS= read -r manifest_hash; do
+    MANIFEST_HASHES+=("$manifest_hash")
+done < "$manifest_hashes_file"
+rm -f -- "$manifest_hashes_file"
+[[ ${#MANIFEST_HASHES[@]} -eq 4 ]] || {
     echo 'ERROR: commit-bound deploy helper hash is invalid.' >&2
+    exit 70
+}
+DEPLOY_SHA="${MANIFEST_HASHES[0]}"
+BACKUP_SET_SHA="${MANIFEST_HASHES[1]}"
+TIMER_SHA="${MANIFEST_HASHES[2]}"
+ATTESTATION_SHA="${MANIFEST_HASHES[3]}"
+[[ "$DEPLOY_SHA" =~ ^[a-f0-9]{64}$ && "$BACKUP_SET_SHA" =~ ^[a-f0-9]{64}$ && "$TIMER_SHA" =~ ^[a-f0-9]{64}$ && "$ATTESTATION_SHA" =~ ^[a-f0-9]{64}$ ]] || {
+    echo 'ERROR: commit-bound installed helper hash is invalid.' >&2
     exit 70
 }
 PAIR_SHA="$(commit_blob_sha 'scripts/ops/libexec/release_pair_admission_v1.py')"
@@ -217,7 +236,8 @@ if printf '%s' "$RUNNER_B64" | decode_runner | ssh -o BatchMode=yes -o ConnectTi
     --archive-sha "$ARCHIVE_SHA" --archive-size "$ARCHIVE_SIZE" \
     --provenance-sha "$PROVENANCE_SHA" --provenance-size "$PROVENANCE_SIZE" \
     --continuity-sha "$continuity_sha" --deploy-sha "$DEPLOY_SHA" \
-    --pair-helper-sha "$PAIR_SHA" --backup-helper-sha "$BACKUP_SHA" \
+    --pair-helper-sha "$PAIR_SHA" --backup-helper-sha "$BACKUP_SHA" --backup-producer-sha "$BACKUP_SET_SHA" \
+    --timer-helper-sha "$TIMER_SHA" --attestation-helper-sha "$ATTESTATION_SHA" \
     --run-id "$run_id" \
     > "$receipt_file" 2>/dev/null; then
     remote_rc=0
@@ -317,7 +337,8 @@ if (( deployment_known == 1 )) && { (( remote_rc == 0 )) || (( remote_rc == 30 )
         --archive-sha "$ARCHIVE_SHA" --archive-size "$ARCHIVE_SIZE" \
         --provenance-sha "$PROVENANCE_SHA" --provenance-size "$PROVENANCE_SIZE" \
         --continuity-sha "$continuity_sha" --deploy-sha "$DEPLOY_SHA" \
-        --pair-helper-sha "$PAIR_SHA" --backup-helper-sha "$BACKUP_SHA" \
+        --pair-helper-sha "$PAIR_SHA" --backup-helper-sha "$BACKUP_SHA" --backup-producer-sha "$BACKUP_SET_SHA" \
+        --timer-helper-sha "$TIMER_SHA" --attestation-helper-sha "$ATTESTATION_SHA" \
         --run-id "$run_id" > "$ack_receipt_file" 2>/dev/null; then
         ack_rc=0
     else
