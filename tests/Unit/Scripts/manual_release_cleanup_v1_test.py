@@ -60,6 +60,8 @@ class FixtureHelper:
         self.open_after_quarantine = False
         self.drift_during_open_scan = False
         self.held_ids = set()
+        self.admission_error = None
+        self.admission_calls = 0
 
     @staticmethod
     def _identity(stat_result):
@@ -123,6 +125,18 @@ class FixtureHelper:
 
     def open_global_lock(self):
         return os.open(os.devnull, os.O_RDONLY)
+
+    def load_admission_core(self):
+        owner = self
+
+        class AdmissionCore:
+            @staticmethod
+            def admit_existing_lock_fd(_lock_fd):
+                owner.admission_calls += 1
+                if owner.admission_error is not None:
+                    raise owner.admission_error
+
+        return AdmissionCore
 
     def open_absolute_directory(self, path, exact_mode=None):
         actual = {
@@ -432,6 +446,7 @@ class ManualReleaseCleanupTest(unittest.TestCase):
                 CLEANUP.run('execute', '0' * 64, self.helper)
             result = CLEANUP.run('execute', digest, self.helper)
         self.assertEqual('pass', result['status'])
+        self.assertEqual(2, self.helper.admission_calls)
         self.assertEqual(1, result['deleted_release_dirs'])
         self.assertFalse(os.path.exists(os.path.join(self.root, 'web', 'easyappointments_prev_old')))
         self.assertFalse(any(name.startswith('.pending-release-')
@@ -439,6 +454,24 @@ class ManualReleaseCleanupTest(unittest.TestCase):
         for leaf in ('easyappointments', 'easyappointments_prev_current', 'stage-unsafe', 'failed-unsafe'):
             self.assertTrue(os.path.exists(os.path.join(self.root, 'web', leaf)))
         self.assertTrue(os.path.exists(os.path.join(self.root, 'releases', 'old.tar.gz')))
+
+    def test_execute_refuses_pending_state_before_any_cleanup_mutation(self):
+        self._mkdir_release('easyappointments_prev_old', 'old', age_days=8)
+        self._archive('old')
+        plan, _ = self._collect()
+        digest = hashlib.sha256(CLEANUP.canonical(plan)).hexdigest()
+        self.helper.admission_error = CLEANUP.CleanupError('pending_present', 75)
+
+        with mock.patch.object(CLEANUP.os, 'geteuid', return_value=0), \
+                mock.patch.object(CLEANUP.socket, 'gethostname', return_value='booking-server'), \
+                mock.patch.object(CLEANUP.pwd, 'getpwnam', return_value=SimpleNamespace(pw_uid=0)):
+            with self.assertRaisesRegex(CLEANUP.CleanupError, 'pending_present'):
+                CLEANUP.run('execute', digest, self.helper)
+
+        self.assertEqual(1, self.helper.admission_calls)
+        self.assertTrue(os.path.isdir(os.path.join(self.root, 'web', 'easyappointments_prev_old')))
+        self.assertFalse(any(name.startswith('.pending-release-')
+                             for name in os.listdir(os.path.join(self.root, 'state'))))
 
     def test_pinned_helper_sha_matches_real_retention_source(self):
         with open(os.path.join(ROOT, 'scripts/ops/libexec/release_archive_dump_retention_v1.py'), 'rb') as source:

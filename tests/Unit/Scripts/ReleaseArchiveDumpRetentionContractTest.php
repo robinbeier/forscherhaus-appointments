@@ -279,7 +279,12 @@ final class ReleaseArchiveDumpRetentionContractTest extends TestCase
         ) {
             self::assertStringContainsString($command, $docs);
         }
-        $runbook = substr($docs, (int) strpos($docs, 'rollout has this exact order:'));
+        $prerequisite = strpos($docs, 'complete, verified ROB-812 pending-state rollout:');
+        $anchor = strpos($docs, 'rollout has this exact order:');
+        self::assertNotFalse($prerequisite);
+        self::assertNotFalse($anchor);
+        self::assertTrue($prerequisite < $anchor);
+        $runbook = substr($docs, (int) $anchor);
         $cursor = -1;
         foreach (
             [
