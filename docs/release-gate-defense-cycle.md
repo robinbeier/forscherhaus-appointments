@@ -141,8 +141,10 @@ GET-only method handling, unchanged owned appointments after denial, and the
 absence of fixed HTML debug dumps with the debug flag enabled. A loopback
 recording renderer captures the HTML sent by the application and returns dummy
 PDF bytes; this proves the authentication/database-to-renderer handoff, not
-Chromium rendering or printable PDF content. The existing on-demand provider UI
-smoke remains the real-PDF check. This test adds no browser job to CI.
+Chromium rendering or printable PDF content. The optional production Provider
+UI smoke is currently suspended under ROB-812, so provider-specific browser
+and real-PDF production behavior remains an explicit evidence gap. This test
+adds no browser job to CI.
 
 The Admins/Secretaries atomic-write, Staff-delete and Settings-batch model tests
 run in the normal database-backed Unit suite. Their cleanup asserts owned row
