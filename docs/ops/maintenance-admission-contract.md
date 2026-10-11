@@ -37,7 +37,7 @@ scheduler, operator and recovery entrypoints, including direct supported calls.
 | Ordinary live probe | `scripts/ops/run_ordinary_live_probe.sh`; interruption markers and cleanup callback | Refuse every wrapper action and the separately invoked cleanup path when fixed `/var/lib/fh-maintenance-admission` is present or its root-controlled absence is unknown; even preflight and verify may initialize fixture state or lock files |
 | Provider/customer UI smokes | `scripts/ops/prod_provider_ui_smoke.sh`, `scripts/ops/prod_customers_ui_smoke.sh`; private cleanup locks and delayed systemd cleanup | Enroll foreground mutation, delayed cleanup units and disarm cleanup as separate writer entrypoints |
 | Backup producer | `scripts/ops/libexec/backup_set_producer_v1.py`; shared and private locks, continuity state | Repository source registers pending before dump dispatch and clears only after direct-child termination and publication. Installed helper remains legacy; interrupted-run recovery and coordinated rollout remain open. |
-| Restore verification | `scripts/ops/libexec/deployment_dump_attestation_v1.py`; detached container, lease watcher, orphan and continuity checks | Repository source admits before reconciliation, registers pending before Docker launch, and settles after terminal restore and publication. Interrupted-owner recovery and production installation remain open. |
+| Restore verification | `scripts/ops/libexec/deployment_dump_attestation_v1.py`; detached container, lease watcher, orphan and continuity checks | Repository source admits before reconciliation, registers pending before Docker launch, and settles after terminal restore and publication. The source now includes a narrowly scoped recovery proof for the post-publication/post-cleanup state; installed recovery and production installation remain open. |
 | Session retention | `scripts/ops/libexec/session_retention_v1.py`; shared lock and protected local state | Repository execute path reads the pending-state contract through its existing lock descriptor before mutation; installed helper and unit remain legacy until the coordinated rollout |
 | Manual build-cache retention | `scripts/ops/prod_build_cache_retention.sh`; private lock and activity veto | Require the shared lock for execute, including when its path is absent; ROB-579 tracks this prerequisite |
 | Retired release/archive/dump retention | Retired helper and existing hold/retention controls | Remain disabled; do not reactivate as part of enrollment |
@@ -190,10 +190,23 @@ marker, and optional continuity state. Those records can only support recovery
 when an independent verifier binds them to the registered dump and backup,
 checks the exact Docker resource is absent, and proves that every required
 publication completed.
-The repository does not yet contain that cross-process verifier for interrupted
-Docker launch, reboot, or partial publication. This helper must not be
-installed on production until those recovery cases are independently
-demonstrated.
+The repository source now contains a cross-process proof for one deliberately
+narrow case: the pending record must be from the current boot and bind the
+exact backup-set ID, dump hash and sizes, run leaf, container intent, and an
+immutable `continuity_required` choice. The verifier re-reads and hashes the
+exact backup file, checks the canonical handoff and backup-success marker,
+validates the published attestation and restore-success marker, optionally
+requires the matching verified continuity state, proves that the exact run
+tree and all labeled dump containers/volumes are absent, and settles through
+`maintenance_pending_v1` while the caller-held canonical lock remains held.
+The bounded root-only `--recover-pending` entrypoint opens only the existing
+canonical and restore locks, selects exactly the current-boot pending record
+or its matching clear marker, and performs this proof before allowing the
+core to settle pending-only, marker-plus-pending, or marker-only state.
+Missing, changed, malformed, old-boot, or otherwise unknown state returns to
+the pending veto. This is source-only evidence: it does not prove recovery of
+a pre-publication or pre-cleanup interruption, does not replace a deployed
+operator, and does not authorize production installation.
 Only trusted root integration code may call the recovery capability; its proof
 callback is not an operator-selectable flag or an authorization boundary. Each
 future writer must bind a fixed, reviewed verifier for its own resource before
