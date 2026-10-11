@@ -338,11 +338,26 @@ final class OrdinaryLiveProbeWrapperTest extends TestCase
         self::assertNotContains('pending-begin', $result['lines']);
     }
 
-    public function testReadOnlyActionsRemainAvailableWhenAdmissionPathIsPresent(): void
+    public function testPreflightAndVerifyRefuseBeforePhpWhenAdmissionIsPresentOrUnknown(): void
+    {
+        mkdir($this->sandbox . '/maintenance-admission', 0700);
+        foreach (['preflight', 'verify'] as $action) {
+            foreach (['present' => 1, 'unknown' => 2] as $state => $expectedStatus) {
+                file_put_contents($this->log, '');
+                $result = $this->executeWrapper($action, ['MOCK_ADMISSION_STATE' => $state]);
+                self::assertSame($expectedStatus, $result['status'], $action . '/' . $state . ': ' . $result['error']);
+                self::assertSame([], $this->actions($result['lines']));
+                self::assertNotContains('systemd-run', $this->prefixes($result['lines']));
+                self::assertNotContains('pending-begin', $result['lines']);
+            }
+        }
+    }
+
+    public function testPreflightAndVerifyRemainAvailableWhenAdmissionIsAbsent(): void
     {
         foreach (['preflight', 'verify'] as $action) {
             file_put_contents($this->log, '');
-            $result = $this->executeWrapper($action, ['MOCK_ADMISSION_STATE' => 'present']);
+            $result = $this->executeWrapper($action);
             self::assertSame(0, $result['status'], $action . ': ' . $result['error']);
             self::assertSame([$action], $this->actions($result['lines']));
             self::assertNotContains('systemd-run', $this->prefixes($result['lines']));

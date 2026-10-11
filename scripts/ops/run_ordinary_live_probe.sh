@@ -102,9 +102,9 @@ else:
     raise SystemExit(1)
 PY
 }
-if [[ "$action" != preflight && "$action" != verify ]]; then
-    ordinary_assert_maintenance_admission_absent || exit $?
-fi
+# Both CLI preflight and verify can initialize fixture state and lock files.
+# No action may enter the PHP probe while maintenance admission is pending.
+ordinary_assert_maintenance_admission_absent || exit $?
 coordination_identity=$(stat -c '%d:%i' -- "$coordination")
 parent=$(dirname -- "$app_root")
 identity=$(stat -c '%d:%i' -- "$app_root")
