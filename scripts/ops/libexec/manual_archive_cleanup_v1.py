@@ -347,6 +347,22 @@ def run(mode, expected_plan_sha=None, helper=None):
     global_lock = helper.open_global_lock()
     releases = release_pair_lock = state = web = orchestrator = None
     try:
+        # Admission is part of the execute contract, not of the read-only
+        # planning path.  The canonical lock is already held by
+        # ``open_global_lock`` and remains held through the whole run, so the
+        # fixed, hash-bound core can make its decision against the same lock
+        # that protects the subsequent cleanup mutations.
+        if mode == 'execute':
+            try:
+                admission_core = helper.load_admission_core()
+                admission_core.admit_existing_lock_fd(global_lock)
+            except Exception as error:
+                reason = getattr(error, 'reason', None)
+                code = getattr(error, 'code', None)
+                if (isinstance(reason, str) and reason
+                        and isinstance(code, int) and not isinstance(code, bool)):
+                    reject(reason, code)
+                reject('maintenance_admission_unknown', 75)
         if helper.activity_count() != 0:
             reject('active_production_work', 75)
         helper.assert_no_nonterminal_runs()

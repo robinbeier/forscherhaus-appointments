@@ -34,6 +34,24 @@ class FakeHelper:
         self.fail_sidecar = False
         self.markers = {}
         self.state_fd = None
+        self.admission_reason = None
+        self.admission_error = None
+        self.admission_calls = 0
+
+    def load_admission_core(self):
+        owner = self
+
+        class AdmissionCore:
+            @staticmethod
+            def admit_existing_lock_fd(_lock_fd):
+                owner.admission_calls += 1
+                if owner.admission_error is not None:
+                    raise owner.admission_error
+                if owner.admission_reason is not None:
+                    raise CLEANUP.CleanupError(owner.admission_reason, 75)
+                return {'status': 'admitted'}
+
+        return AdmissionCore()
 
     @staticmethod
     def file_identity(value):
@@ -199,6 +217,66 @@ class ManualArchiveCleanupTest(unittest.TestCase):
         self.assertEqual(2, result['mutation_counts']['deleted_files'])
         self.assertFalse(os.path.exists(os.path.join(self.root, 'releases', 'old.tar.gz')))
         self.assertFalse(os.path.exists(os.path.join(self.root, 'releases', 'old.build-provenance.json')))
+        self.assertEqual(1, self.helper.admission_calls)
+
+    def test_execute_admission_acceptance_happens_before_cleanup(self):
+        self._pair('old')
+        plan, _ = self._collect()
+        digest = hashlib.sha256(CLEANUP.canonical(plan)).hexdigest()
+        with mock.patch.object(CLEANUP, 'socket') as sock, mock.patch.object(CLEANUP.os, 'geteuid', return_value=0):
+            sock.gethostname.return_value = 'booking-server'
+            result = CLEANUP.run('execute', digest, self.helper)
+        self.assertEqual('pass', result['status'])
+        self.assertEqual(1, self.helper.admission_calls)
+
+    def test_execute_refuses_missing_pending_admission_without_mutation(self):
+        self._pair('old')
+        self.helper.admission_reason = 'maintenance_pending_missing'
+        with mock.patch.object(CLEANUP, 'socket') as sock, mock.patch.object(CLEANUP.os, 'geteuid', return_value=0):
+            sock.gethostname.return_value = 'booking-server'
+            with self.assertRaisesRegex(CLEANUP.CleanupError, 'maintenance_pending_missing'):
+                CLEANUP.run('execute', '0' * 64, self.helper)
+        self.assertEqual(1, self.helper.admission_calls)
+        self.assertTrue(os.path.exists(os.path.join(self.root, 'releases', 'old.tar.gz')))
+        self.assertFalse(os.listdir(os.path.join(self.root, 'state')))
+
+    def test_execute_refuses_corrupt_pending_admission_without_mutation(self):
+        self._pair('old')
+        self.helper.admission_reason = 'maintenance_pending_corrupt'
+        with mock.patch.object(CLEANUP, 'socket') as sock, mock.patch.object(CLEANUP.os, 'geteuid', return_value=0):
+            sock.gethostname.return_value = 'booking-server'
+            with self.assertRaisesRegex(CLEANUP.CleanupError, 'maintenance_pending_corrupt'):
+                CLEANUP.run('execute', '0' * 64, self.helper)
+        self.assertEqual(1, self.helper.admission_calls)
+        self.assertTrue(os.path.exists(os.path.join(self.root, 'releases', 'old.tar.gz')))
+        self.assertFalse(os.listdir(os.path.join(self.root, 'state')))
+
+    def test_execute_refuses_active_pending_admission_without_mutation(self):
+        self._pair('old')
+        self.helper.admission_reason = 'maintenance_pending_active'
+        with mock.patch.object(CLEANUP, 'socket') as sock, mock.patch.object(CLEANUP.os, 'geteuid', return_value=0):
+            sock.gethostname.return_value = 'booking-server'
+            with self.assertRaisesRegex(CLEANUP.CleanupError, 'maintenance_pending_active'):
+                CLEANUP.run('execute', '0' * 64, self.helper)
+        self.assertEqual(1, self.helper.admission_calls)
+        self.assertTrue(os.path.exists(os.path.join(self.root, 'releases', 'old.tar.gz')))
+        self.assertFalse(os.listdir(os.path.join(self.root, 'state')))
+
+    def test_execute_converts_malformed_admission_error_to_unknown_without_mutation(self):
+        self._pair('old')
+
+        class MalformedAdmissionError(Exception):
+            reason = ['not-a-result-class']
+            code = True
+
+        self.helper.admission_error = MalformedAdmissionError()
+        with mock.patch.object(CLEANUP, 'socket') as sock, mock.patch.object(CLEANUP.os, 'geteuid', return_value=0):
+            sock.gethostname.return_value = 'booking-server'
+            with self.assertRaisesRegex(CLEANUP.CleanupError, 'maintenance_admission_unknown'):
+                CLEANUP.run('execute', '0' * 64, self.helper)
+        self.assertEqual(1, self.helper.admission_calls)
+        self.assertTrue(os.path.exists(os.path.join(self.root, 'releases', 'old.tar.gz')))
+        self.assertFalse(os.listdir(os.path.join(self.root, 'state')))
 
     def test_pending_state_blocks_plan_without_retry(self):
         os.mkdir(os.path.join(self.root, 'state', '.pending-release-' + 'a' * 32))

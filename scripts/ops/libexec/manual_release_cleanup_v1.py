@@ -100,6 +100,21 @@ def archive_pair_identity(helper, releases, release_id):
     }
 
 
+def admit_maintenance(helper, global_lock):
+    """Require the reviewed pending-state protocol before any execute path."""
+    try:
+        admission_core = helper.load_admission_core()
+        admission_core.admit_existing_lock_fd(global_lock)
+    except CleanupError:
+        raise
+    except Exception as error:
+        reason = getattr(error, 'reason', None)
+        code = getattr(error, 'code', 75)
+        if isinstance(reason, str) and isinstance(code, int) and not isinstance(code, bool):
+            reject(reason, code)
+        reject('maintenance_admission_unknown', 75)
+
+
 def tree_metadata_sha256(web, name, expected_identity):
     """Bind every nested name and inode metadata without reading application bytes."""
     root = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
@@ -329,6 +344,8 @@ def run(mode, expected_plan_sha=None, helper=None):
     global_lock = helper.open_global_lock()
     web = current = rollback_fd = releases = state = orchestrator = None
     try:
+        if mode == 'execute':
+            admit_maintenance(helper, global_lock)
         if helper.activity_count() != 0:
             reject('active_production_work', 75)
         helper.assert_no_nonterminal_runs()
