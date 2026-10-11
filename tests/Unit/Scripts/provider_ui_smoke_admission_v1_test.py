@@ -103,7 +103,7 @@ class FakeCore:
             "boot_id": boot_id, "resource_identity": resource,
         }
 
-    def read_pending(self, boot_id):
+    def read_pending(self, boot_id=None):
         if getattr(self, 'no_pending', False):
             return None
         return [self.record]
@@ -715,6 +715,140 @@ class ProviderUiSmokeAdmissionBehaviorTest(unittest.TestCase):
                 COORD.recover_interrupted_pending(args)
         self.assertEqual(raised.exception.code, 75)
         self.assertEqual(core.recovery.pending_proof_calls, 1)
+
+    def test_interrupted_pending_ack_accepts_exact_pending_and_calls_proof_twice(self):
+        resource = self.resource("smoke")
+        record = {
+            "schema": "maintenance_pending_v1", "epoch": 1,
+            "operation": "provider_ui_smoke", "run_id": "a" * 32,
+            "boot_id": "old-boot", "resource_identity": resource,
+        }
+        core = FakeCore(record)
+        args = self.args("recover-interrupted-pending-ack", operation="smoke", run_id=None)
+        with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+             patch.object(COORD, "load_core", return_value=core), \
+             patch.object(COORD, "_ensure_arm_ack_temporaries_absent"), \
+             patch.object(COORD, "_ensure_credential_temp_absent"), \
+             patch.object(COORD, "_read_arm_ack", return_value=COORD._ack_record(record)), \
+             patch.object(COORD, "unit_terminal", return_value=True), \
+             patch.object(COORD, "fixture_terminal_state", return_value="dormant"), \
+             patch.object(COORD, "_remove_verified_arm_ack") as remove_ack, \
+             contextlib.redirect_stdout(io.StringIO()):
+            COORD.recover_interrupted_pending_ack(args)
+        self.assertEqual(core.recovery.pending_proof_calls, 1)
+        self.assertTrue(core.recovery.pending_asserted)
+        self.assertTrue(core.recovery.pending_asserted_again)
+        remove_ack.assert_called_once_with(resource, record)
+
+    def test_interrupted_pending_ack_cleans_exact_sole_ack_after_pending_clear_without_run_id(self):
+        resource = self.resource("smoke")
+        record = {
+            "schema": "maintenance_pending_v1", "epoch": 1,
+            "operation": "provider_ui_smoke", "run_id": "a" * 32,
+            "boot_id": "old-boot", "resource_identity": resource,
+        }
+        core = FakeCore(record)
+        pending_missing = core.PendingError("pending missing")
+        pending_missing.reason = "pending_missing"
+        pending_missing.code = 75
+        args = self.args("recover-interrupted-pending-ack", operation="smoke", run_id=None)
+        ack = COORD._ack_record(record)
+        with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+             patch.object(COORD, "load_core", return_value=core), \
+             patch.object(core.recovery, "recover_interrupted_pending", side_effect=pending_missing), \
+             patch.object(COORD, "_ensure_arm_ack_temporaries_absent"), \
+             patch.object(COORD, "_ensure_credential_temp_absent"), \
+             patch.object(COORD, "_read_arm_ack", return_value=ack), \
+             patch.object(COORD, "unit_terminal", return_value=True) as unit, \
+             patch.object(COORD, "fixture_terminal_state", return_value="dormant"), \
+             patch.object(COORD, "_remove_verified_arm_ack") as remove_ack, \
+             contextlib.redirect_stdout(io.StringIO()):
+            COORD.recover_interrupted_pending_ack(args)
+        self.assertEqual(unit.call_count, 2)
+        self.assertEqual(unit.call_args_list[0].args[-1], record["run_id"])
+        self.assertEqual(unit.call_args_list[1].args[-1], record["run_id"])
+        remove_ack.assert_called_once_with(resource, ack)
+
+    def test_interrupted_pending_ack_retains_ack_when_pending_clear_is_unsettled(self):
+        resource = self.resource("smoke")
+        record = {
+            "schema": "maintenance_pending_v1", "epoch": 1,
+            "operation": "provider_ui_smoke", "run_id": "a" * 32,
+            "boot_id": "old-boot", "resource_identity": resource,
+        }
+        core = FakeCore(record)
+        pending_unsettled = core.PendingError("pending clear unsettled")
+        pending_unsettled.reason = "pending_clear_unsettled"
+        pending_unsettled.code = 75
+        args = self.args("recover-interrupted-pending-ack", operation="smoke", run_id=None)
+        with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+             patch.object(COORD, "load_core", return_value=core), \
+             patch.object(core.recovery, "recover_interrupted_pending", side_effect=pending_unsettled), \
+             patch.object(COORD, "_remove_verified_arm_ack") as remove_ack:
+            with self.assertRaises(SystemExit) as raised:
+                COORD.recover_interrupted_pending_ack(args)
+        self.assertEqual(raised.exception.code, 75)
+        remove_ack.assert_not_called()
+
+    def test_interrupted_pending_ack_rejects_wrong_ack_and_interrupted_pair(self):
+        resource = self.resource("smoke")
+        record = {
+            "schema": "maintenance_pending_v1", "epoch": 1,
+            "operation": "provider_ui_smoke", "run_id": "a" * 32,
+            "boot_id": "old-boot", "resource_identity": resource,
+        }
+        core = FakeCore(record)
+        core.no_pending = True
+        args = self.args("recover-interrupted-pending-ack", operation="smoke", run_id=None)
+        for temporary_failure, wrong_ack in ((False, True), (True, False)):
+            with self.subTest(temporary_failure=temporary_failure, wrong_ack=wrong_ack):
+                remove_ack = patch.object(COORD, "_remove_verified_arm_ack")
+                temporary_check = patch.object(
+                    COORD,
+                    "_ensure_arm_ack_temporaries_absent",
+                    side_effect=SystemExit(75) if temporary_failure else None,
+                )
+                ack = COORD._ack_record(record)
+                if wrong_ack:
+                    ack["resource_identity"] = self.resource("different-resource")
+                with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+                     patch.object(COORD, "load_core", return_value=core), \
+                     temporary_check, \
+                     patch.object(COORD, "_ensure_credential_temp_absent"), \
+                     patch.object(COORD, "_read_arm_ack", return_value=ack), \
+                     patch.object(COORD, "unit_terminal", return_value=True), \
+                     patch.object(COORD, "fixture_terminal_state", return_value="dormant"), \
+                     remove_ack as remove:
+                    with self.assertRaises(SystemExit) as raised:
+                        COORD.recover_interrupted_pending_ack(args)
+                self.assertEqual(raised.exception.code, 75)
+                remove.assert_not_called()
+
+    def test_interrupted_pending_ack_rejects_nonterminal_unit_or_dormant_mismatch(self):
+        resource = self.resource("smoke")
+        record = {
+            "schema": "maintenance_pending_v1", "epoch": 1,
+            "operation": "provider_ui_smoke", "run_id": "a" * 32,
+            "boot_id": "old-boot", "resource_identity": resource,
+        }
+        ack = COORD._ack_record(record)
+        for unit_failure, fixture_state in ((True, "dormant"), (False, "active")):
+            with self.subTest(unit_failure=unit_failure, fixture_state=fixture_state):
+                core = FakeCore(record)
+                core.no_pending = True
+                args = self.args("recover-interrupted-pending-ack", operation="smoke", run_id=None)
+                with patch.object(COORD, "private_cleanup_lock", lambda: contextlib.nullcontext()), \
+                     patch.object(COORD, "load_core", return_value=core), \
+                     patch.object(COORD, "_ensure_arm_ack_temporaries_absent"), \
+                     patch.object(COORD, "_ensure_credential_temp_absent"), \
+                     patch.object(COORD, "_read_arm_ack", return_value=ack), \
+                     patch.object(COORD, "unit_terminal", side_effect=SystemExit(75) if unit_failure else None), \
+                     patch.object(COORD, "fixture_terminal_state", return_value=fixture_state), \
+                     patch.object(COORD, "_remove_verified_arm_ack") as remove_ack:
+                    with self.assertRaises(SystemExit) as raised:
+                        COORD.recover_interrupted_pending_ack(args)
+                self.assertEqual(raised.exception.code, 75)
+                remove_ack.assert_not_called()
 
     def test_recover_unarmed_refuses_acknowledged_run(self):
         resource = self.resource("smoke")
@@ -1726,6 +1860,30 @@ class ProviderUiSmokeAdmissionBehaviorTest(unittest.TestCase):
                     COORD._ensure_arm_ack_absent(resource)
             self.assertEqual(raised.exception.code, 75)
             self.assertEqual(ack.read_text(), "existing\n")
+
+    def test_interrupted_pending_ack_fails_closed_when_cleanup_directory_fsync_fails(self):
+        resource = self.resource("smoke")
+        record = {
+            "schema": "maintenance_pending_v1", "epoch": 1,
+            "operation": "provider_ui_smoke", "run_id": "a" * 32,
+            "boot_id": "old-boot", "resource_identity": resource,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            state_dir = Path(directory)
+            resource["state_file"] = str(state_dir / "active.json")
+            ack = state_dir / COORD.ARM_ACK_LEAF
+            ack.write_text(json.dumps(COORD._ack_record(record), sort_keys=True) + "\n")
+            ack.chmod(0o600)
+            with patch.object(COORD, "_read_arm_ack", return_value=COORD._ack_record(record)), \
+                 patch.object(
+                COORD,
+                "_require_state_directory",
+                return_value=(state_dir, (1, 2, 0o40700, 0, 0, 2)),
+            ), patch.object(COORD.os, "fsync", side_effect=OSError("fsync failed")):
+                with self.assertRaises(SystemExit) as raised:
+                    COORD._remove_verified_arm_ack(resource, record)
+            self.assertEqual(raised.exception.code, 75)
+            self.assertFalse(ack.exists())
 
     def test_settle_refuses_while_private_cleanup_lock_is_held(self):
         with tempfile.TemporaryDirectory() as directory:

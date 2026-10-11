@@ -174,13 +174,24 @@ assert_credentials_file() {
 
 create_credentials_file() {
     local parent_dir
+    local grandparent_dir
+    local parent_created=0
     local password
 
     parent_dir="$(dirname "${CREDENTIALS_FILE}")"
     if [[ ! -e "${parent_dir}" && ! -L "${parent_dir}" ]]; then
+        grandparent_dir="$(dirname "${parent_dir}")"
+        [[ -d "${grandparent_dir}" && ! -L "${grandparent_dir}" ]] \
+            || die "credential parent ancestry is unavailable or unsafe"
+        assert_secure_parent_directory "${grandparent_dir}"
         install -d -m 0700 -o root -g root "${parent_dir}"
+        parent_created=1
     fi
     assert_secure_parent_directory "${parent_dir}"
+    if (( parent_created )); then
+        python3 -c 'import os,sys; fd=os.open(sys.argv[1], os.O_RDONLY|os.O_DIRECTORY|os.O_CLOEXEC|os.O_NOFOLLOW); os.fsync(fd); os.close(fd)' \
+            "$(dirname "${parent_dir}")" || die "credential parent durability sync failed"
+    fi
 
     if [[ -e "${CREDENTIALS_FILE}" || -L "${CREDENTIALS_FILE}" ]]; then
         assert_credentials_file
@@ -197,8 +208,12 @@ create_credentials_file() {
     unset password
     chown root:root "${ACTIVE_TEMP_FILE}"
     chmod 0600 "${ACTIVE_TEMP_FILE}"
+    python3 -c 'import os,sys; fd=os.open(sys.argv[1], os.O_RDONLY|os.O_CLOEXEC|os.O_NOFOLLOW); os.fsync(fd); os.close(fd)' \
+        "${ACTIVE_TEMP_FILE}" || die "credential temp durability sync failed"
     mv -T -- "${ACTIVE_TEMP_FILE}" "${CREDENTIALS_FILE}"
     ACTIVE_TEMP_FILE=''
+    python3 -c 'import os,sys; fd=os.open(sys.argv[1], os.O_RDONLY|os.O_DIRECTORY|os.O_CLOEXEC|os.O_NOFOLLOW); os.fsync(fd); os.close(fd)' \
+        "${parent_dir}" || die "credential directory durability sync failed"
 
     assert_credentials_file
     printf 'credential_state=created\n'

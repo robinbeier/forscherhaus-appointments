@@ -106,6 +106,62 @@ final class ProviderUiSmokeOpsScriptsTest extends TestCase
             '/install\)\s+require_command openssl\s+preflight_credentials_before_admission\s+admission_begin install\s+ensure_state_directory\s+create_credentials_file/s',
             $principal,
         );
+        self::assertStringContainsString('credential temp durability sync failed', $principal);
+        self::assertStringContainsString('credential directory durability sync failed', $principal);
+        self::assertStringContainsString('credential parent durability sync failed', $principal);
+        self::assertStringContainsString('credential parent ancestry is unavailable or unsafe', $principal);
+    }
+
+    public function testInstallStopsOnCredentialTempFsyncBeforePhpLifecycle(): void
+    {
+        if (!function_exists('posix_geteuid') || posix_geteuid() !== 0) {
+            self::markTestSkipped('Root-only wrapper behavior runs inside the PHP Docker service.');
+        }
+
+        $workspace = $this->createWorkspace();
+        $credentials = $workspace . '/credentials.env';
+        $stateDirectory = $workspace . '/state';
+        $this->writeExecutable(
+            $workspace . '/bin/python3',
+            <<<'BASH'
+            #!/usr/bin/env bash
+            set -euo pipefail
+            if [[ "${1:-}" == '-c' ]]; then
+                printf '%s\n' credential_temp_fsync >>"${PROD_SMOKE_TEST_EVENTS}"
+                exit 1
+            fi
+            printf '%s\n' aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+            BASH
+            ,
+        );
+
+        try {
+            $result = $this->runCommand(
+                [
+                    'bash',
+                    'scripts/ops/provider_ui_smoke_principal.sh',
+                    'install',
+                    '--app-root',
+                    $this->repoRoot(),
+                    '--credentials-file',
+                    $credentials,
+                    '--state-dir',
+                    $stateDirectory,
+                ],
+                $this->repoRoot(),
+                [
+                    'PATH' => $workspace . '/bin' . PATH_SEPARATOR . (getenv('PATH') ?: ''),
+                    'PROD_SMOKE_TEST_EVENTS' => $workspace . '/events.log',
+                ],
+            );
+
+            self::assertNotSame(0, $result['exit_code']);
+            self::assertStringContainsString('credential temp durability sync failed', $result['stderr']);
+            self::assertStringNotContainsString("gate\n", (string) file_get_contents($workspace . '/events.log'));
+            self::assertFileDoesNotExist($credentials);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
     }
 
     public function testOrchestratorRejectsNonNormalizedRemotePathsBeforeNetworkAccess(): void

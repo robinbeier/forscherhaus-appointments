@@ -79,8 +79,18 @@ present; unsafe, multiple, foreign, or partial temps remain a veto. The
 explicit `recover-interrupted-install-credential-temp` action performs this
 proof and removal under the private and shared recovery locks, then uses the
 normal pending/marker recovery path. It never admits a new lifecycle run.
+The smoke ACK is likewise written to a synced temporary file, linked
+no-clobber, and followed by a directory sync. If the caller loses its run ID
+after the sole final ACK is durably visible, the server-local
+`recover-interrupted-pending-ack` action derives the exact run from Pending,
+requires the matching sole ACK, terminal timer/service state, and dormant
+fixture, then clears Pending and removes the ACK. If a crash occurs between
+those two durable steps, the same action validates the exact terminal ACK and
+removes it without admitting a new run.
 The precredential proof is sound only for the install ordering: the final
 credential is durably published before PHP installation or activation starts.
+Credential creation only creates one missing leaf beneath an already existing,
+validated parent; recursive creation of unsynced ancestors is refused.
 Thus an exact install Pending record plus an absent final credential and a
 protected, marker-free database proves that this run did not reach PHP. Marker
 text cannot detect an arbitrary renamed or orphaned principal; if that state

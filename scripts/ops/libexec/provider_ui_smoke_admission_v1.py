@@ -621,6 +621,26 @@ def _write_arm_ack(resource, record):
         fail('arm_ack_directory_unsafe')
 
 
+def _remove_verified_arm_ack(resource, record):
+    # A lost response normally leaves the durable sole final ACK, not the
+    # hardlink pair used by a crash during publication.  Validate it through
+    # the strict reader before removing it.
+    if _read_arm_ack(resource) != _ack_record(record):
+        fail('arm_ack_binding_changed')
+    final_path = _ack_path(resource)
+    directory = final_path.parent
+    try:
+        os.unlink(final_path)
+        directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY |
+                                os.O_CLOEXEC | os.O_NOFOLLOW)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except OSError:
+        fail('arm_ack_cleanup_failed')
+
+
 def _remove_arm_ack(resource):
     directory, directory_identity = _require_state_directory(resource)
     path = _ack_path(resource)
@@ -1169,6 +1189,70 @@ def recover_interrupted_pending(args: argparse.Namespace) -> None:
     print('provider_ui_smoke_admission=result=pending-recovered')
 
 
+def recover_interrupted_pending_ack(args: argparse.Namespace) -> None:
+    """Recover a smoke Pending whose final ACK response was lost."""
+    if args.operation != 'smoke':
+        fail('pending_ack_operation_invalid', 64)
+    core = load_core()
+    resource = resource_from(args)
+    try:
+        with private_cleanup_lock():
+            with core.maintenance_recovery() as admission:
+                proven_record = None
+                def terminal_proof(record):
+                    nonlocal proven_record
+                    if (record.get('operation') != OPERATION or
+                            record.get('resource_identity') != resource):
+                        return False
+                    try:
+                        _ensure_arm_ack_temporaries_absent(resource)
+                        _ensure_credential_temp_absent(resource)
+                        if _read_arm_ack(resource) != _ack_record(record):
+                            fail('arm_ack_binding_changed')
+                        unit_terminal(args.cleanup_unit + '.timer', resource, record['run_id'])
+                        unit_terminal(args.cleanup_unit + '.service', resource, record['run_id'])
+                        if proven_record is not None and proven_record != record:
+                            fail('arm_ack_binding_changed')
+                        proven_record = record
+                        return fixture_terminal_state(resource) == 'dormant'
+                    except BaseException:
+                        return False
+
+                try:
+                    result = admission.recover_interrupted_pending(
+                        OPERATION, resource, terminal_proof)
+                except core.PendingError as error:
+                    if error.reason != 'pending_missing':
+                        raise
+                    _ensure_arm_ack_temporaries_absent(resource)
+                    _ensure_credential_temp_absent(resource)
+                    ack = _read_arm_ack(resource)
+                    if (ack is None or set(ack) != {'schema', 'run_id', 'boot_id', 'operation', 'resource_identity'} or
+                            ack.get('schema') != 'provider_ui_smoke_arm_ack_v1' or
+                            re.fullmatch(r'[0-9a-f]{32}', str(ack.get('run_id', ''))) is None or
+                            not isinstance(ack.get('boot_id'), str) or
+                            not (1 <= len(ack['boot_id']) <= 128) or
+                            ack.get('operation') != OPERATION or
+                            ack.get('resource_identity') != resource or
+                            _ack_record(ack) != ack):
+                        fail('pending_ack_recovery_unknown')
+                    unit_terminal(args.cleanup_unit + '.timer', resource, ack['run_id'])
+                    unit_terminal(args.cleanup_unit + '.service', resource, ack['run_id'])
+                    if fixture_terminal_state(resource) != 'dormant':
+                        fail('fixture_terminal_unknown')
+                    _remove_verified_arm_ack(resource, ack)
+                    print('provider_ui_smoke_admission=result=pending-ack-recovered')
+                    return
+                if result.get('status') != 'recovered':
+                    fail('pending_ack_recovery_unknown')
+                if proven_record is None:
+                    fail('pending_ack_recovery_unknown')
+                _remove_verified_arm_ack(resource, proven_record)
+    except core.PendingError as error:
+        fail(error.reason, error.code)
+    print('provider_ui_smoke_admission=result=pending-ack-recovered')
+
+
 def recover_clear_marker(args: argparse.Namespace) -> None:
     """Finish only the exact terminal clear interrupted after marker creation."""
     core = load_core()
@@ -1388,7 +1472,7 @@ def recover_interrupted_arm_ack_temp(args: argparse.Namespace) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=('begin', 'ack-arm', 'assert-bound-fd', 'settle', 'recover-arm-ack', 'recover-interrupted-arm-ack', 'recover-interrupted-arm-ack-temp', 'recover-interrupted-pending-temp', 'recover-interrupted-pending', 'recover-interrupted-install-credential-temp', 'recover-unarmed', 'recover-install-empty', 'recover-remove-dormant', 'recover-clear-marker'))
+    parser.add_argument('action', choices=('begin', 'ack-arm', 'assert-bound-fd', 'settle', 'recover-arm-ack', 'recover-interrupted-arm-ack', 'recover-interrupted-arm-ack-temp', 'recover-interrupted-pending-temp', 'recover-interrupted-pending', 'recover-interrupted-pending-ack', 'recover-interrupted-install-credential-temp', 'recover-unarmed', 'recover-install-empty', 'recover-remove-dormant', 'recover-clear-marker'))
     parser.add_argument('--operation', choices=sorted(ACTION_NAMES), required=True)
     parser.add_argument('--run-id')
     parser.add_argument('--lock-fd', type=int)
@@ -1408,9 +1492,9 @@ def main() -> None:
         fail('lifecycle_action_scope_invalid', 64)
     if args.action == 'begin' and args.run_id:
         fail('run_id_not_allowed', 64)
-    if args.action in {'recover-interrupted-pending-temp', 'recover-interrupted-pending', 'recover-interrupted-install-credential-temp'} and args.run_id:
+    if args.action in {'recover-interrupted-pending-temp', 'recover-interrupted-pending', 'recover-interrupted-pending-ack', 'recover-interrupted-install-credential-temp'} and args.run_id:
         fail('run_id_not_allowed', 64)
-    if args.action != 'begin' and args.action not in {'recover-interrupted-pending-temp', 'recover-interrupted-pending', 'recover-interrupted-install-credential-temp'} and (not args.run_id or len(args.run_id) != RUN_ID_BYTES * 2):
+    if args.action != 'begin' and args.action not in {'recover-interrupted-pending-temp', 'recover-interrupted-pending', 'recover-interrupted-pending-ack', 'recover-interrupted-install-credential-temp'} and (not args.run_id or len(args.run_id) != RUN_ID_BYTES * 2):
         fail('run_id_required', 64)
     if args.action == 'begin':
         begin(args)
@@ -1428,6 +1512,8 @@ def main() -> None:
         recover_interrupted_pending_temp(args)
     elif args.action == 'recover-interrupted-pending':
         recover_interrupted_pending(args)
+    elif args.action == 'recover-interrupted-pending-ack':
+        recover_interrupted_pending_ack(args)
     elif args.action == 'recover-interrupted-install-credential-temp':
         recover_interrupted_install_credential_temp(args)
     elif args.action == 'recover-unarmed':
