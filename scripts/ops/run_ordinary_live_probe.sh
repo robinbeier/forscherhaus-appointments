@@ -63,6 +63,48 @@ cmp -s -- "$coordination" /root/deploy_ea.sh || {
 source "$coordination"
 umask 077
 ordinary_production_change_lock || exit $?
+ordinary_assert_maintenance_admission_absent() {
+    /usr/bin/python3 -I -B - /var/lib/fh-maintenance-admission <<'PY'
+import os
+import stat
+import sys
+
+path = sys.argv[1]
+try:
+    current = os.path.dirname(path)
+    while True:
+        try:
+            metadata = os.lstat(current)
+        except OSError as error:
+            print(f"maintenance admission path unknown: {error}", file=sys.stderr)
+            raise SystemExit(2)
+        if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != 0 or metadata.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+            print("maintenance admission path unknown: unsafe ancestor", file=sys.stderr)
+            raise SystemExit(2)
+        if current == os.path.dirname(current):
+            break
+        current = os.path.dirname(current)
+    try:
+        os.lstat(path)
+    except FileNotFoundError:
+        raise SystemExit(0)
+    except OSError as error:
+        print(f"maintenance admission path unknown: {error}", file=sys.stderr)
+        raise SystemExit(2)
+except FileNotFoundError:
+    print("maintenance admission path unknown: missing ancestor", file=sys.stderr)
+    raise SystemExit(2)
+except OSError as error:
+    print(f"maintenance admission path unknown: {error}", file=sys.stderr)
+    raise SystemExit(2)
+else:
+    print("maintenance admission path present", file=sys.stderr)
+    raise SystemExit(1)
+PY
+}
+if [[ "$action" != preflight && "$action" != verify ]]; then
+    ordinary_assert_maintenance_admission_absent || exit $?
+fi
 coordination_identity=$(stat -c '%d:%i' -- "$coordination")
 parent=$(dirname -- "$app_root")
 identity=$(stat -c '%d:%i' -- "$app_root")
@@ -138,6 +180,43 @@ callback='set -euo pipefail
 source "$6"
 umask 077
 ordinary_production_change_lock /var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock 300 || exit $?
+/usr/bin/python3 -I -B - /var/lib/fh-maintenance-admission <<PY
+import os
+import stat
+import sys
+
+path = sys.argv[1]
+try:
+    current = os.path.dirname(path)
+    while True:
+        try:
+            metadata = os.lstat(current)
+        except OSError as error:
+            print(f"maintenance admission path unknown: {error}", file=sys.stderr)
+            raise SystemExit(2)
+        if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != 0 or metadata.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+            print("maintenance admission path unknown: unsafe ancestor", file=sys.stderr)
+            raise SystemExit(2)
+        if current == os.path.dirname(current):
+            break
+        current = os.path.dirname(current)
+    try:
+        os.lstat(path)
+    except FileNotFoundError:
+        raise SystemExit(0)
+    except OSError as error:
+        print(f"maintenance admission path unknown: {error}", file=sys.stderr)
+        raise SystemExit(2)
+except FileNotFoundError:
+    print("maintenance admission path unknown: missing ancestor", file=sys.stderr)
+    raise SystemExit(2)
+except OSError as error:
+    print(f"maintenance admission path unknown: {error}", file=sys.stderr)
+    raise SystemExit(2)
+else:
+    print("maintenance admission path present", file=sys.stderr)
+    raise SystemExit(1)
+PY
 for candidate in "$1"/*; do
     [[ -d "$candidate" && ! -L "$candidate" ]] || continue
     [[ $(stat -c "%d:%i" -- "$candidate") == "$2" ]] || continue
