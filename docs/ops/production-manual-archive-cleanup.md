@@ -11,6 +11,14 @@ The read-only invocation is:
 sudo python3 /usr/local/libexec/manual_archive_cleanup_v1.py plan
 ```
 
+The `execute` invocation is unavailable until the complete, verified ROB-812
+pending-state rollout is installed: all registered maintenance writers, the
+root-controlled admission core, the protocol state directory, and its exact
+epoch must be deployed and verified together. Follow
+[`maintenance-admission-contract.md`](maintenance-admission-contract.md) for
+that coordinated rollout. Until then, `plan` is strictly read-only and no
+manual cleanup execution is authorized.
+
 The returned plan digest is the only input accepted by execution:
 
 ```text
