@@ -431,6 +431,7 @@ arm_remote_cleanup() {
     wrapper="$(remote_wrapper_path)"
     ssh "${SSH_OPTIONS[@]}" "${PROD_SSH_TARGET}" "
 set -euo pipefail
+umask 077
 exec 9>/run/lock/fh-provider-ui-smoke.lock
 flock -n 9 || {
     printf 'ERROR: another Provider UI smoke lifecycle operation is in progress\n' >&2
@@ -501,6 +502,7 @@ printf 'cleanup_lease=armed duration=10m\n'
 disarm_remote_cleanup() {
     ssh "${SSH_OPTIONS[@]}" "${PROD_SSH_TARGET}" "
 set -euo pipefail
+umask 077
 exec 9>/run/lock/fh-provider-ui-smoke.lock
 flock 9
 stop_cleanup_units() {

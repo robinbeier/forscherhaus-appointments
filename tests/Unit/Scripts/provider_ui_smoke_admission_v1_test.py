@@ -13,6 +13,7 @@ import importlib.util
 import io
 import json
 import os
+import stat
 import shutil
 import subprocess
 import sys
@@ -280,6 +281,7 @@ class ProviderUiSmokeAdmissionBehaviorTest(unittest.TestCase):
         core.no_pending = True
         with patch.object(COORD, 'private_cleanup_lock', lambda: contextlib.nullcontext()), \
              patch.object(COORD, 'load_core', return_value=core), \
+             patch.object(core, 'current_boot_id', return_value='next-boot'), \
              patch.object(COORD, '_read_arm_ack', return_value=COORD._ack_record(record)), \
              patch.object(COORD, 'unit_terminal', return_value=True) as units, \
              patch.object(COORD, 'dormant_clean', return_value=True) as fixture, \
@@ -289,6 +291,23 @@ class ProviderUiSmokeAdmissionBehaviorTest(unittest.TestCase):
         self.assertEqual(units.call_count, 2)
         fixture.assert_called_once_with(resource, 'dormant')
         remove.assert_called_once_with(resource)
+
+    def test_orphan_arm_ack_recovery_rejects_invalid_stored_boot_id(self):
+        resource = self.resource('smoke')
+        core = FakeCore({'resource_identity': resource})
+        core.no_pending = True
+        malformed = COORD._ack_record({
+            'run_id': 'a' * 32, 'boot_id': 42,
+            'operation': 'provider_ui_smoke', 'resource_identity': resource,
+        })
+        with patch.object(COORD, 'private_cleanup_lock', lambda: contextlib.nullcontext()), \
+             patch.object(COORD, 'load_core', return_value=core), \
+             patch.object(COORD, '_read_arm_ack', return_value=malformed), \
+             patch.object(COORD, '_remove_arm_ack') as remove:
+            with self.assertRaises(SystemExit) as raised:
+                COORD.recover_arm_ack(self.args('recover-arm-ack'))
+        self.assertEqual(raised.exception.code, 75)
+        remove.assert_not_called()
 
     def test_orphan_arm_ack_recovery_refuses_while_pending_exists(self):
         resource = self.resource('smoke')
@@ -520,6 +539,35 @@ class ProviderUiSmokeAdmissionBehaviorTest(unittest.TestCase):
     def test_private_cleanup_lock_rejects_non_root_identity(self):
         metadata = os.stat(__file__, follow_symlinks=False)
         self.assertIsNone(COORD._private_lock_identity(metadata))
+
+    def test_private_cleanup_lock_accepts_only_exact_root_legacy_mode_for_migration(self):
+        metadata = types.SimpleNamespace(
+            st_mode=stat.S_IFREG | 0o644, st_uid=0, st_gid=0,
+            st_nlink=1, st_size=0, st_dev=1, st_ino=2,
+        )
+        self.assertIsNone(COORD._private_lock_identity(metadata))
+        self.assertIsNotNone(COORD._private_lock_identity(metadata, allow_legacy=True))
+        metadata.st_mode = stat.S_IFREG | 0o666
+        self.assertIsNone(COORD._private_lock_identity(metadata, allow_legacy=True))
+
+    def test_private_cleanup_lock_migrates_legacy_inode_while_held(self):
+        with tempfile.TemporaryDirectory() as directory:
+            lock = Path(directory) / 'fh-provider-ui-smoke.lock'
+            lock.touch()
+            lock.chmod(0o644)
+            original_inode = lock.stat().st_ino
+
+            def identity(metadata, allow_legacy=False):
+                mode = stat.S_IMODE(metadata.st_mode)
+                if mode not in ((0o600, 0o644) if allow_legacy else (0o600,)):
+                    return None
+                return (metadata.st_dev, metadata.st_ino, metadata.st_mode)
+
+            with patch.object(COORD, 'PRIVATE_CLEANUP_LOCK_PATH', str(lock)), \
+                 patch.object(COORD, '_private_lock_identity', side_effect=identity):
+                with COORD.private_cleanup_lock():
+                    self.assertEqual(stat.S_IMODE(lock.stat().st_mode), 0o600)
+                    self.assertEqual(lock.stat().st_ino, original_inode)
 
     def test_unit_terminal_accepts_not_found_after_private_lock_fence(self):
         result = types.SimpleNamespace(

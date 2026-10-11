@@ -179,8 +179,11 @@ The orchestrator:
 The systemd proof binds the cleanup service's complete command to this app,
 credential, state directory and run ID. If pending was already cleared but an
 interruption left only the acknowledgement, the separate `recover-arm-ack`
-action requires a fresh terminal proof before removing that orphan. It is not
-used to infer success from an unknown timer-arm result.
+action retains its original boot binding and requires a fresh terminal proof
+before removing that orphan, including after a reboot. It is not used to infer
+success from an unknown timer-arm result. A previous operator's root-owned,
+empty private lock at mode `0644` is narrowed in place to `0600` under that
+lock before the coordinator admits work.
 
 During operator-to-gate transfer, the credential is never stored in a local
 temporary file, shell variable, command argument, process title, report, or

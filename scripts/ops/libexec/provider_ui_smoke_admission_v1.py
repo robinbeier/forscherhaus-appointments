@@ -223,10 +223,12 @@ def unit_armed(unit: str, resource: dict[str, str], run_id: str) -> bool:
     return True
 
 
-def _private_lock_identity(metadata):
+def _private_lock_identity(metadata, allow_legacy=False):
+    mode = stat.S_IMODE(metadata.st_mode)
     if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != 0 or
             metadata.st_gid != 0 or metadata.st_nlink != 1 or
-            metadata.st_size != 0 or stat.S_IMODE(metadata.st_mode) != 0o600):
+            metadata.st_size != 0 or
+            mode not in ((0o600, 0o644) if allow_legacy else (0o600,))):
         return None
     return (metadata.st_dev, metadata.st_ino, metadata.st_mode,
             metadata.st_uid, metadata.st_gid, metadata.st_nlink,
@@ -476,13 +478,13 @@ def private_cleanup_lock():
             else:
                 path_before = os.stat(PRIVATE_CLEANUP_LOCK_PATH, follow_symlinks=False)
                 open_flags = os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
-        expected = _private_lock_identity(path_before)
+        expected = _private_lock_identity(path_before, allow_legacy=True)
         if expected is None:
             fail('private_lock_unsafe')
         if fd is None:
             fd = os.open(PRIVATE_CLEANUP_LOCK_PATH, open_flags)
         opened = os.fstat(fd)
-        if _private_lock_identity(opened) != expected:
+        if _private_lock_identity(opened, allow_legacy=True) != expected:
             fail('private_lock_unsafe')
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -490,6 +492,18 @@ def private_cleanup_lock():
             if getattr(error, 'errno', None) in (errno.EAGAIN, errno.EWOULDBLOCK, errno.EACCES):
                 fail('private_lock_busy', 75)
             raise
+        path_after = os.stat(PRIVATE_CLEANUP_LOCK_PATH, follow_symlinks=False)
+        held = os.fstat(fd)
+        if (_private_lock_identity(path_after, allow_legacy=True) != expected or
+                _private_lock_identity(held, allow_legacy=True) != expected):
+            fail('private_lock_unsafe')
+        if stat.S_IMODE(held.st_mode) == 0o644:
+            # The previous root operator created this empty lock with a 022
+            # umask. Narrow it only after owning that exact locked inode.
+            os.fchmod(fd, 0o600)
+            expected = _private_lock_identity(os.fstat(fd))
+            if expected is None:
+                fail('private_lock_unsafe')
         path_after = os.stat(PRIVATE_CLEANUP_LOCK_PATH, follow_symlinks=False)
         held = os.fstat(fd)
         if (_private_lock_identity(path_after) != expected or
@@ -590,9 +604,13 @@ def recover_arm_ack(args: argparse.Namespace) -> None:
                 arm_ack = _read_arm_ack(resource)
                 if arm_ack is None:
                     fail('arm_ack_missing')
+                acknowledged_boot = arm_ack.get('boot_id')
+                if (not isinstance(acknowledged_boot, str) or
+                        not acknowledged_boot or len(acknowledged_boot) > 128):
+                    fail('arm_ack_binding_changed')
                 expected = _ack_record({
                     'run_id': args.run_id,
-                    'boot_id': core.current_boot_id(),
+                    'boot_id': acknowledged_boot,
                     'operation': OPERATION,
                     'resource_identity': resource,
                 })

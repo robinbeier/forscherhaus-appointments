@@ -76,8 +76,12 @@ acknowledgement response leaves Pending for deliberate recovery; an earlier or
 interrupted acknowledgement cannot be overwritten by a new run.
 If pending was already durably cleared but the process stopped before removing
 the acknowledgement, `recover-arm-ack` requires the exact run and resource,
-rechecks absence of pending plus terminal units and dormant fixture under both
-locks, then retires only that orphan. It does not repair an unknown timer arm.
+retains the acknowledgement's original boot binding, rechecks absence of
+pending plus terminal units and dormant fixture under both locks, then retires
+only that orphan. It does not repair an unknown timer arm. A root-owned, empty,
+single-link private lock left at mode `0644` by the previous operator is
+narrowed to `0600` only after acquiring and rechecking that exact inode; other
+legacy lock identities fail closed.
 The Provider application fixture holds the pre-existing canonical shared lock
 through every mutating PHP action and verifies the matching pending record
 through a child process that inherits that locked descriptor. A run ID or
