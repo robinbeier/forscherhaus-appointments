@@ -14,7 +14,10 @@ BACKUP_TIMER='fh-backup-set-continuity.timer'; SESSION_TIMER='fh-session-retenti
 CANARY_STATE_FILE='/var/lib/fh-zero-surprise-canary/active.json'
 CANARY_CLEANUP_TIMER='fh-zero-surprise-canary-cleanup.timer'
 CANARY_CLEANUP_SERVICE='fh-zero-surprise-canary-cleanup.service'
+MAINTENANCE_CORE='/usr/local/libexec/fh/maintenance_pending_v1.py'
+MAINTENANCE_STATE='/var/lib/fh-maintenance-admission'
 HELPERS=()
+INSTALLED_HELPER_MANIFEST="${SCRIPT_DIR}/production-installed-helper-manifest.v1.json"
 usage() { printf '%s\n' 'Usage: prod_release_readiness_preflight.sh --expected-active-release EA_ID [--prod-ssh-target root@booking-server]'; }
 while (( $# > 0 )); do
     case "$1" in
@@ -28,36 +31,63 @@ done
 [[ "$PROD_SSH_TARGET" == root@booking-server ]] || { printf 'ERROR: canonical production SSH target required.\n' >&2; exit 64; }
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd -P)"
 prod_require_cmd git
-local_sha256() {
-    if command -v sha256sum >/dev/null 2>&1; then
-        sha256sum -- "$1" | awk '{print $1}'
-    elif command -v shasum >/dev/null 2>&1; then
-        shasum -a 256 -- "$1" | awk '{print $1}'
-    else
-        return 1
-    fi
-}
-for binding in \
-    'deploy_ea.sh=/root/deploy_ea.sh' \
-    'scripts/ops/libexec/backup_set_producer_v1.py=/usr/local/libexec/fh-backup-set-producer-v1' \
-    'scripts/ops/libexec/backup_timer_transition_v1.py=/usr/local/libexec/fh-backup-timer-transition-v1' \
-    'scripts/ops/libexec/deployment_dump_attestation_v1.py=/usr/local/libexec/fh/deployment_dump_attestation_v1.py'; do
-    local_file="${binding%%=*}"; installed_file="${binding#*=}"
-    [[ -f "$REPO_ROOT/$local_file" && ! -L "$REPO_ROOT/$local_file" ]] || { printf 'ERROR: reviewed local helper source unavailable.\n' >&2; exit 64; }
-    git -C "$REPO_ROOT" ls-files --error-unmatch "$local_file" >/dev/null 2>&1 || { printf 'ERROR: local helper source untracked.\n' >&2; exit 64; }
-    git -C "$REPO_ROOT" diff --quiet HEAD -- "$local_file" || { printf 'ERROR: local helper source modified.\n' >&2; exit 64; }
-    local_hash="$(local_sha256 "$REPO_ROOT/$local_file")" || { printf 'ERROR: local helper hash unavailable.\n' >&2; exit 64; }
-    [[ "$local_hash" =~ ^[a-f0-9]{64}$ ]] || { printf 'ERROR: local helper hash invalid.\n' >&2; exit 64; }
-    HELPERS+=("$installed_file=$local_hash")
-done
+manifest_relative="${INSTALLED_HELPER_MANIFEST#"$REPO_ROOT/"}"
+[[ -f "$INSTALLED_HELPER_MANIFEST" && ! -L "$INSTALLED_HELPER_MANIFEST" ]] || { printf 'ERROR: installed helper manifest unavailable.\n' >&2; exit 64; }
+git -C "$REPO_ROOT" ls-files --error-unmatch "$manifest_relative" >/dev/null 2>&1 || { printf 'ERROR: installed helper manifest untracked.\n' >&2; exit 64; }
+git -C "$REPO_ROOT" diff --quiet HEAD -- "$manifest_relative" || { printf 'ERROR: installed helper manifest modified.\n' >&2; exit 64; }
+manifest_specs_file="$(mktemp "${TMPDIR:-/tmp}/installed-helper-manifest.XXXXXX")" || { printf 'ERROR: installed helper manifest staging unavailable.\n' >&2; exit 64; }
+trap 'rm -f -- "$manifest_specs_file"' EXIT
+if ! python3 -I -B - "$INSTALLED_HELPER_MANIFEST" >"$manifest_specs_file" <<'PY'
+import json
+import sys
+
+expected_paths = [
+    '/root/deploy_ea.sh',
+    '/usr/local/libexec/fh-backup-set-producer-v1',
+    '/usr/local/libexec/fh-backup-timer-transition-v1',
+    '/usr/local/libexec/fh/deployment_dump_attestation_v1.py',
+]
+try:
+    with open(sys.argv[1], 'rb') as handle:
+        value = json.load(handle)
+    if (not isinstance(value, dict) or set(value) != {'schema', 'version', 'helpers'} or
+            value.get('schema') != 'production_installed_helper_manifest.v1' or
+            value.get('version') != 1 or not isinstance(value.get('helpers'), list) or
+            len(value['helpers']) != len(expected_paths)):
+        raise ValueError
+    paths = []
+    for item, expected_path in zip(value['helpers'], expected_paths):
+        if (not isinstance(item, dict) or set(item) != {'path', 'sha256'} or
+                item.get('path') != expected_path or
+                not isinstance(item.get('sha256'), str) or
+                len(item['sha256']) != 64 or
+                any(char not in '0123456789abcdef' for char in item['sha256'])):
+            raise ValueError
+        paths.append(item['path'])
+        print(item['path'] + '=' + item['sha256'])
+    if len(set(paths)) != len(expected_paths):
+        raise ValueError
+except (OSError, ValueError, TypeError, json.JSONDecodeError):
+    raise SystemExit(64)
+PY
+then
+    printf 'ERROR: installed helper manifest malformed.\n' >&2
+    exit 64
+fi
+while IFS= read -r binding; do
+    [[ "$binding" == /*=* ]] || { printf 'ERROR: installed helper manifest malformed.\n' >&2; exit 64; }
+    HELPERS+=("$binding")
+done < "$manifest_specs_file"
+rm -f -- "$manifest_specs_file"
+[[ ${#HELPERS[@]} -eq 4 ]] || { printf 'ERROR: installed helper manifest malformed.\n' >&2; exit 64; }
 prod_require_cmd ssh
 receipt_file="$(mktemp "${TMPDIR:-/tmp}/prod-release-readiness.XXXXXX")"
 trap 'rm -f -- "$receipt_file"' EXIT
-if ssh "${SSH_OPTIONS[@]}" "$PROD_SSH_TARGET" bash -s -- "$APP_ROOT" "$EXPECTED_RELEASE" "$LOCK_PATH" "$RECOVERY_MARKER" "$CLEANUP_TIMER" "$RETENTION_TIMER" "$BACKUP_TIMER" "$SESSION_TIMER" "$TIMER_TRANSITION_MARKER" "$DEPLOY_RECOVERY_MARKER" "$CANARY_STATE_FILE" "$CANARY_CLEANUP_TIMER" "$CANARY_CLEANUP_SERVICE" "${HELPERS[@]}" >"$receipt_file" 2>/dev/null <<'REMOTE'
+if ssh "${SSH_OPTIONS[@]}" "$PROD_SSH_TARGET" bash -s -- "$APP_ROOT" "$EXPECTED_RELEASE" "$LOCK_PATH" "$RECOVERY_MARKER" "$CLEANUP_TIMER" "$RETENTION_TIMER" "$BACKUP_TIMER" "$SESSION_TIMER" "$TIMER_TRANSITION_MARKER" "$DEPLOY_RECOVERY_MARKER" "$CANARY_STATE_FILE" "$CANARY_CLEANUP_TIMER" "$CANARY_CLEANUP_SERVICE" "$MAINTENANCE_CORE" "$MAINTENANCE_STATE" "${HELPERS[@]}" >"$receipt_file" 2>/dev/null <<'REMOTE'
 set -u
-APP_ROOT="$1"; EXPECTED_RELEASE="$2"; LOCK_PATH="$3"; RECOVERY_MARKER="$4"; CLEANUP_TIMER="$5"; RETENTION_TIMER="$6"; BACKUP_TIMER="$7"; SESSION_TIMER="$8"; TIMER_TRANSITION_MARKER="$9"; DEPLOY_RECOVERY_MARKER="${10}"; CANARY_STATE_FILE="${11}"; CANARY_CLEANUP_TIMER="${12}"; CANARY_CLEANUP_SERVICE="${13}"; shift 13
+APP_ROOT="$1"; EXPECTED_RELEASE="$2"; LOCK_PATH="$3"; RECOVERY_MARKER="$4"; CLEANUP_TIMER="$5"; RETENTION_TIMER="$6"; BACKUP_TIMER="$7"; SESSION_TIMER="$8"; TIMER_TRANSITION_MARKER="$9"; DEPLOY_RECOVERY_MARKER="${10}"; CANARY_STATE_FILE="${11}"; CANARY_CLEANUP_TIMER="${12}"; CANARY_CLEANUP_SERVICE="${13}"; MAINTENANCE_CORE="${14}"; MAINTENANCE_STATE="${15}"; shift 15
 result() {
-    printf 'schema=production_release_readiness.v1\nstatus=%s\nresult_class=%s\ncaptured_at_utc=%s\nsource_marker=app_root/_RELEASE\nsource_lock=shared_production_lock\nsource_timers=systemctl_show\nsource_tools=tracked_local_vs_installed_sha256\ninvalidation=first_mutation_or_identity_change\n' \
+    printf 'schema=production_release_readiness.v1\nstatus=%s\nresult_class=%s\ncaptured_at_utc=%s\nsource_marker=app_root/_RELEASE\nsource_lock=shared_production_lock\nsource_timers=systemctl_show\nsource_tools=commit_bound_installed_helper_manifest\ninvalidation=first_mutation_or_identity_change\n' \
         "$1" "$2" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 fail() { result failed "$1"; exit 20; }
@@ -158,6 +188,8 @@ timer_state "$BACKUP_TIMER" active
 timer_state "$SESSION_TIMER" active
 timer_state "$RETENTION_TIMER" inactive
 timer_state "$CLEANUP_TIMER" absent
+[[ ! -e "$MAINTENANCE_CORE" && ! -L "$MAINTENANCE_CORE" ]] || fail maintenance_protocol_mixed
+[[ ! -e "$MAINTENANCE_STATE" && ! -L "$MAINTENANCE_STATE" ]] || fail maintenance_protocol_mixed
 for spec in "$@"; do
     path="${spec%%=*}"; expected="${spec#*=}"
     [[ "$path" == /* && "$path" != "$spec" && "$expected" =~ ^[a-f0-9]{64}$ && -f "$path" && ! -L "$path" ]] || fail helper_spec_invalid
@@ -198,14 +230,14 @@ if (( valid_receipt )); then
     [[ "${receipt[0]}" == 'schema=production_release_readiness.v1' ]] || valid_receipt=0
     [[ "${receipt[1]}" == 'status=passed' || "${receipt[1]}" == 'status=failed' ]] || valid_receipt=0
     case "${receipt[2]}" in
-        result_class=readiness_verified|result_class=remote_not_root|result_class=app_root_invalid|result_class=app_root_identity_invalid|result_class=marker_missing|result_class=marker_identity_invalid|result_class=marker_unreadable|result_class=marker_identity_changed|result_class=marker_format_unknown|result_class=marker_release_mismatch|result_class=marker_timestamp_invalid|result_class=marker_timestamp_future|result_class=lock_missing|result_class=lock_parent_identity_invalid|result_class=lock_identity_invalid|result_class=recovery_parent_identity_invalid|result_class=recovery_pending|result_class=canary_recovery_pending|result_class=canary_cleanup_unit_unknown|result_class=canary_cleanup_unresolved|result_class=timer_unknown|result_class=timer_not_active|result_class=timer_unexpected|result_class=helper_spec_invalid|result_class=helper_parent_identity_invalid|result_class=helper_identity_invalid|result_class=helper_unreadable|result_class=helper_identity_changed|result_class=helper_hash_mismatch) ;;
+        result_class=readiness_verified|result_class=remote_not_root|result_class=app_root_invalid|result_class=app_root_identity_invalid|result_class=marker_missing|result_class=marker_identity_invalid|result_class=marker_unreadable|result_class=marker_identity_changed|result_class=marker_format_unknown|result_class=marker_release_mismatch|result_class=marker_timestamp_invalid|result_class=marker_timestamp_future|result_class=lock_missing|result_class=lock_parent_identity_invalid|result_class=lock_identity_invalid|result_class=recovery_parent_identity_invalid|result_class=recovery_pending|result_class=canary_recovery_pending|result_class=canary_cleanup_unit_unknown|result_class=canary_cleanup_unresolved|result_class=timer_unknown|result_class=timer_not_active|result_class=timer_unexpected|result_class=helper_spec_invalid|result_class=helper_parent_identity_invalid|result_class=helper_identity_invalid|result_class=helper_unreadable|result_class=helper_identity_changed|result_class=helper_hash_mismatch|result_class=maintenance_protocol_mixed) ;;
         *) valid_receipt=0 ;;
     esac
     [[ "${receipt[3]}" =~ ^captured_at_utc=20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || valid_receipt=0
     [[ "${receipt[4]}" == 'source_marker=app_root/_RELEASE' ]] || valid_receipt=0
     [[ "${receipt[5]}" == 'source_lock=shared_production_lock' ]] || valid_receipt=0
     [[ "${receipt[6]}" == 'source_timers=systemctl_show' ]] || valid_receipt=0
-    [[ "${receipt[7]}" == 'source_tools=tracked_local_vs_installed_sha256' ]] || valid_receipt=0
+    [[ "${receipt[7]}" == 'source_tools=commit_bound_installed_helper_manifest' ]] || valid_receipt=0
     [[ "${receipt[8]}" == 'invalidation=first_mutation_or_identity_change' ]] || valid_receipt=0
 fi
 if (( valid_receipt )) && { { (( remote_rc == 0 )) && [[ "${receipt[1]}" == 'status=passed' && "${receipt[2]}" == 'result_class=readiness_verified' ]]; } || { (( remote_rc == 20 )) && [[ "${receipt[1]}" == 'status=failed' ]]; }; }; then

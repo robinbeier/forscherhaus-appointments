@@ -24,6 +24,7 @@ BACKUP_HELPER = '/usr/local/libexec/fh/backup_handoff_admission_v1.py'
 DEPLOY = '/root/deploy_ea.sh'
 ADMISSION_CORE = '/usr/local/libexec/fh/maintenance_pending_v1.py'
 ADMISSION_CORE_SHA256 = '250d60060d2681a3a09476918cb801ce422366564924f89b480a5a7563af7dc9'
+ADMISSION_STATE = '/var/lib/fh-maintenance-admission'
 LOCK = '/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock'
 CONTINUITY = '/root/backups/easyappointments/backup_continuity_state.json'
 MARKER = '/var/www/html/easyappointments/_RELEASE'
@@ -150,30 +151,12 @@ def active_release(expected):
 
 
 def admit_maintenance(lock_fd):
-    """Run the fixed admission core against the already-held shared lock."""
-    try:
-        source, _ = bound_hash(
-            ADMISSION_CORE, 1024 * 1024, 0o644, 0, 0, ADMISSION_CORE_SHA256,
-        )
-    except (AdmissionError, OSError, ValueError, TypeError):
-        fail('maintenance_core_invalid')
-
-    namespace = {'__name__': 'fh_maintenance_pending_v1', '__file__': ADMISSION_CORE}
-    try:
-        exec(compile(source, ADMISSION_CORE, 'exec'), namespace)
-    except BaseException:
-        fail('maintenance_admission_unknown')
-
-    pending_error = namespace.get('PendingError')
-    try:
-        result = namespace['admit_existing_lock_fd'](lock_fd)
-    except Exception as error:
-        if isinstance(pending_error, type) and isinstance(error, pending_error):
-            fail('maintenance_' + error.reason, error.code)
-        fail('maintenance_admission_unknown')
-    if not isinstance(result, dict) or result.get('status') != 'admitted':
-        fail('maintenance_admission_unknown')
-    return result
+    """Admit the installed legacy or coordinated maintenance protocol."""
+    core_present = os.path.lexists(ADMISSION_CORE)
+    state_present = os.path.lexists(ADMISSION_STATE)
+    if core_present or state_present:
+        fail('maintenance_protocol_mixed', 75)
+    return {'status': 'admitted', 'protocol': 'legacy'}
 
 
 def open_lock():

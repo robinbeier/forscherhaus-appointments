@@ -58,6 +58,24 @@ final class ProdReleaseReadinessPreflightTest extends TestCase
             chmod($path, 0555);
             $this->helpers[] = $helperBindings[$index] . '=' . hash_file('sha256', $sourceFiles[$index]);
         }
+        $manifestHashes = [
+            '0f17ffc0270f7dc675acbe829f86d00ce03c6a81152a8da433ed63af8d59ff74',
+            '854de2b51595ff5fb2cfb2f16724cdc8ec2fa533d964939722dd0c4c4f7c8f18',
+            '72612651f0076f3d1a2e6ab2e22bef4e04c0b2a3677c19e4637d895c71585a9e',
+            '559b5bfb919213a3c15dd91a4e460cf74c15a902160fd89421d170f98fe73618',
+        ];
+        $shaScript = "#!/bin/sh\nset -eu\nfile=\$1\n[ \"\$file\" = -- ] && file=\$2\n";
+        foreach ($helperFixtures as $index => $path) {
+            $shaScript .= sprintf(
+                'if cmp -s "$file" %s; then printf "%s  %%s\\n" "$file"; exit 0; fi%s',
+                escapeshellarg($sourceFiles[$index]),
+                $manifestHashes[$index],
+                "\n",
+            );
+        }
+        $shaScript .= "/usr/bin/sha256sum -- \"\$file\"\n";
+        file_put_contents($this->root . '/bin/sha256sum', $shaScript);
+        chmod($this->root . '/bin/sha256sum', 0755);
         file_put_contents(
             $this->root . '/bin/systemctl',
             <<<'SH'
@@ -82,7 +100,7 @@ final class ProdReleaseReadinessPreflightTest extends TestCase
             while [[ $# -gt 0 && "$1" != bash ]]; do shift; done
             [[ "$1" == bash ]] || exit 97
             shift 3
-            base=("${@:1:13}")
+            base=("${@:1:15}")
             base[0]=%s
             base[2]=%s
             base[3]=%s
@@ -91,7 +109,9 @@ final class ProdReleaseReadinessPreflightTest extends TestCase
             base[10]=%s
             base[11]=fh-zero-surprise-canary-cleanup.timer
             base[12]=fh-zero-surprise-canary-cleanup.service
-            shift 13
+            base[13]=%s
+            base[14]=%s
+            shift 15
             mapped=()
             for spec in "$@"; do
               case "$spec" in
@@ -111,6 +131,8 @@ final class ProdReleaseReadinessPreflightTest extends TestCase
             var_export($this->timerTransitionMarker, true),
             var_export($this->deployRecoveryMarker, true),
             var_export($this->canaryState, true),
+            var_export($this->root . '/maintenance-core-absent.py', true),
+            var_export($this->root . '/maintenance-state-absent', true),
             $helperFixtures[0],
             $helperFixtures[1],
             $helperFixtures[2],
@@ -143,6 +165,15 @@ final class ProdReleaseReadinessPreflightTest extends TestCase
         self::assertStringNotContainsString('2020-01-01', $out . $err);
     }
 
+    public function testSuccessBindsInstalledManifestInsteadOfSourceHashes(): void
+    {
+        $source = file_get_contents(dirname(__DIR__, 3) . '/scripts/ops/prod_release_readiness_preflight.sh');
+        self::assertIsString($source);
+        self::assertStringContainsString('source_tools=commit_bound_installed_helper_manifest', $source);
+        self::assertStringContainsString('production-installed-helper-manifest.v1.json', $source);
+        self::assertStringNotContainsString('tracked_local_vs_installed_sha256', $source);
+    }
+
     public function testWrongMarkerAndHelperHashFailClosed(): void
     {
         file_put_contents($this->app . '/_RELEASE', "ea_other  2020-01-01T00:00:00Z\n");
@@ -166,6 +197,58 @@ final class ProdReleaseReadinessPreflightTest extends TestCase
         [$status, $out] = $this->executePreflight();
         self::assertSame(20, $status);
         self::assertStringContainsString('helper_hash_mismatch', $out);
+    }
+
+    public function testInstalledManifestHashMismatchFailsClosed(): void
+    {
+        $manifest = dirname(__DIR__, 3) . '/scripts/ops/production-installed-helper-manifest.v1.json';
+        $original = file_get_contents($manifest);
+        self::assertIsString($original);
+        try {
+            $changed = str_replace(
+                '0f17ffc0270f7dc675acbe829f86d00ce03c6a81152a8da433ed63af8d59ff74',
+                '1f17ffc0270f7dc675acbe829f86d00ce03c6a81152a8da433ed63af8d59ff74',
+                $original,
+            );
+            self::assertNotSame($original, $changed);
+            file_put_contents($manifest, $changed);
+            [$status, $out] = $this->executePreflight();
+            self::assertSame(20, $status);
+            self::assertStringContainsString('helper_hash_mismatch', $out);
+        } finally {
+            file_put_contents($manifest, $original);
+        }
+    }
+
+    public function testMalformedInstalledManifestIsRejectedBeforeSsh(): void
+    {
+        $manifest = dirname(__DIR__, 3) . '/scripts/ops/production-installed-helper-manifest.v1.json';
+        $original = file_get_contents($manifest);
+        self::assertIsString($original);
+        $sentinel = $this->root . '/ssh-called';
+        try {
+            file_put_contents($manifest, '{"schema":"wrong"}\n');
+            file_put_contents(
+                $this->root . '/bin/ssh',
+                "#!/bin/sh\ntouch " . escapeshellarg($sentinel) . "\nexit 97\n",
+            );
+            chmod($this->root . '/bin/ssh', 0755);
+            [$status, $out, $err] = $this->executePreflight();
+            self::assertSame(64, $status);
+            self::assertStringContainsString('manifest malformed', $out . $err);
+            self::assertFileDoesNotExist($sentinel);
+        } finally {
+            file_put_contents($manifest, $original);
+        }
+    }
+
+    public function testMixedMaintenanceProtocolFailsClosed(): void
+    {
+        file_put_contents($this->root . '/maintenance-core-absent.py', 'legacy core');
+        mkdir($this->root . '/maintenance-state-absent', 0700);
+        [$status, $out] = $this->executePreflight();
+        self::assertSame(20, $status);
+        self::assertStringContainsString('maintenance_protocol_mixed', $out);
     }
 
     public function testLockAndTimerContradictionsFailClosed(): void

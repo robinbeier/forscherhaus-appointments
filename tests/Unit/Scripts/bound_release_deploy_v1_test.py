@@ -94,10 +94,32 @@ class BoundReleaseDeployTest(unittest.TestCase):
         self.guard.assert_not_called()
         self.child.assert_not_called()
 
-    def test_missing_admission_core_maps_to_stable_result_class(self):
-        MODULE.bound_hash.side_effect = FileNotFoundError('/usr/local/libexec/fh/maintenance_pending_v1.py')
-        with self.assertRaisesRegex(MODULE.AdmissionError, 'maintenance_core_invalid'):
-            ORIGINAL_ADMIT_MAINTENANCE(self.lock_fd)
+    def test_legacy_protocol_is_admitted_when_core_and_state_are_absent(self):
+        self.assertEqual({'status': 'admitted', 'protocol': 'legacy'}, ORIGINAL_ADMIT_MAINTENANCE(self.lock_fd))
+
+    def test_run_executes_legacy_protocol_after_wrapper_admission(self):
+        self.admit.side_effect = ORIGINAL_ADMIT_MAINTENANCE
+        with mock.patch.object(MODULE.os.path, 'lexists', return_value=False):
+            self.assertEqual(('deployed', 0), MODULE.run(arguments()))
+        self.child.assert_called_once()
+
+    def test_mixed_protocol_is_rejected_before_core_execution(self):
+        with mock.patch.object(MODULE.os.path, 'lexists', side_effect=lambda path: path == MODULE.ADMISSION_CORE):
+            with self.assertRaisesRegex(MODULE.AdmissionError, 'maintenance_protocol_mixed'):
+                ORIGINAL_ADMIT_MAINTENANCE(self.lock_fd)
+
+    def test_run_rejects_mixed_protocol_before_reservation_or_child(self):
+        self.admit.side_effect = ORIGINAL_ADMIT_MAINTENANCE
+        with mock.patch.object(MODULE.os.path, 'lexists', side_effect=lambda path: path == MODULE.ADMISSION_CORE):
+            with self.assertRaisesRegex(MODULE.AdmissionError, 'maintenance_protocol_mixed'):
+                MODULE.run(arguments())
+        self.reserve.assert_not_called()
+        self.child.assert_not_called()
+
+    def test_present_maintenance_protocol_is_rejected_for_legacy_manifest(self):
+        with mock.patch.object(MODULE.os.path, 'lexists', return_value=True):
+            with self.assertRaisesRegex(MODULE.AdmissionError, 'maintenance_protocol_mixed'):
+                ORIGINAL_ADMIT_MAINTENANCE(self.lock_fd)
 
     def test_admission_core_binding_is_fixed_and_precedes_reservation(self):
         with open(PATH, encoding='utf-8') as handle:
@@ -107,6 +129,7 @@ class BoundReleaseDeployTest(unittest.TestCase):
             "ADMISSION_CORE_SHA256 = '250d60060d2681a3a09476918cb801ce422366564924f89b480a5a7563af7dc9'",
             source,
         )
+        self.assertIn("ADMISSION_STATE = '/var/lib/fh-maintenance-admission'", source)
         run = source[source.index('def run(args):'):source.index('def main():')]
         self.assertLess(run.index('admit_maintenance(lock_fd)'), run.index('reserve_intent(intent_path'))
 
@@ -452,6 +475,13 @@ class BoundReleaseDeployTest(unittest.TestCase):
         self.assertNotIn("if code in (70, 75) and value['status'] == 'failed':", source)
         self.assertNotIn("if code != 0 and value['status'] == 'failed':", source)
 
+    def test_wrapper_binds_installed_helper_manifest_into_commit_snapshot(self):
+        with open(WRAPPER_PATH, encoding='utf-8') as handle:
+            source = handle.read()
+        manifest = 'scripts/ops/production-installed-helper-manifest.v1.json'
+        self.assertGreaterEqual(source.count(manifest), 3)
+        self.assertIn("'scripts/ops/production-installed-helper-manifest.v1.json'", source)
+
     def test_wrapper_preserves_known_maintenance_refusal_but_rejects_unknown_exit_75(self):
         with open(WRAPPER_PATH, encoding='utf-8') as handle:
             source = handle.read()
@@ -526,6 +556,7 @@ class BoundReleaseDeployTest(unittest.TestCase):
                 'scripts/ops/libexec/backup_set_producer_v1.py',
                 'scripts/ops/libexec/backup_timer_transition_v1.py',
                 'scripts/ops/libexec/deployment_dump_attestation_v1.py',
+                'scripts/ops/production-installed-helper-manifest.v1.json',
                 'scripts/ops/libexec/bound_release_deploy_v1.py',
                 'scripts/ops/libexec/release_pair_admission_v1.py',
                 'scripts/ops/libexec/backup_handoff_admission_v1.py',
@@ -536,6 +567,17 @@ class BoundReleaseDeployTest(unittest.TestCase):
                     with open(path, 'w', encoding='utf-8') as handle:
                         if relative.endswith('prod_release_readiness_preflight.sh'):
                             handle.write("printf 'schema=production_release_readiness.v1\\nstatus=passed\\nresult_class=readiness_verified\\nextra=isolated\\n'\n")
+                        elif relative.endswith('production-installed-helper-manifest.v1.json'):
+                            json.dump({
+                                'schema': 'production_installed_helper_manifest.v1',
+                                'version': 1,
+                                'helpers': [
+                                    {'path': '/root/deploy_ea.sh', 'sha256': 'f' * 64},
+                                    {'path': '/usr/local/libexec/fh-backup-set-producer-v1', 'sha256': '1' * 64},
+                                    {'path': '/usr/local/libexec/fh-backup-timer-transition-v1', 'sha256': '2' * 64},
+                                    {'path': '/usr/local/libexec/fh/deployment_dump_attestation_v1.py', 'sha256': '3' * 64},
+                                ],
+                            }, handle)
                         else:
                             handle.write('placeholder\n')
             wrapper = os.path.join(project, 'scripts/ops/prod_deploy_bound_release.sh')
@@ -605,6 +647,7 @@ exit "${FH_DEPLOY_RC}"
             # is attempted when the deployment itself returns exit 75.
             deployment_cases = (
                 ('maintenance_pending_present', 75),
+                ('maintenance_protocol_mixed', 75),
                 ('lock_busy', 75),
                 ('maintenance_core_invalid', 70),
                 ('maintenance_admission_unknown', 70),
@@ -634,6 +677,7 @@ exit "${FH_DEPLOY_RC}"
 
             ack_cases = (
                 ('maintenance_pending_present', 75, True),
+                ('maintenance_protocol_mixed', 75, True),
                 ('lock_busy', 75, True),
                 ('maintenance_core_invalid', 70, True),
                 ('maintenance_admission_unknown', 70, True),

@@ -64,6 +64,7 @@ readonly sources=(
     'scripts/ops/libexec/release_pair_admission_v1.py'
     'scripts/ops/libexec/backup_handoff_admission_v1.py'
     'scripts/ops/libexec/bound_release_deploy_v1.py'
+    'scripts/ops/production-installed-helper-manifest.v1.json'
 )
 for source in "${sources[@]}"; do
     git -C "$PROJECT" ls-files --error-unmatch "$source" >/dev/null || { echo 'ERROR: untracked operator source.' >&2; exit 70; }
@@ -93,6 +94,7 @@ git -C "$PROJECT" archive "$COMMIT" \
     scripts/ops/libexec/backup_set_producer_v1.py \
     scripts/ops/libexec/backup_timer_transition_v1.py \
     scripts/ops/libexec/deployment_dump_attestation_v1.py \
+    scripts/ops/production-installed-helper-manifest.v1.json \
     | tar -x -C "$snapshot_dir"
 for source in \
     build_release.sh composer.lock package-lock.json deploy_ea.sh \
@@ -107,7 +109,8 @@ for source in \
     scripts/ops/lib/prod_common.sh \
     scripts/ops/libexec/backup_set_producer_v1.py \
     scripts/ops/libexec/backup_timer_transition_v1.py \
-    scripts/ops/libexec/deployment_dump_attestation_v1.py; do
+    scripts/ops/libexec/deployment_dump_attestation_v1.py \
+    scripts/ops/production-installed-helper-manifest.v1.json; do
     [[ -f "$snapshot_dir/$source" && ! -L "$snapshot_dir/$source" ]] || {
         echo 'ERROR: commit-bound verification source unavailable.' >&2; exit 70;
     }
@@ -130,7 +133,41 @@ fi
 commit_blob_sha() {
     git -C "$PROJECT" cat-file blob "$COMMIT:$1" | shasum -a 256 | awk '{print $1}'
 }
-DEPLOY_SHA="$(commit_blob_sha 'deploy_ea.sh')"
+DEPLOY_SHA="$(python3 -I -B - "$snapshot_dir/scripts/ops/production-installed-helper-manifest.v1.json" <<'PY'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], 'rb') as handle:
+        value = json.load(handle)
+    expected = {
+        'schema': 'production_installed_helper_manifest.v1',
+        'version': 1,
+        'helpers': [
+            {'path': '/root/deploy_ea.sh', 'sha256': value['helpers'][0]['sha256']},
+            {'path': '/usr/local/libexec/fh-backup-set-producer-v1', 'sha256': value['helpers'][1]['sha256']},
+            {'path': '/usr/local/libexec/fh-backup-timer-transition-v1', 'sha256': value['helpers'][2]['sha256']},
+            {'path': '/usr/local/libexec/fh/deployment_dump_attestation_v1.py', 'sha256': value['helpers'][3]['sha256']},
+        ],
+    }
+    if value != expected or any(
+        not isinstance(item['sha256'], str) or len(item['sha256']) != 64 or
+        any(char not in '0123456789abcdef' for char in item['sha256'])
+        for item in value['helpers']
+    ):
+        raise ValueError
+    print(value['helpers'][0]['sha256'])
+except (OSError, ValueError, TypeError, KeyError, IndexError, json.JSONDecodeError):
+    raise SystemExit(70)
+PY
+)" || {
+    echo 'ERROR: commit-bound installed helper manifest is invalid.' >&2
+    exit 70
+}
+[[ "$DEPLOY_SHA" =~ ^[a-f0-9]{64}$ ]] || {
+    echo 'ERROR: commit-bound deploy helper hash is invalid.' >&2
+    exit 70
+}
 PAIR_SHA="$(commit_blob_sha 'scripts/ops/libexec/release_pair_admission_v1.py')"
 BACKUP_SHA="$(commit_blob_sha 'scripts/ops/libexec/backup_handoff_admission_v1.py')"
 # Keep the exact commit-bound runner bytes in memory. The worktree path may be

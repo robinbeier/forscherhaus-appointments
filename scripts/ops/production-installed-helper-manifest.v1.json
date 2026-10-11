@@ -1,0 +1,22 @@
+{
+    "schema": "production_installed_helper_manifest.v1",
+    "version": 1,
+    "helpers": [
+        {
+            "path": "/root/deploy_ea.sh",
+            "sha256": "0f17ffc0270f7dc675acbe829f86d00ce03c6a81152a8da433ed63af8d59ff74"
+        },
+        {
+            "path": "/usr/local/libexec/fh-backup-set-producer-v1",
+            "sha256": "854de2b51595ff5fb2cfb2f16724cdc8ec2fa533d964939722dd0c4c4f7c8f18"
+        },
+        {
+            "path": "/usr/local/libexec/fh-backup-timer-transition-v1",
+            "sha256": "72612651f0076f3d1a2e6ab2e22bef4e04c0b2a3677c19e4637d895c71585a9e"
+        },
+        {
+            "path": "/usr/local/libexec/fh/deployment_dump_attestation_v1.py",
+            "sha256": "559b5bfb919213a3c15dd91a4e460cf74c15a902160fd89421d170f98fe73618"
+        }
+    ]
+}

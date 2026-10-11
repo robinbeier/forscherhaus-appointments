@@ -45,10 +45,14 @@ authority. A missing, stale, contradictory, or unknown fact blocks the entry.
    release-entry gate. Bind `ACTIVE_RELEASE_ID` to the **currently active**
    release from the last trusted deployment receipt and the fresh inventory;
    it is not the new candidate ID. Run from the reviewed, clean checkout: the
-   preflight derives the four expected installed-tool hashes from tracked,
-   unchanged local sources rather than accepting hashes copied from the remote
-   query. The new candidate's archive and provenance stay bound separately in
-   step 1.
+   preflight derives the four expected installed-tool hashes from the fixed,
+   reviewed `scripts/ops/production-installed-helper-manifest.v1.json` in the
+   same commit rather than comparing the installed legacy helpers with newer
+   source-only files or accepting hashes copied from a remote query. The
+   manifest has a strict schema and path order; it must be tracked and clean.
+   The preflight also fails closed if the coordinated maintenance core or its
+   state directory is present, because that would be a mixed protocol. The new
+   candidate's archive and provenance stay bound separately in step 1.
 
    ```bash
    PROD_SSH_TARGET=root@booking-server bash scripts/ops/prod_release_readiness_preflight.sh \
