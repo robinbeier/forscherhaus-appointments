@@ -40,7 +40,7 @@ scheduler, operator and recovery entrypoints, including direct supported calls.
 | Restore verification | `scripts/ops/libexec/deployment_dump_attestation_v1.py`; detached container, lease watcher, orphan and continuity checks | Repository source admits before reconciliation, registers pending before Docker launch, and settles after terminal restore and publication. The source now includes a narrowly scoped recovery proof for the post-publication/post-cleanup state; installed recovery and production installation remain open. |
 | Session retention | `scripts/ops/libexec/session_retention_v1.py`; shared lock and protected local state | Repository execute path reads the pending-state contract through its existing lock descriptor before mutation; installed helper and unit remain legacy until the coordinated rollout |
 | Manual build-cache retention | `scripts/ops/prod_build_cache_retention.sh`; private lock and activity veto | Require the shared lock for execute, including when its path is absent; ROB-579 tracks this prerequisite |
-| Retired release/archive/dump retention | Retired helper and existing hold/retention controls | Remain disabled; do not reactivate as part of enrollment |
+| Manual release/archive/dump retention (not enrolled) | Source `scripts/ops/prod_release_archive_dump_retention.sh` still exposes `--execute`. The read-only Tailscale snapshot at 2026-10-11 03:52 UTC, recorded in the ROB-812 Workpad, found the installed helper at SHA-256 `e5e29a78eee9d7659df36caac587f194af752e83962edb237912e5da37b493ac`, `root:root`, mode `0555`, nlink 1, with its timer inactive | Manual execute is outside pending-state admission. Recheck helper identity and unit state immediately before rollout; enroll/fence every supported manual path or explicitly retire it before the ROB-809 cutover. Keep automatic retention disabled |
 | Retained manual backup/restore wrappers | Installed operator paths, verified by bounded read-only inventory | Enroll or explicitly retire every supported path before removing the veto |
 
 Native Docker/BuildKit garbage collection remains a separate engine-managed
@@ -314,6 +314,13 @@ tests must exercise direct legacy invocation and prove refusal or unavailability
 not attribute new protocol awareness to unchanged code. Epoch checks apply only
 to updated participants. Rollback requires the same fence and settled pending
 operations; reverting only some tools must not reopen legacy admission.
+
+The 2026-10-11 03:52 UTC snapshot found the retention timer inactive, but that
+observation does not retire the manual `--execute` wrapper or establish a
+permanent production state. Recheck the helper identity and unit state before
+any rollout; continued accessibility remains a migration blocker until the
+entrypoint is enrolled in the pending-state protocol or explicitly retired and
+verified unreachable.
 
 Remove command-name inference only after every supported retained scheduler,
 manual and recovery path is enrolled, versions agree, crash/recovery evidence
