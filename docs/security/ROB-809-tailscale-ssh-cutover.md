@@ -38,8 +38,11 @@ synthetic smoke may pause during the short SSH window.
 
 ## One bounded cutover
 
-Pause the synthetic Provider UI test, verify the bound preflight again, and
-schedule the rollback before removing only the verified public SSH permits.
+Pause the synthetic Provider UI test, verify the bound preflight again, then
+acquire and validate the shared production-change lock **before** scheduling
+the rollback. Keep that same lock continuously through timer activation,
+firewall mutation, verification and terminal rollback settlement. Remove only
+the verified public SSH permits after the rollback is armed.
 After the change, prove a fresh Tailscale SSH connection, public SSH
 nonreachability for each previously reachable family, continued public HTTPS,
 the intended firewall diff, and application/monitor health. While holding the
