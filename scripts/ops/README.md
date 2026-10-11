@@ -348,7 +348,9 @@ Closed production backup sets:
   `0555`. Install it no-clobber under the shared production lock from a
   reviewed, SHA-256-bound `main` source; verify path, owner, mode, identity,
   and hash before first use. The release-readiness preflight checks its
-  installed hash against the tracked source. See
+  installed hash against the reviewed, commit-bound
+  `production-installed-helper-manifest.v1.json`; a newer source-only version
+  does not change the installed binding. See
   `docs/ops/production-release-entry.md` for the separate installation and
   pause/restore gates.
 - The current `scripts/ops/libexec/backup_set_producer_v1.py` and its systemd
