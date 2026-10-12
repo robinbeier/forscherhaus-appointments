@@ -30,6 +30,9 @@ Provider UI synthetic smoke is not part of this cutover or its release path.
    public SSH permits. Test scheduling, cancellation, dispatch races and
    idempotent restore in isolation. A dispatched rollback must wait for the
    shared production-change lock before writing, not exit because it is held.
+   After restoring the exact public SSH permits, it must verify the effective
+   firewall rules and record a classified result. An unknown or ineffective
+   restore remains a recovery state for inspection through the console.
    The Hetzner console is the independent recovery path; the rollback
    is an additional short-window guard, not a replacement for it. No global
    maintenance-admission record or application release is needed for this
