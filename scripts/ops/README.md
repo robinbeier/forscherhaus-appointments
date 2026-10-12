@@ -8,10 +8,11 @@ Current production monitor roles are documented in `docs/uptime-kuma.md`.
 For agent-first production diagnostics and post-change validation, start with
 `docs/ops/agent-operations.md` and the `prod_*.sh` scripts in this directory.
 
-The optional production Provider UI browser smoke is suspended under ROB-812.
-`docs/release-gate-provider-ui-smoke.md` records its evidence boundary and
-historical design; do not run the operator during the current mixed-version
-state.
+The optional production Provider UI browser smoke was retired under ROB-812.
+Its production principal and live credential were removed; this source no
+longer provides its operator or browser gate. The retained
+`docs/release-gate-provider-ui-smoke.md` records historical design and the
+remaining production-evidence boundary.
 
 For the on-demand, no-customer-data Customers UI role smoke, use
 `docs/release-gate-customers-ui-smoke.md`. It is likewise operator-side and
