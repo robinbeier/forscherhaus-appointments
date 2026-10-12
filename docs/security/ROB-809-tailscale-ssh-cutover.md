@@ -1,6 +1,6 @@
 # ROB-809: optional Tailscale-only SSH cutover
 
-Status (2026-10-11): **deferred, not urgent**. No SSH or firewall change has
+Status (2026-10-12): **deferred, not urgent**. No SSH or firewall change has
 been made under ROB-809. Robin confirmed independent access through the Hetzner
 console and approved a smaller one-time cutover plan. The global ROB-812
 maintenance protocol is **not** a prerequisite. This document prepares a later
@@ -10,8 +10,8 @@ decision; it is not an executable operator or production-change approval.
 
 Remove public-key SSH reachability on the server's public IPv4 and IPv6 paths
 while retaining ordinary OpenSSH over Tailscale. Keep the current keys, users,
-`sshd`, Tailscale policy, HTTPS, and application unchanged. The Provider UI
-synthetic smoke may pause during the short SSH window.
+`sshd`, Tailscale policy, HTTPS, and application unchanged. The retired
+Provider UI synthetic smoke is not part of this cutover or its release path.
 
 ## Fresh preflight for a future night window
 
@@ -27,37 +27,33 @@ synthetic smoke may pause during the short SSH window.
    before the change. If either control cannot be established for a published
    family, stop instead of treating that family as untested.
 3. Prepare one reviewed, narrowly scoped rollback for exactly the removed
-   public SSH permits. Test its scheduling, cancellation, dispatch races and
-   idempotent restore behavior in isolation. A dispatched rollback must wait
-   for the shared lock and verify the restored rules; it must not exit merely
-   because the lock is temporarily held. The Hetzner console is the independent
-   recovery path; the rollback is an additional short-window guard, not a
-   replacement for it.
-   The shared production-change lock protects the firewall mutation and
-   immediate verification; the rollback operator must acquire that same lock
-   before its own write. No all-writer pending journal is needed for this
+   public SSH permits. Test scheduling, cancellation, dispatch races and
+   idempotent restore in isolation. A dispatched rollback must wait for the
+   shared production-change lock before writing, not exit because it is held.
+   The Hetzner console is the independent recovery path; the rollback
+   is an additional short-window guard, not a replacement for it. No global
+   maintenance-admission record or application release is needed for this
    SSH-only change.
 
 ## One bounded cutover
 
-Pause the synthetic Provider UI test, verify the bound preflight again, then
-acquire and validate the shared production-change lock **before** scheduling
-the rollback. Keep that same lock continuously through timer activation,
-firewall mutation, verification and terminal rollback settlement. Remove only
-the verified public SSH permits after the rollback is armed.
+Verify the bound preflight again, then acquire and validate the shared
+production-change lock **before** scheduling the rollback. Keep that same lock
+continuously through firewall mutation, verification and terminal rollback
+settlement. Remove only the verified public SSH permits after the rollback is
+armed.
 After the change, prove a fresh Tailscale SSH connection. For **each published
 address family** that passed the required pre-change controls, prove public SSH
 nonreachability and continued public HTTPS. Verify the intended firewall diff
-and application/monitor health. While holding the shared lock, cancel the timer
-only after those facts and the final firewall
-state agree. Before declaring success or releasing the lock, prove that neither
-the timer nor a dispatched rollback service is queued or running. If rollback
-has already started, abandon the success path, release the lock so it can
-finish, and verify the restored public SSH permits and service state. Unknown
-rollback state requires inspection through the confirmed console; never cancel
-an active restoration to manufacture success. Resume the synthetic test only
-after the SSH window has a verified final state. Never interpret a lost session
-or timer expiry alone as proof of success or rollback.
+and application/monitor health. While holding the shared lock, cancel the
+armed rollback only after those facts and the final firewall state agree.
+Before declaring success or releasing the lock, prove that neither the timer
+nor a dispatched rollback service is queued or running. If rollback has already
+started, abandon the success path, release the lock so it can finish, and
+verify the restored public SSH permits and service state. Unknown rollback
+state requires inspection through the confirmed console; never cancel an
+active restoration to manufacture success. Never interpret a lost session as
+proof of success or rollback.
 
 If identity, rule state, route, rollback state or outcome is unknown, stop and
 use the confirmed console path to inspect or restore the exact public permits.
