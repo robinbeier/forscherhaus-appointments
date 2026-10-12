@@ -1359,6 +1359,8 @@ function dashboardIntegrationSmokeAssertProviderCalendarDialogBrowser(
             'real_http_db_save_verified' => $real['real_http_db_save_verified'],
             'real_http_db_reload_verified' => $real['real_http_db_reload_verified'],
             'real_http_db_persisted_interval_verified' => $real['real_http_db_persisted_interval_verified'],
+            'real_http_db_same_row_verified' => $real['real_http_db_same_row_verified'],
+            'real_http_db_edit_verified' => $real['real_http_db_edit_verified'],
             'real_http_db_delete_verified' => $real['real_http_db_delete_verified'],
             'real_http_db_cleanup_verified' => true,
         ]);
@@ -1622,6 +1624,7 @@ function dashboardIntegrationSmokeParseCalendarDialogBrowserResult(
                     'create',
                     'real_http_db',
                     'real_http_db_create',
+                    'real_http_db_edit',
                     'real_http_db_delete',
                     'dialog',
                     'failure',
@@ -1650,6 +1653,8 @@ function dashboardIntegrationSmokeParseCalendarDialogBrowserResult(
             'real_http_db_save_verified',
             'real_http_db_reload_verified',
             'real_http_db_persisted_interval_verified',
+            'real_http_db_same_row_verified',
+            'real_http_db_edit_verified',
             'real_http_db_delete_verified',
             'real_http_db_cleanup_verified',
         ]
@@ -1716,6 +1721,8 @@ function dashboardIntegrationSmokeParseCalendarDialogBrowserResult(
                 'real_http_db_reload_verified' => ($payload['real_http_db_reload_verified'] ?? false) === true,
                 'real_http_db_persisted_interval_verified' =>
                     ($payload['real_http_db_persisted_interval_verified'] ?? false) === true,
+                'real_http_db_same_row_verified' => ($payload['real_http_db_same_row_verified'] ?? false) === true,
+                'real_http_db_edit_verified' => ($payload['real_http_db_edit_verified'] ?? false) === true,
                 'real_http_db_delete_verified' => ($payload['real_http_db_delete_verified'] ?? false) === true,
                 'real_http_db_cleanup_verified' => ($payload['real_http_db_cleanup_verified'] ?? false) === true,
                 'browser_duration_ms' => $payload['duration_ms'],

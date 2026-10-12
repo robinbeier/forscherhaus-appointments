@@ -201,7 +201,12 @@ async function main(input) {
             url.pathname === loginPath;
         if (allowedProviderWrite) {
             const count = url.pathname === savePath ? ++realProviderSaveCount : ++realProviderDeleteCount;
-            if (count > 1) {
+            if (url.pathname === savePath && count > 2) {
+                blockedWritePaths.push(url.pathname);
+                await route.abort('blockedbyclient');
+                return;
+            }
+            if (url.pathname === deletePath && count > 1) {
                 blockedWritePaths.push(url.pathname);
                 await route.abort('blockedbyclient');
                 return;
@@ -384,6 +389,8 @@ async function main(input) {
         const marker = String(input.real_http_db_marker || `ROB-805 ${visibleDate}`);
         const start = `${visibleDate} 09:00:00`;
         const end = `${visibleDate} 10:00:00`;
+        const editedStart = `${visibleDate} 09:30:00`;
+        const editedEnd = `${visibleDate} 10:30:00`;
         const modal = page.locator('#unavailabilities-modal');
         // The calendar title intentionally shortens long notes; use a unique prefix
         // while the server reload still binds the complete marker.
@@ -453,6 +460,76 @@ async function main(input) {
         if (persisted.length !== 1 || persisted[0].start_datetime !== start || persisted[0].end_datetime !== end) {
             fail('real_http_db: provider reload did not contain the exact stored interval');
         }
+        const createdRowId = String(persisted[0].id || '');
+        if (!createdRowId) fail('real_http_db: provider reload did not expose the created row identity');
+        await page.waitForFunction(() => window.jQuery && jQuery.active === 0, undefined, {
+            timeout: interactionTimeoutMs,
+        });
+        await modal.waitFor({state: 'hidden'});
+        await createdEvent.waitFor({state: 'visible', timeout: interactionTimeoutMs});
+
+        stage = 'real_http_db_edit';
+        await createdEvent.click();
+        const editPopover = page.locator('.popover').last();
+        await editPopover.waitFor({state: 'visible', timeout: interactionTimeoutMs});
+        await editPopover.locator('.edit-popover').click();
+        await modal.waitFor({state: 'visible', timeout: interactionTimeoutMs});
+        const formattedEditedPickerValues = await page.evaluate(
+            ({editedStart, editedEnd}) => {
+                const formatPickerValue = (selector, value) => {
+                    const input = document.querySelector(selector);
+                    const picker = input?._flatpickr;
+                    if (!picker || typeof picker.formatDate !== 'function') return null;
+                    return picker.formatDate(new Date(value.replace(' ', 'T')), picker.config.dateFormat);
+                };
+                return {
+                    start: formatPickerValue('#unavailability-start', editedStart),
+                    end: formatPickerValue('#unavailability-end', editedEnd),
+                };
+            },
+            {editedStart, editedEnd},
+        );
+        if (!formattedEditedPickerValues.start || !formattedEditedPickerValues.end) {
+            fail('real_http_db: provider edit did not expose date-time Flatpickr instances');
+        }
+        await modal.locator('#unavailability-start').fill(formattedEditedPickerValues.start);
+        await modal.locator('#unavailability-start').press('Tab');
+        await modal.locator('#unavailability-end').fill(formattedEditedPickerValues.end);
+        await modal.locator('#unavailability-end').press('Tab');
+        const editResponse = page.waitForResponse(
+            (response) => response.request().method() === 'POST' && new URL(response.url()).pathname === savePath,
+            {timeout: interactionTimeoutMs},
+        );
+        const editReload = page.waitForResponse(
+            (response) =>
+                response.request().method() === 'POST' && new URL(response.url()).pathname === expectedReloadPath,
+            {timeout: interactionTimeoutMs},
+        );
+        const [editHttpResponse, editReloadResponse] = await Promise.all([
+            editResponse,
+            editReload,
+            modal.locator('#save-unavailability').click(),
+        ]);
+        if (editHttpResponse.status() !== 200) fail('real_http_db: provider edit save returned an unexpected status');
+        const editPayload = await editHttpResponse.json().catch(() => null);
+        if (!editPayload || editPayload.success !== true)
+            fail('real_http_db: provider edit save returned a non-success payload');
+        if (editReloadResponse.status() !== 200)
+            fail('real_http_db: provider edit reload returned an unexpected status');
+        const editedReloaded = await editReloadResponse.json().catch(() => null);
+        const editedRows = Array.isArray(editedReloaded?.unavailabilities)
+            ? editedReloaded.unavailabilities.filter(
+                  (row) => String(row.id_users_provider) === providerId && row.notes === marker,
+              )
+            : [];
+        if (
+            editedRows.length !== 1 ||
+            String(editedRows[0].id || '') !== createdRowId ||
+            editedRows[0].start_datetime !== editedStart ||
+            editedRows[0].end_datetime !== editedEnd
+        ) {
+            fail('real_http_db: provider edit reload did not preserve row identity and changed interval');
+        }
         await page.waitForFunction(() => window.jQuery && jQuery.active === 0, undefined, {
             timeout: interactionTimeoutMs,
         });
@@ -495,8 +572,8 @@ async function main(input) {
             timeout: interactionTimeoutMs,
         });
         await createdEvent.waitFor({state: 'detached', timeout: interactionTimeoutMs});
-        if (blockedWritePaths.length > 0 || realProviderSaveCount !== 1 || realProviderDeleteCount !== 1) {
-            fail('real_http_db: browser did not perform exactly one bounded save and delete');
+        if (blockedWritePaths.length > 0 || realProviderSaveCount !== 2 || realProviderDeleteCount !== 1) {
+            fail('real_http_db: browser did not perform exactly two bounded saves and one delete');
         }
         return {
             provider_role_verified: true,
@@ -505,6 +582,8 @@ async function main(input) {
             real_http_db_save_verified: true,
             real_http_db_reload_verified: true,
             real_http_db_persisted_interval_verified: true,
+            real_http_db_same_row_verified: true,
+            real_http_db_edit_verified: true,
             real_http_db_delete_verified: true,
             real_http_db_cleanup_verified: true,
         };
