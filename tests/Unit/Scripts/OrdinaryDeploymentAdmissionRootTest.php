@@ -12,11 +12,15 @@ final class OrdinaryDeploymentAdmissionRootTest extends TestCase
 {
     private const LOCK_ROOT = '/var/lib/fh-deploy-orchestrator';
     private const LOCK = self::LOCK_ROOT . '/locks/fh-production-change.lock';
+    private const CANARY_ROOT = '/var/lib/fh-zero-surprise-canary';
+    private const CANARY_STATE = self::CANARY_ROOT . '/active.json';
 
     private string $fixture;
     private bool $createdLockRoot = false;
     private bool $createdLockDirectory = false;
     private bool $createdLock = false;
+    private bool $createdCanaryRoot = false;
+    private bool $createdCanaryState = false;
 
     protected function setUp(): void
     {
@@ -30,16 +34,37 @@ final class OrdinaryDeploymentAdmissionRootTest extends TestCase
         if (file_exists(self::LOCK) || is_link(self::LOCK)) {
             self::markTestSkipped('The production lock already exists; the root fixture will not replace it.');
         }
+        if (
+            is_link(self::CANARY_ROOT) ||
+            (file_exists(self::CANARY_ROOT) && !is_dir(self::CANARY_ROOT)) ||
+            file_exists(self::CANARY_STATE) ||
+            is_link(self::CANARY_STATE)
+        ) {
+            self::markTestSkipped('The canary state already exists; the root fixture will not replace it.');
+        }
 
         $this->fixture = '/root/ordinary-deploy-' . bin2hex(random_bytes(8));
         mkdir($this->fixture, 0700, true);
         $this->createLock();
+        if (!is_dir(self::CANARY_ROOT)) {
+            mkdir(self::CANARY_ROOT, 0700, true);
+            $this->createdCanaryRoot = true;
+        }
+        file_put_contents(self::CANARY_STATE, "{}\n");
+        chmod(self::CANARY_STATE, 0600);
+        $this->createdCanaryState = true;
     }
 
     protected function tearDown(): void
     {
         if (isset($this->fixture)) {
             $this->removeTree($this->fixture);
+        }
+        if ($this->createdCanaryState) {
+            @unlink(self::CANARY_STATE);
+        }
+        if ($this->createdCanaryRoot) {
+            @rmdir(self::CANARY_ROOT);
         }
         if ($this->createdLock) {
             @unlink(self::LOCK);
@@ -60,7 +85,10 @@ final class OrdinaryDeploymentAdmissionRootTest extends TestCase
 
         self::assertStringNotContainsString('maintenance_pending_v1.py', $output);
         self::assertStringNotContainsString('Maintenance admission core', $output);
-        self::assertStringContainsString('zero-surprise-canary', strtolower($output));
+        self::assertStringContainsString(
+            'active or unresolved zero-surprise canary blocks deployment',
+            strtolower($output),
+        );
         self::assertFileDoesNotExist($this->fixture . '/receipt.json');
     }
 
