@@ -31,8 +31,8 @@ repo checkout -> release archive -> upload -> staged extract -> predeploy gates 
 - `docs/release-gate-dashboard.md` and
   `docs/release-gate-booking-confirmation-pdf.md` document the lower-level gate
   checks used by the zero-surprise flow.
-- `docs/release-gate-provider-ui-smoke.md` records the currently suspended,
-  optional provider browser/PDF production smoke and its evidence gap.
+- `docs/release-gate-provider-ui-smoke.md` records the retired optional
+  provider browser/PDF smoke and its remaining evidence boundary.
 
 ## Build
 

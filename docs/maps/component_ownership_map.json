@@ -868,10 +868,6 @@
           "match": "exact_file"
         },
         {
-          "path": "application/libraries/Provider_ui_smoke_fixture.php",
-          "match": "exact_file"
-        },
-        {
           "path": "deploy_ea.sh",
           "match": "exact_file"
         },
@@ -893,14 +889,6 @@
         },
         {
           "path": "scripts/ops/prod_customers_ui_smoke.sh",
-          "match": "exact_file"
-        },
-        {
-          "path": "scripts/ops/prod_provider_ui_smoke.sh",
-          "match": "exact_file"
-        },
-        {
-          "path": "scripts/ops/provider_ui_smoke_principal.sh",
           "match": "exact_file"
         },
         {
@@ -943,15 +931,13 @@
       "key_files": [
         "application/controllers/Console.php",
         "application/libraries/Customers_ui_smoke_fixture.php",
-        "application/libraries/Provider_ui_smoke_fixture.php",
         ".github/workflows/ci.yml",
         "deploy_ea.sh",
         "scripts/ci/dashboard_integration_smoke.php",
         "scripts/ops/lib/DeployResultV1.php",
         "scripts/ops/lib/DeploymentContractV1.php",
         "scripts/release-gate/dashboard_release_gate.php",
-        "scripts/release-gate/customers_ui_smoke.php",
-        "scripts/release-gate/provider_ui_smoke.php"
+        "scripts/release-gate/customers_ui_smoke.php"
       ],
       "depends_on": [
         "api-v1",

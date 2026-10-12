@@ -81,14 +81,6 @@ php index.php console backup /path/to/backup/folder
 You can also provide a custom directory for your backup files. 
 
 
-##### Provider UI Smoke
-
-The root-only `provider_ui_smoke` lifecycle belongs to the currently suspended,
-optional production Provider UI smoke. Do not call it directly or through its
-wrappers under the ROB-812 mixed-version state. See
-[`release-gate-provider-ui-smoke.md`](release-gate-provider-ui-smoke.md) for
-the evidence gap and historical lifecycle design.
-
 ##### Customers UI Smoke
 
 The root-only `customers_ui_smoke` lifecycle manages four isolated dormant

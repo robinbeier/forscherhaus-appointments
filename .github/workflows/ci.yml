@@ -506,12 +506,6 @@ jobs:
               --log-junit storage/logs/ci/customers-ui-smoke-fixture-lifecycle.junit.xml \
               --log-otr storage/logs/ci/customers-ui-smoke-fixture-lifecycle.otr.xml \
               tests/Unit/Libraries/CustomersUiSmokeFixtureLifecycleTest.php || suite_status=1
-            APP_ENV=testing php -d memory_limit=512M vendor/bin/phpunit \
-              --fail-on-skipped \
-              --fail-on-empty-test-suite \
-              --log-junit storage/logs/ci/provider-ui-smoke-fixture-lifecycle.junit.xml \
-              --log-otr storage/logs/ci/provider-ui-smoke-fixture-lifecycle.otr.xml \
-              tests/Unit/Libraries/ProviderUiSmokeFixtureLifecycleTest.php || suite_status=1
             php vendor/bin/phpunit \
               --fail-on-skipped \
               --fail-on-empty-test-suite \
@@ -534,8 +528,6 @@ jobs:
             --otr-input storage/logs/ci/zero-surprise-canary-fixture.otr.xml \
             --input storage/logs/ci/customers-ui-smoke-fixture-lifecycle.junit.xml \
             --otr-input storage/logs/ci/customers-ui-smoke-fixture-lifecycle.otr.xml \
-            --input storage/logs/ci/provider-ui-smoke-fixture-lifecycle.junit.xml \
-            --otr-input storage/logs/ci/provider-ui-smoke-fixture-lifecycle.otr.xml \
             --input storage/logs/ci/csp-report-only-root.junit.xml \
             --otr-input storage/logs/ci/csp-report-only-root.otr.xml \
             > storage/logs/ci/calendar-canary-regressions.cases.json
@@ -551,8 +543,6 @@ jobs:
             storage/logs/ci/zero-surprise-canary-fixture.otr.xml
             storage/logs/ci/customers-ui-smoke-fixture-lifecycle.junit.xml
             storage/logs/ci/customers-ui-smoke-fixture-lifecycle.otr.xml
-            storage/logs/ci/provider-ui-smoke-fixture-lifecycle.junit.xml
-            storage/logs/ci/provider-ui-smoke-fixture-lifecycle.otr.xml
             storage/logs/ci/csp-report-only-root.junit.xml
             storage/logs/ci/csp-report-only-root.otr.xml
             storage/logs/ci/calendar-canary-regressions.cases.json

@@ -21,7 +21,7 @@ This map defines component boundaries, path ownership scope, and dependency edge
 | `integrations-sync` | Integrations & Sync | auth-session, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 6 | 1 |
 | `api-v1` | REST API v1 | auth-session, booking-public, integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 5 | 3 |
 | `shared-core` | Shared Core | None | 15 | 3 |
-| `platform-quality-tooling` | Platform, CI, Release Gates | api-v1, booking-public, dashboard-exports, installation-bootstrap, people-services-admin, settings-compliance, shared-core | 22 | 11 |
+| `platform-quality-tooling` | Platform, CI, Release Gates | api-v1, booking-public, dashboard-exports, installation-bootstrap, people-services-admin, settings-compliance, shared-core | 19 | 9 |
 
 ## Component Details
 
@@ -374,15 +374,12 @@ Path rules:
 - `application/core/Customers_ui_smoke_access_policy.php` (exact_file)
 - `application/core/Provider_ui_smoke_access_policy.php` (exact_file)
 - `application/libraries/Customers_ui_smoke_fixture.php` (exact_file)
-- `application/libraries/Provider_ui_smoke_fixture.php` (exact_file)
 - `deploy_ea.sh` (exact_file)
 - `scripts/ci` (directory)
 - `scripts/ops/customers_ui_smoke_principals.sh` (exact_file)
 - `scripts/ops/lib/DeployResultV1.php` (exact_file)
 - `scripts/ops/lib/DeploymentContractV1.php` (exact_file)
 - `scripts/ops/prod_customers_ui_smoke.sh` (exact_file)
-- `scripts/ops/prod_provider_ui_smoke.sh` (exact_file)
-- `scripts/ops/provider_ui_smoke_principal.sh` (exact_file)
 - `scripts/release-gate` (directory)
 - `.github/workflows/ci.yml` (exact_file)
 - `docs/release-gate-dashboard.md` (exact_file)
@@ -396,7 +393,6 @@ Path rules:
 Key files:
 - `application/controllers/Console.php`
 - `application/libraries/Customers_ui_smoke_fixture.php`
-- `application/libraries/Provider_ui_smoke_fixture.php`
 - `.github/workflows/ci.yml`
 - `deploy_ea.sh`
 - `scripts/ci/dashboard_integration_smoke.php`
@@ -404,4 +400,3 @@ Key files:
 - `scripts/ops/lib/DeploymentContractV1.php`
 - `scripts/release-gate/dashboard_release_gate.php`
 - `scripts/release-gate/customers_ui_smoke.php`
-- `scripts/release-gate/provider_ui_smoke.php`

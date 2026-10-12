@@ -33,7 +33,6 @@ class Console extends EA_Controller
 
         $this->load->library('instance');
         $this->load->library('customers_ui_smoke_fixture');
-        $this->load->library('provider_ui_smoke_fixture');
         $this->load->library('zero_surprise_canary_fixture');
 
         $this->load->model('admins_model');
@@ -120,57 +119,6 @@ class Console extends EA_Controller
     }
 
     /**
-     * Manage the isolated production provider UI smoke principal and short-lived fixture.
-     *
-     * Usage:
-     *
-     * php index.php console provider_ui_smoke install [credential-file] [state-file]
-     * php index.php console provider_ui_smoke verify [credential-file] [state-file]
-     * php index.php console provider_ui_smoke precredential-empty [credential-file] [state-file]
-     * php index.php console provider_ui_smoke activate [credential-file] [state-file]
-     * php index.php console provider_ui_smoke deactivate [credential-file] [state-file]
-     * php index.php console provider_ui_smoke remove [credential-file] [state-file]
-     */
-    public function provider_ui_smoke(string $action = ''): void
-    {
-        if (
-            !in_array($action, ['install', 'verify', 'precredential-empty', 'activate', 'deactivate', 'remove'], true)
-        ) {
-            $this->exit_provider_ui_smoke_error('invalid', 64);
-        }
-
-        // The credential-less proof is a server-local recovery operation. It
-        // must never become an unprivileged application-facing probe.
-        if ($action === 'precredential-empty' && (!function_exists('posix_geteuid') || posix_geteuid() !== 0)) {
-            $this->exit_provider_ui_smoke_error('root_required', 64);
-        }
-
-        $credential_file = $GLOBALS['argv'][4] ?? Provider_ui_smoke_fixture::DEFAULT_CREDENTIAL_FILE;
-        $state_file = $GLOBALS['argv'][5] ?? Provider_ui_smoke_fixture::DEFAULT_STATE_FILE;
-
-        if (!is_string($credential_file) || !is_string($state_file) || isset($GLOBALS['argv'][6])) {
-            $this->exit_provider_ui_smoke_error('invalid', 64);
-        }
-
-        try {
-            $state = $this->provider_ui_smoke_fixture->run($action, $credential_file, $state_file);
-
-            response('provider_ui_smoke action=' . $action . ' state=' . $state . ' result=ok' . PHP_EOL);
-        } catch (Throwable) {
-            $this->exit_provider_ui_smoke_error($action, 1);
-        }
-    }
-
-    /**
-     * Emit the generic lifecycle error before exiting; response() is not flushed after exit().
-     */
-    private function exit_provider_ui_smoke_error(string $action, int $exit_code): never
-    {
-        fwrite(STDOUT, 'provider_ui_smoke action=' . $action . ' state=error result=error' . PHP_EOL);
-        exit($exit_code);
-    }
-
-    /**
      * Manage the isolated Customers UI smoke principals.
      */
     public function customers_ui_smoke(string $action = ''): void
@@ -247,7 +195,6 @@ class Console extends EA_Controller
             '⇾ php index.php console install',
             '⇾ php index.php console backup',
             '⇾ php index.php console customers_ui_smoke <install|verify|activate|deactivate|remove>',
-            '⇾ php index.php console provider_ui_smoke <install|verify|activate|deactivate|remove>',
             '⇾ php index.php console zero_surprise_canary <activate|verify|deactivate>',
             '',
             '',

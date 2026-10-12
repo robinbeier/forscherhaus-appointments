@@ -54,7 +54,7 @@ This file stays intentionally short. It is a map, not a second runbook.
 | Canonical architecture/ownership map source | `docs/maps/component_ownership_map.json` | Machine-readable source of truth. |
 | Database lock hierarchy | `docs/database-lock-order.md` | Source-grounded parent-first lock order, transaction ownership, productive paths, and known narrower delete subsets. |
 | Write-path contract harness | `docs/ci-write-contracts.md` | Focused contract-smoke reference. |
-| Release gates | `docs/release-gate-zero-surprise.md`, `docs/release-gate-dashboard.md`, `docs/release-gate-booking-confirmation-pdf.md`, `docs/release-gate-provider-ui-smoke.md`, `docs/release-gate-customers-ui-smoke.md` | Dedicated gate behavior and usage. |
+| Release gates | `docs/release-gate-zero-surprise.md`, `docs/release-gate-dashboard.md`, `docs/release-gate-booking-confirmation-pdf.md`, `docs/release-gate-customers-ui-smoke.md` | Active gate behavior and usage. The retired Provider UI smoke is documented separately for historical evidence only. |
 
 ## Validation Routing
 
@@ -70,7 +70,6 @@ This file stays intentionally short. It is a map, not a second runbook.
 - Scope-specific checks:
   - root/host prerequisite contract: [Docker test guidance](docker.md#linux-roothost-tests)
   - integration smoke browser evidence: [Dashboard release gate](release-gate-dashboard.md)
-  - production provider UI smoke: [Provider UI smoke release gate](release-gate-provider-ui-smoke.md)
   - isolated ordinary defense-cycle checks: [Defense-cycle evidence](release-gate-defense-cycle.md)
   - production Customers UI smoke: [Customers UI smoke release gate](release-gate-customers-ui-smoke.md)
   - architecture boundaries entry points: [AGENTS.md](../AGENTS.md)

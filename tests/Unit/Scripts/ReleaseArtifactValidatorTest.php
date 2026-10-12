@@ -80,65 +80,6 @@ final class ReleaseArtifactValidatorTest extends TestCase
         self::assertContains('assets/js/pages/login.min.js', ReleaseArtifactValidator::missingArchivePaths($entries));
     }
 
-    public function testRequiredPathsCoverCompleteProviderUiSmokeRuntimeSurface(): void
-    {
-        $requiredPaths = ReleaseArtifactValidator::requiredPaths();
-
-        $providerUiSmokePaths = [
-            'application/controllers/Booking.php',
-            'application/controllers/Console.php',
-            'application/controllers/Dashboard.php',
-            'application/controllers/Dashboard_export.php',
-            'application/controllers/Login.php',
-            'application/core/EA_Controller.php',
-            'application/core/Provider_ui_smoke_access_policy.php',
-            'application/libraries/Provider_ui_smoke_fixture.php',
-            'application/views/exports/provider_parent_appointments_pdf.php',
-            'application/views/exports/provider_preparation_pdf.php',
-            'application/views/pages/dashboard_teacher.php',
-            'scripts/ops/lib/prod_common.sh',
-            'scripts/ops/prod_provider_ui_smoke.sh',
-            'scripts/ops/provider_ui_smoke_principal.sh',
-            'scripts/ops/libexec/provider_ui_smoke_admission_v1.py',
-            'scripts/release-gate/lib/GateAssertions.php',
-            'scripts/release-gate/lib/GateHttpClient.php',
-            'scripts/release-gate/lib/GateProcessRunner.php',
-            'scripts/release-gate/lib/PlaywrightBrowserSelection.php',
-            'scripts/release-gate/lib/PlaywrightCookieRecords.php',
-            'scripts/release-gate/lib/ProviderUiSmokeContract.php',
-            'scripts/release-gate/lib/ProviderUiSmokeCredentials.php',
-            'scripts/release-gate/lib/ProviderUiSmokeDiagnostics.php',
-            'scripts/release-gate/lib/ProviderUiSmokePdfInspector.php',
-            'scripts/release-gate/lib/ProviderUiSmokeRunCodeResult.php',
-            'scripts/release-gate/playwright/playwright_cli.sh',
-            'scripts/release-gate/playwright/provider_ui_smoke.js',
-            'scripts/release-gate/provider_ui_smoke.php',
-            'assets/js/http/dashboard_http_client.min.js',
-            'assets/js/pages/dashboard_teacher.min.js',
-        ];
-
-        foreach ($providerUiSmokePaths as $providerUiSmokePath) {
-            self::assertContains($providerUiSmokePath, $requiredPaths);
-        }
-
-        $missingPath = 'scripts/release-gate/playwright/provider_ui_smoke.js';
-        $entries = array_values(
-            array_filter($this->completeStaticRequiredPaths(), static fn(string $path): bool => $path !== $missingPath),
-        );
-
-        self::assertSame([$missingPath], ReleaseArtifactValidator::missingArchivePaths($entries));
-
-        $missingHelper = 'scripts/release-gate/lib/ProviderUiSmokeDiagnostics.php';
-        $entries = array_values(
-            array_filter(
-                $this->completeStaticRequiredPaths(),
-                static fn(string $path): bool => $path !== $missingHelper,
-            ),
-        );
-
-        self::assertSame([$missingHelper], ReleaseArtifactValidator::missingArchivePaths($entries));
-    }
-
     public function testRequiredPathsIncludeZeroSurpriseImageCleanupRuntime(): void
     {
         $path = 'scripts/release-gate/lib/ZeroSurpriseImageCleanup.php';
@@ -238,7 +179,6 @@ final class ReleaseArtifactValidatorTest extends TestCase
 
             $invalid = ReleaseArtifactValidator::missingDirectoryPaths($root);
             self::assertContains('scripts/ops/lib/prod_common.sh', $invalid);
-            self::assertContains('scripts/ops/prod_provider_ui_smoke.sh', $invalid);
         } finally {
             $this->removeDirectory($root);
         }

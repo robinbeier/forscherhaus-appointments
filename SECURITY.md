@@ -500,11 +500,11 @@ servers, verify their storage-deny rule
 and the absence of those files before release. The isolated
 `ProviderPdfExportHttpTest` covers two synthetic providers and the
 controller-to-renderer HTML handoff. The optional production Provider UI smoke
-is suspended under ROB-812; it currently supplies no real-rendering evidence.
+was retired under ROB-812. Its synthetic principal and live credential were
+removed; its browser gate and lifecycle source are no longer supported.
 The provider-specific browser journey and both printable PDFs on production
-remain unverified. Even when resumed with its reserved synthetic identity,
-that smoke would not prove cross-provider isolation or stale-role denial in
-production.
+remain unverified. The retired smoke did not prove cross-provider isolation or
+stale-role denial in production.
 
 The local Docker Nginx mounts the repository as its document root. It must
 not serve dotfiles, internal source/data directories, or arbitrary files at
