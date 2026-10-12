@@ -29,6 +29,7 @@ App.Components.UnavailabilitiesModal = (function () {
     const $reloadAppointments = $('#reload-appointments');
 
     const moment = window.moment;
+    let saveInFlight = false;
 
     /**
      * Update the displayed timezone.
@@ -62,6 +63,10 @@ App.Components.UnavailabilitiesModal = (function () {
          * Stores the unavailability period changes or inserts a new record.
          */
         $saveUnavailability.on('click', () => {
+            if (saveInFlight) {
+                return;
+            }
+
             $unavailabilitiesModal.find('.modal-message').addClass('d-none');
             $unavailabilitiesModal.find('.is-invalid').removeClass('is-invalid');
 
@@ -114,6 +119,9 @@ App.Components.UnavailabilitiesModal = (function () {
             }
 
             const successCallback = () => {
+                saveInFlight = false;
+                $saveUnavailability.prop('disabled', false);
+
                 // Display success message to the user.
                 App.Layouts.Backend.displayNotification(lang('unavailability_saved'));
 
@@ -125,7 +133,18 @@ App.Components.UnavailabilitiesModal = (function () {
                 $reloadAppointments.trigger('click');
             };
 
-            App.Http.Calendar.saveUnavailability(unavailability, successCallback, null);
+            saveInFlight = true;
+            $saveUnavailability.prop('disabled', true);
+
+            const request = App.Http.Calendar.saveUnavailability(unavailability, successCallback, null);
+
+            request.fail(() => {
+                // This clears only the UI guard after a settled request. Whether a
+                // transport failure committed server-side remains a separate
+                // reconciliation/idempotency limitation; no retry is automatic here.
+                saveInFlight = false;
+                $saveUnavailability.prop('disabled', false);
+            });
         });
 
         /**
