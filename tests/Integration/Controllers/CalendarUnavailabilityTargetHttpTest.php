@@ -66,6 +66,48 @@ final class CalendarUnavailabilityTargetHttpTest extends TestCase
         self::assertSame($payload['end_datetime'], $row['end_datetime']);
     }
 
+    public function testCalendarWritesRequireCsrfBeforeMutatingOwnedRows(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $client = $this->authenticatedClient();
+        $fixture->appointment();
+        $controlPayload = $this->payload($fixture->providerId, '_csrf_control');
+
+        $control = $client->post('calendar/save_unavailability', ['unavailability' => $controlPayload]);
+        self::assertSame(200, $control->statusCode, $control->body);
+        self::assertTrue(
+            (bool) (json_decode($control->body, true, 512, JSON_THROW_ON_ERROR)['success'] ?? false),
+            $control->body,
+        );
+        $controlRow = get_instance()
+            ->db->get_where('appointments', [
+                'notes' => $controlPayload['notes'],
+                'id_users_provider' => $fixture->providerId,
+                'is_unavailability' => 1,
+            ])
+            ->row_array();
+        self::assertNotEmpty($controlRow);
+        $beforeMissingCsrf = $this->mutationSnapshot();
+
+        $missingCsrf = $client->post(
+            'calendar/save_unavailability',
+            ['unavailability' => $this->payload($fixture->providerId, '_csrf_missing')],
+            null,
+            false,
+        );
+        self::assertSame(403, $missingCsrf->statusCode, $missingCsrf->body);
+        self::assertSame($beforeMissingCsrf, $this->mutationSnapshot());
+
+        $beforeInvalidCsrf = $this->mutationSnapshot();
+        $invalidCsrf = $client->post('calendar/delete_unavailability', [
+            'unavailability_id' => (int) $controlRow['id'],
+            'csrf_token' => 'invalid-synthetic-csrf',
+        ]);
+        self::assertSame(403, $invalidCsrf->statusCode, $invalidCsrf->body);
+        self::assertSame($beforeInvalidCsrf, $this->mutationSnapshot());
+    }
+
     public function testCustomerAndUnknownProviderIdsAreRejectedWithoutPartialMutation(): void
     {
         $fixture = $this->fixture;
