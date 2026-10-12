@@ -29,6 +29,7 @@ App.Utils.CalendarTableView = (function () {
     const $unavailabilitiesModal = $('#unavailabilities-modal');
     const $header = $('#header');
     const $footer = $('#footer');
+    const pendingUnavailabilitySaves = new Set();
     let $filterProvider;
     let $filterService;
     let $selectDate;
@@ -1611,6 +1612,17 @@ App.Utils.CalendarTableView = (function () {
             // Update appointment data.
             App.Http.Calendar.saveAppointment(appointment, null, successCallback);
         } else {
+            const unavailabilityId = String(info.event.extendedProps.data.id);
+
+            if (pendingUnavailabilitySaves.has(unavailabilityId)) {
+                info.revert();
+                App.Layouts.Backend.displayNotification(lang('error'));
+                return;
+            }
+
+            pendingUnavailabilitySaves.add(unavailabilityId);
+            const previousData = {...info.event.extendedProps.data};
+
             // Update unavailability time period.
             const unavailability = {
                 id: info.event.extendedProps.data.id,
@@ -1623,6 +1635,8 @@ App.Utils.CalendarTableView = (function () {
 
             // Define success callback function.
             successCallback = () => {
+                pendingUnavailabilitySaves.delete(unavailabilityId);
+
                 // Display success notification to user.
                 const undoFunction = () => {
                     unavailability.end_datetime = info.event.extendedProps.data.end_datetime = moment(
@@ -1651,7 +1665,13 @@ App.Utils.CalendarTableView = (function () {
                 info.event.setProp('data', info.event.extendedProps.data);
             };
 
-            App.Http.Calendar.saveUnavailability(unavailability, successCallback);
+            App.Http.Calendar.saveUnavailability(unavailability, successCallback, () => {
+                pendingUnavailabilitySaves.delete(unavailabilityId);
+                Object.assign(info.event.extendedProps.data, previousData);
+                info.event.setProp('data', info.event.extendedProps.data);
+                info.revert();
+                App.Layouts.Backend.displayNotification(lang('service_communication_error'));
+            });
         }
     }
 
@@ -1736,6 +1756,17 @@ App.Utils.CalendarTableView = (function () {
             // Update appointment data.
             App.Http.Calendar.saveAppointment(appointment, null, successCallback);
         } else {
+            const unavailabilityId = String(info.event.extendedProps.data.id);
+
+            if (pendingUnavailabilitySaves.has(unavailabilityId)) {
+                info.revert();
+                App.Layouts.Backend.displayNotification(lang('error'));
+                return;
+            }
+
+            pendingUnavailabilitySaves.add(unavailabilityId);
+            const previousData = {...info.event.extendedProps.data};
+
             // Update unavailability time period.
             const unavailability = {
                 id: info.event.extendedProps.data.id,
@@ -1745,6 +1776,8 @@ App.Utils.CalendarTableView = (function () {
             };
 
             successCallback = () => {
+                pendingUnavailabilitySaves.delete(unavailabilityId);
+
                 const undoFunction = () => {
                     unavailability.start_datetime = moment(unavailability.start_datetime)
                         .add({days: -info.delta.days, milliseconds: -info.delta.milliseconds})
@@ -1776,7 +1809,13 @@ App.Utils.CalendarTableView = (function () {
                 $footer.css('position', 'static'); // Footer position fix.
             };
 
-            App.Http.Calendar.saveUnavailability(unavailability, successCallback);
+            App.Http.Calendar.saveUnavailability(unavailability, successCallback, () => {
+                pendingUnavailabilitySaves.delete(unavailabilityId);
+                Object.assign(info.event.extendedProps.data, previousData);
+                info.event.setProp('data', info.event.extendedProps.data);
+                info.revert();
+                App.Layouts.Backend.displayNotification(lang('service_communication_error'));
+            });
         }
     }
 

@@ -30,6 +30,7 @@ App.Utils.CalendarDefaultView = (function () {
     const FILTER_TYPE_ALL = 'all';
     const FILTER_TYPE_PROVIDER = 'provider';
     const FILTER_TYPE_SERVICE = 'service';
+    const pendingUnavailabilitySaves = new Set();
     const moment = window.moment;
 
     let $popoverTarget;
@@ -865,6 +866,17 @@ App.Utils.CalendarDefaultView = (function () {
             // Update appointment data.
             App.Http.Calendar.saveAppointment(appointment, null, successCallback);
         } else {
+            const unavailabilityId = String(info.event.extendedProps.data.id);
+
+            if (pendingUnavailabilitySaves.has(unavailabilityId)) {
+                info.revert();
+                App.Layouts.Backend.displayNotification(lang('error'));
+                return;
+            }
+
+            pendingUnavailabilitySaves.add(unavailabilityId);
+            const previousData = {...info.event.extendedProps.data};
+
             // Update unavailability time period.
             const unavailability = {
                 id: info.event.extendedProps.data.id,
@@ -877,6 +889,8 @@ App.Utils.CalendarDefaultView = (function () {
 
             // Define success callback function.
             successCallback = () => {
+                pendingUnavailabilitySaves.delete(unavailabilityId);
+
                 // Display success notification to user.
                 const undoFunction = () => {
                     unavailability.end_datetime = info.event.extendedProps.data.end_datetime = moment(
@@ -903,7 +917,13 @@ App.Utils.CalendarDefaultView = (function () {
                 info.event.setProp('data', info.event.extendedProps.data);
             };
 
-            App.Http.Calendar.saveUnavailability(unavailability, successCallback, null);
+            App.Http.Calendar.saveUnavailability(unavailability, successCallback, () => {
+                pendingUnavailabilitySaves.delete(unavailabilityId);
+                Object.assign(info.event.extendedProps.data, previousData);
+                info.event.setProp('data', info.event.extendedProps.data);
+                info.revert();
+                App.Layouts.Backend.displayNotification(lang('service_communication_error'));
+            });
         }
     }
 
@@ -1057,6 +1077,17 @@ App.Utils.CalendarDefaultView = (function () {
             // Update appointment data.
             App.Http.Calendar.saveAppointment(appointment, null, successCallback);
         } else {
+            const unavailabilityId = String(info.event.extendedProps.data.id);
+
+            if (pendingUnavailabilitySaves.has(unavailabilityId)) {
+                info.revert();
+                App.Layouts.Backend.displayNotification(lang('error'));
+                return;
+            }
+
+            pendingUnavailabilitySaves.add(unavailabilityId);
+            const previousData = {...info.event.extendedProps.data};
+
             // Update unavailability time period.
             const unavailability = {
                 id: info.event.extendedProps.data.id,
@@ -1066,6 +1097,8 @@ App.Utils.CalendarDefaultView = (function () {
             };
 
             successCallback = () => {
+                pendingUnavailabilitySaves.delete(unavailabilityId);
+
                 const undoFunction = () => {
                     unavailability.start_datetime = moment(unavailability.start_datetime)
                         .add({days: -info.delta.days, milliseconds: -info.delta.milliseconds})
@@ -1095,7 +1128,13 @@ App.Utils.CalendarDefaultView = (function () {
                 ]);
             };
 
-            App.Http.Calendar.saveUnavailability(unavailability, successCallback);
+            App.Http.Calendar.saveUnavailability(unavailability, successCallback, () => {
+                pendingUnavailabilitySaves.delete(unavailabilityId);
+                Object.assign(info.event.extendedProps.data, previousData);
+                info.event.setProp('data', info.event.extendedProps.data);
+                info.revert();
+                App.Layouts.Backend.displayNotification(lang('service_communication_error'));
+            });
         }
     }
 
