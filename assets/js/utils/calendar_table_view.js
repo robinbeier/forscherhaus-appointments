@@ -30,6 +30,7 @@ App.Utils.CalendarTableView = (function () {
     const $header = $('#header');
     const $footer = $('#footer');
     const pendingUnavailabilitySaves = new Set();
+    const pendingUnavailabilityUndos = new Set();
     let $filterProvider;
     let $filterService;
     let $selectDate;
@@ -1614,7 +1615,7 @@ App.Utils.CalendarTableView = (function () {
         } else {
             const unavailabilityId = String(info.event.extendedProps.data.id);
 
-            if (pendingUnavailabilitySaves.has(unavailabilityId)) {
+            if (pendingUnavailabilitySaves.has(unavailabilityId) || pendingUnavailabilityUndos.has(unavailabilityId)) {
                 info.revert();
                 App.Layouts.Backend.displayNotification(lang('error'));
                 return;
@@ -1639,17 +1640,31 @@ App.Utils.CalendarTableView = (function () {
 
                 // Display success notification to user.
                 const undoFunction = () => {
-                    unavailability.end_datetime = info.event.extendedProps.data.end_datetime = moment(
-                        unavailability.end_datetime,
-                    )
-                        .add({days: -info.endDelta.days, milliseconds: -info.endDelta.milliseconds})
-                        .format('YYYY-MM-DD HH:mm:ss');
+                    if (pendingUnavailabilityUndos.has(unavailabilityId)) {
+                        return;
+                    }
 
-                    App.Http.Calendar.saveUnavailability(unavailability).done(() => {
-                        $notification.hide('blind');
-                    });
+                    pendingUnavailabilityUndos.add(unavailabilityId);
 
-                    info.revert();
+                    const undoUnavailability = {
+                        ...unavailability,
+                        start_datetime: previousData.start_datetime,
+                        end_datetime: previousData.end_datetime,
+                    };
+
+                    App.Http.Calendar.saveUnavailability(undoUnavailability)
+                        .done(() => {
+                            pendingUnavailabilityUndos.delete(unavailabilityId);
+                            Object.assign(info.event.extendedProps.data, previousData);
+                            info.event.setProp('data', info.event.extendedProps.data);
+                            info.revert();
+                            $notification.hide('blind');
+                        })
+                        .fail(() => {
+                            pendingUnavailabilityUndos.delete(unavailabilityId);
+                            App.Layouts.Backend.displayNotification(lang('service_communication_error'));
+                            $reloadAppointments.trigger('click');
+                        });
                 };
 
                 App.Layouts.Backend.displayNotification(lang('unavailability_updated'), [
@@ -1758,7 +1773,7 @@ App.Utils.CalendarTableView = (function () {
         } else {
             const unavailabilityId = String(info.event.extendedProps.data.id);
 
-            if (pendingUnavailabilitySaves.has(unavailabilityId)) {
+            if (pendingUnavailabilitySaves.has(unavailabilityId) || pendingUnavailabilityUndos.has(unavailabilityId)) {
                 info.revert();
                 App.Layouts.Backend.displayNotification(lang('error'));
                 return;
@@ -1777,26 +1792,35 @@ App.Utils.CalendarTableView = (function () {
 
             successCallback = () => {
                 pendingUnavailabilitySaves.delete(unavailabilityId);
+                Object.assign(info.event.extendedProps.data, unavailability);
+                info.event.setProp('data', info.event.extendedProps.data);
 
                 const undoFunction = () => {
-                    unavailability.start_datetime = moment(unavailability.start_datetime)
-                        .add({days: -info.delta.days, milliseconds: -info.delta.milliseconds})
-                        .format('YYYY-MM-DD HH:mm:ss');
+                    if (pendingUnavailabilityUndos.has(unavailabilityId)) {
+                        return;
+                    }
 
-                    unavailability.end_datetime = moment(unavailability.end_datetime)
-                        .add({days: -info.delta.days, milliseconds: -info.delta.milliseconds})
-                        .format('YYYY-MM-DD HH:mm:ss');
+                    pendingUnavailabilityUndos.add(unavailabilityId);
 
-                    unavailability.is_unavailability = 1;
+                    const undoUnavailability = {
+                        ...unavailability,
+                        start_datetime: previousData.start_datetime,
+                        end_datetime: previousData.end_datetime,
+                    };
 
-                    info.event.extendedProps.data.start_datetime = unavailability.start_datetime;
-                    info.event.extendedProps.data.end_datetime = unavailability.end_datetime;
-
-                    App.Http.Calendar.saveUnavailability(unavailability).done(() => {
-                        $notification.hide('blind');
-                    });
-
-                    info.revert();
+                    App.Http.Calendar.saveUnavailability(undoUnavailability)
+                        .done(() => {
+                            pendingUnavailabilityUndos.delete(unavailabilityId);
+                            Object.assign(info.event.extendedProps.data, previousData);
+                            info.event.setProp('data', info.event.extendedProps.data);
+                            info.revert();
+                            $notification.hide('blind');
+                        })
+                        .fail(() => {
+                            pendingUnavailabilityUndos.delete(unavailabilityId);
+                            App.Layouts.Backend.displayNotification(lang('service_communication_error'));
+                            $reloadAppointments.trigger('click');
+                        });
                 };
 
                 App.Layouts.Backend.displayNotification(lang('unavailability_updated'), [

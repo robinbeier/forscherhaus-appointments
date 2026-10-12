@@ -7,7 +7,7 @@ const test = require('node:test');
 
 const modules = ['assets/js/utils/calendar_default_view.js', 'assets/js/utils/calendar_table_view.js'];
 
-function makeJQueryObject() {
+function makeJQueryObject(triggers) {
     const object = {
         0: {
             addEventListener: () => {},
@@ -63,7 +63,8 @@ function makeJQueryObject() {
         text() {
             return this;
         },
-        trigger() {
+        trigger(name) {
+            triggers.push(name);
             return this;
         },
         val() {
@@ -83,7 +84,9 @@ function loadCallbacks(modulePath) {
 
     const savedRequests = [];
     const notifications = [];
-    const jqueryObject = makeJQueryObject();
+    const notificationActions = [];
+    const triggers = [];
+    const jqueryObject = makeJQueryObject(triggers);
     const calendar = {
         Calendar: function () {
             return {
@@ -115,14 +118,24 @@ function loadCallbacks(modulePath) {
                     saveAppointment() {},
                     saveUnavailability(...args) {
                         savedRequests.push(args);
-                        return {};
+                        return {
+                            done(callback) {
+                                args.doneCallback = callback;
+                                return this;
+                            },
+                            fail(callback) {
+                                args.failCallback = callback;
+                                return this;
+                            },
+                        };
                     },
                 },
             },
             Layouts: {
                 Backend: {
-                    displayNotification(message) {
+                    displayNotification(message, actions) {
                         notifications.push(message);
+                        notificationActions.push(actions || []);
                     },
                 },
             },
@@ -168,7 +181,9 @@ function loadCallbacks(modulePath) {
         callbacks: context.App.Utils[moduleName].__test,
         getRequest: () => savedRequests.at(-1),
         getRequests: () => savedRequests,
+        getUndo: () => notificationActions.at(-1).find((action) => action.label === 'undo')?.function,
         notifications,
+        triggers,
     };
 }
 
@@ -274,4 +289,104 @@ for (const modulePath of modules) {
         calendar.callbacks.onEventDrop(info);
         assert.equal(calendar.getRequests().length, 2);
     });
+
+    for (const callbackName of ['onEventResize', 'onEventDrop']) {
+        test(`${label} reconciles a failed ${callbackName} undo without claiming it succeeded`, () => {
+            const calendar = loadCallbacks(modulePath);
+            const info = createInfo(callbackName);
+
+            calendar.callbacks[callbackName](info);
+            calendar.getRequest()[1]();
+            const persistedData = {...info.event.extendedProps.data};
+            const undo = calendar.getUndo();
+            assert.equal(typeof undo, 'function');
+
+            undo();
+            undo();
+            assert.equal(calendar.getRequests().length, 2, 'an in-flight undo must not be submitted twice');
+            assert.equal(info.revertCalls, 0, 'the event must not revert before the undo write succeeds');
+            assert.deepEqual(info.event.extendedProps.data, persistedData);
+
+            const undoRequest = calendar.getRequest();
+            assert.equal(undoRequest[0].id, info.originalData.id);
+            assert.equal(undoRequest[0].start_datetime, info.originalData.start_datetime);
+            assert.equal(undoRequest[0].end_datetime, info.originalData.end_datetime);
+            assert.equal(undoRequest[0].id_users_provider, info.originalData.id_users_provider);
+            assert.deepEqual(Object.keys(undoRequest[0]).sort(), [
+                'end_datetime',
+                'id',
+                'id_users_provider',
+                'start_datetime',
+            ]);
+            assert.equal(typeof undoRequest.failCallback, 'function');
+            undoRequest.failCallback();
+            assert.equal(calendar.notifications.at(-1), 'service_communication_error');
+            assert.equal(calendar.triggers.at(-1), 'click', 'reload the authoritative calendar after a failed undo');
+            assert.equal(info.revertCalls, 0, 'a failed undo must not revert the event locally');
+            assert.deepEqual(info.event.extendedProps.data, persistedData);
+        });
+
+        test(`${label} reverts a ${callbackName} event only after its undo write succeeds`, () => {
+            const calendar = loadCallbacks(modulePath);
+            const info = createInfo(callbackName);
+
+            calendar.callbacks[callbackName](info);
+            calendar.getRequest()[1]();
+            calendar.getUndo()();
+            assert.equal(info.revertCalls, 0);
+
+            const undoRequest = calendar.getRequest();
+            assert.equal(typeof undoRequest.doneCallback, 'function');
+            undoRequest.doneCallback();
+            assert.equal(info.revertCalls, 1);
+            assert.deepEqual(info.event.extendedProps.data, info.originalData);
+            assert.deepEqual(calendar.notifications, ['unavailability_updated']);
+            assert.deepEqual(calendar.triggers, []);
+        });
+
+        test(`${label} rejects an edit while ${callbackName} undo is in flight`, () => {
+            const calendar = loadCallbacks(modulePath);
+            const info = createInfo(callbackName);
+
+            calendar.callbacks[callbackName](info);
+            calendar.getRequest()[1]();
+            calendar.getUndo()();
+
+            const competingEdit = createInfo(callbackName);
+            competingEdit.event.extendedProps.data.id = info.originalData.id;
+            calendar.callbacks[callbackName](competingEdit);
+
+            assert.equal(calendar.getRequests().length, 2, 'an edit must not race an in-flight undo');
+            assert.equal(competingEdit.revertCalls, 1);
+            assert.equal(calendar.notifications.at(-1), 'error');
+        });
+
+        if (callbackName === 'onEventDrop') {
+            test(`${label} uses the latest prior state for a sequential drop undo`, () => {
+                const calendar = loadCallbacks(modulePath);
+                const info = createInfo(callbackName);
+
+                calendar.callbacks.onEventDrop(info);
+                calendar.getRequest()[1]();
+
+                info.event.start = new Date('2026-10-12T11:00:00');
+                info.event.end = new Date('2026-10-12T12:00:00');
+                calendar.callbacks.onEventDrop(info);
+                calendar.getRequest()[1]();
+
+                const secondUndo = calendar.getUndo();
+                secondUndo();
+                const secondUndoRequest = calendar.getRequest();
+
+                assert.equal(secondUndoRequest[0].id, info.originalData.id);
+                assert.equal(secondUndoRequest[0].start_datetime, '2026-10-12 10:00:00');
+                assert.equal(secondUndoRequest[0].end_datetime, '2026-10-12 11:00:00');
+
+                secondUndoRequest.doneCallback();
+                assert.deepEqual(info.event.extendedProps.data.start_datetime, '2026-10-12 10:00:00');
+                assert.deepEqual(info.event.extendedProps.data.end_datetime, '2026-10-12 11:00:00');
+                assert.equal(info.revertCalls, 1);
+            });
+        }
+    }
 }
