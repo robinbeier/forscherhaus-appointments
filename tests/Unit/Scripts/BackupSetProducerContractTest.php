@@ -155,6 +155,30 @@ final class BackupSetProducerContractTest extends TestCase
         self::assertStringContainsString('observed_gzip_mtime != expected_gzip_mtime', $this->helper);
     }
 
+    public function testOrdinaryProbeRecoveryGateRunsAfterTheSharedActivityGate(): void
+    {
+        foreach (
+            [
+                "ORDINARY_STATE_ROOT = '/var/lib/fh-defense-ordinary'",
+                "'run.pending'",
+                "'request-unconfirmed'",
+                "'defense-verification.json.tmp'",
+                'def assert_no_pending_ordinary_probe():',
+                'assert_no_pending_ordinary_probe()',
+                'reject(75)',
+            ]
+            as $needle
+        ) {
+            self::assertStringContainsString($needle, $this->helper, $needle);
+        }
+        $main = substr($this->helper, (int) strpos($this->helper, 'def main():'));
+        $activity = strpos($main, 'assert_activity_gate(orchestrator)');
+        $ordinary = strpos($main, 'assert_no_pending_ordinary_probe()');
+        self::assertIsInt($activity);
+        self::assertIsInt($ordinary);
+        self::assertLessThan($ordinary, $activity);
+    }
+
     public function testDocumentationFreezesManualTcpOnlyOperation(): void
     {
         $docs = (string) file_get_contents($this->root . '/docs/ops/production-backup-set-producer.md');

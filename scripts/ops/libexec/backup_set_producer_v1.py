@@ -22,6 +22,7 @@ import time
 SCHEMA = 'production_backup_set_result.v1'
 BACKUP_ROOT = '/root/backups/easyappointments'
 ORCHESTRATOR_ROOT = '/var/lib/fh-deploy-orchestrator'
+ORDINARY_STATE_ROOT = '/var/lib/fh-defense-ordinary'
 GLOBAL_LOCK_LEAF = 'fh-production-change.lock'
 PRIVATE_LOCK_LEAF = '.backup-set-producer.lock'
 CREDENTIALS = '/etc/fh/backup-set-producer.cnf'
@@ -50,6 +51,15 @@ STAGING_LEAF = re.compile(r'\.backup-set-producer-[0-9a-f]{32}\.tmp\Z')
 MARKER_TEMP = re.compile(r'\.last_backup_success\.utc\.tmp-[0-9a-f]{32}\Z')
 HANDOFF_TEMP = re.compile(r'\.last_backup_set\.json\.tmp-[0-9a-f]{32}\Z')
 CONTINUITY_STATE_TEMP = re.compile(r'\.backup_continuity_state\.json\.tmp-[0-9a-f]{32}\Z')
+ORDINARY_PENDING_ARTIFACTS = (
+    'run.pending',
+    'request-unconfirmed',
+    'state.json',
+    'defense-verification.json',
+    'defense-verification.json.tmp',
+    'sessions.json',
+    'sessions.json.tmp',
+)
 RENAME_NOREPLACE = 1
 LIBC = ctypes.CDLL(None, use_errno=True)
 
@@ -351,6 +361,22 @@ def assert_activity_gate(orchestrator):
                 os.close(run)
     finally:
         os.close(runs)
+
+
+def assert_no_pending_ordinary_probe():
+    try:
+        state = open_absolute_directory(ORDINARY_STATE_ROOT, exact_mode=0o700)
+    except FileNotFoundError:
+        return
+    try:
+        for artifact in ORDINARY_PENDING_ARTIFACTS:
+            try:
+                os.stat(artifact, dir_fd=state, follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            reject(75)
+    finally:
+        os.close(state)
 
 
 def read_required_history_file(parent, leaf, maximum):
@@ -1001,6 +1027,7 @@ def main():
         backups = open_absolute_directory(BACKUP_ROOT)
         private_lock = open_lock(backups, PRIVATE_LOCK_LEAF, create=True)
         assert_activity_gate(orchestrator)
+        assert_no_pending_ordinary_probe()
         reconcile_temporary_files(backups)
         expected_marker = stable_marker(backups)
         expected_state = stable_continuity_state(backups, missing_ok=True)

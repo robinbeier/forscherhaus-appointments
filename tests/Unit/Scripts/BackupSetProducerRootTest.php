@@ -31,6 +31,7 @@ final class BackupSetProducerRootTest extends TestCase
         mkdir($this->root . '/backups', 0700);
         mkdir($this->root . '/orchestrator', 0700);
         mkdir($this->root . '/orchestrator/locks', 0700);
+        mkdir($this->root . '/ordinary', 0700);
         touch($this->root . '/orchestrator/locks/fh-production-change.lock');
         chmod($this->root . '/orchestrator/locks/fh-production-change.lock', 0600);
         file_put_contents(
@@ -81,6 +82,7 @@ final class BackupSetProducerRootTest extends TestCase
             spec.loader.exec_module(module)
             module.BACKUP_ROOT = sys.argv[2] + '/backups'
             module.ORCHESTRATOR_ROOT = sys.argv[2] + '/orchestrator'
+            module.ORDINARY_STATE_ROOT = sys.argv[2] + '/ordinary'
             module.CREDENTIALS = sys.argv[2] + '/credentials.cnf'
             module.CONFIG_PATH = module.CREDENTIALS
             module.MARIADB_DUMP = sys.argv[2] + '/mariadb-dump'
@@ -258,6 +260,46 @@ final class BackupSetProducerRootTest extends TestCase
         } finally {
             flock($lock, LOCK_UN);
             fclose($lock);
+        }
+    }
+
+    public function testPendingOrdinaryProbeRecoveryBlocksPublication(): void
+    {
+        foreach (
+            [
+                'run.pending',
+                'request-unconfirmed',
+                'state.json',
+                'defense-verification.json',
+                'defense-verification.json.tmp',
+                'sessions.json',
+                'sessions.json.tmp',
+            ]
+            as $artifact
+        ) {
+            $path = $this->root . '/ordinary/' . $artifact;
+            if (str_ends_with($artifact, '.tmp')) {
+                self::assertSame(strlen('pending'), file_put_contents($path, 'pending'));
+            } elseif (str_ends_with($artifact, '.json') || $artifact === 'run.pending') {
+                self::assertSame(strlen('pending'), file_put_contents($path, 'pending'));
+            } else {
+                self::assertTrue(mkdir($path, 0700));
+            }
+            try {
+                $result = $this->runProducer();
+                self::assertSame(75, $result['exit'], $artifact . ': ' . $result['stderr']);
+                self::assertSame(
+                    ['schema' => 'production_backup_set_result.v1', 'status' => 'busy'],
+                    json_decode($result['stdout'], true, 512, JSON_THROW_ON_ERROR),
+                );
+                self::assertSame([], glob($this->root . '/backups/20*T*Z') ?: []);
+            } finally {
+                if (is_dir($path) && !is_link($path)) {
+                    rmdir($path);
+                } else {
+                    @unlink($path);
+                }
+            }
         }
     }
 
