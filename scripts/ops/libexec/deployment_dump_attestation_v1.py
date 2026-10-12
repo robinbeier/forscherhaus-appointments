@@ -1486,7 +1486,10 @@ def tree_usage(path):
     return allocated, inodes
 
 
-def restore(pinned, pinned_meta, unpacked, create_tables, run_path, nonce):
+def restore(pinned, pinned_meta, unpacked, create_tables, run_path, nonce, outcome=None):
+    if outcome is None:
+        outcome = {}
+    outcome['container_terminal'] = False
     name = 'fh-dump-attestation-' + nonce
     if unpacked > (MAX_RESTORE_BYTES - FIXED_HEADROOM) // RESTORE_MULTIPLIER:
         reject()
@@ -1598,6 +1601,11 @@ def restore(pinned, pinned_meta, unpacked, create_tables, run_path, nonce):
         if len(rows) != 5 or any(len(row) != 4 or row[2:] != ['status', 'OK'] for row in rows):
             reject()
         shutdown_and_observe(name, run_path)
+        # shutdown_and_observe proves both a clean shutdown record and that
+        # Docker no longer exposes the container.  Preserve that proof for
+        # callers when a later validation step fails.
+        outcome['container_terminal'] = True
+        started = False
         values = tree_usage(datadir)
         admitted = restore_bytes + IBTMP_MAX_BYTES + REDO_MAX_BYTES
         if values[0] > admitted or values[1] > max(4096, create_tables * 8 + 4096):
@@ -1607,9 +1615,19 @@ def restore(pinned, pinned_meta, unpacked, create_tables, run_path, nonce):
         started = False
         return values
     finally:
-        if started:
-            stop_or_preserve(name)
-        os.close(lease_fd)
+        try:
+            if started:
+                try:
+                    stop_or_preserve(name)
+                except RecoveryRequired:
+                    # The container outcome is unknown; the caller must retain
+                    # the run evidence for recovery and must not clean it up.
+                    raise
+                else:
+                    # stop_or_preserve returns only after Docker proves absence.
+                    outcome['container_terminal'] = True
+        finally:
+            os.close(lease_fd)
 
 
 def canonical(value):
@@ -1822,6 +1840,7 @@ def main():
             restored_at = None
             restore_terminal = False
             restore_attempted = False
+            restore_outcome = {}
             try:
                 source, source_meta = open_dump(backup_id)
                 require_capacity(EVIDENCE_ROOT, source_meta.st_size + FIXED_HEADROOM)
@@ -1851,7 +1870,9 @@ def main():
                     # Only this call can start a restore container. Earlier
                     # deterministic failures must not leave a blocking run.
                     restore_attempted = True
-                    allocated, inodes = restore(pinned, pinned_meta, unpacked, create_tables, run_path, nonce)
+                    allocated, inodes = restore(
+                        pinned, pinned_meta, unpacked, create_tables, run_path, nonce, restore_outcome,
+                    )
                     restore_terminal = True
                     restored_at = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
                     value = {'schema': 'deployment_dump_attestation.v1',
@@ -1868,6 +1889,8 @@ def main():
                     if len(data) > MAX_ATTESTATION:
                         reject()
             finally:
+                if restore_outcome.get('container_terminal') is True:
+                    restore_terminal = True
                 original_error = sys.exc_info()[0] is not None
                 if pinned is not None:
                     os.close(pinned)

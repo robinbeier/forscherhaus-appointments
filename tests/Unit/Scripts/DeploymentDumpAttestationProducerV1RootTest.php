@@ -313,6 +313,178 @@ final class DeploymentDumpAttestationProducerV1RootTest extends TestCase
         self::assertSame(0, $result['exit'], $result['stderr']);
     }
 
+    public function testTerminalRestoreFailureCleansScratchAndUnknownOutcomePreservesIt(): void
+    {
+        $result = $this->python(
+            <<<'PY'
+            import os
+            module = load()
+            root = os.environ['ROB465_TEST_ROOT']
+            scratch = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+            dump = os.open(root + '/dump.sql.gz', os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600)
+            os.write(dump, b'fixture')
+            os.fsync(dump)
+
+            def terminal_stop(name):
+                # This double is the proven stop_or_preserve contract: return
+                # only after the container is known to be absent.
+                return None
+
+            module.stop_or_preserve = terminal_stop
+            module.final_server_ready = lambda name: True
+            for nonce in ('a' * 32, 'b' * 32):
+                run_leaf = '.run-' + nonce
+                run_path = os.path.join(root, run_leaf)
+                os.mkdir(run_path, 0o700)
+                outcome = {}
+                calls = [0]
+
+                def fail_after_launch(arguments, timeout=120):
+                    calls[0] += 1
+                    if calls[0] == 1:
+                        return ''
+                    raise SystemExit(70)
+
+                module.docker = fail_after_launch
+                try:
+                    module.restore(dump, os.fstat(dump), 1, 0, run_path, nonce, outcome)
+                except SystemExit as error:
+                    if error.code != 70:
+                        raise
+                else:
+                    raise RuntimeError('post-launch validation failure was accepted')
+                if outcome.get('container_terminal') is not True:
+                    raise RuntimeError('proven container absence was not returned')
+                module.cleanup_run_if_terminal(scratch, run_leaf, outcome['container_terminal'])
+                if os.path.exists(run_path):
+                    raise RuntimeError('terminal failed restore left scratch evidence')
+
+            nonce = 'c' * 32
+            run_leaf = '.run-' + nonce
+            run_path = os.path.join(root, run_leaf)
+            os.mkdir(run_path, 0o700)
+            outcome = {}
+            module.stop_or_preserve = lambda name: (_ for _ in ()).throw(
+                module.RecoveryRequired('container absence outcome unknown'))
+            module.docker = lambda arguments, timeout=120: ''
+            try:
+                module.restore(dump, os.fstat(dump), 1, 0, run_path, nonce, outcome)
+            except module.RecoveryRequired:
+                pass
+            else:
+                raise RuntimeError('unknown restore outcome was accepted')
+            if outcome.get('container_terminal') is not False or not os.path.isdir(run_path):
+                raise RuntimeError('unknown outcome did not preserve scratch evidence')
+            os.close(dump)
+            os.close(scratch)
+            PY
+            ,
+        );
+        self::assertSame(0, $result['exit'], $result['stderr']);
+    }
+
+    public function testMainCleansSuccessivelyTerminalFailedRestoresAndBlocksUnknownRetry(): void
+    {
+        $orchestrator = $this->root . '/orchestrator';
+        $locks = $orchestrator . '/locks';
+        $evidenceRoot = $this->root . '/evidence';
+        $backups = $this->root . '/backups';
+        foreach ([$orchestrator, $locks, $evidenceRoot, $backups] as $directory) {
+            self::assertTrue(mkdir($directory, 0700));
+        }
+        file_put_contents($locks . '/fh-production-change.lock', '');
+        chmod($locks . '/fh-production-change.lock', 0600);
+
+        $result = $this->python(
+            <<<'PY'
+            import datetime
+            import os
+            import sys
+            module = load()
+            root = os.environ['ROB465_TEST_ROOT']
+            module.ORCHESTRATOR_ROOT = root + '/orchestrator'
+            module.EVIDENCE_ROOT = root + '/evidence'
+            module.BACKUP_ROOT = root + '/backups'
+            module.bind_to_parent_death = lambda: None
+            module.assert_no_nonterminal_runs = lambda fd: None
+            module.reject_docker_orphans = lambda: None
+            module.require_capacity = lambda *args, **kwargs: None
+            module.assert_handoff_matches = lambda *args, **kwargs: None
+            module.open_absolute_directory = lambda path, exact_mode=None: os.open(
+                path, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW)
+            backup_id = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=1)).strftime('%Y%m%dT%H%M%SZ')
+            module.read_backup_handoff = lambda fd: {'backup_set_id': backup_id}
+            module.read_backup_success_marker = lambda fd: backup_id
+            dump_path = root + '/dump.sql.gz'
+            with open(dump_path, 'wb') as stream:
+                stream.write(b'fixture')
+
+            def fake_open_dump(ignored):
+                fd = os.open(dump_path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+                return fd, os.fstat(fd)
+
+            def fake_pin_dump(source, source_meta, run_path):
+                pinned = os.dup(source)
+                return pinned, os.fstat(pinned), 'a' * 64, 7, 11, 1
+
+            module.open_dump = fake_open_dump
+            module.pin_dump = fake_pin_dump
+            module.publish = lambda *args, **kwargs: (_ for _ in ()).throw(
+                RuntimeError('terminal failure must not publish'))
+            module.success_marker = lambda *args, **kwargs: (_ for _ in ()).throw(
+                RuntimeError('terminal failure must not mutate success marker'))
+            calls = [0]
+
+            def terminal_restore(*args):
+                calls[0] += 1
+                outcome = args[-1]
+                outcome['container_terminal'] = True
+                raise SystemExit(70)
+
+            module.restore = terminal_restore
+            sys.argv = ['deployment_dump_attestation_v1.py', '--latest-handoff']
+            for attempt in (1, 2):
+                try:
+                    module.main()
+                except SystemExit as error:
+                    if error.code != 70:
+                        raise
+                else:
+                    raise RuntimeError('terminal restore failure was accepted')
+                scratch = root + '/evidence/dump-attestation-scratch'
+                if os.listdir(scratch):
+                    raise RuntimeError('main left terminal failure scratch evidence')
+            if calls[0] != 2:
+                raise RuntimeError('second terminal restore never reached restore()')
+            if os.path.exists(root + '/evidence/dump-attestations') and os.listdir(root + '/evidence/dump-attestations'):
+                raise RuntimeError('terminal failure published an attestation')
+
+            def unknown_restore(*args):
+                raise module.RecoveryRequired('container absence outcome unknown')
+
+            module.restore = unknown_restore
+            try:
+                module.main()
+            except module.RecoveryRequired:
+                pass
+            else:
+                raise RuntimeError('unknown restore outcome was accepted')
+            runs = [leaf for leaf in os.listdir(root + '/evidence/dump-attestation-scratch') if leaf.startswith('.run-')]
+            if len(runs) != 1:
+                raise RuntimeError('unknown restore evidence was not preserved')
+            try:
+                module.main()
+            except SystemExit as error:
+                if error.code != 76:
+                    raise
+            else:
+                raise RuntimeError('unknown retry was not blocked')
+            PY
+            ,
+        );
+        self::assertSame(0, $result['exit'], $result['stderr']);
+    }
+
     public function testMarkerReplayIsMonotonicAndReconcilesRecognizedTemps(): void
     {
         file_put_contents($this->root . '/last_verify_success.utc', "2026-08-13T12:00:00Z\n");
