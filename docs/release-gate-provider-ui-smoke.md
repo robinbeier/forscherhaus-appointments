@@ -1,23 +1,25 @@
 # Provider UI Smoke Release Gate
 
-> **Retirement sequence:** first use the existing, hash-bound production
-> operator to remove its dormant synthetic principal and retire its credential.
-> Verify that cleanup independently. Only then merge and release the source
-> deletion in this change. The installed legacy operator still exposes
-> `install` and `activate` until it is retired; neither action is authorized by
-> this document. The local HTTP, authorization, and PDF-handoff tests remain.
+> **Retirement completed (2026-10-12 06:30 UTC):** the separately approved,
+> independently reviewed one-shot operator used the hash-bound wrapper from
+> the active older release under the shared production lock. It verified the
+> dormant principal, then ran `remove --remove-credentials` exactly once.
+> Independent checks found no reserved principal, role, note, service, or
+> appointment; the live credential path is absent and its unchanged file is
+> retained in a root-only recovery directory. The original installed wrapper
+> remains in the active older app release until a later app deployment, but
+> re-bootstrap is not authorized. See the ROB-812 Workpad for identities,
+> hashes, cleanup counts, and health checks. Local HTTP, authorization, and
+> PDF-handoff tests remain.
 
-**Status (2026-10-12): suspended pending controlled retirement.** This optional
-production smoke is not a required release gate. The proposed source change
-removes its lifecycle commands and browser gate after the production principal
-has been removed. Until then, the installed legacy wrapper is the supported
-teardown path and must not be treated as a teardown-only wrapper. The
-repository's local HTTP, authorization, and PDF-handoff tests remain active.
-An interrupted run could leave an active synthetic login that ordinary backup
-or deployment does not currently veto. The existing production principal was
-verified dormant and clean on 2026-10-11; that point-in-time observation does
-not authorize a future run. The instructions below document the historical
-design and are retained only to support controlled cleanup of a legacy state.
+**Status (2026-10-12): production principal and credential retired.** This
+optional production smoke is not a required release gate. The source change
+removes its lifecycle commands and browser gate. The repository's local HTTP,
+authorization, and PDF-handoff tests remain active.
+Before retirement, an interrupted run could leave an active synthetic login
+that ordinary backup or deployment did not veto. The principal was verified
+dormant and clean before its controlled removal. The instructions below document the
+historical design and are not authority for another production run.
 
 Local provider HTTP tests cover authorization and the renderer handoff;
 the shared PDF monitor and release canary cover the common renderer path.
@@ -393,9 +395,12 @@ ssh root@booking-server \
   'bash /var/www/html/easyappointments/scripts/ops/provider_ui_smoke_principal.sh remove'
 ```
 
-Credential retirement is not enrolled in the maintenance-admission protocol.
-`remove --remove-credentials` therefore fails closed; retain the protected
-credential and handle any later retirement as a separately reviewed change.
+The later maintenance-enrolled source wrapper refused
+`remove --remove-credentials`; it was **not** used for the completed retirement.
+The installed older-release wrapper did support that option and was invoked
+only through the separately reviewed, hash-bound one-shot operator described
+above. The live credential has already been retired, so the command in this
+historical section must not be repeated. Its protected recovery copy remains.
 
 Before rolling back to any release that predates the reserved-account route
 containment:
