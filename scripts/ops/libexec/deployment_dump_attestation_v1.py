@@ -1821,6 +1821,7 @@ def main():
             data = None
             restored_at = None
             restore_terminal = False
+            restore_attempted = False
             try:
                 source, source_meta = open_dump(backup_id)
                 require_capacity(EVIDENCE_ROOT, source_meta.st_size + FIXED_HEADROOM)
@@ -1847,6 +1848,9 @@ def main():
                         size + max_datadir + IBTMP_MAX_BYTES + REDO_MAX_BYTES + FIXED_HEADROOM,
                         max(MIN_FREE_INODES, create_tables * 8 + 4096),
                     )
+                    # Only this call can start a restore container. Earlier
+                    # deterministic failures must not leave a blocking run.
+                    restore_attempted = True
                     allocated, inodes = restore(pinned, pinned_meta, unpacked, create_tables, run_path, nonce)
                     restore_terminal = True
                     restored_at = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
@@ -1869,15 +1873,15 @@ def main():
                     os.close(pinned)
                 if source is not None:
                     os.close(source)
-                if restore_terminal:
+                if restore_terminal or not restore_attempted:
                     try:
                         cleanup_run_if_terminal(scratch, run_leaf, True)
                     except BaseException:
                         if not original_error:
                             raise
                 else:
-                    # Keep the run directory and evidence for explicit
-                    # recovery inspection after an unknown restore outcome.
+                    # Once restore() is entered, retain the run if its
+                    # container outcome cannot be proved terminal.
                     cleanup_run_if_terminal(scratch, run_leaf, False)
             # Publication, the success marker, and continuity transition are
             # deliberately after scratch cleanup. A cleanup error must leave

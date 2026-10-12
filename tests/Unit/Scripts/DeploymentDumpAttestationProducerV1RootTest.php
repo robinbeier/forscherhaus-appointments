@@ -464,6 +464,52 @@ final class DeploymentDumpAttestationProducerV1RootTest extends TestCase
         }
     }
 
+    public function testKnownPreRestoreFailureDoesNotBlockTheNextVerification(): void
+    {
+        $orchestrator = $this->root . '/orchestrator';
+        $locks = $orchestrator . '/locks';
+        $evidenceRoot = $this->root . '/evidence';
+        $backups = $this->root . '/backups';
+        foreach ([$orchestrator, $locks, $evidenceRoot, $backups] as $directory) {
+            self::assertTrue(mkdir($directory, 0700));
+        }
+        file_put_contents($locks . '/fh-production-change.lock', '');
+        chmod($locks . '/fh-production-change.lock', 0600);
+        $body = <<<'PY'
+        import datetime
+        import os
+        import sys
+        module = load()
+        root = os.environ['ROB465_TEST_ROOT']
+        module.ORCHESTRATOR_ROOT = root + '/orchestrator'
+        module.EVIDENCE_ROOT = root + '/evidence'
+        module.BACKUP_ROOT = root + '/backups'
+        module.bind_to_parent_death = lambda: None
+        module.assert_no_nonterminal_runs = lambda fd: None
+        def fixture_directory(path, exact_mode=None):
+            assert path in (module.ORCHESTRATOR_ROOT, module.EVIDENCE_ROOT, module.BACKUP_ROOT)
+            return os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW)
+        module.open_absolute_directory = fixture_directory
+        module.reject_docker_orphans = lambda: None
+        backup_id = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=1)).strftime('%Y%m%dT%H%M%SZ')
+        module.read_backup_handoff = lambda fd: {'backup_set_id': backup_id}
+        module.read_backup_success_marker = lambda fd: backup_id
+        def known_failure(backup_id):
+            print('pre-restore-check-reached', flush=True)
+            module.reject(70)
+        module.open_dump = known_failure
+        module.restore = lambda *args: (_ for _ in ()).throw(RuntimeError('restore must not start'))
+        sys.argv = ['deployment_dump_attestation_v1.py', '--latest-handoff']
+        module.main()
+        PY;
+        for ($attempt = 1; $attempt <= 2; $attempt++) {
+            $result = $this->python($body);
+            self::assertSame(70, $result['exit'], "attempt $attempt: " . $result['stderr']);
+            self::assertSame("pre-restore-check-reached\n", $result['stdout']);
+            self::assertSame([], glob($evidenceRoot . '/dump-attestation-scratch/.run-*'));
+        }
+    }
+
     public function testUnknownEmptyHistoricalRunFailsClosed(): void
     {
         mkdir($this->root . '/runs', 0700);
