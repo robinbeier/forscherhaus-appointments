@@ -1792,6 +1792,8 @@ App.Utils.CalendarTableView = (function () {
 
             successCallback = () => {
                 pendingUnavailabilitySaves.delete(unavailabilityId);
+                Object.assign(info.event.extendedProps.data, unavailability);
+                info.event.setProp('data', info.event.extendedProps.data);
 
                 const undoFunction = () => {
                     if (pendingUnavailabilityUndos.has(unavailabilityId)) {

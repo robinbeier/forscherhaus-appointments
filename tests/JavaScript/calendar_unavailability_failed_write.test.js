@@ -360,5 +360,33 @@ for (const modulePath of modules) {
             assert.equal(competingEdit.revertCalls, 1);
             assert.equal(calendar.notifications.at(-1), 'error');
         });
+
+        if (callbackName === 'onEventDrop') {
+            test(`${label} uses the latest prior state for a sequential drop undo`, () => {
+                const calendar = loadCallbacks(modulePath);
+                const info = createInfo(callbackName);
+
+                calendar.callbacks.onEventDrop(info);
+                calendar.getRequest()[1]();
+
+                info.event.start = new Date('2026-10-12T11:00:00');
+                info.event.end = new Date('2026-10-12T12:00:00');
+                calendar.callbacks.onEventDrop(info);
+                calendar.getRequest()[1]();
+
+                const secondUndo = calendar.getUndo();
+                secondUndo();
+                const secondUndoRequest = calendar.getRequest();
+
+                assert.equal(secondUndoRequest[0].id, info.originalData.id);
+                assert.equal(secondUndoRequest[0].start_datetime, '2026-10-12 10:00:00');
+                assert.equal(secondUndoRequest[0].end_datetime, '2026-10-12 11:00:00');
+
+                secondUndoRequest.doneCallback();
+                assert.deepEqual(info.event.extendedProps.data.start_datetime, '2026-10-12 10:00:00');
+                assert.deepEqual(info.event.extendedProps.data.end_datetime, '2026-10-12 11:00:00');
+                assert.equal(info.revertCalls, 1);
+            });
+        }
     }
 }
