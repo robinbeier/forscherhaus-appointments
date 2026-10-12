@@ -313,6 +313,54 @@ final class DeploymentDumpAttestationProducerV1RootTest extends TestCase
         self::assertSame(0, $result['exit'], $result['stderr']);
     }
 
+    public function testAutoRemovedContainerAcceptsIndependentAbsenceProofAndKeepsUnknownGuard(): void
+    {
+        $result = $this->python(
+            <<<'PY'
+            module = load()
+
+            class Result:
+                def __init__(self, returncode, stdout=''):
+                    self.returncode = returncode
+                    self.stdout = stdout
+
+            calls = []
+            def auto_removed(arguments, **kwargs):
+                calls.append(arguments)
+                if arguments[0] == 'stop':
+                    return Result(1)
+                if arguments[:2] == ['ps', '-aq']:
+                    return Result(0, '')
+                raise RuntimeError('unexpected docker command')
+
+            module.docker_run = auto_removed
+            module.stop_or_preserve('fh-dump-attestation-' + 'a' * 32)
+            if calls != [
+                ['stop', '--time', '30', 'fh-dump-attestation-' + 'a' * 32],
+                ['ps', '-aq', '--filter', 'name=^/fh-dump-attestation-' + 'a' * 32 + '$'],
+            ]:
+                raise RuntimeError('independent absence probe was not used')
+
+            def absence_unknown(arguments, **kwargs):
+                if arguments[0] == 'stop':
+                    return Result(1)
+                if arguments[:2] == ['ps', '-aq']:
+                    return Result(1)
+                raise RuntimeError('unexpected docker command')
+
+            module.docker_run = absence_unknown
+            try:
+                module.stop_or_preserve('fh-dump-attestation-' + 'b' * 32)
+            except module.RecoveryRequired:
+                pass
+            else:
+                raise RuntimeError('unproven absence was accepted')
+            PY
+            ,
+        );
+        self::assertSame(0, $result['exit'], $result['stderr']);
+    }
+
     public function testTerminalRestoreFailureCleansScratchAndUnknownOutcomePreservesIt(): void
     {
         $result = $this->python(

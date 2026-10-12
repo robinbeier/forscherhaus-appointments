@@ -933,8 +933,11 @@ def stop_or_preserve(name):
         )
     except BaseException as error:
         raise RecoveryRequired('container stop outcome unknown') from error
-    if result.returncode != 0:
-        raise RecoveryRequired('container stop failed')
+    # `docker run --rm` may have removed an exited container before the
+    # best-effort stop reaches it.  A non-zero stop therefore does not by
+    # itself establish an unknown outcome; the independent absence probe
+    # below remains authoritative.  If that probe cannot prove absence, keep
+    # the recovery state instead of treating the terminal outcome as safe.
     for _ in range(60):
         try:
             probe = docker_run(
@@ -952,6 +955,8 @@ def stop_or_preserve(name):
         if not probe.stdout.strip():
             return
         time.sleep(1)
+    if result.returncode != 0:
+        raise RecoveryRequired('container stop failed')
     raise RecoveryRequired('container remained after stop')
 
 
