@@ -150,6 +150,7 @@
 /docs/release-gate-booking-confirmation-pdf.md @robinbeier
 /docs/release-gate-customers-ui-smoke.md @robinbeier
 /docs/release-gate-dashboard.md @robinbeier
+/docs/release-gate-provider-ui-smoke.md @robinbeier
 /docs/rest-api.md @robinbeier
 /openapi.yml @robinbeier
 /scripts/ci/** @robinbeier
