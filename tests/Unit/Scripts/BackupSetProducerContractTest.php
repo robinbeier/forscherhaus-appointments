@@ -51,8 +51,7 @@ final class BackupSetProducerContractTest extends TestCase
         self::assertStringContainsString("DATABASE = 'easyappointments'", $this->helper);
         self::assertStringContainsString("user=fh_backup\\n", $this->helper);
         self::assertStringContainsString("host=127.0.0.1\\n", $this->helper);
-        self::assertStringContainsString("sys.argv[1] == '--recover-pending'", $this->helper);
-        self::assertStringContainsString('len(sys.argv) not in (1, 2)', $this->helper);
+        self::assertStringContainsString('if len(sys.argv) != 1', $this->helper);
         self::assertStringContainsString('resource.setrlimit(resource.RLIMIT_CORE, (0, 0))', $this->helper);
         self::assertStringNotContainsString('os.environ.get', $this->helper);
         self::assertStringNotContainsString("'mysqldump'", $this->helper);
@@ -105,46 +104,6 @@ final class BackupSetProducerContractTest extends TestCase
         self::assertStringNotContainsString("'sha256':", $this->helper);
     }
 
-    public function testBackupProducerRegistersThroughExistingLockBeforeDumpAndSettlesAfterPublication(): void
-    {
-        $main = substr($this->helper, (int) strpos($this->helper, 'def main():'));
-        $load = strpos($main, 'admission_core = load_admission_core()');
-        $fromLock = strpos($main, 'MaintenanceAdmission.from_existing_lock_fd(');
-        $registration = strpos($main, 'admission.publish_pending(admission_record)');
-        $dump = strpos($main, 'digest, compressed, unpacked = create_backup(');
-        $marker = strpos($main, 'publish_marker(backups, marker_value, nonce, expected_marker)');
-        $settlement = strpos($main, 'admission.clear_pending(');
-        $recovery = strpos($main, 'recovery_from_existing_lock_fd(');
-        $recovered = strpos($main, 'recovery_admission.recover_clear_marker(');
-
-        foreach ([$load, $fromLock, $registration, $dump, $marker, $settlement, $recovery, $recovered] as $position) {
-            self::assertIsInt($position);
-        }
-        self::assertLessThan($registration, $fromLock);
-        self::assertLessThan($dump, $registration);
-        self::assertLessThan($settlement, $marker);
-        self::assertLessThan($recovery, $settlement);
-        self::assertLessThan($recovered, $recovery);
-        self::assertStringContainsString('child_terminal_proven', $this->helper);
-        self::assertStringContainsString('publication_complete', $this->helper);
-        self::assertStringContainsString(
-            'record == admission_record and child_terminal_proven and publication_complete',
-            $this->helper,
-        );
-    }
-
-    public function testAdmissionCoreIsHashAndIdentityBoundBeforeExecution(): void
-    {
-        self::assertStringContainsString(
-            "ADMISSION_CORE = '/usr/local/libexec/fh/maintenance_pending_v1.py'",
-            $this->helper,
-        );
-        self::assertStringContainsString('ADMISSION_CORE_SHA256 = ', $this->helper);
-        self::assertStringContainsString('load_admission_core()', $this->helper);
-        self::assertStringContainsString('verify_trusted_path(ADMISSION_CORE, observed)', $this->helper);
-        self::assertStringContainsString('hashlib.sha256(source).hexdigest()', $this->helper);
-    }
-
     public function testEachPathCapturesItsClockOnlyAfterPotentiallyBlockingValidation(): void
     {
         $main = substr($this->helper, (int) strpos($this->helper, 'def main():'));
@@ -194,6 +153,30 @@ final class BackupSetProducerContractTest extends TestCase
         self::assertStringContainsString("backup_id = observed_at.strftime('%Y%m%dT%H%M%SZ')", $main);
         self::assertStringContainsString('mtime=gzip_mtime', $this->helper);
         self::assertStringContainsString('observed_gzip_mtime != expected_gzip_mtime', $this->helper);
+    }
+
+    public function testOrdinaryProbeRecoveryGateRunsAfterTheSharedActivityGate(): void
+    {
+        foreach (
+            [
+                "ORDINARY_STATE_ROOT = '/var/lib/fh-defense-ordinary'",
+                "'run.pending'",
+                "'request-unconfirmed'",
+                "'defense-verification.json.tmp'",
+                'def assert_no_pending_ordinary_probe():',
+                'assert_no_pending_ordinary_probe()',
+                'reject(75)',
+            ]
+            as $needle
+        ) {
+            self::assertStringContainsString($needle, $this->helper, $needle);
+        }
+        $main = substr($this->helper, (int) strpos($this->helper, 'def main():'));
+        $activity = strpos($main, 'assert_activity_gate(orchestrator)');
+        $ordinary = strpos($main, 'assert_no_pending_ordinary_probe()');
+        self::assertIsInt($activity);
+        self::assertIsInt($ordinary);
+        self::assertLessThan($ordinary, $activity);
     }
 
     public function testDocumentationFreezesManualTcpOnlyOperation(): void
@@ -418,25 +401,25 @@ final class BackupSetProducerContractTest extends TestCase
         self::assertStringNotContainsString('systemctl start', $this->attestationWrapper);
     }
 
-    public function testProducerRolloutUsesExplicitRob812GateWithoutStandaloneInstallRecipe(): void
+    public function testRecurringUnitInstallRefreshesContinuityProducerBeforeSupervisorAndUnits(): void
     {
         $docs = (string) file_get_contents($this->root . '/docs/ops/production-backup-set-producer.md');
-        $opsReadme = (string) file_get_contents($this->root . '/scripts/ops/README.md');
-        $contract = $docs . "\n" . $opsReadme;
+        $installStart = strpos($docs, 'Install and validate the reviewed recurring units');
+        self::assertIsInt($installStart);
+        $install = substr($docs, $installStart);
+        $producer = strpos($install, 'scripts/ops/libexec/backup_set_producer_v1.py');
+        $producerTarget = strpos($install, '/usr/local/libexec/fh-backup-set-producer-v1');
+        $supervisor = strpos($install, 'scripts/ops/libexec/backup_set_producer_supervisor_v1.sh');
+        $producerUnit = strpos($install, 'scripts/ops/systemd/fh-backup-set-producer.service');
 
-        self::assertStringContainsString('not standalone-installable', $docs);
-        self::assertStringContainsString('ROB-812', $docs);
-        self::assertStringContainsString('maintenance-admission migration gate', $docs);
-        self::assertStringContainsString('Do not install either independently', $opsReadme);
-        $installRecipe = "sudo /usr/bin/install -o root -g root -m 0555 \
-  scripts/ops/libexec/backup_set_producer_v1.py \
-  /usr/local/libexec/fh-backup-set-producer-v1";
-        $installPattern =
-            '/(?mi)^\s*(?:sudo\s+)?(?:\/(?:usr\/)?bin\/)?(?:cp|install|chmod|sha256sum|systemctl)\b[^\n]*(?:backup_set_producer|fh-backup-set-producer)/';
-        $collapseContinuations = static fn(string $value): string => str_replace(["\\\r\n", "\\\n"], ' ', $value);
-
-        self::assertMatchesRegularExpression($installPattern, $collapseContinuations($installRecipe));
-        self::assertDoesNotMatchRegularExpression($installPattern, $collapseContinuations($contract));
+        self::assertIsInt($producer);
+        self::assertIsInt($producerTarget);
+        self::assertIsInt($supervisor);
+        self::assertIsInt($producerUnit);
+        self::assertLessThan($producerTarget, $producer);
+        self::assertLessThan($supervisor, $producerTarget);
+        self::assertLessThan($supervisor, $producer);
+        self::assertLessThan($producerUnit, $supervisor);
     }
 
     public function testContinuityStateClosesTheInterServiceHandoffGap(): void
@@ -515,7 +498,7 @@ final class BackupSetProducerContractTest extends TestCase
             $this->producerUnit,
         );
         self::assertStringContainsString(
-            'ReadWritePaths=/root/backups/easyappointments /var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock /var/lib/fh-maintenance-admission',
+            'ReadWritePaths=/root/backups/easyappointments /var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock',
             $this->producerUnit,
         );
         self::assertStringContainsString(

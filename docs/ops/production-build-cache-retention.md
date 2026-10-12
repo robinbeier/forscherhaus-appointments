@@ -87,12 +87,13 @@ docker builder prune --force --filter until=168h --keep-storage 2147483648
 docker builder prune --force --filter until=168h --reserved-space 2147483648
 ```
 
-When the fixed `/var/lib/fh-maintenance-admission` path exists, the legacy
-execute path refuses with `maintenance_protocol_unenrolled` under the shared
-production lock. Docker may continue daemon-side work after the CLI exits, so
-this manual prune cannot join the pending-state protocol until a separate
-terminal proof is implemented and tested. The read-only snapshot remains
-available; native BuildKit GC is a separate engine-managed mechanism.
+The removed ROB-812 pending-state protocol is not part of this path. The
+execute path remains bounded by its own private cleanup lock, the canonical
+production lock, activity classification, capability checks, and the
+postflight identity comparison. Docker may continue daemon-side work after the
+CLI exits, so the operation retains its own documented terminal boundary. The
+read-only snapshot remains available; native BuildKit GC is a separate
+engine-managed mechanism.
 
 It never adds `--all`. Raw Docker output is discarded. Cache totals are
 measured again afterward, and the image/container/volume identity hashes must

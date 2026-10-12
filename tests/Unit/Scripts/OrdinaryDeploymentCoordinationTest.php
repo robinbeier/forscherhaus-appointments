@@ -193,30 +193,7 @@ final class OrdinaryDeploymentCoordinationTest extends TestCase
         self::assertSame(0, $result['exit_code'], $result['stderr']);
     }
 
-    public function testOrdinaryLockDescriptorIsReadWriteForDurableAdmission(): void
-    {
-        $result = $this->runShell(
-            <<<'BASH'
-            source ./deploy_ea.sh
-            ordinary_production_change_lock "$1"
-            python3 - "$ORDINARY_CHANGE_LOCK_FD" <<'PY'
-            import fcntl
-            import os
-            import sys
-
-            fd = int(sys.argv[1])
-            flags = fcntl.fcntl(fd, fcntl.F_GETFL)
-            assert (flags & os.O_ACCMODE) == os.O_RDWR
-            PY
-            BASH
-            ,
-            [$this->lock],
-        );
-
-        self::assertSame(0, $result['exit_code'], $result['stdout'] . $result['stderr']);
-    }
-
-    public function testDeployEntryRequiresFixedHashBoundAdmissionBeforeReceiptMutation(): void
+    public function testDeployEntryUsesCanonicalLockAndRecoveryGatesBeforeReceiptMutation(): void
     {
         $source = (string) file_get_contents(dirname(__DIR__, 3) . '/deploy_ea.sh');
         $entryStart = strpos($source, "if [[ \"\$DRYRUN\" -eq 0 ]]; then\n  ordinary_production_change_lock");
@@ -226,23 +203,14 @@ final class OrdinaryDeploymentCoordinationTest extends TestCase
         self::assertIsInt($entryEnd);
         $entry = substr($source, $entryStart, $entryEnd - $entryStart);
         self::assertIsString($entry);
-        self::assertSame(1, substr_count($entry, 'ordinary_assert_pending_admission'));
-        self::assertStringContainsString("local core='/usr/local/libexec/fh/maintenance_pending_v1.py'", $source);
-        self::assertStringContainsString(
-            "local expected_hash='a26bb85908f40b784539576d85013c7123522adbeac92e53ebbb3d5cd03ee9fd'",
-            $source,
-        );
+        self::assertStringNotContainsString('ordinary_assert_pending_admission', $source);
+        self::assertStringNotContainsString('maintenance_pending_v1.py', $source);
         self::assertStringNotContainsString('spec_from_file_location', $source);
-        self::assertStringContainsString('max_core_bytes = 1024 * 1024', $source);
-        self::assertStringContainsString('source.extend(chunk)', $source);
-        self::assertStringContainsString('hashlib.sha256(source).hexdigest()', $source);
-        self::assertStringContainsString("exec(compile(bytes(source), CORE, 'exec'), module_namespace)", $source);
-        self::assertStringContainsString("pending_error = module_namespace.get('PendingError')", $source);
         self::assertStringContainsString('exec {ordinary_ro_fd}<"$lock_path"', $source);
         self::assertStringContainsString('exec {ordinary_fd}<>"/proc/$$/fd/$ordinary_ro_fd"', $source);
         self::assertLessThan(
             strpos($entry, 'deploy_result_receipt_prepare'),
-            strpos($entry, 'ordinary_assert_pending_admission'),
+            strpos($entry, 'ordinary_assert_bound_recovery_guard'),
         );
     }
 

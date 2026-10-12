@@ -167,16 +167,20 @@ final class ReleaseArchiveDumpRetentionContractTest extends TestCase
         self::assertIsInt($markerStart);
         $execute = substr($helper, $executeStart, $markerStart - $executeStart);
         $mountPreflight = strpos($execute, 'mount_safety = assert_pre_mutation_mount_safety()');
+        $globalLock = strpos($execute, 'global_lock = open_global_lock()');
         $statePreparation = strpos($execute, 'state = prepare_state_directory(mount_safety)');
         $mountRevalidation = strpos($execute, 'revalidate_pre_mutation_mount_safety(mount_safety)', $statePreparation);
         $markerCleanup = strpos($execute, 'clean_marker_temps(state, MUTATIONS)');
         $mountClose = strrpos($execute, 'close_pre_mutation_mount_safety(mount_safety)');
         self::assertIsInt($mountPreflight);
+        self::assertIsInt($globalLock);
         self::assertIsInt($statePreparation);
         self::assertIsInt($mountRevalidation);
         self::assertIsInt($markerCleanup);
         self::assertIsInt($mountClose);
         self::assertTrue($mountPreflight < $statePreparation);
+        self::assertTrue($mountPreflight < $globalLock);
+        self::assertTrue($globalLock < $statePreparation);
         self::assertTrue($statePreparation < $mountRevalidation);
         self::assertTrue($mountRevalidation < $markerCleanup);
         self::assertTrue($markerCleanup < $mountClose);
@@ -279,12 +283,7 @@ final class ReleaseArchiveDumpRetentionContractTest extends TestCase
         ) {
             self::assertStringContainsString($command, $docs);
         }
-        $prerequisite = strpos($docs, 'complete, verified ROB-812 pending-state rollout:');
-        $anchor = strpos($docs, 'rollout has this exact order:');
-        self::assertNotFalse($prerequisite);
-        self::assertNotFalse($anchor);
-        self::assertTrue($prerequisite < $anchor);
-        $runbook = substr($docs, (int) $anchor);
+        $runbook = substr($docs, (int) strpos($docs, 'rollout has this exact order:'));
         $cursor = -1;
         foreach (
             [

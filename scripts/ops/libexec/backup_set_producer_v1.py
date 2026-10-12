@@ -17,12 +17,12 @@ import stat
 import subprocess
 import sys
 import time
-import types
 
 
 SCHEMA = 'production_backup_set_result.v1'
 BACKUP_ROOT = '/root/backups/easyappointments'
 ORCHESTRATOR_ROOT = '/var/lib/fh-deploy-orchestrator'
+ORDINARY_STATE_ROOT = '/var/lib/fh-defense-ordinary'
 GLOBAL_LOCK_LEAF = 'fh-production-change.lock'
 PRIVATE_LOCK_LEAF = '.backup-set-producer.lock'
 CREDENTIALS = '/etc/fh/backup-set-producer.cnf'
@@ -36,9 +36,6 @@ CONTINUITY_STATE_LEAF = 'backup_continuity_state.json'
 PHP = '/usr/bin/php'
 TERMINAL_VALIDATOR = '/usr/local/libexec/fh/validate_deployment_terminal_bundle_v1.php'
 SUPERVISOR_COMMAND = '/usr/bin/bash /usr/local/libexec/fh-backup-set-producer-supervisor-v1'
-ADMISSION_CORE = '/usr/local/libexec/fh/maintenance_pending_v1.py'
-ADMISSION_CORE_SHA256 = 'a26bb85908f40b784539576d85013c7123522adbeac92e53ebbb3d5cd03ee9fd'
-MAX_ADMISSION_CORE_BYTES = 1_048_576
 MAX_CONFIG_BYTES = 16 * 1024
 CONFIG_PASSWORD = re.compile(r'[A-Za-z0-9_-]{32,128}\Z')
 MAX_COMPRESSED = 16 * 1024 * 1024 * 1024
@@ -54,9 +51,17 @@ STAGING_LEAF = re.compile(r'\.backup-set-producer-[0-9a-f]{32}\.tmp\Z')
 MARKER_TEMP = re.compile(r'\.last_backup_success\.utc\.tmp-[0-9a-f]{32}\Z')
 HANDOFF_TEMP = re.compile(r'\.last_backup_set\.json\.tmp-[0-9a-f]{32}\Z')
 CONTINUITY_STATE_TEMP = re.compile(r'\.backup_continuity_state\.json\.tmp-[0-9a-f]{32}\Z')
+ORDINARY_PENDING_ARTIFACTS = (
+    'run.pending',
+    'request-unconfirmed',
+    'state.json',
+    'defense-verification.json',
+    'defense-verification.json.tmp',
+    'sessions.json',
+    'sessions.json.tmp',
+)
 RENAME_NOREPLACE = 1
 LIBC = ctypes.CDLL(None, use_errno=True)
-ADMISSION_PENDING_ERROR_TYPES = ()
 
 
 def bind_to_parent_death():
@@ -200,37 +205,6 @@ def verify_trusted_path(path, expected):
     os.close(descriptor)
     if observed != expected:
         reject()
-
-
-def load_admission_core():
-    """Load the fixed admission protocol with an identity and hash binding."""
-    descriptor, observed = open_trusted_file(
-        ADMISSION_CORE, exact_mode=0o644, maximum=MAX_ADMISSION_CORE_BYTES,
-    )
-    try:
-        source = bytearray()
-        while len(source) <= MAX_ADMISSION_CORE_BYTES:
-            chunk = os.read(descriptor, min(65_536, MAX_ADMISSION_CORE_BYTES + 1 - len(source)))
-            if not chunk:
-                break
-            source.extend(chunk)
-        if len(source) > MAX_ADMISSION_CORE_BYTES:
-            reject(75)
-        digest = hashlib.sha256(source).hexdigest()
-    finally:
-        os.close(descriptor)
-    verify_trusted_path(ADMISSION_CORE, observed)
-    if digest != ADMISSION_CORE_SHA256:
-        reject(75)
-    namespace = {'__name__': 'fh_maintenance_pending_v1', '__file__': ADMISSION_CORE}
-    try:
-        exec(compile(bytes(source), ADMISSION_CORE, 'exec'), namespace)
-    except BaseException:
-        reject(75)
-    module = types.ModuleType('fh_maintenance_pending_v1')
-    module.__file__ = ADMISSION_CORE
-    module.__dict__.update(namespace)
-    return module
 
 
 def validate_connection_config(descriptor):
@@ -387,6 +361,22 @@ def assert_activity_gate(orchestrator):
                 os.close(run)
     finally:
         os.close(runs)
+
+
+def assert_no_pending_ordinary_probe():
+    try:
+        state = open_absolute_directory(ORDINARY_STATE_ROOT, exact_mode=0o700)
+    except FileNotFoundError:
+        return
+    try:
+        for artifact in ORDINARY_PENDING_ARTIFACTS:
+            try:
+                os.stat(artifact, dir_fd=state, follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            reject(75)
+    finally:
+        os.close(state)
 
 
 def read_required_history_file(parent, leaf, maximum):
@@ -914,86 +904,6 @@ def reconcile_temporary_files(backups):
             reject()
 
 
-def assert_no_recovery_temporary_files(backups):
-    """Recovery never cleans producer residue; any residue keeps the veto."""
-    names = os.listdir(backups)
-    if len(names) > 10_000:
-        reject(75)
-    for name in names:
-        if (STAGING_LEAF.fullmatch(name) or MARKER_TEMP.fullmatch(name) or
-                HANDOFF_TEMP.fullmatch(name) or CONTINUITY_STATE_TEMP.fullmatch(name) or
-                name.startswith('.backup-set-producer-') or
-                name.startswith('.last_backup_success.utc.tmp-') or
-                name.startswith('.last_backup_set.json.tmp-') or
-                name.startswith('.backup_continuity_state.json.tmp-')):
-            reject(75)
-
-
-def _recovery_terminal_proof(admission_core, backups, record, current_boot):
-    """Prove publication completed before settling an interrupted pending run."""
-    if record.get('operation') != 'backup_set_producer' or record.get('boot_id') != current_boot:
-        reject(75)
-    resource_identity = record.get('resource_identity')
-    if (not isinstance(resource_identity, dict) or set(resource_identity) != {'backup_set_id', 'database'} or
-            resource_identity.get('database') != DATABASE or
-            not isinstance(resource_identity.get('backup_set_id'), str) or
-            BACKUP_ID.fullmatch(resource_identity['backup_set_id']) is None):
-        reject(75)
-    backup_id = resource_identity['backup_set_id']
-    state = stable_continuity_state(backups)
-    handoff = stable_handoff(backups)
-    marker = stable_marker(backups)
-    if state[0]['status'] != 'pending' or state[0]['handoff'] != handoff[0]:
-        reject(75)
-    if handoff[0]['backup_set_id'] != backup_id or marker is None:
-        reject(75)
-    if marker[0].strftime('%Y%m%dT%H%M%SZ') != backup_id:
-        reject(75)
-    digest, compressed, unpacked, created = validate_backup_set(backups, backup_id)
-    expected = handoff_bytes(backup_id, digest, compressed, unpacked)
-    if expected != stable_handoff(backups)[2] or state[2] != continuity_state_bytes('pending', handoff[0]):
-        reject(75)
-    if marker[0].strftime('%Y-%m-%dT%H:%M:%SZ') != created:
-        reject(75)
-    # Publication follows create_backup(), which returns only after its direct
-    # dump child has exited successfully and the closed dump has been checked.
-    return True
-
-
-def recover_published_pending(admission_core, global_lock, backups):
-    """Settle one fully published, current-boot producer record; never create a dump."""
-    assert_no_recovery_temporary_files(backups)
-    current_boot = admission_core.current_boot_id()
-    pair = admission_core._matching_clear_pair()
-    if pair is None:
-        pending = admission_core.read_pending(current_boot)
-        if pending is None:
-            admission_core.reject('pending_missing')
-        record = pending[0]
-        mode = 'pending'
-    else:
-        record = pair[0][0]
-        mode = 'marker'
-    proof = lambda observed: _recovery_terminal_proof(admission_core, backups, observed, current_boot)
-    proof(record)
-    try:
-        os.fsync(backups)
-    except OSError:
-        reject(75)
-    recovery = None
-    try:
-        recovery = admission_core.MaintenanceAdmission.recovery_from_existing_lock_fd(
-            global_lock, current_boot)
-        if mode == 'pending':
-            result = recovery.recover_pending(record, proof)
-        else:
-            result = recovery.recover_clear_marker(proof)
-        return result
-    finally:
-        if recovery is not None:
-            recovery.__exit__(None, None, None)
-
-
 def validate_backup_set(backups, backup_id):
     gzip_mtime = int(datetime.datetime.strptime(backup_id, '%Y%m%dT%H%M%SZ').replace(
         tzinfo=datetime.timezone.utc).timestamp())
@@ -1095,9 +1005,7 @@ def attach_unmarked_set(backups, current_marker, current_state, nonce):
 
 def main():
     bind_to_parent_death()
-    recovery_mode = len(sys.argv) == 2 and sys.argv[1] == '--recover-pending'
-    if (len(sys.argv) not in (1, 2) or (len(sys.argv) == 2 and not recovery_mode) or
-            os.geteuid() != 0 or os.getuid() != 0 or os.getegid() != 0 or os.getgid() != 0):
+    if len(sys.argv) != 1 or os.geteuid() != 0 or os.getuid() != 0 or os.getegid() != 0 or os.getgid() != 0:
         reject()
     os.umask(0o077)
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
@@ -1108,12 +1016,6 @@ def main():
     private_lock = None
     dump_descriptor = None
     config_descriptor = None
-    admission_core = None
-    admission = None
-    recovery_admission = None
-    admission_record = None
-    child_terminal_proven = False
-    publication_complete = False
     staging = None
     marker_temporary = None
     try:
@@ -1122,29 +1024,10 @@ def main():
             global_lock = open_lock(locks, GLOBAL_LOCK_LEAF)
         finally:
             os.close(locks)
-        admission_core = load_admission_core()
-        global ADMISSION_PENDING_ERROR_TYPES
-        pending_error_type = getattr(admission_core, 'PendingError', None)
-        ADMISSION_PENDING_ERROR_TYPES = (pending_error_type,) if isinstance(pending_error_type, type) else ()
-        if recovery_mode:
-            backups = open_absolute_directory(BACKUP_ROOT)
-            try:
-                private_lock = open_lock(backups, PRIVATE_LOCK_LEAF)
-            except FileNotFoundError:
-                reject(75)
-            result = recover_published_pending(admission_core, global_lock, backups)
-            emit('recovered', backup_sets_published=0, result=result.get('status', 'recovered'))
-            return
-        try:
-            admission = admission_core.MaintenanceAdmission.from_existing_lock_fd(
-                global_lock,
-                admission_core.current_boot_id(),
-            )
-        except Exception:
-            reject(75)
         backups = open_absolute_directory(BACKUP_ROOT)
         private_lock = open_lock(backups, PRIVATE_LOCK_LEAF, create=True)
         assert_activity_gate(orchestrator)
+        assert_no_pending_ordinary_probe()
         reconcile_temporary_files(backups)
         expected_marker = stable_marker(backups)
         expected_state = stable_continuity_state(backups, missing_ok=True)
@@ -1174,53 +1057,23 @@ def main():
         config_descriptor, config_identity = open_trusted_file(
             CONFIG_PATH, exact_mode=0o600, maximum=MAX_CONFIG_BYTES)
         validate_connection_config(config_descriptor)
-        admission_record = admission_core.make_record(
-            'backup_set_producer',
-            'backup-' + backup_id.lower(),
-            admission_core.current_boot_id(),
-            {'backup_set_id': backup_id, 'database': DATABASE},
-        )
         capacity = os.fstatvfs(backups)
         if capacity.f_bavail * capacity.f_frsize < MIN_FREE_BYTES:
             reject()
-        admission.publish_pending(admission_record)
         staging = '.backup-set-producer-' + nonce + '.tmp'
         marker_temporary = '.last_backup_success.utc.tmp-' + nonce
         digest, compressed, unpacked = create_backup(
             backups, backup_id, nonce, dump_descriptor, dump_identity, config_descriptor, config_identity,
             global_lock, private_lock)
-        # create_backup returns only after the direct dump child exited with
-        # status zero and its output passed bounded gzip validation.
-        child_terminal_proven = True
         staging = None
         pending_handoff = json.loads(handoff_bytes(backup_id, digest, compressed, unpacked))
         publish_continuity_state(backups, 'pending', pending_handoff, nonce, expected_state)
         publish_handoff(backups, backup_id, digest, compressed, unpacked, nonce, expected_handoff)
         publish_marker(backups, marker_value, nonce, expected_marker)
-        publication_complete = True
-        admission.clear_pending(
-            admission_record,
-            lambda record: record == admission_record and child_terminal_proven and publication_complete,
-        )
-        admission.__exit__(None, None, None)
-        admission = None
-        recovery_admission = admission_core.MaintenanceAdmission.recovery_from_existing_lock_fd(
-            global_lock,
-            admission_core.current_boot_id(),
-        )
-        recovery_admission.recover_clear_marker(
-            lambda record: record == admission_record and child_terminal_proven and publication_complete,
-        )
-        recovery_admission.__exit__(None, None, None)
-        recovery_admission = None
         marker_temporary = None
         emit('published', backup_sets_published=1, compressed_size_bytes=compressed,
              uncompressed_size_bytes=unpacked)
     finally:
-        if recovery_admission is not None:
-            recovery_admission.__exit__(None, None, None)
-        if admission is not None:
-            admission.__exit__(None, None, None)
         if backups is not None:
             cleanup_current_staging(backups, staging, marker_temporary)
         for descriptor in (config_descriptor, dump_descriptor, private_lock, backups, global_lock, orchestrator):
@@ -1228,7 +1081,7 @@ def main():
                 os.close(descriptor)
 
 
-def run():
+if __name__ == '__main__':
     try:
         main()
     except ProducerError as error:
@@ -1237,13 +1090,3 @@ def run():
     except (OSError, ValueError, UnicodeError):
         emit('rejected')
         raise SystemExit(70)
-    except Exception as error:
-        if ADMISSION_PENDING_ERROR_TYPES and isinstance(error, ADMISSION_PENDING_ERROR_TYPES):
-            code = 75 if getattr(error, 'code', 70) == 75 else 70
-            emit('busy' if code == 75 else 'rejected')
-            raise SystemExit(code)
-        raise
-
-
-if __name__ == '__main__':
-    run()

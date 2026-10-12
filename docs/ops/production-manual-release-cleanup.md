@@ -12,13 +12,11 @@ metadata fingerprints of every nested path, and the complete archive/provenance
 pair's identities and hashes. Any
 change between planning and execution stops the run.
 
-The execution invocation is unavailable until the complete, verified ROB-812
-pending-state rollout is installed: all registered maintenance writers, the
-root-controlled admission core, the protocol state directory, and its exact
-epoch must be deployed and verified together. Follow
-[`maintenance-admission-contract.md`](maintenance-admission-contract.md) for
-that coordinated rollout. Until then, planning remains strictly read-only and
-does not authorize a manual cleanup run.
+The removed ROB-812 pending-state protocol is not a prerequisite for this
+operator. Planning remains strictly read-only; execution requires the exact
+plan digest, the global cleanup lock, the canonical production lock, the
+operation-specific quarantine and postflight proofs, and the separate release
+owner approval described below.
 
 Before any file is unlinked, each selected directory is moved into the
 root-only retention state directory. The tool checks the quarantined tree's

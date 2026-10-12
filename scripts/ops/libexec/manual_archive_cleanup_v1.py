@@ -24,7 +24,7 @@ WEB_ROOT = '/var/www/html'
 RELEASES_ROOT = '/root/releases'
 STATE_ROOT = '/var/lib/fh-release-retention'
 HELPER_PATH = '/usr/local/libexec/fh-release-archive-dump-retention-v1'
-HELPER_SHA256 = '1efaeef43f5632983f57d4a56854a124cd60c31a06b6d7bb5255711892d436a0'
+HELPER_SHA256 = '5f40c6635c2d43130d5d0cd74d33e3a1c5ff1c125bcc3aef9ae394cc4031e9a9'
 MAX_PER_PASS = 4
 MAX_CLASS_SCAN = 10_000
 PAIR = re.compile(r'([A-Za-z0-9._-]{1,128})\.(tar\.gz|build-provenance\.json)\Z')
@@ -347,22 +347,6 @@ def run(mode, expected_plan_sha=None, helper=None):
     global_lock = helper.open_global_lock()
     releases = release_pair_lock = state = web = orchestrator = None
     try:
-        # Admission is part of the execute contract, not of the read-only
-        # planning path.  The canonical lock is already held by
-        # ``open_global_lock`` and remains held through the whole run, so the
-        # fixed, hash-bound core can make its decision against the same lock
-        # that protects the subsequent cleanup mutations.
-        if mode == 'execute':
-            try:
-                admission_core = helper.load_admission_core()
-                admission_core.admit_existing_lock_fd(global_lock)
-            except Exception as error:
-                reason = getattr(error, 'reason', None)
-                code = getattr(error, 'code', None)
-                if (isinstance(reason, str) and reason
-                        and isinstance(code, int) and not isinstance(code, bool)):
-                    reject(reason, code)
-                reject('maintenance_admission_unknown', 75)
         if helper.activity_count() != 0:
             reject('active_production_work', 75)
         helper.assert_no_nonterminal_runs()

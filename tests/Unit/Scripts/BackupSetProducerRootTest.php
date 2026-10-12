@@ -18,10 +18,6 @@ final class BackupSetProducerRootTest extends TestCase
     private string $root;
     private string $helper;
     private string $runner;
-    private string $canonicalOrchestrator = '/var/lib/fh-deploy-orchestrator';
-    private string $canonicalAdmission = '/var/lib/fh-maintenance-admission';
-    /** @var array<string, array{dev:int,ino:int,mode:int,uid:int,gid:int}> */
-    private array $canonicalIdentities = [];
 
     protected function setUp(): void
     {
@@ -30,51 +26,14 @@ final class BackupSetProducerRootTest extends TestCase
         }
         // The production helper rejects world-writable ancestors. Keep the
         // Linux-root fixture beneath the same trusted /var/lib boundary.
-        if (
-            file_exists($this->canonicalOrchestrator) ||
-            is_link($this->canonicalOrchestrator) ||
-            file_exists($this->canonicalAdmission) ||
-            is_link($this->canonicalAdmission)
-        ) {
-            $this->markTestSkipped('Canonical admission paths already exist; refusing to touch them.');
-        }
-        mkdir($this->canonicalOrchestrator, 0700);
-        mkdir($this->canonicalOrchestrator . '/locks', 0700);
-        mkdir($this->canonicalAdmission, 0700);
-        $canonicalLock = $this->canonicalOrchestrator . '/locks/fh-production-change.lock';
-        $lockHandle = fopen($canonicalLock, 'x');
-        self::assertIsResource($lockHandle);
-        fclose($lockHandle);
-        chmod($canonicalLock, 0600);
-        $canonicalEpoch = $this->canonicalAdmission . '/epoch';
-        $epochHandle = fopen($canonicalEpoch, 'x');
-        self::assertIsResource($epochHandle);
-        fwrite($epochHandle, "maintenance-admission.v1\n");
-        fclose($epochHandle);
-        chmod($canonicalEpoch, 0600);
-        foreach (
-            [
-                $this->canonicalOrchestrator,
-                $this->canonicalOrchestrator . '/locks',
-                $canonicalLock,
-                $this->canonicalAdmission,
-                $canonicalEpoch,
-            ]
-            as $path
-        ) {
-            $identity = lstat($path);
-            self::assertIsArray($identity);
-            $this->canonicalIdentities[$path] = [
-                'dev' => (int) $identity['dev'],
-                'ino' => (int) $identity['ino'],
-                'mode' => (int) $identity['mode'],
-                'uid' => (int) $identity['uid'],
-                'gid' => (int) $identity['gid'],
-            ];
-        }
         $this->root = '/var/lib/fh-backup-set-producer-root-' . bin2hex(random_bytes(8));
         mkdir($this->root, 0700);
         mkdir($this->root . '/backups', 0700);
+        mkdir($this->root . '/orchestrator', 0700);
+        mkdir($this->root . '/orchestrator/locks', 0700);
+        mkdir($this->root . '/ordinary', 0700);
+        touch($this->root . '/orchestrator/locks/fh-production-change.lock');
+        chmod($this->root . '/orchestrator/locks/fh-production-change.lock', 0600);
         file_put_contents(
             $this->root . '/credentials.cnf',
             "[client]\nuser=fh_backup\npassword=" . self::PASSWORD . "\nprotocol=tcp\nhost=127.0.0.1\nport=3306\n",
@@ -83,13 +42,6 @@ final class BackupSetProducerRootTest extends TestCase
 
         $this->helper = dirname(__DIR__, 3) . '/scripts/ops/libexec/backup_set_producer_v1.py';
         $this->runner = $this->root . '/run.py';
-        $coreSource = dirname(__DIR__, 3) . '/scripts/ops/libexec/maintenance_pending_v1.py';
-        $coreTarget = $this->root . '/maintenance_pending_v1.py';
-        $coreHandle = fopen($coreTarget, 'x');
-        self::assertIsResource($coreHandle);
-        fwrite($coreHandle, (string) file_get_contents($coreSource));
-        fclose($coreHandle);
-        chmod($coreTarget, 0644);
         $dump = $this->root . '/mariadb-dump';
         file_put_contents(
             $dump,
@@ -124,32 +76,18 @@ final class BackupSetProducerRootTest extends TestCase
             $this->runner,
             <<<'PY'
             import importlib.util
-            import os
             import sys
             spec = importlib.util.spec_from_file_location('rob466', sys.argv[1])
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
             module.BACKUP_ROOT = sys.argv[2] + '/backups'
-            module.ORCHESTRATOR_ROOT = '/var/lib/fh-deploy-orchestrator'
+            module.ORCHESTRATOR_ROOT = sys.argv[2] + '/orchestrator'
+            module.ORDINARY_STATE_ROOT = sys.argv[2] + '/ordinary'
             module.CREDENTIALS = sys.argv[2] + '/credentials.cnf'
             module.CONFIG_PATH = module.CREDENTIALS
             module.MARIADB_DUMP = sys.argv[2] + '/mariadb-dump'
             module.DUMP_PATH = module.MARIADB_DUMP
             module.TERMINAL_VALIDATOR = sys.argv[2] + '/unused-validator'
-            module.ADMISSION_CORE = sys.argv[2] + '/maintenance_pending_v1.py'
-            original_load_admission_core = module.load_admission_core
-            def load_fixture_admission_core():
-                core = original_load_admission_core()
-                if os.environ.get('ROB812_INJECT_PENDING') == 'publish':
-                    def reject_publish(_admission, _record):
-                        raise core.PendingError('synthetic test refusal', 75)
-                    core.MaintenanceAdmission.publish_pending = reject_publish
-                if os.environ.get('ROB812_INJECT_PENDING') == 'clear':
-                    def reject_clear(_admission, _record, _terminal_proof=None):
-                        raise core.PendingError('synthetic settlement refusal', 75)
-                    core.MaintenanceAdmission.clear_pending = reject_clear
-                return core
-            module.load_admission_core = load_fixture_admission_core
             if len(sys.argv) == 4:
                 import datetime
                 fixed = datetime.datetime.strptime(sys.argv[3], '%Y-%m-%dT%H:%M:%SZ').replace(
@@ -159,12 +97,15 @@ final class BackupSetProducerRootTest extends TestCase
             # Parent-death semantics are covered by the shared ROB-465 primitive; this
             # filesystem suite exercises the producer after that entry guard.
             module.bind_to_parent_death = lambda: None
-            if os.environ.get('ROB812_RECOVERY_FSYNC_FAIL') and os.environ.get('ROB812_RECOVER'):
-                def fail_recovery_fsync(_descriptor):
-                    raise OSError(5, 'synthetic recovery fsync failure')
-                module.os.fsync = fail_recovery_fsync
-            sys.argv = [sys.argv[0], '--recover-pending'] if os.environ.get('ROB812_RECOVER') else [sys.argv[0]]
-            module.run()
+            sys.argv = [sys.argv[0]]
+            try:
+                module.main()
+            except module.ProducerError as error:
+                module.emit('busy' if error.code == 75 else 'rejected')
+                raise SystemExit(error.code)
+            except (OSError, ValueError, UnicodeError):
+                module.emit('rejected')
+                raise SystemExit(70)
             PY
             ,
         );
@@ -175,98 +116,6 @@ final class BackupSetProducerRootTest extends TestCase
     {
         if (isset($this->root) && is_dir($this->root)) {
             $this->removeTree($this->root);
-        }
-        $runsPath = $this->canonicalOrchestrator . '/runs';
-        if (isset($this->canonicalIdentities[$runsPath]) && is_dir($runsPath)) {
-            foreach (scandir($runsPath) ?: [] as $runLeaf) {
-                if (!preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/D', $runLeaf)) {
-                    continue;
-                }
-                $runPath = $runsPath . '/' . $runLeaf;
-                $runIdentity = lstat($runPath);
-                if (
-                    !is_array($runIdentity) ||
-                    (($runIdentity['mode'] ?? 0) & 0170000) !== 0040000 ||
-                    (int) $runIdentity['uid'] !== 0 ||
-                    (int) $runIdentity['gid'] !== 0 ||
-                    (int) $runIdentity['nlink'] < 1 ||
-                    (($runIdentity['mode'] ?? 0) & 0777) !== 0700
-                ) {
-                    continue;
-                }
-                foreach (scandir($runPath) ?: [] as $leaf) {
-                    if (!in_array($leaf, ['state.json', 'events.jsonl', 'evidence.json'], true)) {
-                        continue;
-                    }
-                    $path = $runPath . '/' . $leaf;
-                    $identity = lstat($path);
-                    if (
-                        is_array($identity) &&
-                        (($identity['mode'] ?? 0) & 0170000) === 0100000 &&
-                        (int) $identity['uid'] === 0 &&
-                        (int) $identity['gid'] === 0 &&
-                        (int) $identity['nlink'] === 1 &&
-                        (($identity['mode'] ?? 0) & 0777) === 0600
-                    ) {
-                        unlink($path);
-                    }
-                }
-                if (array_values(array_diff(scandir($runPath) ?: [], ['.', '..'])) === []) {
-                    rmdir($runPath);
-                }
-            }
-        }
-        $statePath = $this->canonicalAdmission;
-        if (isset($this->canonicalIdentities[$statePath]) && is_dir($statePath)) {
-            foreach (scandir($statePath) ?: [] as $leaf) {
-                if ($leaf === '.' || $leaf === '..' || $leaf === 'epoch') {
-                    continue;
-                }
-                if (!preg_match('/^(?:pending|clear-state)\.json(?:\.tmp\..*)?$/D', $leaf)) {
-                    continue;
-                }
-                $path = $statePath . '/' . $leaf;
-                $identity = lstat($path);
-                if (
-                    !is_array($identity) ||
-                    (($identity['mode'] ?? 0) & 0170000) !== 0100000 ||
-                    (int) $identity['uid'] !== 0 ||
-                    (int) $identity['gid'] !== 0 ||
-                    (int) $identity['nlink'] !== 1 ||
-                    (($identity['mode'] ?? 0) & 0777) !== 0600
-                ) {
-                    continue;
-                }
-                unlink($path);
-            }
-        }
-        foreach (array_reverse(array_keys($this->canonicalIdentities)) as $path) {
-            if (!file_exists($path) && !is_link($path)) {
-                continue;
-            }
-            $current = lstat($path);
-            $expected = $this->canonicalIdentities[$path];
-            $observed = [
-                'dev' => (int) $current['dev'],
-                'ino' => (int) $current['ino'],
-                'mode' => (int) $current['mode'],
-                'uid' => (int) $current['uid'],
-                'gid' => (int) $current['gid'],
-            ];
-            if ($observed !== $expected) {
-                // Never remove a canonical object whose identity changed while
-                // the fixture was running.
-                continue;
-            }
-            if (is_dir($path) && !is_link($path)) {
-                $children = array_values(array_diff(scandir($path) ?: [], ['.', '..']));
-                if ($children !== []) {
-                    continue;
-                }
-                rmdir($path);
-            } else {
-                unlink($path);
-            }
         }
     }
 
@@ -393,13 +242,11 @@ final class BackupSetProducerRootTest extends TestCase
         }
         self::assertSame(2, count(glob($this->root . '/backups/20*T*Z') ?: []));
         self::assertSame([], glob($this->root . '/backups/.backup-set-producer-*.tmp') ?: []);
-        self::assertFileDoesNotExist('/var/lib/fh-maintenance-admission/pending.json');
-        self::assertFileDoesNotExist('/var/lib/fh-maintenance-admission/clear-state.json');
     }
 
     public function testGlobalLockIsRetryableAndDoesNotPublish(): void
     {
-        $lock = fopen($this->canonicalOrchestrator . '/locks/fh-production-change.lock', 'r+');
+        $lock = fopen($this->root . '/orchestrator/locks/fh-production-change.lock', 'r+');
         self::assertIsResource($lock);
         self::assertTrue(flock($lock, LOCK_EX | LOCK_NB));
         try {
@@ -416,167 +263,44 @@ final class BackupSetProducerRootTest extends TestCase
         }
     }
 
-    public function testAdmissionPendingErrorBecomesBoundedBusyResult(): void
+    public function testPendingOrdinaryProbeRecoveryBlocksPublication(): void
     {
-        $result = $this->runProducer(null, ['ROB812_INJECT_PENDING' => 'publish']);
-
-        self::assertSame(75, $result['exit']);
-        self::assertSame(
-            ['schema' => 'production_backup_set_result.v1', 'status' => 'busy'],
-            json_decode($result['stdout'], true, 512, JSON_THROW_ON_ERROR),
-        );
-        self::assertStringNotContainsString('Traceback', $result['stderr']);
-        self::assertStringNotContainsString('synthetic test refusal', $result['stdout'] . $result['stderr']);
-        self::assertFileDoesNotExist($this->root . '/backups/backup_continuity_state.json');
-        self::assertSame([], glob($this->root . '/backups/.backup-set-producer-*.tmp') ?: []);
-    }
-
-    public function testSettlementPendingErrorRetainsPendingVetoAsBoundedBusyResult(): void
-    {
-        $result = $this->runProducer(null, ['ROB812_INJECT_PENDING' => 'clear']);
-
-        self::assertSame(75, $result['exit']);
-        self::assertSame(
-            ['schema' => 'production_backup_set_result.v1', 'status' => 'busy'],
-            json_decode($result['stdout'], true, 512, JSON_THROW_ON_ERROR),
-        );
-        self::assertStringNotContainsString('Traceback', $result['stderr']);
-        self::assertStringNotContainsString('synthetic settlement refusal', $result['stdout'] . $result['stderr']);
-        self::assertFileExists('/var/lib/fh-maintenance-admission/pending.json');
-        self::assertFileExists($this->root . '/backups/backup_continuity_state.json');
-    }
-
-    public function testRecoverySettlesOnlyFullyPublishedCurrentBootPendingRun(): void
-    {
-        $published = $this->runProducer('2026-08-13T00:00:00Z', ['ROB812_INJECT_PENDING' => 'clear']);
-        self::assertSame(75, $published['exit']);
-        $recovered = $this->runProducer(null, ['ROB812_RECOVER' => '1']);
-        self::assertSame(0, $recovered['exit'], $recovered['stderr']);
-        self::assertSame('recovered', json_decode($recovered['stdout'], true, flags: JSON_THROW_ON_ERROR)['status']);
-        self::assertFileDoesNotExist('/var/lib/fh-maintenance-admission/pending.json');
-        self::assertFileDoesNotExist('/var/lib/fh-maintenance-admission/clear-state.json');
-        self::assertFileExists($this->root . '/backups/backup_continuity_state.json');
-        $state = json_decode(
-            (string) file_get_contents($this->root . '/backups/backup_continuity_state.json'),
-            true,
-            flags: JSON_THROW_ON_ERROR,
-        );
-        self::assertSame('pending', $state['status']);
-        self::assertSame([], glob($this->root . '/backups/.backup-set-producer-*.tmp') ?: []);
-    }
-
-    public function testRecoveryRejectsOldBootAndLeavesPendingVeto(): void
-    {
-        $published = $this->runProducer('2026-08-13T00:00:00Z', ['ROB812_INJECT_PENDING' => 'clear']);
-        self::assertSame(75, $published['exit']);
-        $this->writePendingWithOldBoot();
-        $recovered = $this->runProducer(null, ['ROB812_RECOVER' => '1']);
-        self::assertSame(75, $recovered['exit']);
-        self::assertSame(
-            ['schema' => 'production_backup_set_result.v1', 'status' => 'busy'],
-            json_decode($recovered['stdout'], true, flags: JSON_THROW_ON_ERROR),
-        );
-        self::assertFileExists('/var/lib/fh-maintenance-admission/pending.json');
-        self::assertFileExists($this->root . '/backups/backup_continuity_state.json');
-    }
-
-    public function testRecoverySettlesMarkerPendingState(): void
-    {
-        $published = $this->runProducer('2026-08-13T00:00:00Z', ['ROB812_INJECT_PENDING' => 'clear']);
-        self::assertSame(75, $published['exit']);
-        self::assertTrue(
-            link(
-                '/var/lib/fh-maintenance-admission/pending.json',
-                '/var/lib/fh-maintenance-admission/clear-state.json',
-            ),
-        );
-        $markerPending = $this->runProducer(null, ['ROB812_RECOVER' => '1']);
-        self::assertSame(0, $markerPending['exit'], $markerPending['stderr']);
-        self::assertFileDoesNotExist('/var/lib/fh-maintenance-admission/clear-state.json');
-    }
-
-    public function testRecoverySettlesMarkerOnlyState(): void
-    {
-        $published = $this->runProducer(null, ['ROB812_INJECT_PENDING' => 'clear']);
-        self::assertSame(75, $published['exit']);
-        self::assertTrue(
-            link(
-                '/var/lib/fh-maintenance-admission/pending.json',
-                '/var/lib/fh-maintenance-admission/clear-state.json',
-            ),
-        );
-        self::assertTrue(unlink('/var/lib/fh-maintenance-admission/pending.json'));
-        $markerOnly = $this->runProducer(null, ['ROB812_RECOVER' => '1']);
-        self::assertSame(0, $markerOnly['exit'], $markerOnly['stderr']);
-        self::assertFileDoesNotExist('/var/lib/fh-maintenance-admission/clear-state.json');
-    }
-
-    public function testRecoveryRejectsContinuityMismatchWithoutSettlement(): void
-    {
-        $published = $this->runProducer('2026-08-13T00:00:00Z', ['ROB812_INJECT_PENDING' => 'clear']);
-        self::assertSame(75, $published['exit']);
-        $statePath = $this->root . '/backups/backup_continuity_state.json';
-        $state = json_decode((string) file_get_contents($statePath), true, flags: JSON_THROW_ON_ERROR);
-        $state['handoff']['dump_sha256'] = str_repeat('f', 64);
-        ksort($state['handoff']);
-        ksort($state);
-        file_put_contents($statePath, json_encode($state, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n");
-        chmod($statePath, 0600);
-        $recovered = $this->runProducer(null, ['ROB812_RECOVER' => '1']);
-        self::assertSame(75, $recovered['exit']);
-        self::assertFileExists('/var/lib/fh-maintenance-admission/pending.json');
-        self::assertFileExists($statePath);
-    }
-
-    public function testRecoveryRejectsMissingPrivateLockWithoutCreatingIt(): void
-    {
-        $published = $this->runProducer(null, ['ROB812_INJECT_PENDING' => 'clear']);
-        self::assertSame(75, $published['exit']);
-        $privateLock = $this->root . '/backups/.backup-set-producer.lock';
-        self::assertFileExists($privateLock);
-        self::assertTrue(unlink($privateLock));
-        $recovered = $this->runProducer(null, ['ROB812_RECOVER' => '1']);
-        self::assertSame(75, $recovered['exit']);
-        self::assertSame(
-            ['schema' => 'production_backup_set_result.v1', 'status' => 'busy'],
-            json_decode($recovered['stdout'], true, flags: JSON_THROW_ON_ERROR),
-        );
-        self::assertFileDoesNotExist($privateLock);
-        self::assertFileExists('/var/lib/fh-maintenance-admission/pending.json');
-    }
-
-    public function testRecoveryFsyncFailureRetainsPendingVetoAndAllowsLaterRetry(): void
-    {
-        $published = $this->runProducer(null, ['ROB812_INJECT_PENDING' => 'clear']);
-        self::assertSame(75, $published['exit']);
-        $failed = $this->runProducer(null, ['ROB812_RECOVER' => '1', 'ROB812_RECOVERY_FSYNC_FAIL' => '1']);
-        self::assertSame(75, $failed['exit']);
-        self::assertSame(
-            ['schema' => 'production_backup_set_result.v1', 'status' => 'busy'],
-            json_decode($failed['stdout'], true, flags: JSON_THROW_ON_ERROR),
-        );
-        self::assertFileExists('/var/lib/fh-maintenance-admission/pending.json');
-        self::assertFileDoesNotExist('/var/lib/fh-maintenance-admission/clear-state.json');
-        $retry = $this->runProducer(null, ['ROB812_RECOVER' => '1']);
-        self::assertSame(0, $retry['exit'], $retry['stderr']);
-    }
-
-    public function testRecoveryFsyncFailureAfterMarkerPublicationRetainsBothNames(): void
-    {
-        $published = $this->runProducer(null, ['ROB812_INJECT_PENDING' => 'clear']);
-        self::assertSame(75, $published['exit']);
-        self::assertTrue(
-            link(
-                '/var/lib/fh-maintenance-admission/pending.json',
-                '/var/lib/fh-maintenance-admission/clear-state.json',
-            ),
-        );
-        $failed = $this->runProducer(null, ['ROB812_RECOVER' => '1', 'ROB812_RECOVERY_FSYNC_FAIL' => '1']);
-        self::assertSame(75, $failed['exit']);
-        self::assertFileExists('/var/lib/fh-maintenance-admission/pending.json');
-        self::assertFileExists('/var/lib/fh-maintenance-admission/clear-state.json');
-        $retry = $this->runProducer(null, ['ROB812_RECOVER' => '1']);
-        self::assertSame(0, $retry['exit'], $retry['stderr']);
+        foreach (
+            [
+                'run.pending',
+                'request-unconfirmed',
+                'state.json',
+                'defense-verification.json',
+                'defense-verification.json.tmp',
+                'sessions.json',
+                'sessions.json.tmp',
+            ]
+            as $artifact
+        ) {
+            $path = $this->root . '/ordinary/' . $artifact;
+            if (str_ends_with($artifact, '.tmp')) {
+                self::assertSame(strlen('pending'), file_put_contents($path, 'pending'));
+            } elseif (str_ends_with($artifact, '.json') || $artifact === 'run.pending') {
+                self::assertSame(strlen('pending'), file_put_contents($path, 'pending'));
+            } else {
+                self::assertTrue(mkdir($path, 0700));
+            }
+            try {
+                $result = $this->runProducer();
+                self::assertSame(75, $result['exit'], $artifact . ': ' . $result['stderr']);
+                self::assertSame(
+                    ['schema' => 'production_backup_set_result.v1', 'status' => 'busy'],
+                    json_decode($result['stdout'], true, 512, JSON_THROW_ON_ERROR),
+                );
+                self::assertSame([], glob($this->root . '/backups/20*T*Z') ?: []);
+            } finally {
+                if (is_dir($path) && !is_link($path)) {
+                    rmdir($path);
+                } else {
+                    @unlink($path);
+                }
+            }
+        }
     }
 
     public function testTrustedDumpChildRetainsBothLocksAfterProducerDeath(): void
@@ -613,7 +337,7 @@ final class BackupSetProducerRootTest extends TestCase
             ['/usr/bin/python3', '-I', '-B', runner, helper, root],
             start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
-        locks = ['/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock',
+        locks = [root + '/orchestrator/locks/fh-production-change.lock',
                  root + '/backups/.backup-set-producer.lock']
 
         def wait_for(predicate, seconds=5.0):
@@ -728,9 +452,8 @@ final class BackupSetProducerRootTest extends TestCase
 
     public function testIncompleteRunnerHistoryIsRetryableAndDoesNotPublish(): void
     {
-        $runs = $this->canonicalOrchestrator . '/runs';
+        $runs = $this->root . '/orchestrator/runs';
         mkdir($runs, 0700);
-        $this->trackCanonicalIdentity($runs);
 
         foreach (['state.json', 'events.jsonl', 'evidence.json'] as $missing) {
             $run = $runs . '/018f6f52-4c87-4d4e-8b19-6a66e6e1af25';
@@ -989,13 +712,13 @@ final class BackupSetProducerRootTest extends TestCase
     }
 
     /** @return array{exit:int,stdout:string,stderr:string} */
-    private function runProducer(?string $observedAtUtc = null, array $environment = []): array
+    private function runProducer(?string $observedAtUtc = null): array
     {
         $command = ['/usr/bin/python3', '-I', '-B', $this->runner, $this->helper, $this->root];
         if ($observedAtUtc !== null) {
             $command[] = $observedAtUtc;
         }
-        $process = proc_open($command, [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']], $pipes, null, $environment);
+        $process = proc_open($command, [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']], $pipes, null, []);
         self::assertIsResource($process);
         fclose($pipes[0]);
         $stdout = stream_get_contents($pipes[1]);
@@ -1015,31 +738,12 @@ final class BackupSetProducerRootTest extends TestCase
         chmod($path, 0600);
     }
 
-    private function writePendingWithOldBoot(): void
-    {
-        $path = '/var/lib/fh-maintenance-admission/pending.json';
-        $record = json_decode((string) file_get_contents($path), true, flags: JSON_THROW_ON_ERROR);
-        $record['boot_id'] = '11111111-1111-4111-8111-111111111111';
-        $sort = static function (&$value) use (&$sort): void {
-            if (!is_array($value)) {
-                return;
-            }
-            foreach ($value as &$child) {
-                $sort($child);
-            }
-            ksort($value);
-        };
-        $sort($record);
-        file_put_contents($path, json_encode($record, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n");
-        chmod($path, 0600);
-    }
-
     private function assertLocksAvailable(): void
     {
         foreach (['fh-production-change.lock', '.backup-set-producer.lock'] as $leaf) {
             $path =
                 $leaf === 'fh-production-change.lock'
-                    ? $this->canonicalOrchestrator . '/locks/' . $leaf
+                    ? $this->root . '/orchestrator/locks/' . $leaf
                     : $this->root . '/backups/' . $leaf;
             $lock = fopen($path, 'r+');
             self::assertIsResource($lock);
@@ -1062,18 +766,5 @@ final class BackupSetProducerRootTest extends TestCase
             $item->isLink() || $item->isFile() ? unlink($item->getPathname()) : rmdir($item->getPathname());
         }
         rmdir($path);
-    }
-
-    private function trackCanonicalIdentity(string $path): void
-    {
-        $identity = lstat($path);
-        self::assertIsArray($identity);
-        $this->canonicalIdentities[$path] = [
-            'dev' => (int) $identity['dev'],
-            'ino' => (int) $identity['ino'],
-            'mode' => (int) $identity['mode'],
-            'uid' => (int) $identity['uid'],
-            'gid' => (int) $identity['gid'],
-        ];
     }
 }

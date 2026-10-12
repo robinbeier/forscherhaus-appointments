@@ -218,14 +218,12 @@ it never treats the image entrypoint's temporary initialization server as
 restore-ready. Clean shutdown evidence is published only after that final
 server has completed the fixed import and verification sequence.
 
-The current tracked producer and service unit are **not standalone-installable**.
-They require the protected admission directory, protocol epoch, reviewed core,
-and enrollment of the other maintenance writers. Do not replace the installed
-legacy producer or unit from this source-only ROB-812 slice. Keep their
-verified hashes and the active backup timer unchanged. The coordinated
-installation, native systemd validation, rollback and activation sequence
-must come from the exact manifest required by the
-[maintenance-admission migration gate](maintenance-admission-contract.md#migration-and-removal-gate).
+The current tracked producer and service unit retain their own protected
+connection, dump, private-lock, handoff, continuity, parent-death, and
+terminal-publication checks. The retired ROB-812 pending-state protocol is not
+required by this source. Production installation remains a separately
+reviewed, hash-bound operation with native systemd validation, rollback, and
+the active timer state preserved.
 
 The fixed supervisor must remain the producer service's direct child of
 systemd. It keeps the Python producer as a distinct child so the unchanged
@@ -233,9 +231,32 @@ systemd. It keeps the Python producer as a distinct child so the unchanged
 parent; replacing the service command with a direct Python invocation is not a
 supported profile.
 
+## Install and validate the reviewed recurring units
+
+This ordering contract applies only to a separately approved, hash-bound
+update of the already active recurring chain. First prove the backup timer's
+exact before-state, no active backup or restore job, the shared production
+lock, and a no-clobber rollback copy of each existing file. Under that lock:
+
+1. Install the reviewed `scripts/ops/libexec/backup_set_producer_v1.py` as
+   `/usr/local/libexec/fh-backup-set-producer-v1` and verify its identity,
+   owner, mode, and SHA-256.
+2. Install and verify
+   `scripts/ops/libexec/backup_set_producer_supervisor_v1.sh` as the fixed
+   root-owned supervisor used by the service.
+3. Install and verify `scripts/ops/systemd/fh-backup-set-producer.service`
+   only after both executable helpers are bound; validate the unit with
+   `systemd-analyze verify` before any reload. Restore the exact timer state
+   and check service, backup, restore, and application health afterward.
+
+An unknown result or failed check stops further changes. Restore the previous
+files and timer state under the same controlled operation; retain rollback
+copies and backup evidence. These steps do not authorize a backup run or a
+scheduler change by themselves.
+
 The following ROB-480 pre-cutover sequence records the original timer
 transition. It is not a repeatable installation procedure for the current
-admission-enabled source or the already active production timer.
+source or the already active production timer.
 
 The required pre-cutover state is `disabled` and `inactive`; both services must
 also be inactive. Continue only with the exact installed helper and unit hashes,
@@ -251,7 +272,7 @@ The no-gap cutover order is fixed:
    legacy `02:17` and `02:40 UTC` slots after proving both legacy processes
    absent. Require producer status `published`, a new canonical restore
    attestation, and matching fresh backup and restore markers from the same
-   pending-state binding. If crash recovery returns producer status `attached`,
+   continuity-state binding. If crash recovery returns producer status `attached`,
    complete its verifier transition and repeat the combined pass until the
    fresh proof is `published`; do not cut over on the attachment alone. The
    producer/verifier lock gap is not proof: any intervening activity, SSH

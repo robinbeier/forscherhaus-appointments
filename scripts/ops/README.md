@@ -317,13 +317,11 @@ Security posture reporting:
 
 Dump restore attestation:
 
-- Do not install the current repository version of
-  `scripts/ops/libexec/deployment_dump_attestation_v1.py` on production. Its
-  ROB-812 pending-state enrollment is source-only until interrupted-owner
-  recovery and the complete mixed-version rollout are independently verified;
-  see `docs/ops/maintenance-admission-contract.md`. Keep the already installed
-  legacy helper unchanged in the meantime. Any later installation requires a
-  separately reviewed, hash-bound rollout with the existing recovery stock.
+- The dump-attestation helper retains its own detached-container, lease,
+  orphan, continuity, and terminal-publication checks. The retired ROB-812
+  pending-state enrollment is not part of the current source. Any production
+  installation still requires a separately reviewed, hash-bound rollout with
+  the existing recovery stock.
 - Install `scripts/ops/libexec/validate_deployment_terminal_bundle_v1.php` as
   root-owned mode `0555` and `scripts/ops/lib/DeploymentContractV1.php` as
   root-owned mode `0444` in the same `/usr/local/libexec/fh` directory.
@@ -349,12 +347,11 @@ Closed production backup sets:
   `docs/ops/production-release-entry.md` for the separate installation and
   pause/restore gates.
 - The current `scripts/ops/libexec/backup_set_producer_v1.py` and its systemd
-  unit require the ROB-812 admission core, protected state and coordinated
-  writer rollout. Do not install either independently or replace the verified
-  legacy producer yet. Follow the
-  [maintenance-admission migration gate](../../docs/ops/maintenance-admission-contract.md#migration-and-removal-gate)
-  and its future exact installation manifest; the installed producer remains
-  root-owned mode `0555` at `/usr/local/libexec/fh-backup-set-producer-v1`.
+  unit retain their private lock, canonical handoff, continuity, parent-death,
+  and terminal-publication checks. The retired ROB-812 pending-state protocol
+  is not part of this source. Production installation remains separately
+  reviewed and hash-bound; the installed producer is root-owned mode `0555` at
+  `/usr/local/libexec/fh-backup-set-producer-v1`.
 - The installed `fh-backup-set-producer-supervisor-v1` remains root-owned
   mode `0555` and unchanged during this source-only slice. The recurring
   systemd producer must use this fixed parent so the Python helper's unchanged
