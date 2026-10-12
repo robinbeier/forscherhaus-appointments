@@ -547,16 +547,17 @@ def dry_run():
 
 
 def execute():
-    state = prepare_state_directory()
+    state = None
     global_lock = None
     directory = None
     try:
+        global_lock = open_global_lock()
+        state = prepare_state_directory()
         try:
             fcntl.flock(state, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             reject('cleanup_lock_busy', 75)
         clean_marker_temps(state)
-        global_lock = open_global_lock()
         if activity_count() != 0:
             reject('active_production_work', 75)
 
@@ -622,7 +623,8 @@ def execute():
             os.close(directory)
         if global_lock is not None:
             os.close(global_lock)
-        os.close(state)
+        if state is not None:
+            os.close(state)
 
 
 def marker_status(max_age_seconds):

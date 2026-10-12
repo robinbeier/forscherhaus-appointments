@@ -2430,6 +2430,7 @@ def execute():
     first = None
     second = None
     try:
+        global_lock = open_global_lock()
         state = prepare_state_directory(mount_safety)
         try:
             fcntl.flock(state, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -2439,7 +2440,6 @@ def execute():
         # mount observation immediately before the first cleanup mutation.
         revalidate_pre_mutation_mount_safety(mount_safety)
         clean_marker_temps(state, MUTATIONS)
-        global_lock = open_global_lock()
         if activity_count() != 0:
             reject('active_production_work', 75)
         assert_no_nonterminal_runs()

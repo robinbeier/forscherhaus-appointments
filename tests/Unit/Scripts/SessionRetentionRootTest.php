@@ -240,6 +240,24 @@ final class SessionRetentionRootTest extends TestCase
         fclose($global);
     }
 
+    public function testBusyGlobalLockPreventsStateCreationBeforeExecute(): void
+    {
+        $this->removeTree(self::STATE_ROOT);
+        $global = fopen(self::ORCHESTRATOR_ROOT . '/locks/fh-production-change.lock', 'c+');
+        self::assertIsResource($global);
+        self::assertTrue(flock($global, LOCK_EX | LOCK_NB));
+        try {
+            $blocked = $this->runHelper('execute');
+        } finally {
+            flock($global, LOCK_UN);
+            fclose($global);
+        }
+
+        self::assertSame(75, $blocked['exit'], $blocked['stdout'] . $blocked['stderr']);
+        self::assertSame('active_production_work', $this->decode($blocked)['reason']);
+        self::assertDirectoryDoesNotExist(self::STATE_ROOT);
+    }
+
     public function testDeletionCapIsExactAndRequiresAnotherPassBeforeSuccessMarker(): void
     {
         for ($index = 0; $index < 10_001; $index++) {

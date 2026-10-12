@@ -353,11 +353,35 @@ final class DeploymentDumpAttestationProducerV1RootTest extends TestCase
                         raise
                 else:
                     raise RuntimeError('post-launch validation failure was accepted')
-                if outcome.get('container_terminal') is not True:
+                if outcome.get('launch_state') != 'terminal' or outcome.get('container_terminal') is not True:
                     raise RuntimeError('proven container absence was not returned')
                 module.cleanup_run_if_terminal(scratch, run_leaf, outcome['container_terminal'])
                 if os.path.exists(run_path):
                     raise RuntimeError('terminal failed restore left scratch evidence')
+
+            nonce = 'd' * 32
+            run_leaf = '.run-' + nonce
+            run_path = os.path.join(root, run_leaf)
+            os.mkdir(run_path, 0o700)
+            outcome = {}
+            real_mkdir = module.os.mkdir
+
+            def fail_before_launch(path, mode=0o777, *, dir_fd=None):
+                if path.endswith('/datadir'):
+                    raise OSError('deterministic setup failure')
+                return real_mkdir(path, mode, dir_fd=dir_fd)
+
+            module.os.mkdir = fail_before_launch
+            try:
+                module.restore(dump, os.fstat(dump), 1, 0, run_path, nonce, outcome)
+            except OSError:
+                pass
+            else:
+                raise RuntimeError('pre-docker setup failure was accepted')
+            if outcome.get('launch_state') != 'not_started':
+                raise RuntimeError('pre-docker failure was treated as an unknown launch')
+            module.os.mkdir = real_mkdir
+            os.rmdir(run_path)
 
             nonce = 'c' * 32
             run_leaf = '.run-' + nonce
@@ -373,7 +397,7 @@ final class DeploymentDumpAttestationProducerV1RootTest extends TestCase
                 pass
             else:
                 raise RuntimeError('unknown restore outcome was accepted')
-            if outcome.get('container_terminal') is not False or not os.path.isdir(run_path):
+            if outcome.get('launch_state') != 'unknown' or outcome.get('container_terminal') is not False or not os.path.isdir(run_path):
                 raise RuntimeError('unknown outcome did not preserve scratch evidence')
             os.close(dump)
             os.close(scratch)
@@ -435,13 +459,13 @@ final class DeploymentDumpAttestationProducerV1RootTest extends TestCase
                 RuntimeError('terminal failure must not mutate success marker'))
             calls = [0]
 
-            def terminal_restore(*args):
+            def pre_docker_restore(*args):
                 calls[0] += 1
                 outcome = args[-1]
-                outcome['container_terminal'] = True
+                outcome['launch_state'] = 'not_started'
                 raise SystemExit(70)
 
-            module.restore = terminal_restore
+            module.restore = pre_docker_restore
             sys.argv = ['deployment_dump_attestation_v1.py', '--latest-handoff']
             for attempt in (1, 2):
                 try:
@@ -455,6 +479,27 @@ final class DeploymentDumpAttestationProducerV1RootTest extends TestCase
                 if os.listdir(scratch):
                     raise RuntimeError('main left terminal failure scratch evidence')
             if calls[0] != 2:
+                raise RuntimeError('second pre-docker restore never reached restore()')
+
+            def terminal_restore(*args):
+                calls[0] += 1
+                outcome = args[-1]
+                outcome['launch_state'] = 'terminal'
+                outcome['container_terminal'] = True
+                raise SystemExit(70)
+
+            module.restore = terminal_restore
+            for attempt in (1, 2):
+                try:
+                    module.main()
+                except SystemExit as error:
+                    if error.code != 70:
+                        raise
+                else:
+                    raise RuntimeError('terminal restore failure was accepted')
+                if os.listdir(scratch):
+                    raise RuntimeError('main left terminal failure scratch evidence')
+            if calls[0] != 4:
                 raise RuntimeError('second terminal restore never reached restore()')
             if os.path.exists(root + '/evidence/dump-attestations') and os.listdir(root + '/evidence/dump-attestations'):
                 raise RuntimeError('terminal failure published an attestation')

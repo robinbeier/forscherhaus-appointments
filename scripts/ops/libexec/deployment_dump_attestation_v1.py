@@ -1489,6 +1489,10 @@ def tree_usage(path):
 def restore(pinned, pinned_meta, unpacked, create_tables, run_path, nonce, outcome=None):
     if outcome is None:
         outcome = {}
+    # Before the docker invocation no container can have been created.  Once
+    # dispatch starts, the result is ambiguous until Docker proves either a
+    # running container or its absence.
+    outcome['launch_state'] = 'not_started'
     outcome['container_terminal'] = False
     name = 'fh-dump-attestation-' + nonce
     if unpacked > (MAX_RESTORE_BYTES - FIXED_HEADROOM) // RESTORE_MULTIPLIER:
@@ -1506,6 +1510,7 @@ def restore(pinned, pinned_meta, unpacked, create_tables, run_path, nonce, outco
     fcntl.flock(lease_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     started = False
     try:
+        outcome['launch_state'] = 'unknown'
         docker(['run', '-d', '--rm', '--pull', 'never', '--name', name,
                 '--label', 'fh.dump-attestation=v1', '--network', 'none', '--read-only',
                 '--tmpfs', '/run/mysqld:rw,noexec,nosuid,size=16m',
@@ -1536,6 +1541,7 @@ def restore(pinned, pinned_meta, unpacked, create_tables, run_path, nonce, outco
                 'rm -f /run/fh-exit/.server.log; '
                 'kill "$watcher" 2>/dev/null; wait "$watcher" 2>/dev/null; exit "$status"'], 120)
         started = True
+        outcome['launch_state'] = 'running'
         for attempt in range(90):
             if final_server_ready(name):
                 break
@@ -1605,6 +1611,7 @@ def restore(pinned, pinned_meta, unpacked, create_tables, run_path, nonce, outco
         # Docker no longer exposes the container.  Preserve that proof for
         # callers when a later validation step fails.
         outcome['container_terminal'] = True
+        outcome['launch_state'] = 'terminal'
         started = False
         values = tree_usage(datadir)
         admitted = restore_bytes + IBTMP_MAX_BYTES + REDO_MAX_BYTES
@@ -1622,10 +1629,12 @@ def restore(pinned, pinned_meta, unpacked, create_tables, run_path, nonce, outco
                 except RecoveryRequired:
                     # The container outcome is unknown; the caller must retain
                     # the run evidence for recovery and must not clean it up.
+                    outcome['launch_state'] = 'unknown'
                     raise
                 else:
                     # stop_or_preserve returns only after Docker proves absence.
                     outcome['container_terminal'] = True
+                    outcome['launch_state'] = 'terminal'
         finally:
             os.close(lease_fd)
 
@@ -1889,7 +1898,7 @@ def main():
                     if len(data) > MAX_ATTESTATION:
                         reject()
             finally:
-                if restore_outcome.get('container_terminal') is True:
+                if restore_outcome.get('launch_state') in {'not_started', 'terminal'}:
                     restore_terminal = True
                 original_error = sys.exc_info()[0] is not None
                 if pinned is not None:

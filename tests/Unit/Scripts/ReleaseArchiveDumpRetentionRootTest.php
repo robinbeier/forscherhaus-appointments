@@ -775,7 +775,7 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         fclose($open);
     }
 
-    public function testMarkerTempCleanupBeforeBusyLockReportsKnownMutation(): void
+    public function testBusyGlobalLockPreventsStateAndMarkerMutation(): void
     {
         mkdir(self::STATE, 0700, true);
         $temp = self::STATE . '/.last-success.json.tmp-' . str_repeat('c', 32);
@@ -794,11 +794,11 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         self::assertSame(75, $result['exit'], $result['stdout'] . $result['stderr']);
         $value = $this->decode($result);
         self::assertSame('active_production_work', $value['reason']);
-        self::assertTrue($value['deletion_performed']);
-        self::assertSame('known', $value['mutation_outcome']);
-        self::assertSame(1, $value['mutation_counts']['marker_temp_files']);
-        self::assertSame(1, array_sum($value['mutation_counts']));
-        self::assertFileDoesNotExist($temp);
+        self::assertFalse($value['deletion_performed']);
+        self::assertSame('none', $value['mutation_outcome']);
+        self::assertSame(0, array_sum($value['mutation_counts']));
+        self::assertFileExists(self::STATE);
+        self::assertFileExists($temp);
         self::assertFileExists(self::RELEASES . '/old.tar.gz');
     }
 
@@ -858,8 +858,8 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         chmod($temp, 0600);
 
         $result = $this->runPatchedHelper(
-            "    state = None\n    global_lock = None",
-            "    state = None\n    os.rename(STATE_ROOT, STATE_ROOT + '.raced')\n    os.mkdir(STATE_ROOT, 0o700)\n    global_lock = None",
+            "        global_lock = open_global_lock()\n        state = prepare_state_directory(mount_safety)",
+            "        global_lock = open_global_lock()\n        os.rename(STATE_ROOT, STATE_ROOT + '.raced')\n        os.mkdir(STATE_ROOT, 0o700)\n        state = prepare_state_directory(mount_safety)",
             'execute',
         );
 
