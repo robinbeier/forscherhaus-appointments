@@ -207,6 +207,57 @@ final class CalendarCrossTypeMutationHttpTest extends TestCase
         self::assertSame($hoursBefore, $this->publicAvailability($fixture, $date));
     }
 
+    public function testUnavailabilitySaveAndDeleteCannotTargetGeneratedBuffer(): void
+    {
+        $fixture = $this->requireFixture();
+        $db = get_instance()->db;
+        $client = $this->authenticatedClient();
+
+        self::assertTrue(
+            (bool) $db->update(
+                'services',
+                [
+                    'buffer_before' => 10,
+                    'buffer_after' => 10,
+                ],
+                ['id' => $fixture->serviceId],
+            ),
+        );
+        $ordinary = $fixture->appointment();
+        $ordinaryId = (int) $ordinary['id'];
+        $this->ownedBufferParents[] = $ordinaryId;
+        $before = $this->ordinaryMutationSnapshot($ordinaryId);
+        self::assertCount(2, $before['buffers']);
+        $buffer = $before['buffers'][0];
+        $bufferId = (int) $buffer['id'];
+        $date = substr((string) $ordinary['start_datetime'], 0, 10);
+        $hoursBefore = $this->publicAvailability($fixture, $date);
+        self::assertNotEmpty(
+            $hoursBefore,
+            'Synthetic public availability must be observable before the denied writes.',
+        );
+
+        $save = $client->post('calendar/save_unavailability', [
+            'unavailability' => [
+                'id' => $bufferId,
+                'start_datetime' => $buffer['start_datetime'],
+                'end_datetime' => $buffer['end_datetime'],
+                'notes' => $fixture->run . '_buffer-forged-unavailability',
+                'id_users_provider' => $fixture->providerId,
+            ],
+        ]);
+        self::assertSame(404, $save->statusCode, $save->body);
+        self::assertFalse((bool) ($this->json($save)['success'] ?? true), $save->body);
+        self::assertSame($before, $this->ordinaryMutationSnapshot($ordinaryId));
+        self::assertSame($hoursBefore, $this->publicAvailability($fixture, $date));
+
+        $delete = $client->post('calendar/delete_unavailability', ['unavailability_id' => $bufferId]);
+        self::assertSame(404, $delete->statusCode, $delete->body);
+        self::assertFalse((bool) ($this->json($delete)['success'] ?? true), $delete->body);
+        self::assertSame($before, $this->ordinaryMutationSnapshot($ordinaryId));
+        self::assertSame($hoursBefore, $this->publicAvailability($fixture, $date));
+    }
+
     private function requireFixture(): DefenseCycleFixtures
     {
         self::assertNotNull($this->fixture);

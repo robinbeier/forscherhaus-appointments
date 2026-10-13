@@ -972,10 +972,16 @@ class Calendar extends EA_Controller
     private function find_manual_unavailability_for_write(int $unavailability_id): array
     {
         try {
-            return $this->unavailabilities_model->find($unavailability_id);
+            $unavailability = $this->unavailabilities_model->find($unavailability_id);
         } catch (InvalidArgumentException $error) {
             throw new RuntimeException('The unavailability was not found.', 404, $error);
         }
+
+        if ($unavailability['id_parent_appointment'] !== null) {
+            throw new RuntimeException('The unavailability was not found.', 404);
+        }
+
+        return $unavailability;
     }
 
     protected function lock_manual_unavailability(int $unavailability_id): array
