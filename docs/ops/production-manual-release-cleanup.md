@@ -46,12 +46,13 @@ retention helper's 10,000-entry class limit or has more than 64 previous-release
 entries; a larger backlog requires a separate decision.
 
 Before installing a new manual cleanup operator, compare its pinned
-release-archive/dump-retention helper with the installed helper. If the pin has
-changed, update both files as one coordinated unit under the shared production
-lock. Verify each file's identity, owner, mode, and SHA-256; use no-clobber
-recovery copies and stop on any mismatch. A successful installation alone never
-authorizes cleanup, and a mismatched or unavailable helper blocks both planning
-and execution.
+release-archive/dump-retention helper with the installed helper. The manual
+archive-cleanup operator pins that same helper. If its hash changes, update
+both installed manual operators and the shared helper as one coordinated unit
+under the shared production lock. Verify all three files' identities, owners,
+modes, and SHA-256 hashes; use no-clobber recovery copies for all three and stop
+on any mismatch. A successful installation alone never authorizes cleanup, and
+a mismatched or unavailable helper blocks both planning and execution.
 
 The script is an operator-only production path. Production installation,
 ownership and mode checks, lock setup, and post-run health verification are
