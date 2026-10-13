@@ -125,23 +125,69 @@ final class BookingManualUnavailabilityHttpTest extends TestCase
         self::assertCount(1, $manualRows);
         $this->manualUnavailabilityId = (int) $manualRows[0]['id'];
         self::assertGreaterThan(0, $this->manualUnavailabilityId);
-        $manualBefore = $fixture->row('appointments', $this->manualUnavailabilityId);
         self::assertNotContains($targetHour, $this->availableHours($client, $pair, $date));
         self::assertContains($adjacentHour, $this->availableHours($client, $pair, $date));
 
-        $before = $this->mutationSnapshot();
-        $denied = $client->post('booking/register', [
-            'post_data' => $this->bookingPayload($pair, $targetStart, 'manual-blocked'),
+        $adjacentStart = new DateTimeImmutable($date . ' ' . $adjacentHour . ':00');
+        $edit = $calendar->post('calendar/save_unavailability', [
+            'unavailability' => [
+                'id' => $this->manualUnavailabilityId,
+                'start_datetime' => $adjacentStart->format('Y-m-d H:i:s'),
+                'end_datetime' => $adjacentStart->add(new DateInterval('PT30M'))->format('Y-m-d H:i:s'),
+                'notes' => $fixture->run . '_manual_unavailability',
+                'id_users_provider' => $fixture->providerId,
+            ],
         ]);
-        self::assertSame(409, $denied->statusCode, $denied->body);
-        self::assertSame($before, $this->mutationSnapshot());
-        self::assertSame($manualBefore, $fixture->row('appointments', $this->manualUnavailabilityId));
+        self::assertSame(200, $edit->statusCode, $edit->body);
+        self::assertTrue((bool) (json_decode($edit->body, true, 512, JSON_THROW_ON_ERROR)['success'] ?? false));
+
+        $manualAfterEdit = $fixture->row('appointments', $this->manualUnavailabilityId);
+        self::assertSame($this->manualUnavailabilityId, (int) ($manualAfterEdit['id'] ?? 0));
+        self::assertSame($adjacentStart->format('Y-m-d H:i:s'), $manualAfterEdit['start_datetime'] ?? null);
         self::assertSame(
-            0,
+            $adjacentStart->add(new DateInterval('PT30M'))->format('Y-m-d H:i:s'),
+            $manualAfterEdit['end_datetime'] ?? null,
+        );
+        self::assertContains($targetHour, $this->availableHours($client, $pair, $date));
+        self::assertNotContains($adjacentHour, $this->availableHours($client, $pair, $date));
+
+        $bookingA = $client->post('booking/register', [
+            'post_data' => $this->bookingPayload($pair, $targetStart, 'manual-cleared'),
+        ]);
+        self::assertSame(200, $bookingA->statusCode, $bookingA->body);
+        $bookedA = get_instance()
+            ->db->get_where('appointments', [
+                'id_users_provider' => $fixture->providerId,
+                'id_services' => $fixture->serviceId,
+                'start_datetime' => $targetStart->format('Y-m-d H:i:s'),
+                'notes' => $fixture->run,
+            ])
+            ->result_array();
+        self::assertCount(1, $bookedA);
+        $customerAId = (int) ($bookedA[0]['id_users_customer'] ?? 0);
+        self::assertGreaterThan(0, $customerAId);
+        self::assertSame(
+            'Manual ' . $fixture->run . ' manual-cleared',
+            $fixture->row('users', $customerAId)['last_name'] ?? null,
+        );
+        self::assertSame(
+            1,
             get_instance()
-                ->db->get_where('users', ['last_name' => 'Manual ' . $fixture->run . ' manual-blocked'])
+                ->db->get_where('consents', [
+                    'first_name' => 'Synthetic',
+                    'last_name' => 'Manual ' . $fixture->run . ' manual-cleared',
+                    'type' => 'privacy-policy',
+                ])
                 ->num_rows(),
         );
+
+        $before = $this->ownedPersistenceSnapshot();
+        $denied = $client->post('booking/register', [
+            'post_data' => $this->bookingPayload($pair, $adjacentStart, 'manual-blocked'),
+        ]);
+        self::assertSame(409, $denied->statusCode, $denied->body);
+        self::assertSame($before, $this->ownedPersistenceSnapshot());
+        self::assertSame($manualAfterEdit, $fixture->row('appointments', $this->manualUnavailabilityId));
 
         $delete = $calendar->post('calendar/delete_unavailability', [
             'unavailability_id' => $this->manualUnavailabilityId,
@@ -150,33 +196,33 @@ final class BookingManualUnavailabilityHttpTest extends TestCase
         self::assertTrue((bool) (json_decode($delete->body, true, 512, JSON_THROW_ON_ERROR)['success'] ?? false));
         self::assertSame([], $fixture->row('appointments', $this->manualUnavailabilityId));
         $this->manualUnavailabilityId = 0;
-        self::assertContains($targetHour, $this->availableHours($client, $pair, $date));
+        self::assertContains($adjacentHour, $this->availableHours($client, $pair, $date));
 
-        $success = $client->post('booking/register', [
-            'post_data' => $this->bookingPayload($pair, $targetStart, 'manual-cleared'),
+        $bookingB = $client->post('booking/register', [
+            'post_data' => $this->bookingPayload($pair, $adjacentStart, 'manual-cleared-after-delete'),
         ]);
-        self::assertSame(200, $success->statusCode, $success->body);
-        $booked = get_instance()
+        self::assertSame(200, $bookingB->statusCode, $bookingB->body);
+        $bookedB = get_instance()
             ->db->get_where('appointments', [
                 'id_users_provider' => $fixture->providerId,
                 'id_services' => $fixture->serviceId,
-                'start_datetime' => $targetStart->format('Y-m-d H:i:s'),
+                'start_datetime' => $adjacentStart->format('Y-m-d H:i:s'),
                 'notes' => $fixture->run,
             ])
             ->result_array();
-        self::assertCount(1, $booked);
-        $positiveCustomerId = (int) $booked[0]['id_users_customer'];
-        self::assertGreaterThan(0, $positiveCustomerId);
+        self::assertCount(1, $bookedB);
+        $customerBId = (int) ($bookedB[0]['id_users_customer'] ?? 0);
+        self::assertGreaterThan(0, $customerBId);
         self::assertSame(
-            'Manual ' . $fixture->run . ' manual-cleared',
-            $fixture->row('users', $positiveCustomerId)['last_name'],
+            'Manual ' . $fixture->run . ' manual-cleared-after-delete',
+            $fixture->row('users', $customerBId)['last_name'] ?? null,
         );
         self::assertSame(
             1,
             get_instance()
                 ->db->get_where('consents', [
                     'first_name' => 'Synthetic',
-                    'last_name' => 'Manual ' . $fixture->run . ' manual-cleared',
+                    'last_name' => 'Manual ' . $fixture->run . ' manual-cleared-after-delete',
                     'type' => 'privacy-policy',
                 ])
                 ->num_rows(),
@@ -261,6 +307,34 @@ final class BookingManualUnavailabilityHttpTest extends TestCase
         ];
     }
 
+    /** @return array<string, list<array<string,mixed>>> */
+    private function ownedPersistenceSnapshot(): array
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $db = get_instance()->db;
+
+        return [
+            'appointments' => $db
+                ->order_by('id', 'ASC')
+                ->get_where('appointments', [
+                    'id_users_provider' => $fixture->providerId,
+                    'id_services' => $fixture->serviceId,
+                ])
+                ->result_array(),
+            'synthetic_users' => $db
+                ->order_by('id', 'ASC')
+                ->like('last_name', 'Manual ' . $fixture->run, 'after')
+                ->get_where('users', ['first_name' => 'Synthetic'])
+                ->result_array(),
+            'synthetic_consents' => $db
+                ->order_by('id', 'ASC')
+                ->like('last_name', 'Manual ' . $fixture->run, 'after')
+                ->get_where('consents', ['first_name' => 'Synthetic'])
+                ->result_array(),
+        ];
+    }
+
     private function cleanupOwnedRows(): void
     {
         $fixture = $this->fixture;
@@ -314,6 +388,7 @@ final class BookingManualUnavailabilityHttpTest extends TestCase
             $ownedLastNames = [
                 'Manual ' . $fixture->run . ' manual-blocked',
                 'Manual ' . $fixture->run . ' manual-cleared',
+                'Manual ' . $fixture->run . ' manual-cleared-after-delete',
             ];
             if (
                 ($customer['first_name'] ?? null) !== 'Synthetic' ||
@@ -348,7 +423,7 @@ final class BookingManualUnavailabilityHttpTest extends TestCase
                     ->num_rows(),
             );
         }
-        foreach (['manual-blocked', 'manual-cleared'] as $case) {
+        foreach (['manual-blocked', 'manual-cleared', 'manual-cleared-after-delete'] as $case) {
             $lastName = 'Manual ' . $fixture->run . ' ' . $case;
             $db->delete('consents', ['first_name' => 'Synthetic', 'last_name' => $lastName]);
             self::assertSame(
