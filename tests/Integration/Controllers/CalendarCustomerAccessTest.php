@@ -51,13 +51,15 @@ class CalendarCustomerAccessTest extends TestCase
         }
 
         foreach ($this->cleanupEmails as $email) {
-            $customer = get_instance()
+            $customers = get_instance()
                 ->db->select('id')
                 ->get_where('users', ['email' => $email])
-                ->row_array();
-            if (!empty($customer['id'])) {
-                get_instance()->db->delete('appointments', ['id_users_customer' => (int) $customer['id']]);
-                get_instance()->db->delete('users', ['id' => (int) $customer['id']]);
+                ->result_array();
+            foreach ($customers as $customer) {
+                if (!empty($customer['id'])) {
+                    get_instance()->db->delete('appointments', ['id_users_customer' => (int) $customer['id']]);
+                    get_instance()->db->delete('users', ['id' => (int) $customer['id']]);
+                }
             }
         }
         $this->cleanupEmails = [];
@@ -480,6 +482,46 @@ class CalendarCustomerAccessTest extends TestCase
         $response = $this->decodeJsonOutput();
         $this->assertTrue($response['success'] ?? false);
         $this->assertTrue($this->fixtures->customerExistsByEmail($email));
+    }
+
+    public function testAssignedSecretaryCanCreateUniqueCustomerThroughCalendarSave(): void
+    {
+        $pair = $this->fixtures->resolveProviderServicePair();
+        $providerId = $pair['provider_id'];
+        $secretaryId = $this->createSecretaryForProvider($providerId);
+        $email = 'calendar-secretary-new-' . bin2hex(random_bytes(4)) . '@example.org';
+        $marker = 'calendar-secretary-create-' . bin2hex(random_bytes(4));
+        $this->cleanupEmails[] = $email;
+
+        $this->fixtures->setSetting('limit_customer_access', '1');
+        $this->authenticateAsUser($secretaryId, DB_SLUG_SECRETARY);
+        $appointment = $this->newAppointmentPayload($providerId, $pair['service_id']);
+        $appointment['notes'] = $marker;
+        $this->postCalendarSavePayload($this->newCustomerPayload($email), $appointment);
+        $this->createCalendarController()->save_appointment();
+
+        $response = $this->decodeJsonOutput();
+        $this->assertTrue($response['success'] ?? false);
+
+        $customers = get_instance()
+            ->db->select('users.id')
+            ->from('users')
+            ->join('roles', 'roles.id = users.id_roles', 'inner')
+            ->where('users.email', $email)
+            ->where('roles.slug', DB_SLUG_CUSTOMER)
+            ->get()
+            ->result_array();
+        $this->assertCount(1, $customers);
+        $customer = $customers[0];
+        $customerId = (int) $customer['id'];
+
+        $appointments = get_instance()
+            ->db->get_where('appointments', ['notes' => $marker])
+            ->result_array();
+        $this->assertCount(1, $appointments);
+        $this->assertSame($customerId, (int) $appointments[0]['id_users_customer']);
+        $this->assertSame($providerId, (int) $appointments[0]['id_users_provider']);
+        $this->assertSame($pair['service_id'], (int) $appointments[0]['id_services']);
     }
 
     public function testDuplicateEmailIsRejectedBeforeAppointmentMutation(): void
