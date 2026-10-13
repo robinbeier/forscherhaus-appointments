@@ -15,6 +15,9 @@ final class CalendarCrossTypeMutationHttpTest extends TestCase
 {
     private ?DefenseCycleFixtures $fixture = null;
     private ?DefenseCycleHttpServer $server = null;
+    private ?DefenseCycleHttpServer $bookingServer = null;
+    /** @var list<int> */
+    private array $ownedBufferParents = [];
 
     protected function setUp(): void
     {
@@ -26,8 +29,10 @@ final class CalendarCrossTypeMutationHttpTest extends TestCase
             $this->fixture = new DefenseCycleFixtures();
             $this->fixture->create();
             $this->server = new DefenseCycleHttpServer();
+            $this->bookingServer = new DefenseCycleHttpServer();
         } catch (Throwable $error) {
             $this->server?->close();
+            $this->bookingServer?->close();
             $this->fixture?->cleanup();
             throw $error;
         }
@@ -38,7 +43,15 @@ final class CalendarCrossTypeMutationHttpTest extends TestCase
         try {
             $this->server?->close();
         } finally {
-            $this->fixture?->cleanup();
+            try {
+                $this->bookingServer?->close();
+            } finally {
+                try {
+                    $this->cleanupOwnedBuffers();
+                } finally {
+                    $this->fixture?->cleanup();
+                }
+            }
         }
     }
 
@@ -143,6 +156,57 @@ final class CalendarCrossTypeMutationHttpTest extends TestCase
         self::assertSame($manualBefore, $this->rowByNotes($fixture->run . '_manual'));
     }
 
+    public function testUnavailabilitySaveAndDeleteCannotTargetOrdinaryAppointment(): void
+    {
+        $fixture = $this->requireFixture();
+        $db = get_instance()->db;
+        $client = $this->authenticatedClient();
+
+        // Use a real appointment with dependent buffer rows so the denied requests
+        // are checked against the complete calendar state, not only the parent row.
+        self::assertTrue(
+            (bool) $db->update(
+                'services',
+                [
+                    'buffer_before' => 10,
+                    'buffer_after' => 10,
+                ],
+                ['id' => $fixture->serviceId],
+            ),
+        );
+        $ordinary = $fixture->appointment();
+        $ordinaryId = (int) $ordinary['id'];
+        $this->ownedBufferParents[] = $ordinaryId;
+        $before = $this->ordinaryMutationSnapshot($ordinaryId);
+        self::assertCount(2, $before['buffers']);
+        $date = substr((string) $ordinary['start_datetime'], 0, 10);
+        $hoursBefore = $this->publicAvailability($fixture, $date);
+        self::assertNotEmpty(
+            $hoursBefore,
+            'Synthetic public availability must be observable before the denied writes.',
+        );
+
+        $save = $client->post('calendar/save_unavailability', [
+            'unavailability' => [
+                'id' => $ordinaryId,
+                'start_datetime' => $ordinary['start_datetime'],
+                'end_datetime' => $ordinary['end_datetime'],
+                'notes' => $fixture->run . '_ordinary-forged-unavailability',
+                'id_users_provider' => $fixture->providerId,
+            ],
+        ]);
+        self::assertSame(404, $save->statusCode, $save->body);
+        self::assertFalse((bool) ($this->json($save)['success'] ?? true), $save->body);
+        self::assertSame($before, $this->ordinaryMutationSnapshot($ordinaryId));
+        self::assertSame($hoursBefore, $this->publicAvailability($fixture, $date));
+
+        $delete = $client->post('calendar/delete_unavailability', ['unavailability_id' => $ordinaryId]);
+        self::assertSame(404, $delete->statusCode, $delete->body);
+        self::assertFalse((bool) ($this->json($delete)['success'] ?? true), $delete->body);
+        self::assertSame($before, $this->ordinaryMutationSnapshot($ordinaryId));
+        self::assertSame($hoursBefore, $this->publicAvailability($fixture, $date));
+    }
+
     private function requireFixture(): DefenseCycleFixtures
     {
         self::assertNotNull($this->fixture);
@@ -203,6 +267,85 @@ final class CalendarCrossTypeMutationHttpTest extends TestCase
             ->db->order_by('id', 'ASC')
             ->get_where('appointments', ['notes LIKE' => $fixture->run . '%'])
             ->result_array();
+    }
+
+    /** @return array{appointment:array<string,mixed>,buffers:list<array<string,mixed>>,customer:array<string,mixed>,consents:list<array<string,mixed>>,service:array<string,mixed>} */
+    private function ordinaryMutationSnapshot(int $appointmentId): array
+    {
+        $fixture = $this->requireFixture();
+        $appointment = $fixture->row('appointments', $appointmentId);
+        $customer = $fixture->row('users', $fixture->customerId);
+        $consents = get_instance()
+            ->db->get_where('consents', [
+                'first_name' => $customer['first_name'],
+                'last_name' => $customer['last_name'],
+                'email' => $customer['email'],
+            ])
+            ->result_array();
+        $buffers = get_instance()
+            ->db->get_where('appointments', ['id_parent_appointment' => $appointmentId])
+            ->result_array();
+        usort($buffers, static fn(array $a, array $b): int => ((int) $a['id']) <=> ((int) $b['id']));
+
+        return [
+            'appointment' => $appointment,
+            'buffers' => $buffers,
+            'customer' => $customer,
+            'consents' => $consents,
+            'service' => $fixture->row('services', $fixture->serviceId),
+        ];
+    }
+
+    private function cleanupOwnedBuffers(): void
+    {
+        if ($this->ownedBufferParents === [] || $this->fixture === null) {
+            return;
+        }
+
+        $db = get_instance()->db;
+        foreach (array_unique($this->ownedBufferParents) as $parentId) {
+            $parent = $this->fixture->row('appointments', $parentId);
+            if (
+                $parent === [] ||
+                (int) ($parent['id_users_provider'] ?? 0) !== $this->fixture->providerId ||
+                (int) ($parent['id_users_customer'] ?? 0) !== $this->fixture->customerId ||
+                (int) ($parent['id_services'] ?? 0) !== $this->fixture->serviceId
+            ) {
+                throw new RuntimeException('Refusing to clean an unexpected buffer parent.');
+            }
+
+            $buffers = $db->get_where('appointments', ['id_parent_appointment' => $parentId])->result_array();
+            foreach ($buffers as $buffer) {
+                if ((int) ($buffer['id_parent_appointment'] ?? 0) !== $parentId) {
+                    throw new RuntimeException('Refusing to clean an unexpected buffer row.');
+                }
+                $db->delete('appointments', ['id' => (int) $buffer['id']]);
+            }
+            if ($db->get_where('appointments', ['id_parent_appointment' => $parentId])->num_rows() !== 0) {
+                throw new RuntimeException('Owned buffer cleanup was not confirmed.');
+            }
+        }
+        $this->ownedBufferParents = [];
+    }
+
+    /** @return list<string> */
+    private function publicAvailability(DefenseCycleFixtures $fixture, string $date): array
+    {
+        $server = $this->bookingServer;
+        self::assertNotNull($server);
+        $client = $server->client();
+        self::assertSame(200, $client->get('booking')->statusCode);
+        $response = $client->post('booking/get_available_hours', [
+            'provider_id' => $fixture->providerId,
+            'service_id' => $fixture->serviceId,
+            'selected_date' => $date,
+            'manage_mode' => 'false',
+            'appointment_id' => '',
+        ]);
+        self::assertSame(200, $response->statusCode, $response->body);
+        $hours = json_decode($response->body, true, 512, JSON_THROW_ON_ERROR);
+        self::assertIsArray($hours);
+        return array_values(array_map('strval', $hours));
     }
 
     /** @return array<string, mixed> */

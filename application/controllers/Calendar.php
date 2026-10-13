@@ -807,7 +807,7 @@ class Calendar extends EA_Controller
             $stored_unavailability = null;
 
             if (!empty($unavailability['id'])) {
-                $stored_unavailability = $this->unavailabilities_model->find((int) $unavailability['id']);
+                $stored_unavailability = $this->find_manual_unavailability_for_write((int) $unavailability['id']);
                 $this->check_event_permissions((int) $stored_unavailability['id_users_provider']);
             }
 
@@ -886,8 +886,8 @@ class Calendar extends EA_Controller
                 'warnings' => $warnings,
             ]);
         } catch (Throwable $e) {
-            if ($e->getCode() === 403) {
-                json_response(['success' => false, 'message' => $e->getMessage()], 403);
+            if (in_array($e->getCode(), [403, 404], true)) {
+                json_response(['success' => false, 'message' => $e->getMessage()], $e->getCode());
             } else {
                 json_exception($e);
             }
@@ -911,7 +911,7 @@ class Calendar extends EA_Controller
             $request_dto = $this->calendarRequestDtoFactory()->buildEntityIdRequestDto('unavailability_id');
             $unavailability_id = $request_dto->id;
 
-            $unavailability = $this->unavailabilities_model->find($unavailability_id);
+            $unavailability = $this->find_manual_unavailability_for_write($unavailability_id);
 
             $this->check_event_permissions((int) $unavailability['id_users_provider']);
 
@@ -949,8 +949,8 @@ class Calendar extends EA_Controller
                 'success' => true,
             ]);
         } catch (Throwable $e) {
-            if ($e->getCode() === 403) {
-                json_response(['success' => false, 'message' => $e->getMessage()], 403);
+            if (in_array($e->getCode(), [403, 404], true)) {
+                json_response(['success' => false, 'message' => $e->getMessage()], $e->getCode());
             } else {
                 json_exception($e);
             }
@@ -966,6 +966,15 @@ class Calendar extends EA_Controller
                 $unavailability['id_parent_appointment'] !== null)
         ) {
             throw new InvalidArgumentException('Protected unavailability fields cannot be changed.');
+        }
+    }
+
+    private function find_manual_unavailability_for_write(int $unavailability_id): array
+    {
+        try {
+            return $this->unavailabilities_model->find($unavailability_id);
+        } catch (InvalidArgumentException $error) {
+            throw new RuntimeException('The unavailability was not found.', 404, $error);
         }
     }
 
