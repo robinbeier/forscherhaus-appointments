@@ -37,7 +37,11 @@ identity, including its sidecar when one exists. An incomplete pair without a
 valid hold blocks the plan.
 
 Before a run, the release owner must verify the installed helper is root-owned,
-mode `0555`, and matches the pinned SHA-256 in the script. The production
+mode `0555`, and matches the pinned SHA-256 in the script. The installed manual
+release-cleanup operator pins the same helper; a helper upgrade must
+update both operators and the helper together under the production lock, with
+identity and hash checks and a no-clobber recovery copy of each file.
+Installation alone does not authorize either cleanup operation. The production
 change lock, existing release-pair publisher lock and cleanup lock must be
 available. The same nested-mount boundary
 check used by the manual release operator runs against the web root; active
