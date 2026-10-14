@@ -7,6 +7,19 @@ Codex normally runs from the local macOS workspace and reaches production over
 SSH. The repository is the system of record; the production server only carries
 a short pointer file for emergency orientation.
 
+For a scheduled night operation in a local Codex thread, confirm that the
+execution Mac can stay awake for the whole window. A scheduler trigger is not
+proof that the task is executing: macOS may briefly enter DarkWake and then
+sleep again. Record the first actual preflight time in the issue Workpad and
+compare it with the approved timezone and window. Recheck the clock immediately
+before each planned production write; do not start when the remaining window
+cannot cover the write, verification, and possible rollback. An already needed
+rollback must be completed safely even after the cutoff. Only an operator with
+a verified time guard enforces a cutoff automatically; do not assume that the
+general scripts do. If execution resumes after the cutoff without active
+recovery, perform only read-only classification and leave the change for a
+later window.
+
 ## Default Workflow
 
 1. Start read-only.
