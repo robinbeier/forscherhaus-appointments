@@ -59,7 +59,7 @@ docker run --detach --rm \
     --network "$network" \
     --network-alias php-fpm \
     --volume "$docroot:/var/www/html:ro" \
-    php:8.4-fpm-alpine >/dev/null
+    php:8.4.27-fpm-alpine >/dev/null
 docker run --detach --rm \
     --name "$nginx_container" \
     --network "$network" \

@@ -583,7 +583,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.4.1"
+          php-version: "8.4.27"
           coverage: none
           extensions: gd
           tools: composer:v2
@@ -693,7 +693,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.4.1"
+          php-version: "8.4.27"
           coverage: none
           extensions: gd
           tools: composer:v2
@@ -812,7 +812,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.4.1"
+          php-version: "8.4.27"
           coverage: none
           extensions: gd
           tools: composer:v2
@@ -853,7 +853,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.4.1"
+          php-version: "8.4.27"
           coverage: none
           extensions: gd
           tools: composer:v2
@@ -909,7 +909,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.4.1"
+          php-version: "8.4.27"
           coverage: none
           extensions: gd
           tools: composer:v2
@@ -1024,7 +1024,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.4.1"
+          php-version: "8.4.27"
           coverage: none
           extensions: curl,gd,intl,ldap,mbstring,mysqli,pdo,pdo_mysql,sockets,xml,zip,exif,sqlite3,gettext,bcmath
           tools: composer:v2
@@ -1232,7 +1232,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.4.1"
+          php-version: "8.4.27"
           coverage: xdebug
           extensions: gd
           tools: composer:v2
@@ -1296,7 +1296,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.4.1"
+          php-version: "8.4.27"
           coverage: xdebug
           extensions: gd
           tools: composer:v2
@@ -1392,7 +1392,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.4.1"
+          php-version: "8.4.27"
           coverage: none
           extensions: dom, simplexml
           tools: none
@@ -1585,7 +1585,7 @@ jobs:
         if: needs.changes.outputs.runtime_checks_required == 'true'
         uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.4.1"
+          php-version: "8.4.27"
           coverage: none
           extensions: gd
           tools: composer:v2
@@ -1926,7 +1926,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.4"
+          php-version: "8.4.27"
           coverage: none
           extensions: gd
           tools: composer:v2
@@ -2043,7 +2043,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.4"
+          php-version: "8.4.27"
           coverage: none
           extensions: gd
           tools: composer:v2

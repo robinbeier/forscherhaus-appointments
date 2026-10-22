@@ -716,7 +716,7 @@ class CiWorkflowContractTest extends TestCase
         }
         $setupPhp = $steps['Setup PHP'];
         self::assertSame('shivammathur/setup-php@v2', $setupPhp['uses'] ?? null);
-        self::assertSame('8.4.1', $setupPhp['with']['php-version'] ?? null);
+        self::assertSame('8.4.27', $setupPhp['with']['php-version'] ?? null);
         self::assertSame('xdebug', $setupPhp['with']['coverage'] ?? null);
         self::assertSame('gd', $setupPhp['with']['extensions'] ?? null);
         self::assertSame('composer:v2', $setupPhp['with']['tools'] ?? null);

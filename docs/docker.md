@@ -82,6 +82,11 @@ ownership. A caller-supplied ownership flag is not accepted from the environment
 
 ## Local configuration
 
+The default PHP-FPM image and CI PHP setup use the pinned PHP 8.4.27 patch
+release, while the PHP 8.5 preview smoke uses 8.5.12. These patch pins include
+the fixes for CVE-2026-109618 and CVE-2026-109619; rebuild the affected images
+after updating this repository.
+
 Keep the root `config.php` local. If it is missing, the worktree setup,
 PHP-FPM container, and Composer test scripts create it from
 [`config-sample.php`](../config-sample.php); they do not overwrite an existing configuration. Keep
