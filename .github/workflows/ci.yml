@@ -571,7 +571,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '24'
+          node-version: '24.22.1'
+          check-latest: true
           cache: npm
       - name: Install frontend test dependencies
         # The WebMCP runtime test needs moment-timezone; this job neither
@@ -757,7 +758,8 @@ jobs:
         if: steps.js_changes.outputs.needs_node == 'true'
         uses: actions/setup-node@v6
         with:
-          node-version: '24'
+          node-version: '24.22.1'
+          check-latest: true
           cache: npm
       - name: Install npm dependencies
         if: steps.js_changes.outputs.needs_node == 'true'
@@ -1037,7 +1039,8 @@ jobs:
         if: needs.changes.outputs.integration_smoke == 'true'
         uses: actions/setup-node@v6
         with:
-          node-version: '24'
+          node-version: '24.22.1'
+          check-latest: true
           cache: npm
       - name: Install Node.js dependencies
         if: needs.changes.outputs.integration_smoke == 'true'

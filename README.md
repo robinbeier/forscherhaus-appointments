@@ -21,7 +21,7 @@ Host prerequisites for setup and the local development stack:
 
 - PHP `>=8.3.6`
 - Composer
-- Node.js `>=24.0.0` plus `npm`/`npx`
+- Node.js `^24.22.1 || >=26.12.1` plus `npm`/`npx`
 - Docker Engine `>=28.3.3` + Docker Compose
 
 For agent worktrees and local pre-PR gates, the
