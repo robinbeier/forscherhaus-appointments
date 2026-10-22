@@ -1,4 +1,4 @@
-ARG PHP_FPM_BASE_IMAGE=php:8.4.18-fpm-bookworm
+ARG PHP_FPM_BASE_IMAGE=php:8.4.27-fpm-bookworm
 FROM ${PHP_FPM_BASE_IMAGE}
 
 WORKDIR "/var/www/html"
