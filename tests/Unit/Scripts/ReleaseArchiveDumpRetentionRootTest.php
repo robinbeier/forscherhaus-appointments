@@ -550,7 +550,7 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
         chmod($marker, 0600);
 
         $lock = self::BACKUPS . '/.backup-set-producer.lock';
-        $alias = sys_get_temp_dir() . '/rob483-authority-link-' . bin2hex(random_bytes(8));
+        $alias = dirname($lock) . '/.rob483-authority-link-' . bin2hex(random_bytes(8));
         self::assertTrue(link($lock, $alias));
         try {
             $linked = $this->runHelper('admission-status');
@@ -629,7 +629,7 @@ final class ReleaseArchiveDumpRetentionRootTest extends TestCase
 
         chmod($manifest, 0600);
 
-        $alias = sys_get_temp_dir() . '/rob483-manifest-link-' . bin2hex(random_bytes(8));
+        $alias = self::BACKUPS . '/.rob483-manifest-link-' . bin2hex(random_bytes(8));
         self::assertTrue(link($manifest, $alias));
         try {
             $linked = $this->runHelper('admission-status');
