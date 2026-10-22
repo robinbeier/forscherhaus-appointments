@@ -95,6 +95,23 @@ local credentials and other secrets out of version control.
 In the host machine the server is accessible from `http://localhost` and the database from `localhost:3306`.
 The development stack pins MySQL `8.4.8` in `docker-compose.yml` for CI parity, while application migrations remain compatible with MySQL `5.7+`.
 
+### Node.js security baseline
+
+The October 21, 2026 Node.js security releases are the minimum runtime baseline:
+Node 24.22.1 on the 24.x line, or Node 26.12.1 and newer. The root npm engine
+range and setup checks reject Node 25 and older, unpatched Node 26 releases.
+CI pins Node 24.22.1; the PDF renderer uses `node:24.22.1-bookworm-slim`.
+The PHP development image installs NodeSource 24.x and fails its build if that
+runtime is older than 24.22.1. Rebuild cached images after a security release;
+a floating major tag or a successful old build does not update an existing
+container. Verify `node --version` inside each rebuilt image.
+
+The Kuma Compose template builds a small derivative of the unchanged official
+2.5.6 image, copying only Node 22.23.4 from its digest-pinned official bookworm
+image. This preserves Kuma's dependencies and native-module ABI. See
+[the Kuma operations notes](uptime-kuma.md#nodejs-security-runtime-update)
+for the live update, backup/restore checks and rollback boundary.
+
 ### PHP-FPM session storage
 
 The PHP-FPM service mounts `storage/sessions` from the project-scoped named

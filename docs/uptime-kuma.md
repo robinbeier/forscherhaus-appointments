@@ -24,10 +24,11 @@ Host-owned:
 
 ## Production Snapshot
 
-The repository desired state now pins the official `2.5.6-slim` OCI index in
-`docker/compose.uptime-kuma.yml`. The documented deployed baseline remains
-`2.5.5-slim`; changing this repository pin does not claim that production has
-been upgraded.
+The repository template builds `fh-uptime-kuma:2.5.6-node22.23.4` from the
+unchanged official 2.5.6-slim image plus the official Node 22.23.4 binary. Both
+upstream images are pinned by digest in `docker/uptime-kuma/Dockerfile`.
+The production application remains Kuma 2.5.6; this is a Node security patch,
+not a Kuma application or data-schema upgrade.
 
 The live Compose file is host-owned (observed at
 `/opt/uptime-kuma/docker-compose.yml` on 2026-10-10) and may differ from the
@@ -46,8 +47,8 @@ restore and new-image offline-upgrade checks passed. Production validation
 passed at 19:37 UTC. This is historical evidence for the deployed 2.5.5
 baseline and does not establish compatibility or deployment of 2.5.6.
 
-- desired image: `2.5.6-slim@sha256:5db97dbbef610276e1699f3ece586c3509c8fd35de75d45ff5109761a1b377dc`
-- documented deployed baseline: `2.5.5-slim@sha256:9c56a772a7df53f444a404c579e87a27bd0c201375d00d6745a75bf8138f4342`
+- desired image: `fh-uptime-kuma:2.5.6-node22.23.4` (built locally from the pinned upstream images)
+- historical 2026-09-16 deployed baseline: `2.5.5-slim@sha256:9c56a772a7df53f444a404c579e87a27bd0c201375d00d6745a75bf8138f4342`
 - saved rollback image: `2.5.3-slim@sha256:7d70c3bd3127dc4ad2910f9d2d18481a6ac4f195a4e23e32f0c50869f977985a`
 - listen address: `127.0.0.1:3001`
 - data mount: `/var/lib/uptime-kuma-data` bind-mounted at `/app/data`
@@ -56,9 +57,36 @@ baseline and does not establish compatibility or deployment of 2.5.6.
 The slim image omits Chromium and embedded MariaDB; this instance uses SQLite
 and HTTP, keyword, JSON, and Push monitors. It does not use browser monitors.
 
-### 2.5.6 upgrade and rollback prerequisites
+### Node.js security runtime update
 
-Before an authorized production upgrade, complete every gate below:
+On 2026-10-22, production moved from the official 2.5.6-slim image's Node
+22.22.3 to Node 22.23.4. The live image is
+`fh-uptime-kuma:2.5.6-node22.23.4-20261022`, image ID
+`sha256:accceb9108d9b1fcc330da75561a5abc0a29992447fc7c657877626886cae5d9`.
+Only `/usr/local/bin/node` and its version metadata changed; Kuma, native
+modules, monitor definitions, notification assignments and the data mount
+were preserved. Both images use Debian bookworm and Node module ABI 127.
+
+Before switching, a consistent full data-directory backup was taken while
+Kuma was stopped briefly. The saved old image and the patched image both
+started successfully with isolated, network-disabled copies of that backup.
+Digests over 14 configuration tables matched before/after both trials and
+after the live change. All seven monitors were green after the update.
+The live Compose file was changed only at its image reference; loopback
+binding and `/var/lib/uptime-kuma-data` remained unchanged. The complete
+production validation gate passed, followed by the application PDF gate.
+
+The prior Compose files, images, full data backup, build recipe and trial
+records remain host-local under `/root/node-security-20261022T0836`.
+Keep that old image/data pair for rollback. A future application/schema
+upgrade must repeat the full backup and compatibility procedure below; this
+runtime-only evidence does not authorize changing monitors or notifications.
+
+### Historical 2.5.6 application-upgrade prerequisites
+
+These steps record the earlier 2.5.5 to 2.5.6 application upgrade. For a future
+application upgrade, bind both versions and the fresh backup to the then-current
+live state and repeat the equivalent gates:
 
 1. Make a fresh, consistent full Kuma data backup while the documented deployed
    `2.5.5-slim` image is still active; verify an isolated restore under that
@@ -236,7 +264,7 @@ configuration while auditing.
 Start Kuma from the repository template:
 
 ```bash
-docker compose -f docker/compose.uptime-kuma.yml up -d
+docker compose -f docker/compose.uptime-kuma.yml up -d --build
 ```
 
 For a disposable local restore rehearsal, use a separate data path and port:
@@ -244,7 +272,7 @@ For a disposable local restore rehearsal, use a separate data path and port:
 ```bash
 KUMA_DATA_PATH=/private/tmp/fh-kuma-restore-test-data \
 KUMA_PORT=13001 \
-docker compose -f docker/compose.uptime-kuma.yml up -d
+docker compose -f docker/compose.uptime-kuma.yml up -d --build
 ```
 
 Put Apache or another reverse proxy in front of `127.0.0.1:3001` for

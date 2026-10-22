@@ -8,7 +8,7 @@ source ./scripts/ci/docker_compose_helpers.sh
 
 BASE_REF="$(git_ci_normalize_base_ref "${PRE_PR_BASE_REF:-main}")"
 # Keep the quick gate aligned with the repo's frontend tooling baseline.
-ROOT_NODE_MINIMUM_VERSION=24.0.0
+ROOT_NODE_MINIMUM_VERSION=24.22.1
 CI_DOCKER_LOG_PREFIX="pre-pr-quick"
 
 require_cmd() {

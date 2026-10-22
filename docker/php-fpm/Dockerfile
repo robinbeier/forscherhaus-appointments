@@ -18,6 +18,7 @@ RUN apt-get update \
     && curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer \
     && curl -sLS https://deb.nodesource.com/setup_24.x | bash - \
     && apt-get install -y nodejs \
+    && node -e "const [major, minor, patch] = process.versions.node.split('.').map(Number); if (major !== 24 || minor < 22 || (minor === 22 && patch < 1)) process.exit(1);" \
     && echo "alias ll=\"ls -al\"" >> /root/.bashrc \
     && echo "export XDEBUG_TRIGGER=1" >> /root/.bashrc \
     && echo "export PHP_IDE_CONFIG=\"serverName=host.docker.internal\"" >> /root/.bashrc \
