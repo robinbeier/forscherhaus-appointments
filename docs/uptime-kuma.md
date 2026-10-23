@@ -24,14 +24,14 @@ Host-owned:
 
 ## Production Snapshot
 
-The repository template builds `fh-uptime-kuma:2.5.6-node22.23.4` from the
-unchanged official 2.5.6-slim image plus the official Node 22.23.4 binary. Both
-upstream images are pinned by digest in `docker/uptime-kuma/Dockerfile`.
-The production application remains Kuma 2.5.6; this is a Node security patch,
-not a Kuma application or data-schema upgrade.
+The repository template's desired image is the official
+`louislam/uptime-kuma:2.5.7-slim@sha256:4837e2b531b118d2fad24430fabed1488b14542f03b2bebf035497271b3a1ee8`.
+Upstream 2.5.7 includes Node 22.23.4, so the template does not build a local
+Kuma derivative or overlay Node. Production was upgraded to this image on
+2026-10-23; the verification and rollback evidence is recorded below.
 
-The live Compose file is host-owned (observed at
-`/opt/uptime-kuma/docker-compose.yml` on 2026-10-10) and may differ from the
+The live Compose file is host-owned (reconfirmed at
+`/opt/uptime-kuma/docker-compose.yml` on 2026-10-23) and may differ from the
 repository template. Before an authorized live upgrade, recheck its location,
 preserve that exact file, and change only its image reference. Do not overwrite
 it with `docker/compose.uptime-kuma.yml` or allow an unset `KUMA_DATA_PATH` to switch
@@ -45,11 +45,13 @@ completed successfully: the live instance was healthy at 19:36 UTC after the
 change, 18 configuration tables were preserved, and the full-backup old-image
 restore and new-image offline-upgrade checks passed. Production validation
 passed at 19:37 UTC. This is historical evidence for the deployed 2.5.5
-baseline and does not establish compatibility or deployment of 2.5.6.
+baseline and does not establish compatibility or deployment of 2.5.7.
 
-- desired image: `fh-uptime-kuma:2.5.6-node22.23.4` (built locally from the pinned upstream images)
+- desired image: `louislam/uptime-kuma:2.5.7-slim@sha256:4837e2b531b118d2fad24430fabed1488b14542f03b2bebf035497271b3a1ee8`
+- observed live version on 2026-10-23: Kuma `2.5.7`, Node `22.23.4`, matching the desired image digest
+- observed live image before the 2.5.7 upgrade: `fh-uptime-kuma:2.5.6-node22.23.4-20261022`, image ID `sha256:accceb9108d9b1fcc330da75561a5abc0a29992447fc7c657877626886cae5d9`
 - historical 2026-09-16 deployed baseline: `2.5.5-slim@sha256:9c56a772a7df53f444a404c579e87a27bd0c201375d00d6745a75bf8138f4342`
-- saved rollback image: `2.5.3-slim@sha256:7d70c3bd3127dc4ad2910f9d2d18481a6ac4f195a4e23e32f0c50869f977985a`
+- historical older fallback (not the 2.5.7 rollback target): `2.5.3-slim@sha256:7d70c3bd3127dc4ad2910f9d2d18481a6ac4f195a4e23e32f0c50869f977985a`
 - listen address: `127.0.0.1:3001`
 - data mount: `/var/lib/uptime-kuma-data` bind-mounted at `/app/data`
 - database file: `/app/data/kuma.db` (SQLite)
@@ -82,33 +84,70 @@ Keep that old image/data pair for rollback. A future application/schema
 upgrade must repeat the full backup and compatibility procedure below; this
 runtime-only evidence does not authorize changing monitors or notifications.
 
-### Historical 2.5.6 application-upgrade prerequisites
+### 2.5.7 production update (2026-10-23)
 
-These steps record the earlier 2.5.5 to 2.5.6 application upgrade. For a future
-application upgrade, bind both versions and the fresh backup to the then-current
-live state and repeat the equivalent gates:
+At 09:12:10 UTC, production became healthy on the official pinned 2.5.7-slim
+image. The former custom image only supplied the Node security correction
+that upstream now includes. No local overlay is needed.
 
-1. Make a fresh, consistent full Kuma data backup while the documented deployed
-   `2.5.5-slim` image is still active; verify an isolated restore under that
-   same old image and retain the old image/data pair together.
-2. Run an offline compatibility trial with the desired `2.5.6-slim` image
-   and a copy of that backup. Confirm the instance starts and the database is
-   readable before touching production data.
+Before switching, a consistent full data-directory backup was verified against
+the stopped live files. Separate copies restored successfully under both the
+old custom 2.5.6 image and the official 2.5.7 image with `--network none`.
+SQLite integrity checks passed, and digests over 14 configuration tables
+matched before and after both trials and the live switch, including monitor
+definitions and notification assignments. The target runtime was Node 22.23.4
+with module ABI 127. The host-owned Compose file changed only at its image
+reference; the data bind mount, loopback port and restart policy were preserved.
+
+A second consistent full backup was verified immediately before switching.
+A separate verified rollback data copy was prepared on the same filesystem,
+so rollback can preserve failed-upgrade data and rename the prepared copy
+into place without another full copy after a possible disk-space failure.
+The production change used the shared production-change lock.
+
+At 09:43:44 UTC, all seven active monitors had fresh successful regular
+results after the switch, including all five Push monitors. The complete
+`prod_validate_after_change.sh` gate subsequently passed. The full local
+`PRE_PR_RUN_COVERAGE=1 PRE_PR_BASE_REF=origin/main bash scripts/ci/pre_pr_full.sh`
+gate also passed. These observations establish this update's result, not a
+permanent health guarantee or an authenticated dashboard-login test.
+
+Recovery artifacts remain host-local under
+`/root/kuma-upgrade-2.5.7-20261023`: `compose.before.yml`, `rollback-image.tar`,
+`live-data-backup`, `live-backup-files.sha256.json`, `rollback-ready-data`, and
+the trial/operation evidence. The rollback image is the custom 2.5.6 image
+listed above, not the older 2.5.3 fallback. Stop Kuma before restoring that
+image and its matching full backup together; preserve the newer data directory
+separately. Do not run the one-shot switch script again to request rollback.
+
+### Application-upgrade procedure used for 2.5.7
+
+For future upgrades, bind both versions and a fresh backup to the then-current
+live state and repeat these gates. The October 22 Node patch alone was not
+evidence for the 2.5.7 application upgrade:
+
+1. Make a fresh, consistent full Kuma data backup while the observed live
+   `fh-uptime-kuma:2.5.6-node22.23.4-20261022` image is still active; verify an
+   isolated restore under that same old custom image and retain the old
+   image/data pair together.
+2. Run an offline compatibility trial with the desired official
+   `louislam/uptime-kuma:2.5.7-slim@sha256:4837e2b531b118d2fad24430fabed1488b14542f03b2bebf035497271b3a1ee8`
+   image and a copy of that backup. Confirm the instance starts and the
+   database is readable before touching production data.
 3. Compare monitor definitions and notification assignments in the offline
    trial. After the live upgrade, verify the same pre-upgrade monitor set and
    fresh successful results, including fresh Push signals. The seven-monitor
    repository catalog is a separate desired-state comparison, not permission
    to change the live catalog during an image upgrade.
-4. Keep the old `2.5.5-slim` image and its matching data backup available as
-   the rollback pair. The saved `2.5.3-slim` image below is an older fallback,
+4. Keep the old custom 2.5.6 image and its matching fresh data backup available
+   as the rollback pair. The saved `2.5.3-slim` image above is an older fallback,
    not a substitute for this pair.
 5. Stop without changing production if backup restore, image compatibility,
    monitor definitions, or fresh signals are ambiguous.
 
-The completed 2.5.5 update evidence above does not satisfy these 2.5.6 gates.
-The backup retained from the 2.5.5 update remains excluded from ROB-513. If
-rollback is required, restore the freshly bound 2.5.5 data backup together
-with the saved 2.5.5 image.
+If rollback is required, restore the freshly bound data backup together with
+the saved old custom 2.5.6 image. The 2.5.3 image is not an application-upgrade
+rollback substitute.
 
 Active monitors were captured on 2026-05-14. The repo desired-state catalog now
 also includes reviewed follow-up changes, such as the ROB-385 split between

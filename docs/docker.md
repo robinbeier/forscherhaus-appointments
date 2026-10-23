@@ -106,11 +106,12 @@ runtime is older than 24.22.1. Rebuild cached images after a security release;
 a floating major tag or a successful old build does not update an existing
 container. Verify `node --version` inside each rebuilt image.
 
-The Kuma Compose template builds a small derivative of the unchanged official
-2.5.6 image, copying only Node 22.23.4 from its digest-pinned official bookworm
-image. This preserves Kuma's dependencies and native-module ABI. See
-[the Kuma operations notes](uptime-kuma.md#nodejs-security-runtime-update)
-for the live update, backup/restore checks and rollback boundary.
+The Kuma Compose template uses the official
+`louislam/uptime-kuma:2.5.7-slim` image pinned by digest. Upstream 2.5.7
+includes the required Node 22.23.4 runtime, so the template has no local
+Kuma image build or Node overlay. See [the Kuma operations notes](uptime-kuma.md#257-production-update-2026-10-23)
+for the completed upgrade, observed live state, backup/restore checks and
+rollback boundary.
 
 ### PHP-FPM session storage
 

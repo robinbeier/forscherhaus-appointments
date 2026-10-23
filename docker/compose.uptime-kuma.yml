@@ -1,7 +1,6 @@
 services:
     uptime-kuma:
-        image: 'fh-uptime-kuma:2.5.6-node22.23.4'
-        build: ./uptime-kuma
+        image: 'louislam/uptime-kuma:2.5.7-slim@sha256:4837e2b531b118d2fad24430fabed1488b14542f03b2bebf035497271b3a1ee8'
         restart: unless-stopped
         ports:
             - '${KUMA_BIND_ADDR:-127.0.0.1}:${KUMA_PORT:-3001}:3001'
