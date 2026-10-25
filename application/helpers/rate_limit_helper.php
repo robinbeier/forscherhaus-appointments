@@ -107,7 +107,7 @@ if (!function_exists('rate_limit')) {
 
         $cache_remain_time_key = str_replace(':', '', 'rate_limit_tmp_' . $ip);
 
-        $current_time = date('Y-m-d H:i:s');
+        $current_time = time();
 
         $requests = $CI->cache->get($cache_key);
 
@@ -121,7 +121,7 @@ if (!function_exists('rate_limit')) {
             }
 
             $requests = 1;
-            $current_time_plus = date('Y-m-d H:i:s', strtotime('+' . $duration . ' seconds'));
+            $current_time_plus = $current_time + $duration;
 
             if (
                 !$CI->cache->save($cache_key, $requests, $duration) ||
@@ -138,15 +138,40 @@ if (!function_exists('rate_limit')) {
         } else {
             $time_lost = $CI->cache->get($cache_remain_time_key);
 
-            if (!is_string($time_lost) || strtotime($time_lost) === false) {
+            if (is_string($time_lost)) {
+                // Migrate the pre-timestamp format conservatively. The old value was
+                // timezone-sensitive; preserve the counter and give it one fresh
+                // duration window rather than attempting to interpret that date.
+                $legacy_deadline = DateTime::createFromFormat('!Y-m-d H:i:s', $time_lost);
+                $legacy_errors = DateTime::getLastErrors();
+                if (
+                    $legacy_deadline === false ||
+                    ($legacy_errors !== false &&
+                        ($legacy_errors['warning_count'] > 0 || $legacy_errors['error_count'] > 0)) ||
+                    $legacy_deadline->format('Y-m-d H:i:s') !== $time_lost
+                ) {
+                    @flock($lock_handle, LOCK_UN);
+                    fclose($lock_handle);
+                    rate_limit_fail_closed();
+                }
+
+                if (!$CI->cache->save($cache_remain_time_key, $current_time + $duration, $duration * 2)) {
+                    @flock($lock_handle, LOCK_UN);
+                    fclose($lock_handle);
+                    rate_limit_fail_closed();
+                }
+                $time_lost = $current_time + $duration;
+            }
+
+            if (!is_int($time_lost) || $time_lost <= 0) {
                 @flock($lock_handle, LOCK_UN);
                 fclose($lock_handle);
                 rate_limit_fail_closed();
             }
 
-            if ($current_time > $time_lost) {
+            if ($current_time >= $time_lost) {
                 $requests = 1;
-                $current_time_plus = date('Y-m-d H:i:s', strtotime('+' . $duration . ' seconds'));
+                $current_time_plus = $current_time + $duration;
 
                 if (
                     !$CI->cache->save($cache_key, $requests, $duration) ||

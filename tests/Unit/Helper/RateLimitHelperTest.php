@@ -10,7 +10,7 @@ require_once APPPATH . 'helpers/rate_limit_helper.php';
 final class RateLimitHelperTest extends TestCase
 {
     /**
-     * @return array{status: string, admitted: bool, calls: array<int, string>}
+     * @return array{status: string, admitted: bool, calls: array<int, string>, saved: array<int, string>}
      */
     private function runFailClosedWorker(string $mode): array
     {
@@ -28,6 +28,7 @@ final class RateLimitHelperTest extends TestCase
         $statusPath = $directory . '/status';
         $admittedPath = $directory . '/admitted';
         $callsPath = $directory . '/calls';
+        $savedPath = $directory . '/saved';
         $worker = tempnam($directory, 'worker-');
         file_put_contents(
             $worker,
@@ -39,6 +40,7 @@ final class RateLimitHelperTest extends TestCase
                     '__STATUS_PATH__',
                     '__ADMITTED_PATH__',
                     '__CALLS_PATH__',
+                    '__SAVED_PATH__',
                 ],
                 [
                     var_export($repository . '/application/', true),
@@ -47,12 +49,14 @@ final class RateLimitHelperTest extends TestCase
                     var_export($statusPath, true),
                     var_export($admittedPath, true),
                     var_export($callsPath, true),
+                    var_export($savedPath, true),
                 ],
                 <<<'PHP'
                 <?php
                 define('BASEPATH', __DIR__ . '/');
                 define('APPPATH', __APP_PATH__);
                 $_SERVER['HTTP_HOST'] = 'example.test';
+                http_response_code(200);
 
                 function is_cli(): bool
                 {
@@ -69,11 +73,11 @@ final class RateLimitHelperTest extends TestCase
 
                     public function get(string $key): mixed
                     {
-                        if (__MODE__ === 'save-count' || (__MODE__ === 'save-remain' && $key === 'rate_limit_key_203.0.113.10') || __MODE__ === 'corrupt-count') {
+                        if (in_array(__MODE__, ['new', 'save-count'], true) || (__MODE__ === 'save-remain' && $key === 'rate_limit_key_203.0.113.10') || __MODE__ === 'corrupt-count') {
                             return false;
                         }
                         if ($key === 'rate_limit_tmp_203.0.113.10') {
-                            return __MODE__ === 'missing-remain' ? false : (__MODE__ === 'invalid-remain' ? 'invalid' : (__MODE__ === 'save-reset' ? '2000-01-01 00:00:00' : '2099-01-01 00:00:00'));
+                            return __MODE__ === 'missing-remain' ? false : (__MODE__ === 'invalid-remain' ? 'invalid' : (__MODE__ === 'legacy' ? '2026-10-25 02:30:00' : (__MODE__ === 'save-reset' ? 1 : PHP_INT_MAX)));
                         }
                         return 1;
                     }
@@ -81,6 +85,7 @@ final class RateLimitHelperTest extends TestCase
                     public function save(string $key, mixed $value, int $ttl): bool
                     {
                         file_put_contents(__CALLS_PATH__, $key . PHP_EOL, FILE_APPEND);
+                        file_put_contents(__SAVED_PATH__, $key . '|' . (string) $value . '|' . $ttl . PHP_EOL, FILE_APPEND);
                         if (__MODE__ === 'save-count' || (__MODE__ === 'save-remain' && $key === 'rate_limit_tmp_203.0.113.10')) {
                             return false;
                         }
@@ -133,6 +138,7 @@ final class RateLimitHelperTest extends TestCase
                 'status' => trim((string) file_get_contents($statusPath)),
                 'admitted' => is_file($admittedPath),
                 'calls' => is_file($callsPath) ? file($callsPath, FILE_IGNORE_NEW_LINES) : [],
+                'saved' => is_file($savedPath) ? file($savedPath, FILE_IGNORE_NEW_LINES) : [],
             ];
         } finally {
             foreach (glob($cachePath . '/*') ?: [] as $path) {
@@ -318,6 +324,33 @@ final class RateLimitHelperTest extends TestCase
         $this->assertFalse($result['admitted']);
     }
 
+    public function testLegacyRemainMetadataMigratesWithoutResettingCount(): void
+    {
+        $result = $this->runFailClosedWorker('legacy');
+
+        $this->assertSame('200', $result['status']);
+        $this->assertTrue($result['admitted']);
+        $this->assertSame(2, count($result['saved']));
+        $this->assertMatchesRegularExpression(
+            '/^rate_limit_tmp_203\.0\.113\.10\|[1-9][0-9]*\|7200$/',
+            $result['saved'][0],
+        );
+        $this->assertSame('rate_limit_key_203.0.113.10|2|3600', $result['saved'][1]);
+    }
+
+    public function testNewCounterStoresIntegerUnixDeadline(): void
+    {
+        $result = $this->runFailClosedWorker('new');
+
+        $this->assertSame('200', $result['status']);
+        $this->assertTrue($result['admitted']);
+        $this->assertSame('rate_limit_key_203.0.113.10|1|3600', $result['saved'][0]);
+        $this->assertMatchesRegularExpression(
+            '/^rate_limit_tmp_203\.0\.113\.10\|[1-9][0-9]*\|7200$/',
+            $result['saved'][1],
+        );
+    }
+
     /** @return iterable<string, array{string}> */
     public static function invalidRemainModes(): iterable
     {
@@ -357,19 +390,20 @@ final class RateLimitHelperTest extends TestCase
         $cacheKey = str_replace(':', '', 'rate_limit_key_' . $ip);
         $remainKey = str_replace(':', '', 'rate_limit_tmp_' . $ip);
         file_put_contents($cachePath . '/' . $cacheKey, '1');
-        file_put_contents($cachePath . '/' . $remainKey, '2099-01-01 00:00:00');
+        file_put_contents($cachePath . '/' . $remainKey, (string) PHP_INT_MAX);
 
         $worker = tempnam($directory, 'worker-');
         file_put_contents(
             $worker,
             str_replace(
-                ['__APP_PATH__', '__BARRIER_PATH__', '__CACHE_PATH__', '__IPS__', '__CACHE_KEY__'],
+                ['__APP_PATH__', '__BARRIER_PATH__', '__CACHE_PATH__', '__IPS__', '__CACHE_KEY__', '__REMAIN_KEY__'],
                 [
                     var_export($repository . '/application/', true),
                     var_export($directory, true),
                     var_export($cachePath, true),
                     var_export($ips, true),
                     var_export($cacheKey, true),
+                    var_export($remainKey, true),
                 ],
                 <<<'PHP'
                 <?php
@@ -408,7 +442,13 @@ final class RateLimitHelperTest extends TestCase
                             } while (microtime(true) < $deadline);
                         }
 
-                        return $key === __CACHE_KEY__ && $value !== false ? (int) $value : $value;
+                        if ($value === false) {
+                            return false;
+                        }
+
+                        return in_array($key, [__CACHE_KEY__, __REMAIN_KEY__], true)
+                            ? (int) $value
+                            : $value;
                     }
 
                     public function save(string $key, mixed $value, int $ttl): bool
