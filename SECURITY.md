@@ -45,6 +45,15 @@ controller work. The isolated parallel-process regression proves the counter
 boundary for its synthetic per-key cache; it does not establish production
 throughput or a live rate-limit result.
 
+Rate-limit windows use integer Unix deadlines, independent of the application
+timezone and daylight-saving transitions. A valid legacy local-date deadline is
+rebased once under the same lock to one duration from the current time while
+preserving its request counter. This conservative transition may extend an old
+window by at most one duration; malformed or missing metadata still fails
+closed. Rolling application code back to the old string-only reader can reject
+requests with numeric metadata until that cache state expires (up to twice the
+configured duration); retain this boundary in the rollout recovery plan.
+
 The public monthly booking-availability read must not expand a month safely
 beyond the configured future-booking window into one calculation per day and
 provider. After request and reschedule-authority validation, it may return the
