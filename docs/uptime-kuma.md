@@ -25,10 +25,38 @@ Host-owned:
 ## Production Snapshot
 
 The repository template's desired image is the official
-`louislam/uptime-kuma:2.5.7-slim@sha256:4837e2b531b118d2fad24430fabed1488b14542f03b2bebf035497271b3a1ee8`.
-Upstream 2.5.7 includes Node 22.23.4, so the template does not build a local
-Kuma derivative or overlay Node. Production was upgraded to this image on
-2026-10-23; the verification and rollback evidence is recorded below.
+`louislam/uptime-kuma:2.5.8-slim@sha256:3e0ae13fa92d0a1108b7e4133eaa25b2bc4e26d2f5d8691a5cb01ee1fe5c95f1`.
+The last verified live baseline is 2.5.7 (2026-10-26, before this upgrade).
+A repository merge alone does not update the host-owned Compose file.
+
+### 2.5.8 upgrade assessment (2026-10-26)
+
+[Upstream 2.5.8](https://github.com/louislam/uptime-kuma/releases/tag/2.5.8)
+is a stable patch release including the admin-only RCE security correction
+GHSA-v2p3-6f5h-6hhf, Docker-response validation, and removal of TLS support
+from TCP Port monitors. The read-only live inventory found one HTTP, one
+JSON-query, five Push and zero TCP Port monitors, including inactive ones.
+Thus the TCP TLS behavior change does not affect this instance.
+
+Before cutover, verify a fresh consistent full data backup and isolated
+`--network none` restores under both the current 2.5.7 image and 2.5.8.
+Require SQLite integrity and unchanged configuration digests, including
+monitor definitions and notification assignments. Preserve the exact live
+Compose, old image and matching backup together; change only the image.
+Use the shared production-change lock, a fresh cutover backup and a verified
+same-filesystem rollback data copy. After cutover, require healthy runtime,
+unchanged mounts/ports/restart policy/configuration, seven fresh green regular
+monitor results including all five Push monitors, and the full production
+validation gate. Stop or restore the matched old image/data pair if a gate fails.
+This upgrade does not authorize monitor, notification, cron or credential changes.
+
+Preparation on 2026-10-26 passed: a stopped full data-directory backup matched
+file hashes; separate old-2.5.7 and new-2.5.8 restores started with `--network
+none`, passed SQLite integrity and preserved all 14 configuration-table digests.
+Both runtimes reported Node 22.23.4 / ABI 127. Recovery artifacts are host-local
+under `/root/kuma-upgrade-2.5.8-20261026`; retain the 2.5.7 image and its matching
+backup. This preparation is not a live cutover result. Before switching, make
+and verify another fresh backup and rollback-ready copy under the shared lock.
 
 The live Compose file is host-owned (reconfirmed at
 `/opt/uptime-kuma/docker-compose.yml` on 2026-10-23) and may differ from the
