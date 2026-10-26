@@ -26,10 +26,11 @@ Host-owned:
 
 The repository template's desired image is the official
 `louislam/uptime-kuma:2.5.8-slim@sha256:3e0ae13fa92d0a1108b7e4133eaa25b2bc4e26d2f5d8691a5cb01ee1fe5c95f1`.
-The last verified live baseline is 2.5.7 (2026-10-26, before this upgrade).
+Production was verified healthy on this image on 2026-10-26, running Kuma
+2.5.8 with Node 22.23.4 / module ABI 127.
 A repository merge alone does not update the host-owned Compose file.
 
-### 2.5.8 upgrade assessment (2026-10-26)
+### 2.5.8 production update (2026-10-26)
 
 [Upstream 2.5.8](https://github.com/louislam/uptime-kuma/releases/tag/2.5.8)
 is a stable patch release including the admin-only RCE security correction
@@ -38,28 +39,77 @@ from TCP Port monitors. The read-only live inventory found one HTTP, one
 JSON-query, five Push and zero TCP Port monitors, including inactive ones.
 Thus the TCP TLS behavior change does not affect this instance.
 
-Before cutover, verify a fresh consistent full data backup and isolated
-`--network none` restores under both the current 2.5.7 image and 2.5.8.
-Require SQLite integrity and unchanged configuration digests, including
-monitor definitions and notification assignments. Preserve the exact live
-Compose, old image and matching backup together; change only the image.
-Use the shared production-change lock, a fresh cutover backup and a verified
-same-filesystem rollback data copy. After cutover, require healthy runtime,
-unchanged mounts/ports/restart policy/configuration, seven fresh green regular
-monitor results including all five Push monitors, and the full production
-validation gate. Stop or restore the matched old image/data pair if a gate fails.
-This upgrade does not authorize monitor, notification, cron or credential changes.
+Production became healthy at 17:33:01 UTC (18:33:01 Europe/Berlin).
+The image-only update was merged in [PR #888](https://github.com/robinbeier/forscherhaus-appointments/pull/888)
+as `4bb9192f0c218a01fd844831531b0a4f3bb27a34`; the
+[production evidence](https://github.com/robinbeier/forscherhaus-appointments/pull/888#issuecomment-6423254346)
+records the separate live result.
 
-Preparation on 2026-10-26 passed: a stopped full data-directory backup matched
-file hashes; separate old-2.5.7 and new-2.5.8 restores started with `--network
-none`, passed SQLite integrity and preserved all 14 configuration-table digests.
-Both runtimes reported Node 22.23.4 / ABI 127. Recovery artifacts are host-local
-under `/root/kuma-upgrade-2.5.8-20261026`; retain the 2.5.7 image and its matching
-backup. This preparation is not a live cutover result. Before switching, make
-and verify another fresh backup and rollback-ready copy under the shared lock.
+Verification completed:
+
+- A stopped full data-directory backup matched file hashes. Separate restores
+  under old 2.5.7 and new 2.5.8 started with `--network none`; SQLite integrity
+  passed and all 14 configuration-table digests matched, including monitor
+  definitions and notification assignments. Both images reported Node 22.23.4
+  / module ABI 127.
+- Immediately before cutover, another consistent full backup was hash-verified
+  and a verified rollback data copy was prepared on the same filesystem.
+- Only the image reference changed in the host-owned Compose file. Loopback
+  binding, data bind mount and restart policy stayed unchanged. SQLite integrity
+  and all configuration digests also passed after the live switch and at the
+  final check.
+- At 17:45:32 UTC (18:45:32 Europe/Berlin), all seven active monitors had fresh
+  successful regular results after the update, including all five Push monitors.
+  The shared production-change lock covered the switch and this observation;
+  a switch or observation failure would restore the matched old image/data pair.
+- `bash scripts/ops/prod_validate_after_change.sh` passed after healthy start
+  and again after all fresh signals: endpoints, deep health, services, protected
+  paths and resources passed, with no new application errors.
+- The full local `PRE_PR_RUN_COVERAGE=1 PRE_PR_BASE_REF=origin/main bash scripts/ci/pre_pr_full.sh`
+  gate, applicable GitHub CI, and independent/code/security reviews passed for
+  the update PR. These are distinct from the live checks above.
+
+No application release, monitor definitions, notifications, cron or credentials
+changed. Authenticated dashboard login was not exercised. These dated results
+establish this update's outcome; future operations require fresh live checks.
+
+#### 2.5.8 rollback path
+
+Recovery artifacts are retained host-local under
+`/root/kuma-upgrade-2.5.8-20261026`: `compose.before.yml`, `rollback-image.tar`,
+`live-data-backup`, `live-backup-files.sha256.json`, `rollback-ready-data`,
+`baseline.json`, `config-digest.py`, and the trial/operation evidence.
+The matched rollback image is the official
+`louislam/uptime-kuma:2.5.7-slim@sha256:4837e2b531b118d2fad24430fabed1488b14542f03b2bebf035497271b3a1ee8`.
+Older custom 2.5.6 and 2.5.3 artifacts belong to historical upgrades below.
+
+For an authorized rollback:
+
+1. Obtain the shared production-change lock and verify the current image,
+   host-owned Compose, retained old image and matching full backup. Confirm the
+   prepared rollback copy still matches the recorded backup hashes and passes
+   SQLite integrity before changing live data. Stop if artifacts or identities
+   are ambiguous.
+2. Stop Kuma. Preserve the newer data directory separately; never overwrite it
+   or start 2.5.7 against potentially upgraded 2.5.8 data. Restore the exact
+   `compose.before.yml` and the matching `rollback-ready-data` copy together.
+   The prepared copy can be renamed into `/var/lib/uptime-kuma-data` on the same
+   filesystem, avoiding another full copy during a disk-space failure.
+3. Use the retained old image, loading `rollback-image.tar` if necessary, and
+   restart the `uptime-kuma` service using its host-owned Compose/project.
+   Require a healthy 2.5.7 runtime, unchanged ports/mount/restart policy, SQLite
+   integrity and configuration digests matching `baseline.json`.
+4. Verify the same seven active monitors and fresh successful regular results,
+   including all five Push monitors, then run
+   `bash scripts/ops/prod_validate_after_change.sh`. Preserve the failed-upgrade
+   data and operation evidence for diagnosis.
+
+Do not rerun the one-shot `fh-kuma-258-switch.py` to request rollback. This
+procedure is a recovery plan; no live rollback was needed or exercised. The
+old-image isolated restore test above is the rollback compatibility evidence.
 
 The live Compose file is host-owned (reconfirmed at
-`/opt/uptime-kuma/docker-compose.yml` on 2026-10-23) and may differ from the
+`/opt/uptime-kuma/docker-compose.yml` on 2026-10-26) and may differ from the
 repository template. Before an authorized live upgrade, recheck its location,
 preserve that exact file, and change only its image reference. Do not overwrite
 it with `docker/compose.uptime-kuma.yml` or allow an unset `KUMA_DATA_PATH` to switch
@@ -75,7 +125,7 @@ restore and new-image offline-upgrade checks passed. Production validation
 passed at 19:37 UTC. This is historical evidence for the deployed 2.5.5
 baseline and does not establish compatibility or deployment of 2.5.7.
 
-- desired image: `louislam/uptime-kuma:2.5.7-slim@sha256:4837e2b531b118d2fad24430fabed1488b14542f03b2bebf035497271b3a1ee8`
+- historical 2.5.7 desired image (now the 2.5.8 rollback target): `louislam/uptime-kuma:2.5.7-slim@sha256:4837e2b531b118d2fad24430fabed1488b14542f03b2bebf035497271b3a1ee8`
 - observed live version on 2026-10-23: Kuma `2.5.7`, Node `22.23.4`, matching the desired image digest
 - observed live image before the 2.5.7 upgrade: `fh-uptime-kuma:2.5.6-node22.23.4-20261022`, image ID `sha256:accceb9108d9b1fcc330da75561a5abc0a29992447fc7c657877626886cae5d9`
 - historical 2026-09-16 deployed baseline: `2.5.5-slim@sha256:9c56a772a7df53f444a404c579e87a27bd0c201375d00d6745a75bf8138f4342`
@@ -90,7 +140,7 @@ and HTTP, keyword, JSON, and Push monitors. It does not use browser monitors.
 ### Node.js security runtime update
 
 On 2026-10-22, production moved from the official 2.5.6-slim image's Node
-22.22.3 to Node 22.23.4. The live image is
+22.22.3 to Node 22.23.4. The image used for that historical update was
 `fh-uptime-kuma:2.5.6-node22.23.4-20261022`, image ID
 `sha256:accceb9108d9b1fcc330da75561a5abc0a29992447fc7c657877626886cae5d9`.
 Only `/usr/local/bin/node` and its version metadata changed; Kuma, native
