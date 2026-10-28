@@ -69,7 +69,7 @@ final class PasswordFormatLoginHttpTest extends TestCase
         self::assertSame($before, $fixture->userSettingsRow($fixture->actorId));
     }
 
-    public function testLegacyHashAuthenticatesAndUpgradeIsGuardedWithoutCrossAccountMutation(): void
+    public function testLegacyRolloutKeepsReaderCompatibilityOrUpgradesWithoutResetRaces(): void
     {
         $fixture = $this->fixture();
         $server = $this->server();
@@ -94,6 +94,9 @@ final class PasswordFormatLoginHttpTest extends TestCase
             self::assertSame($actor['salt'], $after['salt']);
         }
         self::assertSame($foreignBefore, $fixture->userSettingsRow($fixture->providerId));
+        if (MODERN_PASSWORD_WRITES) {
+            $this->assertConcurrentResetCannotBeOverwrittenByLegacyUpgrade();
+        }
     }
 
     public function testModernCredentialAuthenticatesAdminBasicApiWithoutDisclosingSecrets(): void
@@ -122,11 +125,8 @@ final class PasswordFormatLoginHttpTest extends TestCase
         self::assertStringNotContainsString('$argon2id$', $response->body);
     }
 
-    public function testConcurrentResetCannotBeOverwrittenByLegacyUpgrade(): void
+    private function assertConcurrentResetCannotBeOverwrittenByLegacyUpgrade(): void
     {
-        if (!MODERN_PASSWORD_WRITES) {
-            self::markTestSkipped('Legacy upgrades are deliberately inactive in the reader-first release.');
-        }
         $db = get_instance()->db;
         $fixture = $this->fixture();
         $settings = $fixture->userSettingsRow($fixture->actorId);

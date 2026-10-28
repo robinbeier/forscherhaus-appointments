@@ -5,6 +5,9 @@ Argon2id. New verifiers use 19,456 KiB, two passes and one thread. The existing
 100-byte password maximum remains; no bcrypt truncation is allowed. The password
 column already holds 512 characters, so no schema change is needed.
 
+The parameters follow the [OWASP Argon2id minimum configuration](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html#argon2id).
+Native format and salt handling follow [PHP password_hash](https://www.php.net/manual/en/function.password-hash.php).
+
 ## Ordered release boundary
 
 1. Deploy the dual-format reader with `MODERN_PASSWORD_WRITES = false`.
@@ -34,5 +37,6 @@ retained ordinary operator bundles are immutable: use a reviewed updated bundle
 before running them against modern-writer releases; never weaken ownership checks.
 
 Tests distinguish real HTTP/DB authentication from in-memory reset-ordering
-doubles. The coordinated legacy-upgrade/reset test runs only after activation;
-its reader-phase skip is an explicit remaining activation gate.
+doubles. The legacy-login regression checks unchanged credentials in the reader phase.
+Its coordinated upgrade/reset branch runs after activation and remains an
+explicit activation gate; the reader phase does not establish that SQL schedule.
