@@ -251,8 +251,12 @@ final class CalendarDeleteRescheduleHttpTest extends TestCase
         }
 
         $files = [];
-        foreach (glob($cachePath . DIRECTORY_SEPARATOR . 'customer-token-*') ?: [] as $path) {
-            if (!is_file($path) || is_link($path) || !preg_match('/^customer-token-[a-f0-9]{64}$/', basename($path))) {
+        foreach (glob($cachePath . DIRECTORY_SEPARATOR . 'customer-token-v2-*') ?: [] as $path) {
+            if (
+                !is_file($path) ||
+                is_link($path) ||
+                !preg_match('/^customer-token-v2-[a-f0-9]{64}$/', basename($path))
+            ) {
                 continue;
             }
             $raw = file_get_contents($path);

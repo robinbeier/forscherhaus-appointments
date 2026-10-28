@@ -36,12 +36,20 @@ final class PrivacyControllerCacheTest extends TestCase
         parent::tearDown();
     }
 
+    public function testCustomerTokenNamespaceIsVersionedAndDoesNotReadLegacyEntries(): void
+    {
+        $constant = new \ReflectionClass(Privacy::class);
+
+        $this->assertSame('customer-token-v2-', $constant->getConstant('CUSTOMER_TOKEN_CACHE_PREFIX'));
+        $this->assertNotSame('customer-token-', $constant->getConstant('CUSTOMER_TOKEN_CACHE_PREFIX'));
+    }
+
     public function testCustomerTokenCacheReturnsExistingCacheFromController(): void
     {
         $cache = new class {
             public function get(string $key): ?int
             {
-                return $key === 'customer-token-known' ? 42 : null;
+                return $key === 'customer-token-v2-known' ? 42 : null;
             }
         };
 
@@ -61,7 +69,7 @@ final class PrivacyControllerCacheTest extends TestCase
         $cache = new class {
             public function get(string $key): ?int
             {
-                return $key === 'customer-token-known' ? 42 : null;
+                return $key === 'customer-token-v2-known' ? 42 : null;
             }
         };
 
@@ -90,7 +98,7 @@ final class PrivacyControllerCacheTest extends TestCase
         $validCache = new class {
             public function get(string $key): ?int
             {
-                return $key === 'customer-token-known' ? 42 : null;
+                return $key === 'customer-token-v2-known' ? 42 : null;
             }
         };
 
@@ -113,7 +121,7 @@ final class PrivacyControllerCacheTest extends TestCase
         $cache = new class {
             public function get(string $key): ?int
             {
-                return $key === 'customer-token-known' ? 42 : null;
+                return $key === 'customer-token-v2-known' ? 42 : null;
             }
         };
 

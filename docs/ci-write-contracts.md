@@ -15,6 +15,13 @@ Einmal-Authority darf das anschliessende Update freigeben. `manage_mode`, IDs
 oder der Route-Hash allein reichen nicht. Der vollstaendige Sicherheitsvertrag
 steht in [Public Reschedule Authority](security/public-reschedule-authority.md).
 
+Bei einem Kundenwechsel ersetzen Kalender- und API-Schreibpfad den öffentlichen
+Termin-Hash atomar durch einen neuen Zufallswert. Normale Änderungen für denselben
+Kunden erhalten den gespeicherten Hash; ein mitgesendeter Hash darf ihn nicht
+ersetzen. Die Ausgabe einer Umbuchungs-Authority prüft den beim Lookup vorliegenden
+Hash nochmals unter den kanonischen Sperren. Ein alter Link darf dadurch auch bei
+gleichzeitiger Neuzuordnung keine Authority für den neuen Kunden erhalten.
+
 Eine normale anonyme Neuanlage darf keine bestehende Kundenzeile anhand einer
 mitgesendeten E-Mail aktualisieren. Bei ausgeblendetem E-Mail-Feld weist der
 Server eine dennoch gesendete nichtleere E-Mail vor der Datenmutation zurück.
@@ -60,6 +67,12 @@ Reschedule-Seite aus kryptografisch sicheren 32 Zufallsbytes, ist im Cache für
 600 Sekunden an die gespeicherte Kunden-ID gebunden und kann keine andere ID aus
 dem Request übernehmen. Das Modell prüft beim Löschen weiterhin die aktuelle
 Kundenrolle und führt die abhängigen Änderungen in einer Transaktion aus.
+
+Der Cache verwendet den Schlüsselpräfix `customer-token-v2-`. Tokens aus der
+älteren Namespace werden abgelehnt; nach Upgrade oder Rückfall muss eine bereits
+geöffnete Seite gegebenenfalls neu geladen werden. Der Token bleibt ausschließlich
+an die gespeicherte Kunden-ID gebunden und erhält durch eine Termin-Neuzuordnung
+keine Berechtigung über den neuen Kunden.
 
 `PrivacyDeleteHttpTest` prüft dies mit echten HTTP-Anfragen und einer eigenen
 synthetischen Datenbank: Methoden und direkte Aliase, CSRF, ungültigen,

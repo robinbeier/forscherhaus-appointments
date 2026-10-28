@@ -64,6 +64,14 @@ class Users_model extends EA_Model
      */
     public function save(array $user): int
     {
+        // An empty password on an update means "leave the existing password".
+        // Remove it before validation so it cannot reach hash_password().
+        if (!empty($user['id']) && isset($user['settings']) && is_array($user['settings'])) {
+            if (array_key_exists('password', $user['settings']) && $user['settings']['password'] === '') {
+                unset($user['settings']['password']);
+            }
+        }
+
         $this->validate($user);
 
         $owns_transaction = false;
@@ -118,6 +126,28 @@ class Users_model extends EA_Model
             throw new InvalidArgumentException(
                 'Not all required fields are provided for the user record: first name, last name, and email.',
             );
+        }
+
+        $settings = $user['settings'] ?? null;
+        if (!is_array($settings)) {
+            throw new InvalidArgumentException('The settings argument must be an array.');
+        }
+
+        $is_insert = empty($user['id']);
+        if (array_key_exists('password', $settings)) {
+            $password = $settings['password'];
+
+            if (!is_string($password)) {
+                throw new InvalidArgumentException('The user password must be a non-empty string.');
+            }
+
+            if ($password === '' || strlen($password) < MIN_PASSWORD_LENGTH) {
+                throw new InvalidArgumentException(
+                    'The user password must be at least ' . MIN_PASSWORD_LENGTH . ' characters long.',
+                );
+            }
+        } elseif ($is_insert) {
+            throw new InvalidArgumentException('The user password cannot be empty when inserting a new record.');
         }
     }
 

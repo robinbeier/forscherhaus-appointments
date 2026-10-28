@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit\Models;
 
 use RuntimeException;
+use InvalidArgumentException;
 use Tests\TestCase;
 use Users_model;
 
@@ -119,6 +120,60 @@ final class UsersModelAtomicWriteTest extends TestCase
         $this->assertFalse($db->trans_active());
         $this->assertSame(0, $db->get_where('users', ['id' => $userId])->num_rows());
         $this->assertSame(0, $db->get_where('user_settings', ['id_users' => $userId])->num_rows());
+    }
+
+    public function test_update_without_password_keeps_existing_hash(): void
+    {
+        $userId = $this->usersModel->save($this->userData());
+        $this->createdUserIds[] = $userId;
+        $before = get_instance()
+            ->db->get_where('user_settings', ['id_users' => $userId])
+            ->row_array();
+
+        $update = [
+            'id' => $userId,
+            'first_name' => 'Updated',
+            'last_name' => 'User',
+            'email' => 'users-update-' . bin2hex(random_bytes(4)) . '@example.org',
+            'settings' => ['username' => 'updated-without-password', 'password' => ''],
+        ];
+        $this->usersModel->save($update);
+
+        $after = get_instance()
+            ->db->get_where('user_settings', ['id_users' => $userId])
+            ->row_array();
+        $this->assertSame($before['password'], $after['password']);
+
+        unset($update['settings']['password']);
+        $this->usersModel->save($update);
+        $afterMissing = get_instance()
+            ->db->get_where('user_settings', ['id_users' => $userId])
+            ->row_array();
+        $this->assertSame($before['password'], $afterMissing['password']);
+    }
+
+    public function test_password_boundary_rejects_short_zero_and_non_string_values_before_mutation(): void
+    {
+        $values = ['0', 'a', 'ab', 'abc', 'abcd', 'abcde', 'abcdef', null, [], true, 1234567];
+
+        foreach ($values as $value) {
+            $user = $this->userData();
+            $user['settings']['password'] = $value;
+
+            try {
+                $this->usersModel->save($user);
+                $this->fail('Expected invalid password to be rejected.');
+            } catch (InvalidArgumentException $exception) {
+                $this->assertStringContainsString('password', strtolower($exception->getMessage()));
+            }
+
+            $this->assertSame(
+                0,
+                get_instance()
+                    ->db->get_where('users', ['email' => $user['email']])
+                    ->num_rows(),
+            );
+        }
     }
 
     public function test_failure_in_existing_outer_transaction_propagates_without_inner_rollback(): void

@@ -26,6 +26,7 @@ final class RescheduleAuthorityState
         public readonly int $providerId,
         public readonly int $serviceId,
         public readonly string $snapshotDigest,
+        public readonly string $appointmentHash,
     ) {}
 }
 
@@ -136,7 +137,7 @@ class Reschedule_authority
     /**
      * Issue one short-lived authority for the canonical appointment.
      */
-    public function issue(int $appointment_id): void
+    public function issue(int $appointment_id, string $presented_hash): void
     {
         if (!$this->db->trans_begin()) {
             throw new RuntimeException('Could not start reschedule authority transaction.');
@@ -144,6 +145,9 @@ class Reschedule_authority
 
         try {
             $state = $this->loadState($appointment_id, true);
+            if (!hash_equals($state->appointmentHash, $presented_hash)) {
+                throw new RescheduleAuthorityException('stale-appointment-capability');
+            }
             $token = $this->randomToken();
             $context = $this->sessionContext();
             $now = date('Y-m-d H:i:s');
@@ -640,6 +644,7 @@ class Reschedule_authority
             $provider_id,
             $service_id,
             hash('sha256', $encoded_snapshot),
+            (string) ($appointment['hash'] ?? ''),
         );
     }
 

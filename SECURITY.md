@@ -26,6 +26,20 @@ Ownership labels do not demonstrate an independent security review.
   credentials, and evidence have their own trust boundary and require review.
   A successful tool run does not establish the application's security by itself.
 
+Self-service password changes enforce the existing `MIN_PASSWORD_LENGTH` in
+the shared user model before any mutation. Missing or empty passwords on an
+update preserve the verifier; other supplied values must be strings meeting
+the policy. Recovery and authentication continue using their existing verifier
+contracts. `AccountPasswordChangeHttpTest` and `UsersModelAtomicWriteTest`
+cover the account path and atomic rejection, not the strength of existing passwords.
+
+Non-development database failures must not disclose SQL or driver diagnostics
+in HTTP HTML or JSON. Preserve the database driver's existing failure/rollback
+semantics; sanitize both the framework error renderer and native MySQLi
+exceptions returned through `json_exception()`. Protected logs retain diagnostics.
+The isolated account failure regression proves rollback after a real write;
+the renderer matrix separately covers development, testing, production, and CLI.
+
 The product is used through its own website. Browser access from another origin
 is not supported for public, backoffice, or API routes. Application responses
 must not grant a foreign origin access through `Access-Control-Allow-*`, including
@@ -374,6 +388,16 @@ the appointment write allowlist: the page needs the existing hash, but a caller
 must not supply a hash for saving. `RescheduleMethodHttpTest` checks the rendered
 projection and its authority/customer-token binding with synthetic data; it
 does not establish who obtained a valid management link.
+
+A calendar or API customer reassignment atomically replaces the public hash
+with a fresh 256-bit value under the appointment lock. Ordinary future changes
+for the same customer preserve the stored hash, regardless of caller-supplied
+hash fields. Schedule changes to safely aged-out appointments also rotate the
+hash under the documented upgrade prerequisite. Authority issuance checks that hash again under the canonical locks
+so an earlier lookup cannot authorize a replacement customer. Privacy tokens
+use the `customer-token-v2-` namespace; pre-upgrade tokens require a page reload
+and are not accepted by the new consumer. Rollback likewise requires reloading
+pages whose privacy tokens were issued by the newer code.
 
 The authenticated calendar page may preload up to 50 recent customers the
 current staff member may view and access according to the persisted role;
