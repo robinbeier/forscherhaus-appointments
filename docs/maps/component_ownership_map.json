@@ -190,6 +190,7 @@
         "assets/js/pages/booking_webmcp.js"
       ],
       "depends_on": [
+        "booking-lifecycle",
         "integrations-sync",
         "people-services-admin",
         "scheduling-backoffice",
@@ -228,12 +229,17 @@
         {
           "path": "application/views/pages/booking_message.php",
           "match": "exact_file"
+        },
+        {
+          "path": "application/core/Public_booking_lifecycle.php",
+          "match": "exact_file"
         }
       ],
       "key_files": [
         "application/controllers/Booking_confirmation.php",
         "application/controllers/Booking_cancellation.php",
-        "application/views/pages/booking_confirmation.php"
+        "application/views/pages/booking_confirmation.php",
+        "application/core/Public_booking_lifecycle.php"
       ],
       "depends_on": [
         "booking-public",
@@ -330,6 +336,7 @@
         "assets/js/pages/calendar.js"
       ],
       "depends_on": [
+        "booking-lifecycle",
         "integrations-sync",
         "people-services-admin",
         "settings-compliance",
@@ -523,6 +530,7 @@
         "assets/js/pages/services.js"
       ],
       "depends_on": [
+        "booking-lifecycle",
         "integrations-sync",
         "scheduling-backoffice",
         "settings-compliance",
@@ -829,6 +837,10 @@
         },
         {
           "path": "application/libraries/Ics_calendar.php",
+          "match": "exact_file"
+        },
+        {
+          "path": "application/core/Early_rate_limit.php",
           "match": "exact_file"
         }
       ],

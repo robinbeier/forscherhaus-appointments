@@ -1163,17 +1163,44 @@ class Appointments_model extends EA_Model
         }
 
         try {
-            $this->db->query(
-                'SELECT `id` FROM `' . $this->db->dbprefix('appointments') . '` WHERE `id` = ? FOR UPDATE',
-                [$appointment_id],
-            );
+            $snapshot = $this->db->get_where('appointments', ['id' => $appointment_id])->row_array();
+            $lifecycle = null;
+            if ($snapshot && !(bool) $snapshot['is_unavailability']) {
+                $customer_id = (int) $snapshot['id_users_customer'];
+                $marker = $this->db
+                    ->get_where('public_booking_customers', ['customer_id' => $customer_id])
+                    ->row_array();
+                // Committed unmarked customers cannot become public-owned:
+                // public insert and reschedule preserve their marker atomically.
+                if ((int) ($marker['customer_id'] ?? 0) === $customer_id) {
+                    $this->lock_update_parents($snapshot, []);
+                    require_once APPPATH . 'core/Public_booking_lifecycle.php';
+                    $lifecycle = new Public_booking_lifecycle($this->db);
+                }
+            }
+            $locked = $this->db
+                ->query('SELECT * FROM `' . $this->db->dbprefix('appointments') . '` WHERE `id` = ? FOR UPDATE', [
+                    $appointment_id,
+                ])
+                ->row_array();
+            if ($snapshot && $locked) {
+                foreach (['id_users_customer', 'id_users_provider', 'id_services'] as $field) {
+                    if ((int) $snapshot[$field] !== (int) $locked[$field]) {
+                        throw new RuntimeException('Appointment parents changed during deletion.');
+                    }
+                }
+            }
             $this->db
                 ->where('id_parent_appointment', $appointment_id)
                 ->where('is_unavailability', true)
                 ->delete('appointments');
 
-            $this->db->delete('appointments', ['id' => $appointment_id]);
-
+            if (!$this->db->delete('appointments', ['id' => $appointment_id])) {
+                throw new RuntimeException('Could not delete appointment.');
+            }
+            if ($lifecycle !== null && $locked && !(bool) $locked['is_unavailability']) {
+                $lifecycle->cleanupAfterCancellation((int) $locked['id_users_customer']);
+            }
             if (!$this->db->trans_commit()) {
                 throw new RuntimeException('Could not commit appointment transaction.');
             }

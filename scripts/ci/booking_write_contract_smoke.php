@@ -561,6 +561,34 @@ function runBookingContractsAttempt(
                 'booking_cancel_unknown_hash_contract',
                 static function () use ($client, $config, $factory, &$state, $slot, $cleanup): array {
                     $customerId = toPositiveInt($state['primary_customer_id'] ?? null, 'cancel_unknown.customer_id');
+                    if (apiGetById($config, 'customers', $customerId, [200, 404]) === null) {
+                        // Last cancellation now removes eligible public customers.
+                        // Live canaries must retain their pre-owned fixture instead.
+                        if ($config['canary_context'] !== null) {
+                            throw new ContractAssertionException('The owned canary customer disappeared.');
+                        }
+                        $customerResponse = apiJsonRequest(
+                            'POST',
+                            $config,
+                            'api/v1/customers',
+                            $factory->createApiCustomerPayload(),
+                            true,
+                            [201],
+                        );
+                        $customer = decodeJsonArray(
+                            $customerResponse['body'],
+                            'POST /api/v1/customers (unknown hash protection)',
+                        );
+                        $customerId = toPositiveInt($customer['id'] ?? null, 'cancel_unknown.protected_customer_id');
+                        $cleanup->register(
+                            'customers',
+                            $customerId,
+                            static fn(int|string $id): bool => apiDeleteById($config, 'customers', (int) $id, [
+                                204,
+                                404,
+                            ]),
+                        );
+                    }
                     $appointmentWindow = BookingWriteContractState::requirePrimaryAppointmentWindow($state);
 
                     $protectPayload = $factory->createApiAppointmentPayload(

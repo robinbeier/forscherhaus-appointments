@@ -41,6 +41,7 @@ parameters:
         - phpstan/bootstrap.php
     scanFiles:
         - phpstan/stubs/codeigniter-functions.stub.php
+        - application/helpers/rate_limit_helper.php
     scanDirectories:
         - system
         - application/core

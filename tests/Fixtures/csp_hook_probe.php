@@ -11,16 +11,23 @@ if ($repoRoot === '' || !is_dir($repoRoot)) {
 $probeRoot = sys_get_temp_dir() . '/fh-csp-hook-probe-' . bin2hex(random_bytes(8));
 mkdir($probeRoot . '/application/config', 0700, true);
 mkdir($probeRoot . '/application/core', 0700, true);
+mkdir($probeRoot . '/application/helpers', 0700, true);
 
 register_shutdown_function(static function () use ($probeRoot): void {
     foreach (
-        [$probeRoot . '/application/config/hooks.php', $probeRoot . '/application/core/Csp_report_only.php']
+        [
+            $probeRoot . '/application/config/hooks.php',
+            $probeRoot . '/application/core/Csp_report_only.php',
+            $probeRoot . '/application/core/Early_rate_limit.php',
+            $probeRoot . '/application/helpers/rate_limit_helper.php',
+        ]
         as $path
     ) {
         if (is_file($path)) {
             unlink($path);
         }
     }
+    @rmdir($probeRoot . '/application/helpers');
     @rmdir($probeRoot . '/application/config');
     @rmdir($probeRoot . '/application/core');
     @rmdir($probeRoot . '/application');
@@ -30,6 +37,8 @@ register_shutdown_function(static function () use ($probeRoot): void {
 define('BASEPATH', __DIR__);
 define('APPPATH', $probeRoot . '/application/');
 copy($repoRoot . '/application/config/hooks.php', APPPATH . 'config/hooks.php');
+copy($repoRoot . '/application/core/Early_rate_limit.php', APPPATH . 'core/Early_rate_limit.php');
+copy($repoRoot . '/application/helpers/rate_limit_helper.php', APPPATH . 'helpers/rate_limit_helper.php');
 file_put_contents(
     APPPATH . 'core/Csp_report_only.php',
     <<<'PHP'

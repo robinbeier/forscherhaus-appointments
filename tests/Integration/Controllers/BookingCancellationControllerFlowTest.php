@@ -138,6 +138,9 @@ class BookingCancellationControllerFlowTest extends TestCase
         $CI->load->model('services_model');
         $CI->load->model('customers_model');
 
+        require_once APPPATH . 'core/Public_booking_lifecycle.php';
+        $controller->public_booking_lifecycle = new \Public_booking_lifecycle($CI->db);
+
         $controller->db = $CI->db;
         $controller->load = $CI->load;
         $controller->input = $CI->input;

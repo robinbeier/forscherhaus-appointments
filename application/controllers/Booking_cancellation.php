@@ -31,6 +31,8 @@ class Booking_cancellation extends EA_Controller
         $this->load->model('providers_model');
         $this->load->model('services_model');
         $this->load->model('customers_model');
+        require_once APPPATH . 'core/Public_booking_lifecycle.php';
+        $this->public_booking_lifecycle = new Public_booking_lifecycle($this->db);
     }
 
     /**
@@ -90,6 +92,12 @@ class Booking_cancellation extends EA_Controller
             }
             $transaction_open = true;
 
+            $this->public_booking_lifecycle->lockCancellationParents(
+                (int) $occurrences[0]['id_users_customer'],
+                (int) $occurrences[0]['id_users_provider'],
+                (int) $occurrences[0]['id_services'],
+            );
+
             // A concurrent reschedule or hash change invalidates the earlier lookup.
             $appointment = $this->db
                 ->query('SELECT * FROM `' . $this->db->dbprefix('appointments') . '` WHERE `id` = ? FOR UPDATE', [
@@ -107,6 +115,9 @@ class Booking_cancellation extends EA_Controller
 
             if (
                 !hash_equals((string) $appointment['hash'], $appointment_hash) ||
+                (int) $appointment['id_users_customer'] !== (int) $occurrences[0]['id_users_customer'] ||
+                (int) $appointment['id_users_provider'] !== (int) $occurrences[0]['id_users_provider'] ||
+                (int) $appointment['id_services'] !== (int) $occurrences[0]['id_services'] ||
                 (bool) $appointment['is_unavailability']
             ) {
                 $this->db->trans_rollback();

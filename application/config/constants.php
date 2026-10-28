@@ -82,7 +82,7 @@ const TIME_FORMAT_MILITARY = 'military';
 const MIN_PASSWORD_LENGTH = 7;
 const MAX_PASSWORD_LENGTH = 100;
 // Reader-first rollout guard; enable only after all deployed readers support Argon2id.
-const MODERN_PASSWORD_WRITES = false;
+const MODERN_PASSWORD_WRITES = true;
 const ANY_PROVIDER = 'any-provider';
 
 const CALENDAR_VIEW_DEFAULT = 'default';

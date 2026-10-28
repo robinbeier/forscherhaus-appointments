@@ -890,8 +890,12 @@ confirmed control failure and record unresolved assumptions. A well-supported
 source finding need not have a live exploit demonstration to be reportable.
 Do not dismiss a finding merely because a production test cannot be performed.
 
-This policy introduces no component exclusions, finding-class suppressions, or
-accepted risks. Editing restrictions on `system/` and dependency code do not
+This policy introduces no component exclusions or finding-class suppressions.
+The owner retains anonymous public booking with throttling and explicitly
+accepts the remaining distributed capacity-abuse risk; it remains reportable,
+not excluded. The [public booking lifecycle](docs/security/public-booking-abuse-and-retention.md)
+documents allocation limits and the narrow deletion policy for future public
+customers. Editing restrictions on `system/` and dependency code do not
 exclude relevant vulnerabilities from review. Legacy compatibility and existing
 tests are not blanket compensating controls. Material scope or risk acceptance
 decisions remain with the owner.
