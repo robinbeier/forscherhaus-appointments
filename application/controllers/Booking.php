@@ -23,6 +23,7 @@
  */
 class Booking extends EA_Controller
 {
+    private const CUSTOMER_TOKEN_CACHE_PREFIX = 'customer-token-v2-';
     public Reschedule_authority $reschedule_authority;
 
     public array $allowed_customer_fields = [
@@ -276,7 +277,7 @@ class Booking extends EA_Controller
             $this->providers_model->only($provider, $this->allowed_provider_fields);
             $this->customers_model->only($customer, $this->allowed_customer_fields);
 
-            $this->rescheduleAuthority()->issue((int) $appointment['id']);
+            $this->rescheduleAuthority()->issue((int) $appointment['id'], (string) $appointment['hash']);
             $customer_token = $this->createCustomerToken((int) $customer['id']);
         } else {
             $manage_mode = false;
@@ -718,7 +719,7 @@ class Booking extends EA_Controller
             return false;
         }
 
-        if (!$cache->save('customer-token-' . $customer_token, $customer_id, 600)) {
+        if (!$cache->save(self::CUSTOMER_TOKEN_CACHE_PREFIX . $customer_token, $customer_id, 600)) {
             log_message('error', 'Booking: failed to persist customer token during reschedule flow.');
 
             return false;

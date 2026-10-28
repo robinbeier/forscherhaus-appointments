@@ -48,6 +48,31 @@ final class RescheduleAuthorityLockOrderTest extends TestCase
         $this->assertSame(10, $acquireQueries[0]['bindings'][1]);
     }
 
+    public function testIssueRejectsStalePresentedAppointmentHashBeforeMintingAuthority(): void
+    {
+        $database = new RescheduleAuthorityCurrentReadFakeDatabase();
+        $database->appointmentSnapshot['hash'] = 'current-hash';
+        $database->lockedAppointment['hash'] = 'current-hash';
+        $authority = $this->createAuthority($database);
+        session([
+            'public_reschedule_authority_context' => str_repeat('c', 43),
+        ]);
+
+        try {
+            $authority->issue(99, 'stale-hash');
+            $this->fail('Expected a stale appointment capability to be rejected.');
+        } catch (\RescheduleAuthorityException $exception) {
+            $this->assertSame('stale-appointment-capability', $exception->getMessage());
+        } finally {
+            session([
+                'public_reschedule_authority_context' => null,
+                'public_reschedule_authority' => null,
+            ]);
+        }
+
+        $this->assertSame([], $database->writes);
+    }
+
     public function testVerifyLockedStateLocksAllParentsBeforeAppointment(): void
     {
         $database = new RescheduleAuthorityLockOrderFakeDatabase();
@@ -280,6 +305,9 @@ final class RescheduleAuthorityCurrentReadFakeDatabase
     /** @var array<int, array{sql:string,bindings:array<int, mixed>}> */
     public array $queries = [];
 
+    /** @var list<string> */
+    public array $writes = [];
+
     /** @var array<string, mixed> */
     public array $appointmentSnapshot = [
         'id' => 99,
@@ -365,6 +393,33 @@ final class RescheduleAuthorityCurrentReadFakeDatabase
     public function dbprefix(string $table): string
     {
         return 'ea_' . $table;
+    }
+
+    public function trans_begin(): bool
+    {
+        return true;
+    }
+
+    public function trans_commit(): bool
+    {
+        return true;
+    }
+
+    public function trans_rollback(): bool
+    {
+        return true;
+    }
+
+    public function delete(string $table, array $where = []): bool
+    {
+        $this->writes[] = 'delete';
+        return true;
+    }
+
+    public function insert(string $table, array $data): bool
+    {
+        $this->writes[] = 'insert';
+        return true;
     }
 
     /**

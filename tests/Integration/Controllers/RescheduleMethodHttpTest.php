@@ -195,7 +195,7 @@ final class RescheduleMethodHttpTest extends TestCase
         }
         self::assertIsObject($cache);
 
-        return (int) $cache->get('customer-token-' . $token);
+        return (int) $cache->get('customer-token-v2-' . $token);
     }
 
     /** @return array<string, string> */
@@ -208,8 +208,12 @@ final class RescheduleMethodHttpTest extends TestCase
         }
 
         $files = [];
-        foreach (glob($cachePath . DIRECTORY_SEPARATOR . 'customer-token-*') ?: [] as $path) {
-            if (!is_file($path) || is_link($path) || !preg_match('/^customer-token-[a-f0-9]{64}$/', basename($path))) {
+        foreach (glob($cachePath . DIRECTORY_SEPARATOR . 'customer-token-v2-*') ?: [] as $path) {
+            if (
+                !is_file($path) ||
+                is_link($path) ||
+                !preg_match('/^customer-token-v2-[a-f0-9]{64}$/', basename($path))
+            ) {
                 continue;
             }
 

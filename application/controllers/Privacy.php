@@ -20,6 +20,7 @@
  */
 class Privacy extends EA_Controller
 {
+    private const CUSTOMER_TOKEN_CACHE_PREFIX = 'customer-token-v2-';
     /**
      * Privacy constructor.
      */
@@ -61,7 +62,7 @@ class Privacy extends EA_Controller
                 );
             }
 
-            $customer_id = $cache->get('customer-token-' . $customer_token);
+            $customer_id = $cache->get(self::CUSTOMER_TOKEN_CACHE_PREFIX . $customer_token);
 
             if (empty($customer_id)) {
                 throw new InvalidArgumentException(

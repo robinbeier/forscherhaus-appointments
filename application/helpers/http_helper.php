@@ -112,9 +112,15 @@ if (!function_exists('json_exception')) {
      */
     function json_exception(Throwable $e): void
     {
+        $message = $e->getMessage();
+
+        if ($e instanceof mysqli_sql_exception && (!defined('ENVIRONMENT') || ENVIRONMENT !== 'development')) {
+            $message = 'An unexpected error occurred.';
+        }
+
         $response = [
             'success' => false,
-            'message' => $e->getMessage(),
+            'message' => $message,
         ];
 
         $logger = load_class('Log', 'core');

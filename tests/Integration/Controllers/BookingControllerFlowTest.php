@@ -1016,6 +1016,43 @@ class BookingControllerFlowTest extends TestCase
         $this->assertSame($customerId, (int) $customerData['id']);
     }
 
+    public function testCustomerReassignmentRetiresOldHashAndIssuesNewManageLink(): void
+    {
+        $pair = $this->fixtures->resolveProviderServicePair();
+        $customerId = $this->fixtures->createCustomer();
+        $replacementCustomerId = $this->fixtures->createCustomer(['first_name' => 'Replacement']);
+        $appointmentId = $this->fixtures->createAppointment(
+            $pair['provider_id'],
+            $customerId,
+            $pair['service_id'],
+            new DateTimeImmutable('+2 days 10:30:00'),
+        );
+        $appointment = $this->fixtures->findAppointmentById($appointmentId);
+        $this->assertNotNull($appointment);
+        $oldHash = (string) $appointment['hash'];
+
+        $controller = $this->createBookingControllerWithForcedAvailability($pair['provider_id']);
+        $this->visitReschedule($controller, $oldHash);
+        $this->assertTrue((bool) script_vars('manage_mode'));
+
+        $this->resetRuntimeState('GET');
+        $appointment['id_users_customer'] = $replacementCustomerId;
+        get_instance()->appointments_model->save($appointment);
+        $updated = $this->fixtures->findAppointmentById($appointmentId);
+        $this->assertNotNull($updated);
+        $newHash = (string) $updated['hash'];
+        $this->assertNotSame($oldHash, $newHash);
+
+        $this->visitReschedule($controller, $oldHash);
+        $this->assertFalse((bool) script_vars('manage_mode'));
+
+        $this->resetRuntimeState('GET');
+        $this->visitReschedule($controller, $newHash);
+        $this->assertTrue((bool) script_vars('manage_mode'));
+        $customerData = script_vars('customer_data');
+        $this->assertSame($replacementCustomerId, (int) ($customerData['id'] ?? 0));
+    }
+
     public function testRescheduleProjectsProviderAndCustomerDataForPublicViews(): void
     {
         $pair = $this->fixtures->resolveProviderServicePair();

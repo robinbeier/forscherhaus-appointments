@@ -89,7 +89,7 @@ final class AccountPasswordChangeHttpTest extends TestCase
             ]
             as [$path, $client]
         ) {
-            $newPassword = $this->fixture->run . '_new_' . ($path === 'account/save' ? 'canonical' : 'alias');
+            $newPassword = $path === 'account/save' ? 'valid77' : $this->fixture->run . '_new_alias';
             $admin = $this->login($client, $oldPassword);
             $account = $this->accountPayload($this->actorBefore, $this->actorSettingsBefore);
             $account['id'] = (string) $this->fixture->providerId;
@@ -130,8 +130,118 @@ final class AccountPasswordChangeHttpTest extends TestCase
         $serverLog = file_get_contents($this->server->directory . '/server.log');
         self::assertIsString($serverLog);
         self::assertStringNotContainsString($this->credentials['password'], $serverLog);
-        self::assertStringNotContainsString($this->fixture->run . '_new_canonical', $serverLog);
+        self::assertStringNotContainsString('valid77', $serverLog);
         self::assertStringNotContainsString($this->fixture->run . '_new_alias', $serverLog);
+    }
+
+    public function testInvalidPasswordValuesAreRejectedOnBothAccountSaveAliasesWithoutMutation(): void
+    {
+        self::assertNotNull($this->fixture);
+        self::assertNotNull($this->server);
+
+        // Form encoding normalizes non-string scalar/list types; those are covered by direct model tests.
+        $values = ['0', 'a', 'ab', 'abc', 'abcd', 'abcde', 'abcdef'];
+        foreach (['account/save', 'index.php/account/save'] as $path) {
+            foreach ($values as $value) {
+                $admin = $this->login(
+                    new GateHttpClient($this->server->baseUrl, indexPage: ''),
+                    $this->credentials['password'],
+                );
+                $account = $this->accountPayload($this->actorBefore, $this->actorSettingsBefore);
+                $account['settings']['password'] = $value;
+
+                $response = $admin->post($path, ['account' => $account]);
+                self::assertSame(500, $response->statusCode, $path . ' must reject invalid passwords.');
+                $error = json_decode($response->body, true, 512, JSON_THROW_ON_ERROR);
+                self::assertFalse($error['success']);
+                self::assertSame(
+                    'The user password must be at least ' . MIN_PASSWORD_LENGTH . ' characters long.',
+                    $error['message'],
+                );
+                self::assertSame($this->actorBefore, $this->fixture->row('users', $this->fixture->actorId));
+                self::assertSame(
+                    $this->actorSettingsBefore,
+                    $this->fixture->userSettingsRow($this->fixture->actorId),
+                    $path . ' must not mutate settings for an invalid password.',
+                );
+            }
+        }
+    }
+
+    public function testDatabaseFailureAfterUserWriteReturnsGenericHttp500AndRollsBack(): void
+    {
+        self::assertNotNull($this->fixture);
+        self::assertNotNull($this->server);
+
+        $db = get_instance()->db;
+        $fixtureAdmin = get_instance()->load->database(
+            [
+                'hostname' => 'mysql',
+                'username' => 'root',
+                'password' => 'secret',
+                'database' => 'easyappointments',
+                'dbdriver' => 'mysqli',
+                'dbprefix' => $db->dbprefix,
+                'pconnect' => false,
+                'db_debug' => false,
+                'char_set' => 'utf8mb4',
+                'dbcollat' => 'utf8mb4_general_ci',
+            ],
+            true,
+        );
+        $trigger = $this->fixture->run . '_deny_account_settings_update';
+        $markerTable = $this->fixture->run . '_account_settings_marker';
+        $createdTrigger = false;
+        $createdMarker = false;
+        try {
+            self::assertTrue(
+                (bool) $fixtureAdmin->query(
+                    'CREATE TABLE `' . $markerTable . '` (`marker` VARCHAR(255) NOT NULL) ENGINE=MEMORY',
+                ),
+            );
+            $createdMarker = true;
+            self::assertTrue(
+                (bool) $fixtureAdmin->query(
+                    'CREATE TRIGGER `' .
+                        $trigger .
+                        '` BEFORE UPDATE ON `' .
+                        $db->dbprefix('user_settings') .
+                        '` FOR EACH ROW BEGIN IF NEW.id_users = ' .
+                        (int) $this->fixture->actorId .
+                        ' THEN INSERT INTO `' .
+                        $markerTable .
+                        '` (`marker`) VALUES (\'user-write-before-settings-failure\');' .
+                        ' SIGNAL SQLSTATE \'45000\' SET MESSAGE_TEXT = \'synthetic account settings failure\'; END IF; END',
+                ),
+            );
+            $createdTrigger = true;
+
+            $beforeUser = $this->fixture->row('users', $this->fixture->actorId);
+            $beforeSettings = $this->fixture->userSettingsRow($this->fixture->actorId);
+            $admin = $this->login($this->server->client(), $this->credentials['password']);
+            $account = $this->accountPayload($beforeUser, $beforeSettings);
+            $account['first_name'] = $this->fixture->run . '_must_rollback';
+            $account['settings']['password'] = $this->fixture->run . '_valid_new_password';
+
+            $response = $admin->post('account/save', ['account' => $account]);
+            self::assertSame(500, $response->statusCode, $response->body);
+            self::assertStringContainsString('An unexpected error occurred.', $response->body);
+            self::assertStringNotContainsString('synthetic account settings failure', $response->body);
+            self::assertSame($beforeUser, $this->fixture->row('users', $this->fixture->actorId));
+            self::assertSame($beforeSettings, $this->fixture->userSettingsRow($this->fixture->actorId));
+            self::assertSame(
+                [['marker' => 'user-write-before-settings-failure']],
+                $fixtureAdmin->query('SELECT `marker` FROM `' . $markerTable . '`')->result_array(),
+            );
+        } finally {
+            if ($createdTrigger) {
+                $fixtureAdmin->query('DROP TRIGGER `' . $trigger . '`');
+            }
+            if ($createdMarker) {
+                $fixtureAdmin->query('DROP TABLE `' . $markerTable . '`');
+            }
+            $fixtureAdmin->close();
+        }
     }
 
     /** @return array<string, mixed> */

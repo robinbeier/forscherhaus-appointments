@@ -90,7 +90,7 @@ final class PrivacyDeleteHttpTest extends TestCase
         $before = $this->ownedState($appointment, $buffer);
         $client = $server->client();
         $token = $this->customerToken($client, (string) $appointment['hash']);
-        $cacheKeys = ['customer-token-' . $token];
+        $cacheKeys = ['customer-token-v2-' . $token];
 
         try {
             $directClient = new \ReleaseGate\GateHttpClient($server->baseUrl, '');
@@ -139,7 +139,7 @@ final class PrivacyDeleteHttpTest extends TestCase
 
             $expiredToken = 'expired-' . $fixture->run;
             $this->cacheToken($expiredToken, $fixture->customerId, 1);
-            $cacheKeys[] = 'customer-token-' . $expiredToken;
+            $cacheKeys[] = 'customer-token-v2-' . $expiredToken;
             sleep(2);
             $expired = $client->post(self::ENDPOINT, ['customer_token' => $expiredToken]);
             self::assertSame(500, $expired->statusCode);
@@ -147,7 +147,7 @@ final class PrivacyDeleteHttpTest extends TestCase
 
             $foreignToken = 'foreign-' . $fixture->run;
             $this->cacheToken($foreignToken, $fixture->providerId, 600);
-            $cacheKeys[] = 'customer-token-' . $foreignToken;
+            $cacheKeys[] = 'customer-token-v2-' . $foreignToken;
             $foreign = $client->post(self::ENDPOINT, ['customer_token' => $foreignToken]);
             self::assertSame(500, $foreign->statusCode);
             self::assertSame($before, $this->ownedState($appointment, $buffer));
@@ -167,7 +167,18 @@ final class PrivacyDeleteHttpTest extends TestCase
         $buffer = $this->addBuffer($appointment);
         $client = $server->client();
         $token = $this->customerToken($client, (string) $appointment['hash']);
-        $cacheKey = 'customer-token-' . $token;
+        $cacheKey = 'customer-token-v2-' . $token;
+        $legacyToken = 'legacy-' . $fixture->run;
+        $cache = get_instance()->cache ?? null;
+        if (!is_object($cache) || !method_exists($cache, 'save')) {
+            get_instance()->load->driver('cache', ['adapter' => 'file']);
+            $cache = get_instance()->cache;
+        }
+        self::assertTrue($cache->save('customer-token-' . $legacyToken, $fixture->customerId, 600));
+        $legacyResponse = $client->post(self::ENDPOINT, ['customer_token' => $legacyToken]);
+        self::assertSame(500, $legacyResponse->statusCode);
+        self::assertNotSame([], $fixture->row('users', $fixture->customerId));
+        $legacyCacheKey = 'customer-token-' . $legacyToken;
         $providerBefore = $fixture->row('users', $fixture->providerId);
         $adminBefore = $fixture->row('users', $fixture->actorId);
         $serviceBefore = $fixture->row('services', $fixture->serviceId);
@@ -190,7 +201,7 @@ final class PrivacyDeleteHttpTest extends TestCase
             self::assertSame($providerBefore, $fixture->row('users', $fixture->providerId));
             self::assertSame($adminBefore, $fixture->row('users', $fixture->actorId));
         } finally {
-            $this->deleteCacheKeys([$cacheKey]);
+            $this->deleteCacheKeys([$cacheKey, $legacyCacheKey]);
         }
     }
 
@@ -207,8 +218,9 @@ final class PrivacyDeleteHttpTest extends TestCase
         $before = $this->ownedState($appointment, $buffer);
         $client = $server->client();
         $token = $this->customerToken($client, (string) $appointment['hash']);
-        $cacheKey = 'customer-token-' . $token;
+        $cacheKey = 'customer-token-v2-' . $token;
         $trigger = $fixture->run . '_deny_privacy_delete';
+        $rollbackMarker = self::ROLLBACK_MARKER . ':' . $fixture->run;
         $fixtureAdmin = null;
         $created = false;
 
@@ -250,7 +262,7 @@ final class PrivacyDeleteHttpTest extends TestCase
                             (int) $buffer['id'] .
                             ") THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'privacy rollback before buffer cleanup'; " .
                             "ELSE SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '" .
-                            self::ROLLBACK_MARKER .
+                            $rollbackMarker .
                             "'; END IF; END IF; END",
                     ),
                 );
@@ -258,7 +270,16 @@ final class PrivacyDeleteHttpTest extends TestCase
 
                 $failed = $client->post(self::ENDPOINT, ['customer_token' => $token]);
                 self::assertSame(500, $failed->statusCode);
-                self::assertStringContainsString(self::ROLLBACK_MARKER, $failed->body);
+                self::assertStringContainsString('An unexpected error occurred.', $failed->body);
+                self::assertStringNotContainsString($rollbackMarker, $failed->body);
+                $markerLogged = false;
+                foreach (glob(rtrim((string) config_item('log_path'), '/\\') . '/log-*') ?: [] as $logFile) {
+                    if (str_contains((string) file_get_contents($logFile), $rollbackMarker)) {
+                        $markerLogged = true;
+                        break;
+                    }
+                }
+                self::assertTrue($markerLogged, 'The protected diagnostic must prove the post-buffer failure.');
                 self::assertSame($before, $this->ownedState($appointment, $buffer));
             } finally {
                 try {
@@ -341,7 +362,7 @@ final class PrivacyDeleteHttpTest extends TestCase
             get_instance()->load->driver('cache', ['adapter' => 'file']);
             $cache = get_instance()->cache;
         }
-        self::assertTrue($cache->save('customer-token-' . $token, $customerId, $ttl));
+        self::assertTrue($cache->save('customer-token-v2-' . $token, $customerId, $ttl));
     }
 
     private function deleteCacheKeys(array $keys): void

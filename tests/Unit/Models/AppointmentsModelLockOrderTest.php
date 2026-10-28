@@ -96,7 +96,127 @@ final class AppointmentsModelLockOrderTest extends TestCase
             $CI->db = $originalDb;
         }
 
-        $this->assertSame(['begin', 'users_lock', 'services_lock', 'appointment_update', 'commit'], $database->events);
+        $this->assertSame(
+            ['begin', 'users_lock', 'services_lock', 'appointment_lock', 'appointment_update', 'commit'],
+            $database->events,
+        );
+    }
+
+    public function testGenericUpdateRotatesCapabilityOnCustomerChangeAndIgnoresCallerHash(): void
+    {
+        $database = new AppointmentsModelLockOrderFakeDatabase();
+        $database->appointment['hash'] = 'old-capability';
+        $database->appointment['id_users_customer'] = 30;
+        $CI = &get_instance();
+        $originalDb = $CI->db;
+        $CI->db = $database;
+
+        try {
+            $model = new class extends Appointments_model {
+                public function __construct() {}
+
+                protected function should_sync_buffer_unavailabilities(array $original, array $updated): bool
+                {
+                    return false;
+                }
+
+                public function callUpdate(array $appointment): int
+                {
+                    return $this->update($appointment);
+                }
+            };
+            $model->callUpdate([
+                'id' => 99,
+                'id_users_customer' => 40,
+                'id_users_provider' => 20,
+                'id_services' => 50,
+                'hash' => 'attacker-supplied',
+            ]);
+        } finally {
+            $CI->db = $originalDb;
+        }
+
+        $this->assertSame(64, strlen((string) $database->appointment['hash']));
+        $this->assertNotSame('old-capability', $database->appointment['hash']);
+        $this->assertNotSame('attacker-supplied', $database->appointment['hash']);
+    }
+
+    public function testGenericUpdatePreservesCapabilityForSameCustomer(): void
+    {
+        $database = new AppointmentsModelLockOrderFakeDatabase();
+        $database->appointment['hash'] = 'existing-capability';
+        $database->appointment['id_users_customer'] = 30;
+        $CI = &get_instance();
+        $originalDb = $CI->db;
+        $CI->db = $database;
+
+        try {
+            $model = new class extends Appointments_model {
+                public function __construct() {}
+
+                protected function should_sync_buffer_unavailabilities(array $original, array $updated): bool
+                {
+                    return false;
+                }
+
+                public function callUpdate(array $appointment): int
+                {
+                    return $this->update($appointment);
+                }
+            };
+            $model->callUpdate([
+                'id' => 99,
+                'id_users_customer' => 30,
+                'id_users_provider' => 20,
+                'id_services' => 50,
+                'hash' => 'stale-capability',
+            ]);
+        } finally {
+            $CI->db = $originalDb;
+        }
+
+        $this->assertSame('existing-capability', $database->appointment['hash']);
+    }
+
+    public function testGenericUpdateRotatesLegacyCapabilityWhenOldAppointmentIsRescheduled(): void
+    {
+        $database = new AppointmentsModelLockOrderFakeDatabase();
+        $database->appointment = array_merge($database->appointment, [
+            'hash' => 'legacy-capability',
+            'id_users_customer' => 30,
+            'start_datetime' => '2020-01-01 09:00:00',
+            'end_datetime' => '2020-01-01 09:30:00',
+        ]);
+        $CI = &get_instance();
+        $originalDb = $CI->db;
+        $CI->db = $database;
+
+        try {
+            $model = new class extends Appointments_model {
+                public function __construct() {}
+                protected function should_sync_buffer_unavailabilities(array $original, array $updated): bool
+                {
+                    return false;
+                }
+                public function callUpdate(array $appointment): int
+                {
+                    return $this->update($appointment);
+                }
+            };
+            $model->callUpdate([
+                'id' => 99,
+                'id_users_customer' => 30,
+                'id_users_provider' => 20,
+                'id_services' => 50,
+                'start_datetime' => '2035-02-17 09:00:00',
+                'end_datetime' => '2035-02-17 09:30:00',
+            ]);
+        } finally {
+            $CI->db = $originalDb;
+        }
+
+        $this->assertNotSame('legacy-capability', $database->appointment['hash']);
+        $this->assertSame(64, strlen((string) $database->appointment['hash']));
     }
 
     public function testInsertLocksParentsBeforeAppointmentAndBufferWrites(): void
@@ -143,10 +263,26 @@ final class AppointmentsModelLockOrderTest extends TestCase
         }
 
         $this->assertSame(
-            ['begin', 'users_lock', 'services_lock', 'appointment_update', 'services_lock', 'buffer_delete', 'commit'],
+            [
+                'begin',
+                'users_lock',
+                'services_lock',
+                'appointment_lock',
+                'appointment_update',
+                'services_lock',
+                'buffer_delete',
+                'commit',
+            ],
             $database->events,
         );
-        $this->assertSame($database->queries[1]['bindings'], $database->queries[2]['bindings']);
+        $service_queries = array_values(
+            array_filter(
+                $database->queries,
+                static fn(array $query): bool => str_contains($query['sql'], '`ea_services`'),
+            ),
+        );
+        $this->assertCount(2, $service_queries);
+        $this->assertSame($service_queries[0]['bindings'], $service_queries[1]['bindings']);
     }
 
     public function testUpdateParentsFailsClosedWhenAParentIsMissing(): void
@@ -317,6 +453,66 @@ final class AppointmentsModelLockOrderTest extends TestCase
         $this->assertSame([99, 20], $database->queries[6]['bindings']);
         $this->assertStringContainsString('ORDER BY `id` ASC FOR UPDATE', $database->queries[6]['sql']);
         $this->assertStringContainsString('FOR UPDATE', $database->queries[6]['sql']);
+    }
+
+    public function testApiUpdateRotatesCapabilityOnlyWhenCustomerChanges(): void
+    {
+        $database = new AppointmentsApiUpdateLockOrderFakeDatabase();
+        $CI = &get_instance();
+        $originalDb = $CI->db;
+        $CI->db = $database;
+
+        try {
+            $model = new class extends Appointments_model {
+                public function __construct() {}
+                public function validate(array $appointment): void {}
+
+                protected function should_sync_buffer_unavailabilities(array $original, array $updated): bool
+                {
+                    return false;
+                }
+            };
+            $model->update_api(99, ['id_users_customer' => 40, 'notes' => 'changed']);
+            $rotated = $database->lastUpdate['hash'] ?? null;
+            $this->assertIsString($rotated);
+            $this->assertSame(64, strlen($rotated));
+
+            $database->lastUpdate = [];
+            $model->update_api(99, ['id_users_customer' => 30, 'notes' => 'same-customer']);
+            $this->assertArrayNotHasKey('hash', $database->lastUpdate);
+        } finally {
+            $CI->db = $originalDb;
+        }
+    }
+
+    public function testApiUpdateRotatesLegacyCapabilityWhenOldAppointmentIsRescheduled(): void
+    {
+        $database = new AppointmentsApiUpdateLockOrderFakeDatabase();
+        $database->appointmentStart = '2020-01-01 09:00:00';
+        $database->appointmentEnd = '2020-01-01 09:30:00';
+        $CI = &get_instance();
+        $originalDb = $CI->db;
+        $CI->db = $database;
+
+        try {
+            $model = new class extends Appointments_model {
+                public function __construct() {}
+                public function validate(array $appointment): void {}
+                protected function should_sync_buffer_unavailabilities(array $original, array $updated): bool
+                {
+                    return false;
+                }
+            };
+            $model->update_api(99, [
+                'start_datetime' => '2035-02-17 09:00:00',
+                'end_datetime' => '2035-02-17 09:30:00',
+            ]);
+        } finally {
+            $CI->db = $originalDb;
+        }
+
+        $this->assertIsString($database->lastUpdate['hash'] ?? null);
+        $this->assertSame(64, strlen($database->lastUpdate['hash']));
     }
 
     private function createModel(): Appointments_model
@@ -532,6 +728,12 @@ final class AppointmentsApiUpdateLockOrderFakeDatabase
     /** @var list<array{sql:string,bindings:list<mixed>}> */
     public array $queries = [];
 
+    /** @var array<string, mixed> */
+    public array $lastUpdate = [];
+
+    public string $appointmentStart = '2035-02-17 09:00:00';
+    public string $appointmentEnd = '2035-02-17 09:30:00';
+
     private bool $transactionActive = false;
 
     public function dbprefix(string $table): string
@@ -560,8 +762,8 @@ final class AppointmentsApiUpdateLockOrderFakeDatabase
                     'id_users_provider' => 20,
                     'id_services' => 50,
                     'is_unavailability' => false,
-                    'start_datetime' => '2035-02-17 09:00:00',
-                    'end_datetime' => '2035-02-17 09:30:00',
+                    'start_datetime' => $this->appointmentStart,
+                    'end_datetime' => $this->appointmentEnd,
                     'notes' => 'before',
                 ],
             ]);
@@ -626,6 +828,7 @@ final class AppointmentsApiUpdateLockOrderFakeDatabase
     public function update(string $table, array $data, array $where): bool
     {
         $this->events[] = 'appointment_update';
+        $this->lastUpdate = $data;
         return true;
     }
 }

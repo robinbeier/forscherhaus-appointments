@@ -41,5 +41,17 @@
  */
 class EA_Exceptions extends CI_Exceptions
 {
-    //
+    /**
+     * Render database errors without exposing SQL or connection diagnostics
+     * outside the development environment.
+     */
+    public function show_error($heading, $message, $template = 'error_general', $status_code = 500)
+    {
+        if ($template === 'error_db' && !is_cli() && ENVIRONMENT !== 'development') {
+            $heading = 'Database Error';
+            $message = 'An unexpected error occurred.';
+        }
+
+        return parent::show_error($heading, $message, $template, $status_code);
+    }
 }

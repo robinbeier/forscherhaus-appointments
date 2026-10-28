@@ -5,6 +5,39 @@ write path on base commit `6744595b32a0e22d7bd489d7cc54efd7a5441f2d`
 and the fail-closed authority boundary implemented by this change. It does not
 authorize deployment, production access, or live-data mutation.
 
+## Upgrade prerequisite for customer-reassignment hash rotation
+
+Hash rotation protects future customer changes; installing the code does not
+repair a hash retained by an earlier reassignment. Before this first rollout,
+the operator must establish that there are no ordinary appointments whose end
+is newer than UTC now minus two days. The conservative margin includes active
+appointments across supported timezones. Older appointments remain subject to
+the existing reschedule/cancellation cutoff and expired confirmation/ICS guards.
+
+Before the switch, verify the active PHP-FPM unit uses `KillMode=control-group`
+and record its master identity. After deployment, restart that same unit and
+verify a new active master before repeating the appointment count. The
+control-group stop excludes old in-flight workers, including ones started
+after the initial observation. Require the count to remain zero, excluding no
+user appointments. A nonzero count, unknown or unchanged process identity,
+unsafe unit mode, failed restart, or failed deployment blocks this rollout's
+security closeout. Obtain a separate, reviewed capability-retirement and
+communication plan if existing live appointments need treatment; do not rotate
+all links or infer historical reassignment from an update timestamp.
+
+Both appointment writers also rotate the hash on a schedule change when the
+locked old end time is at least two days behind UTC now (or cannot be parsed).
+Together with the admission condition this prevents later reactivation of a
+pre-upgrade expired capability. Normal future schedule changes for the same
+customer retain their hash. A provider-timezone change alone cannot make an
+end time older than this conservative margin current again.
+
+The aggregate checks are an explicit prerequisite of this rollout, not evidence
+that arbitrary older installations have no affected appointments. Repeat them
+against the actual release and preserve their timestamps in the private release
+record. Privacy tokens from the earlier cache namespace are rejected by the
+new consumer; rollback requires a page reload for tokens issued by newer code.
+
 ## Pre-change authority and write path
 
 Before ROB-494, the public reschedule flow had no server-verifiable authority

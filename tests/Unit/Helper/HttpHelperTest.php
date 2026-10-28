@@ -199,6 +199,20 @@ class HttpHelperTest extends TestCase
         $this->assertStringNotContainsString(' Trace: array (', $log_line);
     }
 
+    public function testNativeDatabaseExceptionHidesDiagnosticsAndKeepsProtectedLog(): void
+    {
+        $message = 'synthetic-db-diagnostic-' . bin2hex(random_bytes(8));
+        get_instance()->output->set_output('');
+
+        json_exception(new \mysqli_sql_exception($message));
+
+        $response = json_decode(get_instance()->output->get_output(), true, 512, JSON_THROW_ON_ERROR);
+        $this->assertFalse($response['success']);
+        $this->assertSame('An unexpected error occurred.', $response['message']);
+        $this->assertStringNotContainsString($message, get_instance()->output->get_output());
+        $this->assertStringContainsString($message, $this->findLogLineForMessage($message));
+    }
+
     public function testJsonExceptionEmits500StatusAndJsonContentTypeOverHttp(): void
     {
         $scriptPath = tempnam(sys_get_temp_dir(), 'json-exception-http-');

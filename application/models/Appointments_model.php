@@ -326,6 +326,10 @@ class Appointments_model extends EA_Model
             $this->assert_no_api_primary_overlap($updated_appointment, $locked_appointments);
 
             $write = $changes;
+            if ($this->should_rotate_appointment_hash($locked_appointment, $updated_appointment)) {
+                $write['hash'] = bin2hex(random_bytes(32));
+                $updated_appointment['hash'] = $write['hash'];
+            }
             $write['update_datetime'] = date('Y-m-d H:i:s');
 
             if (!$this->db->update('appointments', $write, ['id' => $appointment_id])) {
@@ -658,6 +662,19 @@ class Appointments_model extends EA_Model
         try {
             $original_appointment = $this->find((int) $appointment['id']);
             $this->lock_update_parents($original_appointment, $appointment);
+            $locked_appointment = $this->lock_update_appointment((int) $appointment['id']);
+
+            foreach (['id_users_customer', 'id_users_provider', 'id_services', 'hash'] as $field) {
+                if (($original_appointment[$field] ?? null) !== ($locked_appointment[$field] ?? null)) {
+                    throw new RuntimeException('Appointment changed during the update.');
+                }
+            }
+
+            // Caller-supplied hashes are never authoritative. Rotate only
+            // when the locked customer relationship or legacy schedule requires it.
+            $appointment['hash'] = $this->should_rotate_appointment_hash($locked_appointment, $appointment)
+                ? bin2hex(random_bytes(32))
+                : (string) $locked_appointment['hash'];
             $appointment['update_datetime'] = date('Y-m-d H:i:s');
 
             if (!$this->db->update('appointments', $appointment, ['id' => $appointment['id']])) {
@@ -1001,6 +1018,70 @@ class Appointments_model extends EA_Model
         if ($query->num_rows() !== count($ids)) {
             throw new RuntimeException('Appointment parent record was not found.');
         }
+    }
+
+    /** @return array<string, mixed> */
+    private function lock_update_appointment(int $appointment_id): array
+    {
+        $row = $this->db
+            ->query('SELECT * FROM `' . $this->db->dbprefix('appointments') . '` WHERE `id` = ? FOR UPDATE', [
+                $appointment_id,
+            ])
+            ->row_array();
+
+        if (!$row) {
+            throw new RuntimeException('Appointment record was not found.');
+        }
+
+        $this->cast($row);
+
+        return $row;
+    }
+
+    /**
+     * Rotate capabilities for reassignment, or when a legacy capability is
+     * first touched after its appointment has safely aged out.
+     *
+     * @param array<string, mixed> $locked
+     * @param array<string, mixed> $requested
+     */
+    private function should_rotate_appointment_hash(array $locked, array $requested): bool
+    {
+        if (
+            (int) ($locked['id_users_customer'] ?? 0) !==
+            (int) ($requested['id_users_customer'] ?? ($locked['id_users_customer'] ?? 0))
+        ) {
+            return true;
+        }
+
+        $schedule_changed = false;
+        foreach (['start_datetime', 'end_datetime'] as $field) {
+            if (
+                array_key_exists($field, $requested) &&
+                (string) ($requested[$field] ?? '') !== (string) ($locked[$field] ?? '')
+            ) {
+                $schedule_changed = true;
+                break;
+            }
+        }
+
+        if (!$schedule_changed) {
+            return false;
+        }
+
+        $old_end = (string) ($locked['end_datetime'] ?? '');
+        $parsed = DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $old_end, new DateTimeZone('UTC'));
+        $errors = DateTimeImmutable::getLastErrors();
+
+        if (
+            $parsed === false ||
+            $parsed->format('Y-m-d H:i:s') !== $old_end ||
+            ($errors !== false && ($errors['warning_count'] > 0 || $errors['error_count'] > 0))
+        ) {
+            return true;
+        }
+
+        return $parsed->getTimestamp() <= time() - 2 * 86400;
     }
 
     /**
