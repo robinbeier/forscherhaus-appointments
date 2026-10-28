@@ -381,8 +381,11 @@ final class ProviderApiHttpWriteTest extends TestCase
         }
         self::assertTrue(
             isset($state['settings']['salt'], $state['settings']['password']) &&
-                hash_password($state['settings']['salt'], $payload['settings']['password']) ===
+                verify_password(
                     $state['settings']['password'],
+                    $state['settings']['salt'],
+                    $payload['settings']['password'],
+                ),
             'Stored password must authenticate the synthetic input.',
         );
         $normalized = json_encode($data, JSON_THROW_ON_ERROR);

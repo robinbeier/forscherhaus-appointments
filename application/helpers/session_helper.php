@@ -54,3 +54,20 @@ if (!function_exists('session')) {
         return $value ?? $default;
     }
 }
+
+/** Shared canonical and legacy logout boundary; framework CSRF verifies POSTs. */
+function logout_session(): void
+{
+    if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+        abort(405, 'Method Not Allowed', ['Allow: POST']);
+        return;
+    }
+
+    $CI = &get_instance();
+    $CI->session->sess_destroy();
+    html_vars([
+        'page_title' => lang('log_out'),
+        'company_name' => setting('company_name'),
+    ]);
+    $CI->load->view('pages/logout');
+}

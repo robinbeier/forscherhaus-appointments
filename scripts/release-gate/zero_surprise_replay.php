@@ -1572,14 +1572,15 @@ function buildReplayGateSalt(string $releaseId, string $username): string
 
 function hashReplayGatePassword(string $salt, string $password): string
 {
-    $half = (int) (strlen($salt) / 2);
-    $hash = hash('sha256', substr($salt, 0, $half) . $password . substr($salt, $half));
-
-    for ($i = 0; $i < 100000; $i++) {
-        $hash = hash('sha256', $hash);
+    if (defined('PASSWORD_ARGON2ID')) {
+        return password_hash($password, PASSWORD_ARGON2ID, [
+            'memory_cost' => 19456,
+            'time_cost' => 2,
+            'threads' => 1,
+        ]);
     }
 
-    return $hash;
+    throw new RuntimeException('Replay gate requires Argon2id password hashing support.');
 }
 
 function mysqlQuote(string $value): string

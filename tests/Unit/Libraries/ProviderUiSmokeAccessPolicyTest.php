@@ -56,7 +56,7 @@ class ProviderUiSmokeAccessPolicyTest extends TestCase
         $this->assertTrue(
             Provider_ui_smoke_access_policy::isAllowedRoute('Dashboard_export', 'provider_preparation_pdf', 'GET'),
         );
-        $this->assertTrue(Provider_ui_smoke_access_policy::isAllowedRoute('Logout', 'index', 'GET'));
+        $this->assertTrue(Provider_ui_smoke_access_policy::isAllowedRoute('Logout', 'index', 'POST'));
 
         $this->assertFalse(Provider_ui_smoke_access_policy::isAllowedRoute('Calendar', 'index', 'GET'));
         $this->assertFalse(Provider_ui_smoke_access_policy::isAllowedRoute('Customers', 'index', 'GET'));

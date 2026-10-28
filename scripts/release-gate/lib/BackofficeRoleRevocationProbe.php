@@ -202,7 +202,7 @@ final class BackofficeRoleRevocationProbe
 
     private function logout(): int
     {
-        $response = $this->client->get('logout');
+        $response = $this->client->post('logout');
         $this->remember();
         $this->expect($response, 200, 'logout');
         return $response->statusCode;

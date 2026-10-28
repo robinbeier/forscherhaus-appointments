@@ -352,9 +352,12 @@ final class StaffSettingsApiHttpTest extends TestCase
             ->row_array();
         self::assertSame('provider', $providerRole['slug'] ?? null);
         self::assertSame($this->credentials['provider_username'], $providerSettings['username'] ?? null);
-        self::assertSame(
-            hash_password((string) $providerSettings['salt'], $this->credentials['password']),
-            $providerSettings['password'] ?? null,
+        self::assertTrue(
+            verify_password(
+                (string) ($providerSettings['password'] ?? ''),
+                (string) ($providerSettings['salt'] ?? ''),
+                $this->credentials['password'],
+            ),
         );
 
         $admin = $this->basicClient($this->credentials['admin_username'], $this->credentials['password']);

@@ -48,6 +48,19 @@ final class ApiSettingsPostGuardTest extends TestCase
         self::assertContains('dto:build', $result['events']);
         self::assertContains('save_batch', $result['events']);
         self::assertContains('response', $result['events']);
+        self::assertSame(
+            ['begin', 'lock_actor', 'lock_role', 'save_batch', 'commit', 'response'],
+            array_values(
+                array_filter(
+                    $result['events'],
+                    static fn($event) => in_array(
+                        $event,
+                        ['begin', 'lock_actor', 'lock_role', 'save_batch', 'commit', 'response'],
+                        true,
+                    ),
+                ),
+            ),
+        );
         self::assertSame('', $result['body']);
         self::assertSame(
             [
@@ -85,6 +98,20 @@ final class ApiSettingsPostGuardTest extends TestCase
         );
         self::assertStringContainsString('synthetic settings failure', $result['body']);
         self::assertStringNotContainsString('synthetic-token', $result['body']);
+    }
+
+    public function testLockedRevocationDeletionAndInvalidMaskRollBackBeforeWrite(): void
+    {
+        foreach (['revoked', 'deleted', 'invalid_mask'] as $scenario) {
+            $result = $this->probe($scenario, 'POST');
+            self::assertSame(403, $result['status']);
+            self::assertContains('begin', $result['events']);
+            self::assertContains('lock_actor', $result['events']);
+            self::assertContains('rollback', $result['events']);
+            self::assertNotContains('save_batch', $result['events']);
+            self::assertNotContains('commit', $result['events']);
+            self::assertSame([], $result['saved']);
+        }
     }
 
     /** @return array{events:list<string>,status:int,headers:array<string,string>,body:string,saved:list<array<string,mixed>>} */

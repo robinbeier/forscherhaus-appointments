@@ -152,7 +152,7 @@ final class CustomerRoleBoundaryProbe
             if ($loggedIn) {
                 try {
                     $observe('boundary_logout', 'started');
-                    $logout = $this->client->get('logout');
+                    $logout = $this->client->post('logout');
                     $this->remember();
                     $this->expectStatus($logout, 200, 'customer role-boundary logout');
                     $afterLogout = $this->client->get('customers');

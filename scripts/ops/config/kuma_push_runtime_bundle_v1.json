@@ -52,7 +52,7 @@
             "source": "scripts/release-gate/dashboard_release_gate.php",
             "install": "scripts/release-gate/dashboard_release_gate.php",
             "role": "pdf_gate",
-            "sha256": "989c680a82c66bc87f2dd355d6e63bfdf20cadc8fd7987a9b4a6fd75056f5f75"
+            "sha256": "4626995b14203a8345b6a802ec3d65311abcc32d0849ebfdff3db9d13becadfc"
         },
         {
             "source": "scripts/release-gate/lib/GateAssertions.php",

@@ -122,7 +122,7 @@ final class CalendarCrossTypeLiveProbe
                 );
             });
         } finally {
-            $logout = $this->client->get('logout');
+            $logout = $this->client->post('logout');
             $this->remember($this->client);
             if ($logout->statusCode !== 200 || $this->client->get('account')->statusCode !== 307) {
                 throw new RuntimeException('Calendar cross-type session did not close.');

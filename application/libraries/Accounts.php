@@ -49,18 +49,48 @@ class Accounts
      */
     public function check_login(string $username, string $password): ?array
     {
-        $salt = $this->get_salt_by_username($username);
+        $user_settings = $this->CI->db->get_where('user_settings', ['username' => $username])->row_array();
 
-        $password = hash_password($salt, $password);
+        $stored_password = (string) ($user_settings['password'] ?? '');
+        $salt = (string) ($user_settings['salt'] ?? '');
 
-        $user_settings = $this->CI->db
-            ->get_where('user_settings', [
-                'username' => $username,
-                'password' => $password,
-            ])
-            ->row_array();
+        if (!$this->verify_login_password($stored_password, $salt, $password) || empty($user_settings)) {
+            return null;
+        }
 
-        if (empty($user_settings)) {
+        if (MODERN_PASSWORD_WRITES && password_hash_needs_rehash($stored_password)) {
+            $new_password = hash_password_argon2id($password);
+            $new_salt = generate_salt();
+
+            $updated = $this->CI->db
+                ->where([
+                    'id_users' => $user_settings['id_users'],
+                    'username' => $username,
+                    'password' => $stored_password,
+                    'salt' => $salt,
+                ])
+                ->update('user_settings', ['password' => $new_password, 'salt' => $new_salt]);
+
+            if (!$updated || $this->CI->db->affected_rows() !== 1) {
+                // A concurrent writer won the CAS. Do not authenticate against
+                // a row that changed during this request.
+                return null;
+            } else {
+                $user_settings['password'] = $new_password;
+                $user_settings['salt'] = $new_salt;
+            }
+        }
+
+        // Verification is deliberately expensive. A reset, deletion or username
+        // reassignment committed during that work invalidates this login, even
+        // when this verifier did not need an upgrade.
+        $current = $this->CI->db->get_where('user_settings', ['id_users' => $user_settings['id_users']])->row_array();
+        if (
+            !$current ||
+            !hash_equals((string) $user_settings['username'], (string) $current['username']) ||
+            !hash_equals((string) $user_settings['password'], (string) $current['password']) ||
+            !hash_equals((string) $user_settings['salt'], (string) $current['salt'])
+        ) {
             return null;
         }
 
@@ -78,6 +108,30 @@ class Accounts
             'language' => !empty($user['language']) ? $user['language'] : Config::LANGUAGE,
             'role_slug' => $role['slug'],
         ];
+    }
+
+    /**
+     * Run one legacy and one current KDF on every credential shape. This keeps
+     * known/wrong and unknown usernames on the same work path during migration.
+     */
+    private function verify_login_password(string $hash, string $salt, string $password): bool
+    {
+        $within_limit = strlen($password) <= MAX_PASSWORD_LENGTH;
+        $bounded_password = $within_limit ? $password : substr($password, 0, MAX_PASSWORD_LENGTH);
+        $legacy = $within_limit && preg_match('/\A[a-f0-9]{64}\z/', $hash) === 1;
+        $modern = $within_limit && (password_get_info($hash)['algoName'] ?? null) === 'argon2id';
+        $valid = verify_password($hash, $salt, $password);
+        if (!$legacy) {
+            hash_legacy_password('synthetic-invalid-login', $bounded_password);
+        }
+        if (!$modern) {
+            // Public, synthetic verifier: it is work padding, never an account.
+            password_verify(
+                $bounded_password,
+                '$argon2id$v=19$m=19456,t=2,p=1$QW1JSDF3Q0Y0emYxRVpNVg$4CbCZKKBJ6gnVt8mYCflQClluxR2NdBYrd8nmW3S4zA',
+            );
+        }
+        return $valid;
     }
 
     /**

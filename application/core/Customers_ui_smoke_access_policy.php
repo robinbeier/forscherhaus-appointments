@@ -80,7 +80,7 @@ final class Customers_ui_smoke_access_policy
         return match ($route) {
             'customers::index' => $verb === 'GET',
             'customers::search' => $verb === 'POST',
-            'logout::index' => $verb === 'GET',
+            'logout::index' => $verb === 'POST',
             default => false,
         };
     }
@@ -89,7 +89,7 @@ final class Customers_ui_smoke_access_policy
     {
         return strtolower($controller) === 'logout' &&
             strtolower($method) === 'index' &&
-            strtoupper($httpMethod) === 'GET';
+            strtoupper($httpMethod) === 'POST';
     }
 
     public static function isSafeSearchKeyword(string $keyword): bool

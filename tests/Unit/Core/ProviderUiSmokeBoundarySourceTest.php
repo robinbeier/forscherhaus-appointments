@@ -30,10 +30,10 @@ class ProviderUiSmokeBoundarySourceTest extends TestCase
                 'GET',
             ),
         );
-        self::assertTrue(\Provider_ui_smoke_access_policy::isLogoutRoute('Logout', 'index', 'GET'));
+        self::assertTrue(\Provider_ui_smoke_access_policy::isLogoutRoute('Logout', 'index', 'POST'));
         self::assertFalse(\Provider_ui_smoke_access_policy::isAllowedRoute('Dashboard', 'index', 'POST'));
         self::assertFalse(\Provider_ui_smoke_access_policy::isAllowedRoute('Customers', 'index', 'GET'));
-        self::assertFalse(\Provider_ui_smoke_access_policy::isLogoutRoute('Logout', 'index', 'POST'));
+        self::assertFalse(\Provider_ui_smoke_access_policy::isLogoutRoute('Logout', 'index', 'GET'));
     }
 
     public function testProviderUiLeaseIsValidOnlyDuringItsBoundedWindow(): void

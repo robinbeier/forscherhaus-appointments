@@ -238,8 +238,8 @@ try {
     });
     if ($config['canary_context'] !== null) {
         $runCheck('auth_logout', static function () use ($client, $config): array {
-            $response = $client->get('logout', [], $config['http_timeout']);
-            GateAssertions::assertStatus($response->statusCode, 200, 'GET /logout');
+            $response = $client->post('logout', [], $config['http_timeout']);
+            GateAssertions::assertStatus($response->statusCode, 200, 'POST /logout');
             return ['http_status' => $response->statusCode];
         });
     }

@@ -93,6 +93,8 @@ class Api_settings extends EA_Controller
      */
     public function save(): void
     {
+        $owns_transaction = false;
+
         try {
             $user_id = (int) session('user_id');
 
@@ -122,10 +124,51 @@ class Api_settings extends EA_Controller
                 $settings[] = ['name' => $setting['name'], 'value' => $setting['value']];
             }
 
+            $owns_transaction = !$this->db->trans_active();
+            if ($owns_transaction && !$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start API settings transaction.');
+            }
+
+            // Bind authority to the committed setting: account deletion, demotion
+            // and role-bit revocation must serialize before or after this write.
+            $actor = $this->db
+                ->query('SELECT `id_roles` FROM `' . $this->db->dbprefix('users') . '` WHERE `id` = ? FOR UPDATE', [
+                    $user_id,
+                ])
+                ->row_array();
+            $role = $actor
+                ? $this->db
+                    ->query(
+                        'SELECT `system_settings` FROM `' .
+                            $this->db->dbprefix('roles') .
+                            '` WHERE `id` = ? FOR UPDATE',
+                        [(int) $actor['id_roles']],
+                    )
+                    ->row_array()
+                : null;
+            $mask = (int) ($role['system_settings'] ?? 0);
+            $known_mask = PRIV_VIEW | PRIV_ADD | PRIV_EDIT | PRIV_DELETE;
+            if (!$actor || !$role || $mask < 0 || ($mask & ~$known_mask) !== 0 || ($mask & PRIV_EDIT) !== PRIV_EDIT) {
+                if ($owns_transaction) {
+                    $this->db->trans_rollback();
+                    $owns_transaction = false;
+                }
+                abort(403, 'Forbidden');
+                return;
+            }
+
             $this->settings_model->save_batch($settings);
+
+            if (!$this->db->trans_status() || ($owns_transaction && !$this->db->trans_commit())) {
+                throw new RuntimeException('Could not commit API settings transaction.');
+            }
+            $owns_transaction = false;
 
             response();
         } catch (Throwable $e) {
+            if ($owns_transaction) {
+                $this->db->trans_rollback();
+            }
             json_exception($e);
         }
     }

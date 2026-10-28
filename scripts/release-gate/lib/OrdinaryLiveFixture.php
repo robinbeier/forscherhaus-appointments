@@ -369,9 +369,10 @@ final class OrdinaryLiveFixture
             throw new RuntimeException('Fixture identity changed while cleanup was locking it.');
         }
         if (
-            !hash_equals(
+            !\verify_password(
                 (string) $lockedSettings['password'],
-                \hash_password((string) $lockedSettings['salt'], (string) $state['password']),
+                (string) $lockedSettings['salt'],
+                (string) $state['password'],
             )
         ) {
             throw new RuntimeException('Fixture credential changed; refusing cleanup.');
@@ -447,7 +448,7 @@ final class OrdinaryLiveFixture
             (int) ($settings['notifications'] ?? 1) !== 0 ||
             (int) ($settings['google_sync'] ?? 1) !== 0 ||
             (int) ($settings['caldav_sync'] ?? 1) !== 0 ||
-            !hash_equals((string) $settings['password'], \hash_password((string) $settings['salt'], $state['password']))
+            !\verify_password((string) $settings['password'], (string) $settings['salt'], (string) $state['password'])
         ) {
             throw new RuntimeException('Fixture database ownership or integration settings are invalid.');
         }
@@ -486,9 +487,10 @@ final class OrdinaryLiveFixture
             (int) ($settings['notifications'] ?? 1) !== 0 ||
             (int) ($settings['google_sync'] ?? 1) !== 0 ||
             (int) ($settings['caldav_sync'] ?? 1) !== 0 ||
-            !hash_equals(
+            !\verify_password(
                 (string) ($settings['password'] ?? ''),
-                \hash_password((string) ($settings['salt'] ?? ''), (string) $state['password']),
+                (string) ($settings['salt'] ?? ''),
+                (string) $state['password'],
             )
         ) {
             throw new RuntimeException('Fixture ownership or credential changed; refusing transition.');

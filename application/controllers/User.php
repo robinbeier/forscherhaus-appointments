@@ -55,7 +55,7 @@ class User extends EA_Controller
      */
     public function logout(): void
     {
-        redirect('logout');
+        logout_session();
     }
 
     /**

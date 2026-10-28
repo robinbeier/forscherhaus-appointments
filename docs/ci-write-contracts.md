@@ -301,6 +301,14 @@ echte HTTP-/CSRF-Verifikation. Der API-Controller übergibt den vollständigen
 Batch an `Settings_model::save_batch`; Transaktionszuständigkeit und die getrennten
 Datenbanknachweise beschreibt [der atomare Schreibvertrag](atomic-write-contracts.md#api-settings-batches).
 
+Der Controller hält zusätzlich den aktuellen Actor-User und dessen Rollen-Zeile
+mit `FOR UPDATE` bis zum Commit. Nur die dort gelesene gültige
+`system_settings.edit`-Maske erlaubt den Batch; Account-Löschung, Rollenwechsel
+und Rechteentzug werden davor oder danach geordnet. Negative oder unbekannte
+Maskenbits verleihen keine Berechtigung. Isolierte HTTP-/Datenbanktests beobachten
+den tatsächlichen Lock-Wartepunkt bei Account-Löschung und Rollenrechteentzug
+und prüfen den unveränderten API-Token nach Ablehnung.
+
 ## Weitere Einstellungen im Backoffice
 
 Die Save-Aktionen von General-, LDAP-, Legal-, Business-, Booking-, Matomo-
