@@ -177,6 +177,8 @@ final class ProvidersUpdateHttpTest extends TestCase
         $before = $this->providerState();
         $payload = $this->providerPayload($this->fixture->providerId);
         $payload['notes'] = $this->fixture->run . '_ordinary_update';
+        // The staff UI omits an unchanged password from its request.
+        unset($payload['settings']['password']);
 
         $response = $admin->post('providers/update', ['provider' => $payload]);
 

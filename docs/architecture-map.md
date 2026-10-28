@@ -12,15 +12,15 @@ This map defines component boundaries, path ownership scope, and dependency edge
 |---|---|---|---:|---:|
 | `auth-session` | Access & Session | integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 17 | 3 |
 | `installation-bootstrap` | Installation & Bootstrap | people-services-admin, settings-compliance, shared-core | 3 | 3 |
-| `booking-public` | Public Booking | integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 9 | 6 |
-| `booking-lifecycle` | Booking Confirmation/Cancellation | booking-public, integrations-sync, people-services-admin, scheduling-backoffice, shared-core | 5 | 3 |
-| `scheduling-backoffice` | Calendar & Scheduling | integrations-sync, people-services-admin, settings-compliance, shared-core | 17 | 3 |
+| `booking-public` | Public Booking | booking-lifecycle, integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 9 | 6 |
+| `booking-lifecycle` | Booking Confirmation/Cancellation | booking-public, integrations-sync, people-services-admin, scheduling-backoffice, shared-core | 6 | 4 |
+| `scheduling-backoffice` | Calendar & Scheduling | booking-lifecycle, integrations-sync, people-services-admin, settings-compliance, shared-core | 17 | 3 |
 | `dashboard-exports` | Dashboard & Exports | scheduling-backoffice, people-services-admin, shared-core | 11 | 3 |
-| `people-services-admin` | People, Providers, Services | integrations-sync, scheduling-backoffice, settings-compliance, shared-core | 25 | 3 |
+| `people-services-admin` | People, Providers, Services | booking-lifecycle, integrations-sync, scheduling-backoffice, settings-compliance, shared-core | 25 | 3 |
 | `settings-compliance` | Settings & Compliance | auth-session, integrations-sync, people-services-admin, scheduling-backoffice, shared-core | 27 | 3 |
 | `integrations-sync` | Integrations & Sync | auth-session, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 6 | 1 |
 | `api-v1` | REST API v1 | auth-session, booking-public, integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 5 | 3 |
-| `shared-core` | Shared Core | None | 15 | 3 |
+| `shared-core` | Shared Core | None | 16 | 3 |
 | `platform-quality-tooling` | Platform, CI, Release Gates | api-v1, booking-public, dashboard-exports, installation-bootstrap, people-services-admin, settings-compliance, shared-core | 19 | 9 |
 
 ## Component Details
@@ -84,6 +84,7 @@ Key files:
 Public booking wizard read/write path, including server-side reschedule authority, up to booking completion handoff.
 
 Dependencies:
+- `booking-lifecycle`
 - `integrations-sync`
 - `people-services-admin`
 - `scheduling-backoffice`
@@ -126,17 +127,20 @@ Path rules:
 - `application/views/pages/booking_confirmation.php` (exact_file)
 - `application/views/pages/booking_cancellation.php` (exact_file)
 - `application/views/pages/booking_message.php` (exact_file)
+- `application/core/Public_booking_lifecycle.php` (exact_file)
 
 Key files:
 - `application/controllers/Booking_confirmation.php`
 - `application/controllers/Booking_cancellation.php`
 - `application/views/pages/booking_confirmation.php`
+- `application/core/Public_booking_lifecycle.php`
 
 ### `scheduling-backoffice` - Calendar & Scheduling
 
 Backoffice scheduling operations, calendar interactions and appointment orchestration.
 
 Dependencies:
+- `booking-lifecycle`
 - `integrations-sync`
 - `people-services-admin`
 - `settings-compliance`
@@ -198,6 +202,7 @@ Key files:
 Admin CRUD surfaces for providers, customers, services and service categories.
 
 Dependencies:
+- `booking-lifecycle`
 - `integrations-sync`
 - `scheduling-backoffice`
 - `settings-compliance`
@@ -350,6 +355,7 @@ Path rules:
 - `application/libraries/Ics_file.php` (exact_file)
 - `application/libraries/Ics_provider.php` (exact_file)
 - `application/libraries/Ics_calendar.php` (exact_file)
+- `application/core/Early_rate_limit.php` (exact_file)
 
 Key files:
 - `application/core/Csp_report_only.php`

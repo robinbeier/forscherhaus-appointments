@@ -20,6 +20,12 @@
  */
 class Customers_model extends EA_Model
 {
+    private function publicBookingLifecycle(): Public_booking_lifecycle
+    {
+        require_once APPPATH . 'core/Public_booking_lifecycle.php';
+        return new Public_booking_lifecycle($this->db);
+    }
+
     /**
      * @var array
      */
@@ -304,19 +310,39 @@ class Customers_model extends EA_Model
      */
     protected function update(array $customer): int
     {
+        $owns_transaction = false;
+        if (!$this->db->trans_active()) {
+            if (!$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start customer update transaction.');
+            }
+            $owns_transaction = true;
+        }
         $customer['update_datetime'] = date('Y-m-d H:i:s');
 
-        $updated = $this->db->update('users', $customer, [
-            'id' => $customer['id'],
-            'id_roles' => $this->get_customer_role_id(),
-        ]);
+        try {
+            $this->publicBookingLifecycle()->lockCustomer((int) $customer['id']);
+            $this->publicBookingLifecycle()->retireMarker((int) $customer['id']);
+            $updated = $this->db->update('users', $customer, [
+                'id' => $customer['id'],
+                'id_roles' => $this->get_customer_role_id(),
+            ]);
 
-        if (!$updated) {
-            throw new RuntimeException('Could not update customer.');
-        }
+            if (!$updated) {
+                throw new RuntimeException('Could not update customer.');
+            }
 
-        if ($this->db->affected_rows() === 0) {
-            $this->assert_customer_exists_for_update((int) $customer['id']);
+            if ($this->db->affected_rows() === 0) {
+                $this->assert_customer_exists_for_update((int) $customer['id']);
+            }
+
+            if (!$this->db->trans_status() || ($owns_transaction && !$this->db->trans_commit())) {
+                throw new RuntimeException('Could not commit customer update transaction.');
+            }
+        } catch (Throwable $exception) {
+            if ($owns_transaction) {
+                $this->db->trans_rollback();
+            }
+            throw $exception;
         }
 
         return $customer['id'];

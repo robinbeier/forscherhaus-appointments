@@ -121,12 +121,14 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
   - `application/controllers/Booking_confirmation.php`
   - `application/controllers/Booking_cancellation.php`
   - `application/views/pages/booking_confirmation.php`
+  - `application/core/Public_booking_lifecycle.php`
 - Path rules:
   - `application/controllers/Booking_confirmation.php` (exact_file)
   - `application/controllers/Booking_cancellation.php` (exact_file)
   - `application/views/pages/booking_confirmation.php` (exact_file)
   - `application/views/pages/booking_cancellation.php` (exact_file)
   - `application/views/pages/booking_message.php` (exact_file)
+  - `application/core/Public_booking_lifecycle.php` (exact_file)
 
 ### `scheduling-backoffice`
 
@@ -343,6 +345,7 @@ Note: in `single-owner` mode, identical primary/secondary handles are intentiona
   - `application/libraries/Ics_file.php` (exact_file)
   - `application/libraries/Ics_provider.php` (exact_file)
   - `application/libraries/Ics_calendar.php` (exact_file)
+  - `application/core/Early_rate_limit.php` (exact_file)
 
 ### `platform-quality-tooling`
 

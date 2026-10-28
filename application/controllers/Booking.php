@@ -80,6 +80,8 @@ class Booking extends EA_Controller
         $this->load->library('availability');
         $this->load->library('booking_request_dto_factory');
         $this->load->library('reschedule_authority');
+        require_once APPPATH . 'core/Public_booking_lifecycle.php';
+        $this->public_booking_lifecycle = new Public_booking_lifecycle($this->db);
     }
 
     /**
@@ -447,6 +449,38 @@ class Booking extends EA_Controller
             $existing_customer_id = null;
 
             if (!($authority_claim instanceof RescheduleAuthorityClaim)) {
+                if (
+                    is_cli() ||
+                    !(bool) $this->config->item('rate_limiting') ||
+                    rate_limit_is_local_loopback_request(
+                        $this->input->ip_address(),
+                        $_SERVER['HTTP_HOST'] ?? ($_SERVER['SERVER_NAME'] ?? null),
+                    )
+                ) {
+                    // Local/CLI and explicitly disabled environments retain the
+                    // existing development and test behavior.
+                } else {
+                    $cachePath = (string) $this->config->item('cache_path');
+                    if ($cachePath === '') {
+                        $cachePath = APPPATH . 'cache' . DIRECTORY_SEPARATOR;
+                    }
+                    Early_rate_limit::enforce(
+                        $this->input->ip_address(),
+                        8,
+                        60,
+                        $cachePath,
+                        'booking_creation_key_',
+                        'booking_creation_tmp_',
+                    );
+                    Early_rate_limit::enforce(
+                        $this->input->ip_address(),
+                        40,
+                        3600,
+                        $cachePath,
+                        'booking_creation_hour_key_',
+                        'booking_creation_hour_tmp_',
+                    );
+                }
                 $submitted_email = $customer['email'] ?? null;
                 if (
                     ($submitted_email !== null && !is_string($submitted_email)) ||
@@ -618,26 +652,7 @@ class Booking extends EA_Controller
 
             $customer_ip = $this->input->ip_address();
 
-            // Create the consents (if needed).
-            $consent = [
-                'first_name' => $customer['first_name'] ?? '-',
-                'last_name' => $customer['last_name'] ?? '-',
-                'email' => $customer['email'] ?? '-',
-                'ip' => $customer_ip,
-            ];
-
-            if (setting('display_terms_and_conditions')) {
-                $consent['type'] = 'terms-and-conditions';
-
-                $this->consents_model->save($consent);
-            }
-
-            if (setting('display_privacy_policy')) {
-                $consent['type'] = 'privacy-policy';
-
-                $this->consents_model->save($consent);
-            }
-
+            $consent_ids = [];
             // Save customer language (the language which is used to render the booking page).
             $customer['language'] = session('language') ?? config('language');
 
@@ -647,12 +662,40 @@ class Booking extends EA_Controller
                 $customer['notes'] = 'run:' . $this->zero_surprise_canary->context()['run_id'];
             }
 
+            $captured_marker =
+                $authority_claim instanceof RescheduleAuthorityClaim
+                    ? $this->public_booking_lifecycle->captureMarker((int) $customer['id'])
+                    : null;
+            $created_new_customer = $authority_claim === null && $existing_customer_id === null;
             $customer_id =
                 $authority_claim instanceof RescheduleAuthorityClaim ||
                 ($this->zero_surprise_canary->active() && $existing_customer_id !== null)
                     ? $this->customers_model->save($customer)
                     : $this->customers_model->insert_new($customer);
             $customer = $this->customers_model->find($customer_id);
+            if ($authority_claim instanceof RescheduleAuthorityClaim) {
+                $this->public_booking_lifecycle->restoreCapturedMarker($customer_id, $captured_marker);
+            } elseif ($created_new_customer) {
+                $this->public_booking_lifecycle->markNewCustomer($customer_id);
+            }
+
+            // Persist and link consents only after the customer identity is
+            // durable in this transaction; links use exact IDs from this request.
+            $consent = [
+                'first_name' => $customer['first_name'] ?? '-',
+                'last_name' => $customer['last_name'] ?? '-',
+                'email' => $customer['email'] ?? '-',
+                'ip' => $customer_ip,
+            ];
+            if (setting('display_terms_and_conditions')) {
+                $consent['type'] = 'terms-and-conditions';
+                $consent_ids[] = $this->consents_model->save($consent);
+            }
+            if (setting('display_privacy_policy')) {
+                $consent['type'] = 'privacy-policy';
+                $consent_ids[] = $this->consents_model->save($consent);
+            }
+            $this->public_booking_lifecycle->linkConsents($consent_ids, $customer_id);
 
             $appointment['id_users_customer'] = $customer_id;
             $appointment['is_unavailability'] = false;

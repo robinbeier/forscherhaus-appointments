@@ -88,8 +88,6 @@ class EA_Controller extends CI_Controller
         $this->configure_language();
         $this->load_common_html_vars();
         $this->load_common_script_vars();
-
-        rate_limit($this->input->ip_address());
     }
 
     private function ensure_user_exists()

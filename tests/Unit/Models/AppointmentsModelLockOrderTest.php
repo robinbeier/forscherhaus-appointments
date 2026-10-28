@@ -326,6 +326,60 @@ final class AppointmentsModelLockOrderTest extends TestCase
         $this->assertSame([99], $database->queries[0]['bindings']);
     }
 
+    public function testPublicCustomerDeleteLocksParentsBeforeAppointmentAndReadsRemainingRowsCurrently(): void
+    {
+        $database = new AppointmentsModelLockOrderFakeDatabase();
+        $database->publicMarker = ['customer_id' => 30];
+        $CI = &get_instance();
+        $originalDb = $CI->db;
+        $CI->db = $database;
+        try {
+            $this->createModel()->delete(99);
+        } finally {
+            $CI->db = $originalDb;
+        }
+        $this->assertSame(
+            [
+                'begin',
+                'users_lock',
+                'services_lock',
+                'appointment_lock',
+                'buffer_delete',
+                'appointment_delete',
+                'appointment_lock',
+                'commit',
+            ],
+            $database->events,
+        );
+        $this->assertSame([20, 30], $database->queries[0]['bindings']);
+        $this->assertStringContainsString('ORDER BY `id` ASC FOR UPDATE', $database->queries[0]['sql']);
+        $this->assertStringContainsString(
+            'WHERE `id_users_customer` = ? ORDER BY `id` FOR UPDATE',
+            $database->queries[3]['sql'],
+        );
+    }
+
+    public function testPublicCustomerParentDriftDeniesDeleteBeforeAnyMutation(): void
+    {
+        $database = new AppointmentsModelLockOrderFakeDatabase();
+        $database->publicMarker = ['customer_id' => 30];
+        $database->lockedOverrides = ['id_users_customer' => 40];
+        $CI = &get_instance();
+        $originalDb = $CI->db;
+        $CI->db = $database;
+        try {
+            try {
+                $this->createModel()->delete(99);
+                $this->fail('Parent drift must reject before deletion.');
+            } catch (RuntimeException $error) {
+                $this->assertSame('Appointment parents changed during deletion.', $error->getMessage());
+            }
+        } finally {
+            $CI->db = $originalDb;
+        }
+        $this->assertSame(['begin', 'users_lock', 'services_lock', 'appointment_lock', 'rollback'], $database->events);
+    }
+
     public function testBufferSyncReadsCurrentServiceUnderLock(): void
     {
         $database = new AppointmentsModelLockOrderFakeDatabase();
@@ -524,6 +578,8 @@ final class AppointmentsModelLockOrderTest extends TestCase
 
 final class AppointmentsModelLockOrderFakeDatabase
 {
+    public array $publicMarker = [];
+    public array $lockedOverrides = [];
     /** @var array<int, array{sql:string,bindings:array<int, mixed>}> */
     public array $queries = [];
     public ?string $missingTable = null;
@@ -563,7 +619,10 @@ final class AppointmentsModelLockOrderFakeDatabase
         }
         if (str_contains($sql, 'ea_appointments')) {
             $this->events[] = 'appointment_lock';
-            return new AppointmentsModelLockOrderFakeQuery(1, $this->appointment);
+            return new AppointmentsModelLockOrderFakeQuery(
+                1,
+                array_replace($this->appointment, $this->lockedOverrides),
+            );
         }
         $table = str_contains($sql, 'ea_users') ? 'users' : 'services';
         $this->events[] = $table . '_lock';
@@ -693,7 +752,10 @@ final class AppointmentsModelLockOrderFakeDatabase
      */
     public function get_where(string $table, array $where): AppointmentsModelLockOrderFakeQuery
     {
-        return new AppointmentsModelLockOrderFakeQuery(1, $this->appointment);
+        return new AppointmentsModelLockOrderFakeQuery(
+            1,
+            $table === 'public_booking_customers' ? $this->publicMarker : $this->appointment,
+        );
     }
 }
 

@@ -1328,6 +1328,8 @@ class BookingControllerFlowTest extends TestCase
 
         require_once APPPATH . 'core/Zero_surprise_canary.php';
         $controller->zero_surprise_canary = new \Zero_surprise_canary();
+        require_once APPPATH . 'core/Public_booking_lifecycle.php';
+        $controller->public_booking_lifecycle = new \Public_booking_lifecycle($CI->db);
 
         $controller->load = $CI->load;
         $controller->db = $CI->db;

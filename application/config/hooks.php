@@ -12,6 +12,33 @@
 */
 
 require_once APPPATH . 'core/Csp_report_only.php';
+require_once APPPATH . 'core/Early_rate_limit.php';
+require_once APPPATH . 'helpers/rate_limit_helper.php';
+
+$hook['pre_controller'] = static function (): void {
+    if (is_cli() || !(bool) config_item('rate_limiting')) {
+        return;
+    }
+
+    // The CSP report receiver intentionally has its own bounded storage policy.
+    $uri = load_class('URI', 'core');
+    $controller = strtolower((string) ($uri->rsegments[1] ?? ''));
+    if ($controller === 'csp_report') {
+        return;
+    }
+
+    $input = load_class('Input', 'core');
+    $ip = (string) $input->ip_address();
+    if (rate_limit_is_local_loopback_request($ip, $_SERVER['HTTP_HOST'] ?? ($_SERVER['SERVER_NAME'] ?? null))) {
+        return;
+    }
+
+    $cachePath = (string) config_item('cache_path');
+    if ($cachePath === '') {
+        $cachePath = APPPATH . 'cache' . DIRECTORY_SEPARATOR;
+    }
+    Early_rate_limit::enforce($ip, 100, 120, $cachePath);
+};
 
 $hook['post_controller'] = static function (): void {
     $CI = get_instance();

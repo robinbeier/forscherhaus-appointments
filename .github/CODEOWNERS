@@ -44,7 +44,9 @@
 /application/core/Csp_report_only.php @robinbeier
 /application/core/Customers_ui_smoke_access_policy.php @robinbeier
 /application/core/EA_Session.php @robinbeier
+/application/core/Early_rate_limit.php @robinbeier
 /application/core/Provider_ui_smoke_access_policy.php @robinbeier
+/application/core/Public_booking_lifecycle.php @robinbeier
 /application/core/Zero_surprise_canary.php @robinbeier
 /application/libraries/Accounts.php @robinbeier
 /application/libraries/Api.php @robinbeier

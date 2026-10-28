@@ -218,7 +218,9 @@ Linkberechtigung und aktivierte Buchung. Der Hash muss genau einen gewöhnlichen
 Termin treffen; ein historisch doppelter Hash erhält wie ein unbekannter Hash
 die generische Nicht-gefunden-Antwort, bevor ein Löschziel gewählt wird.
 Der Controller öffnet nach dem ersten
-Lookup eine äußere Transaktion, sperrt den Termin und prüft Hash, Terminart und
+Lookup eine äußere Transaktion, sperrt Kunden-/Anbieter-Eltern in numerischer
+Reihenfolge, dann den Service und den Termin. Er verwirft geänderte Eltern-IDs
+und prüft Hash, Terminart und
 `book_advance_timeout` erneut auf dem gesperrten Datensatz. Wie die bestehende
 Verwaltungsseite lehnt er `start_datetime < now + timeout` ab; Gleichheit bleibt
 erlaubt. Der zeitzonenlose gespeicherte Termin und die aktuelle Zeit werden dabei
@@ -226,8 +228,14 @@ sekundengenau in der Zeitzone des zugehörigen Anbieters ausgewertet. Nicht
 existente lokale Uhrzeiten während eines Zeitzonenwechsels werden nicht still
 normalisiert, sondern fail-closed abgelehnt. Der geschachtelte Modellaufruf
 löscht Puffer und Termin; erst der äußere Commit bestätigt den Erfolg.
-Ablehnungen und Fehler rollen vorher zurück. Dies ist die bestehende
-Termin-/Kind-Sperrfolge, keine neue globale Elternsperre.
+Ablehnungen und Fehler rollen vorher zurück. Nach dem Termin darf nur ein neu
+öffentlich angelegter, unverändert öffentlich verwalteter Kunde ohne weitere
+Termine einschließlich exakt verknüpfter Einwilligungen entfernt werden. Die
+Entscheidung erfolgt unter denselben Elternsperren mit aktuellem Locking-Read;
+Löschung und Stornierung teilen den äußeren Commit. Historische und durch
+Mitarbeitende bearbeitete Kunden werden nicht übernommen. Der
+[Lebenszyklusvertrag](security/public-booking-abuse-and-retention.md) beschreibt
+Herkunft, Rechteentzug, Schema-Reihenfolge und Rückfallgrenzen.
 
 Die isolierten HTTP-Tests prüfen Frist einschließlich abweichender
 Anbieterzeitzone, Methode, deaktivierte Buchung, Nichtmutation und erfolgreiche
