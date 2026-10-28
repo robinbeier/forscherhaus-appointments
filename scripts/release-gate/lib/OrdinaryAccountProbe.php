@@ -130,7 +130,7 @@ final class OrdinaryAccountProbe
                 try {
                     $phase = 'logout';
                     $observe($phase, 'started');
-                    $logout = $this->client->get('logout');
+                    $logout = $this->client->post('logout');
                     $this->remember();
                     $logoutStatus = $logout->statusCode;
                     $this->expectStatus($logout, 200, 'synthetic logout');

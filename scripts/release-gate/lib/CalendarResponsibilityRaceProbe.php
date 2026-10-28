@@ -317,7 +317,7 @@ final class CalendarResponsibilityRaceProbe
 
     private function logout(): void
     {
-        $logout = $this->client->get('logout');
+        $logout = $this->client->post('logout');
         $this->remember();
         $this->expectStatus($logout, 200, 'calendar race logout');
         $after = $this->client->get('calendar');

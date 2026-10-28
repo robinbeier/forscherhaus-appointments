@@ -40,6 +40,15 @@ exceptions returned through `json_exception()`. Protected logs retain diagnostic
 The isolated account failure regression proves rollback after a real write;
 the renderer matrix separately covers development, testing, production, and CLI.
 
+Local password format changes require a verified dual-reader release before
+modern writes are enabled. Preserve the accepted password length and invalidate
+an authentication decision if its credential snapshot changes during verification.
+See [the reader-first rollout](docs/security/password-verifier-rollout.md) for
+the rollback floor and the limits of gradual rehashing.
+
+Logout, including the legacy user alias, requires POST and the normal framework
+CSRF token. GET, HEAD and other methods must not destroy a staff session.
+
 The product is used through its own website. Browser access from another origin
 is not supported for public, backoffice, or API routes. Application responses
 must not grant a foreign origin access through `Access-Control-Allow-*`, including

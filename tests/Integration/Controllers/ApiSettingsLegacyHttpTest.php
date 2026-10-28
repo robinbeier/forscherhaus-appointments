@@ -334,6 +334,191 @@ final class ApiSettingsLegacyHttpTest extends TestCase
         }
     }
 
+    public function testConcurrentRoleRevocationPreventsApiTokenWrite(): void
+    {
+        $this->assertConcurrentRevocation('role');
+    }
+
+    public function testConcurrentActorDeletionPreventsApiTokenWrite(): void
+    {
+        $this->assertConcurrentRevocation('actor');
+    }
+
+    private function assertConcurrentRevocation(string $kind): void
+    {
+        $db = get_instance()->db;
+        $admin = $this->login($this->credentials['admin_username']);
+        $adminRole = $db->get_where('roles', ['slug' => DB_SLUG_ADMIN])->row_array();
+        self::assertNotEmpty($adminRole);
+        self::assertSame((int) $adminRole['id'], (int) $this->actorRoleSnapshot['id_roles']);
+        $this->adminRoleSnapshot = $adminRole;
+        $before = $db->get_where('settings', ['name' => 'api_token'])->row_array();
+
+        $observer = get_instance()->load->database(
+            [
+                'hostname' => 'mysql',
+                'username' => 'root',
+                'password' => 'secret',
+                'database' => 'easyappointments',
+                'dbdriver' => 'mysqli',
+                'dbprefix' => $db->dbprefix,
+                'pconnect' => false,
+                'db_debug' => false,
+                'char_set' => 'utf8mb4',
+                'dbcollat' => 'utf8mb4_general_ci',
+            ],
+            true,
+        );
+        $multi = null;
+        $handle = null;
+        $transactionOpen = false;
+        try {
+            self::assertTrue($observer->query('SET SESSION TRANSACTION READ ONLY'));
+            $ownerConnectionId = mysqli_thread_id($db->conn_id);
+            self::assertNotSame($ownerConnectionId, mysqli_thread_id($observer->conn_id));
+            self::assertTrue($db->trans_begin());
+            $transactionOpen = true;
+            if ($kind === 'role') {
+                $revoked = ((int) $adminRole['system_settings']) & ~PRIV_EDIT;
+                self::assertTrue(
+                    $db->update('roles', ['system_settings' => $revoked], ['id' => (int) $adminRole['id']]),
+                );
+            } else {
+                self::assertTrue($db->delete('users', ['id' => $this->fixture->actorId]));
+            }
+
+            $cookies = [];
+            foreach ($admin->cookieRecords() as $record) {
+                if (isset($record['name'], $record['value'])) {
+                    $cookies[] = $record['name'] . '=' . $record['value'];
+                }
+            }
+            $csrf = $admin->getCookie('csrf_cookie');
+            self::assertNotSame('', (string) $csrf);
+            $form = [['name' => 'api_token', 'value' => $this->fixture->run . '_race']];
+            $multi = curl_multi_init();
+            $handle = curl_init($this->server->baseUrl . '/api_settings/save');
+            self::assertInstanceOf(CurlMultiHandle::class, $multi);
+            self::assertInstanceOf(CurlHandle::class, $handle);
+            curl_setopt_array($handle, [
+                CURLOPT_POST => true,
+                CURLOPT_POSTFIELDS => http_build_query(
+                    ['api_settings' => $form, 'csrf_token' => $csrf],
+                    '',
+                    '&',
+                    PHP_QUERY_RFC3986,
+                ),
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_FOLLOWLOCATION => false,
+                CURLOPT_CONNECTTIMEOUT => 3,
+                CURLOPT_TIMEOUT => 15,
+                CURLOPT_HTTPHEADER => [
+                    'Accept: */*',
+                    'Content-Type: application/x-www-form-urlencoded',
+                    'Cookie: ' . implode('; ', $cookies),
+                ],
+            ]);
+            self::assertSame(CURLM_OK, curl_multi_add_handle($multi, $handle));
+
+            $waiting = false;
+            $deadline = microtime(true) + 8.0;
+            do {
+                do {
+                    $multiResult = curl_multi_exec($multi, $running);
+                } while ($multiResult === CURLM_CALL_MULTI_PERFORM);
+                self::assertSame(CURLM_OK, $multiResult);
+                $waiting = $this->settingsLockWaitObserved(
+                    $observer,
+                    $ownerConnectionId,
+                    $db->dbprefix($kind === 'role' ? 'roles' : 'users'),
+                    $kind === 'role' ? (int) $adminRole['id'] : $this->fixture->actorId,
+                );
+                if ($waiting || $running === 0 || microtime(true) >= $deadline) {
+                    break;
+                }
+                curl_multi_select($multi, 0.05);
+            } while (true);
+            self::assertTrue(
+                $waiting,
+                'API save must wait for the observed authorization lock before write (running=' .
+                    $running .
+                    ', status=' .
+                    (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE) .
+                    ', body=' .
+                    curl_multi_getcontent($handle) .
+                    ').',
+            );
+            self::assertTrue($db->trans_commit());
+            $transactionOpen = false;
+            self::assertTrue($this->drainCurl($multi, $handle));
+            self::assertSame(403, (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE));
+            self::assertSame($before, $db->get_where('settings', ['name' => 'api_token'])->row_array());
+        } finally {
+            if ($transactionOpen && $db->trans_active()) {
+                $db->trans_rollback();
+            }
+            if ($multi instanceof CurlMultiHandle && $handle instanceof CurlHandle) {
+                $this->drainCurl($multi, $handle);
+                curl_multi_remove_handle($multi, $handle);
+            }
+            if ($handle instanceof CurlHandle) {
+                curl_close($handle);
+            }
+            if ($multi instanceof CurlMultiHandle) {
+                curl_multi_close($multi);
+            }
+            $observer->close();
+        }
+    }
+
+    private function settingsLockWaitObserved(object $observer, int $ownerConnectionId, string $table, int $id): bool
+    {
+        $result = $observer->query(
+            'SELECT waits.REQUESTING_THREAD_ID, requesting_lock.OBJECT_NAME AS REQUESTING_TABLE, ' .
+                'COALESCE(requesting_statement.SQL_TEXT, requesting_thread.PROCESSLIST_INFO) AS REQUESTING_SQL ' .
+                'FROM performance_schema.data_lock_waits waits ' .
+                'JOIN performance_schema.data_locks requesting_lock ON requesting_lock.ENGINE_LOCK_ID = waits.REQUESTING_ENGINE_LOCK_ID ' .
+                'JOIN performance_schema.threads requesting_thread ON requesting_thread.THREAD_ID = waits.REQUESTING_THREAD_ID ' .
+                'JOIN performance_schema.threads blocking_thread ON blocking_thread.THREAD_ID = waits.BLOCKING_THREAD_ID ' .
+                'LEFT JOIN performance_schema.events_statements_current requesting_statement ON requesting_statement.THREAD_ID = requesting_thread.THREAD_ID ' .
+                'WHERE blocking_thread.PROCESSLIST_ID = ' .
+                (int) $ownerConnectionId,
+        );
+        if ($result === false) {
+            throw new RuntimeException('The independent lock observer could not read performance_schema.');
+        }
+        $normalize = static fn(string $value): string => (string) preg_replace('/\s+/', ' ', strtoupper(trim($value)));
+        foreach ($result->result_array() as $row) {
+            $sql = $normalize((string) ($row['REQUESTING_SQL'] ?? ''));
+            if (
+                ($row['REQUESTING_TABLE'] ?? null) === $table &&
+                str_contains($sql, 'FROM `' . strtoupper($table) . '`') &&
+                str_contains($sql, 'FOR UPDATE')
+            ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function drainCurl(CurlMultiHandle $multi, CurlHandle $handle): bool
+    {
+        $deadline = microtime(true) + 8.0;
+        do {
+            do {
+                $result = curl_multi_exec($multi, $running);
+            } while ($result === CURLM_CALL_MULTI_PERFORM);
+            if ($result !== CURLM_OK) {
+                return false;
+            }
+            if ($running === 0) {
+                return true;
+            }
+            curl_multi_select($multi, 0.05);
+        } while (microtime(true) < $deadline);
+        return $running === 0;
+    }
+
     private function login(string $username): GateHttpClient
     {
         $client = $this->server?->client();

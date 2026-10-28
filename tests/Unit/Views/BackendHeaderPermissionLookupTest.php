@@ -63,6 +63,8 @@ final class BackendHeaderPermissionLookupTest extends TestCase
         self::assertCount(1, $roleQueries, 'The header should reuse one permission lookup for its navigation checks.');
         self::assertStringContainsString('href="' . site_url('general_settings') . '"', $html);
         self::assertStringNotContainsString('href="' . site_url('account') . '"', $html);
-        self::assertStringContainsString('href="' . site_url('logout') . '"', $html);
+        self::assertStringContainsString('method="post" action="' . site_url('logout') . '"', $html);
+        self::assertStringContainsString('name="' . get_instance()->security->get_csrf_token_name() . '"', $html);
+        self::assertStringContainsString('value="' . get_instance()->security->get_csrf_hash() . '"', $html);
     }
 }

@@ -30,11 +30,19 @@ final class CustomersUiSmokeAccessPolicyTest extends TestCase
         $this->assertFalse(Customers_ui_smoke_access_policy::isAuthorizedRole(DB_SLUG_CUSTOMER));
     }
 
+    public function testLogoutExceptionAllowsOnlyProtectedPostBeforeLeaseChecks(): void
+    {
+        $this->assertTrue(Customers_ui_smoke_access_policy::isLogoutRoute('Logout', 'index', 'POST'));
+        foreach (['GET', 'HEAD', 'PUT', 'DELETE'] as $verb) {
+            $this->assertFalse(Customers_ui_smoke_access_policy::isLogoutRoute('Logout', 'index', $verb));
+        }
+    }
+
     public function testOnlyCustomersReadRoutesAndLogoutAreAllowed(): void
     {
         $this->assertTrue(Customers_ui_smoke_access_policy::isAllowedRoute('Customers', 'index', 'GET'));
         $this->assertTrue(Customers_ui_smoke_access_policy::isAllowedRoute('Customers', 'search', 'POST'));
-        $this->assertTrue(Customers_ui_smoke_access_policy::isAllowedRoute('Logout', 'index', 'GET'));
+        $this->assertTrue(Customers_ui_smoke_access_policy::isAllowedRoute('Logout', 'index', 'POST'));
         $this->assertFalse(Customers_ui_smoke_access_policy::isAllowedRoute('Customers', 'find', 'POST'));
         $this->assertFalse(Customers_ui_smoke_access_policy::isAllowedRoute('Customers', 'store', 'POST'));
         $this->assertFalse(Customers_ui_smoke_access_policy::isAllowedRoute('Customers', 'search', 'GET'));

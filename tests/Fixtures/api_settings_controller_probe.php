@@ -5,6 +5,10 @@ declare(strict_types=1);
 define('BASEPATH', __DIR__);
 define('APPPATH', dirname(__DIR__, 2) . '/application/');
 define('PRIV_SYSTEM_SETTINGS', 'system_settings');
+define('PRIV_VIEW', 1);
+define('PRIV_ADD', 2);
+define('PRIV_EDIT', 4);
+define('PRIV_DELETE', 8);
 
 $scenario = $argv[1] ?? '';
 $_SERVER['REQUEST_METHOD'] = strtoupper($argv[2] ?? 'GET');
@@ -64,6 +68,57 @@ function &get_instance(): object
     return $instance;
 }
 
+final class ProbeSettingsDatabase
+{
+    public function trans_active(): bool
+    {
+        return false;
+    }
+    public function trans_begin(): bool
+    {
+        $GLOBALS['events'][] = 'begin';
+        return true;
+    }
+    public function trans_status(): bool
+    {
+        return true;
+    }
+    public function trans_commit(): bool
+    {
+        $GLOBALS['events'][] = 'commit';
+        return true;
+    }
+    public function trans_rollback(): bool
+    {
+        $GLOBALS['events'][] = 'rollback';
+        return true;
+    }
+    public function dbprefix(string $table): string
+    {
+        return 'ea_' . $table;
+    }
+    public function query(string $sql, array $params): object
+    {
+        $GLOBALS['events'][] = str_contains($sql, '`ea_users`') ? 'lock_actor' : 'lock_role';
+        $role = match ($GLOBALS['scenario']) {
+            'revoked' => 0,
+            'invalid_mask' => 20,
+            default => 4,
+        };
+        $row = str_contains($sql, '`ea_users`')
+            ? ($GLOBALS['scenario'] === 'deleted'
+                ? []
+                : ['id_roles' => 7])
+            : ['system_settings' => $role];
+        return new class ($row) {
+            public function __construct(private array $row) {}
+            public function row_array(): array
+            {
+                return $this->row;
+            }
+        };
+    }
+}
 final class ProbeSettingsModel
 {
     public function save_batch(array $settings): void
@@ -116,11 +171,13 @@ final class ProbeLoader
 class EA_Controller
 {
     public ProbeLoader $load;
+    public ProbeSettingsDatabase $db;
     public ?ProbeSettingsModel $settings_model = null;
     public ?Backoffice_request_dto_factory $backoffice_request_dto_factory = null;
     public function __construct()
     {
         $this->load = new ProbeLoader($this);
+        $this->db = new ProbeSettingsDatabase();
     }
 }
 function emit_probe_and_exit(): never

@@ -25,15 +25,6 @@ class Logout extends EA_Controller
      */
     public function index(): void
     {
-        $this->session->sess_destroy();
-
-        $company_name = setting('company_name');
-
-        html_vars([
-            'page_title' => lang('log_out'),
-            'company_name' => $company_name,
-        ]);
-
-        $this->load->view('pages/logout');
+        logout_session();
     }
 }

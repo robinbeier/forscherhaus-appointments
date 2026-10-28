@@ -173,6 +173,13 @@ final class LoginMethodHttpTest extends TestCase
             [
                 [new GateHttpClient($server->baseUrl, ''), 'logout', 'calendar', '/logout'],
                 [new GateHttpClient($server->baseUrl, 'index.php'), 'logout', 'calendar', '/index.php/logout'],
+                [new GateHttpClient($server->baseUrl, ''), 'user/logout', 'calendar', '/user/logout'],
+                [
+                    new GateHttpClient($server->baseUrl, 'index.php'),
+                    'user/logout',
+                    'calendar',
+                    '/index.php/user/logout',
+                ],
             ]
             as [$client, $logoutPath, $calendarPath, $logoutUrlPath]
         ) {
@@ -192,7 +199,20 @@ final class LoginMethodHttpTest extends TestCase
             self::assertSame(200, $beforeLogout->statusCode, $beforeLogout->body);
             self::assertStringContainsString('id="calendar-page"', $beforeLogout->body);
 
-            $logout = $client->get($logoutPath);
+            foreach (['GET', 'HEAD', 'PUT', 'DELETE'] as $method) {
+                $denied = $client->requestApp($method, $logoutPath);
+                self::assertSame(405, $denied->statusCode, $denied->body);
+                self::assertSame('POST', $denied->header('allow'));
+                self::assertStringContainsString('id="calendar-page"', $client->get($calendarPath)->body);
+            }
+            $missingCsrf = $client->post($logoutPath, [], withCsrfToken: false);
+            self::assertSame(403, $missingCsrf->statusCode, $missingCsrf->body);
+            self::assertStringContainsString('id="calendar-page"', $client->get($calendarPath)->body);
+            $badCsrf = $client->post($logoutPath, ['csrf_token' => 'invalid']);
+            self::assertSame(403, $badCsrf->statusCode, $badCsrf->body);
+            self::assertStringContainsString('id="calendar-page"', $client->get($calendarPath)->body);
+
+            $logout = $client->post($logoutPath);
             self::assertSame(200, $logout->statusCode, $logout->body);
             self::assertSame($logoutUrlPath, (string) parse_url($logout->url, PHP_URL_PATH));
 

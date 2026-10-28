@@ -72,7 +72,7 @@ final class Provider_ui_smoke_access_policy
             'dashboard::provider_metrics' => $verb === 'POST',
             'dashboard_export::provider_parent_appointments_pdf' => $verb === 'GET',
             'dashboard_export::provider_preparation_pdf' => $verb === 'GET',
-            'logout::index' => $verb === 'GET',
+            'logout::index' => $verb === 'POST',
             default => false,
         };
     }
@@ -84,7 +84,7 @@ final class Provider_ui_smoke_access_policy
     {
         return strtolower($controller) === 'logout' &&
             strtolower($method) === 'index' &&
-            strtoupper($http_method) === 'GET';
+            strtoupper($http_method) === 'POST';
     }
 
     /**

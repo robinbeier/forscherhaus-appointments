@@ -248,7 +248,7 @@ class Zero_surprise_canary
         $route = $controller . '::' . $method;
         $segments = $this->CI->uri->segment_array();
         $last = (string) end($segments);
-        if (in_array($route, ['login::index', 'logout::index'], true) && $verb === 'GET') {
+        if (($route === 'login::index' && $verb === 'GET') || ($route === 'logout::index' && $verb === 'POST')) {
             return;
         }
         if ($route === 'login::validate' && $verb === 'POST' && $this->CI->input->post('username') === self::ACTOR) {

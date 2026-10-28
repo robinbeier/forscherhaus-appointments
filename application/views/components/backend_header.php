@@ -151,9 +151,11 @@
                         </a>
                         <div class="dropdown-divider"></div>
                     <?php endif; ?>
-                    <a class="dropdown-item" href="<?= site_url('logout') ?>">
-                        <?= lang('log_out') ?>
-                    </a>
+                    <form method="post" action="<?= site_url('logout') ?>">
+                        <input type="hidden" name="<?= html_escape($CI->security->get_csrf_token_name()) ?>"
+                               value="<?= html_escape($CI->security->get_csrf_hash()) ?>">
+                        <button class="dropdown-item" type="submit"><?= lang('log_out') ?></button>
+                    </form>
                 </div>
             </li>
         </ul>

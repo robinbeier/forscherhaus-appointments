@@ -164,7 +164,7 @@ final class DefenseCycleOrdinaryFlowTest extends TestCase
         $saved = $f->row('appointments', (int) $appointment['id']);
         self::assertSame($appointment['start_datetime'], $saved['start_datetime']);
         self::assertSame($appointment['hash'], $saved['hash']);
-        self::assertSame(200, $client->get('logout')->statusCode);
+        self::assertSame(200, $client->post('logout')->statusCode);
     }
 
     public function testOrdinaryLegacyParentViewHasOnlyPublicData(): void

@@ -108,7 +108,7 @@ final class BackofficeTargetReadProbe
             $this->expect($calendar, 403, 'same-session customer calendar');
             $this->assertNoMarker($calendar, (string) $target['marker'], 'same-session customer calendar');
             $logoutAttempted = true;
-            $logout = $this->client->get('logout');
+            $logout = $this->client->post('logout');
             $this->remember();
             $this->expect($logout, 200, 'logout');
 
@@ -128,7 +128,7 @@ final class BackofficeTargetReadProbe
         } catch (Throwable $error) {
             if ($loggedIn && !$logoutAttempted) {
                 try {
-                    $logout = $this->client->get('logout');
+                    $logout = $this->client->post('logout');
                     $this->remember();
                     $this->expect($logout, 200, 'failure-path logout');
                 } catch (Throwable) {

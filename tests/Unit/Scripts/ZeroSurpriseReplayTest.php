@@ -186,7 +186,10 @@ class ZeroSurpriseReplayTest extends TestCase
         $this->assertStringContainsString("SET @zs_email = 'zs+gate-user@gate.invalid';", $sql);
         $this->assertStringContainsString('INSERT INTO ea_user_settings', $sql);
         $this->assertStringContainsString('ON DUPLICATE KEY UPDATE', $sql);
-        $this->assertMatchesRegularExpression("/SET @zs_password_hash = '[a-f0-9]{64}';/", $sql);
+        $this->assertMatchesRegularExpression(
+            "/SET @zs_password_hash = '" . preg_quote('$argon2id$', '/') . "[^']+';/",
+            $sql,
+        );
         $this->assertMatchesRegularExpression("/SET @zs_salt = '[a-f0-9]{64}';/", $sql);
     }
 

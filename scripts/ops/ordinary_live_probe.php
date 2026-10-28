@@ -409,7 +409,7 @@ try {
                 },
                 static function () use ($client, $sessions): void {
                     CalendarMethodProbe::closeSession(
-                        static fn(): GateHttpResponse => $client->get('logout'),
+                        static fn(): GateHttpResponse => $client->post('logout'),
                         static function () use ($client, $sessions): void {
                             $sessions->remember($client->getCookie('ea_session'));
                         },

@@ -190,7 +190,7 @@ final class AccountSecurityMatrixProbe
         } finally {
             if ($loggedIn) {
                 try {
-                    $logout = $client->get('logout');
+                    $logout = $client->post('logout');
                     $this->remember($client);
                     $this->expectStatus($logout, 200, 'synthetic matrix logout');
                     $afterLogout = $client->get('account');

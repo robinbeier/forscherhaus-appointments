@@ -91,7 +91,7 @@ final class OrdinarySessionProbe
             ) {
                 throw new RuntimeException('Inactivity/file-preservation precondition was not established.');
             }
-            $expired = $this->ownCookieGet('account', $cookie);
+            $expired = $this->ownCookieRequest('account', $cookie);
             $assertActive();
             if ($expired['status'] !== 307 || !preg_match('~/(?:index\.php/)?login(?:\?|$)~', $expired['location'])) {
                 throw new RuntimeException('Expired own session was not redirected to login.');
@@ -115,12 +115,12 @@ final class OrdinarySessionProbe
             ];
         } finally {
             if ($cookie !== null) {
-                $logout = $this->ownCookieGet('logout', $cookie);
+                $logout = $this->ownCookieRequest('logout', $cookie);
                 if ($logout['status'] !== 200) {
                     throw new RuntimeException('Session probe logout failed; explicit cleanup required.');
                 }
             } else {
-                $this->client->get('logout');
+                $this->client->post('logout');
                 $this->remember();
             }
         }
@@ -131,11 +131,22 @@ final class OrdinarySessionProbe
         $this->sessions->remember($this->client->getCookie('ea_session'));
     }
 
-    /** Fixed normal read/logout routes and only this probe's already recorded cookie. */
-    private function ownCookieGet(string $route, string $cookie): array
+    /** Fixed normal read/CSRF-protected logout routes and this probe's recorded cookie. */
+    private function ownCookieRequest(string $route, string $cookie): array
     {
         if (!in_array($route, ['account', 'logout'], true) || !preg_match('/\A[a-zA-Z0-9,-]{22,256}\z/D', $cookie)) {
             throw new RuntimeException('Invalid ordinary session request.');
+        }
+        $csrf = null;
+        if ($route === 'logout') {
+            // Obtain a normal server-issued double-submit token without replacing
+            // the separately captured session identity being cleaned up.
+            $this->client->get('login');
+            $this->remember();
+            $csrf = $this->client->getCookie('csrf_cookie');
+            if (!is_string($csrf) || $csrf === '') {
+                throw new RuntimeException('Own session logout requires a CSRF token.');
+            }
         }
         $headers = [];
         $curl = curl_init(rtrim($this->baseUrl, '/') . '/index.php/' . $route);
@@ -144,7 +155,7 @@ final class OrdinarySessionProbe
             CURLOPT_FOLLOWLOCATION => false,
             CURLOPT_TIMEOUT => 15,
             CURLOPT_CONNECTTIMEOUT => 5,
-            CURLOPT_COOKIE => 'ea_session=' . $cookie,
+            CURLOPT_COOKIE => 'ea_session=' . $cookie . ($csrf !== null ? '; csrf_cookie=' . $csrf : ''),
             CURLOPT_HEADERFUNCTION => static function ($handle, string $line) use (&$headers): int {
                 $parts = explode(':', trim($line), 2);
                 if (count($parts) === 2) {
@@ -153,6 +164,13 @@ final class OrdinarySessionProbe
                 return strlen($line);
             },
         ]);
+        if ($route === 'logout') {
+            curl_setopt_array($curl, [
+                CURLOPT_POST => true,
+                CURLOPT_POSTFIELDS => http_build_query(['csrf_token' => $csrf], '', '&', PHP_QUERY_RFC3986),
+                CURLOPT_HTTPHEADER => ['Content-Type: application/x-www-form-urlencoded'],
+            ]);
+        }
         try {
             $body = curl_exec($curl);
             $status = curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
