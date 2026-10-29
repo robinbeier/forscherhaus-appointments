@@ -49,6 +49,23 @@ The isolated replay passes passwords to child checks through standard input.
 The live canary instead passes the fixed root-only context-file path and uses
 its generated fixture identity. Password values are never child process arguments.
 
+The final public cancellation may delete the run's newly created customer and
+linked consents. The unknown-hash probe then creates its protected comparison
+booking through the same leased public path, reusing its original synthetic
+customer payload without an ID. Its `:cancel-protect` appointment marker is
+already accepted by root recovery cleanup. Ordinary replay retains its run-marked
+API customer setup so fallback sweeping can recover a lost creation response.
+
+Evidence contract: the real root-Docker lease, HTTP routes and database must
+complete all six booking checks, preserve the comparison appointment exactly
+after the unknown hash, and restore customer/appointment/consent baselines while
+preserving an unrelated sentinel. The lease and provider/service pair remain
+bound; one replacement booking is allowed, and the existing child timeout and
+exit classes (success, contract failure, runtime failure) remain. Request or
+cleanup failures still fail the gate and retain the automatic rollback. Changes
+to the booking smoke script or its real-lease regression rerun this evidence in
+the existing calendar/canary CI job.
+
 The replay binds one `booking_start_date` in the configured timezone before
 the restored-database checks and passes that exact date to both the initial and
 hypothetical booking child. This prevents a midnight or daylight-saving
