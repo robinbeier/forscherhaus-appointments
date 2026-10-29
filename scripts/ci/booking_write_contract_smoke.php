@@ -561,64 +561,103 @@ function runBookingContractsAttempt(
                 'booking_cancel_unknown_hash_contract',
                 static function () use ($client, $config, $factory, &$state, $slot, $cleanup): array {
                     $customerId = toPositiveInt($state['primary_customer_id'] ?? null, 'cancel_unknown.customer_id');
-                    if (apiGetById($config, 'customers', $customerId, [200, 404]) === null) {
-                        // Last cancellation now removes eligible public customers.
-                        // Live canaries must retain their pre-owned fixture instead.
-                        if ($config['canary_context'] !== null) {
-                            throw new ContractAssertionException('The owned canary customer disappeared.');
+                    $appointmentWindow = BookingWriteContractState::requirePrimaryAppointmentWindow($state);
+                    $needsNewCustomer = apiGetById($config, 'customers', $customerId, [200, 404]) === null;
+
+                    if ($needsNewCustomer && $config['canary_context'] !== null) {
+                        // Final cancellation may delete this run's public customer,
+                        // including a newly created customer inside a canary lease.
+                        // Re-enter the same public path; keep all lease/pair guards.
+                        $customerPayload = $state['primary_customer'] ?? null;
+                        if (!is_array($customerPayload)) {
+                            throw new ContractAssertionException('cancel_unknown requires its owned customer payload.');
                         }
-                        $customerResponse = apiJsonRequest(
+                        unset($customerPayload['id']);
+                        $protectedResponse = $client->post(
+                            'booking/register',
+                            [
+                                'post_data' => [
+                                    'appointment' => $factory->createBookingAppointmentPayload(
+                                        (int) $slot['provider_id'],
+                                        (int) $slot['service_id'],
+                                        $appointmentWindow['start'],
+                                        $appointmentWindow['end'],
+                                        ['notes' => 'run:' . $state['run_id'] . ':cancel-protect'],
+                                    ),
+                                    'customer' => $customerPayload,
+                                    'manage_mode' => false,
+                                ],
+                            ],
+                            $config['http_timeout'],
+                            true,
+                        );
+                        GateAssertions::assertStatus(
+                            $protectedResponse->statusCode,
+                            200,
+                            'POST /booking/register (unknown hash protection)',
+                        );
+                        $protectedBody = decodeJsonArray(
+                            $protectedResponse->body,
+                            'POST /booking/register (unknown hash protection)',
+                        );
+                        $protectedAppointmentId = toPositiveInt(
+                            $protectedBody['appointment_id'] ?? null,
+                            'cancel_unknown.protected_appointment_id',
+                        );
+                    } else {
+                        if ($needsNewCustomer) {
+                            // Normal-mode fallback sweeping needs a persisted run
+                            // marker when an API response is lost before journaling.
+                            $customerResponse = apiJsonRequest(
+                                'POST',
+                                $config,
+                                'api/v1/customers',
+                                $factory->createApiCustomerPayload(),
+                                true,
+                                [201],
+                            );
+                            $customer = decodeJsonArray(
+                                $customerResponse['body'],
+                                'POST /api/v1/customers (unknown hash protection)',
+                            );
+                            $customerId = toPositiveInt(
+                                $customer['id'] ?? null,
+                                'cancel_unknown.protected_customer_id',
+                            );
+                            $cleanup->register(
+                                'customers',
+                                $customerId,
+                                static fn(int|string $id): bool => apiDeleteById($config, 'customers', (int) $id, [
+                                    204,
+                                    404,
+                                ]),
+                            );
+                        }
+                        $protectPayload = $factory->createApiAppointmentPayload(
+                            $customerId,
+                            (int) $slot['provider_id'],
+                            (int) $slot['service_id'],
+                            $appointmentWindow['start'],
+                            $appointmentWindow['end'],
+                            ['notes' => 'run:' . $state['run_id'] . ':cancel-protect'],
+                        );
+                        $protectedAppointment = apiJsonRequest(
                             'POST',
                             $config,
-                            'api/v1/customers',
-                            $factory->createApiCustomerPayload(),
+                            'api/v1/appointments',
+                            $protectPayload,
                             true,
                             [201],
                         );
-                        $customer = decodeJsonArray(
-                            $customerResponse['body'],
-                            'POST /api/v1/customers (unknown hash protection)',
+                        $protectedBody = decodeJsonArray(
+                            $protectedAppointment['body'],
+                            'POST /api/v1/appointments (unknown hash protection)',
                         );
-                        $customerId = toPositiveInt($customer['id'] ?? null, 'cancel_unknown.protected_customer_id');
-                        $cleanup->register(
-                            'customers',
-                            $customerId,
-                            static fn(int|string $id): bool => apiDeleteById($config, 'customers', (int) $id, [
-                                204,
-                                404,
-                            ]),
+                        $protectedAppointmentId = toPositiveInt(
+                            $protectedBody['id'] ?? null,
+                            'cancel_unknown.protected_appointment_id',
                         );
                     }
-                    $appointmentWindow = BookingWriteContractState::requirePrimaryAppointmentWindow($state);
-
-                    $protectPayload = $factory->createApiAppointmentPayload(
-                        $customerId,
-                        (int) $slot['provider_id'],
-                        (int) $slot['service_id'],
-                        $appointmentWindow['start'],
-                        $appointmentWindow['end'],
-                        [
-                            'notes' => 'run:' . $state['run_id'] . ':unknown-hash-protection',
-                        ],
-                    );
-
-                    $protectedAppointment = apiJsonRequest(
-                        'POST',
-                        $config,
-                        'api/v1/appointments',
-                        $protectPayload,
-                        true,
-                        [201],
-                    );
-
-                    $protectedBody = decodeJsonArray(
-                        $protectedAppointment['body'],
-                        'POST /api/v1/appointments (unknown hash protection)',
-                    );
-                    $protectedAppointmentId = toPositiveInt(
-                        $protectedBody['id'] ?? null,
-                        'cancel_unknown.protected_appointment_id',
-                    );
 
                     $cleanup->register(
                         'appointments',
@@ -628,6 +667,22 @@ function runBookingContractsAttempt(
                             404,
                         ]),
                     );
+
+                    $protectedBefore = apiGetById($config, 'appointments', $protectedAppointmentId, [200]);
+                    if ($needsNewCustomer && $config['canary_context'] !== null) {
+                        $customerId = toPositiveInt(
+                            $protectedBefore['customerId'] ?? null,
+                            'cancel_unknown.protected_customer_id',
+                        );
+                        $cleanup->register(
+                            'customers',
+                            $customerId,
+                            static fn(int|string $id): bool => apiDeleteById($config, 'customers', (int) $id, [
+                                204,
+                                404,
+                            ]),
+                        );
+                    }
 
                     $unknownHash = 'missing-' . $state['run_id'];
                     $response = $client->post(
@@ -644,9 +699,9 @@ function runBookingContractsAttempt(
                     );
 
                     $existing = apiGetById($config, 'appointments', $protectedAppointmentId, [200]);
-                    if (!is_array($existing)) {
+                    if (!is_array($existing) || $existing !== $protectedBefore) {
                         throw new ContractAssertionException(
-                            'cancel_unknown_hash path deleted unrelated appointments.',
+                            'cancel_unknown_hash path changed unrelated appointments.',
                         );
                     }
 
