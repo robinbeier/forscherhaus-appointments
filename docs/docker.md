@@ -373,7 +373,9 @@ launch. In the isolated 60-page plus four-request regression, the cgroup memory
 peak was about 946 MiB (the sampled Docker display peaked at 864 MiB), with
 zero cgroup OOM events. This is a bounded local workload, not a host-wide
 capacity guarantee; use the cgroup peak when assessing the 1 GiB limit. The
-Puppeteer browser cache remains in the image and is intentionally not hidden by
+Chromium's writable XDG configuration/cache (including Crashpad state) are
+directed into `/tmp`; a fresh native Linux image must not need to create them
+under the read-only home directory. The Puppeteer browser cache remains in the image and is intentionally not hidden by
 a whole-cache tmpfs. Validate cold start, the existing 60-page/logo test, and
 the effective `ReadonlyRootfs`, `CapEff`, `NoNewPrivs`, limits, and writable
 paths locally; these checks do not establish production state.
