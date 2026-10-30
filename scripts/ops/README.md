@@ -370,3 +370,8 @@ Closed production backup sets:
   separately controlled production operations; merge activates nothing.
 - The production sequence, atomic set contract and ROB-461 two-set gate live
   in `docs/ops/production-backup-set-producer.md`.
+
+## Update maintenance and PHP-FPM hardening
+
+- [Update maintenance](../../docs/ops/update-maintenance.md): read-only package, image and host inventory, weekly review, and controlled update boundaries.
+- [PHP-FPM hardening](../../docs/ops/php-fpm-hardening.md): reviewed service drop-in, deployment/log-rotation compatibility, actual FPM probes and rollback.
