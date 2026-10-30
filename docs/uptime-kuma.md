@@ -22,6 +22,36 @@ Host-owned:
 - notification credentials
 - maintenance state
 
+## Container controls
+
+The repository template retains the pinned 2.5.8 image and root-owned
+`/app/data` compatibility while applying a read-only root filesystem, a small
+`/tmp` tmpfs, `no-new-privileges`, 384 MiB memory/512 MiB memory-plus-swap,
+128 PIDs, and 5 MiB/3-file JSON logs. Startup testing showed that dropping all
+capabilities requires retaining only `CHOWN`, `DAC_OVERRIDE`, and `FOWNER` so
+the pinned image can initialise or reuse the root-owned `/app/data` volume.
+The template does not change the image user or migrate existing data.
+
+On 2026-10-30 the pinned image passed local SQLite initialization, synthetic
+administrator setup/login, and actual HTTP, JSON-query and Push monitor checks.
+After a container restart, the same credentials and monitor definitions still
+worked and all three emitted fresh successful heartbeats. External DNS and
+verified HTTPS also passed. The final run measured a cgroup memory peak of
+about 147 MiB and 26 PIDs, with no OOM events or automatic restarts. Actual
+root filesystem, limits, `NoNewPrivs=1`, Seccomp=2 and the three retained
+capabilities were inspected. The process remains root; this is reduced
+privilege, not a migration to a non-root image.
+
+An initial healthy response alone reached only the database setup wizard and
+was not counted as a monitor proof. The read-only root prevents the image's
+optional nscd startup; the DNS/HTTPS check verifies the tested fallback path.
+These synthetic checks do not establish production health or every monitor
+type. Current production coverage remains HTTP, JSON-query, Push, and no
+ping/TCP monitors. The live
+Compose file is host-owned: an authorized rollout must separately reconcile
+these controls there, preserve the exact previous Compose file and data backup,
+and use that pair for rollback without overwriting the newer data directory.
+
 ## Production Snapshot
 
 The repository template's desired image is the official

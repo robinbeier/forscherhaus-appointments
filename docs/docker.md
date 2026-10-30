@@ -364,6 +364,30 @@ and representative application exports; check fonts, pagination, and landscape
 output as well as successful HTTP responses. Repository changes do not replace
 the production renderer until a separately approved rebuild/deployment.
 
+The renderer Compose service applies bounded container controls: an init
+process, all Linux capabilities dropped, `no-new-privileges`, a read-only root
+filesystem, writable `/tmp` tmpfs for Chromium runtime state, 1 GiB memory and
+1.5 GiB memory-plus-swap limits, 512 PIDs, and 10 MiB/3-file JSON logs. Cold
+browser startup is single-flight, so concurrent requests share one Chromium
+launch. In the isolated 60-page plus four-request regression, the cgroup memory
+peak was about 946 MiB (the sampled Docker display peaked at 864 MiB), with
+zero cgroup OOM events. This is a bounded local workload, not a host-wide
+capacity guarantee; use the cgroup peak when assessing the 1 GiB limit. The
+Chromium's writable XDG configuration/cache (including Crashpad state) are
+directed into `/tmp`; a fresh native Linux image must not need to create them
+under the read-only home directory. The Puppeteer browser cache remains in the image and is intentionally not hidden by
+a whole-cache tmpfs. Validate cold start, the existing 60-page/logo test, and
+the effective `ReadonlyRootfs`, `CapEff`, `NoNewPrivs`, limits, and writable
+paths locally; these checks do not establish production state.
+
+Activate these limits together with a renderer image containing the single-flight
+fix. Applying only the Compose limits to the previous image failed the four-request
+cold-start probe through OOM at both 768 MiB and 1 GiB. Before an authorized host
+change, preserve its exact Compose file and image ID, reconcile its loopback port
+and service wrapper, then verify real PDF output as well as health after the switch.
+Rollback restores the previous image and Compose together; do not mix the old
+browser-start behavior with the new limits.
+
 OpenLDAP runs in the `openldap` container. Host ports `389` and `636` bind only to
 `127.0.0.1`, so the development fixture is not exposed to the local network.
 Containers continue to connect through `openldap:389` on the Compose network.

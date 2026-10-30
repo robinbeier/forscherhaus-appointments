@@ -1,6 +1,8 @@
 FROM node:24.22.1-bookworm-slim
 
 ENV PUPPETEER_CACHE_DIR=/home/node/.cache/puppeteer
+ENV XDG_CONFIG_HOME=/tmp/chromium-config \
+    XDG_CACHE_HOME=/tmp/chromium-cache
 
 WORKDIR /app
 

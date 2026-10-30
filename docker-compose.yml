@@ -77,6 +77,22 @@ services:
     pdf-renderer:
         platform: linux/amd64
         build: ./pdf-renderer
+        init: true
+        cap_drop:
+            - ALL
+        security_opt:
+            - no-new-privileges:true
+        read_only: true
+        tmpfs:
+            - /tmp:size=512m,mode=1777
+        mem_limit: 1g
+        memswap_limit: 1536m
+        pids_limit: 512
+        logging:
+            driver: json-file
+            options:
+                max-size: 10m
+                max-file: '3'
         environment:
             - NODE_ENV=production
         ports:
