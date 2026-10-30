@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
 import {spawn} from 'node:child_process';
 import http from 'node:http';
 import test from 'node:test';
@@ -63,12 +64,41 @@ async function startRenderer() {
 }
 
 async function stopRenderer(child) {
-    if (child.exitCode !== null) {
+    if (child.exitCode !== null || child.signalCode !== null) {
         return;
     }
 
-    child.kill('SIGTERM');
-    await new Promise((resolve) => child.once('exit', resolve));
+    await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+            child.kill('SIGKILL');
+            reject(new Error('renderer did not stop within 5 seconds'));
+        }, 5000);
+        child.once('exit', () => {
+            clearTimeout(timer);
+            resolve();
+        });
+        child.kill('SIGTERM');
+    });
+}
+
+async function directChromeChildren(pid) {
+    const children = (await fs.readFile(`/proc/${pid}/task/${pid}/children`, 'utf8')).trim();
+    if (!children) {
+        return [];
+    }
+
+    const matches = [];
+    for (const childPid of children.split(/\s+/)) {
+        try {
+            const command = (await fs.readFile(`/proc/${childPid}/cmdline`)).toString('utf8');
+            if (/chrome|chromium/i.test(command)) {
+                matches.push(childPid);
+            }
+        } catch {
+            // The browser may exit between reading children and cmdline.
+        }
+    }
+    return matches;
 }
 
 test('renders HTML when one asset request never becomes idle', {timeout: 45000}, async () => {
@@ -157,6 +187,61 @@ test('renders a 60-page combined report with one shared logo payload', {timeout:
         const imageObjectCount = body.toString('latin1').match(/\/Subtype \/Image/g)?.length || 0;
         assert.ok(imageObjectCount >= 1, 'rendered PDF did not contain the shared logo image');
         assert.ok(durationMs < 20000, `60-page render took ${durationMs}ms`);
+    } finally {
+        await stopRenderer(renderer.child);
+    }
+});
+
+test('shares one cold browser launch across four concurrent renders', {timeout: 60000}, async () => {
+    const renderer = await startRenderer();
+    const pages = Array.from(
+        {length: 60},
+        (_, index) => `<section style="break-after:page"><h1>Page ${index + 1}</h1><p>Synthetic</p></section>`,
+    ).join('');
+    const payloads = [
+        JSON.stringify({html: '<html><body><h1>Concurrent one</h1></body></html>'}),
+        JSON.stringify({html: '<html><body><h1>Concurrent two</h1></body></html>'}),
+        JSON.stringify({html: '<html><body><h1>Concurrent three</h1></body></html>'}),
+        JSON.stringify({html: `<html><body>${pages}</body></html>`}),
+    ];
+
+    try {
+        const requests = payloads.map((body) =>
+            fetch(`http://127.0.0.1:${renderer.port}/pdf`, {
+                method: 'POST',
+                headers: {'content-type': 'application/json'},
+                body,
+                signal: AbortSignal.timeout(50000),
+            }),
+        );
+        let children = [];
+        const deadline = Date.now() + 10000;
+        while (Date.now() < deadline && children.length === 0) {
+            children = await directChromeChildren(renderer.child.pid);
+            await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        assert.equal(children.length, 1, `expected one direct Chrome child, found ${children.length}`);
+
+        const responses = await Promise.all(requests);
+        for (const response of responses) {
+            const pdf = Buffer.from(await response.arrayBuffer());
+            assert.equal(response.status, 200, renderer.output());
+            assert.equal(pdf.subarray(0, 5).toString(), '%PDF-');
+        }
+
+        children = await directChromeChildren(renderer.child.pid);
+        assert.equal(children.length, 1, `expected one direct Chrome child after renders, found ${children.length}`);
+        process.kill(Number(children[0]), 'SIGKILL');
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        const retry = await fetch(`http://127.0.0.1:${renderer.port}/pdf`, {
+            method: 'POST',
+            headers: {'content-type': 'application/json'},
+            body: JSON.stringify({html: '<html><body><h1>Retry after browser disconnect</h1></body></html>'}),
+            signal: AbortSignal.timeout(30000),
+        });
+        const retryPdf = Buffer.from(await retry.arrayBuffer());
+        assert.equal(retry.status, 200, renderer.output());
+        assert.equal(retryPdf.subarray(0, 5).toString(), '%PDF-');
     } finally {
         await stopRenderer(renderer.child);
     }

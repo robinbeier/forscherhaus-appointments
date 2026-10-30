@@ -6,6 +6,7 @@ const app = express();
 app.use(express.json({limit: '20mb'}));
 
 let browser;
+let browserLaunch;
 const launchArgs = [
     '--no-sandbox',
     '--disable-setuid-sandbox',
@@ -26,14 +27,30 @@ function resolveExecutablePath() {
 
 async function getBrowser() {
     if (!browser) {
-        const launchOptions = {args: launchArgs};
-        const executablePath = resolveExecutablePath();
+        if (!browserLaunch) {
+            browserLaunch = (async () => {
+                const launchOptions = {args: launchArgs};
+                const executablePath = resolveExecutablePath();
 
-        if (executablePath) {
-            launchOptions.executablePath = executablePath;
+                if (executablePath) {
+                    launchOptions.executablePath = executablePath;
+                }
+
+                const instance = await puppeteer.launch(launchOptions);
+                instance.once('disconnected', () => {
+                    if (browser === instance) {
+                        browser = undefined;
+                        browserLaunch = undefined;
+                    }
+                });
+                browser = instance;
+                return instance;
+            })().catch((error) => {
+                browserLaunch = undefined;
+                throw error;
+            });
         }
-
-        browser = await puppeteer.launch(launchOptions);
+        return browserLaunch;
     }
     return browser;
 }
