@@ -6,6 +6,7 @@ import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parents[2] / "scripts" / "ops"))
 import update_inventory as inventory
@@ -73,8 +74,10 @@ class UpdateInventoryTests(unittest.TestCase):
         container = {"Id": "container-id", "Image": "sha256:" + "d" * 64, "Config": {"Image": "registry.example/app@sha256:" + "a" * 64, "Labels": {"SECRET": "no"}}, "State": {"Running": True, "Health": {"Status": "not_configured"}}}
         image = {"Id": "sha256:" + "d" * 64, "Config": {"Labels": {"org.opencontainers.image.revision": "b" * 40, "SECRET": "no"}}, "RepoDigests": ["registry.example/app@sha256:" + "c" * 64]}
         def run(argv):
-            return json.dumps([container if argv[1] == "inspect" else image])
-        values, missing = inventory.container_inventory(["demo"], run)
+            self.assertEqual(argv[:3], ["docker", "--host", "unix:///var/run/docker.sock"])
+            return json.dumps([container if argv[3] == "inspect" else image])
+        with patch.dict(os.environ, {"DOCKER_HOST": "tcp://remote.invalid:2375", "DOCKER_CONTEXT": "remote"}):
+            values, missing = inventory.container_inventory(["demo"], run)
         self.assertFalse(missing)
         self.assertEqual(values[0]["health"], "not_configured")
         self.assertEqual(values[0]["oci_revision"], "b" * 40)

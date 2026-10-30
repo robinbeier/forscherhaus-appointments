@@ -121,14 +121,14 @@ def container_inventory(names: list[str], run: Callable = command) -> tuple[list
     result, missing = [], []
     for name in names:
         try:
-            item = json.loads(run(["docker", "inspect", name]))[0]
+            item = json.loads(run(["docker", "--host", "unix:///var/run/docker.sock", "inspect", name]))[0]
             config, state = item.get("Config", {}), item.get("State", {})
             ref = config.get("Image")
             image_id = item.get("Image")
             if not isinstance(ref, str) or not REF_RE.fullmatch(ref) or not isinstance(image_id, str) or not re.fullmatch(r"sha256:[a-f0-9]{64}", image_id):
                 missing.append(name)
                 continue
-            image = json.loads(run(["docker", "image", "inspect", image_id]))[0]
+            image = json.loads(run(["docker", "--host", "unix:///var/run/docker.sock", "image", "inspect", image_id]))[0]
             labels = image.get("Config", {}).get("Labels") or {}
             revision = labels.get("org.opencontainers.image.revision")
             health = (state.get("Health") or {}).get("Status") or ("not_configured" if state.get("Running") else "not_running")
