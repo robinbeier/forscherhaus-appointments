@@ -108,9 +108,7 @@ final class CalendarWorkingPlanExceptionRaceHttpTest extends TestCase
 
             $handles[] = $this->startRequest($firstClient, $firstDate, $multi);
             $handles[] = $this->startRequest($secondClient, $secondDate, $multi, $secondServer->baseUrl);
-            self::assertTrue(
-                $this->waitsForIds($multi, $observer, $ownerId, 'users', $ownedUserIds, 2),
-            );
+            self::assertTrue($this->waitsForIds($multi, $observer, $ownerId, 'users', $ownedUserIds, 2));
 
             self::assertTrue($db->trans_commit());
             $transactionOpen = false;
@@ -124,14 +122,8 @@ final class CalendarWorkingPlanExceptionRaceHttpTest extends TestCase
             $after = $this->workingPlanExceptions();
             self::assertArrayNotHasKey($firstDate, $before);
             self::assertArrayNotHasKey($secondDate, $before);
-            self::assertSame(
-                ['start' => '10:00', 'end' => '12:00', 'breaks' => []],
-                $after[$firstDate] ?? null,
-            );
-            self::assertSame(
-                ['start' => '10:00', 'end' => '12:00', 'breaks' => []],
-                $after[$secondDate] ?? null,
-            );
+            self::assertSame(['start' => '10:00', 'end' => '12:00', 'breaks' => []], $after[$firstDate] ?? null);
+            self::assertSame(['start' => '10:00', 'end' => '12:00', 'breaks' => []], $after[$secondDate] ?? null);
         } finally {
             if ($transactionOpen && $db->trans_active()) {
                 $db->trans_rollback();
@@ -194,7 +186,14 @@ final class CalendarWorkingPlanExceptionRaceHttpTest extends TestCase
             $handle = $this->startRequest($client, $date, $multi);
             self::assertTrue(
                 $revoke
-                    ? $this->waitsForIds($multi, $observer, $ownerId, 'users', [$fixture->actorId, $fixture->providerId], 1)
+                    ? $this->waitsForIds(
+                        $multi,
+                        $observer,
+                        $ownerId,
+                        'users',
+                        [$fixture->actorId, $fixture->providerId],
+                        1,
+                    )
                     : $this->waitsFor($multi, $observer, $ownerId, 'users', $fixture->providerId),
             );
 
@@ -235,8 +234,12 @@ final class CalendarWorkingPlanExceptionRaceHttpTest extends TestCase
         }
     }
 
-    private function startRequest(GateHttpClient $client, string $date, CurlMultiHandle $multi, ?string $baseUrl = null): CurlHandle
-    {
+    private function startRequest(
+        GateHttpClient $client,
+        string $date,
+        CurlMultiHandle $multi,
+        ?string $baseUrl = null,
+    ): CurlHandle {
         $token = $client->getCookie('csrf_cookie');
         self::assertNotSame('', (string) $token);
         $fixture = $this->fixture;
@@ -281,49 +284,91 @@ final class CalendarWorkingPlanExceptionRaceHttpTest extends TestCase
         int $expected,
     ): bool {
         $deadline = microtime(true) + 8;
+        $eligibleEdges = [];
+        $running = 0;
         do {
             self::assertSame(CURLM_OK, curl_multi_exec($multi, $running));
             self::assertNotFalse(
                 $result = $observer->query(
                     'SELECT l.OBJECT_NAME, r.PROCESSLIST_ID AS waiting_id,
+                            b.PROCESSLIST_ID AS blocking_id,
                             COALESCE(s.SQL_TEXT, r.PROCESSLIST_INFO) AS statement_text
                      FROM performance_schema.data_lock_waits w
                      JOIN performance_schema.data_locks l ON l.ENGINE_LOCK_ID = w.REQUESTING_ENGINE_LOCK_ID
                      JOIN performance_schema.threads b ON b.THREAD_ID = w.BLOCKING_THREAD_ID
                      JOIN performance_schema.threads r ON r.THREAD_ID = w.REQUESTING_THREAD_ID
-                     LEFT JOIN performance_schema.events_statements_current s ON s.THREAD_ID = r.THREAD_ID
-                     WHERE b.PROCESSLIST_ID = ' . $ownerId,
+                     LEFT JOIN performance_schema.events_statements_current s ON s.THREAD_ID = r.THREAD_ID',
                 ),
             );
-            $waitingIds = [];
+            $eligibleEdges = [];
             foreach ($result->result_array() as $row) {
                 $sql = strtoupper(
                     (string) preg_replace('/\s+/', ' ', str_replace('`', '', trim((string) $row['statement_text']))),
                 );
-                $mentionsOwnedId = false;
+                $mentionsOwnedIds = true;
                 foreach ($ids as $id) {
-                    if (str_contains($sql, (string) $id)) {
-                        $mentionsOwnedId = true;
+                    if (!str_contains($sql, (string) $id)) {
+                        $mentionsOwnedIds = false;
                         break;
                     }
                 }
                 if (
                     $row['OBJECT_NAME'] === $observer->dbprefix($table) &&
                     str_contains($sql, 'FOR UPDATE') &&
-                    $mentionsOwnedId
+                    $mentionsOwnedIds
                 ) {
-                    $waitingIds[] = (int) $row['waiting_id'];
+                    $waitingId = (int) $row['waiting_id'];
+                    $blockingId = (int) $row['blocking_id'];
+                    if ($waitingId > 0 && $blockingId > 0 && $waitingId !== $ownerId) {
+                        $eligibleEdges[$waitingId][] = $blockingId;
+                    }
                 }
             }
-            if (count(array_unique($waitingIds)) >= $expected) {
+
+            // InnoDB may queue a waiter behind another waiter rather than the owner.
+            // Count only eligible locking reads with a path back to our held fixture lock.
+            $reachable = [];
+            do {
+                $changed = false;
+                foreach ($eligibleEdges as $waitingId => $blockingIds) {
+                    if (isset($reachable[$waitingId])) {
+                        continue;
+                    }
+                    foreach ($blockingIds as $blockingId) {
+                        if ($blockingId === $ownerId || isset($reachable[$blockingId])) {
+                            $reachable[$waitingId] = true;
+                            $changed = true;
+                            break;
+                        }
+                    }
+                }
+            } while ($changed);
+
+            if (count($reachable) >= $expected) {
                 return true;
             }
             if ($running === 0) {
-                return false;
+                self::fail(
+                    sprintf(
+                        'Expected %d lock waiters rooted at owner %d; running=%d; eligible_edges=%s',
+                        $expected,
+                        $ownerId,
+                        $running,
+                        json_encode($eligibleEdges, JSON_THROW_ON_ERROR),
+                    ),
+                );
             }
             curl_multi_select($multi, 0.05);
         } while (microtime(true) < $deadline);
-        return false;
+        self::fail(
+            sprintf(
+                'Timed out waiting for %d lock waiters rooted at owner %d; running=%d; eligible_edges=%s',
+                $expected,
+                $ownerId,
+                $running,
+                json_encode($eligibleEdges, JSON_THROW_ON_ERROR),
+            ),
+        );
     }
 
     private function drain(CurlMultiHandle $multi, CurlHandle $handle): bool
