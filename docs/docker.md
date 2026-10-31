@@ -107,10 +107,10 @@ a floating major tag or a successful old build does not update an existing
 container. Verify `node --version` inside each rebuilt image.
 
 The Kuma Compose template uses the official
-`louislam/uptime-kuma:2.5.8-slim` image pinned by digest. The official image
+`louislam/uptime-kuma:2.5.9-slim` image pinned by digest. The official image
 includes the required Node 22.23.4 runtime, so the template has no local
-Kuma image build or Node overlay. See [the Kuma operations notes](uptime-kuma.md#258-production-update-2026-10-26)
-for the successful production update, verification results and matched 2.5.7
+Kuma image build or Node overlay. See [the Kuma operations notes](uptime-kuma.md#259-production-update-2026-10-31)
+for the production update, verification results and matched 2.5.8
 image/data rollback path.
 
 ### PHP-FPM session storage

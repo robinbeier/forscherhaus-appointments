@@ -24,7 +24,7 @@ Host-owned:
 
 ## Container controls
 
-The repository template retains the pinned 2.5.8 image and root-owned
+The repository template retains the pinned 2.5.9 image and root-owned
 `/app/data` compatibility while applying a read-only root filesystem, a small
 `/tmp` tmpfs, `no-new-privileges`, 384 MiB memory/512 MiB memory-plus-swap,
 128 PIDs, and 5 MiB/3-file JSON logs. Startup testing showed that dropping all
@@ -32,7 +32,7 @@ capabilities requires retaining only `CHOWN`, `DAC_OVERRIDE`, and `FOWNER` so
 the pinned image can initialise or reuse the root-owned `/app/data` volume.
 The template does not change the image user or migrate existing data.
 
-On 2026-10-30 the pinned image passed local SQLite initialization, synthetic
+On 2026-10-30 the then-pinned 2.5.8 image passed local SQLite initialization, synthetic
 administrator setup/login, and actual HTTP, JSON-query and Push monitor checks.
 After a container restart, the same credentials and monitor definitions still
 worked and all three emitted fresh successful heartbeats. External DNS and
@@ -55,10 +55,32 @@ and use that pair for rollback without overwriting the newer data directory.
 ## Production Snapshot
 
 The repository template's desired image is the official
-`louislam/uptime-kuma:2.5.8-slim@sha256:3e0ae13fa92d0a1108b7e4133eaa25b2bc4e26d2f5d8691a5cb01ee1fe5c95f1`.
-Production was verified healthy on this image on 2026-10-26, running Kuma
-2.5.8 with Node 22.23.4 / module ABI 127.
+`louislam/uptime-kuma:2.5.9-slim@sha256:c41c46667c116066ad252b4887e1c4c66cca8891ca17f3161c1d16540645d1cc`.
+Production was updated to this image on 2026-10-31. The previous 2.5.8
+validation remains documented below.
 A repository merge alone does not update the host-owned Compose file.
+
+### 2.5.9 production update (2026-10-31)
+
+[Upstream 2.5.9](https://github.com/louislam/uptime-kuma/releases/tag/2.5.9)
+includes an RSS cache-poisoning security fix and Push monitor retry fixes.
+Before switching, a stopped full data backup was hash-verified; isolated old
+and new image restores passed SQLite integrity, configuration digest and
+database schema comparisons. The switch used a second verified stopped backup
+and a prepared rollback copy. The host-owned Compose change was limited to the
+image reference; the data mount, loopback binding and restart policy were checked.
+The new container reported Kuma 2.5.9 and Node 22.23.4; the post-change
+production validation passed. Authentication in the dashboard was not tested.
+At 16:45 UTC all seven active monitors had fresh successful results after the
+switch, including all five Push monitors; the production validation passed
+again afterwards. The full local pre-PR gate, including coverage, also passed.
+
+Recovery artifacts, including the exact previous Compose file, 2.5.8 image,
+matching data backup and prepared rollback copy, are retained under
+`/root/kuma-upgrade-2.5.9-20261031`. Follow the matched image/data rollback
+procedure below, substituting these artifacts and 2.5.8 for the older version;
+preserve the newer data separately. The isolated old-image restore is recovery
+evidence, not a live rollback exercise.
 
 ### 2.5.8 production update (2026-10-26)
 
