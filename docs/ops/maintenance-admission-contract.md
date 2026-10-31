@@ -4,7 +4,8 @@ ROB-812 is a historical proposal for a durable, repository-wide
 `maintenance_pending.v1` admission record. That protocol was never installed
 on production and has now been removed from the ordinary backup, restore,
 retention, cleanup, and live-probe source paths. It is not a prerequisite for
-the normal release path or for the deferred ROB-809 SSH decision.
+the normal release path or for the ROB-809 SSH cutover. See the
+[cutover record](../security/ROB-809-tailscale-ssh-cutover.md) for its outcome.
 
 The optional Provider UI smoke has its own separately documented lifecycle and
 remains suspended until its production retirement or replacement is completed.
