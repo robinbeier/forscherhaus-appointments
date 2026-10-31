@@ -1,10 +1,56 @@
 # ROB-809: optional Tailscale-only SSH cutover
 
-Status (2026-10-12): **deferred, not urgent**. No SSH or firewall change has
-been made under ROB-809. Robin confirmed independent access through the Hetzner
-console and approved a smaller one-time cutover plan. The global ROB-812
-maintenance protocol is **not** a prerequisite. This document prepares a later
-decision; it is not an executable operator or production-change approval.
+Status (2026-10-30): **implemented and live-verified**. Robin requested the SSH
+hardening and confirmed a successful current Hetzner console login before the
+cutover. Public SSH permits were removed for IPv4 and IPv6; ordinary OpenSSH
+over Tailscale remains available. The global ROB-812 maintenance protocol was
+not a prerequisite. The procedure below remains the safety contract for any
+future repetition; the completed run does not authorize another change.
+
+## Completed cutover · 2026-10-30
+
+The local and remote `main` were `c690a504d8da4f63afac5f57d3cffdf03e5f807a`.
+Fresh read-only health, effective firewall rules and configuration hashes were
+captured before the change. Robin's console test supplied the independent
+recovery-path confirmation. New direct public connections proved SSH protocol
+reachability, HTTP `301` and certificate-validated HTTPS `200` for both address
+families before mutation.
+
+The independently reviewed one-run operator retained the existing global
+production-change lock continuously from preflight through timer activation,
+mutation, external verification and rollback settlement. It removed only the
+general `allow 22/tcp` permits, preserving the interface-specific Tailscale SSH
+rules and HTTP/HTTPS. Exact user-rule bytes and normalized effective IPv4/IPv6
+filter tables matched the expected two-rule delta; unrelated UFW configuration
+hashes remained unchanged. No SSH authentication, user, key, Tailscale policy,
+application, package or database change was included.
+
+Validation:
+
+- Nine isolated regression tests passed, including a real blocking file-lock
+  waiter and simulated timer-dispatch/cancellation races. Systemd command
+  responses were doubles, not a live systemd integration test.
+- A disposable network-isolated container with real UFW 0.36.2 tested exact
+  IPv4/IPv6 rule deletion, restoration and idempotent restoration. Its Debian
+  package revision differed from the production Ubuntu package revision.
+- After the live change, two new public SSH connections per address family
+  failed while HTTP `301` and certificate-validated HTTPS `200` continued on
+  the same pinned public addresses. New non-multiplexed Tailscale SSH
+  connections succeeded.
+- `prod_validate_after_change.sh` passed, including app/deep health, renderer,
+  monitor endpoint, services, certificates and actionable-log checks.
+- The timer and rollback service were inactive, no rollback job was queued,
+  and no rollback had run before the lock was released. A final new SSH
+  connection rechecked the exact firewall state and available global lock.
+
+The private host-side operator, pre-change rule files, manifest and terminal
+success receipt are retained under `/root/fh-ssh-cutover-20261030/` (`0700`).
+The reviewed operator SHA-256 is
+`508a0627909350bcd13b8ea8bc48f0e04c4832ab74b928d2a27f9d8868cdb353`.
+Its automatic rollback is inactive after successful settlement; this retained
+run is evidence, not a reusable permission to reopen public SSH. Existing SSH
+sessions were not forcibly disconnected. A later firewall or network change
+invalidates this reachability evidence.
 
 ## Intended result
 
