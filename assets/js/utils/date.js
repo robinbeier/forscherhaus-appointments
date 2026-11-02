@@ -70,10 +70,11 @@ window.App.Utils.Date = (function () {
     }
 
     /**
-     * Check whether a date range is a valid school-week range.
+     * Check whether a date range is valid for the dashboard.
      *
      * A range may contain one weekday or multiple weekdays, but both dates
-     * must be Monday through Friday and belong to the same ISO week and year.
+     * must be Monday through Friday and the inclusive range must be at most
+     * fourteen calendar days.
      *
      * @param {String|Date} startDate The first date in the range.
      * @param {String|Date} endDate The last date in the range.
@@ -104,7 +105,7 @@ window.App.Utils.Date = (function () {
             return false;
         }
 
-        return start.isoWeek() === end.isoWeek() && start.isoWeekYear() === end.isoWeekYear();
+        return end.diff(start, 'days') < 14;
     }
 
     /**

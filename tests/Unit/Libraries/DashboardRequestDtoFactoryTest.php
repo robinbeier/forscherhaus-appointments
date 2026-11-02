@@ -39,6 +39,8 @@ class DashboardRequestDtoFactoryTest extends TestCase
             ['2026-09-11', '2026-09-11'],
             ['2026-09-08', '2026-09-10'],
             ['2026-12-28', '2027-01-01'],
+            ['2026-09-07', '2026-09-18'],
+            ['2026-09-08', '2026-09-21'],
         ];
     }
 
@@ -54,7 +56,7 @@ class DashboardRequestDtoFactoryTest extends TestCase
         return [
             'original resource trigger' => ['1000-01-01', '9999-12-31'],
             'same week number different year' => ['2025-09-08', '2026-09-11'],
-            'short crossweek' => ['2026-09-11', '2026-09-14'],
+            'range longer than fourteen calendar days' => ['2026-09-07', '2026-09-21'],
             'reversed' => ['2026-09-11', '2026-09-07'],
             'saturday' => ['2026-09-12', '2026-09-12'],
             'sunday' => ['2026-09-13', '2026-09-13'],

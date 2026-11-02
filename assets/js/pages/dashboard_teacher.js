@@ -42,7 +42,6 @@ App.Pages.DashboardTeacher = (function () {
     function initialize() {
         App.Utils.UI.initializeDatePicker($dateRange, {
             mode: 'range',
-            disable: [(date) => date.getDay() === 0 || date.getDay() === 6],
         });
         datePicker = $dateRange[0]?._flatpickr;
 

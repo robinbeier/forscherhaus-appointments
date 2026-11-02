@@ -81,6 +81,8 @@ final class DashboardExportRequestDto
  */
 class Dashboard_request_dto_factory
 {
+    private const MAX_PERIOD_DAYS = 14;
+
     protected Request_normalizer $request_normalizer;
 
     public function __construct(?Request_normalizer $request_normalizer = null)
@@ -167,11 +169,13 @@ class Dashboard_request_dto_factory
             throw new InvalidArgumentException($this->getPeriodValidationMessage());
         }
 
+        $period_days = (int) $start->diff($end)->format('%a') + 1;
+
         if (
             $start > $end ||
             (int) $start->format('N') > 5 ||
             (int) $end->format('N') > 5 ||
-            $start->format('o-W') !== $end->format('o-W')
+            $period_days > self::MAX_PERIOD_DAYS
         ) {
             throw new InvalidArgumentException($this->getPeriodValidationMessage());
         }
