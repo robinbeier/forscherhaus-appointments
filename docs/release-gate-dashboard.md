@@ -14,7 +14,7 @@ It is designed to catch runtime regressions that unit tests can miss, without ch
 
 The separate isolated `DashboardExportHttpTest` covers friendly and direct export routes, current stored admin role after session creation, GET-only methods, contact-data minimization, and absence of persistent HTML debug dumps. It uses only disposable synthetic accounts and appointments. The release gate's successful export chain alone does not establish those negative-path properties.
 
-Dashboard periods must stay within one Monday-to-Friday school week; single weekdays are supported.
+Dashboard periods may cover up to 14 inclusive calendar days. The selected start and end dates must be weekdays; ranges may cross weekends so two full school weeks can be reviewed. Single weekdays are supported.
 
 ## Scope
 
@@ -37,7 +37,7 @@ composer release:gate:dashboard -- \
   --username="$EA_GATE_USERNAME" \
   --password="$EA_GATE_PASSWORD" \
   --start-date=2026-02-02 \
-  --end-date=2026-02-06 \
+  --end-date=2026-02-13 \
   --statuses=Booked \
   --pdf-health-url=http://localhost:3003/healthz
 ```
