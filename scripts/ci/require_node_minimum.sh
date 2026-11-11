@@ -8,7 +8,7 @@ fi
 
 minimum_version="$1"
 context_label="${2:-node-check}"
-security_floor="24.22.1"
+security_floor="24.22.3"
 
 if ! command -v node >/dev/null 2>&1; then
     echo "[${context_label}] Missing required command: node" >&2
@@ -56,12 +56,12 @@ if (current[0] === 24 && compare(current, securityFloor) >= 0) {
     process.exit(0);
 }
 
-if (compare(current, [26, 12, 1]) >= 0) {
+if (compare(current, [26, 13, 1]) >= 0) {
     process.exit(0);
 }
 process.exit(1);
 NODE
 then
-    echo "[${context_label}] Node.js security range ^24.22.1 || >=26.12.1 is required (found v${current_version}; caller minimum ${minimum_version})." >&2
+    echo "[${context_label}] Node.js security range ^24.22.3 || >=26.13.1 is required (found v${current_version}; caller minimum ${minimum_version})." >&2
     exit 1
 fi
