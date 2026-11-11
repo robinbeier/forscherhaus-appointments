@@ -97,19 +97,20 @@ The development stack pins MySQL `8.4.8` in `docker-compose.yml` for CI parity, 
 
 ### Node.js security baseline
 
-The October 21, 2026 Node.js security releases are the minimum runtime baseline:
-Node 24.22.1 on the 24.x line, or Node 26.12.1 and newer. The root npm engine
+The November 11, 2026 Node.js security releases are the minimum runtime baseline:
+Node 24.22.3 on the 24.x line, or Node 26.13.1 and newer. The root npm engine
 range and setup checks reject Node 25 and older, unpatched Node 26 releases.
-CI pins Node 24.22.1; the PDF renderer uses `node:24.22.1-bookworm-slim`.
+CI pins Node 24.22.3; the PDF renderer uses `node:24.22.3-bookworm-slim` pinned by digest.
 The PHP development image installs NodeSource 24.x and fails its build if that
-runtime is older than 24.22.1. Rebuild cached images after a security release;
+runtime is older than 24.22.3. Rebuild cached images after a security release;
 a floating major tag or a successful old build does not update an existing
 container. Verify `node --version` inside each rebuilt image.
 
 The Kuma Compose template uses the official
 `louislam/uptime-kuma:2.5.9-slim` image pinned by digest. The official image
-includes the required Node 22.23.4 runtime, so the template has no local
-Kuma image build or Node overlay. See [the Kuma operations notes](uptime-kuma.md#259-production-update-2026-10-31)
+included Node 22.23.4 when last checked; that runtime predates the November
+security update. Check for a vendor image with Node 22.23.5 or newer before
+updating it; the template has no local Kuma image build or Node overlay. See [the Kuma operations notes](uptime-kuma.md#259-production-update-2026-10-31)
 for the production update, verification results and matched 2.5.8
 image/data rollback path.
 
@@ -347,7 +348,7 @@ Bundled Nginx denies the two historical provider HTML dump URLs even if an old
 release left files in `storage/logs`. Production web-server access rules must
 be checked separately before a release.
 
-The renderer image uses `node:24-bookworm-slim` and installs only the Chrome
+The renderer image uses `node:24.22.3-bookworm-slim` pinned by digest and installs only the Chrome
 revision selected by `pdf-renderer/package-lock.json`. Automatic Puppeteer
 browser downloads are disabled during `npm ci`; the explicit Chrome install
 also installs its Debian runtime dependencies. The build retains the configured

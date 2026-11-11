@@ -21,15 +21,19 @@ final class NodeMinimumPolicyTest extends TestCase
     public function testSupportedAndRejectedNodeVersionsUseTheRealNodeEvaluator(): void
     {
         $cases = [
-            '24.22.1' => true,
+            '24.22.3' => true,
             '24.23.0' => true,
-            '26.12.1' => true,
+            '26.13.1' => true,
+            '24.22.2' => false,
+            '24.22.1' => false,
             '24.22.0' => false,
             '26.8.1' => false,
+            '26.13.0' => false,
+            '26.12.1' => false,
             '26.12.0' => false,
             '25.9.0' => false,
             '22.22.0' => false,
-            '24.22.1-beta.1' => false,
+            '24.22.3-beta.1' => false,
         ];
 
         foreach ($cases as $version => $expectedSuccess) {
@@ -43,12 +47,12 @@ final class NodeMinimumPolicyTest extends TestCase
         $result = $this->runHelper('24.22.0', '24.0.0');
 
         self::assertSame(1, $result['exit_code']);
-        self::assertStringContainsString('security range ^24.22.1 || >=26.12.1', $result['stderr']);
+        self::assertStringContainsString('security range ^24.22.3 || >=26.13.1', $result['stderr']);
     }
 
     public function testHigherCallerMinimumRemainsEnforced(): void
     {
-        self::assertSame(1, $this->runHelper('26.12.1', '26.12.2')['exit_code']);
+        self::assertSame(1, $this->runHelper('26.13.1', '26.13.2')['exit_code']);
     }
 
     public function testMissingOrMalformedNodeCommandFailsClosed(): void
@@ -60,12 +64,12 @@ final class NodeMinimumPolicyTest extends TestCase
         $malformed = $this->runHelper('not-a-version');
         self::assertSame(1, $malformed['exit_code']);
 
-        self::assertSame(1, $this->runRaw(['24.22.1', 'node-policy-test', 'extra'])['exit_code']);
+        self::assertSame(1, $this->runRaw(['24.22.3', 'node-policy-test', 'extra'])['exit_code']);
         self::assertSame(1, $this->runRaw([])['exit_code']);
     }
 
     /** @return array{exit_code:int,stdout:string,stderr:string} */
-    private function runHelper(?string $version, string $minimum = '24.22.1'): array
+    private function runHelper(?string $version, string $minimum = '24.22.3'): array
     {
         $fixture = sys_get_temp_dir() . '/node-policy-' . bin2hex(random_bytes(6));
         $this->fixtures[] = $fixture;
