@@ -24,7 +24,7 @@ Host-owned:
 
 ## Container controls
 
-The repository template retains the pinned 2.5.9 image and root-owned
+The repository template pins the 2.5.11 image and retains root-owned
 `/app/data` compatibility while applying a read-only root filesystem, a small
 `/tmp` tmpfs, `no-new-privileges`, 384 MiB memory/512 MiB memory-plus-swap,
 128 PIDs, and 5 MiB/3-file JSON logs. Startup testing showed that dropping all
@@ -55,10 +55,40 @@ and use that pair for rollback without overwriting the newer data directory.
 ## Production Snapshot
 
 The repository template's desired image is the official
-`louislam/uptime-kuma:2.5.9-slim@sha256:c41c46667c116066ad252b4887e1c4c66cca8891ca17f3161c1d16540645d1cc`.
-Production was updated to this image on 2026-10-31. The previous 2.5.8
-validation remains documented below.
+`louislam/uptime-kuma:2.5.11-slim@sha256:3c3a54a7338a41129163d933295076424e51b07f861a4cdf96a68b50bdde7a73`.
+The host-owned production Compose file now uses the 2.5.11 image after the
+verified image-only switch described below. The previous 2.5.9 and 2.5.8
+validation records remain documented below.
 A repository merge alone does not update the host-owned Compose file.
+
+### 2.5.11 production update (2026-11-12)
+
+[Upstream 2.5.11](https://github.com/louislam/uptime-kuma/releases/tag/2.5.11)
+updates dependencies and fixes an admin-only RCE in an upstream package
+(GHSA-437w-j82f-9vjh). The repository desired state is prepared with the
+official multi-architecture image digest above. On 2026-11-12, preparation on
+the server checked a stopped full data backup and a rollback copy. Isolated
+restores of the old and new images passed SQLite integrity and
+configuration-digest comparisons; the 2.5.9 restore was healthy, and the
+2.5.11 image reported Node.js 22.23.5. The preparation artifacts are retained
+under `/root/kuma-upgrade-2.5.11-20261112`.
+
+The live switch completed at 2026-11-12 13:45:49 UTC after the two explicitly
+unused Docker images were removed and a fresh stopped full-data backup plus a
+matched 2.5.9 rollback copy were verified.
+The host-owned Compose change was limited to the image reference; the data
+mount, loopback binding and restart policy were preserved. The new container is
+healthy and reports Kuma 2.5.11 with Node.js 22.23.5. Immediate post-change
+validation passed with root disk usage at 84%, and no new service or application
+log errors were observed. The switch result recorded seven active monitors,
+seven green results, and seven fresh results including five fresh Push
+heartbeats. Final post-change validation passed at 2026-11-12 13:46 UTC with
+root disk usage at 84% and no new service or application log errors.
+Authenticated dashboard login was not tested.
+
+The preparation and cutover artifacts are retained under
+`/root/kuma-upgrade-2.5.11-20261112`; the preparation copy is not a substitute
+for the fresh cutover backup.
 
 ### 2.5.9 production update (2026-10-31)
 
