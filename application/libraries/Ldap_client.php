@@ -98,6 +98,7 @@ class Ldap_client
                 'timezone' => !empty($user['timezone']) ? $user['timezone'] : $default_timezone,
                 'language' => !empty($user['language']) ? $user['language'] : Config::LANGUAGE,
                 'role_slug' => $role['slug'],
+                'credential_version' => max(0, (int) ($user['credential_version'] ?? 0)),
             ];
         }
 

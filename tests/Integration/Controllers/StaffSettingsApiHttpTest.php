@@ -506,6 +506,7 @@ final class StaffSettingsApiHttpTest extends TestCase
             false,
         );
         $adminBefore = $this->fixture->userSettingsRow($adminId);
+        $adminVersionBefore = (int) ($this->fixture->row('users', $adminId)['credential_version'] ?? 0);
         unset($adminPayload['settings']['password']);
         $adminPayload['firstName'] = 'HTTP Admin Updated';
         $adminUpdate = $this->success($admin->requestJsonApp('PUT', 'api/v1/admins/' . $adminId, $adminPayload));
@@ -513,6 +514,10 @@ final class StaffSettingsApiHttpTest extends TestCase
         self::assertSame('HTTP Admin Updated', $this->fixture->row('users', $adminId)['first_name']);
         self::assertSame($adminBefore['password'], $adminAfter['password']);
         self::assertSame($adminBefore['salt'], $adminAfter['salt']);
+        self::assertSame(
+            $adminVersionBefore,
+            (int) ($this->fixture->row('users', $adminId)['credential_version'] ?? 0),
+        );
         $this->assertStaff(
             $adminUpdate,
             ['id' => $adminId, 'firstName' => $adminPayload['firstName'], 'email' => $adminPayload['email']],
@@ -536,6 +541,7 @@ final class StaffSettingsApiHttpTest extends TestCase
             $this->fixture->secretaryWriteState($secretaryPayload['email'])['providers'],
         );
         $secretaryBefore = $this->fixture->userSettingsRow($secretaryId);
+        $secretaryVersionBefore = (int) ($this->fixture->row('users', $secretaryId)['credential_version'] ?? 0);
         unset($secretaryPayload['settings']['password']);
         $secretaryPayload['firstName'] = 'Updated Secretary';
         $secretaryPayload['providers'] = [];
@@ -554,10 +560,49 @@ final class StaffSettingsApiHttpTest extends TestCase
         $secretaryAfter = $this->fixture->userSettingsRow($secretaryId);
         self::assertSame($secretaryBefore['password'], $secretaryAfter['password']);
         self::assertSame($secretaryBefore['salt'], $secretaryAfter['salt']);
+        self::assertSame(
+            $secretaryVersionBefore,
+            (int) ($this->fixture->row('users', $secretaryId)['credential_version'] ?? 0),
+        );
         self::assertSame([], $updated['providers']);
         self::assertSame('Updated Secretary', $this->fixture->row('users', $secretaryId)['first_name']);
         self::assertSame([], $this->fixture->secretaryWriteState($secretaryPayload['email'])['providers']);
         $this->assertNoSyntheticSecrets($adminCreate, $adminUpdate, $secretaryCreate, $updated);
+    }
+
+    public function testAdminPasswordResetInvalidatesPreExistingTargetSession(): void
+    {
+        $admin = $this->writeClient('basic');
+        $payload = $this->fixture->adminWritePayload('session-reset');
+        $created = $this->success($admin->requestJsonApp('POST', 'api/v1/admins', $payload), 201);
+        $targetId = (int) $created['id'];
+        $target = $this->server->client();
+        self::assertSame(200, $target->get('login')->statusCode);
+        $login = $target->post('login/validate', [
+            'username' => $payload['settings']['username'],
+            'password' => $this->credentials['password'],
+        ]);
+        self::assertSame(200, $login->statusCode);
+        self::assertTrue((bool) (json_decode($login->body, true, 512, JSON_THROW_ON_ERROR)['success'] ?? false));
+
+        $beforeVersion = (int) ($this->fixture->row('users', $targetId)['credential_version'] ?? 0);
+        $payload['firstName'] = 'Reset Target';
+        $payload['settings']['password'] = $this->fixture->run . '_reset_password';
+        $response = $admin->requestJsonApp('PUT', 'api/v1/admins/' . $targetId, $payload);
+        self::assertSame(200, $response->statusCode, $response->body);
+        self::assertSame(
+            $beforeVersion + 1,
+            (int) ($this->fixture->row('users', $targetId)['credential_version'] ?? 0),
+        );
+        self::assertSame(403, $target->get('account')->statusCode);
+        $fresh = $this->server->client();
+        self::assertSame(200, $fresh->get('login')->statusCode);
+        $freshLogin = $fresh->post('login/validate', [
+            'username' => $payload['settings']['username'],
+            'password' => $payload['settings']['password'],
+        ]);
+        self::assertTrue((bool) (json_decode($freshLogin->body, true, 512, JSON_THROW_ON_ERROR)['success'] ?? false));
+        self::assertSame(200, $fresh->get('account')->statusCode);
     }
 
     public function testAdminPutRejectsMismatchedOrInvalidBodyIdWithoutPartialChange(): void

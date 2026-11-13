@@ -61,6 +61,15 @@ class Secretaries_model extends EA_Model
      */
     public function save(array $secretary): int
     {
+        if (
+            !empty($secretary['id']) &&
+            isset($secretary['settings']) &&
+            is_array($secretary['settings']) &&
+            array_key_exists('password', $secretary['settings']) &&
+            empty($secretary['settings']['password'])
+        ) {
+            unset($secretary['settings']['password']);
+        }
         $secretary['providers'] = $this->normalize_provider_ids($secretary['providers'] ?? []);
         $secretary_id = empty($secretary['id']) ? null : $this->normalize_provider_ids([$secretary['id']])[0];
         if ($secretary_id !== null) {
@@ -339,7 +348,7 @@ class Secretaries_model extends EA_Model
 
         $settings = $secretary['settings'];
 
-        unset($secretary['providers'], $secretary['settings']);
+        unset($secretary['providers'], $secretary['settings'], $secretary['credential_version']);
 
         if (!$this->db->insert('users', $secretary)) {
             throw new RuntimeException('Could not insert secretary.');
@@ -414,9 +423,10 @@ class Secretaries_model extends EA_Model
 
         $settings = $secretary['settings'];
 
-        unset($secretary['providers'], $secretary['settings']);
+        unset($secretary['providers'], $secretary['settings'], $secretary['credential_version']);
 
-        if (isset($settings['password'])) {
+        $password_changed = isset($settings['password']);
+        if ($password_changed) {
             $existing_settings = $this->db->get_where('user_settings', ['id_users' => $secretary['id']])->row_array();
 
             if (empty($existing_settings)) {
@@ -435,6 +445,9 @@ class Secretaries_model extends EA_Model
         }
 
         $this->set_settings($secretary['id'], $settings);
+        if ($password_changed) {
+            $this->bump_credential_version((int) $secretary['id']);
+        }
         $this->set_provider_ids($secretary['id'], $provider_ids);
 
         return (int) $secretary['id'];

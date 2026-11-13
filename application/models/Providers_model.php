@@ -72,6 +72,15 @@ class Providers_model extends EA_Model
      */
     public function save(array $provider): int
     {
+        if (
+            !empty($provider['id']) &&
+            isset($provider['settings']) &&
+            is_array($provider['settings']) &&
+            array_key_exists('password', $provider['settings']) &&
+            empty($provider['settings']['password'])
+        ) {
+            unset($provider['settings']['password']);
+        }
         $this->validate($provider);
 
         if (empty($provider['id'])) {
@@ -318,7 +327,7 @@ class Providers_model extends EA_Model
 
         $settings = $provider['settings'];
 
-        unset($provider['services'], $provider['settings']);
+        unset($provider['services'], $provider['settings'], $provider['credential_version']);
 
         if (!$this->db->insert('users', $provider)) {
             throw new RuntimeException('Could not insert provider.');
@@ -435,13 +444,16 @@ class Providers_model extends EA_Model
             $provider['update_datetime'] = date('Y-m-d H:i:s');
             $service_ids = $this->normalize_update_service_ids($provider['services']);
             $settings = $provider['settings'];
-            unset($provider['services'], $provider['settings']);
+            unset($provider['services'], $provider['settings'], $provider['credential_version']);
+            // Credential versions are advanced only by the atomic password-change
+            // path. Never write a stale API snapshot back during metadata updates.
 
             // Service deletion locks its parent before cascading to these associations.
             // Keep the same order before replacing the provider's connections.
             $this->lock_update_service_parents((int) $provider['id'], $service_ids);
 
-            if (isset($settings['password'])) {
+            $password_changed = isset($settings['password']);
+            if ($password_changed) {
                 $existing_settings = $this->db
                     ->get_where('user_settings', ['id_users' => $provider['id']])
                     ->row_array();
@@ -462,6 +474,9 @@ class Providers_model extends EA_Model
             }
 
             $this->set_settings($provider['id'], $settings);
+            if ($password_changed) {
+                $this->bump_credential_version((int) $provider['id']);
+            }
             try {
                 $this->set_service_ids($provider['id'], $service_ids);
             } catch (Throwable $e) {

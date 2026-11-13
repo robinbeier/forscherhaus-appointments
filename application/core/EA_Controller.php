@@ -103,6 +103,22 @@ class EA_Controller extends CI_Controller
 
             abort(403, 'Forbidden');
         }
+
+        $current_version = $this->users_model->credential_version((int) $user_id);
+        $session_version = session('credential_version', 0);
+
+        if (!is_int($session_version) && !ctype_digit((string) $session_version)) {
+            session_destroy();
+            abort(403, 'Forbidden');
+        }
+
+        // A missing session value is the pre-migration version zero. Once the
+        // password changes, the persisted version advances and this session is
+        // rejected instead of enrolling against the new credential.
+        if ((int) $session_version !== $current_version) {
+            session_destroy();
+            abort(403, 'Forbidden');
+        }
     }
 
     /**

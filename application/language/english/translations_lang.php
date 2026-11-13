@@ -167,6 +167,7 @@ $lang['mobile'] = 'Mobile';
 $lang['state'] = 'State';
 $lang['username'] = 'Username';
 $lang['password'] = 'Password';
+$lang['current_password'] = 'Current password';
 $lang['retype_password'] = 'Retype Password';
 $lang['receive_notifications'] = 'Receive Notifications';
 $lang['passwords_mismatch'] = 'Passwords mismatch.';
