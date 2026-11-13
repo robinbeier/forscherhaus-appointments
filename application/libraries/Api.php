@@ -65,9 +65,63 @@ class Api
      */
     public function model(string $model): void
     {
-        $this->CI->load->model($model);
+        // Keep the API model surface explicit. Apart from preventing arbitrary
+        // loader paths, literal calls let the component-boundary checker prove
+        // each API dependency without trusting caller input.
+        switch ($model) {
+            case 'admins_model':
+                $this->CI->load->model('admins_model');
+                $this->model = $this->CI->admins_model;
+                return;
 
-        $this->model = $this->CI->{$model};
+            case 'appointments_model':
+                $this->CI->load->model('appointments_model');
+                $this->model = $this->CI->appointments_model;
+                return;
+
+            case 'blocked_periods_model':
+                $this->CI->load->model('blocked_periods_model');
+                $this->model = $this->CI->blocked_periods_model;
+                return;
+
+            case 'customers_model':
+                $this->CI->load->model('customers_model');
+                $this->model = $this->CI->customers_model;
+                return;
+
+            case 'providers_model':
+                $this->CI->load->model('providers_model');
+                $this->model = $this->CI->providers_model;
+                return;
+
+            case 'secretaries_model':
+                $this->CI->load->model('secretaries_model');
+                $this->model = $this->CI->secretaries_model;
+                return;
+
+            case 'service_categories_model':
+                $this->CI->load->model('service_categories_model');
+                $this->model = $this->CI->service_categories_model;
+                return;
+
+            case 'services_model':
+                $this->CI->load->model('services_model');
+                $this->model = $this->CI->services_model;
+                return;
+
+            case 'settings_model':
+                $this->CI->load->model('settings_model');
+                $this->model = $this->CI->settings_model;
+                return;
+
+            case 'unavailabilities_model':
+                $this->CI->load->model('unavailabilities_model');
+                $this->model = $this->CI->unavailabilities_model;
+                return;
+
+            default:
+                throw new InvalidArgumentException('Unsupported API model.');
+        }
     }
 
     /**
