@@ -127,6 +127,32 @@ final class AccountLegacyHttpTest extends TestCase
         );
     }
 
+    public function testAccountPageDoesNotProjectStoredIntegrationSecrets(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $fixture->seedStaffIntegrationSecrets($fixture->actorId);
+        $admin = $this->login($this->credentials['admin_username']);
+
+        foreach (['account', 'account/index'] as $path) {
+            $response = $admin->get($path);
+
+            self::assertSame(200, $response->statusCode, $path . ' ' . $response->body);
+            self::assertStringNotContainsString($fixture->run . '_staff_google_', $response->body, $path);
+            self::assertStringNotContainsString($fixture->run . '_staff_caldav_', $response->body, $path);
+            $scriptVars = $this->scriptVarsFromResponse($response->body);
+            self::assertArrayHasKey('account', $scriptVars, $path);
+            self::assertSame(
+                [
+                    'username' => $this->actorSettingsBefore['username'],
+                    'calendar_view' => $this->actorSettingsBefore['calendar_view'] ?? 'default',
+                ],
+                $scriptVars['account']['settings'] ?? null,
+                $path . ' must expose only the account settings required by its frontend.',
+            );
+        }
+    }
+
     public function testAccountMethodsAndCsrfBoundariesRejectWritesWithoutChangingRows(): void
     {
         $fixture = $this->fixture;
@@ -329,5 +355,20 @@ final class AccountLegacyHttpTest extends TestCase
         $contents = SessionFileReader::read($path);
         self::assertSame(1, preg_match('/dest_url\|s:\d+:"([^"]*)";/', $contents, $matches));
         return $matches[1];
+    }
+
+    /** @return array<string,mixed> */
+    private function scriptVarsFromResponse(string $body): array
+    {
+        self::assertSame(
+            1,
+            preg_match('/const vars = (\{.*?\});\s*return \(key\)/s', $body, $matches),
+            'The response must contain the canonical script variable payload.',
+        );
+
+        $vars = json_decode($matches[1], true, 512, JSON_THROW_ON_ERROR);
+        self::assertIsArray($vars);
+
+        return $vars;
     }
 }
