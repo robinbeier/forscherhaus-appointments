@@ -209,6 +209,14 @@ mode or state-directory option is needed. Remove the former
 `--renderer-deploy-mode external` and `--renderer-state-dir` options from saved
 commands when updating deployment tools.
 
+The hardened renderer requires the same root-controlled `PDF_TOKEN` in its
+container and in the PHP runtime before it is enabled. Coordinate that
+configuration and any renderer image change separately from an application
+deploy. The ordinary `/healthz` check proves liveness only; after the change,
+run the authenticated [dashboard PDF release gate](release-gate-dashboard.md)
+against the active release and require successful PDF exports. If it fails,
+roll back the renderer change before treating the deployment as healthy.
+
 For normal application-only changes, the deploy script reloads the detected
 PHP-FPM unit. Apache is left untouched because the deploy changes application
 release files; pass an explicit `--reload` list when a host configuration change

@@ -5,6 +5,7 @@ services:
         environment:
             - EA_SKIP_NPM_BOOTSTRAP=${EA_SKIP_NPM_BOOTSTRAP:-0}
             - EA_SKIP_ASSET_BUILD_BOOTSTRAP=${EA_SKIP_ASSET_BUILD_BOOTSTRAP:-0}
+            - PDF_TOKEN
         extra_hosts:
             - host.docker.internal:host-gateway
         volumes:
@@ -95,6 +96,7 @@ services:
                 max-file: '3'
         environment:
             - NODE_ENV=production
+            - PDF_TOKEN
         ports:
             - '127.0.0.1:3003:3000'
         shm_size: '1gb'
