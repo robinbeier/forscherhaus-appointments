@@ -113,6 +113,57 @@ final class BuildReleasePublicationContractTest extends TestCase
         self::assertStringNotContainsString('cp -R assets', $script);
     }
 
+    public function testTarMetadataFlagsUseOptionAcceptanceNotHelpText(): void
+    {
+        $script = file_get_contents(dirname(__DIR__, 3) . '/build_release.sh');
+        self::assertIsString($script);
+        self::assertStringContainsString('tar --no-mac-metadata --version', $script);
+        self::assertStringContainsString('tar --no-xattrs --version', $script);
+        self::assertStringNotContainsString('TAR_HELP="$(tar --help', $script);
+
+        $probe = <<<'SH'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        TAR_METADATA_ARGS=()
+        if tar --no-mac-metadata --version >/dev/null 2>&1; then
+          TAR_METADATA_ARGS+=(--no-mac-metadata)
+        fi
+        if tar --no-xattrs --version >/dev/null 2>&1; then
+          TAR_METADATA_ARGS+=(--no-xattrs)
+        fi
+        printf '%s\n' "${TAR_METADATA_ARGS[*]}"
+        SH;
+        $tar = <<<'SH'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        if [[ "$1" == '--no-mac-metadata' || "$1" == '--no-xattrs' ]]; then
+          [[ "${FAKE_TAR_MODE:-gnu}" == 'bsdtar' ]] && exit 0
+          exit 2
+        fi
+        exit 0
+        SH;
+        $probePath = $this->workspace . '/tar-probe.sh';
+        $tarPath = $this->workspace . '/tar';
+        $this->writeExecutable($probePath, $probe);
+        $this->writeExecutable($tarPath, $tar);
+
+        $gnu = $this->runCommandOutput(
+            'PATH=' .
+                escapeshellarg($this->workspace . ':' . (getenv('PATH') ?: '')) .
+                ' FAKE_TAR_MODE=gnu bash ' .
+                escapeshellarg($probePath),
+        );
+        self::assertSame("\n", $gnu);
+
+        $bsd = $this->runCommandOutput(
+            'PATH=' .
+                escapeshellarg($this->workspace . ':' . (getenv('PATH') ?: '')) .
+                ' FAKE_TAR_MODE=bsdtar bash ' .
+                escapeshellarg($probePath),
+        );
+        self::assertSame("--no-mac-metadata --no-xattrs\n", $bsd);
+    }
+
     public function testStagingPruneRemovesDocumentationAndKeepsRuntimeFiles(): void
     {
         $script = file_get_contents(dirname(__DIR__, 3) . '/build_release.sh');

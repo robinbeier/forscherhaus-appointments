@@ -226,11 +226,10 @@ if [[ "$DRYRUN" -eq 0 ]]; then
   # GNU tar (used in CI) does not know the macOS metadata switch. Keep the
   # archive reproducible on macOS while remaining portable in Linux builders.
   TAR_METADATA_ARGS=()
-  TAR_HELP="$(tar --help 2>&1)"
-  if [[ "$TAR_HELP" == *'--no-mac-metadata'* ]]; then
+  if tar --no-mac-metadata --version >/dev/null 2>&1; then
     TAR_METADATA_ARGS+=(--no-mac-metadata)
   fi
-  if [[ "$TAR_HELP" == *'--no-xattrs'* ]]; then
+  if tar --no-xattrs --version >/dev/null 2>&1; then
     TAR_METADATA_ARGS+=(--no-xattrs)
   fi
   COPYFILE_DISABLE=1 tar "${TAR_METADATA_ARGS[@]}" -C "$STAGE" -czf "$ARCHIVE" .
