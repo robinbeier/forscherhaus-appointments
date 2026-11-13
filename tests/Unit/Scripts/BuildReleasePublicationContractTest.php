@@ -9,6 +9,8 @@ use PHPUnit\Framework\TestCase;
 final class BuildReleasePublicationContractTest extends TestCase
 {
     private string $workspace;
+    /** @var list<string> */
+    private array $temporaryReleaseIds = [];
 
     protected function setUp(): void
     {
@@ -18,6 +20,12 @@ final class BuildReleasePublicationContractTest extends TestCase
 
     protected function tearDown(): void
     {
+        foreach ($this->temporaryReleaseIds as $release) {
+            @unlink('/tmp/build_ea_' . $release . '.log');
+            foreach (glob('/tmp/' . $release . '.output.*') ?: [] as $outputDirectory) {
+                $this->removeTree($outputDirectory);
+            }
+        }
         $this->removeTree($this->workspace);
     }
 
@@ -88,6 +96,18 @@ final class BuildReleasePublicationContractTest extends TestCase
         self::assertStringContainsString('assets/css/*.css|assets/js/*.min.js|assets/vendor/*', $script);
         self::assertStringContainsString('^assets/[A-Za-z0-9.@_/-]+$', $script);
         self::assertStringContainsString('/usr/bin/install -m 0644 "$ASSET_SOURCE" "$ASSET_TARGET"', $script);
+        self::assertStringContainsString('FRONTEND_BUILD="$(mktemp -d "/tmp/${REL}.frontend.XXXXXX")"', $script);
+        self::assertStringContainsString(
+            'git archive --format=tar "$EXPECTED_COMMIT" | tar -xf - -C "$FRONTEND_BUILD"',
+            $script,
+        );
+        self::assertStringContainsString(
+            'npm ci --ignore-scripts --no-audit --no-fund --prefix "$FRONTEND_BUILD"',
+            $script,
+        );
+        self::assertStringContainsString('./node_modules/.bin/gulp build', $script);
+        self::assertStringNotContainsString('npm run build', $script);
+        self::assertStringContainsString('ASSET_SOURCE="$FRONTEND_BUILD/$asset_path"', $script);
         self::assertStringContainsString('[[ -f "$ASSET_SOURCE" && ! -L "$ASSET_SOURCE" ]]', $script);
         self::assertStringContainsString('[[ "$GENERATED_ASSET_COUNT" -gt 0 ]]', $script);
         self::assertStringNotContainsString('cp -R assets', $script);
@@ -135,7 +155,159 @@ final class BuildReleasePublicationContractTest extends TestCase
         self::assertSame('source docs', file_get_contents($source . '/docs/ops/marker.md'));
     }
 
-    private function runCommand(string $command): int
+    public function testReleaseBuildIgnoresPoisonedWorktreeAssets(): void
+    {
+        $project = $this->workspace . '/isolated-build-project';
+        $bin = $this->workspace . '/bin';
+        self::assertTrue(mkdir($project . '/application/config', 0777, true));
+        self::assertTrue(mkdir($project . '/assets/js', 0777, true));
+        self::assertTrue(mkdir($project . '/scripts/release-gate', 0777, true));
+        self::assertTrue(mkdir($project . '/scripts/ops', 0777, true));
+        self::assertTrue(mkdir($bin, 0777, true));
+        $this->copyBuildScriptForHarness($project . '/build_release.sh');
+        self::assertTrue(chmod($project . '/build_release.sh', 0700));
+        self::assertNotFalse(file_put_contents($project . '/application/config/config.php', '<?php'));
+        self::assertNotFalse(file_put_contents($project . '/assets/js/app.js', 'tracked source'));
+        self::assertNotFalse(
+            file_put_contents($project . '/scripts/release-gate/validate_release_artifact.php', '<?php'),
+        );
+        self::assertNotFalse(file_put_contents($project . '/scripts/ops/create_release_build_provenance.php', '<?php'));
+        self::assertNotFalse(file_put_contents($project . '/assets/js/app.min.js', 'poisoned ignored output'));
+        self::assertTrue(mkdir($project . '/node_modules/.bin', 0777, true));
+        self::assertNotFalse(file_put_contents($project . '/node_modules/.bin/gulp', 'poisoned source gulp'));
+        $this->writeExecutable(
+            $bin . '/npm',
+            "#!/usr/bin/env bash\nset -euo pipefail\nprefix=''\nwhile [[ \$# -gt 0 ]]; do if [[ \"\$1\" == '--prefix' ]]; then prefix=\"\$2\"; shift 2; else shift; fi; done\n[[ -n \"\$prefix\" ]] || exit 1\nmkdir -p \"\$prefix/node_modules/.bin\"\nprintf '%s\\n' '#!/usr/bin/env bash' 'printf \"isolated build output\" > assets/js/app.min.js' > \"\$prefix/node_modules/.bin/gulp\"\nchmod 700 \"\$prefix/node_modules/.bin/gulp\"\n",
+        );
+        $this->writeExecutable($bin . '/node', "#!/usr/bin/env bash\nexit 0\n");
+        $this->writeExecutable($bin . '/composer', "#!/usr/bin/env bash\nexit 0\n");
+        $this->writeExecutable(
+            $bin . '/php',
+            "#!/usr/bin/env bash\nfor arg in \"\$@\"; do [[ \"\$arg\" == '--print-generated-runtime-paths' ]] && { printf '%s\\n' assets/js/app.min.js; exit 0; }; done\nexit 0\n",
+        );
+        $this->initializeGitFixture($project, 'build_release.sh application assets/js/app.js scripts');
+        $commit = trim($this->runCommandOutput('git -C ' . escapeshellarg($project) . ' rev-parse HEAD'));
+        $release = 'ea_20261113_' . bin2hex(random_bytes(4));
+        $this->temporaryReleaseIds[] = $release;
+        $exitCode = 0;
+        $this->runCommand(
+            'PATH=' .
+                escapeshellarg($bin . ':' . (getenv('PATH') ?: '')) .
+                ' bash ' .
+                escapeshellarg($project . '/build_release.sh') .
+                ' --expected-commit ' .
+                escapeshellarg($commit) .
+                ' --rel ' .
+                escapeshellarg($release) .
+                ' --project ' .
+                escapeshellarg($project) .
+                ' --skip-upload',
+            $exitCode,
+        );
+        $output = (string) file_get_contents('/tmp/build_ea_' . $release . '.log');
+        self::assertSame(0, $exitCode);
+        self::assertStringContainsString('[✓] Build abgeschlossen:', $output);
+        preg_match('/\[✓\] Build abgeschlossen: (.+)$/m', $output, $matches);
+        self::assertCount(2, $matches);
+        $archive = trim($matches[1]);
+        self::assertFileExists($archive);
+        self::assertSame(
+            'isolated build output',
+            trim($this->runCommandOutput('tar -xOzf ' . escapeshellarg($archive) . ' ./assets/js/app.min.js')),
+        );
+        @unlink($archive);
+        preg_match('/^    Provenance: (.+)$/m', $output, $provenanceMatches);
+        if (isset($provenanceMatches[1])) {
+            @unlink(trim($provenanceMatches[1]));
+        }
+        @rmdir(dirname($archive));
+        @unlink('/tmp/build_ea_' . $release . '.log');
+    }
+
+    public function testReleaseBuildStopsBeforeArchiveWhenNpmCiFails(): void
+    {
+        $project = $this->workspace . '/failed-install-project';
+        $bin = $this->workspace . '/failed-bin';
+        self::assertTrue(mkdir($project . '/application/config', 0777, true));
+        self::assertTrue(mkdir($project . '/assets/js', 0777, true));
+        self::assertTrue(mkdir($project . '/scripts/release-gate', 0777, true));
+        self::assertTrue(mkdir($project . '/scripts/ops', 0777, true));
+        self::assertTrue(mkdir($bin, 0777, true));
+        $this->copyBuildScriptForHarness($project . '/build_release.sh');
+        self::assertTrue(chmod($project . '/build_release.sh', 0700));
+        foreach (
+            [
+                'application/config/config.php' => '<?php',
+                'assets/js/app.js' => 'tracked source',
+                'scripts/release-gate/validate_release_artifact.php' => '<?php',
+                'scripts/ops/create_release_build_provenance.php' => '<?php',
+            ]
+            as $path => $contents
+        ) {
+            self::assertNotFalse(file_put_contents($project . '/' . $path, $contents));
+        }
+        $this->writeExecutable($bin . '/npm', "#!/usr/bin/env bash\necho 'synthetic npm ci failure' >&2\nexit 42\n");
+        $this->writeExecutable($bin . '/node', "#!/usr/bin/env bash\nexit 0\n");
+        $this->writeExecutable($bin . '/composer', "#!/usr/bin/env bash\nexit 0\n");
+        $this->writeExecutable($bin . '/php', "#!/usr/bin/env bash\nexit 0\n");
+        $this->initializeGitFixture($project, 'build_release.sh application assets/js/app.js scripts');
+        $commit = trim($this->runCommandOutput('git -C ' . escapeshellarg($project) . ' rev-parse HEAD'));
+        $exitCode = 0;
+        $release = 'ea_20261113_' . bin2hex(random_bytes(4));
+        $this->temporaryReleaseIds[] = $release;
+        $this->runCommand(
+            'PATH=' .
+                escapeshellarg($bin . ':' . (getenv('PATH') ?: '')) .
+                ' bash ' .
+                escapeshellarg($project . '/build_release.sh') .
+                ' --expected-commit ' .
+                escapeshellarg($commit) .
+                ' --rel ' .
+                escapeshellarg($release) .
+                ' --project ' .
+                escapeshellarg($project) .
+                ' --skip-upload',
+            $exitCode,
+        );
+        $output = (string) file_get_contents('/tmp/build_ea_' . $release . '.log');
+        self::assertSame(42, $exitCode);
+        self::assertStringContainsString('synthetic npm ci failure', $output);
+        self::assertStringNotContainsString('[✓] Build abgeschlossen:', $output);
+        foreach (glob('/tmp/' . $release . '.output.*') ?: [] as $outputDirectory) {
+            self::assertSame([], glob($outputDirectory . '/*.tar.gz') ?: []);
+            self::assertSame([], glob($outputDirectory . '/*.build-provenance.json') ?: []);
+            rmdir($outputDirectory);
+        }
+        @unlink('/tmp/build_ea_' . $release . '.log');
+    }
+
+    private function writeExecutable(string $path, string $contents): void
+    {
+        self::assertNotFalse(file_put_contents($path, $contents));
+        self::assertTrue(chmod($path, 0700));
+    }
+
+    private function copyBuildScriptForHarness(string $target): void
+    {
+        $script = file_get_contents(dirname(__DIR__, 3) . '/build_release.sh');
+        self::assertIsString($script);
+        $script = str_replace('exec > >(tee -a "$LOG") 2>&1', 'exec >"$LOG" 2>&1', $script);
+        self::assertNotFalse(file_put_contents($target, $script));
+    }
+
+    private function initializeGitFixture(string $project, string $paths): void
+    {
+        self::assertSame(0, $this->runCommand('git init -q ' . escapeshellarg($project)));
+        self::assertSame(
+            0,
+            $this->runCommand('git -C ' . escapeshellarg($project) . ' config user.email test@example.invalid'),
+        );
+        self::assertSame(0, $this->runCommand('git -C ' . escapeshellarg($project) . ' config user.name Test'));
+        self::assertSame(0, $this->runCommand('git -C ' . escapeshellarg($project) . ' add ' . $paths));
+        self::assertSame(0, $this->runCommand('git -C ' . escapeshellarg($project) . ' commit -qm initial'));
+    }
+
+    private function runCommand(string $command, ?int &$exitCode = null): int
     {
         $process = proc_open($command, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
         self::assertIsResource($process);
@@ -143,7 +315,20 @@ final class BuildReleasePublicationContractTest extends TestCase
         stream_get_contents($pipes[2]);
         fclose($pipes[1]);
         fclose($pipes[2]);
-        return proc_close($process);
+        $exitCode = proc_close($process);
+        return $exitCode;
+    }
+
+    private function runCommandOutput(string $command, ?int &$exitCode = null): string
+    {
+        $process = proc_open($command, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+        self::assertIsResource($process);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $exitCode = proc_close($process);
+        return (string) $stdout . (string) $stderr;
     }
 
     private function removeTree(string $path): void
