@@ -44,7 +44,7 @@ final class ProvidersModelLockOrderTest extends TestCase
             array_values(array_unique($database->writtenServiceIds, SORT_NUMERIC)),
             'Association writes must use the canonical requested service IDs included in the parent lock set.',
         );
-        self::assertContains('update_users', $database->events);
+        self::assertContains('bump_credential_version', $database->events);
     }
 }
 
@@ -71,6 +71,7 @@ final class ProvidersModelLockOrderFakeDatabase
     public array $serviceLockBindings = [];
     /** @var list<int> */
     public array $writtenServiceIds = [];
+    public int $affected = 0;
     public bool $transactionActive = true;
 
     public function dbprefix(string $table): string
@@ -113,7 +114,8 @@ final class ProvidersModelLockOrderFakeDatabase
     public function query(string $sql, array $bindings = []): ProvidersModelLockOrderFakeQuery
     {
         if (str_contains($sql, 'UPDATE `ea_users` SET `credential_version`')) {
-            $this->events[] = 'update_users';
+            $this->events[] = 'bump_credential_version';
+            $this->affected = 1;
             return new ProvidersModelLockOrderFakeQuery([]);
         }
 
@@ -136,6 +138,9 @@ final class ProvidersModelLockOrderFakeDatabase
     /** @param array<string, mixed> $where */
     public function get_where(string $table, array $where = []): ProvidersModelLockOrderFakeQuery
     {
+        if ($table === 'users') {
+            return new ProvidersModelLockOrderFakeQuery([['credential_version' => 1]]);
+        }
         if ($table === 'roles') {
             return new ProvidersModelLockOrderFakeQuery([['id' => 7]]);
         }
@@ -146,6 +151,16 @@ final class ProvidersModelLockOrderFakeDatabase
             return new ProvidersModelLockOrderFakeQuery([['salt' => 'synthetic-salt']]);
         }
         throw new RuntimeException('Unexpected table in Providers model lock-order test: ' . $table);
+    }
+
+    public function select(string $fields = '*'): self
+    {
+        return $this;
+    }
+
+    public function affected_rows(): int
+    {
+        return $this->affected;
     }
 
     /** @param array<string, mixed> $data @param array<string, mixed> $where */

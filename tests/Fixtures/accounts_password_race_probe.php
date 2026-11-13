@@ -128,6 +128,9 @@ $ci->db = new class ($format, $rotate) {
             $this->row = array_replace($this->row, $values);
             $this->affected = 1;
         }
+        // CI's query builder starts each statement with a fresh predicate.
+        $this->queryWhere = [];
+        $this->predicate = [];
         return true;
     }
     public function affected_rows(): int
