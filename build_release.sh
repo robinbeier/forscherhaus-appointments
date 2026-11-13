@@ -91,11 +91,11 @@ echo "    Logfile : $LOG"
 
 cd "$PROJECT"
 PROJECT="$(pwd -P)"
-source "$PROJECT/scripts/release-gate/lib/create_release_archive.sh"
 [[ "$(git rev-parse --verify HEAD)" == "$EXPECTED_COMMIT" ]] || { echo "[!] HEAD does not match --expected-commit." >&2; exit 1; }
 git diff --quiet --exit-code && git diff --cached --quiet --exit-code || {
   echo "[!] Tracked source is dirty; refusing a release build." >&2; exit 1;
 }
+source "$PROJECT/scripts/release-gate/lib/create_release_archive.sh"
 
 # Vorbedingung: CI-Config muss lokal existieren (sie gehört zum Code!)
 if [[ ! -f "application/config/config.php" ]]; then

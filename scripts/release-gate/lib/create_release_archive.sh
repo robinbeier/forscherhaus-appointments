@@ -14,5 +14,9 @@ create_release_archive() {
     metadata_args+=(--no-xattrs)
   fi
 
-  COPYFILE_DISABLE=1 tar "${metadata_args[@]}" -C "$stage" -czf "$archive" .
+  if ((${#metadata_args[@]} > 0)); then
+    COPYFILE_DISABLE=1 tar "${metadata_args[@]}" -C "$stage" -czf "$archive" .
+  else
+    COPYFILE_DISABLE=1 tar -C "$stage" -czf "$archive" .
+  fi
 }

@@ -191,6 +191,45 @@ final class BuildReleasePublicationContractTest extends TestCase
         );
     }
 
+    public function testDirtyArchiveHelperIsNotSourcedBeforeBuildRefusal(): void
+    {
+        $project = $this->workspace . '/dirty-helper-project';
+        self::assertTrue(mkdir($project . '/scripts/release-gate', 0777, true));
+        $this->copyBuildScriptForHarness($project . '/build_release.sh');
+        self::assertTrue(chmod($project . '/build_release.sh', 0700));
+        $this->initializeGitFixture($project, 'build_release.sh scripts/release-gate/lib/create_release_archive.sh');
+        $commit = trim($this->runCommandOutput('git -C ' . escapeshellarg($project) . ' rev-parse HEAD'));
+        $marker = $project . '/sourced-marker';
+        self::assertNotFalse(
+            file_put_contents(
+                $project . '/scripts/release-gate/lib/create_release_archive.sh',
+                "printf '%s' sourced >" . escapeshellarg($marker) . "\n",
+                FILE_APPEND,
+            ),
+        );
+
+        $exitCode = 0;
+        $release = 'ea_20261113_dirty_' . bin2hex(random_bytes(4));
+        $this->temporaryReleaseIds[] = $release;
+        $this->runCommandOutput(
+            'bash ' .
+                escapeshellarg($project . '/build_release.sh') .
+                ' --expected-commit ' .
+                escapeshellarg($commit) .
+                ' --rel ' .
+                escapeshellarg($release) .
+                ' --project ' .
+                escapeshellarg($project) .
+                ' --skip-upload',
+            $exitCode,
+        );
+        $output = (string) file_get_contents('/tmp/build_ea_' . $release . '.log');
+
+        self::assertSame(1, $exitCode);
+        self::assertStringContainsString('Tracked source is dirty', $output);
+        self::assertFileDoesNotExist($marker);
+    }
+
     public function testStagingPruneRemovesDocumentationAndKeepsRuntimeFiles(): void
     {
         $script = file_get_contents(dirname(__DIR__, 3) . '/build_release.sh');
