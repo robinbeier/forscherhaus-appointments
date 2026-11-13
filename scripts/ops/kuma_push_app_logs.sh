@@ -190,12 +190,13 @@ new_errors="$(grep -cF "$PATTERN" "$tmp_delta" || true)"
 new_errors="${new_errors:-0}"
 
 if (( new_errors > THRESHOLD )); then
-  latest_line="$(grep -F "$PATTERN" "$tmp_delta" | tail -n 1 || true)"
-  latest_line="$(kuma_push_trim "$latest_line" 180)"
-  msg="CRIT new_app_errors=${new_errors} file=$(basename "$LOG_FILE") latest=${latest_line}"
+  # Keep diagnostic content on the host. Kuma receives only a fixed class and
+  # count so application paths, identifiers, tokens, and personal data cannot
+  # cross the monitoring boundary through an error line.
+  msg="CRIT new_app_errors=${new_errors} class=application_error"
   kuma_push_send "$KUMA_PUSH_URL_APP_LOGS" "down" "$msg" "0"
 else
-  msg="OK new_app_errors=${new_errors} file=$(basename "$LOG_FILE")"
+  msg="OK new_app_errors=${new_errors} class=application_log"
   kuma_push_send "$KUMA_PUSH_URL_APP_LOGS" "up" "$msg" "1"
 fi
 

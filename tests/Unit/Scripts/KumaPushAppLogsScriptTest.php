@@ -373,10 +373,10 @@ class KumaPushAppLogsScriptTest extends TestCase
 
             self::assertSame(0, $result['exit_code'], $result['stderr']);
             self::assertStringContainsString('CRIT new_app_errors=1', $result['stdout']);
-            self::assertStringContainsString(
-                'latest=ERROR - 2026-10-06 08:00:01 --> host=abc real alarm',
-                $this->readFile($capturePath),
-            );
+            $capture = $this->readFile($capturePath);
+            self::assertStringContainsString('msg=CRIT new_app_errors=1 class=application_error', $capture);
+            self::assertStringContainsString('class=application_error', $capture);
+            self::assertStringNotContainsString('host=abc real alarm', $capture);
 
             file_put_contents($envFile, 'KUMA_APP_LOG_IGNORE_REGEX=' . escapeshellarg('[') . "\n", FILE_APPEND);
             file_put_contents($logFile, "ERROR - 2026-10-06 08:00:02 --> host=abc malformed regex\n", FILE_APPEND);
@@ -581,7 +581,7 @@ class KumaPushAppLogsScriptTest extends TestCase
                     'ERROR - 2026-10-05 08:00:02 --> 404 Page Not Found: Installation/index/extra',
                     'ERROR - 2026-10-05 08:00:03 --> 404 Page Not Found: Mnavercom/index/extra',
                     'ERROR - 2026-10-05 08:00:04 --> 404 Page Not Found: Google/get_google_calendars',
-                    'ERROR - 2026-10-05 08:00:05 --> Severity: Warning --> real app warning',
+                    'ERROR - 2026-10-05 08:00:05 --> Severity: Warning --> real app warning email=person@example.invalid token=secret-token-123 url=https://internal.invalid/?id=42',
                     '',
                 ]),
                 FILE_APPEND,
@@ -597,10 +597,11 @@ class KumaPushAppLogsScriptTest extends TestCase
             self::assertStringContainsString('CRIT new_app_errors=4', $result['stdout']);
             $curlCalls = $this->readFile($capturePath);
             self::assertStringContainsString('status=down', $curlCalls);
-            self::assertStringContainsString(
-                'latest=ERROR - 2026-10-05 08:00:05 --> Severity: Warning --> real app warning',
-                $curlCalls,
-            );
+            self::assertStringContainsString('msg=CRIT new_app_errors=4 class=application_error', $curlCalls);
+            self::assertStringContainsString('class=application_error', $curlCalls);
+            self::assertStringNotContainsString('person@example.invalid', $curlCalls);
+            self::assertStringNotContainsString('secret-token-123', $curlCalls);
+            self::assertStringNotContainsString('internal.invalid', $curlCalls);
         } finally {
             $this->removeDirectory($workspace);
         }
