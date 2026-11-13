@@ -63,4 +63,16 @@ final class ApiRequestWithTest extends TestCase
 
         (new Api())->request_with();
     }
+
+    public function testModelRejectsUnknownPathLikeNameBeforeLoading(): void
+    {
+        $api = (new \ReflectionClass(Api::class))->newInstanceWithoutConstructor();
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Unsupported API model.');
+
+        // No CI loader is installed deliberately: rejection must happen before
+        // any caller-supplied value can reach the framework loader.
+        $api->model('../customers_model');
+    }
 }
