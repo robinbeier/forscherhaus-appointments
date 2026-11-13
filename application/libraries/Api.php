@@ -22,6 +22,12 @@ defined('BASEPATH') or exit('No direct script access allowed');
  */
 class Api
 {
+    private const MAX_WITH_TOKENS = 16;
+
+    private const MAX_RAW_WITH_TOKENS = 64;
+
+    private const MAX_WITH_TOKEN_LENGTH = 64;
+
     /**
      * @var EA_Controller|CI_Controller
      */
@@ -178,7 +184,10 @@ class Api
      */
     public function request_limit(): ?int
     {
-        $length = $this->request_normalizer->normalizeInt(request('length', $this->default_length), $this->default_length);
+        $length = $this->request_normalizer->normalizeInt(
+            request('length', $this->default_length),
+            $this->default_length,
+        );
 
         if ($length === null || $length < 0) {
             return $this->default_length;
@@ -262,13 +271,65 @@ class Api
      */
     public function request_with(): ?array
     {
-        $with = $this->normalizeCsvTokens(request('with'));
+        $rawWith = request('with');
+
+        if ($this->rawCsvTokenCount($rawWith) > self::MAX_RAW_WITH_TOKENS) {
+            throw new InvalidArgumentException(
+                sprintf('The with parameter must contain at most %d relation tokens.', self::MAX_RAW_WITH_TOKENS),
+            );
+        }
+
+        $with = $this->normalizeCsvTokens($rawWith);
 
         if (empty($with)) {
             return null;
         }
 
-        return $with;
+        $unique = [];
+        $seen = [];
+
+        foreach ($with as $token) {
+            if (strlen($token) > self::MAX_WITH_TOKEN_LENGTH) {
+                throw new InvalidArgumentException('The with parameter contains a relation name that is too long.');
+            }
+
+            if (isset($seen[$token])) {
+                continue;
+            }
+
+            $seen[$token] = true;
+            $unique[] = $token;
+        }
+
+        if (count($unique) > self::MAX_WITH_TOKENS) {
+            throw new InvalidArgumentException(
+                sprintf('The with parameter must contain at most %d unique relations.', self::MAX_WITH_TOKENS),
+            );
+        }
+
+        return $unique;
+    }
+
+    /**
+     * Count raw CSV/list entries before normalization and deduplication.
+     *
+     * @param mixed $value
+     */
+    private function rawCsvTokenCount(mixed $value): int
+    {
+        if ($value === null || $value === '') {
+            return 0;
+        }
+
+        if (is_array($value)) {
+            return count($value);
+        }
+
+        if (is_object($value)) {
+            return 0;
+        }
+
+        return substr_count((string) $value, ',') + 1;
     }
 
     /**
