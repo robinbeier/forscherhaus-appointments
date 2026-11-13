@@ -153,7 +153,7 @@ validate_probe_token() {
     local token="$1"
     [[ "${#token}" -ge 16 && "${#token}" -le 512 ]] || return 1
     [[ "${token}" != *[[:space:]]* && "${token}" != *[[:cntrl:]]* ]] || return 1
-    [[ "${token}" != *'"'* && "${token}" != *'\\'* ]] || return 1
+    [[ "${token}" != *'"'* && "${token}" != *'\'* ]] || return 1
 }
 
 read_production_probe_token() {

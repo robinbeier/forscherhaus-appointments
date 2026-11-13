@@ -592,6 +592,23 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
         self::assertSame('unknown', ReadOnlyProbeReceiptV1::decode($malformedOutput[0] . "\n")['outcome']);
     }
 
+    public function testWrapperRejectsCurlConfigEscapesInTokenBeforeRequest(): void
+    {
+        [$status, $output, $stderr, $headerFiles] = $this->runWrapper(
+            'success',
+            'http://127.0.0.1:8123',
+            null,
+            'abcdefghijklmnop\\nX-Injected:yes',
+        );
+
+        self::assertSame(70, $status);
+        self::assertCount(1, $output);
+        self::assertSame('', $stderr);
+        self::assertSame([], $headerFiles);
+        self::assertSame('unknown', ReadOnlyProbeReceiptV1::decode($output[0] . "\n")['outcome']);
+        self::assertStringNotContainsString('X-Injected', $output[0]);
+    }
+
     public function testResponseBindingRejectsMissingAndMalformedHeaders(): void
     {
         [$status, $output] = $this->runWrapper('binding_success');
@@ -700,6 +717,7 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
         string $scenario,
         string $baseUrl = 'http://127.0.0.1:8123',
         ?string $stdoutTarget = null,
+        string $probeToken = 'synthetic-read-only-probe-token',
     ): array {
         $directory = sys_get_temp_dir() . '/read-only-probe-curl-' . bin2hex(random_bytes(8));
         mkdir($directory, 0700, true);
@@ -1030,7 +1048,7 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
             $baseUrlEnv =
                 $baseUrl === 'http://127.0.0.1' ? '' : ' READ_ONLY_PROBE_BASE_URL=' . escapeshellarg($baseUrl);
             if ($baseUrl !== 'http://127.0.0.1') {
-                $baseUrlEnv .= " READ_ONLY_PROBE_TOKEN='synthetic-read-only-probe-token'";
+                $baseUrlEnv .= ' READ_ONLY_PROBE_TOKEN=' . escapeshellarg($probeToken);
             }
             if (str_starts_with($scenario, 'binding_')) {
                 $baseUrlEnv .=
