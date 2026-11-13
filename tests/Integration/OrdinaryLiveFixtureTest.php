@@ -148,7 +148,7 @@ final class OrdinaryLiveFixtureTest extends TestCase
         $this->fixture->assertCleanBeforeActivation();
     }
 
-    public function testOrphanSelectorsEachBlockPreflightAndActivationWithoutNewMutation(): void
+    public function testUserEditableFixtureShapedMarkersDoNotBlockOrGetCleaned(): void
     {
         $db = &get_instance()->db;
         $role = $db->get_where('roles', ['slug' => 'provider'])->row_array();
@@ -157,7 +157,7 @@ final class OrdinaryLiveFixtureTest extends TestCase
             $username = ($selector === 'user' ? 'unrelated_synthetic_' : 'defense_live_') . bin2hex(random_bytes(16));
             $email = bin2hex(random_bytes(16)) . '@synthetic.invalid';
             $db->insert('users', [
-                'first_name' => 'Orphan',
+                'first_name' => 'Unrelated',
                 'last_name' => 'Synthetic',
                 'email' => $email,
                 'phone_number' => '000000000',
@@ -181,22 +181,22 @@ final class OrdinaryLiveFixtureTest extends TestCase
                     'google_sync' => 0,
                     'caldav_sync' => 0,
                 ]);
-                $userCount = $db->count_all('users');
-                $settingsCount = $db->count_all('user_settings');
-                self::assertSame('cleanup_pending', $this->fixture->verify());
-                foreach (['assertCleanBeforeActivation', 'activate'] as $operation) {
-                    $error = null;
-                    try {
-                        $this->fixture->{$operation}();
-                    } catch (RuntimeException $caught) {
-                        $error = $caught;
-                    }
-                    self::assertNotNull($error, $selector . ' must block ' . $operation);
-                    self::assertStringContainsString('Orphaned ordinary fixture rows', $error->getMessage());
-                    self::assertFileDoesNotExist($this->stateDirectory . '/state.json');
-                    self::assertSame($userCount, $db->count_all('users'));
-                    self::assertSame($settingsCount, $db->count_all('user_settings'));
-                }
+                self::assertSame('clean', $this->fixture->verify());
+                $this->fixture->assertCleanBeforeActivation();
+                $this->fixture->activate();
+                self::assertSame('active', $this->fixture->verify());
+                self::assertSame(1, $db->get_where('users', ['id' => $userId, 'notes' => $marker])->num_rows());
+                self::assertSame(
+                    1,
+                    $db->get_where('user_settings', ['id_users' => $userId, 'username' => $username])->num_rows(),
+                );
+                $this->fixture->deactivate();
+                self::assertSame('clean', $this->fixture->verify());
+                self::assertSame(1, $db->get_where('users', ['id' => $userId, 'notes' => $marker])->num_rows());
+                self::assertSame(
+                    1,
+                    $db->get_where('user_settings', ['id_users' => $userId, 'username' => $username])->num_rows(),
+                );
             } finally {
                 $db->delete('user_settings', ['id_users' => $userId, 'username' => $username]);
                 $db->delete('users', ['id' => $userId, 'notes' => $marker, 'email' => $email]);

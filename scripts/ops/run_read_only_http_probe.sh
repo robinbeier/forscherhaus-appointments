@@ -24,6 +24,8 @@ OUTCOME='unknown'
 EXIT_CODE=70
 RECEIPT_EMITTED=0
 TEMP_FILES=()
+PROBE_TOKEN=''
+CURL_CONFIG=''
 
 CHECK_MODERN_CONFIRMATION='false'
 CHECK_LEGACY_CONFIRMATION='false'
@@ -147,6 +149,33 @@ verify_production_context() {
     PROD_APP_IDENTITY="$(stat -c '%d:%i' -- "${PROD_APP_ROOT}" 2>/dev/null)" || return 1
 }
 
+validate_probe_token() {
+    local token="$1"
+    [[ "${#token}" -ge 16 && "${#token}" -le 512 ]] || return 1
+    [[ "${token}" != *[[:space:]]* && "${token}" != *[[:cntrl:]]* ]] || return 1
+    [[ "${token}" != *'"'* && "${token}" != *'\'* ]] || return 1
+}
+
+read_production_probe_token() {
+    local path='/etc/fh/healthz.token'
+    local mode uid gid links
+    [[ -f "${path}" && ! -L "${path}" ]] || return 1
+    mode="$(stat -c '%a' -- "${path}" 2>/dev/null)" || return 1
+    uid="$(stat -c '%u' -- "${path}" 2>/dev/null)" || return 1
+    gid="$(stat -c '%g' -- "${path}" 2>/dev/null)" || return 1
+    links="$(stat -c '%h' -- "${path}" 2>/dev/null)" || return 1
+    [[ "${mode}" == '600' && "${uid}" == '0' && "${gid}" == '0' && "${links}" == '1' ]] || return 1
+    PROBE_TOKEN="$(tr -d '\r\n' <"${path}")" || return 1
+    validate_probe_token "${PROBE_TOKEN}"
+}
+
+write_curl_config() {
+    CURL_CONFIG="$(mktemp 2>/dev/null)" || die_environment
+    chmod 600 "${CURL_CONFIG}" || die_environment
+    TEMP_FILES+=("${CURL_CONFIG}")
+    printf 'header = "X-Health-Token: %s"\n' "${PROBE_TOKEN}" >"${CURL_CONFIG}" || die_environment
+}
+
 snapshot_production_state() {
     local rate_limits
     local logs
@@ -167,9 +196,12 @@ if [[ "${READ_ONLY_PROBE_BASE_URL+x}" != 'x' && "${BASE_URL}" == "${PROD_ORIGIN}
     VERIFY_RESPONSE_BINDING=1
     STATE_BEFORE="$(snapshot_production_state)" || die_environment
     REDIRECT_ORIGIN="${PROD_REDIRECT_ORIGIN}"
+    read_production_probe_token || die_unknown
 elif [[ "${BASE_URL}" =~ ^http://127\.0\.0\.1:[1-9][0-9]*$ ]]; then
     TARGET_CLASS='local'
     REDIRECT_ORIGIN="${BASE_URL}"
+    PROBE_TOKEN="${READ_ONLY_PROBE_TOKEN:-}"
+    validate_probe_token "${PROBE_TOKEN}" || die_unknown
     if [[ "${READ_ONLY_PROBE_EXPECTED_LOCAL_ROOT+x}" == 'x' || "${READ_ONLY_PROBE_EXPECTED_LOCAL_RELEASE+x}" == 'x' ]]; then
         [[ "${READ_ONLY_PROBE_EXPECTED_LOCAL_ROOT:-}" =~ ^dev:[0-9]+:[0-9]+$ ]] || die_unknown
         [[ "${READ_ONLY_PROBE_EXPECTED_LOCAL_RELEASE:-}" =~ ^(unreleased|ea_[A-Za-z0-9_]+)$ ]] || die_unknown
@@ -183,6 +215,7 @@ fi
 for command_name in curl od tr mktemp awk rm; do
     command -v "${command_name}" >/dev/null 2>&1 || die_environment
 done
+write_curl_config
 
 modern_capability="$(od -An -N32 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n' 2>/dev/null)" || die_environment
 legacy_capability="$(od -An -N6 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n' 2>/dev/null)" || die_environment
@@ -200,7 +233,7 @@ request() {
     header_file="$(mktemp 2>/dev/null)" || die_environment
     TEMP_FILES+=("${header_file}")
     set +e
-    http_status="$(curl --disable --config /dev/null --noproxy '*' --request GET --retry 0 --max-redirs 0 --silent --show-error --max-time 15 --cookie "${COOKIE_JAR}" --cookie-jar "${COOKIE_JAR}" --dump-header "${header_file}" --output /dev/null --write-out '%{http_code}' "${BASE_URL}/index.php/${route}" 2>/dev/null)"
+    http_status="$(curl --disable --config "${CURL_CONFIG}" --noproxy '*' --request GET --retry 0 --max-redirs 0 --silent --show-error --max-time 15 --cookie "${COOKIE_JAR}" --cookie-jar "${COOKIE_JAR}" --dump-header "${header_file}" --output /dev/null --write-out '%{http_code}' "${BASE_URL}/index.php/${route}" 2>/dev/null)"
     curl_status=$?
     set -e
     [[ "${curl_status}" == '0' ]] || die_environment

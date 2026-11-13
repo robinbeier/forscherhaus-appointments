@@ -47,7 +47,6 @@ final class OrdinaryLiveFixture
             if (is_link($this->stateFile) || is_file($this->stateFile)) {
                 throw new RuntimeException('An ordinary live fixture already exists; deactivate it first.');
             }
-            $this->assertCleanDatabaseBeforeActivation();
             $role = $this->db->get_where('roles', ['slug' => $roleSlug])->row_array();
             if (empty($role['id'])) {
                 throw new RuntimeException('Requested ordinary fixture role is missing.');
@@ -134,7 +133,6 @@ final class OrdinaryLiveFixture
             if (is_link($this->stateFile) || is_file($this->stateFile)) {
                 throw new RuntimeException('An ordinary live fixture already exists; deactivate it first.');
             }
-            $this->assertCleanDatabaseBeforeActivation();
         });
     }
 
@@ -248,10 +246,10 @@ final class OrdinaryLiveFixture
             throw new RuntimeException('Fixture state path is a symlink; refusing verification.');
         }
         if (!file_exists($this->stateFile)) {
-            $leftovers =
-                $this->db->like('notes', 'ordinary-live:', 'after')->get('users')->num_rows() +
-                $this->db->like('username', 'defense_live_', 'after')->get('user_settings')->num_rows();
-            return $leftovers === 0 ? 'clean' : 'cleanup_pending';
+            // Profile fields are editable by ordinary staff and therefore
+            // cannot establish ownership of a released fixture. Only an
+            // exact root-owned journal can authorize cleanup or recovery.
+            return 'clean';
         }
         $state = $this->readState();
         $this->validateState($state);
@@ -412,15 +410,6 @@ final class OrdinaryLiveFixture
         $settings = $this->db->get_where('user_settings', ['username' => $username])->num_rows();
         if ($users !== 0 || $settings !== 0) {
             throw new RuntimeException('Fixture identity collision detected.');
-        }
-    }
-
-    private function assertCleanDatabaseBeforeActivation(): void
-    {
-        $users = $this->db->like('notes', 'ordinary-live:', 'after')->get('users')->num_rows();
-        $settings = $this->db->like('username', 'defense_live_', 'after')->get('user_settings')->num_rows();
-        if ($users !== 0 || $settings !== 0) {
-            throw new RuntimeException('Orphaned ordinary fixture rows require explicit recovery.');
         }
     }
 

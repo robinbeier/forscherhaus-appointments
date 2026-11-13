@@ -92,6 +92,10 @@ class Account extends EA_Controller
         session(['dest_url' => site_url('account')]);
 
         $account = $this->users_model->find($user_id);
+        $account['settings'] = [
+            'username' => $account['settings']['username'] ?? '',
+            'calendar_view' => $account['settings']['calendar_view'] ?? 'default',
+        ];
 
         script_vars([
             'account' => $account,

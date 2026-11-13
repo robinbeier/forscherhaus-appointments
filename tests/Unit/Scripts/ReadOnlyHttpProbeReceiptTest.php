@@ -12,11 +12,44 @@ require_once __DIR__ . '/../../../application/libraries/Session/drivers/Session_
 
 final class ReadOnlyHttpProbeReceiptTest extends TestCase
 {
+    private const PROBE_TOKEN = 'synthetic-read-only-probe-token';
+    private ?string $previousEnvToken = null;
+    private bool $hadEnvToken = false;
+    private ?string $previousProcessToken = null;
+    private bool $hadProcessToken = false;
+
+    protected function setUp(): void
+    {
+        $this->hadEnvToken = array_key_exists('HEALTHZ_TOKEN', $_ENV);
+        $this->previousEnvToken = $_ENV['HEALTHZ_TOKEN'] ?? null;
+        $processToken = getenv('HEALTHZ_TOKEN');
+        $this->hadProcessToken = $processToken !== false;
+        $this->previousProcessToken = $processToken === false ? null : $processToken;
+
+        $_ENV['HEALTHZ_TOKEN'] = self::PROBE_TOKEN;
+        putenv('HEALTHZ_TOKEN=' . self::PROBE_TOKEN);
+    }
+
+    protected function tearDown(): void
+    {
+        if ($this->hadEnvToken) {
+            $_ENV['HEALTHZ_TOKEN'] = $this->previousEnvToken;
+        } else {
+            unset($_ENV['HEALTHZ_TOKEN']);
+        }
+        if ($this->hadProcessToken) {
+            putenv('HEALTHZ_TOKEN=' . $this->previousProcessToken);
+        } else {
+            putenv('HEALTHZ_TOKEN');
+        }
+    }
+
     public function testProbeRequestClassifierIsLoopbackGetAndExactCapabilityBound(): void
     {
         self::assertTrue(
             $this->classifyRequest([
                 'REQUEST_METHOD' => 'GET',
+                'HTTP_X_HEALTH_TOKEN' => self::PROBE_TOKEN,
                 'REMOTE_ADDR' => '127.0.0.1',
                 'HTTP_HOST' => 'localhost:8123',
                 'REQUEST_URI' => '/index.php/booking_confirmation/of/' . str_repeat('a', 64),
@@ -33,11 +66,13 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
 
         foreach (
             [
-                ['HTTP_HOST' => 'dasforscherhaus-leg.de'],
+                ['HTTP_HOST' => 'dasforscherhaus-leg.de', 'HTTP_X_HEALTH_TOKEN' => self::PROBE_TOKEN],
                 ['REMOTE_ADDR' => '192.0.2.10'],
                 ['REQUEST_METHOD' => 'POST'],
                 ['REQUEST_URI' => '/booking_confirmation/of/' . str_repeat('A', 64)],
                 ['REQUEST_URI' => '/appointments/ics/' . str_repeat('c', 12) . '/suffix'],
+                ['HTTP_X_HEALTH_TOKEN' => 'wrong-token'],
+                ['HTTP_X_HEALTH_TOKEN' => ''],
             ]
             as $override
         ) {
@@ -557,6 +592,23 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
         self::assertSame('unknown', ReadOnlyProbeReceiptV1::decode($malformedOutput[0] . "\n")['outcome']);
     }
 
+    public function testWrapperRejectsCurlConfigEscapesInTokenBeforeRequest(): void
+    {
+        [$status, $output, $stderr, $headerFiles] = $this->runWrapper(
+            'success',
+            'http://127.0.0.1:8123',
+            null,
+            'abcdefghijklmnop\\nX-Injected:yes',
+        );
+
+        self::assertSame(70, $status);
+        self::assertCount(1, $output);
+        self::assertSame('', $stderr);
+        self::assertSame([], $headerFiles);
+        self::assertSame('unknown', ReadOnlyProbeReceiptV1::decode($output[0] . "\n")['outcome']);
+        self::assertStringNotContainsString('X-Injected', $output[0]);
+    }
+
     public function testResponseBindingRejectsMissingAndMalformedHeaders(): void
     {
         [$status, $output] = $this->runWrapper('binding_success');
@@ -665,6 +717,7 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
         string $scenario,
         string $baseUrl = 'http://127.0.0.1:8123',
         ?string $stdoutTarget = null,
+        string $probeToken = 'synthetic-read-only-probe-token',
     ): array {
         $directory = sys_get_temp_dir() . '/read-only-probe-curl-' . bin2hex(random_bytes(8));
         mkdir($directory, 0700, true);
@@ -704,7 +757,14 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
             if [ -n "${MOCK_CURL_HEADER_LOG}" ]; then
                 printf '%s\n' "${header}" >>"${MOCK_CURL_HEADER_LOG}"
             fi
-            [ "${config}" = '/dev/null' ] || exit 8
+            [ -n "${config}" ] || exit 8
+            token_header=0
+            while IFS= read -r config_line; do
+                case "${config_line}" in
+                    'header = "X-Health-Token: synthetic-read-only-probe-token"') token_header=1 ;;
+                esac
+            done <"${config}"
+            [ "${token_header}" = '1' ] || exit 8
             [ "${request_method}" = 'GET' ] || exit 8
             [ "${retry}" = '0' ] || exit 8
             [ "${max_redirs}" = '0' ] || exit 8
@@ -987,6 +1047,9 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
             $path = $scenario === 'missing_rm' ? $directory : $directory . ':/usr/bin:/bin';
             $baseUrlEnv =
                 $baseUrl === 'http://127.0.0.1' ? '' : ' READ_ONLY_PROBE_BASE_URL=' . escapeshellarg($baseUrl);
+            if ($baseUrl !== 'http://127.0.0.1') {
+                $baseUrlEnv .= ' READ_ONLY_PROBE_TOKEN=' . escapeshellarg($probeToken);
+            }
             if (str_starts_with($scenario, 'binding_')) {
                 $baseUrlEnv .=
                     " READ_ONLY_PROBE_EXPECTED_LOCAL_ROOT='dev:1:2' READ_ONLY_PROBE_EXPECTED_LOCAL_RELEASE='ea_test'";
@@ -1068,6 +1131,7 @@ final class ReadOnlyHttpProbeReceiptTest extends TestCase
                 'REMOTE_ADDR' => '127.0.0.1',
                 'HTTP_HOST' => '127.0.0.1:8123',
                 'REQUEST_URI' => '/appointments/ics/' . str_repeat('a', 12),
+                'HTTP_X_HEALTH_TOKEN' => self::PROBE_TOKEN,
             ],
             $override,
         );

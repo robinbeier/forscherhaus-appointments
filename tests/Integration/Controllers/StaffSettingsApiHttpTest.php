@@ -998,6 +998,168 @@ final class StaffSettingsApiHttpTest extends TestCase
         }
     }
 
+    public function testAdminUpdateRejectsStaleAdminSnapshotAfterRoleDemotion(): void
+    {
+        $db = get_instance()->db;
+        $fixture = $this->fixture;
+        $admin = $this->basicClient($this->credentials['admin_username'], $this->credentials['password']);
+        $created = $this->success(
+            $admin->requestJsonApp('POST', 'api/v1/admins', $fixture->adminWritePayload('stale-role')),
+            201,
+        );
+        $targetId = (int) ($created['id'] ?? 0);
+        self::assertGreaterThan(0, $targetId);
+
+        try {
+            get_instance()->load->model('admins_model');
+            $staleSnapshot = get_instance()->admins_model->get(['id' => $targetId])[0] ?? [];
+            self::assertSame($targetId, (int) ($staleSnapshot['id'] ?? 0));
+
+            $providerRole = $db->get_where('roles', ['slug' => 'provider'])->row_array();
+            self::assertNotEmpty($providerRole);
+            self::assertTrue($db->update('users', ['id_roles' => (int) $providerRole['id']], ['id' => $targetId]));
+
+            try {
+                get_instance()->admins_model->save($staleSnapshot);
+                self::fail('A stale admin snapshot must not restore the admin role.');
+            } catch (RuntimeException $exception) {
+                self::assertStringContainsString('no longer an admin', $exception->getMessage());
+            }
+
+            self::assertSame(
+                (int) $providerRole['id'],
+                (int) $db->get_where('users', ['id' => $targetId])->row()->id_roles,
+            );
+        } finally {
+            $db->delete('user_settings', ['id_users' => $targetId]);
+            $db->delete('users', ['id' => $targetId]);
+        }
+    }
+
+    public function testAdminApiUpdateWaitsForRoleDemotionAndRejectsStaleSnapshot(): void
+    {
+        $db = get_instance()->db;
+        $fixture = $this->fixture;
+        $admin = $this->basicClient($this->credentials['admin_username'], $this->credentials['password']);
+        $payload = $fixture->adminWritePayload('ordered-role-race');
+        $created = $this->success($admin->requestJsonApp('POST', 'api/v1/admins', $payload), 201);
+        $targetId = (int) ($created['id'] ?? 0);
+        self::assertGreaterThan(0, $targetId);
+
+        $adminRole = $db->get_where('roles', ['slug' => 'admin'])->row_array();
+        $providerRole = $db->get_where('roles', ['slug' => 'provider'])->row_array();
+        self::assertNotEmpty($adminRole);
+        self::assertNotEmpty($providerRole);
+        $adminRoleId = (int) $adminRole['id'];
+        $providerRoleId = (int) $providerRole['id'];
+        $observer = null;
+        $multi = null;
+        $handle = null;
+        $transactionOpen = false;
+
+        try {
+            $before = $fixture->adminDeleteState($targetId);
+            self::assertSame($adminRoleId, (int) ($before['user']['id_roles'] ?? 0));
+            self::assertTrue($db->trans_begin());
+            $transactionOpen = true;
+            self::assertTrue($db->update('users', ['id_roles' => $providerRoleId], ['id' => $targetId]));
+
+            $observer = get_instance()->load->database(
+                [
+                    'hostname' => 'mysql',
+                    'username' => 'root',
+                    'password' => 'secret',
+                    'database' => 'easyappointments',
+                    'dbdriver' => 'mysqli',
+                    'dbprefix' => $db->dbprefix,
+                    'pconnect' => false,
+                    'db_debug' => false,
+                    'char_set' => 'utf8mb4',
+                    'dbcollat' => 'utf8mb4_general_ci',
+                ],
+                true,
+            );
+            self::assertTrue($observer->query('SET SESSION TRANSACTION READ ONLY'));
+            $ownerConnectionId = mysqli_thread_id($db->conn_id);
+            self::assertNotSame($ownerConnectionId, mysqli_thread_id($observer->conn_id));
+
+            $multi = curl_multi_init();
+            $handle = curl_init($this->server->baseUrl . '/index.php/api/v1/admins/' . $targetId);
+            self::assertNotFalse($multi);
+            self::assertNotFalse($handle);
+            $payload['firstName'] = $fixture->run . '_stale-race-update';
+            curl_setopt_array($handle, [
+                CURLOPT_CUSTOMREQUEST => 'PUT',
+                CURLOPT_POSTFIELDS => json_encode($payload, JSON_THROW_ON_ERROR),
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_FOLLOWLOCATION => false,
+                CURLOPT_CONNECTTIMEOUT => 3,
+                CURLOPT_TIMEOUT => 8,
+                CURLOPT_HTTPHEADER => [
+                    'Accept: application/json',
+                    'Content-Type: application/json',
+                    'Authorization: Bearer ' . $this->credentials['token'],
+                ],
+            ]);
+            self::assertSame(CURLM_OK, curl_multi_add_handle($multi, $handle));
+
+            $waiting = false;
+            $deadline = microtime(true) + 8.0;
+            do {
+                do {
+                    $multiResult = curl_multi_exec($multi, $running);
+                } while ($multiResult === CURLM_CALL_MULTI_PERFORM);
+                self::assertSame(CURLM_OK, $multiResult);
+                $waiting = $this->adminUpdateLockWaitObserved($observer, $ownerConnectionId, $targetId);
+                if ($waiting || $running === 0 || microtime(true) >= $deadline) {
+                    break;
+                }
+                curl_multi_select($multi, 0.05);
+            } while (true);
+
+            self::assertTrue($waiting, 'Admin API update must wait on the target row before writing.');
+            self::assertTrue($db->trans_commit());
+            $transactionOpen = false;
+
+            $drainDeadline = microtime(true) + 8.0;
+            do {
+                do {
+                    $multiResult = curl_multi_exec($multi, $running);
+                } while ($multiResult === CURLM_CALL_MULTI_PERFORM);
+                self::assertSame(CURLM_OK, $multiResult);
+                if ($running === 0 || microtime(true) >= $drainDeadline) {
+                    break;
+                }
+                curl_multi_select($multi, 0.05);
+            } while (true);
+
+            self::assertSame(0, $running, 'Admin API update must finish after the demotion commits.');
+            self::assertSame(CURLE_OK, curl_errno($handle), curl_error($handle));
+            self::assertSame(500, (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE));
+            $after = $fixture->adminDeleteState($targetId);
+            self::assertSame($providerRoleId, (int) ($after['user']['id_roles'] ?? 0));
+            self::assertSame($before['settings'], $after['settings']);
+            self::assertSame($before['user']['first_name'], $after['user']['first_name']);
+        } finally {
+            if ($transactionOpen && $db->trans_active()) {
+                $db->trans_rollback();
+            }
+            if ($handle instanceof \CurlHandle && $multi instanceof \CurlMultiHandle) {
+                $this->drainConcurrentAdminDelete($multi, $handle);
+                curl_multi_remove_handle($multi, $handle);
+                curl_close($handle);
+            }
+            if ($multi instanceof \CurlMultiHandle) {
+                curl_multi_close($multi);
+            }
+            if ($observer !== null) {
+                $observer->close();
+            }
+            $db->delete('user_settings', ['id_users' => $targetId]);
+            $db->delete('users', ['id' => $targetId]);
+        }
+    }
+
     public function testConcurrentAdminDeletesWaitAndRejectTheSecondLastAdminDelete(): void
     {
         $db = get_instance()->db;
@@ -1342,6 +1504,23 @@ final class StaffSettingsApiHttpTest extends TestCase
                 ($wait['REQUESTING_TABLE'] ?? null) === $usersTable &&
                 $normalize((string) ($wait['REQUESTING_SQL'] ?? '')) === $normalize($expectedSql)
             ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function adminUpdateLockWaitObserved(object $observer, int $ownerConnectionId, int $targetId): bool
+    {
+        foreach ($this->adminDeleteLockWaitRows($observer, $ownerConnectionId) as $wait) {
+            if (($wait['REQUESTING_SCHEMA'] ?? null) !== \Config::DB_NAME) {
+                continue;
+            }
+            if (($wait['REQUESTING_TABLE'] ?? null) !== get_instance()->db->dbprefix('users')) {
+                continue;
+            }
+            $statement = (string) ($wait['REQUESTING_SQL'] ?? '');
+            if (str_contains(strtoupper($statement), 'FOR UPDATE') && str_contains($statement, (string) $targetId)) {
                 return true;
             }
         }
