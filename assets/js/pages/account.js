@@ -30,6 +30,7 @@ App.Pages.Account = (function () {
     const $timezone = $('#timezone');
     const $username = $('#username');
     const $password = $('#password');
+    const $currentPassword = $('#current-password');
     const $retypePassword = $('#retype-password');
     const $calendarView = $('#calendar-view');
     const $saveSettings = $('#save-settings');
@@ -137,6 +138,7 @@ App.Pages.Account = (function () {
             settings: {
                 username: $username.val(),
                 password: $password.val() || undefined,
+                current_password: $password.val() ? $currentPassword.val() || undefined : undefined,
                 calendar_view: $calendarView.val(),
             },
         };
@@ -158,6 +160,9 @@ App.Pages.Account = (function () {
             App.Layouts.Backend.displayNotification(lang('settings_saved'));
 
             $footerUserDisplayName.text('Hello, ' + $firstName.val() + ' ' + $lastName.val() + '!');
+            $currentPassword.val('');
+            $password.val('');
+            $retypePassword.val('');
         });
     }
 

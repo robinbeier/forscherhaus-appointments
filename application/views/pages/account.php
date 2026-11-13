@@ -117,6 +117,14 @@
                                 </div>
 
                                 <div class="mb-3">
+                                    <label class="form-label" for="current-password">
+                                        <?= lang('current_password') ?>
+                                    </label>
+                                    <input type="password" id="current-password" class="form-control"
+                                           autocomplete="current-password">
+                                </div>
+
+                                <div class="mb-3">
                                     <label class="form-label" for="retype-password">
                                         <?= lang('retype_password') ?>
                                     </label>

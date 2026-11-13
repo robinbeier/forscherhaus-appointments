@@ -72,6 +72,15 @@ class Providers_model extends EA_Model
      */
     public function save(array $provider): int
     {
+        if (
+            !empty($provider['id']) &&
+            isset($provider['settings']) &&
+            is_array($provider['settings']) &&
+            array_key_exists('password', $provider['settings']) &&
+            empty($provider['settings']['password'])
+        ) {
+            unset($provider['settings']['password']);
+        }
         $this->validate($provider);
 
         if (empty($provider['id'])) {
@@ -441,7 +450,8 @@ class Providers_model extends EA_Model
             // Keep the same order before replacing the provider's connections.
             $this->lock_update_service_parents((int) $provider['id'], $service_ids);
 
-            if (isset($settings['password'])) {
+            $password_changed = isset($settings['password']);
+            if ($password_changed) {
                 $existing_settings = $this->db
                     ->get_where('user_settings', ['id_users' => $provider['id']])
                     ->row_array();
@@ -462,6 +472,9 @@ class Providers_model extends EA_Model
             }
 
             $this->set_settings($provider['id'], $settings);
+            if ($password_changed) {
+                $this->bump_credential_version((int) $provider['id']);
+            }
             try {
                 $this->set_service_ids($provider['id'], $service_ids);
             } catch (Throwable $e) {

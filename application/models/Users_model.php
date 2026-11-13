@@ -20,6 +20,16 @@
  */
 class Users_model extends EA_Model
 {
+    /** Return the persisted credential version used to invalidate sessions. */
+    public function credential_version(int $user_id): int
+    {
+        $settings = $this->db
+            ->select('credential_version')
+            ->get_where('users', ['id' => $user_id])
+            ->row_array();
+
+        return max(0, (int) ($settings['credential_version'] ?? 0));
+    }
     /**
      * @var array
      */
@@ -62,8 +72,9 @@ class Users_model extends EA_Model
      * @throws InvalidArgumentException
      * @throws Exception
      */
-    public function save(array $user): int
+    public function save(array $user, ?string $current_password = null): int
     {
+        $this->last_saved_credential_version = null;
         // An empty password on an update means "leave the existing password".
         // Remove it before validation so it cannot reach hash_password().
         if (!empty($user['id']) && isset($user['settings']) && is_array($user['settings'])) {
@@ -85,7 +96,34 @@ class Users_model extends EA_Model
         }
 
         try {
+            if ($current_password !== null && !empty($user['id']) && isset($user['settings']['password'])) {
+                $locked = $this->db
+                    ->query(
+                        'SELECT `users`.`ldap_dn`, `user_settings`.`password`, `user_settings`.`salt` FROM `' .
+                            $this->db->dbprefix('users') .
+                            '` AS `users` INNER JOIN `' .
+                            $this->db->dbprefix('user_settings') .
+                            '` AS `user_settings` ON `user_settings`.`id_users` = `users`.`id` WHERE `users`.`id` = ? FOR UPDATE',
+                        [(int) $user['id']],
+                    )
+                    ->row_array();
+
+                if (!$locked || !empty($locked['ldap_dn'])) {
+                    throw new RuntimeException(
+                        'Directory-managed accounts must change their password in the directory.',
+                    );
+                }
+
+                $valid = verify_password((string) $locked['password'], (string) $locked['salt'], $current_password);
+                if (!$valid) {
+                    throw new RuntimeException('The current password is incorrect.');
+                }
+            }
+
             $user_id = empty($user['id']) ? $this->insert($user) : $this->update($user);
+            if ($this->last_saved_credential_version === null) {
+                $this->last_saved_credential_version = $this->current_credential_version($user_id);
+            }
 
             if ($owns_transaction && !$this->db->trans_commit()) {
                 throw new RuntimeException('Could not commit user save transaction.');
@@ -239,7 +277,9 @@ class Users_model extends EA_Model
         $settings = $user['settings'];
         unset($user['settings']);
 
-        if (isset($settings['password'])) {
+        $password_changed = isset($settings['password']);
+
+        if ($password_changed) {
             $existing_settings = $this->db->get_where('user_settings', ['id_users' => $user['id']])->row_array();
 
             if (empty($existing_settings)) {
@@ -254,6 +294,10 @@ class Users_model extends EA_Model
         }
 
         $this->set_settings($user['id'], $settings);
+
+        if ($password_changed) {
+            $this->bump_credential_version((int) $user['id']);
+        }
 
         return $user['id'];
     }

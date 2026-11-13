@@ -79,6 +79,7 @@ final class AccountPasswordChangeHttpTest extends TestCase
 
         $oldPassword = $this->credentials['password'];
         $beforeHash = $this->actorSettingsBefore['password'] ?? null;
+        $beforeCredentialVersion = (int) ($this->actorBefore['credential_version'] ?? 0);
         self::assertIsString($beforeHash);
         self::assertNotEmpty($this->foreignSettingsBefore['password'] ?? null);
 
@@ -93,7 +94,16 @@ final class AccountPasswordChangeHttpTest extends TestCase
             $admin = $this->login($client, $oldPassword);
             $account = $this->accountPayload($this->actorBefore, $this->actorSettingsBefore);
             $account['id'] = (string) $this->fixture->providerId;
+            $metadataOnly = $account;
+            $metadataOnly['first_name'] = $this->fixture->run . '_metadata_only';
+            self::assertSame(200, $admin->post($path, ['account' => $metadataOnly])->statusCode);
+            self::assertSame(
+                200,
+                $admin->get('account')->statusCode,
+                'Metadata-only save must preserve the current session version.',
+            );
             $account['settings']['password'] = $newPassword;
+            $account['settings']['current_password'] = $oldPassword;
 
             $saved = $admin->post($path, ['account' => $account]);
             self::assertSame(200, $saved->statusCode, $path . ' must accept the authenticated password change.');
@@ -103,6 +113,11 @@ final class AccountPasswordChangeHttpTest extends TestCase
 
             $actorSettings = $this->fixture->userSettingsRow($this->fixture->actorId);
             self::assertNotSame($beforeHash, $actorSettings['password'] ?? null, $path);
+            self::assertSame(
+                $beforeCredentialVersion + 1,
+                (int) ($this->fixture->row('users', $this->fixture->actorId)['credential_version'] ?? 0),
+                'A successful password change must advance the persisted credential version exactly once.',
+            );
             self::assertTrue(
                 $this->loginResult($this->server->client(), $this->credentials['admin_username'], $newPassword),
                 'New password must authenticate through the real login endpoint.',
@@ -125,6 +140,7 @@ final class AccountPasswordChangeHttpTest extends TestCase
 
             $oldPassword = $newPassword;
             $beforeHash = $actorSettings['password'];
+            $beforeCredentialVersion++;
         }
 
         $serverLog = file_get_contents($this->server->directory . '/server.log');
@@ -149,6 +165,7 @@ final class AccountPasswordChangeHttpTest extends TestCase
                 );
                 $account = $this->accountPayload($this->actorBefore, $this->actorSettingsBefore);
                 $account['settings']['password'] = $value;
+                $account['settings']['current_password'] = $this->credentials['password'];
 
                 $response = $admin->post($path, ['account' => $account]);
                 self::assertSame(500, $response->statusCode, $path . ' must reject invalid passwords.');
@@ -166,6 +183,74 @@ final class AccountPasswordChangeHttpTest extends TestCase
                 );
             }
         }
+    }
+
+    public function testWrongCurrentPasswordAndDirectoryManagedAccountAreRejectedWithoutMutation(): void
+    {
+        self::assertNotNull($this->fixture);
+        self::assertNotNull($this->server);
+
+        $admin = $this->login($this->server->client(), $this->credentials['password']);
+        $account = $this->accountPayload($this->actorBefore, $this->actorSettingsBefore);
+        $account['settings']['password'] = $this->fixture->run . '_wrong_current_new';
+        $account['settings']['current_password'] = 'definitely-wrong';
+
+        $response = $admin->post('account/save', ['account' => $account]);
+        self::assertSame(500, $response->statusCode);
+        self::assertSame($this->actorSettingsBefore, $this->fixture->userSettingsRow($this->fixture->actorId));
+
+        $db = get_instance()->db;
+        $db->update(
+            'users',
+            ['ldap_dn' => 'uid=' . $this->fixture->run . ',ou=people,dc=example,dc=org'],
+            [
+                'id' => $this->fixture->actorId,
+            ],
+        );
+        try {
+            $account['settings']['current_password'] = $this->credentials['password'];
+            $account['settings']['password'] = $this->fixture->run . '_ldap_new';
+            $response = $admin->post('account/save', ['account' => $account]);
+            self::assertSame(500, $response->statusCode);
+            self::assertSame(
+                $this->actorSettingsBefore,
+                $this->fixture->userSettingsRow($this->fixture->actorId),
+                'LDAP-backed account must not mutate the local password hash.',
+            );
+        } finally {
+            $db->update(
+                'users',
+                ['ldap_dn' => $this->actorBefore['ldap_dn'] ?? null],
+                ['id' => $this->fixture->actorId],
+            );
+        }
+    }
+
+    public function testPasswordChangeInvalidatesAnotherExistingSessionOnNextRequest(): void
+    {
+        self::assertNotNull($this->fixture);
+        self::assertNotNull($this->server);
+
+        $first = $this->login($this->server->client(), $this->credentials['password']);
+        $second = $this->login($this->server->client(), $this->credentials['password']);
+        $legacySessionId = $second->getCookie('ea_session');
+        self::assertNotNull($legacySessionId);
+        $legacySessionPath = $this->server->directory . '/sessions/sess_' . $legacySessionId;
+        $legacySession = file_get_contents($legacySessionPath);
+        self::assertIsString($legacySession);
+        self::assertStringContainsString('credential_version|i:0;', $legacySession);
+        $legacySessionWithoutVersion = preg_replace('/credential_version\|i:\d+;/', '', $legacySession);
+        self::assertIsString($legacySessionWithoutVersion);
+        self::assertStringNotContainsString('credential_version|', $legacySessionWithoutVersion);
+        self::assertNotFalse(file_put_contents($legacySessionPath, $legacySessionWithoutVersion));
+        $account = $this->accountPayload($this->actorBefore, $this->actorSettingsBefore);
+        $account['settings']['password'] = $this->fixture->run . '_session_rotation';
+        $account['settings']['current_password'] = $this->credentials['password'];
+
+        $saved = $first->post('account/save', ['account' => $account]);
+        self::assertSame(200, $saved->statusCode);
+        self::assertSame(200, $first->get('account')->statusCode, 'The changing session remains valid.');
+        self::assertSame(403, $second->get('account')->statusCode);
     }
 
     public function testDatabaseFailureAfterUserWriteReturnsGenericHttp500AndRollsBack(): void
@@ -222,6 +307,7 @@ final class AccountPasswordChangeHttpTest extends TestCase
             $account = $this->accountPayload($beforeUser, $beforeSettings);
             $account['first_name'] = $this->fixture->run . '_must_rollback';
             $account['settings']['password'] = $this->fixture->run . '_valid_new_password';
+            $account['settings']['current_password'] = $this->credentials['password'];
 
             $response = $admin->post('account/save', ['account' => $account]);
             self::assertSame(500, $response->statusCode, $response->body);
@@ -264,6 +350,7 @@ final class AccountPasswordChangeHttpTest extends TestCase
             'settings' => [
                 'username' => $settings['username'],
                 'password' => '',
+                'current_password' => '',
                 'calendar_view' => $settings['calendar_view'] ?? 'default',
             ],
         ];

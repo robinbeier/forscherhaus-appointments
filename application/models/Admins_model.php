@@ -61,6 +61,15 @@ class Admins_model extends EA_Model
      */
     public function save(array $admin): int
     {
+        if (
+            !empty($admin['id']) &&
+            isset($admin['settings']) &&
+            is_array($admin['settings']) &&
+            array_key_exists('password', $admin['settings']) &&
+            empty($admin['settings']['password'])
+        ) {
+            unset($admin['settings']['password']);
+        }
         $this->validate($admin);
 
         $owns_transaction = !$this->db->trans_active();
@@ -357,7 +366,8 @@ class Admins_model extends EA_Model
 
         unset($admin['settings']);
 
-        if (!empty($settings['password'])) {
+        $password_changed = !empty($settings['password']);
+        if ($password_changed) {
             $existing_settings = $this->db->get_where('user_settings', ['id_users' => $admin['id']])->row_array();
 
             if (empty($existing_settings)) {
@@ -378,6 +388,9 @@ class Admins_model extends EA_Model
         }
 
         $this->set_settings($admin['id'], $settings);
+        if ($password_changed) {
+            $this->bump_credential_version((int) $admin['id']);
+        }
 
         return $admin['id'];
     }

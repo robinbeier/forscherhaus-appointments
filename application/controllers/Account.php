@@ -41,7 +41,7 @@ class Account extends EA_Controller
         //
     ];
 
-    public array $allowed_user_setting_fields = ['username', 'password', 'calendar_view'];
+    public array $allowed_user_setting_fields = ['username', 'password', 'calendar_view', 'current_password'];
 
     public array $optional_user_setting_fields = [
         //
@@ -147,7 +147,23 @@ class Account extends EA_Controller
                 unset($account['settings']['password']);
             }
 
-            $this->users_model->save($account);
+            $new_password = $account['settings']['password'] ?? null;
+            $current_password = $account['settings']['current_password'] ?? null;
+            unset($account['settings']['current_password']);
+
+            if ($new_password !== null && (!is_string($current_password) || $current_password === '')) {
+                throw new RuntimeException('The current password is incorrect.');
+            }
+
+            $this->users_model->save($account, $new_password === null ? null : $current_password);
+
+            if ($new_password !== null) {
+                $saved_version = $this->users_model->last_saved_credential_version();
+                if ($saved_version === null) {
+                    throw new RuntimeException('Could not confirm the new credential version.');
+                }
+                session(['credential_version' => $saved_version]);
+            }
 
             session([
                 'user_email' => $account['email'],
