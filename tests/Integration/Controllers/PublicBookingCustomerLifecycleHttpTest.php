@@ -360,9 +360,8 @@ final class PublicBookingCustomerLifecycleHttpTest extends TestCase
             ->get_where('consents', ['customer_id' => $id])
             ->result_array();
         self::assertCount(2, $beforeConsents);
-        get_instance()->load->library('migration');
-        $migration = get_instance()->migration;
-        self::assertSame(70, (int) $db->get('migrations')->row_array()['version']);
+        $baselineMigrationVersion = (int) $db->get('migrations')->row_array()['version'];
+        self::assertGreaterThanOrEqual(70, $baselineMigrationVersion);
         $beforeMarker = $db->get_where('public_booking_customers', ['customer_id' => $id])->row_array();
         $schema = new Migration_Create_public_booking_customers();
         $schema->up();
@@ -393,7 +392,9 @@ final class PublicBookingCustomerLifecycleHttpTest extends TestCase
                 ->result_array(),
         );
         try {
-            self::assertNotFalse($migration->version(69));
+            // Exercise only migration 070 directly; the migration manager would
+            // also roll back later migrations such as credential_version.
+            $schema->down();
             self::assertFalse($db->table_exists('public_booking_customers'));
             self::assertFalse($db->field_exists('customer_id', 'consents'));
             self::assertNotEmpty($db->get_where('users', ['id' => $id])->row_array());
@@ -402,9 +403,9 @@ final class PublicBookingCustomerLifecycleHttpTest extends TestCase
                 self::assertSame($row, $db->get_where('consents', ['id' => $row['id']])->row_array());
             }
         } finally {
-            self::assertNotFalse($migration->version(70));
+            $schema->up();
         }
-        self::assertSame(70, (int) $db->get('migrations')->row_array()['version']);
+        self::assertSame($baselineMigrationVersion, (int) $db->get('migrations')->row_array()['version']);
         self::assertSame(0, $db->count_all('public_booking_customers'));
         foreach ($beforeConsents as $row) {
             self::assertNull($db->get_where('consents', ['id' => $row['id']])->row_array()['customer_id']);

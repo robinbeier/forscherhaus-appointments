@@ -233,9 +233,11 @@ final class AccountPasswordChangeHttpTest extends TestCase
 
         $first = $this->login($this->server->client(), $this->credentials['password']);
         $second = $this->login($this->server->client(), $this->credentials['password']);
+        self::assertSame(200, $second->get('account')->statusCode);
         $legacySessionId = $second->getCookie('ea_session');
         self::assertNotNull($legacySessionId);
-        $legacySessionPath = $this->server->directory . '/sessions/sess_' . $legacySessionId;
+        $legacySessionPath = $this->server->directory . '/sessions/sess_' . rawurldecode($legacySessionId);
+        self::assertFileExists($legacySessionPath);
         $legacySession = file_get_contents($legacySessionPath);
         self::assertIsString($legacySession);
         self::assertStringContainsString('credential_version|i:0;', $legacySession);
