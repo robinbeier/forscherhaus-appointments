@@ -5,7 +5,10 @@ declare(strict_types=1);
 define('BASEPATH', __DIR__);
 define('APPPATH', dirname(__DIR__, 2) . '/application/');
 define('PRIV_SYSTEM_SETTINGS', 'system_settings');
+define('PRIV_VIEW', 1);
+define('PRIV_ADD', 2);
 define('PRIV_EDIT', 4);
+define('PRIV_DELETE', 8);
 define('SYNTHETIC_USER_ID', 7001);
 
 $controllerName = $argv[1] ?? '';
@@ -151,9 +154,10 @@ final class ProbeDatabase
     }
     public function query(string $sql, array $params = []): object|false
     {
+        global $scenario;
         $isRole = str_contains($sql, 'FROM `ea_roles`');
         $GLOBALS['events'][] = $isRole ? 'lock:role' : 'lock:actor';
-        return new ProbePermissionQuery($isRole ? 'role' : 'actor', 'authorized');
+        return new ProbePermissionQuery($isRole ? 'role' : 'actor', $scenario);
     }
 }
 final class ProbePermissionQuery
@@ -161,7 +165,8 @@ final class ProbePermissionQuery
     public function __construct(private string $type, private string $scenario) {}
     public function row_array(): array
     {
-        return $this->type === 'role' ? ['system_settings' => 4] : ['id_roles' => 1];
+        $mask = $this->scenario === 'invalid-mask' ? PRIV_EDIT | 16 : PRIV_EDIT;
+        return $this->type === 'role' ? ['system_settings' => $mask] : ['id_roles' => 1];
     }
 }
 final class ProbeSettingsModel

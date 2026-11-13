@@ -107,6 +107,14 @@ final class BusinessSettingsWorkingPlanAtomicTest extends TestCase
         );
     }
 
+    public function testInvalidSystemSettingsMaskCannotAuthorizeWorkingPlanWrite(): void
+    {
+        $result = $this->probe('invalid-mask', 'POST');
+        self::assertSame(403, $result['status']);
+        self::assertContains('rollback', $result['events']);
+        self::assertNotContains('providers:get', $result['events']);
+    }
+
     public function testJoinedTransactionRetainsCallerOwnership(): void
     {
         $success = $this->probe('joined-success', 'POST');

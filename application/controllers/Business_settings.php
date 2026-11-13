@@ -311,6 +311,8 @@ class Business_settings extends EA_Controller
         }
 
         $role = $role_query->row_array();
-        return is_array($role) && ((int) ($role['system_settings'] ?? 0) & PRIV_EDIT) === PRIV_EDIT;
+        $mask = (int) ($role['system_settings'] ?? 0);
+        $known_mask = PRIV_VIEW | PRIV_ADD | PRIV_EDIT | PRIV_DELETE;
+        return is_array($role) && $mask >= 0 && ($mask & ~$known_mask) === 0 && ($mask & PRIV_EDIT) === PRIV_EDIT;
     }
 }

@@ -178,6 +178,17 @@ final class SettingsPostGuardTest extends TestCase
         }
     }
 
+    public function testInvalidPermissionMaskCannotAuthorizePageWrite(): void
+    {
+        foreach (['General_settings', 'Business_settings'] as $controller) {
+            $result = $this->probe($controller, 'invalid-mask', 'POST');
+            self::assertSame(403, $result['status'], $controller);
+            self::assertContains('transaction:rollback', $result['events'], $controller);
+            self::assertSame([], $result['saved'], $controller);
+            self::assertSame([], $result['saved_batches'], $controller);
+        }
+    }
+
     public function testPageAllowlistRejectsMissingOrStructuredValues(): void
     {
         foreach (

@@ -5,7 +5,10 @@ declare(strict_types=1);
 define('BASEPATH', __DIR__);
 define('APPPATH', dirname(__DIR__, 2) . '/application/');
 define('PRIV_SYSTEM_SETTINGS', 'system_settings');
+define('PRIV_VIEW', 1);
+define('PRIV_ADD', 2);
 define('PRIV_EDIT', 4);
+define('PRIV_DELETE', 8);
 define('SYNTHETIC_USER_ID', 7001);
 
 $scenario = $argv[1] ?? 'success';
@@ -108,7 +111,11 @@ final class ProbeDatabase
             $is_role
                 ? [
                     'users' => $scenario === 'wrong-column' ? PRIV_EDIT : 0,
-                    'system_settings' => in_array($scenario, ['revoked', 'wrong-column'], true) ? 0 : PRIV_EDIT,
+                    'system_settings' => in_array($scenario, ['revoked', 'wrong-column'], true)
+                        ? 0
+                        : ($scenario === 'invalid-mask'
+                            ? PRIV_EDIT | 16
+                            : PRIV_EDIT),
                 ]
                 : ['id_roles' => 1],
         );
