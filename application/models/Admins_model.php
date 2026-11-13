@@ -360,6 +360,23 @@ class Admins_model extends EA_Model
      */
     protected function update(array $admin): int
     {
+        $current = $this->db->query(
+            'SELECT `id`, `id_roles` FROM `' . $this->db->dbprefix('users') . '` WHERE `id` = ? FOR UPDATE',
+            [$admin['id']],
+        );
+        $current_admin = $current === false ? [] : $current->row_array();
+        if (empty($current_admin)) {
+            throw new RuntimeException('Could not lock admin before update.');
+        }
+
+        if ((int) $current_admin['id_roles'] !== $this->get_admin_role_id()) {
+            throw new RuntimeException('The target is no longer an admin and cannot be updated.');
+        }
+
+        // The API update may have been decoded from a snapshot taken before
+        // this lock. Never carry a stale or caller-derived role into the write.
+        $admin['id_roles'] = (int) $current_admin['id_roles'];
+
         $settings = $admin['settings'];
 
         $settings['id_users'] = $admin['id'];
