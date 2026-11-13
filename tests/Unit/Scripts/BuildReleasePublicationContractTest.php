@@ -205,7 +205,7 @@ final class BuildReleasePublicationContractTest extends TestCase
             $exitCode,
         );
         $output = (string) file_get_contents('/tmp/build_ea_' . $release . '.log');
-        self::assertSame(0, $exitCode);
+        self::assertSame(0, $exitCode, $output);
         self::assertStringContainsString('[✓] Build abgeschlossen:', $output);
         preg_match('/\[✓\] Build abgeschlossen: (.+)$/m', $output, $matches);
         self::assertCount(2, $matches);

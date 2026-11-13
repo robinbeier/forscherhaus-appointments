@@ -223,7 +223,17 @@ fi
 if [[ "$DRYRUN" -eq 0 ]]; then
   # macOS: avoid Apple metadata/xattrs in the release tarball to keep remote
   # validation output small and reproducible across GNU tar environments.
-  COPYFILE_DISABLE=1 tar --no-mac-metadata --no-xattrs -C "$STAGE" -czf "$ARCHIVE" .
+  # GNU tar (used in CI) does not know the macOS metadata switch. Keep the
+  # archive reproducible on macOS while remaining portable in Linux builders.
+  TAR_METADATA_ARGS=()
+  TAR_HELP="$(tar --help 2>&1)"
+  if [[ "$TAR_HELP" == *'--no-mac-metadata'* ]]; then
+    TAR_METADATA_ARGS+=(--no-mac-metadata)
+  fi
+  if [[ "$TAR_HELP" == *'--no-xattrs'* ]]; then
+    TAR_METADATA_ARGS+=(--no-xattrs)
+  fi
+  COPYFILE_DISABLE=1 tar "${TAR_METADATA_ARGS[@]}" -C "$STAGE" -czf "$ARCHIVE" .
   # 4) Vollständigen Archivinhalt prüfen
   php scripts/release-gate/validate_release_artifact.php --archive="$ARCHIVE"
   php scripts/ops/create_release_build_provenance.php \
