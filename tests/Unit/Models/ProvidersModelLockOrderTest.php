@@ -112,6 +112,11 @@ final class ProvidersModelLockOrderFakeDatabase
     /** @param array<int, mixed> $bindings */
     public function query(string $sql, array $bindings = []): ProvidersModelLockOrderFakeQuery
     {
+        if (str_contains($sql, 'UPDATE `ea_users` SET `credential_version`')) {
+            $this->events[] = 'update_users';
+            return new ProvidersModelLockOrderFakeQuery([]);
+        }
+
         if (str_contains($sql, 'id_roles') && str_contains($sql, 'FROM `ea_users`')) {
             $this->events[] = 'target_lock';
             return new ProvidersModelLockOrderFakeQuery([['id_roles' => 7]]);
