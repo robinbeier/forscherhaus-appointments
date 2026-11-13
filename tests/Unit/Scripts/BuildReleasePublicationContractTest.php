@@ -119,6 +119,7 @@ final class BuildReleasePublicationContractTest extends TestCase
         self::assertIsString($script);
         self::assertStringContainsString('tar --no-mac-metadata --version', $script);
         self::assertStringContainsString('tar --no-xattrs --version', $script);
+        self::assertStringContainsString('tar "${TAR_METADATA_ARGS[@]}" -C "$STAGE" -czf "$ARCHIVE" .', $script);
         self::assertStringNotContainsString('TAR_HELP="$(tar --help', $script);
 
         $probe = <<<'SH'
@@ -131,11 +132,12 @@ final class BuildReleasePublicationContractTest extends TestCase
         if tar --no-xattrs --version >/dev/null 2>&1; then
           TAR_METADATA_ARGS+=(--no-xattrs)
         fi
-        printf '%s\n' "${TAR_METADATA_ARGS[*]}"
+        tar "${TAR_METADATA_ARGS[@]}" -C /tmp -czf /tmp/release-test.tar.gz .
         SH;
         $tar = <<<'SH'
         #!/usr/bin/env bash
         set -euo pipefail
+        printf '%s\n' "$*" >>"${FAKE_TAR_LOG:?}"
         if [[ "$1" == '--no-mac-metadata' || "$1" == '--no-xattrs' ]]; then
           [[ "${FAKE_TAR_MODE:-gnu}" == 'bsdtar' ]] && exit 0
           exit 2
@@ -146,22 +148,42 @@ final class BuildReleasePublicationContractTest extends TestCase
         $tarPath = $this->workspace . '/tar';
         $this->writeExecutable($probePath, $probe);
         $this->writeExecutable($tarPath, $tar);
+        $logPath = $this->workspace . '/tar.log';
 
         $gnu = $this->runCommandOutput(
             'PATH=' .
                 escapeshellarg($this->workspace . ':' . (getenv('PATH') ?: '')) .
-                ' FAKE_TAR_MODE=gnu bash ' .
+                ' FAKE_TAR_MODE=gnu FAKE_TAR_LOG=' .
+                escapeshellarg($logPath) .
+                ' bash ' .
                 escapeshellarg($probePath),
         );
-        self::assertSame("\n", $gnu);
+        self::assertSame('', $gnu);
+        $gnuCalls = file($logPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        self::assertIsArray($gnuCalls);
+        $gnuArchiveCall = end($gnuCalls);
+        self::assertIsString($gnuArchiveCall);
+        self::assertStringContainsString('-czf /tmp/release-test.tar.gz .', $gnuArchiveCall);
+        self::assertStringNotContainsString('--no-mac-metadata', $gnuArchiveCall);
+        self::assertStringNotContainsString('--no-xattrs', $gnuArchiveCall);
 
         $bsd = $this->runCommandOutput(
             'PATH=' .
                 escapeshellarg($this->workspace . ':' . (getenv('PATH') ?: '')) .
-                ' FAKE_TAR_MODE=bsdtar bash ' .
+                ' FAKE_TAR_MODE=bsdtar FAKE_TAR_LOG=' .
+                escapeshellarg($logPath) .
+                ' bash ' .
                 escapeshellarg($probePath),
         );
-        self::assertSame("--no-mac-metadata --no-xattrs\n", $bsd);
+        self::assertSame('', $bsd);
+        $bsdCalls = file($logPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        self::assertIsArray($bsdCalls);
+        $bsdArchiveCall = end($bsdCalls);
+        self::assertIsString($bsdArchiveCall);
+        self::assertStringContainsString(
+            '--no-mac-metadata --no-xattrs -C /tmp -czf /tmp/release-test.tar.gz .',
+            $bsdArchiveCall,
+        );
     }
 
     public function testStagingPruneRemovesDocumentationAndKeepsRuntimeFiles(): void
