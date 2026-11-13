@@ -124,26 +124,27 @@ final class StaffSettingsApiHttpTest extends TestCase
         self::assertCount(1, $providers);
 
         $provider = $providers[0];
-        self::assertSame(
-            [
-                'address',
-                'city',
-                'email',
-                'firstName',
-                'id',
-                'isPrivate',
-                'language',
-                'ldapDn',
-                'lastName',
-                'mobile',
-                'notes',
-                'phone',
-                'state',
-                'timezone',
-                'zip',
-            ],
-            array_keys($provider),
-        );
+        $expectedProviderKeys = [
+            'address',
+            'city',
+            'email',
+            'firstName',
+            'id',
+            'isPrivate',
+            'language',
+            'ldapDn',
+            'lastName',
+            'mobile',
+            'notes',
+            'phone',
+            'state',
+            'timezone',
+            'zip',
+        ];
+        $actualProviderKeys = array_keys($provider);
+        sort($expectedProviderKeys);
+        sort($actualProviderKeys);
+        self::assertSame($expectedProviderKeys, $actualProviderKeys);
         self::assertArrayNotHasKey('id_roles', $provider);
         self::assertArrayNotHasKey('credential_version', $provider);
         self::assertArrayNotHasKey('password', $provider);
