@@ -204,7 +204,7 @@ class Users_model extends EA_Model
         $user['update_datetime'] = date('Y-m-d H:i:s');
 
         $settings = $user['settings'];
-        unset($user['settings']);
+        unset($user['settings'], $user['credential_version']);
 
         if (!$this->db->insert('users', $user)) {
             throw new RuntimeException('Could not insert user.');
@@ -275,7 +275,7 @@ class Users_model extends EA_Model
         $user['update_datetime'] = date('Y-m-d H:i:s');
 
         $settings = $user['settings'];
-        unset($user['settings']);
+        unset($user['settings'], $user['credential_version']);
 
         $password_changed = isset($settings['password']);
 

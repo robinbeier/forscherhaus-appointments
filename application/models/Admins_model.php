@@ -288,7 +288,7 @@ class Admins_model extends EA_Model
 
         $settings = $admin['settings'];
 
-        unset($admin['settings']);
+        unset($admin['settings'], $admin['credential_version']);
 
         $admin['create_datetime'] = date('Y-m-d H:i:s');
         $admin['update_datetime'] = date('Y-m-d H:i:s');
@@ -382,6 +382,9 @@ class Admins_model extends EA_Model
         $settings['id_users'] = $admin['id'];
 
         unset($admin['settings']);
+        // Credential versions are advanced only by the atomic password-change
+        // path. Never write a stale API snapshot back during metadata updates.
+        unset($admin['credential_version']);
 
         $password_changed = !empty($settings['password']);
         if ($password_changed) {

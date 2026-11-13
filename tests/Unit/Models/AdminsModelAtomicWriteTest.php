@@ -175,6 +175,22 @@ final class AdminsModelAtomicWriteTest extends TestCase
         $this->assertSame($before['salt'], $after['salt']);
     }
 
+    public function test_stale_credential_version_from_metadata_snapshot_cannot_overwrite_newer_value(): void
+    {
+        $adminId = $this->adminsModel->save($this->adminData());
+        $this->createdUserIds[] = $adminId;
+        $db = get_instance()->db;
+        $stale = $this->adminsModel->find($adminId);
+        $before = (int) ($stale['credential_version'] ?? 0);
+
+        self::assertTrue(
+            $db->set('credential_version', 'credential_version + 1', false)->where('id', $adminId)->update('users'),
+        );
+        $this->adminsModel->save($stale);
+
+        self::assertSame($before + 1, (int) $db->get_where('users', ['id' => $adminId])->row('credential_version'));
+    }
+
     public function test_settings_failure_after_real_mutation_rolls_back_insert_and_update(): void
     {
         $model = $this->failingModel();

@@ -348,7 +348,7 @@ class Secretaries_model extends EA_Model
 
         $settings = $secretary['settings'];
 
-        unset($secretary['providers'], $secretary['settings']);
+        unset($secretary['providers'], $secretary['settings'], $secretary['credential_version']);
 
         if (!$this->db->insert('users', $secretary)) {
             throw new RuntimeException('Could not insert secretary.');
@@ -423,7 +423,7 @@ class Secretaries_model extends EA_Model
 
         $settings = $secretary['settings'];
 
-        unset($secretary['providers'], $secretary['settings']);
+        unset($secretary['providers'], $secretary['settings'], $secretary['credential_version']);
 
         $password_changed = isset($settings['password']);
         if ($password_changed) {

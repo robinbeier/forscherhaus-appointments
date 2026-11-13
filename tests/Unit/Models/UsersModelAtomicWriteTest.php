@@ -152,6 +152,22 @@ final class UsersModelAtomicWriteTest extends TestCase
         $this->assertSame($before['password'], $afterMissing['password']);
     }
 
+    public function test_stale_credential_version_from_metadata_snapshot_cannot_overwrite_newer_value(): void
+    {
+        $userId = $this->usersModel->save($this->userData());
+        $this->createdUserIds[] = $userId;
+        $db = get_instance()->db;
+        $stale = $this->usersModel->find($userId);
+        $before = (int) ($stale['credential_version'] ?? 0);
+
+        self::assertTrue(
+            $db->set('credential_version', 'credential_version + 1', false)->where('id', $userId)->update('users'),
+        );
+        $this->usersModel->save($stale);
+
+        self::assertSame($before + 1, (int) $db->get_where('users', ['id' => $userId])->row('credential_version'));
+    }
+
     public function test_password_boundary_rejects_short_zero_and_non_string_values_before_mutation(): void
     {
         $values = ['0', 'a', 'ab', 'abc', 'abcd', 'abcde', 'abcdef', null, [], true, 1234567];

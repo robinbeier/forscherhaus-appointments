@@ -25,6 +25,7 @@ final class ProvidersModelLockOrderTest extends TestCase
                 'first_name' => 'Synthetic',
                 'last_name' => 'Provider',
                 'email' => 'provider@synthetic.invalid',
+                'credential_version' => 0,
                 'services' => [30, 20, 30],
                 'settings' => ['username' => 'provider', 'password' => 'synthetic-password'],
             ]);
@@ -45,6 +46,7 @@ final class ProvidersModelLockOrderTest extends TestCase
             'Association writes must use the canonical requested service IDs included in the parent lock set.',
         );
         self::assertContains('bump_credential_version', $database->events);
+        self::assertArrayNotHasKey('credential_version', $database->lastUserUpdate);
     }
 }
 
@@ -71,6 +73,8 @@ final class ProvidersModelLockOrderFakeDatabase
     public array $serviceLockBindings = [];
     /** @var list<int> */
     public array $writtenServiceIds = [];
+    /** @var array<string, mixed> */
+    public array $lastUserUpdate = [];
     public int $affected = 0;
     public bool $transactionActive = true;
 
@@ -167,6 +171,9 @@ final class ProvidersModelLockOrderFakeDatabase
     public function update(string $table, array $data, array $where = []): bool
     {
         $this->events[] = 'update_' . $table;
+        if ($table === 'users') {
+            $this->lastUserUpdate = $data;
+        }
         return true;
     }
 
