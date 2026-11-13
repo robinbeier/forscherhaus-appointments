@@ -322,6 +322,53 @@ final class ServiceCategoriesLegacyHttpTest extends TestCase
         self::assertSame($before, $this->row($this->categoryId));
     }
 
+    public function testRevokedServicePermissionsRejectAllMutationsWithoutPersistingChanges(): void
+    {
+        $admin = $this->login($this->credentials['admin_username']);
+        $db = get_instance()->db;
+        $before = $this->row($this->categoryId);
+        $roleBefore = $db->get_where('roles', ['id' => $this->roleBefore['id']])->row_array();
+        self::assertNotEmpty($roleBefore);
+
+        try {
+            self::assertTrue((bool) $db->update('roles', ['services' => 0], ['id' => $this->roleBefore['id']]));
+            $requests = [
+                [
+                    'service_categories/store',
+                    ['service_category' => ['name' => $this->fixture->run . '_revoked_store']],
+                ],
+                [
+                    'service_categories/update',
+                    [
+                        'service_category' => [
+                            'id' => $this->categoryId,
+                            'name' => $this->fixture->run . '_revoked_update',
+                        ],
+                    ],
+                ],
+                ['service_categories/destroy', ['service_category_id' => $this->categoryId]],
+            ];
+
+            foreach ($requests as [$path, $payload]) {
+                $response = $admin->post($path, $payload);
+                self::assertSame(403, $response->statusCode, $path . ': ' . $response->body);
+                self::assertSame($before, $this->row($this->categoryId));
+                if (isset($payload['service_category']['name'])) {
+                    self::assertSame(
+                        [],
+                        $db
+                            ->get_where('service_categories', [
+                                'name' => $payload['service_category']['name'],
+                            ])
+                            ->result_array(),
+                    );
+                }
+            }
+        } finally {
+            $db->update('roles', ['services' => $roleBefore['services']], ['id' => $this->roleBefore['id']]);
+        }
+    }
+
     /** @return list<array{0:string,1:string,2:array<string,mixed>}> */
     private function deniedRequests(): array
     {

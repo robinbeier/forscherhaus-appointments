@@ -325,6 +325,32 @@ final class ServicesModelLockOrderTest extends TestCase
         $this->assertStringContainsString('DELETE `buffer_blocks`', $database->queries[2]['sql']);
         $this->assertSame(['services'], $database->deletes);
     }
+
+    public function testDeleteRollsBackWhenServiceDeleteFailsAfterParentLocks(): void
+    {
+        $database = new ServicesModelLockOrderFakeDatabase();
+        $database->failServiceDelete = true;
+        $CI = &get_instance();
+        $originalDb = $CI->db;
+        $CI->db = $database;
+
+        try {
+            try {
+                (new ServicesModelLockOrderTestModel())->delete(42);
+                self::fail('Expected the synthetic service delete failure.');
+            } catch (\RuntimeException $exception) {
+                self::assertSame('synthetic service delete failure', $exception->getMessage());
+            }
+        } finally {
+            $CI->db = $originalDb;
+        }
+
+        $this->assertSame(
+            ['begin', 'service_lock', 'appointment_lock', 'buffer_cleanup', 'delete_services', 'rollback'],
+            $database->events,
+        );
+        $this->assertSame(['services'], $database->deletes);
+    }
 }
 
 final class ServicesModelLockOrderTestModel extends Services_model
@@ -352,6 +378,7 @@ final class ServicesModelLockOrderFakeDatabase
     /** @var list<string> */
     public array $events = [];
     public bool $serviceExists = true;
+    public bool $failServiceDelete = false;
     /** @var list<array<string, mixed>> */
     public array $providerRows = [];
     /** @var list<array<string, mixed>> */
@@ -447,6 +474,9 @@ final class ServicesModelLockOrderFakeDatabase
     {
         $this->deletes[] = $table;
         $this->events[] = 'delete_' . $table;
+        if ($table === 'services' && $this->failServiceDelete) {
+            throw new RuntimeException('synthetic service delete failure');
+        }
         return true;
     }
 
