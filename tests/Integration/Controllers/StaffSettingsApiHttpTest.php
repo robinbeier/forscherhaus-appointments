@@ -96,6 +96,61 @@ final class StaffSettingsApiHttpTest extends TestCase
         }
     }
 
+    public function testSecretaryProviderRelationUsesTheProviderApiProjection(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $admin = $this->basicClient($this->credentials['admin_username'], $this->credentials['password']);
+        $payload = $fixture->secretaryWritePayload('provider-projection', [$fixture->providerId]);
+        $created = $this->success($admin->requestJsonApp('POST', 'api/v1/secretaries', $payload), 201);
+        $secretaryId = (int) ($created['id'] ?? 0);
+        self::assertGreaterThan(0, $secretaryId);
+
+        $rows = $this->success(
+            $admin->get('api/v1/secretaries', [
+                'q' => $fixture->run,
+                'with' => 'providers',
+            ]),
+        );
+        $matches = array_values(
+            array_filter(
+                $rows,
+                static fn(mixed $row): bool => is_array($row) && (int) ($row['id'] ?? 0) === $secretaryId,
+            ),
+        );
+        self::assertCount(1, $matches);
+        $providers = $matches[0]['providers'] ?? null;
+        self::assertIsArray($providers);
+        self::assertCount(1, $providers);
+
+        $provider = $providers[0];
+        self::assertSame(
+            [
+                'address',
+                'city',
+                'email',
+                'firstName',
+                'id',
+                'isPrivate',
+                'language',
+                'ldapDn',
+                'lastName',
+                'mobile',
+                'notes',
+                'phone',
+                'state',
+                'timezone',
+                'zip',
+            ],
+            array_keys($provider),
+        );
+        self::assertArrayNotHasKey('id_roles', $provider);
+        self::assertArrayNotHasKey('credential_version', $provider);
+        self::assertArrayNotHasKey('password', $provider);
+        self::assertArrayNotHasKey('salt', $provider);
+        self::assertSame($fixture->providerId, (int) $provider['id']);
+    }
+
     public static function adminCollectionRoutes(): array
     {
         return [
