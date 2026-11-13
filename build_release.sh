@@ -91,6 +91,7 @@ echo "    Logfile : $LOG"
 
 cd "$PROJECT"
 PROJECT="$(pwd -P)"
+source "$PROJECT/scripts/release-gate/lib/create_release_archive.sh"
 [[ "$(git rev-parse --verify HEAD)" == "$EXPECTED_COMMIT" ]] || { echo "[!] HEAD does not match --expected-commit." >&2; exit 1; }
 git diff --quiet --exit-code && git diff --cached --quiet --exit-code || {
   echo "[!] Tracked source is dirty; refusing a release build." >&2; exit 1;
@@ -221,18 +222,7 @@ fi
 
 # 3) Archiv bauen
 if [[ "$DRYRUN" -eq 0 ]]; then
-  # macOS: avoid Apple metadata/xattrs in the release tarball to keep remote
-  # validation output small and reproducible across GNU tar environments.
-  # GNU tar (used in CI) does not know the macOS metadata switch. Keep the
-  # archive reproducible on macOS while remaining portable in Linux builders.
-  TAR_METADATA_ARGS=()
-  if tar --no-mac-metadata --version >/dev/null 2>&1; then
-    TAR_METADATA_ARGS+=(--no-mac-metadata)
-  fi
-  if tar --no-xattrs --version >/dev/null 2>&1; then
-    TAR_METADATA_ARGS+=(--no-xattrs)
-  fi
-  COPYFILE_DISABLE=1 tar "${TAR_METADATA_ARGS[@]}" -C "$STAGE" -czf "$ARCHIVE" .
+  create_release_archive "$STAGE" "$ARCHIVE"
   # 4) Vollständigen Archivinhalt prüfen
   php scripts/release-gate/validate_release_artifact.php --archive="$ARCHIVE"
   php scripts/ops/create_release_build_provenance.php \

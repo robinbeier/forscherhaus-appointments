@@ -117,22 +117,23 @@ final class BuildReleasePublicationContractTest extends TestCase
     {
         $script = file_get_contents(dirname(__DIR__, 3) . '/build_release.sh');
         self::assertIsString($script);
-        self::assertStringContainsString('tar --no-mac-metadata --version', $script);
-        self::assertStringContainsString('tar --no-xattrs --version', $script);
-        self::assertStringContainsString('tar "${TAR_METADATA_ARGS[@]}" -C "$STAGE" -czf "$ARCHIVE" .', $script);
-        self::assertStringNotContainsString('TAR_HELP="$(tar --help', $script);
+        $helperPath = dirname(__DIR__, 3) . '/scripts/release-gate/lib/create_release_archive.sh';
+        $helper = file_get_contents($helperPath);
+        self::assertIsString($helper);
+        self::assertStringContainsString('tar --no-mac-metadata --version', $helper);
+        self::assertStringContainsString('tar --no-xattrs --version', $helper);
+        self::assertStringContainsString('tar "${metadata_args[@]}" -C "$stage" -czf "$archive" .', $helper);
+        self::assertStringContainsString(
+            'source "$PROJECT/scripts/release-gate/lib/create_release_archive.sh"',
+            $script,
+        );
+        self::assertStringContainsString('create_release_archive "$STAGE" "$ARCHIVE"', $script);
 
         $probe = <<<'SH'
         #!/usr/bin/env bash
         set -euo pipefail
-        TAR_METADATA_ARGS=()
-        if tar --no-mac-metadata --version >/dev/null 2>&1; then
-          TAR_METADATA_ARGS+=(--no-mac-metadata)
-        fi
-        if tar --no-xattrs --version >/dev/null 2>&1; then
-          TAR_METADATA_ARGS+=(--no-xattrs)
-        fi
-        tar "${TAR_METADATA_ARGS[@]}" -C /tmp -czf /tmp/release-test.tar.gz .
+        source "$1"
+        create_release_archive /tmp /tmp/release-test.tar.gz
         SH;
         $tar = <<<'SH'
         #!/usr/bin/env bash
@@ -156,7 +157,9 @@ final class BuildReleasePublicationContractTest extends TestCase
                 ' FAKE_TAR_MODE=gnu FAKE_TAR_LOG=' .
                 escapeshellarg($logPath) .
                 ' bash ' .
-                escapeshellarg($probePath),
+                escapeshellarg($probePath) .
+                ' ' .
+                escapeshellarg($helperPath),
         );
         self::assertSame('', $gnu);
         $gnuCalls = file($logPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
@@ -173,7 +176,9 @@ final class BuildReleasePublicationContractTest extends TestCase
                 ' FAKE_TAR_MODE=bsdtar FAKE_TAR_LOG=' .
                 escapeshellarg($logPath) .
                 ' bash ' .
-                escapeshellarg($probePath),
+                escapeshellarg($probePath) .
+                ' ' .
+                escapeshellarg($helperPath),
         );
         self::assertSame('', $bsd);
         $bsdCalls = file($logPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
@@ -366,6 +371,10 @@ final class BuildReleasePublicationContractTest extends TestCase
         self::assertIsString($script);
         $script = str_replace('exec > >(tee -a "$LOG") 2>&1', 'exec >"$LOG" 2>&1', $script);
         self::assertNotFalse(file_put_contents($target, $script));
+        $helper = dirname(__DIR__, 3) . '/scripts/release-gate/lib/create_release_archive.sh';
+        $helperTarget = dirname($target) . '/scripts/release-gate/lib/create_release_archive.sh';
+        self::assertTrue(mkdir(dirname($helperTarget), 0700, true));
+        self::assertNotFalse(copy($helper, $helperTarget));
     }
 
     private function initializeGitFixture(string $project, string $paths): void
