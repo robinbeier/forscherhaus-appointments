@@ -364,6 +364,9 @@ final class PublicBookingCustomerLifecycleHttpTest extends TestCase
         self::assertGreaterThanOrEqual(70, $baselineMigrationVersion);
         $beforeMarker = $db->get_where('public_booking_customers', ['customer_id' => $id])->row_array();
         $schema = new Migration_Create_public_booking_customers();
+        // Direct migration instances do not inherit the test application's
+        // dbforge magic property; wire the already-loaded forge explicitly.
+        $schema->dbforge = get_instance()->dbforge;
         $schema->up();
         self::assertSame(
             $beforeMarker,

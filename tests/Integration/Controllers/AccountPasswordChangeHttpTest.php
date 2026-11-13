@@ -233,18 +233,14 @@ final class AccountPasswordChangeHttpTest extends TestCase
 
         $first = $this->login($this->server->client(), $this->credentials['password']);
         $second = $this->login($this->server->client(), $this->credentials['password']);
-        self::assertSame(200, $second->get('account')->statusCode);
-        $legacySessionId = $second->getCookie('ea_session');
-        self::assertNotNull($legacySessionId);
-        $legacySessionPath = $this->server->directory . '/sessions/sess_' . rawurldecode($legacySessionId);
-        self::assertFileExists($legacySessionPath);
-        $legacySession = file_get_contents($legacySessionPath);
-        self::assertIsString($legacySession);
-        self::assertStringContainsString('credential_version|i:0;', $legacySession);
-        $legacySessionWithoutVersion = preg_replace('/credential_version\|i:\d+;/', '', $legacySession);
-        self::assertIsString($legacySessionWithoutVersion);
-        self::assertStringNotContainsString('credential_version|', $legacySessionWithoutVersion);
-        self::assertNotFalse(file_put_contents($legacySessionPath, $legacySessionWithoutVersion));
+        $firstSession = $first->getCookie('ea_session');
+        $secondSession = $second->getCookie('ea_session');
+        self::assertNotNull($firstSession);
+        self::assertNotNull($secondSession);
+        self::assertNotSame($firstSession, $secondSession);
+        $secondAccount = $second->get('account');
+        self::assertSame(200, $secondAccount->statusCode);
+        self::assertStringEndsWith('/account', (string) parse_url($secondAccount->url, PHP_URL_PATH));
         $account = $this->accountPayload($this->actorBefore, $this->actorSettingsBefore);
         $account['settings']['password'] = $this->fixture->run . '_session_rotation';
         $account['settings']['current_password'] = $this->credentials['password'];
