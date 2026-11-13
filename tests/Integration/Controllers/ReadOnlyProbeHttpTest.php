@@ -11,27 +11,52 @@ require_once dirname(__DIR__) . '/Support/DefenseCycleHttpServer.php';
 /** The bounded probe routes stay stateless on the real loopback application path. */
 final class ReadOnlyProbeHttpTest extends TestCase
 {
+    private const PROBE_TOKEN = 'synthetic-read-only-probe-token';
     private ?DefenseCycleHttpServer $server = null;
+    private ?string $previousEnvToken = null;
+    private bool $hadEnvToken = false;
+    private ?string $previousProcessToken = null;
+    private bool $hadProcessToken = false;
 
     protected function setUp(): void
     {
+        $this->hadEnvToken = array_key_exists('HEALTHZ_TOKEN', $_ENV);
+        $this->previousEnvToken = $_ENV['HEALTHZ_TOKEN'] ?? null;
+        $processToken = getenv('HEALTHZ_TOKEN');
+        $this->hadProcessToken = $processToken !== false;
+        $this->previousProcessToken = $processToken === false ? null : $processToken;
+
         if (getenv('FH_DEFENSE_ISOLATED') !== '1' || !is_file('/.dockerenv')) {
             self::markTestSkipped('Requires the explicitly owned isolated Docker runner.');
         }
 
-        $this->server = new DefenseCycleHttpServer();
+        $_ENV['HEALTHZ_TOKEN'] = self::PROBE_TOKEN;
+        putenv('HEALTHZ_TOKEN=' . self::PROBE_TOKEN);
+        try {
+            $this->server = new DefenseCycleHttpServer();
+        } catch (Throwable $error) {
+            $this->restoreHealthToken();
+            throw $error;
+        }
     }
 
     protected function tearDown(): void
     {
-        $this->server?->close();
+        try {
+            $this->server?->close();
+        } finally {
+            $this->restoreHealthToken();
+        }
     }
 
     public function testModernAndLegacyProbeRoutesRemainStatelessOverLoopback(): void
     {
         $server = $this->server;
         self::assertNotNull($server);
-        $client = new GateHttpClient($server->baseUrl, additionalHeaders: ['Accept' => 'text/html']);
+        $client = new GateHttpClient(
+            $server->baseUrl,
+            additionalHeaders: ['Accept' => 'text/html', 'X-Health-Token' => self::PROBE_TOKEN],
+        );
         $root = dirname(__DIR__, 3);
         $rootStat = stat($root);
         self::assertIsArray($rootStat);
@@ -57,6 +82,37 @@ final class ReadOnlyProbeHttpTest extends TestCase
         self::assertSame($before['session'], $after['session'], 'Probe must not create a session file.');
         self::assertSame($before['rate_limit'], $after['rate_limit'], 'Loopback rate-limit state must stay unchanged.');
         self::assertSame($before['logs'], $after['logs'], 'Probe must not append an application log entry.');
+    }
+
+    public function testLoopbackRouteWithoutOrWithWrongHealthTokenDoesNotEnterProbeMode(): void
+    {
+        $server = $this->server;
+        self::assertNotNull($server);
+        $route = 'appointments/ics/' . str_repeat('c', 12);
+        $responses = [
+            $server->client()->get($route),
+            (new GateHttpClient($server->baseUrl, additionalHeaders: ['X-Health-Token' => 'wrong-token']))->get($route),
+        ];
+
+        foreach ($responses as $response) {
+            self::assertSame(404, $response->statusCode);
+            self::assertNull($response->header('x-fh-read-only-probe-root'));
+            self::assertNull($response->header('x-fh-read-only-probe-release'));
+        }
+    }
+
+    private function restoreHealthToken(): void
+    {
+        if ($this->hadEnvToken) {
+            $_ENV['HEALTHZ_TOKEN'] = $this->previousEnvToken;
+        } else {
+            unset($_ENV['HEALTHZ_TOKEN']);
+        }
+        if ($this->hadProcessToken) {
+            putenv('HEALTHZ_TOKEN=' . $this->previousProcessToken);
+        } else {
+            putenv('HEALTHZ_TOKEN');
+        }
     }
 
     /** @return array{session:array<int,string>,rate_limit:array<int,string>,logs:array<int,string>} */

@@ -9,11 +9,19 @@ caller-supplied `READ_ONLY_PROBE_EXPECTED_RELEASE` expectation. The marker and a
 are checked again after the requests. The expected release is an expectation;
 the active root and marker remain the authority.
 
-The application classifies only `GET` requests from loopback clients to the
-exact 12- or 64-character lowercase capability routes. Those requests use a
+The application classifies only `GET` requests from loopback clients carrying
+the server-managed `HEALTHZ_TOKEN` in `X-Health-Token`, to the exact 12- or
+64-character lowercase capability routes. The token is checked before any
+probe-specific session, logging, or binding behavior. Those requests use a
 non-persistent session driver, pass the existing loopback rate-limit guard, and
 silence only classified ICS 404 log paths. Public requests keep the normal file
 session driver, rate limiting, and error logging.
+
+Production requires `/etc/fh/healthz.token` to remain a regular, non-symlinked
+file owned by `root:root`, mode `0600`, with one link and a 16–512-character
+token containing no whitespace, control characters, quotes, or backslashes.
+Token rotations must preserve these ownership, permission, link, and shape
+requirements; the wrapper fails closed before making requests if they do not.
 
 The wrapper reuses one cookie context and removes its local cookie jar and
 header files. The receipt is secret-free and contains only closed security
