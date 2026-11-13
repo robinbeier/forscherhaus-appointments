@@ -10,6 +10,12 @@ final class Read_only_probe_request
 {
     public static function is(): bool
     {
+        $expectedToken = self::expectedToken();
+        $providedToken = (string) ($_SERVER['HTTP_X_HEALTH_TOKEN'] ?? '');
+        if ($expectedToken === '' || $providedToken === '' || !hash_equals($expectedToken, $providedToken)) {
+            return false;
+        }
+
         if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'GET') {
             return false;
         }
@@ -37,6 +43,22 @@ final class Read_only_probe_request
 
         return preg_match('#^/(?:booking_confirmation/of|appointments/ics)/(?:[0-9a-f]{12}|[0-9a-f]{64})$#', $route) ===
             1;
+    }
+
+    private static function expectedToken(): string
+    {
+        if (!function_exists('env')) {
+            $helper = defined('APPPATH') ? APPPATH . 'helpers/env_helper.php' : '';
+            if ($helper !== '' && is_file($helper)) {
+                require_once $helper;
+            }
+        }
+
+        if (function_exists('env')) {
+            return trim((string) env('HEALTHZ_TOKEN', ''));
+        }
+
+        return trim((string) ($_ENV['HEALTHZ_TOKEN'] ?? getenv('HEALTHZ_TOKEN') ?: ''));
     }
 
     /** @return array{root:string,release:string} */
