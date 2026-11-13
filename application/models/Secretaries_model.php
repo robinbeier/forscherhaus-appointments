@@ -707,6 +707,8 @@ class Secretaries_model extends EA_Model
             return;
         }
 
+        $this->load->model('providers_model');
+
         foreach ($resources as $resource) {
             $secretary['providers'] = match ($resource) {
                 'providers' => $this->db
@@ -720,6 +722,14 @@ class Secretaries_model extends EA_Model
                     'The requested secretary relation is not supported: ' . $resource,
                 ),
             };
+
+            if ($resource === 'providers') {
+                foreach ($secretary['providers'] as &$provider) {
+                    $this->providers_model->api_encode($provider);
+                }
+
+                unset($provider);
+            }
         }
     }
 

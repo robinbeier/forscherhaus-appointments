@@ -155,6 +155,9 @@ http://ea-installation/index.php/api/v1/appointments?with=customer,service,provi
 For appointments, attached customer, service and provider records use their
 normal API field names and projection. The `fields` parameter narrows the
 appointment itself; explicitly requested `with` relations remain attached.
+Repeated relation names are included once in their original order. The request
+may contain at most 64 relation entries, 16 distinct relations, and 64 bytes
+per relation name; larger requests are rejected before related records load.
 
 ### Expected Responses
 
