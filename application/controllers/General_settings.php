@@ -123,7 +123,7 @@ class General_settings extends EA_Controller
             }
 
             $settings_request = $this->backofficeRequestDtoFactory()->buildSettingsRequestDto('general_settings');
-            $settings = $settings_request->settings;
+            $settings = $this->normalizePageSettings($settings_request->settings);
 
             $validated_settings = [];
 
@@ -150,6 +150,15 @@ class General_settings extends EA_Controller
             }
 
             try {
+                if (!$this->lockAndCheckCurrentEditPermission($user_id, $db)) {
+                    if ($owns_transaction) {
+                        $db->trans_rollback();
+                        $owns_transaction = false;
+                    }
+                    abort(403, 'Forbidden');
+                    return;
+                }
+
                 foreach ($validated_settings as $setting) {
                     $this->settings_model->save($setting);
                 }
@@ -171,6 +180,40 @@ class General_settings extends EA_Controller
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    /**
+     * Keep this page's write scope aligned with its read projection.
+     *
+     * @param array<int|string, mixed> $settings
+     * @return list<array{name: string, value: mixed}>
+     */
+    private function normalizePageSettings(array $settings): array
+    {
+        $normalized = [];
+        $seen = [];
+
+        foreach ($settings as $setting) {
+            if (!is_array($setting)) {
+                throw new InvalidArgumentException('Invalid general setting record.');
+            }
+
+            $name = $setting['name'] ?? null;
+            if (!is_string($name) || !in_array($name, self::PAGE_SETTING_NAMES, true)) {
+                throw new InvalidArgumentException('The setting is not writable on this page.');
+            }
+            if (isset($seen[$name])) {
+                throw new InvalidArgumentException('Duplicate settings are not allowed.');
+            }
+            if (!array_key_exists('value', $setting) || !is_scalar($setting['value'])) {
+                throw new InvalidArgumentException('The setting value must be scalar.');
+            }
+
+            $seen[$name] = true;
+            $normalized[] = ['name' => $name, 'value' => $setting['value']];
+        }
+
+        return $normalized;
     }
 
     private function backofficeRequestDtoFactory(): Backoffice_request_dto_factory
@@ -195,5 +238,31 @@ class General_settings extends EA_Controller
         $this->backoffice_request_dto_factory = $CI->backoffice_request_dto_factory;
 
         return $this->backoffice_request_dto_factory;
+    }
+
+    private function lockAndCheckCurrentEditPermission(int $user_id, object $db): bool
+    {
+        $actor_query = $db->query('SELECT `id_roles` FROM `' . $db->dbprefix('users') . '` WHERE `id` = ? FOR UPDATE', [
+            $user_id,
+        ]);
+        if ($actor_query === false) {
+            throw new RuntimeException('Could not lock settings actor.');
+        }
+
+        $actor = $actor_query->row_array();
+        if (!$actor) {
+            return false;
+        }
+
+        $role_query = $db->query(
+            'SELECT `system_settings` FROM `' . $db->dbprefix('roles') . '` WHERE `id` = ? FOR UPDATE',
+            [(int) $actor['id_roles']],
+        );
+        if ($role_query === false) {
+            throw new RuntimeException('Could not lock settings role.');
+        }
+
+        $role = $role_query->row_array();
+        return is_array($role) && ((int) ($role['system_settings'] ?? 0) & PRIV_EDIT) === PRIV_EDIT;
     }
 }

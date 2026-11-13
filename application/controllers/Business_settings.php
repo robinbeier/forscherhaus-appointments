@@ -119,19 +119,75 @@ class Business_settings extends EA_Controller
             }
 
             $settings_request = $this->backofficeRequestDtoFactory()->buildSettingsRequestDto('business_settings');
-            $settings = $settings_request->settings;
+            $settings = $this->normalizePageSettings($settings_request->settings);
 
-            foreach ($settings as &$setting) {
-                $this->settings_model->only($setting, $this->allowed_setting_fields);
-                $this->settings_model->optional($setting, $this->optional_setting_fields);
+            $db = $this->settings_model->db;
+            $owns_transaction = !$db->trans_active();
+            if ($owns_transaction && !$db->trans_begin()) {
+                throw new RuntimeException('Could not start business settings transaction.');
             }
-            unset($setting);
-            $this->settings_model->save_batch($settings);
+
+            try {
+                if (!$this->lockAndCheckCurrentEditPermission($user_id, $db)) {
+                    if ($owns_transaction) {
+                        $db->trans_rollback();
+                        $owns_transaction = false;
+                    }
+                    abort(403, 'Forbidden');
+                    return;
+                }
+                $this->settings_model->save_batch($settings);
+                if (!$db->trans_status()) {
+                    throw new RuntimeException('Could not save business settings.');
+                }
+                if ($owns_transaction && !$db->trans_commit()) {
+                    throw new RuntimeException('Could not commit business settings transaction.');
+                }
+            } catch (Throwable $exception) {
+                if ($owns_transaction) {
+                    $db->trans_rollback();
+                }
+                throw $exception;
+            }
 
             response();
         } catch (Throwable $e) {
             json_exception($e);
         }
+    }
+
+    /**
+     * Keep this page's write scope aligned with its read projection.
+     *
+     * @param array<int|string, mixed> $settings
+     * @return list<array{name: string, value: mixed}>
+     */
+    private function normalizePageSettings(array $settings): array
+    {
+        $normalized = [];
+        $seen = [];
+
+        foreach ($settings as $setting) {
+            if (!is_array($setting)) {
+                throw new InvalidArgumentException('Invalid business setting record.');
+            }
+
+            $name = $setting['name'] ?? null;
+            if (!is_string($name) || !in_array($name, self::PAGE_SETTING_NAMES, true)) {
+                throw new InvalidArgumentException('The setting is not writable on this page.');
+            }
+            if (isset($seen[$name])) {
+                throw new InvalidArgumentException('Duplicate settings are not allowed.');
+            }
+            if (!array_key_exists('value', $setting) || !is_scalar($setting['value'])) {
+                throw new InvalidArgumentException('The setting value must be scalar.');
+            }
+
+            $seen[$name] = true;
+            $normalized[] = ['name' => $name, 'value' => $setting['value']];
+        }
+
+        return $normalized;
     }
 
     /**
@@ -160,13 +216,6 @@ class Business_settings extends EA_Controller
                 throw new RuntimeException('Could not encode global working plan.');
             }
 
-            $providers = $this->providers_model->get();
-
-            if ($providers === []) {
-                response();
-                return;
-            }
-
             $db = $this->providers_model->db;
             $owns_transaction = !$db->trans_active();
             if ($owns_transaction && !$db->trans_begin()) {
@@ -174,6 +223,24 @@ class Business_settings extends EA_Controller
             }
 
             try {
+                if (!$this->lockAndCheckCurrentEditPermission($user_id, $db)) {
+                    if ($owns_transaction) {
+                        $db->trans_rollback();
+                        $owns_transaction = false;
+                    }
+                    abort(403, 'Forbidden');
+                    return;
+                }
+
+                $providers = $this->providers_model->get();
+                if ($providers === []) {
+                    if ($owns_transaction && !$db->trans_commit()) {
+                        throw new RuntimeException('Could not commit global working plan transaction.');
+                    }
+                    response();
+                    return;
+                }
+
                 foreach ($providers as $provider) {
                     $this->providers_model->set_setting($provider['id'], 'working_plan', $working_plan);
                 }
@@ -219,5 +286,31 @@ class Business_settings extends EA_Controller
         $this->backoffice_request_dto_factory = $CI->backoffice_request_dto_factory;
 
         return $this->backoffice_request_dto_factory;
+    }
+
+    private function lockAndCheckCurrentEditPermission(int $user_id, object $db): bool
+    {
+        $actor_query = $db->query('SELECT `id_roles` FROM `' . $db->dbprefix('users') . '` WHERE `id` = ? FOR UPDATE', [
+            $user_id,
+        ]);
+        if ($actor_query === false) {
+            throw new RuntimeException('Could not lock settings actor.');
+        }
+
+        $actor = $actor_query->row_array();
+        if (!$actor) {
+            return false;
+        }
+
+        $role_query = $db->query(
+            'SELECT `system_settings` FROM `' . $db->dbprefix('roles') . '` WHERE `id` = ? FOR UPDATE',
+            [(int) $actor['id_roles']],
+        );
+        if ($role_query === false) {
+            throw new RuntimeException('Could not lock settings role.');
+        }
+
+        $role = $role_query->row_array();
+        return is_array($role) && ((int) ($role['system_settings'] ?? 0) & PRIV_EDIT) === PRIV_EDIT;
     }
 }

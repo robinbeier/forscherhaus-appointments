@@ -30,9 +30,15 @@ final class SettingsPostGuardTest extends TestCase
             $result = $this->probe($controller, 'authorized', 'POST');
             self::assertSame(200, $result['status'], $controller);
             $expected = [
-                ['name' => 'synthetic_setting', 'value' => 'synthetic-value', 'extra' => 'drop-me'],
-                ['name' => 'synthetic_second', 'value' => 'second-value', 'extra' => 'drop-me-too'],
+                ['name' => 'company_name', 'value' => 'synthetic-value', 'extra' => 'drop-me'],
+                ['name' => 'company_link', 'value' => 'second-value', 'extra' => 'drop-me-too'],
             ];
+            if ($controller === 'Business_settings') {
+                $expected = [
+                    ['name' => 'book_advance_timeout', 'value' => 'synthetic-value', 'extra' => 'drop-me'],
+                    ['name' => 'future_booking_limit', 'value' => 'second-value', 'extra' => 'drop-me-too'],
+                ];
+            }
             if ($controller === 'Ldap_settings') {
                 $expected = [
                     ['name' => 'ldap_is_active', 'value' => '1', 'extra' => 'drop-me'],
@@ -87,8 +93,8 @@ final class SettingsPostGuardTest extends TestCase
                 self::assertSame([], $result['saved_batches'], $controller);
                 self::assertSame(
                     [
-                        ['name' => 'synthetic_setting', 'value' => 'synthetic-value', 'extra' => 'drop-me', 'id' => 41],
-                        ['name' => 'synthetic_second', 'value' => 'second-value', 'extra' => 'drop-me-too', 'id' => 42],
+                        ['name' => 'company_name', 'value' => 'synthetic-value', 'id' => 41],
+                        ['name' => 'company_link', 'value' => 'second-value', 'id' => 42],
                     ],
                     $result['saved'],
                     $controller,
@@ -161,6 +167,31 @@ final class SettingsPostGuardTest extends TestCase
         }
     }
 
+    public function testPageAllowlistRejectsForeignSettingForGeneralAndBusiness(): void
+    {
+        foreach (['General_settings', 'Business_settings'] as $controller) {
+            $result = $this->probe($controller, 'malicious', 'POST');
+            self::assertSame(500, $result['status'], $controller);
+            self::assertContains('json_exception', $result['events'], $controller);
+            self::assertSame([], $result['saved'], $controller);
+            self::assertSame([], $result['saved_batches'], $controller);
+        }
+    }
+
+    public function testPageAllowlistRejectsMissingOrStructuredValues(): void
+    {
+        foreach (
+            [['General_settings', 'invalid_value'], ['Business_settings', 'missing_value']]
+            as [$controller, $scenario]
+        ) {
+            $result = $this->probe($controller, $scenario, 'POST');
+            self::assertSame(500, $result['status'], $controller);
+            self::assertContains('json_exception', $result['events'], $controller);
+            self::assertSame([], $result['saved'], $controller);
+            self::assertSame([], $result['saved_batches'], $controller);
+        }
+    }
+
     public function testBatchFailureDelegatesCompletePayloadAndSuppressesResponse(): void
     {
         foreach ($this->controllers as $controller => $key) {
@@ -172,9 +203,15 @@ final class SettingsPostGuardTest extends TestCase
             self::assertContains('json_exception', $result['events'], $controller);
             self::assertNotContains('response', $result['events'], $controller);
             $expected = [
-                ['name' => 'synthetic_setting', 'value' => 'synthetic-value', 'extra' => 'drop-me'],
-                ['name' => 'synthetic_second', 'value' => 'second-value', 'extra' => 'drop-me-too'],
+                ['name' => 'company_name', 'value' => 'synthetic-value', 'extra' => 'drop-me'],
+                ['name' => 'company_link', 'value' => 'second-value', 'extra' => 'drop-me-too'],
             ];
+            if ($controller === 'Business_settings') {
+                $expected = [
+                    ['name' => 'book_advance_timeout', 'value' => 'synthetic-value', 'extra' => 'drop-me'],
+                    ['name' => 'future_booking_limit', 'value' => 'second-value', 'extra' => 'drop-me-too'],
+                ];
+            }
             if ($controller === 'Ldap_settings') {
                 $expected = [
                     ['name' => 'ldap_is_active', 'value' => '1', 'extra' => 'drop-me'],

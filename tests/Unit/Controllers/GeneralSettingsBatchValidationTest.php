@@ -206,6 +206,44 @@ class GeneralSettingsBatchValidationTest extends TestCase
         $this->assertFalse($db->trans_active());
     }
 
+    public function testOutOfPageSettingIsRejectedBeforeMutation(): void
+    {
+        $before = $this->findSetting('company_name');
+        $this->saveBatch([['name' => 'api_token', 'value' => 'attacker-controlled']]);
+
+        $response = json_decode(get_instance()->output->get_output(), true, flags: JSON_THROW_ON_ERROR);
+        $this->assertFalse($response['success']);
+        $this->assertSame($before, $this->findSetting('company_name'));
+        $this->assertNotSame('attacker-controlled', $this->findSetting('api_token')['value']);
+    }
+
+    public function testCallerSettingIdCannotRenameAnotherSetting(): void
+    {
+        $companyName = $this->findSetting('company_name');
+        $apiToken = $this->findSetting('api_token');
+        $this->saveBatch([['name' => 'company_name', 'id' => (int) $apiToken['id'], 'value' => 'safe update']]);
+
+        $this->assertSame('', get_instance()->output->get_output());
+        $this->assertSame('safe update', $this->findSetting('company_name')['value']);
+        $this->assertSame($apiToken['value'], $this->findSetting('api_token')['value']);
+        $this->assertSame((int) $companyName['id'], (int) $this->findSetting('company_name')['id']);
+    }
+
+    public function testMissingOrStructuredValueIsRejectedBeforeMutation(): void
+    {
+        $before = $this->findSetting('company_name');
+        foreach (
+            [['name' => 'company_name'], ['name' => 'company_name', 'value' => ['nested' => 'value']]]
+            as $setting
+        ) {
+            $this->saveBatch([$setting]);
+            $response = json_decode(get_instance()->output->get_output(), true, flags: JSON_THROW_ON_ERROR);
+            $this->assertFalse($response['success']);
+            $this->assertSame($before, $this->findSetting('company_name'));
+            get_instance()->output->set_output('');
+        }
+    }
+
     public function testSettingsApiUpdateAndShowReturnNormalizedCompanyColor(): void
     {
         $controller = $this->createApiController('#abc');
