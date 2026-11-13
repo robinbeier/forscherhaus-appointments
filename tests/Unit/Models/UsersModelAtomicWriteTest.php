@@ -159,6 +159,10 @@ final class UsersModelAtomicWriteTest extends TestCase
         $db = get_instance()->db;
         $stale = $this->usersModel->find($userId);
         $before = (int) ($stale['credential_version'] ?? 0);
+        // A full find() projection contains nullable settings fields that are
+        // not valid write values. Keep only the actual metadata field for the
+        // ordinary update while retaining the stale credential snapshot.
+        $stale['settings'] = ['username' => (string) $stale['settings']['username']];
 
         self::assertTrue(
             $db->set('credential_version', 'credential_version + 1', false)->where('id', $userId)->update('users'),
