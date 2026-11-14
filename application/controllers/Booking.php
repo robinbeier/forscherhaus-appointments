@@ -695,7 +695,7 @@ class Booking extends EA_Controller
                 $authority_claim instanceof RescheduleAuthorityClaim ||
                 ($this->zero_surprise_canary->active() && $existing_customer_id !== null)
                     ? $this->customers_model->save($customer)
-                    : $this->customers_model->insert_new($customer);
+                    : $this->customers_model->insert_new($customer, $creation_identity_lock);
             $customer = $this->customers_model->find($customer_id);
             if ($authority_claim instanceof RescheduleAuthorityClaim) {
                 $this->public_booking_lifecycle->restoreCapturedMarker($customer_id, $captured_marker);
