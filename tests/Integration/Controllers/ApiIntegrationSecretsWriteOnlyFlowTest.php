@@ -209,6 +209,23 @@ final class ApiIntegrationSecretsWriteOnlyFlowTest extends TestCase
         );
     }
 
+    public function testProviderCreateRollsBackIdentityWhenServiceAssociationFails(): void
+    {
+        $payload = $this->providerPayload('rollback-google', 'rollback-caldav', PHP_INT_MAX);
+        $email = $payload['email'];
+
+        $this->setPostPayload($payload);
+        $this->createProvidersController()->store();
+        $response = $this->decodeJsonOutput();
+
+        $this->assertArrayNotHasKey('id', $response);
+        $this->assertSame(
+            0,
+            $this->CI->db->where('email', $email)->count_all_results('users'),
+            'A failed service association must not leave an active provider identity behind.',
+        );
+    }
+
     public function testInvalidProviderCredentialTypeIsRejectedWithoutMutation(): void
     {
         $providerId = $this->createProvider();

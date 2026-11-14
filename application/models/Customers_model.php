@@ -291,6 +291,7 @@ class Customers_model extends EA_Model
         $customer['create_datetime'] = date('Y-m-d H:i:s');
         $customer['update_datetime'] = date('Y-m-d H:i:s');
         $customer['id_roles'] = $this->get_customer_role_id();
+        unset($customer['credential_version']);
 
         if (!$this->db->insert('users', $customer)) {
             throw new RuntimeException('Could not insert customer.');
@@ -318,6 +319,7 @@ class Customers_model extends EA_Model
             $owns_transaction = true;
         }
         $customer['update_datetime'] = date('Y-m-d H:i:s');
+        unset($customer['credential_version']);
 
         try {
             $this->publicBookingLifecycle()->lockCustomer((int) $customer['id']);

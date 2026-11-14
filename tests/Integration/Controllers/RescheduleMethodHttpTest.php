@@ -89,9 +89,12 @@ final class RescheduleMethodHttpTest extends TestCase
         self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/', $customerToken);
         self::assertSame($fixture->customerId, $this->customerTokenValue($customerToken));
 
+        $peerBookingPage = $peerDirectClient->get('booking');
+        self::assertSame(200, $peerBookingPage->statusCode, $peerBookingPage->body);
+
         foreach ([['HEAD', $peerRewriteClient], ['POST', $peerDirectClient]] as [$method, $requestClient]) {
             $beforeRejected = $this->ownedCacheFiles();
-            $response = $requestClient->requestApp($method, $path, [], null, false);
+            $response = $requestClient->requestApp($method, $path, [], null, $method === 'POST');
 
             self::assertSame($beforeRejected, $this->ownedCacheFiles(), $method . ' must not create customer tokens.');
             self::assertSame(405, $response->statusCode, $method . ' must be rejected.');

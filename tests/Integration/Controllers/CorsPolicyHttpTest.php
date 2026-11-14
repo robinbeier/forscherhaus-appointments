@@ -53,10 +53,12 @@ final class CorsPolicyHttpTest extends TestCase
             self::assertSame(200, $response->statusCode, $response->body);
             $this->assertNoCorsAllowHeaders($response);
 
-            // An ordinary cross-origin form request can reach the controller
-            // without CORS permission. Invalid booking data must not mutate it.
-            $post = $client->requestApp('POST', 'booking/register', ['post_data' => []]);
-            self::assertSame(409, $post->statusCode, $post->body);
+            // The public booking write requires the same-origin CSRF token even
+            // though the response carries no CORS permission.
+            $post = $client->requestApp('POST', 'booking/register', [
+                'post_data' => $this->validBookingPayload(),
+            ]);
+            self::assertSame(403, $post->statusCode, $post->body);
             $this->assertNoCorsAllowHeaders($post);
             self::assertSame($beforeAppointments, get_instance()->db->count_all('appointments'));
         }
@@ -131,6 +133,30 @@ final class CorsPolicyHttpTest extends TestCase
     {
         self::assertNotNull($this->fixture);
         return $this->fixture;
+    }
+
+    /** @return array<string, mixed> */
+    private function validBookingPayload(): array
+    {
+        $fixture = $this->fixture();
+        $customer = $fixture->row('users', $fixture->customerId);
+        unset($customer['id'], $customer['email']);
+
+        $start = (new DateTimeImmutable('today'))->modify('+21 days')->setTime(11, 0);
+
+        return [
+            'appointment' => [
+                'start_datetime' => $start->format('Y-m-d H:i:s'),
+                'end_datetime' => $start->modify('+30 minutes')->format('Y-m-d H:i:s'),
+                'id_services' => $fixture->serviceId,
+                'id_users_provider' => $fixture->providerId,
+                'location' => '',
+                'notes' => $fixture->run . '_csrf',
+                'color' => '',
+            ],
+            'customer' => $customer,
+            'manage_mode' => false,
+        ];
     }
 
     private function server(): DefenseCycleHttpServer

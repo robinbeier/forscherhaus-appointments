@@ -72,6 +72,15 @@ class Providers_model extends EA_Model
      */
     public function save(array $provider): int
     {
+        if (
+            !empty($provider['id']) &&
+            isset($provider['settings']) &&
+            is_array($provider['settings']) &&
+            array_key_exists('password', $provider['settings']) &&
+            empty($provider['settings']['password'])
+        ) {
+            unset($provider['settings']['password']);
+        }
         $this->validate($provider);
 
         if (empty($provider['id'])) {
@@ -314,24 +323,69 @@ class Providers_model extends EA_Model
         $provider['update_datetime'] = date('Y-m-d H:i:s');
         $provider['id_roles'] = $this->get_provider_role_id();
 
-        $service_ids = $provider['services'];
+        $service_ids = $this->normalize_insert_service_ids($provider['services']);
 
         $settings = $provider['settings'];
 
-        unset($provider['services'], $provider['settings']);
+        unset($provider['services'], $provider['settings'], $provider['credential_version']);
 
-        if (!$this->db->insert('users', $provider)) {
-            throw new RuntimeException('Could not insert provider.');
+        $owns_transaction = !$this->db->trans_active();
+
+        if ($owns_transaction && !$this->db->trans_begin()) {
+            throw new RuntimeException('Could not start provider insert transaction.');
         }
 
-        $provider['id'] = $this->db->insert_id();
-        $settings['salt'] = generate_salt();
-        $settings['password'] = hash_password($settings['salt'], $settings['password']);
+        try {
+            if (!$this->db->insert('users', $provider)) {
+                throw new RuntimeException('Could not insert provider.');
+            }
 
-        $this->set_settings($provider['id'], $settings);
-        $this->set_service_ids($provider['id'], $service_ids);
+            $provider['id'] = $this->db->insert_id();
 
-        return $provider['id'];
+            if ((int) $provider['id'] < 1) {
+                throw new RuntimeException('Could not determine inserted provider ID.');
+            }
+
+            $settings['salt'] = generate_salt();
+            $settings['password'] = hash_password($settings['salt'], $settings['password']);
+
+            $this->set_settings($provider['id'], $settings);
+            $this->set_service_ids($provider['id'], $service_ids);
+
+            if (!$this->db->trans_status()) {
+                throw new RuntimeException('Could not complete provider insert transaction.');
+            }
+
+            if ($owns_transaction && !$this->db->trans_commit()) {
+                throw new RuntimeException('Could not commit provider insert transaction.');
+            }
+
+            return $provider['id'];
+        } catch (Throwable $exception) {
+            if ($owns_transaction) {
+                $this->db->trans_rollback();
+            }
+
+            throw $exception;
+        }
+    }
+
+    /** Normalize service IDs before the first provider row is inserted. */
+    private function normalize_insert_service_ids(array $service_ids): array
+    {
+        $normalized = [];
+
+        foreach ($service_ids as $service_id) {
+            $parsed = filter_var($service_id, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+
+            if ($parsed === false) {
+                throw new InvalidArgumentException('The provided provider services are invalid.');
+            }
+
+            $normalized[] = $parsed;
+        }
+
+        return array_values(array_unique($normalized));
     }
 
     /**
@@ -435,13 +489,16 @@ class Providers_model extends EA_Model
             $provider['update_datetime'] = date('Y-m-d H:i:s');
             $service_ids = $this->normalize_update_service_ids($provider['services']);
             $settings = $provider['settings'];
-            unset($provider['services'], $provider['settings']);
+            unset($provider['services'], $provider['settings'], $provider['credential_version']);
+            // Credential versions are advanced only by the atomic password-change
+            // path. Never write a stale API snapshot back during metadata updates.
 
             // Service deletion locks its parent before cascading to these associations.
             // Keep the same order before replacing the provider's connections.
             $this->lock_update_service_parents((int) $provider['id'], $service_ids);
 
-            if (isset($settings['password'])) {
+            $password_changed = isset($settings['password']);
+            if ($password_changed) {
                 $existing_settings = $this->db
                     ->get_where('user_settings', ['id_users' => $provider['id']])
                     ->row_array();
@@ -462,6 +519,9 @@ class Providers_model extends EA_Model
             }
 
             $this->set_settings($provider['id'], $settings);
+            if ($password_changed) {
+                $this->bump_credential_version((int) $provider['id']);
+            }
             try {
                 $this->set_service_ids($provider['id'], $service_ids);
             } catch (Throwable $e) {
@@ -564,7 +624,9 @@ class Providers_model extends EA_Model
     public function set_service_ids(int $provider_id, array $service_ids): void
     {
         // Re-insert the provider-service connections.
-        $this->db->delete('services_providers', ['id_users' => $provider_id]);
+        if (!$this->db->delete('services_providers', ['id_users' => $provider_id])) {
+            throw new RuntimeException('Could not remove provider service associations.');
+        }
 
         foreach ($service_ids as $service_id) {
             $service_provider_connection = [
@@ -572,7 +634,9 @@ class Providers_model extends EA_Model
                 'id_services' => $service_id,
             ];
 
-            $this->db->insert('services_providers', $service_provider_connection);
+            if (!$this->db->insert('services_providers', $service_provider_connection)) {
+                throw new RuntimeException('Could not insert provider service association.');
+            }
         }
     }
 

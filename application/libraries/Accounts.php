@@ -49,7 +49,13 @@ class Accounts
      */
     public function check_login(string $username, string $password): ?array
     {
-        $user_settings = $this->CI->db->get_where('user_settings', ['username' => $username])->row_array();
+        $user_settings = $this->CI->db
+            ->select('user_settings.*, users.credential_version')
+            ->from('user_settings')
+            ->join('users', 'users.id = user_settings.id_users', 'inner')
+            ->where('user_settings.username', $username)
+            ->get()
+            ->row_array();
 
         $stored_password = (string) ($user_settings['password'] ?? '');
         $salt = (string) ($user_settings['salt'] ?? '');
@@ -84,7 +90,13 @@ class Accounts
         // Verification is deliberately expensive. A reset, deletion or username
         // reassignment committed during that work invalidates this login, even
         // when this verifier did not need an upgrade.
-        $current = $this->CI->db->get_where('user_settings', ['id_users' => $user_settings['id_users']])->row_array();
+        $current = $this->CI->db
+            ->select('user_settings.*, users.credential_version')
+            ->from('user_settings')
+            ->join('users', 'users.id = user_settings.id_users', 'inner')
+            ->where('user_settings.id_users', $user_settings['id_users'])
+            ->get()
+            ->row_array();
         if (
             !$current ||
             !hash_equals((string) $user_settings['username'], (string) $current['username']) ||
@@ -107,6 +119,7 @@ class Accounts
             'timezone' => !empty($user['timezone']) ? $user['timezone'] : $default_timezone,
             'language' => !empty($user['language']) ? $user['language'] : Config::LANGUAGE,
             'role_slug' => $role['slug'],
+            'credential_version' => max(0, (int) ($current['credential_version'] ?? 0)),
         ];
     }
 
@@ -135,20 +148,6 @@ class Accounts
     }
 
     /**
-     * Get the user's salt value.
-     *
-     * @param string $username Username.
-     *
-     * @return string Returns the salt value.
-     */
-    public function get_salt_by_username(string $username): string
-    {
-        $user_settings = $this->CI->db->get_where('user_settings', ['username' => $username])->row_array();
-
-        return $user_settings['salt'] ?? '';
-    }
-
-    /**
      * Get the user full name.
      *
      * @param int $user_id User ID.
@@ -160,44 +159,6 @@ class Accounts
         $user = $this->CI->users_model->find($user_id);
 
         return $user['first_name'] . ' ' . $user['last_name'];
-    }
-
-    /**
-     * Regenerate the password of the user that matches the provided username and email.
-     *
-     * @param string $username Username.
-     * @param string $email Email.
-     *
-     * @return string Returns the new password on success or FALSE on failure.
-     *
-     * @throws Exception
-     */
-    public function regenerate_password(string $username, string $email): string
-    {
-        $query = $this->CI->db
-            ->select('users.id')
-            ->from('users')
-            ->join('user_settings', 'user_settings.id_users = users.id', 'inner')
-            ->where('users.email', $email)
-            ->where('user_settings.username', $username)
-            ->get();
-
-        if (!$query->num_rows()) {
-            throw new RuntimeException('The user was not found in the database with the provided info.');
-        }
-
-        $user = $query->row_array();
-
-        // Generate a new password for the user.
-        $new_password = random_string('alnum', 12);
-
-        $salt = $this->get_salt_by_username($username);
-
-        $hash_password = hash_password($salt, $new_password);
-
-        $this->CI->users_model->set_setting($user['id'], 'password', $hash_password);
-
-        return $new_password;
     }
 
     /**

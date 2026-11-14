@@ -96,6 +96,10 @@ App.Pages.GeneralSettings = (function () {
         $('[data-field]').each((index, field) => {
             const $field = $(field);
 
+            if ($field.data('field') === 'company_logo') {
+                return;
+            }
+
             generalSettings.push({
                 name: $field.data('field'),
                 value: $field.is(':checkbox') ? Number($field.prop('checked')) : $field.val(),

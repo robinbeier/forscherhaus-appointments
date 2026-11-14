@@ -61,6 +61,15 @@ class Admins_model extends EA_Model
      */
     public function save(array $admin): int
     {
+        if (
+            !empty($admin['id']) &&
+            isset($admin['settings']) &&
+            is_array($admin['settings']) &&
+            array_key_exists('password', $admin['settings']) &&
+            empty($admin['settings']['password'])
+        ) {
+            unset($admin['settings']['password']);
+        }
         $this->validate($admin);
 
         $owns_transaction = !$this->db->trans_active();
@@ -279,7 +288,7 @@ class Admins_model extends EA_Model
 
         $settings = $admin['settings'];
 
-        unset($admin['settings']);
+        unset($admin['settings'], $admin['credential_version']);
 
         $admin['create_datetime'] = date('Y-m-d H:i:s');
         $admin['update_datetime'] = date('Y-m-d H:i:s');
@@ -351,13 +360,34 @@ class Admins_model extends EA_Model
      */
     protected function update(array $admin): int
     {
+        $current = $this->db->query(
+            'SELECT `id`, `id_roles` FROM `' . $this->db->dbprefix('users') . '` WHERE `id` = ? FOR UPDATE',
+            [$admin['id']],
+        );
+        $current_admin = $current === false ? [] : $current->row_array();
+        if (empty($current_admin)) {
+            throw new RuntimeException('Could not lock admin before update.');
+        }
+
+        if ((int) $current_admin['id_roles'] !== $this->get_admin_role_id()) {
+            throw new RuntimeException('The target is no longer an admin and cannot be updated.');
+        }
+
+        // The API update may have been decoded from a snapshot taken before
+        // this lock. Never carry a stale or caller-derived role into the write.
+        $admin['id_roles'] = (int) $current_admin['id_roles'];
+
         $settings = $admin['settings'];
 
         $settings['id_users'] = $admin['id'];
 
         unset($admin['settings']);
+        // Credential versions are advanced only by the atomic password-change
+        // path. Never write a stale API snapshot back during metadata updates.
+        unset($admin['credential_version']);
 
-        if (!empty($settings['password'])) {
+        $password_changed = !empty($settings['password']);
+        if ($password_changed) {
             $existing_settings = $this->db->get_where('user_settings', ['id_users' => $admin['id']])->row_array();
 
             if (empty($existing_settings)) {
@@ -378,6 +408,9 @@ class Admins_model extends EA_Model
         }
 
         $this->set_settings($admin['id'], $settings);
+        if ($password_changed) {
+            $this->bump_credential_version((int) $admin['id']);
+        }
 
         return $admin['id'];
     }

@@ -74,6 +74,8 @@ final class BookingJsonBodyLimitHttpTest extends TestCase
             'booking/register',
             json_encode(['post_data' => $this->bookingPayload('small-control')], JSON_THROW_ON_ERROR),
             'application/json',
+            null,
+            $this->csrfHeaders(),
         );
 
         self::assertSame(200, $response->statusCode, $response->body);
@@ -90,10 +92,48 @@ final class BookingJsonBodyLimitHttpTest extends TestCase
         $rawBody = json_encode(['post_data' => $payload], JSON_THROW_ON_ERROR);
         self::assertGreaterThan(1024 * 1024, strlen($rawBody));
 
-        $response = $client->requestRawApp('POST', 'booking/register', $rawBody, 'application/json');
+        $response = $client->requestRawApp(
+            'POST',
+            'booking/register',
+            $rawBody,
+            'application/json',
+            null,
+            $this->csrfHeaders(),
+        );
 
         self::assertSame(413, $response->statusCode, $response->body);
         self::assertSame($before, $this->mutationSnapshot());
+    }
+
+    public function testJsonBookingRequiresMatchingCsrfHeaderBeforeMutation(): void
+    {
+        $client = $this->requireClient();
+        $body = json_encode(['post_data' => $this->bookingPayload('missing-csrf')], JSON_THROW_ON_ERROR);
+        $before = $this->mutationSnapshot();
+        self::assertSame(
+            403,
+            $client->requestRawApp('POST', 'booking/register', $body, 'application/json')->statusCode,
+        );
+        self::assertSame($before, $this->mutationSnapshot());
+
+        self::assertSame(
+            403,
+            $client->requestRawApp('POST', 'booking/register', $body, 'application/json', null, [
+                'X-CSRF' => 'invalid-synthetic-token',
+            ])->statusCode,
+        );
+        self::assertSame($before, $this->mutationSnapshot());
+    }
+
+    /** @return array<string, string> */
+    private function csrfHeaders(): array
+    {
+        $client = $this->requireClient();
+        self::assertSame(200, $client->get('booking')->statusCode);
+        $token = (string) $client->getCookie('csrf_cookie');
+        self::assertNotSame('', $token);
+
+        return ['X-CSRF' => $token];
     }
 
     /** @return array<string, int> */

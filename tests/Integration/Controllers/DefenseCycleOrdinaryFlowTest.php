@@ -15,6 +15,7 @@ final class DefenseCycleOrdinaryFlowTest extends TestCase
 {
     private ?DefenseCycleFixtures $fixture = null;
     private ?DefenseCycleHttpServer $server = null;
+    private ?array $settingsRestore = null;
 
     protected function setUp(): void
     {
@@ -38,6 +39,14 @@ final class DefenseCycleOrdinaryFlowTest extends TestCase
     protected function tearDown(): void
     {
         try {
+            if ($this->settingsRestore !== null) {
+                get_instance()->db->update(
+                    'settings',
+                    ['value' => $this->settingsRestore['value']],
+                    ['id' => $this->settingsRestore['id']],
+                );
+                $this->settingsRestore = null;
+            }
             $this->server?->close();
         } finally {
             $this->fixture?->cleanup();
@@ -235,7 +244,12 @@ final class DefenseCycleOrdinaryFlowTest extends TestCase
     public function testOrdinaryLegacySettingsAliasHandoffPreservesCsrfAndMethod(): void
     {
         $f = $this->fixture;
-        $owned = $f->ownedSetting('http', 'before');
+        $setting = get_instance()
+            ->db->get_where('settings', ['name' => 'company_name'])
+            ->row_array();
+        self::assertNotEmpty($setting['id'] ?? null);
+        $originalValue = (string) $setting['value'];
+        $this->settingsRestore = ['id' => (int) $setting['id'], 'value' => $originalValue];
         $client = new GateHttpClient(
             $this->server->baseUrl,
             additionalHeaders: ['X-Requested-With' => 'XMLHttpRequest'],
@@ -251,16 +265,27 @@ final class DefenseCycleOrdinaryFlowTest extends TestCase
         );
         $csrf = $client->getCookie('csrf_cookie') ?? '';
         self::assertNotSame('', $csrf);
-        $form = ['csrf_token' => $csrf, 'general_settings' => [['name' => $owned['name'], 'value' => 'expected']]];
+        $form = ['csrf_token' => $csrf, 'general_settings' => [['name' => 'company_name', 'value' => 'expected']]];
         $first = $client->post('backend_api/ajax_save_settings', $form);
         self::assertSame(307, $first->statusCode);
         self::assertSame($this->server->baseUrl . '/index.php/general_settings/save', $first->header('location'));
-        self::assertSame('before', $f->settingRow((int) $owned['id'])['value'] ?? null);
+        self::assertSame(
+            $originalValue,
+            get_instance()
+                ->db->get_where('settings', ['id' => (int) $setting['id']])
+                ->row_array()['value'] ?? null,
+        );
         $second = $client->post('general_settings/save', $form);
         self::assertSame(200, $second->statusCode);
         self::assertSame('', $second->body);
-        self::assertSame('expected', $f->settingRow((int) $owned['id'])['value'] ?? null);
-        $f->cleanup();
-        self::assertSame([], $f->settingRow((int) $owned['id']));
+        self::assertSame(
+            'expected',
+            get_instance()
+                ->db->get_where('settings', ['id' => (int) $setting['id']])
+                ->row_array()['value'] ?? null,
+        );
+        self::assertTrue(
+            get_instance()->db->update('settings', ['value' => $originalValue], ['id' => (int) $setting['id']]),
+        );
     }
 }

@@ -96,6 +96,62 @@ final class StaffSettingsApiHttpTest extends TestCase
         }
     }
 
+    public function testSecretaryProviderRelationUsesTheProviderApiProjection(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $admin = $this->basicClient($this->credentials['admin_username'], $this->credentials['password']);
+        $payload = $fixture->secretaryWritePayload('provider-projection', [$fixture->providerId]);
+        $created = $this->success($admin->requestJsonApp('POST', 'api/v1/secretaries', $payload), 201);
+        $secretaryId = (int) ($created['id'] ?? 0);
+        self::assertGreaterThan(0, $secretaryId);
+
+        $rows = $this->success(
+            $admin->get('api/v1/secretaries', [
+                'q' => $fixture->run,
+                'with' => 'providers',
+            ]),
+        );
+        $matches = array_values(
+            array_filter(
+                $rows,
+                static fn(mixed $row): bool => is_array($row) && (int) ($row['id'] ?? 0) === $secretaryId,
+            ),
+        );
+        self::assertCount(1, $matches);
+        $providers = $matches[0]['providers'] ?? null;
+        self::assertIsArray($providers);
+        self::assertCount(1, $providers);
+
+        $provider = $providers[0];
+        $expectedProviderKeys = [
+            'address',
+            'city',
+            'email',
+            'firstName',
+            'id',
+            'isPrivate',
+            'language',
+            'ldapDn',
+            'lastName',
+            'mobile',
+            'notes',
+            'phone',
+            'state',
+            'timezone',
+            'zip',
+        ];
+        $actualProviderKeys = array_keys($provider);
+        sort($expectedProviderKeys);
+        sort($actualProviderKeys);
+        self::assertSame($expectedProviderKeys, $actualProviderKeys);
+        self::assertArrayNotHasKey('id_roles', $provider);
+        self::assertArrayNotHasKey('credential_version', $provider);
+        self::assertArrayNotHasKey('password', $provider);
+        self::assertArrayNotHasKey('salt', $provider);
+        self::assertSame($fixture->providerId, (int) $provider['id']);
+    }
+
     public static function adminCollectionRoutes(): array
     {
         return [
@@ -506,6 +562,7 @@ final class StaffSettingsApiHttpTest extends TestCase
             false,
         );
         $adminBefore = $this->fixture->userSettingsRow($adminId);
+        $adminVersionBefore = (int) ($this->fixture->row('users', $adminId)['credential_version'] ?? 0);
         unset($adminPayload['settings']['password']);
         $adminPayload['firstName'] = 'HTTP Admin Updated';
         $adminUpdate = $this->success($admin->requestJsonApp('PUT', 'api/v1/admins/' . $adminId, $adminPayload));
@@ -513,6 +570,10 @@ final class StaffSettingsApiHttpTest extends TestCase
         self::assertSame('HTTP Admin Updated', $this->fixture->row('users', $adminId)['first_name']);
         self::assertSame($adminBefore['password'], $adminAfter['password']);
         self::assertSame($adminBefore['salt'], $adminAfter['salt']);
+        self::assertSame(
+            $adminVersionBefore,
+            (int) ($this->fixture->row('users', $adminId)['credential_version'] ?? 0),
+        );
         $this->assertStaff(
             $adminUpdate,
             ['id' => $adminId, 'firstName' => $adminPayload['firstName'], 'email' => $adminPayload['email']],
@@ -536,6 +597,7 @@ final class StaffSettingsApiHttpTest extends TestCase
             $this->fixture->secretaryWriteState($secretaryPayload['email'])['providers'],
         );
         $secretaryBefore = $this->fixture->userSettingsRow($secretaryId);
+        $secretaryVersionBefore = (int) ($this->fixture->row('users', $secretaryId)['credential_version'] ?? 0);
         unset($secretaryPayload['settings']['password']);
         $secretaryPayload['firstName'] = 'Updated Secretary';
         $secretaryPayload['providers'] = [];
@@ -554,10 +616,49 @@ final class StaffSettingsApiHttpTest extends TestCase
         $secretaryAfter = $this->fixture->userSettingsRow($secretaryId);
         self::assertSame($secretaryBefore['password'], $secretaryAfter['password']);
         self::assertSame($secretaryBefore['salt'], $secretaryAfter['salt']);
+        self::assertSame(
+            $secretaryVersionBefore,
+            (int) ($this->fixture->row('users', $secretaryId)['credential_version'] ?? 0),
+        );
         self::assertSame([], $updated['providers']);
         self::assertSame('Updated Secretary', $this->fixture->row('users', $secretaryId)['first_name']);
         self::assertSame([], $this->fixture->secretaryWriteState($secretaryPayload['email'])['providers']);
         $this->assertNoSyntheticSecrets($adminCreate, $adminUpdate, $secretaryCreate, $updated);
+    }
+
+    public function testAdminPasswordResetInvalidatesPreExistingTargetSession(): void
+    {
+        $admin = $this->writeClient('basic');
+        $payload = $this->fixture->adminWritePayload('session-reset');
+        $created = $this->success($admin->requestJsonApp('POST', 'api/v1/admins', $payload), 201);
+        $targetId = (int) $created['id'];
+        $target = $this->server->client();
+        self::assertSame(200, $target->get('login')->statusCode);
+        $login = $target->post('login/validate', [
+            'username' => $payload['settings']['username'],
+            'password' => $this->credentials['password'],
+        ]);
+        self::assertSame(200, $login->statusCode);
+        self::assertTrue((bool) (json_decode($login->body, true, 512, JSON_THROW_ON_ERROR)['success'] ?? false));
+
+        $beforeVersion = (int) ($this->fixture->row('users', $targetId)['credential_version'] ?? 0);
+        $payload['firstName'] = 'Reset Target';
+        $payload['settings']['password'] = $this->fixture->run . '_reset_password';
+        $response = $admin->requestJsonApp('PUT', 'api/v1/admins/' . $targetId, $payload);
+        self::assertSame(200, $response->statusCode, $response->body);
+        self::assertSame(
+            $beforeVersion + 1,
+            (int) ($this->fixture->row('users', $targetId)['credential_version'] ?? 0),
+        );
+        self::assertSame(403, $target->get('account')->statusCode);
+        $fresh = $this->server->client();
+        self::assertSame(200, $fresh->get('login')->statusCode);
+        $freshLogin = $fresh->post('login/validate', [
+            'username' => $payload['settings']['username'],
+            'password' => $payload['settings']['password'],
+        ]);
+        self::assertTrue((bool) (json_decode($freshLogin->body, true, 512, JSON_THROW_ON_ERROR)['success'] ?? false));
+        self::assertSame(200, $fresh->get('account')->statusCode);
     }
 
     public function testAdminPutRejectsMismatchedOrInvalidBodyIdWithoutPartialChange(): void
@@ -998,6 +1099,168 @@ final class StaffSettingsApiHttpTest extends TestCase
         }
     }
 
+    public function testAdminUpdateRejectsStaleAdminSnapshotAfterRoleDemotion(): void
+    {
+        $db = get_instance()->db;
+        $fixture = $this->fixture;
+        $admin = $this->basicClient($this->credentials['admin_username'], $this->credentials['password']);
+        $created = $this->success(
+            $admin->requestJsonApp('POST', 'api/v1/admins', $fixture->adminWritePayload('stale-role')),
+            201,
+        );
+        $targetId = (int) ($created['id'] ?? 0);
+        self::assertGreaterThan(0, $targetId);
+
+        try {
+            get_instance()->load->model('admins_model');
+            $staleSnapshot = get_instance()->admins_model->get(['id' => $targetId])[0] ?? [];
+            self::assertSame($targetId, (int) ($staleSnapshot['id'] ?? 0));
+
+            $providerRole = $db->get_where('roles', ['slug' => 'provider'])->row_array();
+            self::assertNotEmpty($providerRole);
+            self::assertTrue($db->update('users', ['id_roles' => (int) $providerRole['id']], ['id' => $targetId]));
+
+            try {
+                get_instance()->admins_model->save($staleSnapshot);
+                self::fail('A stale admin snapshot must not restore the admin role.');
+            } catch (RuntimeException $exception) {
+                self::assertStringContainsString('no longer an admin', $exception->getMessage());
+            }
+
+            self::assertSame(
+                (int) $providerRole['id'],
+                (int) $db->get_where('users', ['id' => $targetId])->row()->id_roles,
+            );
+        } finally {
+            $db->delete('user_settings', ['id_users' => $targetId]);
+            $db->delete('users', ['id' => $targetId]);
+        }
+    }
+
+    public function testAdminApiUpdateWaitsForRoleDemotionAndRejectsStaleSnapshot(): void
+    {
+        $db = get_instance()->db;
+        $fixture = $this->fixture;
+        $admin = $this->basicClient($this->credentials['admin_username'], $this->credentials['password']);
+        $payload = $fixture->adminWritePayload('ordered-role-race');
+        $created = $this->success($admin->requestJsonApp('POST', 'api/v1/admins', $payload), 201);
+        $targetId = (int) ($created['id'] ?? 0);
+        self::assertGreaterThan(0, $targetId);
+
+        $adminRole = $db->get_where('roles', ['slug' => 'admin'])->row_array();
+        $providerRole = $db->get_where('roles', ['slug' => 'provider'])->row_array();
+        self::assertNotEmpty($adminRole);
+        self::assertNotEmpty($providerRole);
+        $adminRoleId = (int) $adminRole['id'];
+        $providerRoleId = (int) $providerRole['id'];
+        $observer = null;
+        $multi = null;
+        $handle = null;
+        $transactionOpen = false;
+
+        try {
+            $before = $fixture->adminDeleteState($targetId);
+            self::assertSame($adminRoleId, (int) ($before['user']['id_roles'] ?? 0));
+            self::assertTrue($db->trans_begin());
+            $transactionOpen = true;
+            self::assertTrue($db->update('users', ['id_roles' => $providerRoleId], ['id' => $targetId]));
+
+            $observer = get_instance()->load->database(
+                [
+                    'hostname' => 'mysql',
+                    'username' => 'root',
+                    'password' => 'secret',
+                    'database' => 'easyappointments',
+                    'dbdriver' => 'mysqli',
+                    'dbprefix' => $db->dbprefix,
+                    'pconnect' => false,
+                    'db_debug' => false,
+                    'char_set' => 'utf8mb4',
+                    'dbcollat' => 'utf8mb4_general_ci',
+                ],
+                true,
+            );
+            self::assertTrue($observer->query('SET SESSION TRANSACTION READ ONLY'));
+            $ownerConnectionId = mysqli_thread_id($db->conn_id);
+            self::assertNotSame($ownerConnectionId, mysqli_thread_id($observer->conn_id));
+
+            $multi = curl_multi_init();
+            $handle = curl_init($this->server->baseUrl . '/index.php/api/v1/admins/' . $targetId);
+            self::assertNotFalse($multi);
+            self::assertNotFalse($handle);
+            $payload['firstName'] = $fixture->run . '_stale-race-update';
+            curl_setopt_array($handle, [
+                CURLOPT_CUSTOMREQUEST => 'PUT',
+                CURLOPT_POSTFIELDS => json_encode($payload, JSON_THROW_ON_ERROR),
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_FOLLOWLOCATION => false,
+                CURLOPT_CONNECTTIMEOUT => 3,
+                CURLOPT_TIMEOUT => 8,
+                CURLOPT_HTTPHEADER => [
+                    'Accept: application/json',
+                    'Content-Type: application/json',
+                    'Authorization: Bearer ' . $this->credentials['token'],
+                ],
+            ]);
+            self::assertSame(CURLM_OK, curl_multi_add_handle($multi, $handle));
+
+            $waiting = false;
+            $deadline = microtime(true) + 8.0;
+            do {
+                do {
+                    $multiResult = curl_multi_exec($multi, $running);
+                } while ($multiResult === CURLM_CALL_MULTI_PERFORM);
+                self::assertSame(CURLM_OK, $multiResult);
+                $waiting = $this->adminUpdateLockWaitObserved($observer, $ownerConnectionId, $targetId);
+                if ($waiting || $running === 0 || microtime(true) >= $deadline) {
+                    break;
+                }
+                curl_multi_select($multi, 0.05);
+            } while (true);
+
+            self::assertTrue($waiting, 'Admin API update must wait on the target row before writing.');
+            self::assertTrue($db->trans_commit());
+            $transactionOpen = false;
+
+            $drainDeadline = microtime(true) + 8.0;
+            do {
+                do {
+                    $multiResult = curl_multi_exec($multi, $running);
+                } while ($multiResult === CURLM_CALL_MULTI_PERFORM);
+                self::assertSame(CURLM_OK, $multiResult);
+                if ($running === 0 || microtime(true) >= $drainDeadline) {
+                    break;
+                }
+                curl_multi_select($multi, 0.05);
+            } while (true);
+
+            self::assertSame(0, $running, 'Admin API update must finish after the demotion commits.');
+            self::assertSame(CURLE_OK, curl_errno($handle), curl_error($handle));
+            self::assertSame(500, (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE));
+            $after = $fixture->adminDeleteState($targetId);
+            self::assertSame($providerRoleId, (int) ($after['user']['id_roles'] ?? 0));
+            self::assertSame($before['settings'], $after['settings']);
+            self::assertSame($before['user']['first_name'], $after['user']['first_name']);
+        } finally {
+            if ($transactionOpen && $db->trans_active()) {
+                $db->trans_rollback();
+            }
+            if ($handle instanceof \CurlHandle && $multi instanceof \CurlMultiHandle) {
+                $this->drainConcurrentAdminDelete($multi, $handle);
+                curl_multi_remove_handle($multi, $handle);
+                curl_close($handle);
+            }
+            if ($multi instanceof \CurlMultiHandle) {
+                curl_multi_close($multi);
+            }
+            if ($observer !== null) {
+                $observer->close();
+            }
+            $db->delete('user_settings', ['id_users' => $targetId]);
+            $db->delete('users', ['id' => $targetId]);
+        }
+    }
+
     public function testConcurrentAdminDeletesWaitAndRejectTheSecondLastAdminDelete(): void
     {
         $db = get_instance()->db;
@@ -1342,6 +1605,23 @@ final class StaffSettingsApiHttpTest extends TestCase
                 ($wait['REQUESTING_TABLE'] ?? null) === $usersTable &&
                 $normalize((string) ($wait['REQUESTING_SQL'] ?? '')) === $normalize($expectedSql)
             ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function adminUpdateLockWaitObserved(object $observer, int $ownerConnectionId, int $targetId): bool
+    {
+        foreach ($this->adminDeleteLockWaitRows($observer, $ownerConnectionId) as $wait) {
+            if (($wait['REQUESTING_SCHEMA'] ?? null) !== \Config::DB_NAME) {
+                continue;
+            }
+            if (($wait['REQUESTING_TABLE'] ?? null) !== get_instance()->db->dbprefix('users')) {
+                continue;
+            }
+            $statement = (string) ($wait['REQUESTING_SQL'] ?? '');
+            if (str_contains(strtoupper($statement), 'FOR UPDATE') && str_contains($statement, (string) $targetId)) {
                 return true;
             }
         }

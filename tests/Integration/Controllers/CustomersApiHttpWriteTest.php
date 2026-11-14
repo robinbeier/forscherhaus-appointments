@@ -75,6 +75,30 @@ final class CustomersApiHttpWriteTest extends TestCase
         );
     }
 
+    public function testMetadataSaveCannotOverwriteNewerCredentialVersion(): void
+    {
+        $f = $this->fixture;
+        $admin = $this->adminClient();
+        $payload = $this->customerPayload($f->customerWritePayload('credential-version'));
+        $created = $this->success($admin->requestJsonApp('POST', 'api/v1/customers', $payload), 201);
+        $id = (int) ($created['id'] ?? 0);
+        self::assertGreaterThan(0, $id);
+
+        $db = get_instance()->db;
+        $before = (int) ($f->row('users', $id)['credential_version'] ?? 0);
+        get_instance()->load->model('customers_model');
+        $stale = get_instance()->customers_model->find($id);
+        self::assertSame($before, (int) ($stale['credential_version'] ?? 0));
+        self::assertTrue(
+            $db->set('credential_version', 'credential_version + 1', false)->where('id', $id)->update('users'),
+        );
+
+        $stale['first_name'] = 'Metadata after credential bump';
+        get_instance()->customers_model->save($stale);
+
+        self::assertSame($before + 1, (int) ($f->row('users', $id)['credential_version'] ?? 0));
+    }
+
     public function testPutRejectsBodyIdThatDiffersFromUriWithoutMutatingEitherCustomer(): void
     {
         $f = $this->fixture;

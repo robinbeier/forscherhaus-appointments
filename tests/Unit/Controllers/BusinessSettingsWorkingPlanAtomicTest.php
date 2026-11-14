@@ -16,8 +16,10 @@ final class BusinessSettingsWorkingPlanAtomicTest extends TestCase
             [
                 'auth:edit:system_settings',
                 'dto:working_plan',
-                'providers:get',
                 'begin',
+                'lock:actor',
+                'lock:role',
+                'providers:get',
                 'set:1:working_plan:{"2":{"z":1},"1":{"a":2}}',
                 'set:2:working_plan:{"2":{"z":1},"1":{"a":2}}',
                 'commit',
@@ -45,8 +47,10 @@ final class BusinessSettingsWorkingPlanAtomicTest extends TestCase
             [
                 'auth:edit:system_settings',
                 'dto:working_plan',
-                'providers:get',
                 'begin',
+                'lock:actor',
+                'lock:role',
+                'providers:get',
                 'set:1:working_plan:{"2":{"z":1},"1":{"a":2}}',
                 'set:2:working_plan:{"2":{"z":1},"1":{"a":2}}',
                 'rollback',
@@ -63,6 +67,52 @@ final class BusinessSettingsWorkingPlanAtomicTest extends TestCase
             self::assertSame(500, $result['status']);
             self::assertSame(['auth:edit:system_settings', 'json_exception'], $result['events']);
         }
+    }
+
+    public function testRevokedPermissionRollsBackBeforeProviderMutation(): void
+    {
+        $result = $this->probe('revoked', 'POST');
+        self::assertSame(403, $result['status']);
+        self::assertSame(
+            [
+                'auth:edit:system_settings',
+                'dto:working_plan',
+                'begin',
+                'lock:actor',
+                'lock:role',
+                'rollback',
+                'abort:403',
+            ],
+            $result['events'],
+        );
+        self::assertStringNotContainsString('providers:get', implode('|', $result['events']));
+        self::assertStringNotContainsString('set:', implode('|', $result['events']));
+    }
+
+    public function testUnrelatedUsersPermissionBitDoesNotAuthorizeSettingsWrite(): void
+    {
+        $result = $this->probe('wrong-column', 'POST');
+        self::assertSame(403, $result['status']);
+        self::assertSame(
+            [
+                'auth:edit:system_settings',
+                'dto:working_plan',
+                'begin',
+                'lock:actor',
+                'lock:role',
+                'rollback',
+                'abort:403',
+            ],
+            $result['events'],
+        );
+    }
+
+    public function testInvalidSystemSettingsMaskCannotAuthorizeWorkingPlanWrite(): void
+    {
+        $result = $this->probe('invalid-mask', 'POST');
+        self::assertSame(403, $result['status']);
+        self::assertContains('rollback', $result['events']);
+        self::assertNotContains('providers:get', $result['events']);
     }
 
     public function testJoinedTransactionRetainsCallerOwnership(): void
@@ -82,7 +132,16 @@ final class BusinessSettingsWorkingPlanAtomicTest extends TestCase
         self::assertContains('set:1:working_plan:{}', $emptyPlan['events']);
         $emptyProviders = $this->probe('emptyproviders', 'POST');
         self::assertSame(
-            ['auth:edit:system_settings', 'dto:working_plan', 'providers:get', 'response'],
+            [
+                'auth:edit:system_settings',
+                'dto:working_plan',
+                'begin',
+                'lock:actor',
+                'lock:role',
+                'providers:get',
+                'commit',
+                'response',
+            ],
             $emptyProviders['events'],
         );
     }

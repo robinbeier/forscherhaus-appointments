@@ -252,6 +252,22 @@ final class SecretariesModelAtomicWriteTest extends TestCase
         $this->assertSame([], $this->secretariesModel->find($secretaryId)['providers']);
     }
 
+    public function test_stale_credential_version_from_metadata_snapshot_cannot_overwrite_newer_value(): void
+    {
+        $secretaryId = $this->secretariesModel->save($this->secretaryData([]));
+        $this->createdUserIds[] = $secretaryId;
+        $db = get_instance()->db;
+        $stale = $this->secretariesModel->find($secretaryId);
+        $before = (int) ($stale['credential_version'] ?? 0);
+
+        self::assertTrue(
+            $db->set('credential_version', 'credential_version + 1', false)->where('id', $secretaryId)->update('users'),
+        );
+        $this->secretariesModel->save($stale);
+
+        self::assertSame($before + 1, (int) $db->get_where('users', ['id' => $secretaryId])->row('credential_version'));
+    }
+
     public function test_settings_failure_after_mutation_rolls_back_insert_and_update(): void
     {
         $model = $this->failingModel('settings');

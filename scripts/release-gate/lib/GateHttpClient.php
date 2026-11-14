@@ -146,6 +146,8 @@ final class GateHttpClient
         string $body,
         ?string $contentType,
         ?int $timeoutSeconds = null,
+        /** @var array<string, string> $requestSpecificHeaders */
+        array $requestSpecificHeaders = [],
     ): GateHttpResponse {
         $normalizedMethod = strtoupper(trim($method));
         if (!in_array($normalizedMethod, ['POST', 'PUT'], true)) {
@@ -162,6 +164,7 @@ final class GateHttpClient
             false,
             false,
             $contentType,
+            $requestSpecificHeaders,
         );
     }
 
@@ -216,6 +219,8 @@ final class GateHttpClient
         bool $noBody = false,
         bool $jsonBody = false,
         ?string $contentType = null,
+        /** @var array<string, string> $requestSpecificHeaders */
+        array $requestSpecificHeaders = [],
     ): GateHttpResponse {
         if (!function_exists('curl_init')) {
             throw new RuntimeException('ext-curl is required for the release gate.');
@@ -289,6 +294,11 @@ final class GateHttpClient
         }
         if ($this->isSameOrigin($url, $this->baseUrl)) {
             foreach ($this->additionalHeaders as $name => $value) {
+                if (trim($name) !== '' && trim($value) !== '') {
+                    $requestHeaders[] = trim($name) . ': ' . trim($value);
+                }
+            }
+            foreach ($requestSpecificHeaders as $name => $value) {
                 if (trim($name) !== '' && trim($value) !== '') {
                     $requestHeaders[] = trim($name) . ': ' . trim($value);
                 }

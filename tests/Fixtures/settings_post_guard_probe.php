@@ -5,6 +5,10 @@ declare(strict_types=1);
 define('BASEPATH', __DIR__);
 define('APPPATH', dirname(__DIR__, 2) . '/application/');
 define('PRIV_SYSTEM_SETTINGS', 'system_settings');
+define('PRIV_VIEW', 1);
+define('PRIV_ADD', 2);
+define('PRIV_EDIT', 4);
+define('PRIV_DELETE', 8);
 define('SYNTHETIC_USER_ID', 7001);
 
 $controllerName = $argv[1] ?? '';
@@ -93,7 +97,10 @@ final class ProbeQuery
 
     public function where(string $column, string $value): self
     {
-        if ($column !== 'name' || !in_array($value, ['synthetic_setting', 'synthetic_second'], true)) {
+        if (
+            $column !== 'name' ||
+            !in_array($value, ['company_name', 'company_link', 'book_advance_timeout', 'future_booking_limit'], true)
+        ) {
             throw new RuntimeException('Unexpected settings query predicate.');
         }
         $GLOBALS['query_name'] = $value;
@@ -106,7 +113,10 @@ final class ProbeQuery
     }
     public function row_array(): array
     {
-        return ['id' => $this->name === 'synthetic_setting' ? 41 : 42, 'name' => $this->name];
+        return [
+            'id' => in_array($this->name, ['company_name', 'book_advance_timeout'], true) ? 41 : 42,
+            'name' => $this->name,
+        ];
     }
 }
 final class ProbeDatabase
@@ -138,6 +148,26 @@ final class ProbeDatabase
         $this->active = false;
         return true;
     }
+    public function dbprefix(string $table): string
+    {
+        return 'ea_' . $table;
+    }
+    public function query(string $sql, array $params = []): object|false
+    {
+        global $scenario;
+        $isRole = str_contains($sql, 'FROM `ea_roles`');
+        $GLOBALS['events'][] = $isRole ? 'lock:role' : 'lock:actor';
+        return new ProbePermissionQuery($isRole ? 'role' : 'actor', $scenario);
+    }
+}
+final class ProbePermissionQuery
+{
+    public function __construct(private string $type, private string $scenario) {}
+    public function row_array(): array
+    {
+        $mask = $this->scenario === 'invalid-mask' ? PRIV_EDIT | 16 : PRIV_EDIT;
+        return $this->type === 'role' ? ['system_settings' => $mask] : ['id_roles' => 1];
+    }
 }
 final class ProbeSettingsModel
 {
@@ -150,7 +180,7 @@ final class ProbeSettingsModel
     public function query(): ProbeQuery
     {
         $GLOBALS['events'][] = 'query';
-        return new ProbeQuery($GLOBALS['query_name'] ?? 'synthetic_setting');
+        return new ProbeQuery($GLOBALS['query_name'] ?? 'company_name');
     }
     public function validate(array $setting): void {}
     public function only(array &$setting, array $fields): void
@@ -180,6 +210,22 @@ class Backoffice_request_dto_factory
     {
         global $events;
         $events[] = 'dto:' . $key;
+        global $scenario;
+        if ($scenario === 'malicious' && in_array($key, ['general_settings', 'business_settings'], true)) {
+            return (object) [
+                'settings' => [['name' => 'api_token', 'id' => 41, 'value' => 'attacker-controlled']],
+            ];
+        }
+        if ($scenario === 'invalid_value' && $key === 'general_settings') {
+            return (object) [
+                'settings' => [['name' => 'company_name', 'value' => ['nested' => 'value']]],
+            ];
+        }
+        if ($scenario === 'missing_value' && $key === 'business_settings') {
+            return (object) [
+                'settings' => [['name' => 'book_advance_timeout']],
+            ];
+        }
         if ($key === 'ldap_settings') {
             return (object) [
                 'settings' => [
@@ -221,10 +267,18 @@ class Backoffice_request_dto_factory
                 'settings' => [['name' => 'google_analytics_code', 'value' => 'G-SYNTHETIC', 'extra' => 'drop-me']],
             ];
         }
+        if ($key === 'general_settings') {
+            return (object) [
+                'settings' => [
+                    ['name' => 'company_name', 'value' => 'synthetic-value', 'extra' => 'drop-me'],
+                    ['name' => 'company_link', 'value' => 'second-value', 'extra' => 'drop-me-too'],
+                ],
+            ];
+        }
         return (object) [
             'settings' => [
-                ['name' => 'synthetic_setting', 'value' => 'synthetic-value', 'extra' => 'drop-me'],
-                ['name' => 'synthetic_second', 'value' => 'second-value', 'extra' => 'drop-me-too'],
+                ['name' => 'book_advance_timeout', 'value' => 'synthetic-value', 'extra' => 'drop-me'],
+                ['name' => 'future_booking_limit', 'value' => 'second-value', 'extra' => 'drop-me-too'],
             ],
         ];
     }
