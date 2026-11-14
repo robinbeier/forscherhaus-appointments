@@ -46,6 +46,22 @@ $hook['post_controller'] = static function (): void {
         return;
     }
 
+    try {
+        $api = $CI->api;
+        if (is_object($api) && is_callable([$api, 'finalizeMutationTransaction'])) {
+            $api->finalizeMutationTransaction();
+        }
+    } catch (Throwable $error) {
+        log_message('error', 'API actor transaction finalization failed: ' . $error->getMessage());
+        $output = $CI->output;
+        if (is_object($output) && is_callable([$output, 'set_status_header'])) {
+            $output
+                ->set_status_header(500)
+                ->set_content_type('application/json')
+                ->set_output(json_encode(['success' => false, 'message' => 'An unexpected error occurred.']));
+        }
+    }
+
     // CI_Controller exposes services through __get() without implementing
     // __isset(). Read the magic property explicitly and validate the API
     // before passing it to the policy helpers.
