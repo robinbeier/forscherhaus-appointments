@@ -198,6 +198,41 @@ final class ServicesLegacyWriteHttpTest extends TestCase
         }
     }
 
+    public function testRevokedServicePermissionsRejectEachWriteWithoutPersistingChanges(): void
+    {
+        $admin = $this->login($this->server->client());
+        $db = get_instance()->db;
+        $roleBefore = $db->get_where('roles', ['id' => $this->actorRoleBefore])->row_array();
+        self::assertNotEmpty($roleBefore);
+        $before = $this->serviceRow($this->fixture->serviceId);
+
+        try {
+            self::assertTrue((bool) $db->update('roles', ['services' => 0], ['id' => $this->actorRoleBefore]));
+            $requests = [
+                ['services/store', ['service' => $this->servicePayload($this->fixture->run . '_revoked_store')]],
+                [
+                    'services/update',
+                    [
+                        'service' => $this->servicePayload(
+                            $this->fixture->run . '_revoked_update',
+                            $this->fixture->serviceId,
+                        ),
+                    ],
+                ],
+                ['services/destroy', ['service_id' => $this->fixture->serviceId]],
+            ];
+
+            foreach ($requests as [$path, $payload]) {
+                $response = $admin->post($path, $payload);
+                self::assertSame(403, $response->statusCode, $path . ': ' . $response->body);
+                self::assertSame($before, $this->serviceRow($this->fixture->serviceId));
+                self::assertSame([], $this->ownedRows($payload['service']['name'] ?? ''));
+            }
+        } finally {
+            $db->update('roles', ['services' => $roleBefore['services']], ['id' => $this->actorRoleBefore]);
+        }
+    }
+
     public function testEditOnlyRoleCannotCreateThroughUpdateWithoutId(): void
     {
         $admin = $this->login($this->server->client());
