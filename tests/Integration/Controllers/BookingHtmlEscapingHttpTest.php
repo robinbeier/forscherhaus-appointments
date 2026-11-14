@@ -19,6 +19,7 @@ final class BookingHtmlEscapingHttpTest extends TestCase
         'display_custom_field_1',
         'require_custom_field_1',
         'disable_booking',
+        'disable_booking_message',
     ];
 
     private ?DefenseCycleFixtures $fixture = null;
@@ -161,6 +162,24 @@ final class BookingHtmlEscapingHttpTest extends TestCase
         $this->assertNoInjectedElements($disabledPage->body);
     }
 
+    public function testDisabledBookingPurifiesRichMessageBeforePublicRendering(): void
+    {
+        $client = $this->server?->client();
+        self::assertNotNull($client);
+        $this->setSetting(
+            'disable_booking_message',
+            '<strong>ROB694 allowed message</strong><script>alert("xss")</script><img src="x" onerror="alert(\'xss\')">',
+        );
+        $this->setSetting('disable_booking', '1');
+
+        $page = $client->get('booking');
+
+        self::assertSame(200, $page->statusCode);
+        self::assertStringContainsString('<strong>ROB694 allowed message</strong>', $page->body);
+        self::assertStringNotContainsString('<script', strtolower($page->body));
+        self::assertStringNotContainsString('onerror=', strtolower($page->body));
+    }
+
     private function assertNoInjectedElements(string $body): void
     {
         self::assertStringNotContainsString('<span data-rob694=', $body);
@@ -188,6 +207,7 @@ final class BookingHtmlEscapingHttpTest extends TestCase
         $this->setSetting('display_custom_field_1', '0');
         $this->setSetting('require_custom_field_1', '0');
         $this->setSetting('disable_booking', '0');
+        $this->setSetting('disable_booking_message', 'ROB694 baseline disabled message');
     }
 
     private function setSetting(string $name, string $value): void
