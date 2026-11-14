@@ -80,9 +80,7 @@ class Ldap_client
         $ldap_host = setting('ldap_host');
         $ldap_port = (int) setting('ldap_port');
 
-        $connection = @ldap_connect($ldap_host, $ldap_port);
-        $protocol_configured = $connection !== false && @ldap_set_option($connection, LDAP_OPT_PROTOCOL_VERSION, 3);
-        $this->assertConnectionReady($connection, $protocol_configured);
+        $connection = $this->establishSecureConnection($ldap_host, $ldap_port);
 
         $user_bind = @ldap_bind($connection, $user['ldap_dn'], $password);
 
@@ -148,5 +146,48 @@ class Ldap_client
         if (!$protocol_configured) {
             throw new LdapOperationalException('Unable to configure the LDAP connection.');
         }
+    }
+
+    /**
+     * Establish an LDAPv3 connection and upgrade it to certificate-verified
+     * StartTLS before any credentials are sent.
+     *
+     * @throws LdapOperationalException When TLS setup fails.
+     */
+    protected function establishSecureConnection(string $host, int $port): mixed
+    {
+        if (!$this->setTlsCertificateVerification()) {
+            throw new LdapOperationalException('Unable to configure LDAP certificate verification.');
+        }
+
+        $connection = $this->connectToServer($host, $port);
+        $protocol_configured = $connection !== false && $this->configureProtocol($connection);
+        $this->assertConnectionReady($connection, $protocol_configured);
+
+        if (!$this->startTls($connection)) {
+            throw new LdapOperationalException('Unable to establish LDAP TLS.');
+        }
+
+        return $connection;
+    }
+
+    protected function setTlsCertificateVerification(): bool
+    {
+        return @ldap_set_option(null, LDAP_OPT_X_TLS_REQUIRE_CERT, LDAP_OPT_X_TLS_DEMAND);
+    }
+
+    protected function connectToServer(string $host, int $port): mixed
+    {
+        return @ldap_connect($host, $port);
+    }
+
+    protected function configureProtocol(mixed $connection): bool
+    {
+        return @ldap_set_option($connection, LDAP_OPT_PROTOCOL_VERSION, 3);
+    }
+
+    protected function startTls(mixed $connection): bool
+    {
+        return @ldap_start_tls($connection);
     }
 }

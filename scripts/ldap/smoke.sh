@@ -9,7 +9,7 @@ LDAP_ADMIN_PASSWORD="${LDAP_ADMIN_PASSWORD:-admin}"
 LDAP_READONLY_DN="${LDAP_READONLY_DN:-cn=user,dc=example,dc=org}"
 LDAP_READONLY_PASSWORD="${LDAP_READONLY_PASSWORD:-password}"
 LDAP_BASE_DN="${LDAP_BASE_DN:-dc=example,dc=org}"
-LDAP_URI="${LDAP_URI:-ldap://localhost:389}"
+LDAP_URI="${LDAP_URI:-ldap://openldap:389}"
 LDAP_COMPOSE_PROJECT_NAME="${LDAP_COMPOSE_PROJECT_NAME:-}"
 LDAP_SERVICE_NAME="${LDAP_SERVICE_NAME:-openldap}"
 LDAP_EXPECTED_UID="${LDAP_EXPECTED_UID:-ada}"
@@ -64,11 +64,11 @@ wait_for_openldap() {
     local attempt
 
     for attempt in $(seq 1 60); do
-        if run_ldap ldapwhoami -x -H "${LDAP_URI}" -D "${LDAP_ADMIN_DN}" -w "${LDAP_ADMIN_PASSWORD}" >/dev/null 2>&1; then
+        if run_ldap ldapwhoami -x -ZZ -H "${LDAP_URI}" -D "${LDAP_ADMIN_DN}" -w "${LDAP_ADMIN_PASSWORD}" >/dev/null 2>&1; then
             # Some images expose a temporary init slapd before their final runtime restart.
             sleep 2
 
-            if run_ldap ldapwhoami -x -H "${LDAP_URI}" -D "${LDAP_ADMIN_DN}" -w "${LDAP_ADMIN_PASSWORD}" >/dev/null 2>&1; then
+            if run_ldap ldapwhoami -x -ZZ -H "${LDAP_URI}" -D "${LDAP_ADMIN_DN}" -w "${LDAP_ADMIN_PASSWORD}" >/dev/null 2>&1; then
                 return 0
             fi
         fi
@@ -105,17 +105,23 @@ main() {
 
     wait_for_openldap
 
-    admin_whoami="$(run_ldap ldapwhoami -x -H "${LDAP_URI}" -D "${LDAP_ADMIN_DN}" -w "${LDAP_ADMIN_PASSWORD}")"
+    if compose exec -T -e LDAPTLS_CACERT=/etc/ssl/certs/ca-certificates.crt "${LDAP_SERVICE_NAME}" ldapwhoami -x -ZZ -H "${LDAP_URI}" -D "${LDAP_ADMIN_DN}" -w "${LDAP_ADMIN_PASSWORD}" >/dev/null 2>&1; then
+        echo "[FAIL] LDAP certificate mismatch unexpectedly succeeded" >&2
+        exit 1
+    fi
+    echo "[PASS] LDAP certificate mismatch rejected"
+
+    admin_whoami="$(run_ldap ldapwhoami -x -ZZ -H "${LDAP_URI}" -D "${LDAP_ADMIN_DN}" -w "${LDAP_ADMIN_PASSWORD}")"
     assert_output_contains "${admin_whoami}" "dn:${LDAP_ADMIN_DN}" "admin bind"
 
-    readonly_whoami="$(run_ldap ldapwhoami -x -H "${LDAP_URI}" -D "${LDAP_READONLY_DN}" -w "${LDAP_READONLY_PASSWORD}")"
+    readonly_whoami="$(run_ldap ldapwhoami -x -ZZ -H "${LDAP_URI}" -D "${LDAP_READONLY_DN}" -w "${LDAP_READONLY_PASSWORD}")"
     assert_output_contains "${readonly_whoami}" "dn:${LDAP_READONLY_DN}" "readonly bind"
 
-    base_search="$(run_ldap ldapsearch -x -H "${LDAP_URI}" -D "${LDAP_ADMIN_DN}" -w "${LDAP_ADMIN_PASSWORD}" -b "${LDAP_BASE_DN}" -s base -LLL)"
+    base_search="$(run_ldap ldapsearch -x -ZZ -H "${LDAP_URI}" -D "${LDAP_ADMIN_DN}" -w "${LDAP_ADMIN_PASSWORD}" -b "${LDAP_BASE_DN}" -s base -LLL)"
     assert_output_contains "${base_search}" "dn: ${LDAP_BASE_DN}" "base search dn"
     assert_output_contains "${base_search}" "dc: example" "base search dc"
 
-    user_search="$(run_ldap ldapsearch -x -H "${LDAP_URI}" -D "${LDAP_ADMIN_DN}" -w "${LDAP_ADMIN_PASSWORD}" -b "${LDAP_BASE_DN}" "(uid=${LDAP_EXPECTED_UID})" cn sn givenName mail uid telephoneNumber dn -LLL)"
+    user_search="$(run_ldap ldapsearch -x -ZZ -H "${LDAP_URI}" -D "${LDAP_ADMIN_DN}" -w "${LDAP_ADMIN_PASSWORD}" -b "${LDAP_BASE_DN}" "(uid=${LDAP_EXPECTED_UID})" cn sn givenName mail uid telephoneNumber dn -LLL)"
     assert_output_contains "${user_search}" "dn: uid=${LDAP_EXPECTED_UID},ou=people,${LDAP_BASE_DN}" "seeded user dn"
     assert_output_contains "${user_search}" "cn: ${LDAP_EXPECTED_UID}" "seeded user cn"
     assert_output_contains "${user_search}" "givenName: ${LDAP_EXPECTED_GIVEN_NAME}" "seeded user givenName"

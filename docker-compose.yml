@@ -6,11 +6,13 @@ services:
             - EA_SKIP_NPM_BOOTSTRAP=${EA_SKIP_NPM_BOOTSTRAP:-0}
             - EA_SKIP_ASSET_BUILD_BOOTSTRAP=${EA_SKIP_ASSET_BUILD_BOOTSTRAP:-0}
             - PDF_TOKEN
+            - LDAPTLS_CACERT=/run/secrets/ldap-ca/ca.crt
         extra_hosts:
             - host.docker.internal:host-gateway
         volumes:
             - '.:/var/www/html'
             - './docker/php-fpm/php-ini-overrides.ini:/usr/local/etc/php/conf.d/99-overrides.ini'
+            - ldap_tls_ca:/run/secrets/ldap-ca:ro
             - type: volume
               source: php_fpm_sessions
               target: /var/www/html/storage/sessions
@@ -61,6 +63,9 @@ services:
     openldap:
         image: vegardit/openldap@sha256:efa7cff027fa2ac503b073161849f93e4ccaaa1b9ac0a9788814865032952564
         hostname: openldap
+        depends_on:
+            ldap-tls-init:
+                condition: service_completed_successfully
         ports:
             - '127.0.0.1:389:389'
             - '127.0.0.1:636:636'
@@ -69,11 +74,41 @@ services:
             - ./docker/ldap/vegardit/init_org_entries.ldif:/opt/ldifs/init_org_entries.ldif:ro
             - ./docker/openldap/var:/var/lib/ldap
             - ./docker/openldap/etc:/etc/ldap/slapd.d
+            - ldap_tls_ca:/run/secrets/ldap-ca:ro
+            - ldap_tls_server:/run/secrets/ldap-server:ro
         environment:
             - LDAP_INIT_ORG_DN=dc=example,dc=org
             - LDAP_INIT_ORG_NAME=example
             - LDAP_INIT_ROOT_USER_DN=cn=admin,dc=example,dc=org
             - LDAP_INIT_ROOT_USER_PW=admin
+            - LDAP_TLS_ENABLED=true
+            - LDAP_LDAPS_ENABLED=true
+            - LDAP_TLS_CERT_FILE=/run/secrets/ldap-server/server.crt
+            - LDAP_TLS_KEY_FILE=/run/secrets/ldap-server/server.key
+            - LDAP_TLS_CA_FILE=/run/secrets/ldap-ca/ca.crt
+            - LDAP_TLS_SSF=128
+            - LDAPTLS_CACERT=/run/secrets/ldap-ca/ca.crt
+            - LDAPTLS_REQCERT=demand
+
+    ldap-tls-init:
+        image: php:8.4.27-cli-bookworm
+        command:
+            - bash
+            - -ec
+            - |
+                if [[ -s /run/secrets/ldap-ca/ca.crt && -s /run/secrets/ldap-server/server.crt && -s /run/secrets/ldap-server/server.key ]] \
+                    && openssl x509 -checkend 3600 -noout -in /run/secrets/ldap-ca/ca.crt \
+                    && openssl x509 -checkend 3600 -noout -in /run/secrets/ldap-server/server.crt; then exit 0; fi
+                umask 077
+                rm -f /run/secrets/ldap-ca/* /run/secrets/ldap-server/*
+                openssl req -x509 -newkey rsa:2048 -nodes -days 1 -keyout /run/secrets/ldap-ca/ca.key -out /run/secrets/ldap-ca/ca.crt -subj '/CN=Forscherhaus LDAP fixture CA'
+                openssl req -newkey rsa:2048 -nodes -keyout /run/secrets/ldap-server/server.key -out /run/secrets/ldap-server/server.csr -subj '/CN=openldap'
+                printf '%s\n' '[v3_req]' 'subjectAltName=DNS:openldap,DNS:localhost,IP:127.0.0.1' > /tmp/ldap-ext.cnf
+                openssl x509 -req -in /run/secrets/ldap-server/server.csr -CA /run/secrets/ldap-ca/ca.crt -CAkey /run/secrets/ldap-ca/ca.key -CAcreateserial -out /run/secrets/ldap-server/server.crt -days 1 -sha256 -extfile /tmp/ldap-ext.cnf -extensions v3_req
+                rm -f /run/secrets/ldap-ca/ca.key /run/secrets/ldap-server/server.csr /run/secrets/ldap-ca/ca.srl /tmp/ldap-ext.cnf
+        volumes:
+            - ldap_tls_ca:/run/secrets/ldap-ca
+            - ldap_tls_server:/run/secrets/ldap-server
 
     pdf-renderer:
         platform: linux/amd64
@@ -108,3 +143,5 @@ services:
 
 volumes:
     php_fpm_sessions:
+    ldap_tls_ca:
+    ldap_tls_server:

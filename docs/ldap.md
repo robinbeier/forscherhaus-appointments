@@ -15,10 +15,13 @@ bash ./scripts/ldap/smoke.sh
 ```
 
 The default helper stack now uses the versioned `docker/ldap/vegardit` bootstrap fixtures, while the generated runtime
-state under `docker/openldap/{var,etc}` remains local-only and disposable.
+state under `docker/openldap/{var,etc}` remains local-only and disposable. Compose also creates a short-lived CA and
+server certificate in private runtime volumes. LDAP login and the smoke use StartTLS with certificate verification;
+there is no plaintext fallback.
 
 By default, OpenLDAP is configured to run on `localhost:389`, so it can be accessed on the host machine from this
-address. In the internal Docker Compose network the equivalent address is `openldap:389`.
+address. In the internal Docker Compose network the equivalent address is `openldap:389`. The application uses the
+service hostname `openldap`, which must match the certificate name used by an LDAP server.
 
 The seeded CLI workflow is the source of truth for local LDAP state. The default Docker stack no longer ships
 `phpLDAPadmin`, and the repo no longer carries an `openldap-legacy` fallback profile. If you need ad-hoc inspection,
@@ -61,7 +64,9 @@ The current deterministic seeded user is:
 
 After making sure that the local OpenLDAP server works, Easy!Appointments will be able to connect to it.
 
-Open Backend > Settings > Integrations > LDAP to configure the host and port and enable LDAP login.
+Open Backend > Settings > Integrations > LDAP to configure the host and port and enable LDAP login. The configured
+LDAP host must match the server certificate, and the PHP/OpenLDAP client must trust the issuing CA through its
+`LDAPTLS_CACERT` runtime configuration. Production CA material is provisioned outside this repository.
 
 #### Host
 
@@ -69,7 +74,8 @@ The server host address, provide "openldap" for Docker or your own host or IP.
 
 #### Port
 
-The server port number, provide 389 for Docker or your own server port value.
+The server port number, provide 389 for Docker or your own server port value. The application requires StartTLS on
+the LDAP port before binding; an LDAPS-only server on port 636 is not compatible with this contract.
 
 ## LDAP SSO
 
