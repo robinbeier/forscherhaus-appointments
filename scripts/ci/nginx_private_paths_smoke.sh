@@ -189,6 +189,22 @@ assert_php_route '/booking/register/' '/booking/register/' '/index.php' '/bookin
 assert_php_route '/index.php/booking/register' '/index.php/booking/register' '/index.php' '/booking/register'
 assert_php_route '/index.php/booking/register/' '/index.php/booking/register/' '/index.php' '/booking/register/'
 
+for booking_alias in \
+    '/booking/register/extra' '/index.php/booking/register/extra' \
+    '/booking/Register' '/index.php/booking/Register' \
+    '/booking/Register/extra' '/index.php/booking/Register/extra'; do
+    alias_small_status="$(curl --noproxy '*' --silent --show-error --output "$body_file" \
+        --write-out '%{http_code}' --request POST \
+        --header 'Content-Type: application/x-www-form-urlencoded' \
+        --data 'fixture=small' "$base_url$booking_alias")"
+    [[ "$alias_small_status" == '200' ]] || {
+        echo "Expected small booking alias $booking_alias to reach the front controller, got HTTP $alias_small_status." >&2
+        cat "$body_file" >&2
+        exit 1
+    }
+    grep -Fqx 'synthetic-frontcontroller-ok' "$body_file"
+done
+
 # Query-routed paths are accepted by CodeIgniter but cannot be constrained by
 # an Nginx location match. They must be rejected at the edge so normalized
 # slash and dot-dot variants cannot bypass the booking body limit; ordinary
@@ -233,7 +249,11 @@ booking_status="$(curl --noproxy '*' --silent --show-error --output "$body_file"
     exit 1
 }
 
-for booking_path in '/booking/register/' '/index.php/booking/register' '/index.php/booking/register/'; do
+for booking_path in \
+    '/booking/register/' '/index.php/booking/register' '/index.php/booking/register/' \
+    '/booking/register/extra' '/index.php/booking/register/extra' \
+    '/booking/Register' '/index.php/booking/Register' \
+    '/booking/Register/extra' '/index.php/booking/Register/extra'; do
     alias_status="$(curl --noproxy '*' --silent --show-error --output "$body_file" \
         --write-out '%{http_code}' --request POST \
         --header 'Content-Type: application/x-www-form-urlencoded' \
