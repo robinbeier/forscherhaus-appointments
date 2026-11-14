@@ -91,6 +91,72 @@ class ZeroSurpriseReplayTest extends TestCase
         self::assertStringNotContainsString('build', implode(' ', $commands[0]));
     }
 
+    public function testReplayStopsBeforeDumpImportWhenStartedImageIdentityDrifts(): void
+    {
+        $commands = [];
+        $postStart = false;
+        $runner = static function (array $command, string $workingDirectory, int $timeoutSeconds) use (
+            &$commands,
+            &$postStart,
+        ): array {
+            $commands[] = $command;
+            $joined = implode(' ', $command);
+            if (str_contains($joined, 'config --format json')) {
+                return [
+                    'exit_code' => 0,
+                    'stdout' => json_encode([
+                        'services' => [
+                            'mysql' => ['image' => 'mysql@sha256:' . str_repeat('a', 64)],
+                            'nginx' => ['image' => 'nginx@sha256:' . str_repeat('b', 64)],
+                            'php-fpm' => ['build' => ['context' => '.']],
+                            'pdf-renderer' => ['build' => ['context' => '.']],
+                        ],
+                    ]),
+                    'stderr' => '',
+                ];
+            }
+            if (str_contains($joined, 'ps --all -q')) {
+                return ['exit_code' => 0, 'stdout' => "created-container\n", 'stderr' => ''];
+            }
+            if (str_contains($joined, 'ps -q')) {
+                $postStart = true;
+                return ['exit_code' => 0, 'stdout' => "running-container\n", 'stderr' => ''];
+            }
+            if (str_contains($joined, 'inspect --format')) {
+                return [
+                    'exit_code' => 0,
+                    'stdout' => 'sha256:' . str_repeat($postStart ? 'd' : 'c', 64) . "\n",
+                    'stderr' => '',
+                ];
+            }
+
+            return ['exit_code' => 0, 'stdout' => '', 'stderr' => ''];
+        };
+
+        $result = runRestoreDumpStep('/repo', ['docker', 'compose'], ['dump_file' => '/tmp/synthetic.sql'], $runner);
+
+        self::assertSame('fail', $result['status']);
+        self::assertSame('runtime_identity_recheck', $result['details']['failed_substep']);
+        self::assertSame(
+            [],
+            array_values(
+                array_filter(
+                    $commands,
+                    static fn(array $command): bool => str_contains(implode(' ', $command), 'mysqladmin'),
+                ),
+            ),
+        );
+        self::assertSame(
+            [],
+            array_values(
+                array_filter(
+                    $commands,
+                    static fn(array $command): bool => str_contains(implode(' ', $command), 'easyappointments'),
+                ),
+            ),
+        );
+    }
+
     public function testExternalStepPassesPasswordOnlyThroughStdin(): void
     {
         $password = "synthetic quote' and newline\n";

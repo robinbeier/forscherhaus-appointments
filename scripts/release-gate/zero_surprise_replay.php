@@ -1338,13 +1338,18 @@ function isNoLiveSlotFailure(?array $bookingReport, array $config, array $initia
  * @param array<string, mixed> $config
  * @return array<string, mixed>
  */
-function runRestoreDumpStep(string $repoRoot, array $composePrefix, array $config): array
+function runRestoreDumpStep(string $repoRoot, array $composePrefix, array $config, ?callable $runner = null): array
 {
     $stepStartedAt = microtime(true);
     $substeps = [];
     $baselineBlockers = null;
+    $runner ??= static fn(
+        array $command,
+        string $workingDirectory,
+        int $timeoutSeconds,
+    ): array => GateProcessRunner::run($command, $workingDirectory, null, $timeoutSeconds);
 
-    $runtimePreflight = preflightReplayRuntime($repoRoot, $composePrefix);
+    $runtimePreflight = preflightReplayRuntime($repoRoot, $composePrefix, $runner);
     $substeps[] = [
         'name' => 'runtime_preflight',
         'status' => $runtimePreflight['status'],
@@ -1361,7 +1366,7 @@ function runRestoreDumpStep(string $repoRoot, array $composePrefix, array $confi
         ];
     }
 
-    $upResult = GateProcessRunner::run(
+    $upResult = $runner(
         composeCommand($composePrefix, [
             'up',
             '-d',
@@ -1374,7 +1379,6 @@ function runRestoreDumpStep(string $repoRoot, array $composePrefix, array $confi
             'pdf-renderer',
         ]),
         $repoRoot,
-        null,
         300,
     );
     $substeps[] = summarizeSubstep('compose_up', $upResult);
@@ -1392,12 +1396,7 @@ function runRestoreDumpStep(string $repoRoot, array $composePrefix, array $confi
     }
 
     foreach (['php-fpm', 'pdf-renderer'] as $service) {
-        $container = GateProcessRunner::run(
-            composeCommand($composePrefix, ['ps', '-q', $service]),
-            $repoRoot,
-            null,
-            60,
-        );
+        $container = $runner(composeCommand($composePrefix, ['ps', '-q', $service]), $repoRoot, 60);
         $containerId = trim((string) ($container['stdout'] ?? ''));
         if (($container['exit_code'] ?? 1) !== 0 || $containerId === '' || str_contains($containerId, "\n")) {
             return [
@@ -1407,12 +1406,7 @@ function runRestoreDumpStep(string $repoRoot, array $composePrefix, array $confi
                 'details' => ['failed_substep' => 'runtime_identity_recheck', 'substeps' => $substeps],
             ];
         }
-        $identity = GateProcessRunner::run(
-            ['docker', 'inspect', '--format', '{{.Image}}', $containerId],
-            $repoRoot,
-            null,
-            60,
-        );
+        $identity = $runner(['docker', 'inspect', '--format', '{{.Image}}', $containerId], $repoRoot, 60);
         $imageId = trim((string) ($identity['stdout'] ?? ''));
         if (($identity['exit_code'] ?? 1) !== 0 || $imageId !== ($runtimePreflight['image_ids'][$service] ?? null)) {
             return [
