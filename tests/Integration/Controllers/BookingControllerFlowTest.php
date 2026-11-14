@@ -1260,6 +1260,79 @@ class BookingControllerFlowTest extends TestCase
         $this->assertSame($customerId, (int) $customerData['id']);
     }
 
+    public function testRescheduleCustomerTokenUsesCustomerReturnedByLockedAuthority(): void
+    {
+        $pair = $this->fixtures->resolveProviderServicePair();
+        $customerAId = $this->fixtures->createCustomer(['first_name' => 'Historical']);
+        $customerBId = $this->fixtures->createCustomer(['first_name' => 'Locked']);
+        $appointmentId = $this->fixtures->createAppointment(
+            $pair['provider_id'],
+            $customerAId,
+            $pair['service_id'],
+            new DateTimeImmutable('+2 days 10:15:00'),
+        );
+        $appointment = $this->fixtures->findAppointmentById($appointmentId);
+        $this->assertNotNull($appointment);
+
+        $controller = $this->createBookingControllerWithForcedAvailability($pair['provider_id']);
+        $delegate = $controller->reschedule_authority;
+        $combinedMethodCalled = false;
+        $legacyMethodCalled = false;
+        $controller->reschedule_authority = new class (
+            $delegate,
+            $customerBId,
+            $combinedMethodCalled,
+            $legacyMethodCalled,
+        ) extends \Reschedule_authority {
+            public function __construct(
+                private readonly \Reschedule_authority $delegate,
+                private readonly int $lockedCustomerId,
+                private bool &$combinedMethodCalled,
+                private bool &$legacyMethodCalled,
+            ) {}
+
+            public function issueWithPrivacyToken(
+                int $appointment_id,
+                string $presented_hash,
+                callable $token_writer,
+            ): string|bool {
+                $this->combinedMethodCalled = true;
+
+                return $token_writer($this->lockedCustomerId);
+            }
+
+            public function issue(int $appointment_id, string $presented_hash): void
+            {
+                $this->legacyMethodCalled = true;
+            }
+        };
+
+        $savedCustomerId = null;
+        $savedTokenKey = null;
+        $controller->cache = new class ($savedCustomerId, $savedTokenKey) {
+            public function __construct(private mixed &$savedCustomerId, private mixed &$savedTokenKey) {}
+
+            public function save(string $key, mixed $value, int $ttl): bool
+            {
+                $this->savedTokenKey = $key;
+                $this->savedCustomerId = (int) $value;
+
+                return true;
+            }
+        };
+
+        $this->visitReschedule($controller, (string) $appointment['hash']);
+
+        $renderedToken = script_vars('customer_token');
+        $this->assertTrue($combinedMethodCalled);
+        $this->assertFalse($legacyMethodCalled);
+        $this->assertIsString($renderedToken);
+        $this->assertNotSame('', $renderedToken);
+        $this->assertSame('customer-token-v2-' . $renderedToken, $savedTokenKey);
+        $this->assertSame($customerBId, $savedCustomerId);
+        $this->assertNotSame($customerAId, $savedCustomerId);
+    }
+
     public function testCustomerReassignmentRetiresOldHashAndIssuesNewManageLink(): void
     {
         $pair = $this->fixtures->resolveProviderServicePair();
