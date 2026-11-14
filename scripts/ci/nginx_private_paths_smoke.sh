@@ -189,6 +189,36 @@ assert_php_route '/booking/register/' '/booking/register/' '/index.php' '/bookin
 assert_php_route '/index.php/booking/register' '/index.php/booking/register' '/index.php' '/booking/register'
 assert_php_route '/index.php/booking/register/' '/index.php/booking/register/' '/index.php' '/booking/register/'
 
+# Query-routed paths are accepted by CodeIgniter but cannot be constrained by
+# an Nginx location match. They must be rejected at the edge so normalized
+# slash and dot-dot variants cannot bypass the booking body limit; ordinary
+# query parameters and canonical path forms remain available to browsers.
+for booking_query_alias in \
+    '/index.php?/booking/register' '/?/booking/register' \
+    '/index.php?/booking/register?foo=bar' '/?/booking/register?foo=bar' \
+    '/index.php?//booking///register' '/?//booking///register' \
+    '/index.php?/../booking/register' '/?/../booking/register'; do
+    alias_route_status="$(curl --noproxy '*' --silent --show-error --output "$body_file" \
+        --write-out '%{http_code}' --request POST \
+        --header 'Content-Type: application/x-www-form-urlencoded' \
+        --data 'fixture=small' "$base_url$booking_query_alias")"
+    [[ "$alias_route_status" == '404' ]] || {
+        echo "Expected query-string booking alias $booking_query_alias to return HTTP 404, got $alias_route_status." >&2
+        cat "$body_file" >&2
+        exit 1
+    }
+done
+
+for ordinary_query_path in '/?foo=bar' '/index.php?foo=bar'; do
+    ordinary_query_status="$(request_status "$ordinary_query_path")"
+    [[ "$ordinary_query_status" == '200' ]] || {
+        echo "Expected ordinary query path $ordinary_query_path to return HTTP 200, got $ordinary_query_status." >&2
+        cat "$body_file" >&2
+        exit 1
+    }
+    grep -Fqx 'synthetic-frontcontroller-ok' "$body_file"
+done
+
 # Route-specific request-body protection: booking/register must reject a
 # form-encoded body above 1 MiB at Nginx, while the ordinary route still reaches
 # the front controller and unrelated static paths are not given this cap.
@@ -210,6 +240,22 @@ for booking_path in '/booking/register/' '/index.php/booking/register' '/index.p
         --data-binary "@$payload_file" "$base_url$booking_path")"
     [[ "$alias_status" == '413' ]] || {
         echo "Expected oversized $booking_path body to return HTTP 413, got $alias_status." >&2
+        cat "$body_file" >&2
+        exit 1
+    }
+done
+
+for booking_query_alias in \
+    '/index.php?/booking/register' '/?/booking/register' \
+    '/index.php?/booking/register?foo=bar' '/?/booking/register?foo=bar' \
+    '/index.php?//booking///register' '/?//booking///register' \
+    '/index.php?/../booking/register' '/?/../booking/register'; do
+    oversized_alias_status="$(curl --noproxy '*' --silent --show-error --output "$body_file" \
+        --write-out '%{http_code}' --request POST \
+        --header 'Content-Type: application/x-www-form-urlencoded' \
+        --data-binary "@$payload_file" "$base_url$booking_query_alias")"
+    [[ "$oversized_alias_status" == '404' ]] || {
+        echo "Expected oversized query-string booking alias $booking_query_alias to return HTTP 404, got $oversized_alias_status." >&2
         cat "$body_file" >&2
         exit 1
     }
