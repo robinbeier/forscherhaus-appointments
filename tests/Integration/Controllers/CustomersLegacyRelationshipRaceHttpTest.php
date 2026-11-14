@@ -111,6 +111,133 @@ final class CustomersLegacyRelationshipRaceHttpTest extends TestCase
         get_instance()->db->delete('appointments', ['id_users_customer' => $secondaryId]);
     }
 
+    public function testProviderCannotDeleteCustomerWithForeignProviderAppointment(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $db = get_instance()->db;
+        $client = $this->loginProvider();
+        $ownAppointment = $fixture->appointment();
+
+        $provider = $db->get_where('users', ['id' => $fixture->providerId])->row_array();
+        self::assertNotEmpty($provider);
+        unset($provider['id']);
+        $provider['email'] = $fixture->run . '_foreign_provider@synthetic.invalid';
+        $provider['notes'] = $fixture->run;
+        self::assertTrue((bool) $db->insert('users', $provider));
+        $foreignProviderId = (int) $db->insert_id();
+        $settings = $db->get_where('user_settings', ['id_users' => $fixture->providerId])->row_array();
+        self::assertNotEmpty($settings);
+        unset($settings['id']);
+        $settings['id_users'] = $foreignProviderId;
+        $settings['username'] = $fixture->run . '_foreign_provider';
+        self::assertTrue((bool) $db->insert('user_settings', $settings));
+
+        $foreignAppointment = [
+            'book_datetime' => date('Y-m-d H:i:s'),
+            'start_datetime' => date('Y-m-d 13:00:00', strtotime('+14 days')),
+            'end_datetime' => date('Y-m-d 13:30:00', strtotime('+14 days')),
+            'notes' => $fixture->run,
+            'hash' => bin2hex(random_bytes(32)),
+            'is_unavailability' => 0,
+            'id_users_provider' => $foreignProviderId,
+            'id_users_customer' => $fixture->customerId,
+            'id_services' => $fixture->serviceId,
+        ];
+        self::assertTrue((bool) $db->insert('appointments', $foreignAppointment));
+        $foreignAppointmentId = (int) $db->insert_id();
+        $beforeCustomer = $fixture->row('users', $fixture->customerId);
+        $beforeAppointments = $db
+            ->order_by('id')
+            ->get_where('appointments', ['id_users_customer' => $fixture->customerId])
+            ->result_array();
+
+        try {
+            $deleted = $client->post('customers/destroy', ['customer_id' => $fixture->customerId]);
+            self::assertSame(403, $deleted->statusCode, $deleted->body);
+            self::assertSame($beforeCustomer, $fixture->row('users', $fixture->customerId));
+            self::assertSame(
+                $beforeAppointments,
+                $db
+                    ->order_by('id')
+                    ->get_where('appointments', ['id_users_customer' => $fixture->customerId])
+                    ->result_array(),
+            );
+        } finally {
+            $db->delete('appointments', ['id' => $foreignAppointmentId]);
+            $db->delete('appointments', ['id' => (int) $ownAppointment['id']]);
+            $db->delete('user_settings', ['id_users' => $foreignProviderId]);
+            $db->delete('users', ['id' => $foreignProviderId]);
+        }
+    }
+
+    public function testAdminCanDeleteCustomerWithAppointmentsAcrossProviders(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $db = get_instance()->db;
+        $fixture->appointment();
+        $foreignProviderId = $this->createSyntheticStaff('provider', 'admin_foreign_provider');
+        $this->createAppointmentForProvider($foreignProviderId, $fixture->customerId);
+        $client = $this->loginAs($this->credentials['admin_username']);
+
+        try {
+            $deleted = $client->post('customers/destroy', ['customer_id' => $fixture->customerId]);
+            self::assertSame(200, $deleted->statusCode, $deleted->body);
+            self::assertSame([], $fixture->row('users', $fixture->customerId));
+            self::assertSame(
+                [],
+                $db->get_where('appointments', ['id_users_customer' => $fixture->customerId])->result_array(),
+            );
+        } finally {
+            $db->delete('appointments', ['id_users_customer' => $fixture->customerId]);
+            $db->delete('user_settings', ['id_users' => $foreignProviderId]);
+            $db->delete('users', ['id' => $foreignProviderId]);
+        }
+    }
+
+    public function testSecretaryNeedsAllProviderAssignmentsToDeleteSharedCustomer(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $db = get_instance()->db;
+        $fixture->appointment();
+        $foreignProviderId = $this->createSyntheticStaff('provider', 'secretary_foreign_provider');
+        $this->createAppointmentForProvider($foreignProviderId, $fixture->customerId);
+        $secretaryId = $this->createSyntheticStaff('secretary', 'shared_customer_secretary');
+        self::assertTrue(
+            (bool) $db->insert('secretaries_providers', [
+                'id_users_secretary' => $secretaryId,
+                'id_users_provider' => $fixture->providerId,
+            ]),
+        );
+        $client = $this->loginAs($fixture->run . '_shared_customer_secretary');
+        $before = $fixture->row('users', $fixture->customerId);
+
+        try {
+            $denied = $client->post('customers/destroy', ['customer_id' => $fixture->customerId]);
+            self::assertSame(403, $denied->statusCode, $denied->body);
+            self::assertSame($before, $fixture->row('users', $fixture->customerId));
+
+            self::assertTrue(
+                (bool) $db->insert('secretaries_providers', [
+                    'id_users_secretary' => $secretaryId,
+                    'id_users_provider' => $foreignProviderId,
+                ]),
+            );
+            $allowed = $client->post('customers/destroy', ['customer_id' => $fixture->customerId]);
+            self::assertSame(200, $allowed->statusCode, $allowed->body);
+            self::assertSame([], $fixture->row('users', $fixture->customerId));
+        } finally {
+            $db->delete('appointments', ['id_users_customer' => $fixture->customerId]);
+            $db->delete('secretaries_providers', ['id_users_secretary' => $secretaryId]);
+            $db->delete('user_settings', ['id_users' => $secretaryId]);
+            $db->delete('users', ['id' => $secretaryId]);
+            $db->delete('user_settings', ['id_users' => $foreignProviderId]);
+            $db->delete('users', ['id' => $foreignProviderId]);
+        }
+    }
+
     /** @return iterable<string, array{string,string}> */
     public static function relationshipRaceCases(): iterable
     {
@@ -254,14 +381,65 @@ final class CustomersLegacyRelationshipRaceHttpTest extends TestCase
 
     private function loginProvider(?GateHttpClient $client = null): GateHttpClient
     {
+        return $this->loginAs($this->credentials['provider_username'], $client);
+    }
+
+    private function loginAs(string $username, ?GateHttpClient $client = null): GateHttpClient
+    {
         $client ??= $this->server->client();
         self::assertSame(200, $client->get('login')->statusCode);
         $response = $client->post('login/validate', [
-            'username' => $this->credentials['provider_username'],
+            'username' => $username,
             'password' => $this->credentials['password'],
         ]);
         self::assertSame(200, $response->statusCode, $response->body);
         return $client;
+    }
+
+    private function createSyntheticStaff(string $roleSlug, string $suffix): int
+    {
+        $db = get_instance()->db;
+        $role = $db->get_where('roles', ['slug' => $roleSlug])->row_array();
+        self::assertNotEmpty($role);
+        self::assertTrue(
+            (bool) $db->insert('users', [
+                'first_name' => 'Synthetic',
+                'last_name' => $suffix,
+                'email' => $this->fixture->run . '_' . $suffix . '@synthetic.invalid',
+                'phone_number' => '000000000',
+                'notes' => $this->fixture->run,
+                'timezone' => 'UTC',
+                'language' => 'english',
+                'id_roles' => (int) $role['id'],
+                'is_private' => 0,
+            ]),
+        );
+        $id = (int) $db->insert_id();
+        $source = $db->get_where('user_settings', ['id_users' => $this->fixture->providerId])->row_array();
+        unset($source['id']);
+        $source['id_users'] = $id;
+        $source['username'] = $this->fixture->run . '_' . $suffix;
+        self::assertTrue((bool) $db->insert('user_settings', $source));
+        return $id;
+    }
+
+    private function createAppointmentForProvider(int $providerId, int $customerId): int
+    {
+        $db = get_instance()->db;
+        self::assertTrue(
+            (bool) $db->insert('appointments', [
+                'book_datetime' => date('Y-m-d H:i:s'),
+                'start_datetime' => date('Y-m-d 13:00:00', strtotime('+14 days')),
+                'end_datetime' => date('Y-m-d 13:30:00', strtotime('+14 days')),
+                'notes' => $this->fixture->run,
+                'hash' => bin2hex(random_bytes(32)),
+                'is_unavailability' => 0,
+                'id_users_provider' => $providerId,
+                'id_users_customer' => $customerId,
+                'id_services' => $this->fixture->serviceId,
+            ]),
+        );
+        return (int) $db->insert_id();
     }
 
     private function observesCustomerWait(object $observer, int $ownerId, int $customerId): bool

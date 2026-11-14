@@ -72,6 +72,11 @@ php index.php console backup
 ```
 
 This command will create a backup of the application data in the `storage/backups` directory. 
+The application container keeps this directory private (`0700`); run the command as the
+operator that owns the directory. For the default bind-mounted checkout path, a root
+container process may use the trusted owner of the application checkout; this exception
+does not apply to custom paths. Custom backup directories must be private, non-symlink
+directories owned by the executing user (or root).
 
 
 ```
