@@ -61,6 +61,10 @@ final class StaffSettingsApiHttpTest extends TestCase
         $response = $client->requestApp('POST', 'api/v1/admins', $payload);
 
         self::assertSame(415, $response->statusCode);
+        self::assertSame(
+            ['success' => false, 'message' => 'API mutation requests require application/json.'],
+            json_decode($response->body, true, 512, JSON_THROW_ON_ERROR),
+        );
         self::assertSame([], $this->fixture->adminWriteState($payload['email']));
     }
 

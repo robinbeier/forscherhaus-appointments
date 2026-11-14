@@ -191,6 +191,8 @@ class Api
             415,
         );
 
+        $this->CI->output->_display();
+
         exit();
     }
 
