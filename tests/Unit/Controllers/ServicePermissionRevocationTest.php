@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit\Controllers;
 
 use PHPUnit\Framework\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 use ReflectionMethod;
 use Service_categories;
 use Services;
@@ -18,7 +19,7 @@ require_once APPPATH . 'controllers/Service_categories.php';
  */
 final class ServicePermissionRevocationTest extends TestCase
 {
-    /** @dataProvider controllerProvider */
+    #[DataProvider('controllerProvider')]
     public function testEachWritePermissionRechecksTheLockedRole(
         string $controllerClass,
         string $action,
@@ -40,7 +41,7 @@ final class ServicePermissionRevocationTest extends TestCase
         self::assertSame(7, $database->bindings[1][0]);
     }
 
-    /** @dataProvider controllerProvider */
+    #[DataProvider('controllerProvider')]
     public function testRevokedRoleIsRejectedAfterActorAndRoleLocks(
         string $controllerClass,
         string $action,

@@ -82,56 +82,56 @@ class GeneralSettingsBatchValidationTest extends TestCase
         $this->assertTrue($this->settingsModel->db->trans_active());
     }
 
-    public function testStandaloneFailureRollsBackEarlierUpdateAndLaterInsert(): void
+    public function testStandaloneFailureRollsBackAllowedUpdates(): void
     {
         $db = $this->settingsModel->db;
         $db->trans_rollback();
-        $existingName = $this->ownedName('standalone-existing');
-        $newName = $this->ownedName('standalone-new');
-        $this->settingsModel->save(['name' => $existingName, 'value' => 'before']);
-        $before = $this->findSetting($existingName);
-        try {
-            $this->saveBatchWithModel(
-                [['name' => $existingName, 'value' => 'changed'], ['name' => $newName, 'value' => 'must roll back']],
-                new FailingGeneralSettingsModel(),
-            );
+        $companyNameBefore = $this->findSetting('company_name');
+        $companyLinkBefore = $this->findSetting('company_link');
+        $model = new FailingGeneralSettingsModel();
+        $this->saveBatchWithModel(
+            [
+                ['name' => 'company_name', 'value' => 'changed'],
+                ['name' => 'company_link', 'value' => 'https://example.invalid/'],
+            ],
+            $model,
+        );
 
-            $response = json_decode(get_instance()->output->get_output(), true, flags: JSON_THROW_ON_ERROR);
-            $this->assertFalse($response['success']);
-            $this->assertSame($before, $this->findSetting($existingName));
-            $this->assertSame(0, $db->get_where('settings', ['name' => $newName])->num_rows());
-            $this->assertFalse($db->trans_active());
-        } finally {
-            $this->deleteOwnedNames();
-        }
+        $response = json_decode(get_instance()->output->get_output(), true, flags: JSON_THROW_ON_ERROR);
+        $this->assertFalse($response['success']);
+        $this->assertSame(2, $model->saveCount());
+        $this->assertSame($companyNameBefore, $this->findSetting('company_name'));
+        $this->assertSame($companyLinkBefore, $this->findSetting('company_link'));
+        $this->assertFalse($db->trans_active());
     }
 
     public function testJoinedFailureLeavesTransactionForCallerRollback(): void
     {
         $db = $this->settingsModel->db;
         $db->trans_rollback();
-        $existingName = $this->ownedName('joined-existing');
-        $newName = $this->ownedName('joined-new');
+        $companyNameBefore = $this->findSetting('company_name');
+        $companyLinkBefore = $this->findSetting('company_link');
         $priorName = $this->ownedName('joined-prior');
-        $this->settingsModel->save(['name' => $existingName, 'value' => 'before']);
-        $before = $this->findSetting($existingName);
         $db->trans_begin();
         try {
             $this->settingsModel->save(['name' => $priorName, 'value' => 'caller write']);
+            $model = new FailingGeneralSettingsModel();
             $this->saveBatchWithModel(
                 [
-                    ['name' => $existingName, 'value' => 'changed'],
-                    ['name' => $newName, 'value' => 'must remain until caller rollback'],
+                    ['name' => 'company_name', 'value' => 'changed'],
+                    ['name' => 'company_link', 'value' => 'https://example.invalid/'],
                 ],
-                new FailingGeneralSettingsModel(),
+                $model,
             );
 
+            $this->assertSame(2, $model->saveCount());
             $this->assertTrue($db->trans_active());
-            $this->assertSame('changed', $this->findSetting($existingName)['value']);
-            $this->assertSame(1, $db->get_where('settings', ['name' => $newName])->num_rows());
+            $this->assertSame('changed', $this->findSetting('company_name')['value']);
+            $this->assertSame('https://example.invalid/', $this->findSetting('company_link')['value']);
+            $this->assertSame(1, $db->get_where('settings', ['name' => $priorName])->num_rows());
             $db->trans_rollback();
-            $this->assertSame($before, $this->findSetting($existingName));
-            $this->assertSame(0, $db->get_where('settings', ['name' => $newName])->num_rows());
+            $this->assertSame($companyNameBefore, $this->findSetting('company_name'));
+            $this->assertSame($companyLinkBefore, $this->findSetting('company_link'));
             $this->assertSame(0, $db->get_where('settings', ['name' => $priorName])->num_rows());
             $this->assertFalse($db->trans_active());
         } finally {
@@ -139,45 +139,50 @@ class GeneralSettingsBatchValidationTest extends TestCase
         }
     }
 
-    public function testInitiallyAbsentDuplicateNamesRemainPreparedAsTwoRecords(): void
+    public function testDuplicateAllowedNamesAreRejectedBeforeMutation(): void
     {
-        $name = $this->ownedName('duplicate');
-        $this->saveBatch([['name' => $name, 'value' => 'first'], ['name' => $name, 'value' => 'second']]);
+        $before = $this->findSetting('company_name');
+        $this->saveBatch([
+            ['name' => 'company_name', 'value' => 'first'],
+            ['name' => 'company_name', 'value' => 'second'],
+        ]);
 
-        $rows = $this->settingsModel->db
-            ->order_by('id', 'ASC')
-            ->get_where('settings', ['name' => $name])
-            ->result_array();
-        $this->assertCount(2, $rows);
-        $this->assertSame(['first', 'second'], array_column($rows, 'value'));
+        $response = json_decode(get_instance()->output->get_output(), true, flags: JSON_THROW_ON_ERROR);
+        $this->assertFalse($response['success']);
+        $this->assertSame('Duplicate settings are not allowed.', $response['message']);
+        $this->assertSame($before, $this->findSetting('company_name'));
+        $this->assertTrue($this->settingsModel->db->trans_active());
     }
 
-    public function testPreparedExistingIdWinsAcrossRenameOrdering(): void
+    public function testCallerIdCannotRenameAnotherAllowedSettingInBatch(): void
     {
         $db = $this->settingsModel->db;
         $db->trans_rollback();
-        $existingName = $this->ownedName('prepared-existing');
-        $renamedName = $this->ownedName('prepared-renamed');
-        $this->settingsModel->save(['name' => $existingName, 'value' => 'before']);
-        $before = $this->findSetting($existingName);
+        $companyNameBefore = $this->findSetting('company_name');
+        $companyLinkBefore = $this->findSetting('company_link');
         $db->trans_begin();
         try {
-            $existingId = (int) $before['id'];
             $this->saveBatch([
-                ['name' => $renamedName, 'id' => $existingId, 'value' => 'renamed'],
-                ['name' => $existingName, 'value' => 'final'],
+                [
+                    'name' => 'company_link',
+                    'id' => (int) $companyNameBefore['id'],
+                    'value' => 'https://example.invalid/',
+                ],
+                ['name' => 'company_name', 'value' => 'final'],
             ]);
 
-            $this->assertSame(1, $db->get_where('settings', ['id' => $existingId])->num_rows());
-            $this->assertSame($existingName, $this->findSetting($existingName)['name']);
-            $this->assertSame('final', $this->findSetting($existingName)['value']);
-            $this->assertSame($existingId, (int) $this->findSetting($existingName)['id']);
-            $this->assertSame(0, $db->get_where('settings', ['name' => $renamedName])->num_rows());
+            $this->assertSame('', get_instance()->output->get_output());
+            $this->assertSame('final', $this->findSetting('company_name')['value']);
+            $this->assertSame((int) $companyNameBefore['id'], (int) $this->findSetting('company_name')['id']);
+            $this->assertSame('https://example.invalid/', $this->findSetting('company_link')['value']);
+            $this->assertSame((int) $companyLinkBefore['id'], (int) $this->findSetting('company_link')['id']);
             $db->trans_rollback();
-            $this->assertSame($before, $this->findSetting($existingName));
-            $this->assertSame(0, $db->get_where('settings', ['name' => $renamedName])->num_rows());
+            $this->assertSame($companyNameBefore, $this->findSetting('company_name'));
+            $this->assertSame($companyLinkBefore, $this->findSetting('company_link'));
         } finally {
-            $this->deleteOwnedNames();
+            if ($db->trans_active()) {
+                $db->trans_rollback();
+            }
         }
     }
 
@@ -372,6 +377,11 @@ final class FailingGeneralSettingsModel extends Settings_model
             throw new \RuntimeException('Injected general settings failure.');
         }
         return $id;
+    }
+
+    public function saveCount(): int
+    {
+        return $this->saveCount;
     }
 }
 

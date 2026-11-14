@@ -475,7 +475,7 @@ final class ServicesModelLockOrderFakeDatabase
         $this->deletes[] = $table;
         $this->events[] = 'delete_' . $table;
         if ($table === 'services' && $this->failServiceDelete) {
-            throw new RuntimeException('synthetic service delete failure');
+            throw new \RuntimeException('synthetic service delete failure');
         }
         return true;
     }
