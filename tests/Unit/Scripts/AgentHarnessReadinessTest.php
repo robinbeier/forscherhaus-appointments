@@ -32,9 +32,19 @@ class AgentHarnessReadinessTest extends TestCase
     public function testArchiveExceptionCannotMaskBlockingCommands(): void
     {
         $controls = agentHarnessReadinessFailureControlsForPolicy('strict-v2');
-        $step = ['uses' => 'actions/cache/restore@v4', 'continue-on-error' => true, 'timeout-minutes' => 1];
+        $step = [
+            'uses' => 'actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830',
+            'continue-on-error' => true,
+            'timeout-minutes' => 1,
+        ];
         $jobName = 'defense-cycle-ordinary-flows-shard-1';
-        foreach (['actions/cache/restore@v4', 'actions/cache/save@v4'] as $action) {
+        foreach (
+            [
+                'actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830',
+                'actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830',
+            ]
+            as $action
+        ) {
             $candidate = array_replace($step, ['uses' => $action]);
             self::assertSame(
                 [],
@@ -45,6 +55,7 @@ class AgentHarnessReadinessTest extends TestCase
             [
                 ['run' => 'composer test'],
                 ['uses' => 'actions/github-script@v9'],
+                ['uses' => 'actions/cache/restore@v4'],
                 ['uses' => 'actions/cache/restore@main'],
                 ['timeout-minutes' => 2],
                 ['timeout-minutes' => null],
