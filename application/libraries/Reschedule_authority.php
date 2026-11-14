@@ -47,8 +47,6 @@ class Reschedule_authority
 
     private const LIFETIME_SECONDS = 600;
 
-    private const CREATION_IDENTITY_LOCK_PREFIX = 'ea:public-create:';
-
     private const CREATION_IDENTITY_LOCK_TIMEOUT_SECONDS = 10;
 
     /**
@@ -433,15 +431,12 @@ class Reschedule_authority
      */
     public function acquireCreationIdentityLock(?string $email): ?string
     {
-        $normalized_email = strtolower(trim((string) $email));
+        $lock_name = self::creationIdentityLockName($email, (string) ($this->db->database ?? ''));
 
-        if ($normalized_email === '') {
+        if ($lock_name === null) {
             return null;
         }
 
-        $database_name = (string) ($this->db->database ?? '');
-        $identity_digest = hash('sha256', $database_name . "\0" . $normalized_email);
-        $lock_name = self::CREATION_IDENTITY_LOCK_PREFIX . substr($identity_digest, 0, 40);
         $row = $this->db
             ->query('SELECT GET_LOCK(?, ?) AS acquired', [$lock_name, self::CREATION_IDENTITY_LOCK_TIMEOUT_SECONDS])
             ->row_array();
@@ -451,6 +446,16 @@ class Reschedule_authority
         }
 
         return $lock_name;
+    }
+
+    /**
+     * Return the opaque lock name shared by all customer creation surfaces.
+     */
+    public static function creationIdentityLockName(?string $email, string $database_name): ?string
+    {
+        require_once APPPATH . 'core/Customer_creation_identity_lock.php';
+
+        return Customer_creation_identity_lock::name($email, $database_name);
     }
 
     /**

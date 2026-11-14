@@ -83,15 +83,39 @@ class Customers_model extends EA_Model
     }
 
     /** Insert a new customer without turning an email match into update authority. */
-    public function insert_new(array $customer): int
+    public function insert_new(array $customer, ?string $held_creation_lock = null): int
     {
         if (array_key_exists('id', $customer)) {
             throw new InvalidArgumentException('A new customer must not include an ID.');
         }
 
-        $this->validate($customer);
+        // The email uniqueness check in validate() is necessarily a read
+        // followed by an insert. Serialize creates for the same normalized
+        // email so two concurrent collection POSTs cannot both pass that
+        // check and create duplicate customers.
+        require_once APPPATH . 'core/Customer_creation_identity_lock.php';
+        $lock_name =
+            $held_creation_lock ??
+            Customer_creation_identity_lock::name($customer['email'] ?? null, (string) ($this->db->database ?? ''));
+        $owns_lock = $held_creation_lock === null && $lock_name !== null;
 
-        return $this->insert($customer);
+        if ($owns_lock) {
+            $lock = $this->db->query('SELECT GET_LOCK(?, 10) AS acquired', [$lock_name]);
+
+            if ($lock === false || (int) $lock->row()->acquired !== 1) {
+                throw new RuntimeException('Could not reserve the customer email for creation.');
+            }
+        }
+
+        try {
+            $this->validate($customer);
+
+            return $this->insert($customer);
+        } finally {
+            if ($owns_lock) {
+                $this->db->query('SELECT RELEASE_LOCK(?)', [$lock_name]);
+            }
+        }
     }
 
     /**
