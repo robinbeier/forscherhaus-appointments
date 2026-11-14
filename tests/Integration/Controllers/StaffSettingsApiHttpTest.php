@@ -44,6 +44,30 @@ final class StaffSettingsApiHttpTest extends TestCase
         }
     }
 
+    public function testCrossSiteFormCannotCreateAdminWithValidBasicCredentials(): void
+    {
+        $payload = $this->fixture->adminWritePayload('cross_site_form');
+        $client = new GateHttpClient(
+            $this->server->baseUrl,
+            additionalHeaders: [
+                'Authorization' =>
+                    'Basic ' .
+                    base64_encode($this->credentials['admin_username'] . ':' . $this->credentials['password']),
+                'Origin' => 'https://attacker.example',
+                'Sec-Fetch-Site' => 'cross-site',
+            ],
+        );
+
+        $response = $client->requestApp('POST', 'api/v1/admins', $payload);
+
+        self::assertSame(415, $response->statusCode);
+        self::assertSame(
+            ['success' => false, 'message' => 'API mutation requests require application/json.'],
+            json_decode($response->body, true, 512, JSON_THROW_ON_ERROR),
+        );
+        self::assertSame([], $this->fixture->adminWriteState($payload['email']));
+    }
+
     public function testAdminAndSecretaryReadsAndSettingsRequireAuthAndExposePublicKeys(): void
     {
         $admin = $this->basicClient($this->credentials['admin_username'], $this->credentials['password']);
