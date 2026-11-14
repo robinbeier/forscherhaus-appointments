@@ -189,7 +189,7 @@ final class ProviderPdfRecordingRenderer
     private string $directory = '';
     private mixed $process = null;
 
-    public function __construct()
+    public function __construct(int $statusCode = 200, string $responseBody = '%PDF-FAKE-ROB628\n')
     {
         $this->directory = sys_get_temp_dir() . '/fh-pdf-' . bin2hex(random_bytes(8));
         if (!mkdir($this->directory, 0700)) {
@@ -205,7 +205,11 @@ final class ProviderPdfRecordingRenderer
         if (
             file_put_contents(
                 $this->directory . '/router.php',
-                "<?php\n\$body = file_get_contents('php://input');\nfile_put_contents(__DIR__ . '/capture.jsonl', (\$body === false ? '' : \$body) . \"\\n\", FILE_APPEND | LOCK_EX);\nheader('Content-Type: application/pdf');\necho '%PDF-FAKE-ROB628\\n';\n",
+                "<?php\n\$body = file_get_contents('php://input');\nfile_put_contents(__DIR__ . '/capture.jsonl', (\$body === false ? '' : \$body) . \"\\n\", FILE_APPEND | LOCK_EX);\nhttp_response_code(" .
+                    $statusCode .
+                    ");\nheader('Content-Type: application/pdf');\necho " .
+                    var_export($responseBody, true) .
+                    ";\n",
             ) === false
         ) {
             $this->close();
