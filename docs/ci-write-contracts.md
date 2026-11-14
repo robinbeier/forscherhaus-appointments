@@ -95,6 +95,12 @@ ohne Mutation. Die aktive Erfassung der konfigurierten Datenschutz- und
 Nutzungszustimmungen erfolgt ausschließlich serverseitig beim erfolgreichen
 `Booking::register` über das Consent-Modell. Ein CSRF-Token oder eine
 übermittelte Datensatz-ID begründet keine öffentliche Änderungsberechtigung.
+Wenn Nutzungsbedingungen oder Datenschutzhinweise angezeigt werden, muss der
+öffentliche Buchungs- oder Umbuchungs-POST für jede angezeigte Erklärung eine
+ausdrückliche Zustimmung im `consent`-Payload enthalten (`true`, `1` oder
+`'1'`). Fehlende, falsche oder verschachtelte Werte werden vor jeder
+Kunden-, Termin- oder Consent-Mutation mit 409 abgelehnt. Für nicht angezeigte
+Erklärungen ist keine Zustimmung erforderlich.
 
 `ConsentSaveHttpTest` prüft direkte und Rewrite-Routen, mehrere HTTP-Methoden,
 CSRF-Grenzen, die Ablehnung einer fremden synthetischen Datensatz-ID und
