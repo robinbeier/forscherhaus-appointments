@@ -414,6 +414,86 @@ final class CspReportOnlyTest extends TestCase
         }
     }
 
+    public function testBusyAggregateLockFailsPromptlyWithoutMutatingState(): void
+    {
+        $directory = $this->temporaryRoot() . '/csp-report-only-lock-' . bin2hex(random_bytes(4));
+        mkdir($directory, 0700, true);
+        $path = $directory . '/aggregate.json';
+        $lockPath = $path . '.lock';
+        $readyPath = $directory . '/ready';
+        $releasePath = $directory . '/release';
+        $before = '';
+        file_put_contents($path, $before);
+        $holder = $directory . '/holder.php';
+        file_put_contents(
+            $holder,
+            '<?php $h = fopen($argv[1], "c+"); flock($h, LOCK_EX); touch($argv[2]); $deadline = microtime(true) + 3; while (!file_exists($argv[3]) && microtime(true) < $deadline) usleep(1000);',
+        );
+        $process = null;
+
+        try {
+            $process = proc_open(
+                [PHP_BINARY, $holder, $lockPath, $readyPath, $releasePath],
+                [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+                $pipes,
+            );
+            self::assertIsResource($process);
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+            $deadline = microtime(true) + 5;
+            while (!is_file($readyPath) && microtime(true) < $deadline) {
+                usleep(1000);
+            }
+            self::assertFileExists($readyPath);
+
+            $started = microtime(true);
+            $result = Csp_report_only::record(
+                [
+                    'surface' => 'app',
+                    'directive' => 'script-src',
+                    'blocked_origin' => 'inline',
+                    'disposition' => 'report',
+                ],
+                $this->config(),
+                $path,
+                1_700_000_000,
+            );
+            $elapsed = microtime(true) - $started;
+
+            self::assertSame(['status' => 'error', 'reason' => 'storage_unavailable'], $result);
+            self::assertLessThan(1.0, $elapsed);
+            self::assertSame($before, (string) file_get_contents($path));
+            touch($releasePath);
+            self::assertSame(0, proc_close($process));
+            $process = null;
+            self::assertSame(
+                ['status' => 'accepted', 'reason' => 'stored'],
+                Csp_report_only::record(
+                    [
+                        'surface' => 'app',
+                        'directive' => 'script-src',
+                        'blocked_origin' => 'inline',
+                        'disposition' => 'report',
+                    ],
+                    $this->config(),
+                    $path,
+                    1_700_000_000,
+                ),
+            );
+        } finally {
+            if (is_resource($process)) {
+                touch($releasePath);
+                proc_close($process);
+            }
+            foreach ([$holder, $readyPath, $releasePath, $lockPath, $path] as $file) {
+                if (is_file($file)) {
+                    unlink($file);
+                }
+            }
+            rmdir($directory);
+        }
+    }
+
     public function testAppWwwAnalyticsAndExcludedSurfaceMatrix(): void
     {
         $states = [
