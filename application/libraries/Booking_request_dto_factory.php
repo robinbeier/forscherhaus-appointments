@@ -19,10 +19,12 @@ final class BookingRegisterRequestDto
     /**
      * @param array<string, mixed> $appointment
      * @param array<string, mixed> $customer
+     * @param array<string, mixed> $consent
      */
     public function __construct(
         public readonly array $appointment,
         public readonly array $customer,
+        public readonly array $consent,
         public readonly bool $manageMode,
         public readonly ?string $captcha,
         public readonly ?int $appointmentId,
@@ -136,6 +138,7 @@ class Booking_request_dto_factory
         $normalized_post_data = $this->request_normalizer->normalizeAssocArray($post_data);
         $appointment = $this->request_normalizer->normalizeAssocArray($normalized_post_data['appointment'] ?? []);
         $customer = $this->request_normalizer->normalizeAssocArray($normalized_post_data['customer'] ?? []);
+        $consent = $this->request_normalizer->normalizeAssocArray($normalized_post_data['consent'] ?? []);
 
         foreach (['address', 'city', 'zip_code', 'notes', 'phone_number'] as $optional_customer_key) {
             if (!array_key_exists($optional_customer_key, $customer)) {
@@ -149,6 +152,7 @@ class Booking_request_dto_factory
         return new BookingRegisterRequestDto(
             $appointment,
             $customer,
+            $consent,
             $manage_mode,
             $normalized_captcha,
             $this->request_normalizer->normalizePositiveInt($appointment['id'] ?? null, null),

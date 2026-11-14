@@ -421,6 +421,7 @@ final class CalendarPublicBookingRaceHttpTest extends TestCase
                 'notes' => $fixture->run,
             ],
             'manage_mode' => false,
+            'consent' => ['terms_and_conditions' => true, 'privacy_policy' => true],
         ];
     }
 

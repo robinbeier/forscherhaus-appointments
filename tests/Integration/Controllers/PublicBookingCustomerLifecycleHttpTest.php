@@ -62,6 +62,76 @@ final class PublicBookingCustomerLifecycleHttpTest extends TestCase
         $this->cleanup();
     }
 
+    public function testPublicBookingRequiresUnambiguousConsentBeforeAnyMutation(): void
+    {
+        $fixture = $this->fixture;
+        $server = $this->server;
+        self::assertNotNull($fixture);
+        self::assertNotNull($server);
+        $db = get_instance()->db;
+        $client = $server->client();
+        self::assertSame(200, $client->get('booking')->statusCode);
+        $anchor = new DateTimeImmutable($fixture->appointment()['start_datetime']);
+        $baseline = [
+            'appointments' => $db->count_all('appointments'),
+            'users' => $db->count_all('users'),
+            'consents' => $db->count_all('consents'),
+        ];
+
+        foreach (
+            [
+                [],
+                ['terms_and_conditions' => false, 'privacy_policy' => true],
+                [
+                    'terms_and_conditions' => ['yes'],
+                    'privacy_policy' => true,
+                ],
+            ]
+            as $consent
+        ) {
+            $response = $client->post('booking/register', [
+                'post_data' => [
+                    'appointment' => $this->appointmentPayload($fixture, $anchor->modify('+8 hours'), 'consent-denied'),
+                    'customer' => [
+                        'first_name' => 'Denied',
+                        'last_name' => 'Consent',
+                        'phone_number' => '0000000000',
+                        'timezone' => 'UTC',
+                    ],
+                    'manage_mode' => false,
+                    'consent' => $consent,
+                ],
+            ]);
+            self::assertSame(409, $response->statusCode, $response->body);
+            self::assertSame($baseline, [
+                'appointments' => $db->count_all('appointments'),
+                'users' => $db->count_all('users'),
+                'consents' => $db->count_all('consents'),
+            ]);
+        }
+
+        $db->update('settings', ['value' => '0'], ['id' => (int) $this->settings['display_privacy_policy']['id']]);
+        $response = $client->post('booking/register', [
+            'post_data' => [
+                'appointment' => $this->appointmentPayload($fixture, $anchor->modify('+2 hours'), 'one-policy'),
+                'customer' => [
+                    'first_name' => 'One',
+                    'last_name' => 'Policy',
+                    'phone_number' => '0000000000',
+                    'timezone' => 'UTC',
+                ],
+                'manage_mode' => false,
+                'consent' => ['terms_and_conditions' => true, 'privacy_policy' => false],
+            ],
+        ]);
+        self::assertSame(200, $response->statusCode, $response->body);
+        $data = json_decode($response->body, true, 512, JSON_THROW_ON_ERROR);
+        $this->ownedAppointmentIds[] = (int) $data['appointment_id'];
+        $appointment = $db->get_where('appointments', ['id' => $data['appointment_id']])->row_array();
+        self::assertNotEmpty($appointment);
+        $this->ownedCustomerIds[] = (int) $appointment['id_users_customer'];
+    }
+
     public function testRepeatedPublicBookCancelRemovesOnlyOwnedCustomerAndConsents(): void
     {
         $fixture = $this->fixture;
@@ -90,6 +160,7 @@ final class PublicBookingCustomerLifecycleHttpTest extends TestCase
                         'timezone' => 'Europe/Berlin',
                     ],
                     'manage_mode' => false,
+                    'consent' => $this->validConsent(),
                 ],
             ]);
             self::assertSame(200, $response->statusCode, $response->body);
@@ -191,7 +262,12 @@ final class PublicBookingCustomerLifecycleHttpTest extends TestCase
         $payload['id'] = (int) $appointment['id'];
         $customer = get_instance()->customers_model->find($id);
         $response = $client->post('booking/register', [
-            'post_data' => ['appointment' => $payload, 'customer' => $customer, 'manage_mode' => true],
+            'post_data' => [
+                'appointment' => $payload,
+                'customer' => $customer,
+                'manage_mode' => true,
+                'consent' => $this->validConsent(),
+            ],
         ]);
         self::assertSame(200, $response->statusCode, $response->body);
         self::assertNull($db->get_where('public_booking_customers', ['customer_id' => $id])->row_array());
@@ -215,7 +291,12 @@ final class PublicBookingCustomerLifecycleHttpTest extends TestCase
         $customer = get_instance()->customers_model->find($id);
         $customer['last_name'] = 'Public correction';
         $response = $client->post('booking/register', [
-            'post_data' => ['appointment' => $payload, 'customer' => $customer, 'manage_mode' => true],
+            'post_data' => [
+                'appointment' => $payload,
+                'customer' => $customer,
+                'manage_mode' => true,
+                'consent' => $this->validConsent(),
+            ],
         ]);
         self::assertSame(200, $response->statusCode, $response->body);
         self::assertNotEmpty($db->get_where('public_booking_customers', ['customer_id' => $id])->row_array());
@@ -445,6 +526,7 @@ final class PublicBookingCustomerLifecycleHttpTest extends TestCase
                     'timezone' => 'UTC',
                 ],
                 'manage_mode' => false,
+                'consent' => $this->validConsent(),
             ],
         ]);
         self::assertSame(200, $response->statusCode, $response->body);
@@ -479,6 +561,15 @@ final class PublicBookingCustomerLifecycleHttpTest extends TestCase
             'location' => '',
             'notes' => $notes,
             'color' => '',
+        ];
+    }
+
+    /** @return array{terms_and_conditions: bool, privacy_policy: bool} */
+    private function validConsent(): array
+    {
+        return [
+            'terms_and_conditions' => true,
+            'privacy_policy' => true,
         ];
     }
 

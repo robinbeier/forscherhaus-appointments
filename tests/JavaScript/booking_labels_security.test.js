@@ -16,12 +16,21 @@ function escapeHtml(value) {
         .replaceAll("'", '&#039;');
 }
 
-function createHarness({serviceName, providerName, currency, location}) {
+function createHarness({
+    serviceName,
+    providerName,
+    currency,
+    location,
+    termsAccepted = false,
+    privacyAccepted = false,
+}) {
     const rendered = {
         appointmentDetails: '',
         displayBookingSelection: '',
         serviceDescription: [],
+        postData: '',
     };
+    const consentState = {terms: termsAccepted, privacy: privacyAccepted};
     const values = {
         manage_mode: false,
         available_services: [{id: 11, duration: 30, price: 100, currency, location, description: ''}],
@@ -42,6 +51,9 @@ function createHarness({serviceName, providerName, currency, location}) {
         ['#address', {val: () => ''}],
         ['#city', {val: () => ''}],
         ['#zip-code', {val: () => ''}],
+        ['#accept-to-terms-and-conditions', {prop: () => consentState.terms}],
+        ['#accept-to-privacy-policy', {prop: () => consentState.privacy}],
+        ['input[name="post_data"]', {val: (value) => (rendered.postData = value)}],
     ]);
 
     const appointmentDetails = {
@@ -126,7 +138,7 @@ function createHarness({serviceName, providerName, currency, location}) {
     vm.createContext(context);
     vm.runInContext(bookingSource, context, {filename: 'booking.js'});
 
-    return {api: context.App.Pages.Booking, rendered};
+    return {api: context.App.Pages.Booking, rendered, consentState};
 }
 
 test('booking HTML sinks escape hostile labels and service metadata', () => {
@@ -167,4 +179,41 @@ test('booking HTML sinks preserve ordinary ampersands and accents as text', () =
     assert.match(harness.rendered.appointmentDetails, /Mathe &amp; Musik für Schüler:innen/);
     assert.match(harness.rendered.appointmentDetails, /Jörg Ährens/);
     assert.match(harness.rendered.serviceDescription.join(''), /Raum A &amp; B/);
+});
+
+test('booking submits both policy consent states explicitly', () => {
+    const harness = createHarness({
+        serviceName: 'Forschung',
+        providerName: 'Ada Lovelace',
+        currency: '€',
+        location: 'Raum A',
+        termsAccepted: true,
+        privacyAccepted: false,
+    });
+
+    harness.api.updateConfirmFrame();
+
+    assert.deepEqual(JSON.parse(harness.rendered.postData).consent, {
+        terms_and_conditions: 1,
+        privacy_policy: 0,
+    });
+});
+
+test('booking refreshes consent values after the confirmation step changes', () => {
+    const harness = createHarness({
+        serviceName: 'Forschung',
+        providerName: 'Ada Lovelace',
+        currency: '€',
+        location: 'Raum A',
+    });
+
+    harness.api.updateConfirmFrame();
+    harness.consentState.terms = true;
+    harness.consentState.privacy = true;
+    harness.api.updateConfirmFrame();
+
+    assert.deepEqual(JSON.parse(harness.rendered.postData).consent, {
+        terms_and_conditions: 1,
+        privacy_policy: 1,
+    });
 });

@@ -280,6 +280,10 @@ function runBookingContractsAttempt(
                             'post_data' => [
                                 'appointment' => $appointmentPayload,
                                 'customer' => $customerPayload,
+                                'consent' => [
+                                    'terms_and_conditions' => true,
+                                    'privacy_policy' => true,
+                                ],
                                 'manage_mode' => false,
                             ],
                         ],
@@ -380,6 +384,10 @@ function runBookingContractsAttempt(
                             'post_data' => [
                                 'appointment' => $appointmentPayload,
                                 'customer' => $customerPayload,
+                                'consent' => [
+                                    'terms_and_conditions' => true,
+                                    'privacy_policy' => true,
+                                ],
                                 'manage_mode' => true,
                             ],
                         ],
@@ -444,6 +452,10 @@ function runBookingContractsAttempt(
                             'post_data' => [
                                 'appointment' => $appointmentPayload,
                                 'customer' => $customerPayload,
+                                'consent' => [
+                                    'terms_and_conditions' => true,
+                                    'privacy_policy' => true,
+                                ],
                                 'manage_mode' => false,
                             ],
                         ],
@@ -585,6 +597,10 @@ function runBookingContractsAttempt(
                                         ['notes' => 'run:' . $state['run_id'] . ':cancel-protect'],
                                     ),
                                     'customer' => $customerPayload,
+                                    'consent' => [
+                                        'terms_and_conditions' => true,
+                                        'privacy_policy' => true,
+                                    ],
                                     'manage_mode' => false,
                                 ],
                             ],

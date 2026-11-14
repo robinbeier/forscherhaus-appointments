@@ -345,6 +345,11 @@ App.Http.Booking = (function () {
             }
         }
 
+        // Consent checkboxes are rendered on the final wizard step. Rebuild the
+        // payload at submit time so values changed after entering that step are
+        // included in the request.
+        App.Pages.Booking.updateConfirmFrame();
+
         const formData = JSON.parse($('input[name="post_data"]').val());
 
         const data = {
