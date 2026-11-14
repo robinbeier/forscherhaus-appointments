@@ -471,7 +471,7 @@ class Customers extends EA_Controller
         // The permission helper reads appointment relationships. Lock that same
         // customer scope before its first transaction-scoped nonlocking read.
         $locked_appointments = $this->db->query(
-            'SELECT `id` FROM `' .
+            'SELECT `id`, `id_users_provider` FROM `' .
                 $this->db->dbprefix('appointments') .
                 '` WHERE `id_users_customer` = ? ORDER BY `id` ASC FOR UPDATE',
             [$customer_id],
@@ -482,11 +482,84 @@ class Customers extends EA_Controller
         }
 
         try {
-            return !cannot($action, PRIV_CUSTOMERS, $user_id) &&
-                $this->permissions->has_customer_access($user_id, $customer_id);
+            if (
+                cannot($action, PRIV_CUSTOMERS, $user_id) ||
+                !$this->permissions->has_customer_access($user_id, $customer_id)
+            ) {
+                return false;
+            }
+
+            if (
+                $action === 'delete' &&
+                !$this->hasLockedCustomerDeleteScope($user_id, $locked_appointments->result_array())
+            ) {
+                return false;
+            }
+
+            return true;
         } catch (InvalidArgumentException) {
             return false;
         }
+    }
+
+    /**
+     * A provider or secretary may delete a customer only when every locked
+     * appointment is within that staff member's current provider scope.
+     * Administrators retain their existing global customer-delete authority.
+     *
+     * @param array<int, array<string, mixed>> $appointments
+     */
+    private function hasLockedCustomerDeleteScope(int $user_id, array $appointments): bool
+    {
+        $role_id = (int) $this->users_model->value($user_id, 'id_roles');
+        $role_slug = $this->roles_model->value($role_id, 'slug');
+
+        if ($role_slug === DB_SLUG_ADMIN) {
+            return true;
+        }
+
+        $provider_ids = [];
+        foreach ($appointments as $appointment) {
+            $provider_id = filter_var($appointment['id_users_provider'] ?? null, FILTER_VALIDATE_INT, [
+                'options' => ['min_range' => 1],
+            ]);
+            if ($provider_id === false) {
+                return false;
+            }
+            $provider_ids[(int) $provider_id] = true;
+        }
+
+        if ($role_slug === DB_SLUG_PROVIDER) {
+            return count($provider_ids) === 0 || (count($provider_ids) === 1 && isset($provider_ids[$user_id]));
+        }
+
+        if ($role_slug !== DB_SLUG_SECRETARY) {
+            return false;
+        }
+
+        $secretary = $this->secretaries_model->find($user_id);
+        $assigned_provider_ids = [];
+        foreach ($secretary['providers'] ?? [] as $assigned_provider_id) {
+            if (is_int($assigned_provider_id)) {
+                $normalized_provider_id = $assigned_provider_id;
+            } elseif (is_string($assigned_provider_id) && preg_match('/^[1-9][0-9]*$/D', $assigned_provider_id)) {
+                $normalized_provider_id = (int) $assigned_provider_id;
+            } else {
+                return false;
+            }
+            if ($normalized_provider_id <= 0) {
+                return false;
+            }
+            $assigned_provider_ids[$normalized_provider_id] = true;
+        }
+
+        foreach (array_keys($provider_ids) as $provider_id) {
+            if (!isset($assigned_provider_ids[$provider_id])) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private function backofficeRequestDtoFactory(): Backoffice_request_dto_factory
