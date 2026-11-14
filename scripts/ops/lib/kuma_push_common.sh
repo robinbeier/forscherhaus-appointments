@@ -29,18 +29,39 @@ kuma_push_send() {
   local status="$2"
   local msg="$3"
   local ping="$4"
+  local config_file
+  local escaped_url
 
-  curl --silent --show-error --fail \
+  [[ "$push_url" != *$'\r'* && "$push_url" != *$'\n'* && -n "$push_url" ]] ||
+    kuma_push_die "Invalid Kuma push URL"
+  config_file="$(mktemp "${TMPDIR:-/tmp}/fh-kuma-push.XXXXXX")" ||
+    kuma_push_die "Could not create private Kuma push config"
+  chmod 0600 "$config_file" || {
+    rm -f "$config_file"
+    kuma_push_die "Could not secure private Kuma push config"
+  }
+  escaped_url="${push_url//\\/\\\\}"
+  escaped_url="${escaped_url//\"/\\\"}"
+  if ! (umask 077; printf 'url = "%s"\n' "$escaped_url" > "$config_file"); then
+    rm -f "$config_file"
+    kuma_push_die "Could not write private Kuma push config"
+  fi
+
+  if ! curl --disable --config "$config_file" --silent --show-error --fail \
     --connect-timeout 2 \
     --max-time 8 \
     --retry 1 \
     --retry-delay 1 \
     --retry-all-errors \
-    --get "$push_url" \
+    --get \
     --data-urlencode "status=${status}" \
     --data-urlencode "msg=${msg}" \
     --data-urlencode "ping=${ping}" \
-    >/dev/null
+    >/dev/null; then
+    rm -f "$config_file"
+    return 1
+  fi
+  rm -f "$config_file"
 }
 
 kuma_push_log() {

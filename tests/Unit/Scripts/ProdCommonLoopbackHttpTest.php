@@ -18,6 +18,14 @@ final class ProdCommonLoopbackHttpTest extends TestCase
         #!/usr/bin/env bash
         set -euo pipefail
         printf '%s\0' "$@" > "${CURL_ARGUMENTS:?}"
+        previous=''
+        for arg in "$@"; do
+            if [[ "$previous" == '-H' && "$arg" == @* ]]; then
+                cat "${arg#@}" > "${CURL_HEADER:?}"
+                printf '%s' "${arg#@}" > "${CURL_HEADER_PATH:?}"
+            fi
+            previous="$arg"
+        done
         printf '%b' "${CURL_OBSERVED:?}"
         BASH;
         self::assertSame(strlen($stub), file_put_contents($this->directory . '/curl', $stub));
@@ -27,6 +35,8 @@ final class ProdCommonLoopbackHttpTest extends TestCase
     protected function tearDown(): void
     {
         @unlink($this->directory . '/curl.args');
+        @unlink($this->directory . '/header');
+        @unlink($this->directory . '/header-path');
         @unlink($this->directory . '/curl');
         @rmdir($this->directory);
     }
@@ -42,10 +52,24 @@ final class ProdCommonLoopbackHttpTest extends TestCase
         self::assertContains('--noproxy', $arguments);
         self::assertContains('*', $arguments);
         self::assertContains('http://127.0.0.1/index.php/healthz', $arguments);
-        self::assertContains('X-Health-Token: synthetic-token', $arguments);
+        self::assertNotContains('X-Health-Token: synthetic-token', $arguments);
+        self::assertSame("X-Health-Token: synthetic-token\n", (string) file_get_contents($this->directory . '/header'));
+        self::assertFileDoesNotExist((string) file_get_contents($this->directory . '/header-path'));
         $proxy = array_search('--proxy', $arguments, true);
         self::assertIsInt($proxy);
         self::assertSame('', $arguments[$proxy + 1] ?? null);
+
+        $noSpace = $this->runProbe(
+            "200\\t127.0.0.1",
+            'http://127.0.0.1/index.php/healthz',
+            'X-Health-Token:synthetic-token',
+        );
+        self::assertSame(0, $noSpace['exit_code'], $noSpace['stderr']);
+        self::assertSame('200', $noSpace['stdout']);
+        self::assertNotContains(
+            'X-Health-Token:synthetic-token',
+            explode("\0", rtrim((string) file_get_contents($this->directory . '/curl.args'), "\0")),
+        );
     }
 
     public function testLoopbackHealthRequestRejectsNonLoopbackPeerAndUrl(): void
@@ -58,13 +82,13 @@ final class ProdCommonLoopbackHttpTest extends TestCase
     }
 
     /** @return array{exit_code:int,stdout:string,stderr:string} */
-    private function runProbe(string $observed, string $url): array
+    private function runProbe(string $observed, string $url, string $header = 'X-Health-Token: synthetic-token'): array
     {
         $process = proc_open(
             [
                 '/bin/bash',
                 '-c',
-                'source scripts/ops/lib/prod_common.sh; prod_loopback_http_code "$1" -H "X-Health-Token: synthetic-token"',
+                'source scripts/ops/lib/prod_common.sh; prod_loopback_http_code "$1" -H "$HEADER_VALUE"',
                 'bash',
                 $url,
             ],
@@ -74,6 +98,9 @@ final class ProdCommonLoopbackHttpTest extends TestCase
             array_merge($_ENV, [
                 'PATH' => $this->directory . PATH_SEPARATOR . (getenv('PATH') ?: ''),
                 'CURL_ARGUMENTS' => $this->directory . '/curl.args',
+                'CURL_HEADER' => $this->directory . '/header',
+                'CURL_HEADER_PATH' => $this->directory . '/header-path',
+                'HEADER_VALUE' => $header,
                 'CURL_OBSERVED' => $observed,
             ]),
         );

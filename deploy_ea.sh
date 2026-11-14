@@ -1761,9 +1761,21 @@ probe_deep_health_contract() {
 
   token="$(read_healthz_token)" || return 1
 
+  local header_file
+  header_file="$(mktemp "${TMPDIR:-/tmp}/fh-deep-health-header.XXXXXX")" || return 1
+  chmod 0600 "$header_file" || { rm -f "$header_file"; return 1; }
+  if [[ "$token" == *$'\r'* || "$token" == *$'\n'* || -z "$token" ]]; then
+    rm -f "$header_file"
+    echo "[!] Deep health token contains invalid characters" >&2
+    return 1
+  fi
+  (umask 077; printf 'X-Health-Token: %s\n' "$token" > "$header_file") || {
+    rm -f "$header_file"
+    return 1
+  }
   for ((attempt = 1; attempt <= DEEP_HEALTH_RETRIES; attempt++)); do
     body_file="$(mktemp)"
-    if http_code="$(curl --connect-timeout "$HEALTH_CONNECT_TIMEOUT_SECONDS" --max-time "$DEEP_HEALTH_TIMEOUT_SECONDS" -sS -o "$body_file" -w '%{http_code}' -H "X-Health-Token: $token" "$DEEP_HEALTH_URL")"; then
+    if http_code="$(curl --disable --connect-timeout "$HEALTH_CONNECT_TIMEOUT_SECONDS" --max-time "$DEEP_HEALTH_TIMEOUT_SECONDS" -sS -o "$body_file" -w '%{http_code}' -H "@$header_file" "$DEEP_HEALTH_URL")"; then
       curl_exit=0
     else
       curl_exit=$?
@@ -1800,6 +1812,7 @@ probe_deep_health_contract() {
     ' "$body_file"; then
       echo "[OK] Deep health contract passed: status=ok and checks.pdf_renderer.ok=true (attempt $attempt/$DEEP_HEALTH_RETRIES)"
       rm -f "$body_file"
+      rm -f "$header_file"
       return 0
     fi
 
@@ -1811,6 +1824,7 @@ probe_deep_health_contract() {
   done
 
   echo "[!] Deep health contract validation failed after $DEEP_HEALTH_RETRIES attempts: $DEEP_HEALTH_URL"
+  rm -f "$header_file"
   return 1
 }
 

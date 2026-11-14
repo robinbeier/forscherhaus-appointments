@@ -122,6 +122,7 @@ final class KumaPushRuntimeBundleTest extends TestCase
         $stubBin = $workspace . '/bin';
         $phpLog = $workspace . '/php-gate.log';
         $curlLog = $workspace . '/curl.log';
+        $curlConfigLog = $workspace . '/curl-config.log';
         $envFile = $workspace . '/uptime-kuma-push.env';
         $credentials = $workspace . '/release-gate-admin.env';
         try {
@@ -140,7 +141,7 @@ final class KumaPushRuntimeBundleTest extends TestCase
                 ]),
             );
             $this->writePdfPhpStub($stubBin . '/php', $phpLog);
-            $this->writeCurlStub($stubBin . '/curl', $curlLog);
+            $this->writeCurlStub($stubBin . '/curl', $curlLog, $curlConfigLog);
             $installedPdf = $fixture['root'] . self::INSTALL_ROOT . '/scripts/ops/kuma_push_pdf_export.sh';
             $result = $this->runCommand(['bash', $installedPdf], $this->repoRoot(), [
                 'PATH' => $stubBin . PATH_SEPARATOR . (getenv('PATH') ?: '/usr/bin:/bin'),
@@ -159,10 +160,23 @@ final class KumaPushRuntimeBundleTest extends TestCase
             self::assertStringContainsString('stdin_sha256=' . hash('sha256', 'fixture-password'), $gateLog);
             self::assertStringContainsString('RELEASE_GATE_REPO_ROOT=' . $appRoot, $gateLog);
             self::assertStringNotContainsString($fixture['source'] . '/scripts/release-gate', $gateLog);
-            self::assertStringContainsString(
-                'https://kuma.example/push/pdf-export',
-                (string) file_get_contents($curlLog),
-            );
+            $curlArgs = file_get_contents($curlLog);
+            self::assertIsString($curlArgs);
+            self::assertStringNotContainsString('https://kuma.example/push/pdf-export', $curlArgs);
+            $curlConfig = file_get_contents($curlConfigLog);
+            self::assertIsString($curlConfig);
+            self::assertSame("url = \"https://kuma.example/push/pdf-export\"\n", $curlConfig);
+            $configPaths = file($curlLog, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+            self::assertIsArray($configPaths);
+            $configPath = null;
+            foreach ($configPaths as $line) {
+                if (str_starts_with($line, 'config_path=')) {
+                    $configPath = substr($line, strlen('config_path='));
+                }
+            }
+            self::assertIsString($configPath);
+            self::assertNotSame('', $configPath);
+            self::assertFileDoesNotExist($configPath);
             self::assertFileExists($stateDir . '/kuma-pdf-export-latest.json');
             self::assertSame(0600, fileperms($stateDir . '/kuma-pdf-export-latest.json') & 0777);
             self::assertFileDoesNotExist($appRoot . '/storage/logs/ops/kuma-pdf-export-latest.json');
@@ -241,9 +255,27 @@ final class KumaPushRuntimeBundleTest extends TestCase
         chmod($path, 0755);
     }
 
-    private function writeCurlStub(string $path, string $logPath): void
+    private function writeCurlStub(string $path, string $logPath, string $configLogPath): void
     {
-        file_put_contents($path, "#!/bin/sh\nprintf '%s\\n' \"\$*\" >> " . escapeshellarg($logPath) . "\n");
+        $script =
+            "#!/bin/sh\n" .
+            "printf '%s\\n' \"\$*\" >> " .
+            escapeshellarg($logPath) .
+            "\n" .
+            "previous=''\nconfig_path=''\n" .
+            "for arg in \"\$@\"; do\n" .
+            "  if [ \"\$previous\" = '--config' ]; then config_path=\"\$arg\"; fi\n" .
+            "  previous=\"\$arg\"\n" .
+            "done\n" .
+            "if [ -n \"\$config_path\" ]; then\n" .
+            "  printf 'config_path=%s\\n' \"\$config_path\" >> " .
+            escapeshellarg($logPath) .
+            "\n" .
+            "  cat \"\$config_path\" > " .
+            escapeshellarg($configLogPath) .
+            "\n" .
+            "fi\n";
+        file_put_contents($path, $script);
         chmod($path, 0755);
     }
 

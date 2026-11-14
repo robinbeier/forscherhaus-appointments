@@ -1577,13 +1577,17 @@ final class DeployStableResultTest extends TestCase
             DRYRUN=0
             DEEP_HEALTH_RETRIES=2
             calls_file=$(mktemp)
+            header_paths=$(mktemp)
             printf '0' > "$calls_file"
-            trap 'rm -f "$calls_file"' EXIT
+            trap 'rm -f "$calls_file" "$header_paths"' EXIT
             sleeps=0
             sleep() { sleeps=$((sleeps + 1)); }
             read_healthz_token() { printf token; }
             curl() {
-              [[ "$1" == '--connect-timeout' && "$2" == '3' && "$3" == '--max-time' && "$4" == '30' && "$5" == '-sS' && "$6" == '-o' && "$8" == '-w' && "$9" == '%{http_code}' && "${10}" == '-H' && "${11}" == 'X-Health-Token: token' ]] || return 97
+              [[ "$*" != *'X-Health-Token: token'* ]] || return 97
+              header_file=''; for arg in "$@"; do [[ "$arg" == @* ]] && header_file="${arg#@}"; done
+              [[ -n "$header_file" && "$(cat "$header_file")" == 'X-Health-Token: token' ]] || return 98
+              printf '%s\n' "$header_file" >> "$header_paths"
               local output=''
               while (($# > 0)); do
                 if [[ "$1" == '-o' ]]; then output="$2"; shift 2; else shift; fi
@@ -1596,6 +1600,7 @@ final class DeployStableResultTest extends TestCase
               return 0
             }
             if ! probe_deep_health_contract; then exit 1; fi
+            while IFS= read -r header_file; do [[ ! -e "$header_file" ]] || exit 99; done < "$header_paths"
             printf 'calls=%s sleeps=%s' "$(<"$calls_file")" "$sleeps"
             BASH
             ,
@@ -1617,8 +1622,13 @@ final class DeployStableResultTest extends TestCase
             sleep() { sleeps=$((sleeps + 1)); }
             read_healthz_token() { printf token; }
             mode=malformed
+            header_paths=$(mktemp)
+            trap 'rm -f "$header_paths"' EXIT
             curl() {
-              [[ "$1" == '--connect-timeout' && "$2" == '3' && "$3" == '--max-time' && "$4" == '30' && "$5" == '-sS' && "$6" == '-o' && "$8" == '-w' && "$9" == '%{http_code}' && "${10}" == '-H' && "${11}" == 'X-Health-Token: token' ]] || return 97
+              [[ "$*" != *'X-Health-Token: token'* ]] || return 97
+              header_file=''; for arg in "$@"; do [[ "$arg" == @* ]] && header_file="${arg#@}"; done
+              [[ -n "$header_file" && "$(cat "$header_file")" == 'X-Health-Token: token' ]] || return 98
+              printf '%s\n' "$header_file" >> "$header_paths"
               local output=''
               while (($# > 0)); do
                 if [[ "$1" == '-o' ]]; then output="$2"; shift 2; else shift; fi
@@ -1629,6 +1639,7 @@ final class DeployStableResultTest extends TestCase
             if probe_deep_health_contract; then exit 1; fi
             mode=pdf-false
             if probe_deep_health_contract; then exit 1; fi
+            while IFS= read -r header_file; do [[ ! -e "$header_file" ]] || exit 99; done < "$header_paths"
             printf 'rejected-twice sleeps=%s' "$sleeps"
             BASH
             ,

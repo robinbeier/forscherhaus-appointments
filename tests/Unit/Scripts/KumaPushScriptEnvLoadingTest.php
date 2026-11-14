@@ -220,6 +220,13 @@ final class KumaPushScriptEnvLoadingTest extends TestCase
                 #!/usr/bin/env bash
                 set -euo pipefail
                 printf '%s\n' "$*" > "$CURL_ARGS_FILE"
+                for ((index = 1; index <= $#; index++)); do
+                  if [[ "${!index}" == '--config' ]]; then
+                    next=$((index + 1))
+                    printf '%s' "${!next}" > "$CURL_CONFIG_PATH"
+                    cat "${!next}" > "$CURL_CONFIG_FILE"
+                  fi
+                done
                 exit 0
                 BASH
                 ,
@@ -229,6 +236,8 @@ final class KumaPushScriptEnvLoadingTest extends TestCase
                 'PATH' => $workspace . '/bin:' . (getenv('PATH') ?: ''),
                 'KUMA_PUSH_ENV_FILE' => $envFile,
                 'CURL_ARGS_FILE' => $curlArgsFile,
+                'CURL_CONFIG_FILE' => $workspace . '/curl-config.txt',
+                'CURL_CONFIG_PATH' => $workspace . '/curl-config-path.txt',
             ]);
 
             self::assertSame(0, $result['exit_code'], $result['stderr']);
@@ -236,7 +245,12 @@ final class KumaPushScriptEnvLoadingTest extends TestCase
 
             $curlArgs = file_get_contents($curlArgsFile);
             self::assertIsString($curlArgs);
-            self::assertStringContainsString('https://kuma.example/ops-jobs', $curlArgs);
+            self::assertStringNotContainsString('https://kuma.example/ops-jobs', $curlArgs);
+            self::assertStringContainsString(
+                'url = "https://kuma.example/ops-jobs"',
+                (string) file_get_contents($workspace . '/curl-config.txt'),
+            );
+            self::assertFileDoesNotExist((string) file_get_contents($workspace . '/curl-config-path.txt'));
             self::assertStringContainsString('msg=OK restore_verify_age_minutes=', $curlArgs);
         } finally {
             $this->removeDirectory($workspace);
@@ -269,6 +283,13 @@ final class KumaPushScriptEnvLoadingTest extends TestCase
                 #!/usr/bin/env bash
                 set -euo pipefail
                 printf '%s\n' "$*" > "$CURL_ARGS_FILE"
+                for ((index = 1; index <= $#; index++)); do
+                  if [[ "${!index}" == '--config' ]]; then
+                    next=$((index + 1))
+                    printf '%s' "${!next}" > "$CURL_CONFIG_PATH"
+                    cat "${!next}" > "$CURL_CONFIG_FILE"
+                  fi
+                done
                 exit 0
                 BASH
                 ,
@@ -278,6 +299,8 @@ final class KumaPushScriptEnvLoadingTest extends TestCase
                 'PATH' => $workspace . '/bin:' . (getenv('PATH') ?: ''),
                 'KUMA_PUSH_ENV_FILE' => $envFile,
                 'CURL_ARGS_FILE' => $curlArgsFile,
+                'CURL_CONFIG_FILE' => $workspace . '/curl-config.txt',
+                'CURL_CONFIG_PATH' => $workspace . '/curl-config-path.txt',
             ]);
 
             self::assertSame(0, $result['exit_code'], $result['stderr']);
@@ -285,8 +308,63 @@ final class KumaPushScriptEnvLoadingTest extends TestCase
 
             $curlArgs = file_get_contents($curlArgsFile);
             self::assertIsString($curlArgs);
-            self::assertStringContainsString('https://kuma.example/backup-creation', $curlArgs);
+            self::assertStringNotContainsString('https://kuma.example/backup-creation', $curlArgs);
+            self::assertStringContainsString(
+                'url = "https://kuma.example/backup-creation"',
+                (string) file_get_contents($workspace . '/curl-config.txt'),
+            );
+            self::assertFileDoesNotExist((string) file_get_contents($workspace . '/curl-config-path.txt'));
             self::assertStringContainsString('msg=OK backup_age_minutes=', $curlArgs);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testKumaPushRemovesPrivateConfigWhenCurlFails(): void
+    {
+        $workspace = $this->createWorkspace();
+
+        try {
+            $envFile = $workspace . '/ops-jobs.env';
+            $markerFile = $workspace . '/last_verify_success.utc';
+            $configPathFile = $workspace . '/curl-config-path.txt';
+
+            file_put_contents($markerFile, gmdate('c'));
+            file_put_contents(
+                $envFile,
+                implode(PHP_EOL, [
+                    'KUMA_PUSH_URL_OPS_JOBS=https://kuma.example/ops-jobs-secret',
+                    'KUMA_OPS_JOBS_VERIFY_FILE=' . $markerFile,
+                    'KUMA_OPS_JOBS_MAX_VERIFY_AGE_MINUTES=60',
+                    '',
+                ]),
+            );
+            $this->writeStub(
+                $workspace . '/bin/curl',
+                <<<'BASH'
+                #!/usr/bin/env bash
+                set -euo pipefail
+                for ((index = 1; index <= $#; index++)); do
+                  if [[ "${!index}" == '--config' ]]; then
+                    next=$((index + 1))
+                    printf '%s' "${!next}" > "$CURL_CONFIG_PATH_FILE"
+                  fi
+                done
+                exit 42
+                BASH
+                ,
+            );
+
+            $result = $this->runCommand(['bash', 'scripts/ops/kuma_push_ops_jobs.sh'], $this->repoRoot(), [
+                'PATH' => $workspace . '/bin:' . (getenv('PATH') ?: ''),
+                'KUMA_PUSH_ENV_FILE' => $envFile,
+                'CURL_CONFIG_PATH_FILE' => $configPathFile,
+            ]);
+
+            self::assertSame(1, $result['exit_code'], $result['stderr']);
+            $configPath = (string) file_get_contents($configPathFile);
+            self::assertNotSame('', $configPath);
+            self::assertFileDoesNotExist($configPath);
         } finally {
             $this->removeDirectory($workspace);
         }
