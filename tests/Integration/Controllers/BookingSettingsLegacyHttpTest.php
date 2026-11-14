@@ -329,8 +329,123 @@ final class BookingSettingsLegacyHttpTest extends TestCase
                 $db->update('users', ['id_roles' => $this->actorSnapshot['id_roles']], ['id' => $fixture->actorId]),
             );
             self::assertSame(200, $admin->get('booking_settings')->statusCode);
+            $saved = $admin->post('booking_settings/save', [
+                'booking_settings' => [['name' => 'display_first_name', 'value' => '1']],
+            ]);
+            self::assertSame(200, $saved->statusCode, $saved->body);
+            self::assertSame('1', (string) ($this->bookingRows()['display_first_name']['value'] ?? ''));
         } finally {
             $db->update('users', ['id_roles' => $this->actorSnapshot['id_roles']], ['id' => $fixture->actorId]);
+        }
+    }
+
+    public function testConcurrentRoleRevocationWaitsForSettingsLockAndPreventsWrite(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        self::assertNotNull($this->adminRoleSnapshot);
+        $db = get_instance()->db;
+        $admin = $this->login($this->credentials['admin_username']);
+        self::assertSame(200, $admin->get('booking_settings')->statusCode);
+        $before = $this->bookingRows();
+        $observer = get_instance()->load->database(
+            [
+                'hostname' => 'mysql',
+                'username' => 'root',
+                'password' => 'secret',
+                'database' => 'easyappointments',
+                'dbdriver' => 'mysqli',
+                'dbprefix' => $db->dbprefix,
+                'pconnect' => false,
+                'db_debug' => false,
+                'char_set' => 'utf8mb4',
+                'dbcollat' => 'utf8mb4_general_ci',
+            ],
+            true,
+        );
+        $multi = null;
+        $handle = null;
+        $transactionOpen = false;
+        try {
+            self::assertTrue($observer->query('SET SESSION TRANSACTION READ ONLY'));
+            $ownerConnectionId = mysqli_thread_id($db->conn_id);
+            self::assertNotSame($ownerConnectionId, mysqli_thread_id($observer->conn_id));
+            self::assertTrue($db->trans_begin());
+            $transactionOpen = true;
+            $revoked = ((int) $this->adminRoleSnapshot['system_settings']) & ~PRIV_EDIT;
+            self::assertTrue(
+                $db->update('roles', ['system_settings' => $revoked], ['id' => (int) $this->adminRoleSnapshot['id']]),
+            );
+
+            $cookies = [];
+            foreach ($admin->cookieRecords() as $record) {
+                if (isset($record['name'], $record['value'])) {
+                    $cookies[] = $record['name'] . '=' . $record['value'];
+                }
+            }
+            $csrf = $admin->getCookie('csrf_cookie');
+            self::assertNotSame('', (string) $csrf);
+            $multi = curl_multi_init();
+            $handle = curl_init($this->server->baseUrl . '/booking_settings/save');
+            self::assertInstanceOf(CurlMultiHandle::class, $multi);
+            self::assertInstanceOf(CurlHandle::class, $handle);
+            curl_setopt_array($handle, [
+                CURLOPT_POST => true,
+                CURLOPT_POSTFIELDS => http_build_query(
+                    [
+                        'booking_settings' => [['name' => 'display_first_name', 'value' => '1']],
+                        'csrf_token' => $csrf,
+                    ],
+                    '',
+                    '&',
+                    PHP_QUERY_RFC3986,
+                ),
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_FOLLOWLOCATION => false,
+                CURLOPT_CONNECTTIMEOUT => 3,
+                CURLOPT_TIMEOUT => 15,
+                CURLOPT_HTTPHEADER => [
+                    'Accept: */*',
+                    'Content-Type: application/x-www-form-urlencoded',
+                    'Cookie: ' . implode('; ', $cookies),
+                ],
+            ]);
+            self::assertSame(CURLM_OK, curl_multi_add_handle($multi, $handle));
+
+            $waiting = false;
+            $deadline = microtime(true) + 8.0;
+            do {
+                do {
+                    $multiResult = curl_multi_exec($multi, $running);
+                } while ($multiResult === CURLM_CALL_MULTI_PERFORM);
+                self::assertSame(CURLM_OK, $multiResult);
+                $waiting = $this->settingsLockWaitObserved($observer, $ownerConnectionId);
+                if ($waiting || $running === 0 || microtime(true) >= $deadline) {
+                    break;
+                }
+                curl_multi_select($multi, 0.05);
+            } while (true);
+            self::assertTrue($waiting, 'Booking save must wait on the held roles row lock.');
+            self::assertTrue($db->trans_commit());
+            $transactionOpen = false;
+            self::assertTrue($this->drainCurl($multi, $handle));
+            self::assertSame(403, (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE));
+            self::assertSame($before, $this->bookingRows());
+        } finally {
+            if ($transactionOpen && $db->trans_active()) {
+                $db->trans_rollback();
+            }
+            if ($multi instanceof CurlMultiHandle && $handle instanceof CurlHandle) {
+                $this->drainCurl($multi, $handle);
+                curl_multi_remove_handle($multi, $handle);
+            }
+            if ($handle instanceof CurlHandle) {
+                curl_close($handle);
+            }
+            if ($multi instanceof CurlMultiHandle) {
+                curl_multi_close($multi);
+            }
+            $observer->close();
         }
     }
 
@@ -344,6 +459,55 @@ final class BookingSettingsLegacyHttpTest extends TestCase
                 ->row_array();
         }
         return $rows;
+    }
+
+    private function settingsLockWaitObserved(object $observer, int $ownerConnectionId): bool
+    {
+        $table = get_instance()->db->dbprefix('roles');
+        $result = $observer->query(
+            'SELECT waits.REQUESTING_THREAD_ID, requesting_lock.OBJECT_NAME AS REQUESTING_TABLE, ' .
+                'COALESCE(requesting_statement.SQL_TEXT, requesting_thread.PROCESSLIST_INFO) AS REQUESTING_SQL ' .
+                'FROM performance_schema.data_lock_waits waits ' .
+                'JOIN performance_schema.data_locks requesting_lock ON requesting_lock.ENGINE_LOCK_ID = waits.REQUESTING_ENGINE_LOCK_ID ' .
+                'JOIN performance_schema.threads requesting_thread ON requesting_thread.THREAD_ID = waits.REQUESTING_THREAD_ID ' .
+                'JOIN performance_schema.threads blocking_thread ON blocking_thread.THREAD_ID = waits.BLOCKING_THREAD_ID ' .
+                'LEFT JOIN performance_schema.events_statements_current requesting_statement ON requesting_statement.THREAD_ID = requesting_thread.THREAD_ID ' .
+                'WHERE blocking_thread.PROCESSLIST_ID = ' .
+                (int) $ownerConnectionId,
+        );
+        if ($result === false) {
+            throw new RuntimeException('The independent lock observer could not read performance_schema.');
+        }
+        $normalize = static fn(string $value): string => (string) preg_replace('/\s+/', ' ', strtoupper(trim($value)));
+        foreach ($result->result_array() as $row) {
+            $sql = $normalize((string) ($row['REQUESTING_SQL'] ?? ''));
+            if (
+                ($row['REQUESTING_TABLE'] ?? null) === $table &&
+                str_contains($sql, 'FROM `' . strtoupper($table) . '`') &&
+                str_contains($sql, 'FOR UPDATE')
+            ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function drainCurl(CurlMultiHandle $multi, CurlHandle $handle): bool
+    {
+        $deadline = microtime(true) + 8.0;
+        do {
+            do {
+                $result = curl_multi_exec($multi, $running);
+            } while ($result === CURLM_CALL_MULTI_PERFORM);
+            if ($result !== CURLM_OK) {
+                return false;
+            }
+            if ($running === 0) {
+                return true;
+            }
+            curl_multi_select($multi, 0.05);
+        } while (microtime(true) < $deadline);
+        return $running === 0;
     }
 
     /** @return array<string, mixed> */
