@@ -53,6 +53,7 @@ run_download() {
         printf 'PATH=%q:$PATH\n' "$workspace"
         printf 'LOCAL_DOWNLOAD_ROOT=%q\n' "$download_root"
         printf '%s\n' 'LOCAL_DB_NAME=easyappointments' \
+            'REMOTE_BACKUP_ROOT=/root/backups/easyappointments' \
             'REMOTE_BACKUP_DIR=/root/backups/easyappointments/20260313T074134Z' \
             'PROD_SSH_TARGET=synthetic@invalid' \
             'SSH_OPTIONS=(-o synthetic)' \
@@ -85,6 +86,7 @@ first_dir="$(tail -n1 "$first_output")"
 assert_mode 700 "$first_dir"
 assert_mode 600 "$first_dir/easyappointments.sql.gz"
 assert_mode 600 "$first_dir/backup.env"
+assert_mode 600 "$first_dir/last_backup_set.json"
 [[ "$(cat "$known_path/easyappointments.sql.gz")" == 'keep this dump' ]] || fail 'pre-existing dump was overwritten'
 [[ "$(cat "$known_path/backup.env")" == 'keep this metadata' ]] || fail 'pre-existing metadata was overwritten'
 
@@ -95,6 +97,7 @@ second_dir="$(tail -n1 "$second_output")"
 assert_mode 700 "$second_dir"
 assert_mode 600 "$second_dir/easyappointments.sql.gz"
 assert_mode 600 "$second_dir/backup.env"
+assert_mode 600 "$second_dir/last_backup_set.json"
 
 # A planted symlink must not redirect the download into an attacker-selected
 # directory. This check is intentionally separate from the known-path check.
@@ -109,6 +112,7 @@ symlink_script="$workspace/run-symlink-download.sh"
     printf 'PATH=%q:$PATH\n' "$workspace"
     printf 'LOCAL_DOWNLOAD_ROOT=%q\n' "$download_root"
     printf '%s\n' 'LOCAL_DB_NAME=easyappointments' \
+        'REMOTE_BACKUP_ROOT=/root/backups/easyappointments' \
         'REMOTE_BACKUP_DIR=/root/backups/easyappointments/20260313T074135Z' \
         'PROD_SSH_TARGET=synthetic@invalid' \
         'SSH_OPTIONS=(-o synthetic)' \
@@ -132,5 +136,6 @@ symlink_dir="$(tail -n1 "$workspace/symlink-output")"
 assert_mode 700 "$symlink_dir"
 assert_mode 600 "$symlink_dir/easyappointments.sql.gz"
 assert_mode 600 "$symlink_dir/backup.env"
+assert_mode 600 "$symlink_dir/last_backup_set.json"
 
 printf 'import_prod_backup_private_download=passed\n'
