@@ -127,6 +127,250 @@ class BookingControllerFlowTest extends TestCase
         $this->assertTrue($this->fixtures->customerExistsByEmail($customerEmail));
     }
 
+    public function testRegisterRejectsPrivateProviderServiceTargetBeforeCreatingCustomer(): void
+    {
+        $pair = $this->fixtures->resolveProviderServicePair();
+        $this->fixtures->updateSharedService($pair['service_id'], ['is_private' => 1]);
+        $customerEmail = 'private-target-' . bin2hex(random_bytes(4)) . '@example.org';
+        $startAt = new DateTimeImmutable('tomorrow 09:00:00');
+
+        $_POST['post_data'] = [
+            'appointment' => [
+                'start_datetime' => $startAt->format('Y-m-d H:i:s'),
+                'end_datetime' => $startAt
+                    ->add(new DateInterval('PT' . EVENT_MINIMUM_DURATION . 'M'))
+                    ->format('Y-m-d H:i:s'),
+                'id_services' => $pair['service_id'],
+                'id_users_provider' => $pair['provider_id'],
+                'location' => '',
+                'notes' => 'Private target must be rejected',
+                'color' => '',
+            ],
+            'customer' => [
+                'first_name' => 'Private',
+                'last_name' => 'Target',
+                'email' => $customerEmail,
+                'phone_number' => '+49123456789',
+                'address' => 'Teststrasse 1',
+                'city' => 'Berlin',
+                'zip_code' => '10115',
+                'timezone' => setting('default_timezone') ?: 'UTC',
+                'notes' => '',
+            ],
+            'manage_mode' => false,
+        ];
+
+        $controller = $this->createBookingControllerWithForcedAvailability($pair['provider_id']);
+        $controller->register();
+
+        $response = json_decode(get_instance()->output->get_output(), true);
+
+        $this->assertSame(409, get_instance()->output->statusCode);
+        $this->assertSame(lang('requested_hour_is_unavailable'), $response['message'] ?? null);
+        $this->assertFalse($this->fixtures->customerExistsByEmail($customerEmail));
+    }
+
+    public function testPublicProviderProjectionOmitsPrivateServices(): void
+    {
+        $providerId = $this->fixtures->resolveProviderServicePair()['provider_id'];
+        $privateServiceId = 0;
+        $publicServiceId = 0;
+
+        try {
+            $privateServiceId = $this->createSyntheticService($providerId, true);
+            $publicServiceId = $this->createSyntheticService($providerId, false);
+            $providers = get_instance()->providers_model->get_available_providers(true);
+            $provider = null;
+            foreach ($providers as $candidate) {
+                if ((int) $candidate['id'] === $providerId) {
+                    $provider = $candidate;
+                    break;
+                }
+            }
+
+            self::assertIsArray($provider);
+            self::assertNotContains($privateServiceId, $provider['services']);
+            self::assertContains($publicServiceId, $provider['services']);
+        } finally {
+            foreach ([$privateServiceId, $publicServiceId] as $serviceId) {
+                if ($serviceId <= 0) {
+                    continue;
+                }
+                get_instance()->db->delete('services_providers', [
+                    'id_users' => $providerId,
+                    'id_services' => $serviceId,
+                ]);
+                get_instance()->db->delete('services', ['id' => $serviceId]);
+            }
+        }
+    }
+
+    public function testAvailableHoursRejectsPrivateProviderServiceTarget(): void
+    {
+        $pair = $this->fixtures->resolveProviderServicePair();
+        $this->fixtures->updateSharedService($pair['service_id'], ['is_private' => 1]);
+
+        $_GET = [
+            'provider_id' => (string) $pair['provider_id'],
+            'service_id' => $pair['service_id'],
+            'selected_date' => (new DateTimeImmutable('tomorrow'))->format('Y-m-d'),
+            'manage_mode' => false,
+            'appointment_id' => null,
+        ];
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+        get_instance()->output->set_output('');
+
+        try {
+            $controller = $this->createBookingControllerWithForcedAvailability($pair['provider_id']);
+            $controller->get_available_hours();
+
+            self::assertSame(false, json_decode(get_instance()->output->get_output(), true)['success'] ?? null);
+        } finally {
+            $_GET = [];
+            $_SERVER['REQUEST_METHOD'] = 'POST';
+        }
+    }
+
+    public function testVerifiedCanaryPairMayUsePrivateProviderAndService(): void
+    {
+        $pair = $this->fixtures->resolveProviderServicePair();
+        $this->fixtures->updateSharedProvider($pair['provider_id'], ['is_private' => 1]);
+        $this->fixtures->updateSharedService($pair['service_id'], ['is_private' => 1]);
+
+        $controller = $this->createBookingControllerWithForcedAvailability($pair['provider_id']);
+        $canary = new \Zero_surprise_canary();
+        $context = new \ReflectionProperty(\Zero_surprise_canary::class, 'context');
+        $context->setAccessible(true);
+        $context->setValue($canary, [
+            'provider_id' => $pair['provider_id'],
+            'service_id' => $pair['service_id'],
+        ]);
+        $controller->zero_surprise_canary = $canary;
+
+        $_GET = [
+            'provider_id' => (string) $pair['provider_id'],
+            'service_id' => $pair['service_id'],
+            'selected_date' => (new DateTimeImmutable('tomorrow'))->format('Y-m-d'),
+            'manage_mode' => false,
+            'appointment_id' => null,
+        ];
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+        get_instance()->output->set_output('');
+        $controller->get_available_hours();
+
+        self::assertIsArray(json_decode(get_instance()->output->get_output(), true));
+        self::assertNotSame(false, json_decode(get_instance()->output->get_output(), true)['success'] ?? null);
+    }
+
+    public function testPrivateProviderIsRejectedForAvailabilityAndRegistration(): void
+    {
+        $pair = $this->fixtures->resolveProviderServicePair();
+        $this->fixtures->updateSharedProvider($pair['provider_id'], ['is_private' => 1]);
+
+        $_GET = [
+            'provider_id' => (string) $pair['provider_id'],
+            'service_id' => $pair['service_id'],
+            'selected_date' => (new DateTimeImmutable('tomorrow'))->format('Y-m-d'),
+            'manage_mode' => false,
+            'appointment_id' => null,
+        ];
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+        get_instance()->output->set_output('');
+        $this->createBookingControllerWithForcedAvailability($pair['provider_id'])->get_available_hours();
+        self::assertSame(false, json_decode(get_instance()->output->get_output(), true)['success'] ?? null);
+
+        $customerEmail = 'private-provider-' . bin2hex(random_bytes(4)) . '@example.org';
+        $startAt = new DateTimeImmutable('tomorrow 09:00:00');
+        $_POST['post_data'] = [
+            'appointment' => [
+                'start_datetime' => $startAt->format('Y-m-d H:i:s'),
+                'end_datetime' => $startAt
+                    ->add(new DateInterval('PT' . EVENT_MINIMUM_DURATION . 'M'))
+                    ->format('Y-m-d H:i:s'),
+                'id_services' => $pair['service_id'],
+                'id_users_provider' => $pair['provider_id'],
+            ],
+            'customer' => ['first_name' => 'Private', 'last_name' => 'Provider', 'email' => $customerEmail],
+            'manage_mode' => false,
+        ];
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+        get_instance()->output->set_output('');
+        $this->createBookingControllerWithForcedAvailability($pair['provider_id'])->register();
+
+        self::assertSame(409, get_instance()->output->statusCode);
+        self::assertFalse($this->fixtures->customerExistsByEmail($customerEmail));
+    }
+
+    public function testUnavailableDatesRejectPrivateTargetUniformly(): void
+    {
+        $pair = $this->fixtures->resolveProviderServicePair();
+        $this->fixtures->updateSharedService($pair['service_id'], ['is_private' => 1]);
+
+        $_POST = [
+            'provider_id' => $pair['provider_id'],
+            'service_id' => $pair['service_id'],
+            'selected_date' => (new DateTimeImmutable('first day of next month'))->format('Y-m-d'),
+            'manage_mode' => false,
+            'appointment_id' => null,
+        ];
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+        get_instance()->output->set_output('');
+        $this->createBookingControllerWithForcedAvailability($pair['provider_id'])->get_unavailable_dates();
+
+        self::assertSame(false, json_decode(get_instance()->output->get_output(), true)['success'] ?? null);
+    }
+
+    public function testAnyProviderRejectsPrivateServiceAcrossPublicBookingPaths(): void
+    {
+        $pair = $this->fixtures->resolveProviderServicePair();
+        $this->fixtures->updateSharedService($pair['service_id'], ['is_private' => 1]);
+        $date = (new DateTimeImmutable('tomorrow'))->format('Y-m-d');
+
+        $_GET = [
+            'provider_id' => (string) ANY_PROVIDER,
+            'service_id' => $pair['service_id'],
+            'selected_date' => $date,
+            'manage_mode' => false,
+            'appointment_id' => null,
+        ];
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+        get_instance()->output->set_output('');
+        $this->createBookingControllerWithForcedAvailability($pair['provider_id'])->get_available_hours();
+        self::assertSame(false, json_decode(get_instance()->output->get_output(), true)['success'] ?? null);
+
+        $_POST = [
+            'provider_id' => ANY_PROVIDER,
+            'service_id' => $pair['service_id'],
+            'selected_date' => (new DateTimeImmutable('first day of next month'))->format('Y-m-d'),
+            'manage_mode' => false,
+            'appointment_id' => null,
+        ];
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+        get_instance()->output->set_output('');
+        $this->createBookingControllerWithForcedAvailability($pair['provider_id'])->get_unavailable_dates();
+        self::assertSame(false, json_decode(get_instance()->output->get_output(), true)['success'] ?? null);
+
+        $customerEmail = 'any-private-service-' . bin2hex(random_bytes(4)) . '@example.org';
+        $startAt = new DateTimeImmutable('tomorrow 09:00:00');
+        $_POST['post_data'] = [
+            'appointment' => [
+                'start_datetime' => $startAt->format('Y-m-d H:i:s'),
+                'end_datetime' => $startAt
+                    ->add(new DateInterval('PT' . EVENT_MINIMUM_DURATION . 'M'))
+                    ->format('Y-m-d H:i:s'),
+                'id_services' => $pair['service_id'],
+                'id_users_provider' => ANY_PROVIDER,
+            ],
+            'customer' => ['first_name' => 'Any', 'last_name' => 'Private', 'email' => $customerEmail],
+            'manage_mode' => false,
+        ];
+        get_instance()->output->set_output('');
+        $this->createBookingControllerWithForcedAvailability($pair['provider_id'])->register();
+
+        self::assertSame(409, get_instance()->output->statusCode);
+        self::assertFalse($this->fixtures->customerExistsByEmail($customerEmail));
+    }
+
     public function testCreationIdentityLockSerializesAcrossDatabaseConnections(): void
     {
         $pair = $this->fixtures->resolveProviderServicePair();
@@ -1355,6 +1599,24 @@ class BookingControllerFlowTest extends TestCase
         $controller->timezones = $CI->timezones;
         $controller->availability = $CI->availability;
         $controller->reschedule_authority = $CI->reschedule_authority;
+    }
+
+    private function createSyntheticService(int $providerId, bool $private): int
+    {
+        $db = get_instance()->db;
+        $db->insert('services', [
+            'name' => 'Private projection fixture ' . bin2hex(random_bytes(4)),
+            'duration' => EVENT_MINIMUM_DURATION,
+            'price' => 0,
+            'is_private' => $private ? 1 : 0,
+        ]);
+        $serviceId = (int) $db->insert_id();
+        $db->insert('services_providers', [
+            'id_users' => $providerId,
+            'id_services' => $serviceId,
+        ]);
+
+        return $serviceId;
     }
 
     private function resetRuntimeState(string $requestMethod): void
