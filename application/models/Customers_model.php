@@ -89,9 +89,25 @@ class Customers_model extends EA_Model
             throw new InvalidArgumentException('A new customer must not include an ID.');
         }
 
-        $this->validate($customer);
+        // The email uniqueness check in validate() is necessarily a read
+        // followed by an insert. Serialize creates for the same normalized
+        // email so two concurrent collection POSTs cannot both pass that
+        // check and create duplicate customers.
+        $email = strtolower(trim((string) ($customer['email'] ?? '')));
+        $lock_name = 'ea_customer_create_' . substr(hash('sha256', $email), 0, 40);
+        $lock = $this->db->query('SELECT GET_LOCK(?, 5) AS acquired', [$lock_name]);
 
-        return $this->insert($customer);
+        if ($lock === false || (int) $lock->row()->acquired !== 1) {
+            throw new RuntimeException('Could not reserve the customer email for creation.');
+        }
+
+        try {
+            $this->validate($customer);
+
+            return $this->insert($customer);
+        } finally {
+            $this->db->query('SELECT RELEASE_LOCK(?)', [$lock_name]);
+        }
     }
 
     /**
