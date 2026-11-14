@@ -133,27 +133,83 @@ class Api
             // Bearer token.
             $api_token = setting('api_token');
 
-            if (!empty($api_token) && $api_token === $this->get_bearer_token()) {
-                return;
-            }
+            if (empty($api_token) || $api_token !== $this->get_bearer_token()) {
+                // Basic auth.
+                $username = $_SERVER['PHP_AUTH_USER'] ?? null;
 
-            // Basic auth.
-            $username = $_SERVER['PHP_AUTH_USER'] ?? null;
+                $password = $_SERVER['PHP_AUTH_PW'] ?? null;
 
-            $password = $_SERVER['PHP_AUTH_PW'] ?? null;
+                $user_data = $this->CI->accounts->check_login($username, $password);
 
-            $user_data = $this->CI->accounts->check_login($username, $password);
-
-            if (empty($user_data['role_slug']) || $user_data['role_slug'] !== DB_SLUG_ADMIN) {
-                throw new RuntimeException(
-                    'The provided credentials do not match any admin user!',
-                    401,
-                    'Unauthorized',
-                );
+                if (empty($user_data['role_slug']) || $user_data['role_slug'] !== DB_SLUG_ADMIN) {
+                    throw new RuntimeException(
+                        'The provided credentials do not match any admin user!',
+                        401,
+                        'Unauthorized',
+                    );
+                }
             }
         } catch (Throwable) {
             $this->request_authentication();
         }
+
+        // Preserve the 401 contract for unauthenticated writes before checking
+        // the body type of an authenticated mutation.
+        $this->rejectNonJsonMutation();
+    }
+
+    /**
+     * Browser-simple form submissions must not reach authenticated API writes.
+     *
+     * The API still supports Basic authentication for existing server clients,
+     * but routed POST/PUT writes require JSON so a cross-site HTML form cannot
+     * manufacture an authenticated mutation. A bodyless DELETE remains valid.
+     */
+    private function rejectNonJsonMutation(): void
+    {
+        $method = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? ''));
+        $action = strtolower((string) ($this->CI->router->method ?? ''));
+        $action_method = ['store' => 'POST', 'update' => 'PUT', 'destroy' => 'DELETE'][$action] ?? null;
+
+        // Let the controller return its existing 405 for a wrong method.
+        if ($method !== $action_method) {
+            return;
+        }
+
+        $content_type = (string) ($_SERVER['CONTENT_TYPE'] ?? '');
+        $content_length = (int) ($_SERVER['CONTENT_LENGTH'] ?? 0);
+
+        if (self::acceptsMutationContentType($method, $content_type, $content_length)) {
+            return;
+        }
+
+        json_response(
+            [
+                'success' => false,
+                'message' => 'API mutation requests require application/json.',
+            ],
+            415,
+        );
+
+        exit();
+    }
+
+    private static function acceptsMutationContentType(string $method, string $content_type, int $content_length): bool
+    {
+        $content_type = strtolower(trim($content_type));
+
+        // A bodyless DELETE is legitimate. POST/PUT without a declared body
+        // type still need JSON: a chunked body can omit Content-Length.
+        if (
+            $method === 'DELETE' &&
+            $content_type === '' &&
+            $content_length === 0 &&
+            !isset($_SERVER['HTTP_TRANSFER_ENCODING'])
+        ) {
+            return true;
+        }
+
+        return (bool) preg_match('/^application\\/json(?:\\s*;|$)/', $content_type);
     }
 
     /**
