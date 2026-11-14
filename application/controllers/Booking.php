@@ -522,6 +522,26 @@ class Booking extends EA_Controller
 
             // Resolve ANY_PROVIDER or reject an unavailable concrete target.
             // Availability is checked again under the provider lock below.
+            if (
+                (($appointment['id_users_provider'] ?? null) === ANY_PROVIDER &&
+                    !$this->isPublicBookingService((int) ($appointment['id_services'] ?? 0))) ||
+                (($appointment['id_users_provider'] ?? null) !== ANY_PROVIDER &&
+                    !$this->isPublicBookingTarget(
+                        (int) ($appointment['id_users_provider'] ?? 0),
+                        (int) ($appointment['id_services'] ?? 0),
+                    ))
+            ) {
+                json_response(
+                    [
+                        'success' => false,
+                        'message' => lang('requested_hour_is_unavailable'),
+                    ],
+                    409,
+                );
+
+                return;
+            }
+
             $appointment['id_users_provider'] = $this->check_datetime_availability($appointment);
 
             if (!$appointment['id_users_provider']) {
@@ -557,6 +577,10 @@ class Booking extends EA_Controller
                     $target_service_id,
                     $existing_customer_id,
                 );
+            }
+
+            if (!$this->isPublicBookingTarget($target_provider_id, $target_service_id, true)) {
+                throw new RescheduleAuthorityException('target-visibility-mismatch');
             }
 
             // Recompute the requested end from the server-side service duration
@@ -975,6 +999,22 @@ class Booking extends EA_Controller
 
             $this->assertNotProviderUiSmokeBookingTarget($provider_id, $service_id);
 
+            if (
+                $provider_id === ANY_PROVIDER
+                    ? !$this->isPublicBookingService($service_id)
+                    : !$this->isPublicBookingTarget($provider_id, $service_id)
+            ) {
+                json_response(
+                    [
+                        'success' => false,
+                        'message' => lang('requested_hour_is_unavailable'),
+                    ],
+                    409,
+                );
+
+                return;
+            }
+
             // Do not continue if there was no provider selected (more likely there is no provider in the system).
 
             if (empty($provider_id)) {
@@ -1076,6 +1116,22 @@ class Booking extends EA_Controller
 
             $this->assertNotProviderUiSmokeBookingTarget($provider_id, $service_id);
 
+            if (
+                $provider_id === ANY_PROVIDER
+                    ? !$this->isPublicBookingService($service_id)
+                    : !$this->isPublicBookingTarget($provider_id, $service_id)
+            ) {
+                json_response(
+                    [
+                        'success' => false,
+                        'message' => lang('requested_hour_is_unavailable'),
+                    ],
+                    409,
+                );
+
+                return;
+            }
+
             $provider_ids =
                 $provider_id === ANY_PROVIDER ? $this->search_providers_by_service($service_id) : [$provider_id];
 
@@ -1167,6 +1223,62 @@ class Booking extends EA_Controller
         }
 
         return $provider_list;
+    }
+
+    private function isPublicBookingService(int $service_id, bool $lock = false): bool
+    {
+        if ($service_id <= 0) {
+            return false;
+        }
+
+        $query =
+            'SELECT `id` FROM `' .
+            $this->db->dbprefix('services') .
+            '` WHERE `id` = ? AND `is_private` = 0' .
+            ($lock ? ' FOR UPDATE' : '');
+
+        return $this->db->query($query, [$service_id])->num_rows() === 1;
+    }
+
+    private function isPublicBookingTarget(int $provider_id, int $service_id, bool $lock = false): bool
+    {
+        if ($provider_id <= 0 || $service_id <= 0) {
+            return false;
+        }
+
+        // The release canary is the sole server-verified exception to public
+        // visibility. Keep it scoped to the exact leased pair and re-check
+        // the current provider role/assignment under the write lock.
+        if ($this->zero_surprise_canary->active()) {
+            $this->zero_surprise_canary->assertPair($provider_id, $service_id);
+            $query =
+                'SELECT `users`.`id` FROM `' .
+                $this->db->dbprefix('users') .
+                '` AS `users` INNER JOIN `' .
+                $this->db->dbprefix('roles') .
+                '` AS `roles` ON `roles`.`id` = `users`.`id_roles` INNER JOIN `' .
+                $this->db->dbprefix('services_providers') .
+                '` AS `services_providers` ON `services_providers`.`id_users` = `users`.`id` INNER JOIN `' .
+                $this->db->dbprefix('services') .
+                '` AS `services` ON `services`.`id` = `services_providers`.`id_services` WHERE `users`.`id` = ? AND `roles`.`slug` = ? AND `users`.`is_private` = 1 AND `services_providers`.`id_services` = ? AND `services`.`is_private` = 1' .
+                ($lock ? ' FOR UPDATE' : '');
+
+            return $this->db->query($query, [$provider_id, DB_SLUG_PROVIDER, $service_id])->num_rows() === 1;
+        }
+
+        $query =
+            'SELECT `users`.`id` FROM `' .
+            $this->db->dbprefix('users') .
+            '` AS `users` INNER JOIN `' .
+            $this->db->dbprefix('roles') .
+            '` AS `roles` ON `roles`.`id` = `users`.`id_roles` INNER JOIN `' .
+            $this->db->dbprefix('services_providers') .
+            '` AS `services_providers` ON `services_providers`.`id_users` = `users`.`id` INNER JOIN `' .
+            $this->db->dbprefix('services') .
+            '` AS `services` ON `services`.`id` = `services_providers`.`id_services` WHERE `users`.`id` = ? AND `roles`.`slug` = ? AND `users`.`is_private` = 0 AND `services`.`id` = ? AND `services`.`is_private` = 0' .
+            ($lock ? ' FOR UPDATE' : '');
+
+        return $this->db->query($query, [$provider_id, DB_SLUG_PROVIDER, $service_id])->num_rows() === 1;
     }
 
     /**
