@@ -401,9 +401,13 @@ and service wrapper, then verify real PDF output as well as health after the swi
 Rollback restores the previous image and Compose together; do not mix the old
 browser-start behavior with the new limits.
 
-OpenLDAP runs in the `openldap` container. Host ports `389` and `636` bind only to
+OpenLDAP runs in the `openldap` container. A short-lived, project-scoped Compose
+volume is initialized with an ephemeral CA and server certificate; no private key
+is stored in the repository. The fixture enables StartTLS on `openldap:389` and
+requires certificate verification. Host ports `389` and `636` bind only to
 `127.0.0.1`, so the development fixture is not exposed to the local network.
-Containers continue to connect through `openldap:389` on the Compose network.
+Containers connect through `openldap:389` on the Compose network and trust the CA
+from the private runtime volume.
 
 The default Docker stack no longer bundles phpLDAPadmin. Use the deterministic LDAP reset/smoke helpers and standard
 LDAP clients against the local fixture instead.
@@ -415,7 +419,15 @@ bash ./scripts/ldap/reset_directory.sh
 bash ./scripts/ldap/smoke.sh
 ```
 
-The smoke check expects the `openldap` service to already be running; `reset_directory.sh` starts it before printing the smoke command.
+The reset helper starts the TLS initializer and `openldap` before applying the
+seed. The smoke check exercises StartTLS, rejects a mismatched CA, and verifies
+the seeded binds and searches. Use a unique Compose project name when more than
+one stack is running, for example:
+
+```bash
+COMPOSE_PROJECT_NAME=fh-ldap bash ./scripts/ldap/reset_directory.sh
+COMPOSE_PROJECT_NAME=fh-ldap bash ./scripts/ldap/smoke.sh
+```
 
 ## Restoring a Server Dump Locally
 

@@ -7,7 +7,7 @@ SEED_DIR="${REPO_ROOT}/docker/ldap/seed"
 
 LDAP_ADMIN_DN="${LDAP_ADMIN_DN:-cn=admin,dc=example,dc=org}"
 LDAP_ADMIN_PASSWORD="${LDAP_ADMIN_PASSWORD:-admin}"
-LDAP_URI="${LDAP_URI:-ldap://localhost:389}"
+LDAP_URI="${LDAP_URI:-ldap://openldap:389}"
 LDAP_COMPOSE_PROJECT_NAME="${LDAP_COMPOSE_PROJECT_NAME:-}"
 LDAP_SERVICE_NAME="${LDAP_SERVICE_NAME:-openldap}"
 
@@ -79,11 +79,11 @@ wait_for_openldap() {
     local attempt
 
     for attempt in $(seq 1 60); do
-        if compose exec -T "${LDAP_SERVICE_NAME}" ldapwhoami -x -H "${LDAP_URI}" -D "${LDAP_ADMIN_DN}" -w "${LDAP_ADMIN_PASSWORD}" >/dev/null 2>&1; then
+        if compose exec -T "${LDAP_SERVICE_NAME}" ldapwhoami -x -ZZ -H "${LDAP_URI}" -D "${LDAP_ADMIN_DN}" -w "${LDAP_ADMIN_PASSWORD}" >/dev/null 2>&1; then
             # Some images expose a temporary init slapd before their final runtime restart.
             sleep 2
 
-            if compose exec -T "${LDAP_SERVICE_NAME}" ldapwhoami -x -H "${LDAP_URI}" -D "${LDAP_ADMIN_DN}" -w "${LDAP_ADMIN_PASSWORD}" >/dev/null 2>&1; then
+            if compose exec -T "${LDAP_SERVICE_NAME}" ldapwhoami -x -ZZ -H "${LDAP_URI}" -D "${LDAP_ADMIN_DN}" -w "${LDAP_ADMIN_PASSWORD}" >/dev/null 2>&1; then
                 return 0
             fi
         fi
@@ -118,7 +118,7 @@ apply_seed_files() {
 
     for seed_file in "${seed_files[@]}"; do
         echo "Applying $(basename "${seed_file}")"
-        compose exec -T "${LDAP_SERVICE_NAME}" ldapadd -x -H "${LDAP_URI}" -D "${LDAP_ADMIN_DN}" -w "${LDAP_ADMIN_PASSWORD}" < "${seed_file}"
+        compose exec -T "${LDAP_SERVICE_NAME}" ldapadd -x -ZZ -H "${LDAP_URI}" -D "${LDAP_ADMIN_DN}" -w "${LDAP_ADMIN_PASSWORD}" < "${seed_file}"
     done
 }
 
