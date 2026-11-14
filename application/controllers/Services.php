@@ -187,7 +187,22 @@ class Services extends EA_Controller
 
             $this->services_model->optional($service, $this->optional_service_fields);
 
+            $owns_transaction = !$this->db->trans_active();
+            if ($owns_transaction && !$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start service create transaction.');
+            }
+            if (!$this->hasCurrentServicePermission($user_id, 'add')) {
+                if ($owns_transaction) {
+                    $this->db->trans_rollback();
+                }
+                abort(403, 'Forbidden');
+                return;
+            }
             $service_id = $this->services_model->save($service);
+            if (!$this->db->trans_status() || ($owns_transaction && !$this->db->trans_commit())) {
+                throw new RuntimeException('Could not commit service create transaction.');
+            }
+            $owns_transaction = false;
 
             $service = $this->services_model->find($service_id);
 
@@ -196,6 +211,9 @@ class Services extends EA_Controller
                 'id' => $service_id,
             ]);
         } catch (Throwable $e) {
+            if (isset($owns_transaction) && $owns_transaction) {
+                $this->db->trans_rollback();
+            }
             json_exception($e);
         }
     }
@@ -267,7 +285,22 @@ class Services extends EA_Controller
 
             $this->services_model->optional($service, $this->optional_service_update_fields);
 
+            $owns_transaction = !$this->db->trans_active();
+            if ($owns_transaction && !$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start service update transaction.');
+            }
+            if (!$this->hasCurrentServicePermission($user_id, 'edit')) {
+                if ($owns_transaction) {
+                    $this->db->trans_rollback();
+                }
+                abort(403, 'Forbidden');
+                return;
+            }
             $service_id = $this->services_model->save($service, $existing_service);
+            if (!$this->db->trans_status() || ($owns_transaction && !$this->db->trans_commit())) {
+                throw new RuntimeException('Could not commit service update transaction.');
+            }
+            $owns_transaction = false;
 
             $service = $this->services_model->find($service_id);
 
@@ -276,6 +309,9 @@ class Services extends EA_Controller
                 'id' => $service_id,
             ]);
         } catch (Throwable $e) {
+            if (isset($owns_transaction) && $owns_transaction) {
+                $this->db->trans_rollback();
+            }
             json_exception($e);
         }
     }
@@ -303,12 +339,30 @@ class Services extends EA_Controller
 
             $service = $this->services_model->find($service_id);
 
+            $owns_transaction = !$this->db->trans_active();
+            if ($owns_transaction && !$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start service deletion transaction.');
+            }
+            if (!$this->hasCurrentServicePermission($user_id, 'delete')) {
+                if ($owns_transaction) {
+                    $this->db->trans_rollback();
+                }
+                abort(403, 'Forbidden');
+                return;
+            }
             $this->services_model->delete($service_id);
+            if (!$this->db->trans_status() || ($owns_transaction && !$this->db->trans_commit())) {
+                throw new RuntimeException('Could not commit service deletion transaction.');
+            }
+            $owns_transaction = false;
 
             json_response([
                 'success' => true,
             ]);
         } catch (Throwable $e) {
+            if (isset($owns_transaction) && $owns_transaction) {
+                $this->db->trans_rollback();
+            }
             json_exception($e);
         }
     }
@@ -335,5 +389,40 @@ class Services extends EA_Controller
         $this->backoffice_request_dto_factory = $CI->backoffice_request_dto_factory;
 
         return $this->backoffice_request_dto_factory;
+    }
+
+    private function hasCurrentServicePermission(int $user_id, string $action): bool
+    {
+        $actor = $this->db->query(
+            'SELECT `id_roles` FROM `' . $this->db->dbprefix('users') . '` WHERE `id` = ? FOR UPDATE',
+            [$user_id],
+        );
+        if ($actor === false) {
+            throw new RuntimeException('Could not lock service actor.');
+        }
+        $actor_row = $actor->row_array();
+        $role = $actor_row
+            ? $this->db->query(
+                'SELECT `services` FROM `' . $this->db->dbprefix('roles') . '` WHERE `id` = ? FOR UPDATE',
+                [(int) $actor_row['id_roles']],
+            )
+            : null;
+        if ($role === false) {
+            throw new RuntimeException('Could not lock service role.');
+        }
+        $mask = (int) ($role?->row_array()['services'] ?? 0);
+        $permission = match ($action) {
+            'add' => PRIV_ADD,
+            'edit' => PRIV_EDIT,
+            'delete' => PRIV_DELETE,
+            default => 0,
+        };
+        $known_mask = PRIV_VIEW | PRIV_ADD | PRIV_EDIT | PRIV_DELETE;
+        return $actor_row !== [] &&
+            $role !== null &&
+            $permission !== 0 &&
+            $mask >= 0 &&
+            ($mask & ~$known_mask) === 0 &&
+            ($mask & $permission) === $permission;
     }
 }

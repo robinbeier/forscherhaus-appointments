@@ -43,6 +43,37 @@
  */
 class EA_Model extends CI_Model
 {
+    protected ?int $last_saved_credential_version = null;
+
+    public function last_saved_credential_version(): ?int
+    {
+        return $this->last_saved_credential_version;
+    }
+    /** Advance the persisted credential version inside the caller's transaction. */
+    protected function bump_credential_version(int $user_id): void
+    {
+        if (
+            !$this->db->query(
+                'UPDATE `' .
+                    $this->db->dbprefix('users') .
+                    '` SET `credential_version` = `credential_version` + 1 WHERE `id` = ?',
+                [$user_id],
+            ) ||
+            $this->db->affected_rows() !== 1
+        ) {
+            throw new RuntimeException('Could not advance the user credential version.');
+        }
+        $this->last_saved_credential_version = $this->current_credential_version($user_id);
+    }
+
+    protected function current_credential_version(int $user_id): int
+    {
+        $row = $this->db
+            ->select('credential_version')
+            ->get_where('users', ['id' => $user_id])
+            ->row_array();
+        return max(0, (int) ($row['credential_version'] ?? 0));
+    }
     /**
      * @var array
      */

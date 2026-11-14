@@ -88,8 +88,11 @@ provenance are the release candidate, and their exact bytes are published.
 
 The builder:
 
-- refreshes frontend release assets with `npm run build`
-- fails if generated frontend assets drift
+- exports the exact expected commit into an isolated frontend build tree and
+  refreshes frontend release assets with lockfile-based `npm ci` and the
+  committed build tool
+- never copies generated assets from the mutable checkout; it fails if an
+  asset declared by the release manifest is missing from the isolated build
 - derives the exhaustive generated-runtime manifest from the exact committed
   JS/SCSS source tree and the closed vendor-output contract, then copies and
   validates every listed CSS/JS/vendor file in a temporary stage

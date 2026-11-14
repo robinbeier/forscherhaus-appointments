@@ -22,6 +22,12 @@ defined('BASEPATH') or exit('No direct script access allowed');
  */
 class Api
 {
+    private const MAX_WITH_TOKENS = 16;
+
+    private const MAX_RAW_WITH_TOKENS = 64;
+
+    private const MAX_WITH_TOKEN_LENGTH = 64;
+
     /**
      * @var EA_Controller|CI_Controller
      */
@@ -59,9 +65,63 @@ class Api
      */
     public function model(string $model): void
     {
-        $this->CI->load->model($model);
+        // Keep the API model surface explicit. Apart from preventing arbitrary
+        // loader paths, literal calls let the component-boundary checker prove
+        // each API dependency without trusting caller input.
+        switch ($model) {
+            case 'admins_model':
+                $this->CI->load->model('admins_model');
+                $this->model = $this->CI->admins_model;
+                return;
 
-        $this->model = $this->CI->{$model};
+            case 'appointments_model':
+                $this->CI->load->model('appointments_model');
+                $this->model = $this->CI->appointments_model;
+                return;
+
+            case 'blocked_periods_model':
+                $this->CI->load->model('blocked_periods_model');
+                $this->model = $this->CI->blocked_periods_model;
+                return;
+
+            case 'customers_model':
+                $this->CI->load->model('customers_model');
+                $this->model = $this->CI->customers_model;
+                return;
+
+            case 'providers_model':
+                $this->CI->load->model('providers_model');
+                $this->model = $this->CI->providers_model;
+                return;
+
+            case 'secretaries_model':
+                $this->CI->load->model('secretaries_model');
+                $this->model = $this->CI->secretaries_model;
+                return;
+
+            case 'service_categories_model':
+                $this->CI->load->model('service_categories_model');
+                $this->model = $this->CI->service_categories_model;
+                return;
+
+            case 'services_model':
+                $this->CI->load->model('services_model');
+                $this->model = $this->CI->services_model;
+                return;
+
+            case 'settings_model':
+                $this->CI->load->model('settings_model');
+                $this->model = $this->CI->settings_model;
+                return;
+
+            case 'unavailabilities_model':
+                $this->CI->load->model('unavailabilities_model');
+                $this->model = $this->CI->unavailabilities_model;
+                return;
+
+            default:
+                throw new InvalidArgumentException('Unsupported API model.');
+        }
     }
 
     /**
@@ -178,7 +238,10 @@ class Api
      */
     public function request_limit(): ?int
     {
-        $length = $this->request_normalizer->normalizeInt(request('length', $this->default_length), $this->default_length);
+        $length = $this->request_normalizer->normalizeInt(
+            request('length', $this->default_length),
+            $this->default_length,
+        );
 
         if ($length === null || $length < 0) {
             return $this->default_length;
@@ -262,13 +325,65 @@ class Api
      */
     public function request_with(): ?array
     {
-        $with = $this->normalizeCsvTokens(request('with'));
+        $rawWith = request('with');
+
+        if ($this->rawCsvTokenCount($rawWith) > self::MAX_RAW_WITH_TOKENS) {
+            throw new InvalidArgumentException(
+                sprintf('The with parameter must contain at most %d relation tokens.', self::MAX_RAW_WITH_TOKENS),
+            );
+        }
+
+        $with = $this->normalizeCsvTokens($rawWith);
 
         if (empty($with)) {
             return null;
         }
 
-        return $with;
+        $unique = [];
+        $seen = [];
+
+        foreach ($with as $token) {
+            if (strlen($token) > self::MAX_WITH_TOKEN_LENGTH) {
+                throw new InvalidArgumentException('The with parameter contains a relation name that is too long.');
+            }
+
+            if (isset($seen[$token])) {
+                continue;
+            }
+
+            $seen[$token] = true;
+            $unique[] = $token;
+        }
+
+        if (count($unique) > self::MAX_WITH_TOKENS) {
+            throw new InvalidArgumentException(
+                sprintf('The with parameter must contain at most %d unique relations.', self::MAX_WITH_TOKENS),
+            );
+        }
+
+        return $unique;
+    }
+
+    /**
+     * Count raw CSV/list entries before normalization and deduplication.
+     *
+     * @param mixed $value
+     */
+    private function rawCsvTokenCount(mixed $value): int
+    {
+        if ($value === null || $value === '') {
+            return 0;
+        }
+
+        if (is_array($value)) {
+            return count($value);
+        }
+
+        if (is_object($value)) {
+            return 0;
+        }
+
+        return substr_count((string) $value, ',') + 1;
     }
 
     /**

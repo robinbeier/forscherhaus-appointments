@@ -64,7 +64,7 @@ class KumaPushAppLogsScriptTest extends TestCase
                 chmod 700 "$fixture/state"
                 printf 'ERROR - old!\n' > "$KUMA_APP_LOG_FILE"
                 output="$(bash scripts/ops/kuma_push_app_logs.sh)"
-                [[ "$output" == *'OK primed app log monitor'* ]]
+                [[ "$output" == *'OK app_log_source=priming class=application_log_source'* ]]
                 IFS='|' read -r _ legacy_inode legacy_size < "$KUMA_PUSH_STATE_DIR/app-logs.state"
                 printf '%s|%s|%s\n' "$KUMA_APP_LOG_FILE" "$legacy_inode" "$legacy_size" > "$KUMA_PUSH_STATE_DIR/app-logs.state"
                 output="$(bash scripts/ops/kuma_push_app_logs.sh)"
@@ -156,6 +156,83 @@ class KumaPushAppLogsScriptTest extends TestCase
         );
 
         self::assertSame(0, $result['exit_code'], $result['stdout'] . $result['stderr']);
+    }
+
+    public function testMissingAppLogUsesPathFreeMonitorMessage(): void
+    {
+        $workspace = sys_get_temp_dir() . '/kuma-push-app-logs-missing-' . bin2hex(random_bytes(8));
+        $stubBin = $workspace . '/bin';
+        $appRoot = $workspace . '/app-root';
+        $stateDir = $workspace . '/state';
+        $capturePath = $workspace . '/curl-args.log';
+        $logFile = $appRoot . '/storage/logs/log-missing.php';
+        $envFile = $workspace . '/uptime-kuma-push.env';
+
+        mkdir($stubBin, 0777, true);
+        mkdir($stateDir, 0700, true);
+
+        try {
+            $this->writeCurlStub($stubBin, $capturePath);
+            $this->writeEnvFile($envFile, $appRoot);
+
+            $result = $this->runCommand(
+                ['bash', 'scripts/ops/kuma_push_app_logs.sh'],
+                $this->repoRoot(),
+                array_merge($this->commandEnv($envFile, $stateDir, $stubBin), ['KUMA_APP_LOG_FILE' => $logFile]),
+            );
+
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            self::assertStringContainsString(
+                'OK app_log_source=missing class=application_log_source',
+                $result['stdout'],
+            );
+            self::assertStringNotContainsString($logFile, $result['stdout']);
+            self::assertStringNotContainsString(basename($logFile), $result['stdout']);
+
+            $capture = $this->readFile($capturePath);
+            self::assertStringContainsString('status=up', $capture);
+            self::assertStringContainsString('msg=OK app_log_source=missing class=application_log_source', $capture);
+            self::assertStringNotContainsString($logFile, $capture);
+            self::assertStringNotContainsString(basename($logFile), $capture);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testConcurrentAppLogMonitorUsesPathFreeMessage(): void
+    {
+        $workspace = sys_get_temp_dir() . '/kuma-push-app-logs-lock-' . bin2hex(random_bytes(8));
+        $stubBin = $workspace . '/bin';
+        $appRoot = $workspace . '/app-root';
+        $stateDir = $workspace . '/state';
+        $lockFile = $workspace . '/private-lock-name.lock';
+        $envFile = $workspace . '/uptime-kuma-push.env';
+
+        mkdir($stubBin, 0777, true);
+        chmod($workspace, 0700);
+        mkdir($stateDir, 0700, true);
+
+        try {
+            file_put_contents($stubBin . '/flock', "#!/usr/bin/env bash\nexit 1\n");
+            chmod($stubBin . '/flock', 0755);
+            $this->writeEnvFile($envFile, $appRoot);
+
+            $result = $this->runCommand(
+                ['bash', 'scripts/ops/kuma_push_app_logs.sh'],
+                $this->repoRoot(),
+                array_merge($this->commandEnv($envFile, $stateDir, $stubBin), ['KUMA_APP_LOG_LOCK_FILE' => $lockFile]),
+            );
+
+            self::assertSame(0, $result['exit_code'], $result['stderr']);
+            self::assertStringContainsString(
+                'OK app_log_monitor=already_running class=application_log_lock',
+                $result['stdout'],
+            );
+            self::assertStringNotContainsString($lockFile, $result['stdout']);
+            self::assertStringNotContainsString(basename($lockFile), $result['stdout']);
+        } finally {
+            $this->removeDirectory($workspace);
+        }
     }
 
     public function testPrivateDirectoryPreparationAcceptsOnlyARecreatedSafeRaceWinner(): void
@@ -301,7 +378,12 @@ class KumaPushAppLogsScriptTest extends TestCase
             );
 
             self::assertSame(0, $primeResult['exit_code'], $primeResult['stderr']);
-            self::assertStringContainsString('OK primed app log monitor', $primeResult['stdout']);
+            self::assertStringContainsString(
+                'OK app_log_source=priming class=application_log_source',
+                $primeResult['stdout'],
+            );
+            self::assertStringNotContainsString($logFile, $primeResult['stdout']);
+            self::assertStringNotContainsString(basename($logFile), $primeResult['stdout']);
 
             file_put_contents($logFile, "[error] ERROR - ignored-host-noise\n", FILE_APPEND);
 
@@ -315,7 +397,9 @@ class KumaPushAppLogsScriptTest extends TestCase
             self::assertStringContainsString('OK new_app_errors=0', $result['stdout']);
             $curlCalls = $this->readFile($capturePath);
             self::assertStringContainsString('status=up', $curlCalls);
-            self::assertStringContainsString('msg=OK primed app log monitor', $curlCalls);
+            self::assertStringContainsString('msg=OK app_log_source=priming class=application_log_source', $curlCalls);
+            self::assertStringNotContainsString($logFile, $curlCalls);
+            self::assertStringNotContainsString(basename($logFile), $curlCalls);
             self::assertStringContainsString('msg=OK new_app_errors=0', $curlCalls);
             self::assertStringContainsString('ping=1', $curlCalls);
         } finally {
@@ -373,10 +457,10 @@ class KumaPushAppLogsScriptTest extends TestCase
 
             self::assertSame(0, $result['exit_code'], $result['stderr']);
             self::assertStringContainsString('CRIT new_app_errors=1', $result['stdout']);
-            self::assertStringContainsString(
-                'latest=ERROR - 2026-10-06 08:00:01 --> host=abc real alarm',
-                $this->readFile($capturePath),
-            );
+            $capture = $this->readFile($capturePath);
+            self::assertStringContainsString('msg=CRIT new_app_errors=1 class=application_error', $capture);
+            self::assertStringContainsString('class=application_error', $capture);
+            self::assertStringNotContainsString('host=abc real alarm', $capture);
 
             file_put_contents($envFile, 'KUMA_APP_LOG_IGNORE_REGEX=' . escapeshellarg('[') . "\n", FILE_APPEND);
             file_put_contents($logFile, "ERROR - 2026-10-06 08:00:02 --> host=abc malformed regex\n", FILE_APPEND);
@@ -581,7 +665,7 @@ class KumaPushAppLogsScriptTest extends TestCase
                     'ERROR - 2026-10-05 08:00:02 --> 404 Page Not Found: Installation/index/extra',
                     'ERROR - 2026-10-05 08:00:03 --> 404 Page Not Found: Mnavercom/index/extra',
                     'ERROR - 2026-10-05 08:00:04 --> 404 Page Not Found: Google/get_google_calendars',
-                    'ERROR - 2026-10-05 08:00:05 --> Severity: Warning --> real app warning',
+                    'ERROR - 2026-10-05 08:00:05 --> Severity: Warning --> real app warning email=person@example.invalid token=secret-token-123 url=https://internal.invalid/?id=42',
                     '',
                 ]),
                 FILE_APPEND,
@@ -597,10 +681,11 @@ class KumaPushAppLogsScriptTest extends TestCase
             self::assertStringContainsString('CRIT new_app_errors=4', $result['stdout']);
             $curlCalls = $this->readFile($capturePath);
             self::assertStringContainsString('status=down', $curlCalls);
-            self::assertStringContainsString(
-                'latest=ERROR - 2026-10-05 08:00:05 --> Severity: Warning --> real app warning',
-                $curlCalls,
-            );
+            self::assertStringContainsString('msg=CRIT new_app_errors=4 class=application_error', $curlCalls);
+            self::assertStringContainsString('class=application_error', $curlCalls);
+            self::assertStringNotContainsString('person@example.invalid', $curlCalls);
+            self::assertStringNotContainsString('secret-token-123', $curlCalls);
+            self::assertStringNotContainsString('internal.invalid', $curlCalls);
         } finally {
             $this->removeDirectory($workspace);
         }

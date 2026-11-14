@@ -157,7 +157,22 @@ class Service_categories extends EA_Controller
 
             $this->service_categories_model->optional($service_category, $this->optional_service_category_fields);
 
+            $owns_transaction = !$this->db->trans_active();
+            if ($owns_transaction && !$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start service category create transaction.');
+            }
+            if (!$this->hasCurrentServicePermission($user_id, 'add')) {
+                if ($owns_transaction) {
+                    $this->db->trans_rollback();
+                }
+                abort(403, 'Forbidden');
+                return;
+            }
             $service_category_id = $this->service_categories_model->save($service_category);
+            if (!$this->db->trans_status() || ($owns_transaction && !$this->db->trans_commit())) {
+                throw new RuntimeException('Could not commit service category create transaction.');
+            }
+            $owns_transaction = false;
 
             $service_category = $this->service_categories_model->find($service_category_id);
 
@@ -166,6 +181,9 @@ class Service_categories extends EA_Controller
                 'id' => $service_category_id,
             ]);
         } catch (Throwable $e) {
+            if (isset($owns_transaction) && $owns_transaction) {
+                $this->db->trans_rollback();
+            }
             json_exception($e);
         }
     }
@@ -227,7 +245,22 @@ class Service_categories extends EA_Controller
 
             $this->service_categories_model->optional($service_category, $this->optional_service_category_fields);
 
+            $owns_transaction = !$this->db->trans_active();
+            if ($owns_transaction && !$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start service category update transaction.');
+            }
+            if (!$this->hasCurrentServicePermission($user_id, 'edit')) {
+                if ($owns_transaction) {
+                    $this->db->trans_rollback();
+                }
+                abort(403, 'Forbidden');
+                return;
+            }
             $service_category_id = $this->service_categories_model->save($service_category);
+            if (!$this->db->trans_status() || ($owns_transaction && !$this->db->trans_commit())) {
+                throw new RuntimeException('Could not commit service category update transaction.');
+            }
+            $owns_transaction = false;
 
             $service_category = $this->service_categories_model->find($service_category_id);
 
@@ -236,6 +269,9 @@ class Service_categories extends EA_Controller
                 'id' => $service_category_id,
             ]);
         } catch (Throwable $e) {
+            if (isset($owns_transaction) && $owns_transaction) {
+                $this->db->trans_rollback();
+            }
             json_exception($e);
         }
     }
@@ -262,12 +298,30 @@ class Service_categories extends EA_Controller
 
             $service_category = $this->service_categories_model->find($service_category_id);
 
+            $owns_transaction = !$this->db->trans_active();
+            if ($owns_transaction && !$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start service category deletion transaction.');
+            }
+            if (!$this->hasCurrentServicePermission($user_id, 'delete')) {
+                if ($owns_transaction) {
+                    $this->db->trans_rollback();
+                }
+                abort(403, 'Forbidden');
+                return;
+            }
             $this->service_categories_model->delete($service_category_id);
+            if (!$this->db->trans_status() || ($owns_transaction && !$this->db->trans_commit())) {
+                throw new RuntimeException('Could not commit service category deletion transaction.');
+            }
+            $owns_transaction = false;
 
             json_response([
                 'success' => true,
             ]);
         } catch (Throwable $e) {
+            if (isset($owns_transaction) && $owns_transaction) {
+                $this->db->trans_rollback();
+            }
             json_exception($e);
         }
     }
@@ -294,5 +348,40 @@ class Service_categories extends EA_Controller
         $this->backoffice_request_dto_factory = $CI->backoffice_request_dto_factory;
 
         return $this->backoffice_request_dto_factory;
+    }
+
+    private function hasCurrentServicePermission(int $user_id, string $action): bool
+    {
+        $actor = $this->db->query(
+            'SELECT `id_roles` FROM `' . $this->db->dbprefix('users') . '` WHERE `id` = ? FOR UPDATE',
+            [$user_id],
+        );
+        if ($actor === false) {
+            throw new RuntimeException('Could not lock service actor.');
+        }
+        $actor_row = $actor->row_array();
+        $role = $actor_row
+            ? $this->db->query(
+                'SELECT `services` FROM `' . $this->db->dbprefix('roles') . '` WHERE `id` = ? FOR UPDATE',
+                [(int) $actor_row['id_roles']],
+            )
+            : null;
+        if ($role === false) {
+            throw new RuntimeException('Could not lock service role.');
+        }
+        $mask = (int) ($role?->row_array()['services'] ?? 0);
+        $permission = match ($action) {
+            'add' => PRIV_ADD,
+            'edit' => PRIV_EDIT,
+            'delete' => PRIV_DELETE,
+            default => 0,
+        };
+        $known_mask = PRIV_VIEW | PRIV_ADD | PRIV_EDIT | PRIV_DELETE;
+        return $actor_row !== [] &&
+            $role !== null &&
+            $permission !== 0 &&
+            $mask >= 0 &&
+            ($mask & ~$known_mask) === 0 &&
+            ($mask & $permission) === $permission;
     }
 }

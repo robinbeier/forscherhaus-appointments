@@ -59,6 +59,8 @@ $ci->db = new class ($format, $rotate) {
     public int $reads = 0;
     public int $affected = 0;
     public array $predicate = [];
+    /** @var array<string, mixed> */
+    private array $queryWhere = [];
     public function __construct(string $format, private bool $rotate)
     {
         $this->row = [
@@ -73,8 +75,40 @@ $ci->db = new class ($format, $rotate) {
     }
     public function get_where(string $table, array $where): object
     {
+        $this->queryWhere = $where;
+        return $this->get();
+    }
+    public function select(string $fields): self
+    {
+        return $this;
+    }
+    public function from(string $table): self
+    {
+        return $this;
+    }
+    public function join(string $table, string $condition, string $type = 'inner'): self
+    {
+        return $this;
+    }
+    public function where(string|array $column, mixed $value = null): self
+    {
+        if (is_array($column)) {
+            $this->queryWhere = $column;
+            $this->predicate = $column;
+        } else {
+            $this->queryWhere[$column] = $value;
+        }
+        return $this;
+    }
+    public function get(): object
+    {
         ++$this->reads;
+        $where = [];
+        foreach ($this->queryWhere as $key => $value) {
+            $where[basename(str_replace('.', '/', (string) $key))] = $value;
+        }
         $row = array_diff_assoc($where, $this->row) === [] ? $this->row : [];
+        $this->queryWhere = [];
         if ($this->rotate) {
             $this->row['password'] = hash_password_argon2id('replacement-password');
             $this->rotate = false;
@@ -87,11 +121,6 @@ $ci->db = new class ($format, $rotate) {
             }
         };
     }
-    public function where(array $where): self
-    {
-        $this->predicate = $where;
-        return $this;
-    }
     public function update(string $table, array $values): bool
     {
         $this->affected = 0;
@@ -99,6 +128,9 @@ $ci->db = new class ($format, $rotate) {
             $this->row = array_replace($this->row, $values);
             $this->affected = 1;
         }
+        // CI's query builder starts each statement with a fresh predicate.
+        $this->queryWhere = [];
+        $this->predicate = [];
         return true;
     }
     public function affected_rows(): int

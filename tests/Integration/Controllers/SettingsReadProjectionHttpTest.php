@@ -22,6 +22,7 @@ final class SettingsReadProjectionHttpTest extends TestCase
     private ?array $adminRoleSnapshot = null;
     private ?int $actorRoleSnapshot = null;
     private ?int $providerRoleSnapshot = null;
+    private ?array $settingsRestore = null;
 
     protected function setUp(): void
     {
@@ -48,6 +49,14 @@ final class SettingsReadProjectionHttpTest extends TestCase
             $this->server?->close();
         } finally {
             try {
+                if ($this->settingsRestore !== null) {
+                    get_instance()->db->update(
+                        'settings',
+                        ['value' => $this->settingsRestore['value']],
+                        ['id' => $this->settingsRestore['id']],
+                    );
+                    $this->settingsRestore = null;
+                }
                 $this->restoreAuthority();
             } finally {
                 $this->fixture?->cleanup();
@@ -329,7 +338,12 @@ final class SettingsReadProjectionHttpTest extends TestCase
             ->db->get_where('roles', ['slug' => DB_SLUG_ADMIN])
             ->row_array();
         self::assertNotEmpty($adminRole['id'] ?? null);
-        $owned = $fixture->ownedSetting('write-promotion', 'before');
+        $setting = get_instance()
+            ->db->get_where('settings', ['name' => 'company_name'])
+            ->row_array();
+        self::assertNotEmpty($setting['id'] ?? null);
+        $originalValue = (string) $setting['value'];
+        $this->settingsRestore = ['id' => (int) $setting['id'], 'value' => $originalValue];
         $provider = $this->login($this->credentials['provider_username'], $this->credentials['password']);
         self::assertTrue(
             get_instance()->db->update('users', ['id_roles' => (int) $adminRole['id']], ['id' => $fixture->providerId]),
@@ -338,13 +352,21 @@ final class SettingsReadProjectionHttpTest extends TestCase
         $response = $provider->post(
             'general_settings/save',
             [
-                'general_settings' => [['name' => $owned['name'], 'value' => 'after-promotion']],
+                'general_settings' => [['name' => 'company_name', 'value' => 'after-promotion']],
             ],
             null,
             true,
         );
         self::assertSame(200, $response->statusCode, $response->body);
-        self::assertSame('after-promotion', $fixture->settingRow((int) $owned['id'])['value']);
+        self::assertSame(
+            'after-promotion',
+            get_instance()
+                ->db->get_where('settings', ['id' => (int) $setting['id']])
+                ->row_array()['value'] ?? null,
+        );
+        self::assertTrue(
+            get_instance()->db->update('settings', ['value' => $originalValue], ['id' => (int) $setting['id']]),
+        );
     }
 
     public function testStoredActorRoleDemotionAndCapabilityRevocationDenyAlreadyLoggedInReads(): void

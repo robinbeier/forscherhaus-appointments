@@ -95,6 +95,7 @@ PROJECT="$(pwd -P)"
 git diff --quiet --exit-code && git diff --cached --quiet --exit-code || {
   echo "[!] Tracked source is dirty; refusing a release build." >&2; exit 1;
 }
+source "$PROJECT/scripts/release-gate/lib/create_release_archive.sh"
 
 # Vorbedingung: CI-Config muss lokal existieren (sie gehört zum Code!)
 if [[ ! -f "application/config/config.php" ]]; then
@@ -107,8 +108,14 @@ ARCHIVE="$OUTPUT/${REL}.tar.gz"
 PROVENANCE="$OUTPUT/${REL}.build-provenance.json"
 STAGE="$(mktemp -d "/tmp/${REL}.stage.XXXXXX")"
 STAGE="$(cd "$STAGE" && pwd -P)"
-cleanup() { rm -rf "$STAGE"; }
+FRONTEND_BUILD=''
+cleanup() {
+  [[ -z "$STAGE" ]] || rm -rf -- "$STAGE"
+  [[ -z "$FRONTEND_BUILD" ]] || rm -rf -- "$FRONTEND_BUILD"
+}
 trap cleanup EXIT
+FRONTEND_BUILD="$(mktemp -d "/tmp/${REL}.frontend.XXXXXX")"
+FRONTEND_BUILD="$(cd "$FRONTEND_BUILD" && pwd -P)"
 
 echo "[i] Stage-Verzeichnis: $STAGE"
 
@@ -127,15 +134,17 @@ command -v node >/dev/null 2>&1 || {
 
 echo "[i] Refresh frontend release assets"
 if [[ "$DRYRUN" -eq 0 ]]; then
-  npm run build
-  git diff --quiet --exit-code -- assets/css assets/js assets/vendor || {
-    echo "[!] Frontend asset refresh changed tracked source inputs in assets/css, assets/js, or assets/vendor." >&2
-    git status --short -- assets/css assets/js assets/vendor >&2 || true
-    exit 1
-  }
+  echo "[i] Export exact commit into isolated frontend build tree: $FRONTEND_BUILD"
+  git archive --format=tar "$EXPECTED_COMMIT" | tar -xf - -C "$FRONTEND_BUILD"
+  rm -rf "$FRONTEND_BUILD/.git" "$FRONTEND_BUILD/vendor" "$FRONTEND_BUILD/node_modules"
+  npm ci --ignore-scripts --no-audit --no-fund --prefix "$FRONTEND_BUILD"
+  (
+    cd "$FRONTEND_BUILD"
+    ./node_modules/.bin/gulp build
+  )
 else
-  echo "[DRY-RUN] Würde npm run build ausführen"
-  echo "[DRY-RUN] Würde sicherstellen, dass assets/css, assets/js und assets/vendor danach keinen Diff haben"
+  echo "[DRY-RUN] Würde den erwarteten Commit in einen isolierten Frontend-Baum exportieren"
+  echo "[DRY-RUN] Würde npm ci --ignore-scripts --no-audit --no-fund und ./node_modules/.bin/gulp build ausführen"
 fi
 
 # 1) Stage befüllen (Root-config, runtime storage, and local build artifacts ausschließen; ankern!)
@@ -169,7 +178,7 @@ if [[ "$DRYRUN" -eq 0 ]]; then
       echo "[!] Generated release asset path is unsafe: $asset_path" >&2
       exit 1
     }
-    ASSET_SOURCE="$PROJECT/$asset_path"
+    ASSET_SOURCE="$FRONTEND_BUILD/$asset_path"
     ASSET_TARGET="$STAGE/$asset_path"
     [[ -f "$ASSET_SOURCE" && ! -L "$ASSET_SOURCE" ]] || {
       echo "[!] Refreshed release asset is missing or unsafe: $asset_path" >&2
@@ -213,9 +222,7 @@ fi
 
 # 3) Archiv bauen
 if [[ "$DRYRUN" -eq 0 ]]; then
-  # macOS: avoid Apple metadata/xattrs in the release tarball to keep remote
-  # validation output small and reproducible across GNU tar environments.
-  COPYFILE_DISABLE=1 tar --no-mac-metadata --no-xattrs -C "$STAGE" -czf "$ARCHIVE" .
+  create_release_archive "$STAGE" "$ARCHIVE"
   # 4) Vollständigen Archivinhalt prüfen
   php scripts/release-gate/validate_release_artifact.php --archive="$ARCHIVE"
   php scripts/ops/create_release_build_provenance.php \

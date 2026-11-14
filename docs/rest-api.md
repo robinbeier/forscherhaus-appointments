@@ -21,6 +21,12 @@ Additionally you can configure your own API key in the settings page and pass it
 Appointment POST and PUT JSON request bodies are limited to 1 MiB. Oversized
 bodies receive HTTP 413 before an appointment write is attempted.
 
+In the bundled Nginx stack, the public `POST /booking/register` route and its
+front-controller aliases also reject form-encoded or multipart bodies above
+1 MiB before PHP parsing. This route-specific Nginx guard does not change the
+global limit for uploads or other application routes; production Apache
+deployments need an equivalent, separately verified edge rule.
+
 The API follows the REST structure which means that the client can use various HTTP verbs in order to perform various operations to the resources. For example you should use a GET request for fetching resources, a POST for creating new and PUT for updating existing ones in the database. Finally a DELETE request will remove a resource from the system.
 
 Browser access from a different origin is not supported. The application is
@@ -36,6 +42,9 @@ public appointment. Updating an existing appointment through that route first
 requires the canonical `GET /booking/reschedule/{hash}` flow in the same
 server-side session. The issued authority is short-lived, one-time, and bound
 to the exact appointment, customer, and canonical scheduling state.
+
+Browser POST requests under `/booking/`, including availability reads and
+registration, use the CSRF token issued to the same-origin booking session.
 
 Client-provided `manage_mode`, appointment/customer IDs, hashes, paths, or
 token-shaped values never grant update authority by themselves. REST API
@@ -155,6 +164,9 @@ http://ea-installation/index.php/api/v1/appointments?with=customer,service,provi
 For appointments, attached customer, service and provider records use their
 normal API field names and projection. The `fields` parameter narrows the
 appointment itself; explicitly requested `with` relations remain attached.
+Repeated relation names are included once in their original order. The request
+may contain at most 64 relation entries, 16 distinct relations, and 64 bytes
+per relation name; larger requests are rejected before related records load.
 
 ### Expected Responses
 

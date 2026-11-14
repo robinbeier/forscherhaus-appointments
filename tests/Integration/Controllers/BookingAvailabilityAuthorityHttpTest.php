@@ -128,12 +128,18 @@ final class BookingAvailabilityAuthorityHttpTest extends TestCase
         array $extra,
         string $message,
     ): void {
-        $available = $client->requestApp('POST', 'booking/get_available_hours', [
-            'provider_id' => (string) $scenario['provider_id'],
-            'service_id' => (string) $scenario['service_id'],
-            'selected_date' => $scenario['date'],
-            ...$extra,
-        ]);
+        $available = $client->requestApp(
+            'POST',
+            'booking/get_available_hours',
+            [
+                'provider_id' => (string) $scenario['provider_id'],
+                'service_id' => (string) $scenario['service_id'],
+                'selected_date' => $scenario['date'],
+                ...$extra,
+            ],
+            null,
+            true,
+        );
         self::assertSame(200, $available->statusCode, $available->body);
         $hours = json_decode($available->body, true, 512, JSON_THROW_ON_ERROR);
         self::assertIsArray($hours);
@@ -158,13 +164,19 @@ final class BookingAvailabilityAuthorityHttpTest extends TestCase
     /** @param array{provider_id:int,service_id:int,date:string,hour:string} $scenario */
     private function assertAvailableWithAuthority(GateHttpClient $client, array $scenario, int $appointmentId): void
     {
-        $response = $client->requestApp('POST', 'booking/get_available_hours', [
-            'provider_id' => (string) $scenario['provider_id'],
-            'service_id' => (string) $scenario['service_id'],
-            'selected_date' => $scenario['date'],
-            'manage_mode' => '1',
-            'appointment_id' => (string) $appointmentId,
-        ]);
+        $response = $client->requestApp(
+            'POST',
+            'booking/get_available_hours',
+            [
+                'provider_id' => (string) $scenario['provider_id'],
+                'service_id' => (string) $scenario['service_id'],
+                'selected_date' => $scenario['date'],
+                'manage_mode' => '1',
+                'appointment_id' => (string) $appointmentId,
+            ],
+            null,
+            true,
+        );
         self::assertSame(200, $response->statusCode, $response->body);
         $hours = json_decode($response->body, true, 512, JSON_THROW_ON_ERROR);
         self::assertIsArray($hours);
