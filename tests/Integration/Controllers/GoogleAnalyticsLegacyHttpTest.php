@@ -20,7 +20,9 @@ final class GoogleAnalyticsLegacyHttpTest extends TestCase
     private ?DefenseCycleHttpServer $server = null;
     private array $credentials = [];
     private ?array $actorSnapshot = null;
+    private ?array $actorSettingsSnapshot = null;
     private ?array $providerSnapshot = null;
+    private ?array $adminRoleSnapshot = null;
     private ?array $providerRoleSnapshot = null;
     private ?array $settingSnapshot = null;
 
@@ -37,7 +39,11 @@ final class GoogleAnalyticsLegacyHttpTest extends TestCase
             $this->server = new DefenseCycleHttpServer();
             $db = get_instance()->db;
             $this->actorSnapshot = $this->fixture->row('users', $this->fixture->actorId);
+            $this->actorSettingsSnapshot = $db
+                ->get_where('user_settings', ['id_users' => $this->fixture->actorId])
+                ->row_array();
             $this->providerSnapshot = $this->fixture->row('users', $this->fixture->providerId);
+            $this->adminRoleSnapshot = $db->get_where('roles', ['slug' => DB_SLUG_ADMIN])->row_array();
             $this->providerRoleSnapshot = $db->get_where('roles', ['slug' => DB_SLUG_PROVIDER])->row_array();
             $this->settingSnapshot = $db->get_where('settings', ['name' => self::SETTING_NAME])->row_array();
             self::assertNotEmpty($this->settingSnapshot, 'The synthetic stack must seed google_analytics_code.');
@@ -54,10 +60,37 @@ final class GoogleAnalyticsLegacyHttpTest extends TestCase
             if ($this->fixture !== null) {
                 $db = get_instance()->db;
                 if ($this->actorSnapshot !== null) {
-                    $db->update(
-                        'users',
-                        ['id_roles' => $this->actorSnapshot['id_roles']],
-                        ['id' => $this->actorSnapshot['id']],
+                    $storedActor = $db->get_where('users', ['id' => $this->actorSnapshot['id']])->row_array();
+                    if ($storedActor === null) {
+                        self::assertTrue($db->insert('users', $this->actorSnapshot));
+                    } else {
+                        self::assertTrue(
+                            $db->update('users', $this->actorSnapshot, ['id' => $this->actorSnapshot['id']]),
+                        );
+                    }
+                    self::assertSame(
+                        $this->actorSnapshot,
+                        $db->get_where('users', ['id' => $this->actorSnapshot['id']])->row_array(),
+                    );
+                }
+                if ($this->actorSettingsSnapshot !== null) {
+                    $storedSettings = $db
+                        ->get_where('user_settings', ['id_users' => $this->actorSettingsSnapshot['id_users']])
+                        ->row_array();
+                    if ($storedSettings === null) {
+                        self::assertTrue($db->insert('user_settings', $this->actorSettingsSnapshot));
+                    } else {
+                        self::assertTrue(
+                            $db->update('user_settings', $this->actorSettingsSnapshot, [
+                                'id_users' => $this->actorSettingsSnapshot['id_users'],
+                            ]),
+                        );
+                    }
+                    self::assertSame(
+                        $this->actorSettingsSnapshot,
+                        $db
+                            ->get_where('user_settings', ['id_users' => $this->actorSettingsSnapshot['id_users']])
+                            ->row_array(),
                     );
                 }
                 if ($this->providerSnapshot !== null) {
@@ -72,6 +105,15 @@ final class GoogleAnalyticsLegacyHttpTest extends TestCase
                     self::assertSame(
                         $this->providerRoleSnapshot,
                         $db->get_where('roles', ['id' => $this->providerRoleSnapshot['id']])->row_array(),
+                    );
+                }
+                if ($this->adminRoleSnapshot !== null) {
+                    self::assertTrue(
+                        $db->update('roles', $this->adminRoleSnapshot, ['id' => $this->adminRoleSnapshot['id']]),
+                    );
+                    self::assertSame(
+                        $this->adminRoleSnapshot,
+                        $db->get_where('roles', ['id' => $this->adminRoleSnapshot['id']])->row_array(),
                     );
                 }
                 if ($this->settingSnapshot !== null) {
