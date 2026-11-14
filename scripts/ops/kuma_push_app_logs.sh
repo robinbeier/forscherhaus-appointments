@@ -65,14 +65,14 @@ if command -v flock >/dev/null 2>&1; then
   kuma_push_validate_private_file "$LOCK_FILE" || kuma_push_die "Unsafe private lock file"
   exec 9>>"$LOCK_FILE"
   if ! flock -n 9; then
-    msg="OK app log monitor already running: $(basename "$LOCK_FILE")"
+    msg="OK app_log_monitor=already_running class=application_log_lock"
     kuma_push_log "$msg"
     exit 0
   fi
 fi
 
 if [[ ! -f "$LOG_FILE" ]]; then
-  msg="OK app log not present yet: $(basename "$LOG_FILE")"
+  msg="OK app_log_source=missing class=application_log_source"
   kuma_push_send "$KUMA_PUSH_URL_APP_LOGS" "up" "$msg" "1"
   kuma_push_log "$msg"
   exit 0
@@ -164,7 +164,7 @@ else
 fi
 
 if [[ ! -f "$STATE_FILE" ]]; then
-  msg="OK primed app log monitor at $(basename "$LOG_FILE") size=${current_size}"
+  msg="OK app_log_source=priming class=application_log_source"
   kuma_push_send "$KUMA_PUSH_URL_APP_LOGS" "up" "$msg" "1"
   printf '%s|%s|%s\n%s\n' "$LOG_FILE" "$current_inode" "$current_size" "$prefix_sha256" > "$STATE_FILE"
   kuma_push_validate_private_file "$STATE_FILE" || kuma_push_die "Unsafe private state file"
@@ -190,12 +190,13 @@ new_errors="$(grep -cF "$PATTERN" "$tmp_delta" || true)"
 new_errors="${new_errors:-0}"
 
 if (( new_errors > THRESHOLD )); then
-  latest_line="$(grep -F "$PATTERN" "$tmp_delta" | tail -n 1 || true)"
-  latest_line="$(kuma_push_trim "$latest_line" 180)"
-  msg="CRIT new_app_errors=${new_errors} file=$(basename "$LOG_FILE") latest=${latest_line}"
+  # Keep diagnostic content on the host. Kuma receives only a fixed class and
+  # count so application paths, identifiers, tokens, and personal data cannot
+  # cross the monitoring boundary through an error line.
+  msg="CRIT new_app_errors=${new_errors} class=application_error"
   kuma_push_send "$KUMA_PUSH_URL_APP_LOGS" "down" "$msg" "0"
 else
-  msg="OK new_app_errors=${new_errors} file=$(basename "$LOG_FILE")"
+  msg="OK new_app_errors=${new_errors} class=application_log"
   kuma_push_send "$KUMA_PUSH_URL_APP_LOGS" "up" "$msg" "1"
 fi
 
