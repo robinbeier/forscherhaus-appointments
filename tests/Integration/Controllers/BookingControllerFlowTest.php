@@ -231,6 +231,37 @@ class BookingControllerFlowTest extends TestCase
         }
     }
 
+    public function testVerifiedCanaryPairMayUsePrivateProviderAndService(): void
+    {
+        $pair = $this->fixtures->resolveProviderServicePair();
+        $this->fixtures->updateSharedProvider($pair['provider_id'], ['is_private' => 1]);
+        $this->fixtures->updateSharedService($pair['service_id'], ['is_private' => 1]);
+
+        $controller = $this->createBookingControllerWithForcedAvailability($pair['provider_id']);
+        $canary = new \Zero_surprise_canary();
+        $context = new \ReflectionProperty(\Zero_surprise_canary::class, 'context');
+        $context->setAccessible(true);
+        $context->setValue($canary, [
+            'provider_id' => $pair['provider_id'],
+            'service_id' => $pair['service_id'],
+        ]);
+        $controller->zero_surprise_canary = $canary;
+
+        $_GET = [
+            'provider_id' => (string) $pair['provider_id'],
+            'service_id' => $pair['service_id'],
+            'selected_date' => (new DateTimeImmutable('tomorrow'))->format('Y-m-d'),
+            'manage_mode' => false,
+            'appointment_id' => null,
+        ];
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+        get_instance()->output->set_output('');
+        $controller->get_available_hours();
+
+        self::assertIsArray(json_decode(get_instance()->output->get_output(), true));
+        self::assertNotSame(false, json_decode(get_instance()->output->get_output(), true)['success'] ?? null);
+    }
+
     public function testPrivateProviderIsRejectedForAvailabilityAndRegistration(): void
     {
         $pair = $this->fixtures->resolveProviderServicePair();

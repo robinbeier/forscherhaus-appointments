@@ -1246,6 +1246,26 @@ class Booking extends EA_Controller
             return false;
         }
 
+        // The release canary is the sole server-verified exception to public
+        // visibility. Keep it scoped to the exact leased pair and re-check
+        // the current provider role/assignment under the write lock.
+        if ($this->zero_surprise_canary->active()) {
+            $this->zero_surprise_canary->assertPair($provider_id, $service_id);
+            $query =
+                'SELECT `users`.`id` FROM `' .
+                $this->db->dbprefix('users') .
+                '` AS `users` INNER JOIN `' .
+                $this->db->dbprefix('roles') .
+                '` AS `roles` ON `roles`.`id` = `users`.`id_roles` INNER JOIN `' .
+                $this->db->dbprefix('services_providers') .
+                '` AS `services_providers` ON `services_providers`.`id_users` = `users`.`id` INNER JOIN `' .
+                $this->db->dbprefix('services') .
+                '` AS `services` ON `services`.`id` = `services_providers`.`id_services` WHERE `users`.`id` = ? AND `roles`.`slug` = ? AND `users`.`is_private` = 1 AND `services_providers`.`id_services` = ? AND `services`.`is_private` = 1' .
+                ($lock ? ' FOR UPDATE' : '');
+
+            return $this->db->query($query, [$provider_id, DB_SLUG_PROVIDER, $service_id])->num_rows() === 1;
+        }
+
         $query =
             'SELECT `users`.`id` FROM `' .
             $this->db->dbprefix('users') .
