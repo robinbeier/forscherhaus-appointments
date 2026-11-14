@@ -39,6 +39,10 @@ final class RescheduleAuthorityLockOrderTest extends TestCase
         $this->assertMatchesRegularExpression('/^ea:public-create:[a-f0-9]{40}$/D', $firstLock);
         $this->assertLessThanOrEqual(64, strlen($firstLock));
         $this->assertStringNotContainsString('case-test', $firstLock);
+        $this->assertSame(
+            $firstLock,
+            Reschedule_authority::creationIdentityLockName('case-test@example.invalid', 'unit-test'),
+        );
 
         $acquireQueries = array_values(
             array_filter($database->queries, static fn(array $query): bool => str_contains($query['sql'], 'GET_LOCK')),

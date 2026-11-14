@@ -83,7 +83,7 @@ class Customers_model extends EA_Model
     }
 
     /** Insert a new customer without turning an email match into update authority. */
-    public function insert_new(array $customer): int
+    public function insert_new(array $customer, ?string $held_creation_lock = null): int
     {
         if (array_key_exists('id', $customer)) {
             throw new InvalidArgumentException('A new customer must not include an ID.');
@@ -93,12 +93,21 @@ class Customers_model extends EA_Model
         // followed by an insert. Serialize creates for the same normalized
         // email so two concurrent collection POSTs cannot both pass that
         // check and create duplicate customers.
-        $email = strtolower(trim((string) ($customer['email'] ?? '')));
-        $lock_name = 'ea_customer_create_' . substr(hash('sha256', $email), 0, 40);
-        $lock = $this->db->query('SELECT GET_LOCK(?, 5) AS acquired', [$lock_name]);
+        require_once APPPATH . 'libraries/Reschedule_authority.php';
+        $lock_name =
+            $held_creation_lock ??
+            Reschedule_authority::creationIdentityLockName(
+                $customer['email'] ?? null,
+                (string) ($this->db->database ?? ''),
+            );
+        $owns_lock = $held_creation_lock === null && $lock_name !== null;
 
-        if ($lock === false || (int) $lock->row()->acquired !== 1) {
-            throw new RuntimeException('Could not reserve the customer email for creation.');
+        if ($owns_lock) {
+            $lock = $this->db->query('SELECT GET_LOCK(?, 10) AS acquired', [$lock_name]);
+
+            if ($lock === false || (int) $lock->row()->acquired !== 1) {
+                throw new RuntimeException('Could not reserve the customer email for creation.');
+            }
         }
 
         try {
@@ -106,7 +115,9 @@ class Customers_model extends EA_Model
 
             return $this->insert($customer);
         } finally {
-            $this->db->query('SELECT RELEASE_LOCK(?)', [$lock_name]);
+            if ($owns_lock) {
+                $this->db->query('SELECT RELEASE_LOCK(?)', [$lock_name]);
+            }
         }
     }
 
