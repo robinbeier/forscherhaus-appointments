@@ -216,6 +216,57 @@ final class ProviderPdfExportHttpTest extends TestCase
         self::assertSame([], $unexpectedDumps, 'Provider PDF exports must not leave fixed HTML debug dumps.');
     }
 
+    public function testProviderPdfRendererDiagnosticsAreNotReturnedToProvider(): void
+    {
+        $this->renderer?->close();
+        $this->renderer = new ProviderPdfRecordingRenderer(500, 'renderer-internal-secret-ROB-952');
+        putenv('PDF_RENDERER_URL=' . $this->renderer->baseUrl);
+        $this->server?->close();
+        $this->server = new DefenseCycleHttpServer();
+        $provider = $this->login($this->fixture->run . '_provider', $this->fixture->password);
+        $range = [
+            'start_date' => $this->periodStart,
+            'end_date' => $this->periodEnd,
+        ];
+
+        foreach (
+            [
+                'dashboard/export/provider-parent-appointments.pdf',
+                'dashboard/export/provider-preparation.pdf',
+                'dashboard_export/provider_parent_appointments_pdf',
+                'dashboard_export/provider_preparation_pdf',
+            ]
+            as $route
+        ) {
+            $response = $provider->get($route, $range);
+            self::assertSame(400, $response->statusCode, $route);
+            self::assertStringNotContainsString('renderer-internal-secret-ROB-952', $response->body);
+            self::assertStringContainsString('PDF export could not be generated', $response->body);
+        }
+    }
+
+    public function testProviderPdfValidationErrorsRemainHelpful(): void
+    {
+        $provider = $this->login($this->fixture->run . '_provider', $this->fixture->password);
+        foreach (
+            [
+                'dashboard/export/provider-parent-appointments.pdf',
+                'dashboard/export/provider-preparation.pdf',
+                'dashboard_export/provider_parent_appointments_pdf',
+                'dashboard_export/provider_preparation_pdf',
+            ]
+            as $route
+        ) {
+            $response = $provider->get($route, [
+                'start_date' => 'invalid-date',
+                'end_date' => $this->periodEnd,
+            ]);
+            self::assertSame(400, $response->statusCode, $route);
+            self::assertStringContainsString('choose one weekday', strtolower($response->body));
+            self::assertStringNotContainsString('PDF export could not be generated', $response->body);
+        }
+    }
+
     private function login(string $username, string $password): GateHttpClient
     {
         $client = $this->server->client();

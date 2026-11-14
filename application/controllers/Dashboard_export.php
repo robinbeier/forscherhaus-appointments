@@ -276,13 +276,18 @@ class Dashboard_export extends EA_Controller
                 'appointment_pages' => $this->buildProviderParentAppointmentPages($appointments),
             ];
 
-            $this->pdfRenderer->stream_view(
-                'exports/provider_parent_appointments_pdf',
-                $view_data,
-                $this->buildProviderParentAppointmentsPdfFilename($provider, $period->start, $period->end),
-                // This view contains parent names and must never leave a fixed HTML debug dump.
-                $this->buildPdfStreamOptions(),
-            );
+            try {
+                $this->pdfRenderer->stream_view(
+                    'exports/provider_parent_appointments_pdf',
+                    $view_data,
+                    $this->buildProviderParentAppointmentsPdfFilename($provider, $period->start, $period->end),
+                    // This view contains parent names and must never leave a fixed HTML debug dump.
+                    $this->buildPdfStreamOptions(),
+                );
+            } catch (Throwable $exception) {
+                log_message('error', 'Failed to render provider parent appointments PDF: ' . $exception->getMessage());
+                abort(400, 'The PDF export could not be generated. Please try again later.');
+            }
         } catch (Throwable $exception) {
             log_message('error', 'Failed to render provider parent appointments export: ' . $exception->getMessage());
             abort(400, $exception->getMessage());
@@ -314,13 +319,18 @@ class Dashboard_export extends EA_Controller
                 'appointment_pages' => $this->buildProviderPreparationAppointmentPages($appointments),
             ];
 
-            $this->pdfRenderer->stream_view(
-                'exports/provider_preparation_pdf',
-                $view_data,
-                $this->buildProviderPreparationPdfFilename($provider, $period->start, $period->end),
-                // Preparation data is also sensitive; render without a persistent HTML dump.
-                $this->buildProviderPreparationPdfStreamOptions(),
-            );
+            try {
+                $this->pdfRenderer->stream_view(
+                    'exports/provider_preparation_pdf',
+                    $view_data,
+                    $this->buildProviderPreparationPdfFilename($provider, $period->start, $period->end),
+                    // Preparation data is also sensitive; render without a persistent HTML dump.
+                    $this->buildProviderPreparationPdfStreamOptions(),
+                );
+            } catch (Throwable $exception) {
+                log_message('error', 'Failed to render provider preparation PDF: ' . $exception->getMessage());
+                abort(400, 'The PDF export could not be generated. Please try again later.');
+            }
         } catch (Throwable $exception) {
             log_message('error', 'Failed to render provider preparation export: ' . $exception->getMessage());
             abort(400, $exception->getMessage());
