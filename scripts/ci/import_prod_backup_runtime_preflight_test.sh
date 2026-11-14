@@ -11,6 +11,8 @@ fail() { printf 'import_prod_backup_runtime_preflight=failed: %s\n' "$*" >&2; ex
 
 function_body="$(sed -n '/^preflight_local_runtime() {/,/^}$/p' "$IMPORT_SCRIPT")"
 [[ -n "$function_body" ]] || fail 'could not extract preflight_local_runtime()'
+required_commands_body="$(sed -n '/^require_local_commands() {/,/^}$/p' "$IMPORT_SCRIPT")"
+[[ -n "$required_commands_body" ]] || fail 'could not extract require_local_commands()'
 
 docker_mock="$workspace/docker"
 cat > "$docker_mock" <<'MOCK'
@@ -63,9 +65,38 @@ run_case missing_mysql 'mysql:8.4.8@sha256:' 1
 run_case missing_nginx 'nginx:1.29.6-alpine@sha256:' 1
 run_case approved_images '' 0
 
+# The host-side verifier is a mandatory prerequisite. Keep this check before
+# any SSH/SCP call so a missing interpreter cannot download a production dump
+# and only then fail during verification.
+missing_python_runner="$workspace/missing-python.sh"
+missing_python_ssh_marker="$workspace/missing-python.ssh"
+missing_python_scp_marker="$workspace/missing-python.scp"
+for command_name in bash ssh scp tar gunzip curl; do
+    ln -s "$(command -v true)" "$workspace/$command_name"
+done
+{
+    printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail'
+    printf 'PATH=%q\n' "$workspace"
+    printf '%s\n' 'die() { exit 1; }'
+    printf '%s\n' 'require_cmd() { command -v "$1" >/dev/null 2>&1 || die "missing $1"; }'
+    printf '%s\n' "$required_commands_body"
+    printf 'ssh() { : > %q; }\n' "$missing_python_ssh_marker"
+    printf 'scp() { : > %q; }\n' "$missing_python_scp_marker"
+    printf '%s\n' 'require_local_commands' 'ssh production' 'scp production dump'
+} > "$missing_python_runner"
+chmod 0700 "$missing_python_runner"
+set +e
+bash "$missing_python_runner" >/dev/null 2>&1
+missing_python_status=$?
+set -e
+[[ "$missing_python_status" -ne 0 ]] || fail 'missing host python was not rejected before remote contact'
+[[ ! -e "$missing_python_ssh_marker" && ! -e "$missing_python_scp_marker" ]] || fail 'missing host python still reached SSH/SCP'
+
 preflight_line="$(rg -n '^    preflight_local_runtime$' "$IMPORT_SCRIPT" | cut -d: -f1)"
+required_line="$(rg -n '^    require_local_commands$' "$IMPORT_SCRIPT" | cut -d: -f1)"
 remote_line="$(rg -n '^    create_or_select_remote_backup$' "$IMPORT_SCRIPT" | cut -d: -f1)"
 up_line="$(rg -n 'compose up -d --pull never --no-build mysql php-fpm nginx' "$IMPORT_SCRIPT" | cut -d: -f1)"
+[[ "$required_line" -lt "$remote_line" ]] || fail 'host prerequisites run after remote contact'
 [[ "$preflight_line" -lt "$remote_line" ]] || fail 'preflight runs after remote contact'
 [[ -n "$up_line" ]] || fail 'local startup does not disable pulling and rebuilding'
 rg -q 'compose build --pull=false php-fpm' "$IMPORT_SCRIPT" || fail 'preflight build uses invalid --pull syntax'

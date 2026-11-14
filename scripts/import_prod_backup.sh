@@ -52,6 +52,16 @@ require_cmd() {
     command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"
 }
 
+require_local_commands() {
+    require_cmd ssh
+    require_cmd scp
+    require_cmd docker
+    require_cmd tar
+    require_cmd gunzip
+    require_cmd curl
+    require_cmd python3
+}
+
 compose() {
     (
         cd "${REPO_ROOT}"
@@ -297,12 +307,7 @@ main() {
     parse_args "$@"
 
     ensure_remote_backup_dir "${REMOTE_BACKUP_DIR}"
-    require_cmd ssh
-    require_cmd scp
-    require_cmd docker
-    require_cmd tar
-    require_cmd gunzip
-    require_cmd curl
+    require_local_commands
     ensure_identifier "${LOCAL_DB_NAME}"
 
     # Validate the canonical Compose port exposure before touching local paths
