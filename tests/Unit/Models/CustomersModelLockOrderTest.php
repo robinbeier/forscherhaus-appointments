@@ -5,6 +5,7 @@ namespace Tests\Unit\Models;
 use Customers_model;
 use PHPUnit\Framework\TestCase;
 use ReflectionClass;
+use Reschedule_authority;
 
 require_once APPPATH . 'models/Customers_model.php';
 require_once APPPATH . 'libraries/Reschedule_authority.php';
