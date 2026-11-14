@@ -46,6 +46,34 @@ class HelperSyncV1Test(unittest.TestCase):
         self.assertTrue((self.tx / ('a' * 32) / 'rolled-back.json').is_file())
 
     @unittest.skipUnless(os.geteuid() == 0, 'requires root-owned fixture')
+    def test_crash_before_pending_publication_leaves_recoverable_root(self):
+        interrupted_run = '6' * 32
+        child = os.fork()
+        if child == 0:
+            real_replace = os.replace
+
+            def crash_before_pending(source, destination):
+                if Path(destination) == mod.PENDING:
+                    os._exit(91)
+                return real_replace(source, destination)
+
+            with patch.object(mod.os, 'replace', side_effect=crash_before_pending):
+                mod.execute(mod.sha256(self.candidate), self.candidate.stat().st_size, interrupted_run)
+            os._exit(92)
+
+        _, status = os.waitpid(child, 0)
+        self.assertEqual(os.waitstatus_to_exitcode(status), 91)
+        self.assertEqual(self.target.read_text(), 'old\n')
+        self.assertFalse(mod.PENDING.exists())
+        self.assertEqual([path.name for path in self.tx.iterdir()], [interrupted_run])
+        self.assertTrue(any(path.name.startswith('.state.') for path in (self.tx / interrupted_run).iterdir()))
+
+        with patch.object(mod, 'internal_postflight', return_value=None):
+            result = mod.execute(mod.sha256(self.candidate), self.candidate.stat().st_size, '7' * 32)
+        self.assertEqual(result['status'], 'committed_pending_ack')
+        self.assertEqual(self.target.read_text(), 'new\n')
+
+    @unittest.skipUnless(os.geteuid() == 0, 'requires root-owned fixture')
     def test_execute_then_ack_is_run_bound_and_durable(self):
         run_id = 'b' * 32
         with patch.object(mod, 'internal_postflight', return_value=None) as health:

@@ -86,8 +86,9 @@ def fsync_dir(path: Path) -> None:
     try: os.fsync(fd)
     finally: os.close(fd)
 
-def write_json(path: Path, data: dict) -> None:
-    fd, tmp = tempfile.mkstemp(prefix='.state.', dir=path.parent)
+def write_json(path: Path, data: dict, temp_dir: Path | None = None) -> None:
+    staging = temp_dir or path.parent
+    fd, tmp = tempfile.mkstemp(prefix='.state.', dir=staging)
     try:
         with os.fdopen(fd, 'w', encoding='utf-8') as out:
             json.dump(data, out, sort_keys=True, separators=(',', ':')); out.write('\n'); out.flush(); os.fsync(out.fileno())
@@ -318,7 +319,7 @@ def execute(candidate_sha: str, candidate_size: int, run_id: str) -> dict:
         if ident(staged)['sha256'] != cand['sha256'] or ident(staged)['size'] != cand['size'] or ident(staged)['mode'] != cand['mode']:
             raise SyncError('staged_identity_mismatch')
         state = {'schema':'helper_sync.v1','run_id':run_id,'target':str(TARGET),'tx':str(tx),'backup':str(backup),'old':old,'new':cand}
-        write_json(PENDING, state)
+        write_json(PENDING, state, tx)
         try:
             os.replace(staged, TARGET); os.chown(TARGET, 0, 0); os.chmod(TARGET, old['mode']); fsync_dir(TARGET.parent)
             if ident(TARGET)['sha256'] != cand['sha256']: raise SyncError('installed_identity_mismatch')
