@@ -30,6 +30,7 @@ function createHarness({
         serviceDescription: [],
         postData: '',
     };
+    const consentState = {terms: termsAccepted, privacy: privacyAccepted};
     const values = {
         manage_mode: false,
         available_services: [{id: 11, duration: 30, price: 100, currency, location, description: ''}],
@@ -50,8 +51,8 @@ function createHarness({
         ['#address', {val: () => ''}],
         ['#city', {val: () => ''}],
         ['#zip-code', {val: () => ''}],
-        ['#accept-to-terms-and-conditions', {prop: () => termsAccepted}],
-        ['#accept-to-privacy-policy', {prop: () => privacyAccepted}],
+        ['#accept-to-terms-and-conditions', {prop: () => consentState.terms}],
+        ['#accept-to-privacy-policy', {prop: () => consentState.privacy}],
         ['input[name="post_data"]', {val: (value) => (rendered.postData = value)}],
     ]);
 
@@ -137,7 +138,7 @@ function createHarness({
     vm.createContext(context);
     vm.runInContext(bookingSource, context, {filename: 'booking.js'});
 
-    return {api: context.App.Pages.Booking, rendered};
+    return {api: context.App.Pages.Booking, rendered, consentState};
 }
 
 test('booking HTML sinks escape hostile labels and service metadata', () => {
@@ -193,7 +194,26 @@ test('booking submits both policy consent states explicitly', () => {
     harness.api.updateConfirmFrame();
 
     assert.deepEqual(JSON.parse(harness.rendered.postData).consent, {
-        terms_and_conditions: true,
-        privacy_policy: false,
+        terms_and_conditions: 1,
+        privacy_policy: 0,
+    });
+});
+
+test('booking refreshes consent values after the confirmation step changes', () => {
+    const harness = createHarness({
+        serviceName: 'Forschung',
+        providerName: 'Ada Lovelace',
+        currency: '€',
+        location: 'Raum A',
+    });
+
+    harness.api.updateConfirmFrame();
+    harness.consentState.terms = true;
+    harness.consentState.privacy = true;
+    harness.api.updateConfirmFrame();
+
+    assert.deepEqual(JSON.parse(harness.rendered.postData).consent, {
+        terms_and_conditions: 1,
+        privacy_policy: 1,
     });
 });

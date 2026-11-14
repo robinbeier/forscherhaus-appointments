@@ -1058,8 +1058,10 @@ App.Pages.Booking = (function () {
         data.manage_mode = Number(manageMode);
 
         data.consent = {
-            terms_and_conditions: Boolean($('#accept-to-terms-and-conditions').prop('checked')),
-            privacy_policy: Boolean($('#accept-to-privacy-policy').prop('checked')),
+            // Form encoding converts booleans to the string "true"/"false".
+            // Use the numeric representation accepted by the server-side DTO.
+            terms_and_conditions: Number($('#accept-to-terms-and-conditions').prop('checked')),
+            privacy_policy: Number($('#accept-to-privacy-policy').prop('checked')),
         };
 
         if (manageMode) {
