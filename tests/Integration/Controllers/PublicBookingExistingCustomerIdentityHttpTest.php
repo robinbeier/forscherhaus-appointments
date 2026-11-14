@@ -95,6 +95,7 @@ final class PublicBookingExistingCustomerIdentityHttpTest extends TestCase
                     'timezone' => 'Europe/Berlin',
                 ],
                 'manage_mode' => false,
+                'consent' => ['privacy_policy' => true],
             ],
         ]);
 
@@ -122,6 +123,7 @@ final class PublicBookingExistingCustomerIdentityHttpTest extends TestCase
                 ),
                 'customer' => $first,
                 'manage_mode' => false,
+                'consent' => ['privacy_policy' => true],
             ],
         ]);
         $secondResponse = $client->post('booking/register', [
@@ -133,6 +135,7 @@ final class PublicBookingExistingCustomerIdentityHttpTest extends TestCase
                 ),
                 'customer' => $second,
                 'manage_mode' => false,
+                'consent' => ['privacy_policy' => true],
             ],
         ]);
 
@@ -177,6 +180,7 @@ final class PublicBookingExistingCustomerIdentityHttpTest extends TestCase
                 ),
                 'customer' => $submittedCustomer,
                 'manage_mode' => false,
+                'consent' => ['privacy_policy' => true],
             ],
         ]);
 
@@ -209,6 +213,7 @@ final class PublicBookingExistingCustomerIdentityHttpTest extends TestCase
                 ],
                 'customer' => array_merge($customer, ['id' => $fixture->customerId]),
                 'manage_mode' => true,
+                'consent' => ['privacy_policy' => true],
             ],
         ]);
 

@@ -32,7 +32,10 @@ final class PublicBookingProviderRaceHttpTest extends TestCase
             $this->fixture = new DefenseCycleFixtures();
             $this->fixture->create();
             $db = get_instance()->db;
-            foreach (['display_email', 'require_email', 'display_privacy_policy', 'display_terms_and_conditions'] as $name) {
+            foreach (
+                ['display_email', 'require_email', 'display_privacy_policy', 'display_terms_and_conditions']
+                as $name
+            ) {
                 $this->settings[$name] = $db->get_where('settings', ['name' => $name])->row_array() ?: null;
             }
             $db->update('settings', ['value' => '1'], ['name' => 'display_email']);
@@ -73,10 +76,7 @@ final class PublicBookingProviderRaceHttpTest extends TestCase
         self::assertNotNull($secondServer);
         $db = get_instance()->db;
         $start = new DateTimeImmutable('+14 days 10:00:00');
-        $payloads = [
-            $this->payload($fixture, $start, 'first'),
-            $this->payload($fixture, $start, 'second'),
-        ];
+        $payloads = [$this->payload($fixture, $start, 'first'), $this->payload($fixture, $start, 'second')];
         $clients = [$firstServer->client(), $secondServer->client()];
         foreach ($clients as $client) {
             self::assertSame(200, $client->get('booking')->statusCode);
@@ -94,17 +94,18 @@ final class PublicBookingProviderRaceHttpTest extends TestCase
             self::assertTrue($db->trans_begin());
             $transactionOpen = true;
             self::assertNotFalse(
-                $db->query(
-                    'SELECT `id` FROM `' . $db->dbprefix('users') . '` WHERE `id` = ? FOR UPDATE',
-                    [$fixture->providerId],
-                ),
+                $db->query('SELECT `id` FROM `' . $db->dbprefix('users') . '` WHERE `id` = ? FOR UPDATE', [
+                    $fixture->providerId,
+                ]),
             );
 
             $multi = curl_multi_init();
             foreach ($payloads as $index => $payload) {
-                $handle = curl_init($index === 0
-                    ? $firstServer->baseUrl . '/index.php/booking/register'
-                    : $secondServer->baseUrl . '/index.php/booking/register');
+                $handle = curl_init(
+                    $index === 0
+                        ? $firstServer->baseUrl . '/index.php/booking/register'
+                        : $secondServer->baseUrl . '/index.php/booking/register',
+                );
                 self::assertInstanceOf(CurlHandle::class, $handle);
                 curl_setopt_array($handle, [
                     CURLOPT_POST => true,
@@ -128,7 +129,11 @@ final class PublicBookingProviderRaceHttpTest extends TestCase
             }
 
             $waiting = $this->waitForProviderWait($observer, $ownerId, $db->dbprefix('users'), 2, $multi);
-            self::assertSame(2, $waiting, 'Both public requests must reach the provider parent lock with the expected SQL.');
+            self::assertSame(
+                2,
+                $waiting,
+                'Both public requests must reach the provider parent lock with the expected SQL.',
+            );
             self::assertTrue($db->trans_commit());
             $transactionOpen = false;
             self::assertTrue($this->drain($multi), 'Both HTTP requests must finish after the owner releases the lock.');
@@ -152,18 +157,20 @@ final class PublicBookingProviderRaceHttpTest extends TestCase
                     self::assertArrayHasKey('appointment_id', $decoded);
                     $success = $decoded;
                 } else {
-                    self::assertSame(['success' => false, 'message' => lang('requested_hour_is_unavailable')], $decoded);
+                    self::assertSame(
+                        ['success' => false, 'message' => lang('requested_hour_is_unavailable')],
+                        $decoded,
+                    );
                 }
             }
             self::assertIsArray($success);
-            $winnerAppointment = $db->get_where('appointments', ['id' => (int) $success['appointment_id']])->row_array();
+            $winnerAppointment = $db
+                ->get_where('appointments', ['id' => (int) $success['appointment_id']])
+                ->row_array();
             self::assertSame($fixture->providerId, (int) ($winnerAppointment['id_users_provider'] ?? 0));
             self::assertSame($fixture->serviceId, (int) ($winnerAppointment['id_services'] ?? 0));
 
-            $winnerEmails = [
-                $payloads[0]['customer']['email'],
-                $payloads[1]['customer']['email'],
-            ];
+            $winnerEmails = [$payloads[0]['customer']['email'], $payloads[1]['customer']['email']];
             $customers = $db->where_in('email', $winnerEmails)->get('users')->result_array();
             self::assertCount(1, $customers, 'The losing request must not leave a customer row.');
             self::assertSame($winnerAppointment['id_users_customer'], $customers[0]['id']);
@@ -171,7 +178,13 @@ final class PublicBookingProviderRaceHttpTest extends TestCase
             self::assertCount(1, $appointments, 'The losing request must not leave an appointment row.');
             self::assertSame((int) $winnerAppointment['id'], (int) $appointments[0]['id']);
             $winningEmail = (string) $customers[0]['email'];
-            self::assertSame(2, $db->where('email', $winningEmail)->where_in('type', ['privacy-policy', 'terms-and-conditions'])->count_all_results('consents'));
+            self::assertSame(
+                2,
+                $db
+                    ->where('email', $winningEmail)
+                    ->where_in('type', ['privacy-policy', 'terms-and-conditions'])
+                    ->count_all_results('consents'),
+            );
             $losingEmail = $winningEmail === $winnerEmails[0] ? $winnerEmails[1] : $winnerEmails[0];
             self::assertSame(0, $db->where('email', $losingEmail)->count_all_results('consents'));
         } finally {
@@ -203,7 +216,9 @@ final class PublicBookingProviderRaceHttpTest extends TestCase
         self::assertArrayHasKey('appointment_id', $decoded);
         self::assertSame(
             1,
-            get_instance()->db->where('notes', 'ROB-717 ' . $fixture->run . ' positive')->count_all_results('appointments'),
+            get_instance()
+                ->db->where('notes', 'ROB-717 ' . $fixture->run . ' positive')
+                ->count_all_results('appointments'),
         );
     }
 
@@ -235,36 +250,56 @@ final class PublicBookingProviderRaceHttpTest extends TestCase
                 'timezone' => 'UTC',
             ],
             'manage_mode' => false,
+            'consent' => ['terms_and_conditions' => true, 'privacy_policy' => true],
         ];
     }
 
     private function observerConnection(): object
     {
-        $observer = get_instance()->load->database([
-            'hostname' => 'mysql', 'username' => 'root', 'password' => 'secret', 'database' => 'easyappointments',
-            'dbdriver' => 'mysqli', 'dbprefix' => get_instance()->db->dbprefix, 'pconnect' => false,
-            'db_debug' => false, 'char_set' => 'utf8mb4', 'dbcollat' => 'utf8mb4_general_ci',
-        ], true);
+        $observer = get_instance()->load->database(
+            [
+                'hostname' => 'mysql',
+                'username' => 'root',
+                'password' => 'secret',
+                'database' => 'easyappointments',
+                'dbdriver' => 'mysqli',
+                'dbprefix' => get_instance()->db->dbprefix,
+                'pconnect' => false,
+                'db_debug' => false,
+                'char_set' => 'utf8mb4',
+                'dbcollat' => 'utf8mb4_general_ci',
+            ],
+            true,
+        );
         self::assertNotSame(mysqli_thread_id(get_instance()->db->conn_id), mysqli_thread_id($observer->conn_id));
         self::assertTrue($observer->query('SET SESSION TRANSACTION READ ONLY'));
 
         return $observer;
     }
 
-    private function waitForProviderWait(object $observer, int $ownerId, string $table, int $expected, CurlMultiHandle $multi): int
-    {
+    private function waitForProviderWait(
+        object $observer,
+        int $ownerId,
+        string $table,
+        int $expected,
+        CurlMultiHandle $multi,
+    ): int {
         $deadline = microtime(true) + 8;
         do {
             curl_multi_exec($multi, $running);
             $result = $observer->query(
                 'SELECT COALESCE(s.SQL_TEXT, r.PROCESSLIST_INFO) AS statement_text ' .
-                'FROM performance_schema.data_lock_waits w ' .
-                'JOIN performance_schema.data_locks l ON l.ENGINE_LOCK_ID = w.REQUESTING_ENGINE_LOCK_ID ' .
-                'JOIN performance_schema.threads b ON b.THREAD_ID = w.BLOCKING_THREAD_ID ' .
-                'JOIN performance_schema.threads r ON r.THREAD_ID = w.REQUESTING_THREAD_ID ' .
-                'LEFT JOIN performance_schema.events_statements_current s ON s.THREAD_ID = r.THREAD_ID ' .
-                'WHERE b.PROCESSLIST_ID = ' . $ownerId . ' AND l.OBJECT_SCHEMA = ' . $observer->escape(Config::DB_NAME) .
-                ' AND l.OBJECT_NAME = ' . $observer->escape($table),
+                    'FROM performance_schema.data_lock_waits w ' .
+                    'JOIN performance_schema.data_locks l ON l.ENGINE_LOCK_ID = w.REQUESTING_ENGINE_LOCK_ID ' .
+                    'JOIN performance_schema.threads b ON b.THREAD_ID = w.BLOCKING_THREAD_ID ' .
+                    'JOIN performance_schema.threads r ON r.THREAD_ID = w.REQUESTING_THREAD_ID ' .
+                    'LEFT JOIN performance_schema.events_statements_current s ON s.THREAD_ID = r.THREAD_ID ' .
+                    'WHERE b.PROCESSLIST_ID = ' .
+                    $ownerId .
+                    ' AND l.OBJECT_SCHEMA = ' .
+                    $observer->escape(Config::DB_NAME) .
+                    ' AND l.OBJECT_NAME = ' .
+                    $observer->escape($table),
             );
             self::assertNotFalse($result, 'Independent lock instrumentation must be available.');
             $expectedSql = strtoupper('SELECT `id` FROM `' . $table . '` WHERE `id` IN (');
@@ -344,7 +379,10 @@ final class PublicBookingProviderRaceHttpTest extends TestCase
                 $appointmentIds,
                 array_map(
                     'intval',
-                    array_column($db->where_in('id_users_customer', $customerIds)->get('appointments')->result_array(), 'id'),
+                    array_column(
+                        $db->where_in('id_users_customer', $customerIds)->get('appointments')->result_array(),
+                        'id',
+                    ),
                 ),
             );
         }

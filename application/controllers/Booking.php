@@ -413,6 +413,18 @@ class Booking extends EA_Controller
                 get_instance()->session->unset_userdata('captcha_phrase');
             }
 
+            if (!$this->hasRequiredPublicBookingConsent($request_dto->consent)) {
+                json_response(
+                    [
+                        'success' => false,
+                        'message' => lang('unexpected_issues_message'),
+                    ],
+                    409,
+                );
+
+                return;
+            }
+
             $start_datetime = $appointment['start_datetime'] ?? null;
             $parsed_start = is_string($start_datetime)
                 ? DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $start_datetime)
@@ -776,6 +788,29 @@ class Booking extends EA_Controller
                 $this->rescheduleAuthority()->releaseCreationIdentityLock($creation_identity_lock);
             }
         }
+    }
+
+    /** @param array<string, mixed> $consent */
+    private function hasRequiredPublicBookingConsent(array $consent): bool
+    {
+        foreach (
+            [
+                'terms_and_conditions' => 'display_terms_and_conditions',
+                'privacy_policy' => 'display_privacy_policy',
+            ]
+            as $consent_key => $setting_name
+        ) {
+            if (!setting($setting_name)) {
+                continue;
+            }
+
+            $value = $consent[$consent_key] ?? null;
+            if ($value !== true && $value !== 1 && $value !== '1') {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private function createCustomerToken(int $customer_id): string|bool

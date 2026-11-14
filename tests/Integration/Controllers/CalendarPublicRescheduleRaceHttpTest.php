@@ -467,6 +467,7 @@ final class CalendarPublicRescheduleRaceHttpTest extends TestCase
                 'notes' => $customer['notes'] ?? '',
             ],
             'manage_mode' => true,
+            'consent' => ['terms_and_conditions' => true, 'privacy_policy' => true],
         ];
     }
 

@@ -1057,6 +1057,11 @@ App.Pages.Booking = (function () {
 
         data.manage_mode = Number(manageMode);
 
+        data.consent = {
+            terms_and_conditions: Boolean($('#accept-to-terms-and-conditions').prop('checked')),
+            privacy_policy: Boolean($('#accept-to-privacy-policy').prop('checked')),
+        };
+
         if (manageMode) {
             data.appointment.id = vars('appointment_data').id;
             data.customer.id = vars('customer_data').id;
