@@ -192,7 +192,10 @@ assert_php_route '/index.php/booking/register/' '/index.php/booking/register/' '
 for booking_alias in \
     '/booking/register/extra' '/index.php/booking/register/extra' \
     '/booking/Register' '/index.php/booking/Register' \
-    '/booking/Register/extra' '/index.php/booking/Register/extra'; do
+    '/booking/Register/extra' '/index.php/booking/Register/extra' \
+    '/book.ing/register' '/b.o.o.k.i.n.g/register' '/booking./register' \
+    '/index.php/book.ing/register' '/index.php/b.o.o.k.i.n.g/register' \
+    '/book.ing/register/extra' '/index.php/book.ing/register/extra'; do
     alias_small_status="$(curl --noproxy '*' --silent --show-error --output "$body_file" \
         --write-out '%{http_code}' --request POST \
         --header 'Content-Type: application/x-www-form-urlencoded' \
@@ -253,7 +256,10 @@ for booking_path in \
     '/booking/register/' '/index.php/booking/register' '/index.php/booking/register/' \
     '/booking/register/extra' '/index.php/booking/register/extra' \
     '/booking/Register' '/index.php/booking/Register' \
-    '/booking/Register/extra' '/index.php/booking/Register/extra'; do
+    '/booking/Register/extra' '/index.php/booking/Register/extra' \
+    '/book.ing/register' '/b.o.o.k.i.n.g/register' '/booking./register' \
+    '/index.php/book.ing/register' '/index.php/b.o.o.k.i.n.g/register' \
+    '/book.ing/register/extra' '/index.php/book.ing/register/extra'; do
     alias_status="$(curl --noproxy '*' --silent --show-error --output "$body_file" \
         --write-out '%{http_code}' --request POST \
         --header 'Content-Type: application/x-www-form-urlencoded' \
