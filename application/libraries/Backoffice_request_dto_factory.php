@@ -61,6 +61,9 @@ final class BackofficeSettingsRequestDto
  */
 class Backoffice_request_dto_factory
 {
+    /** Keep authenticated backoffice searches bounded at the existing default size. */
+    private const MAX_SEARCH_LIMIT = 1000;
+
     protected Request_normalizer $request_normalizer;
 
     public function __construct(?Request_normalizer $request_normalizer = null)
@@ -126,7 +129,7 @@ class Backoffice_request_dto_factory
         return new BackofficeSearchRequestDto(
             $normalized_keyword,
             $normalized_order_by ?? $default_order_by,
-            max(0, $normalized_limit),
+            min(self::MAX_SEARCH_LIMIT, max(0, $normalized_limit)),
             max(0, $normalized_offset),
         );
     }

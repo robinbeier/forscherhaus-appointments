@@ -30,6 +30,20 @@ class BackofficeRequestDtoFactoryTest extends TestCase
         $this->assertSame(0, $dto->offset);
     }
 
+    public function testCreateSearchRequestDtoClampsOversizedLimitsToTheBound(): void
+    {
+        $at_bound = $this->factory->createSearchRequestDto('', null, '1000', '0');
+        $over_bound = $this->factory->createSearchRequestDto('', null, '1001', '0');
+        $maximum_int = $this->factory->createSearchRequestDto('', null, PHP_INT_MAX, '0');
+        $custom_default = $this->factory->createSearchRequestDto('', null, null, '0', 'name ASC', 5000);
+
+        $this->assertSame(1000, $at_bound->limit);
+        $this->assertSame(1000, $over_bound->limit);
+        $this->assertSame(1000, $maximum_int->limit);
+        $this->assertSame(1000, $custom_default->limit);
+        $this->assertSame('name ASC', $custom_default->orderBy);
+    }
+
     public function testCreateEntityPayloadRequestDtoSupportsAssocArrayAndJsonPayloads(): void
     {
         $from_array = $this->factory->createEntityPayloadRequestDto(['name' => 'Ada']);

@@ -78,7 +78,7 @@ final class UpdateControllerTest extends TestCase
         self::assertSame(['success' => true], $result['view']);
     }
 
-    public function testNonPostMethodsAreRejectedAndMigrationFailureEscapesInView(): void
+    public function testNonPostMethodsAreRejectedAndMigrationFailureDoesNotEscapeInView(): void
     {
         foreach (['PUT', 'DELETE'] as $method) {
             $result = $this->probe('authorized', $method);
@@ -92,8 +92,9 @@ final class UpdateControllerTest extends TestCase
         $failure = $this->probe('migration_failure', 'POST');
         self::assertTrue($failure['instance']);
         self::assertSame(1, substr_count(implode('|', $failure['events']), 'migrate'));
-        self::assertFalse($failure['view']['success']);
-        self::assertStringContainsString('&lt;b&gt;synthetic failure &amp; note&lt;/b&gt;', $failure['rendered']);
+        self::assertSame(['success' => false], $failure['view']);
+        self::assertStringNotContainsString('synthetic failure', $failure['rendered']);
+        self::assertStringNotContainsString('&lt;b&gt;', $failure['rendered']);
         self::assertStringNotContainsString('<b>synthetic failure & note</b>', $failure['rendered']);
     }
 

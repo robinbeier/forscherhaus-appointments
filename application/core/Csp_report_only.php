@@ -805,7 +805,7 @@ final class Csp_report_only
         if (!is_resource($handle)) {
             return null;
         }
-        if (!flock($handle, LOCK_EX)) {
+        if (!flock($handle, LOCK_EX | LOCK_NB)) {
             fclose($handle);
             return null;
         }
