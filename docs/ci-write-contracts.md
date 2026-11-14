@@ -579,8 +579,9 @@ Schreibtest.
 
 ## Settings API v1
 
-Die generische Settings API erlaubt authentifizierten Admin-Basic- und
-Bearer-Clients das Lesen gespeicherter Werte sowie `PUT /api/v1/settings/:name`.
+Die Settings API erlaubt authentifizierten Admin-Basic- und Bearer-Clients das
+Lesen und Schreiben ausschließlich der repository-definierten Allowlist
+nicht-geheimer Einstellungsnamen sowie `PUT /api/v1/settings/:name`.
 Bei Basic wird die aktuell gespeicherte Admin-Rolle für jeden Request erneut
 ermittelt: Nach einem Rollenwechsel weg von Admin müssen kanonische und direkt
 erreichbare Lese- und PUT-Pfade mit 401 enden, ohne den Einstellungswert zu
@@ -589,8 +590,11 @@ eigener API-Zugang und bleibt von diesem Rollenwechsel unberührt. Die
 generische API prüft innerhalb der Admin-Rolle derzeit nicht zusätzlich das
 feinere `system_settings`-Recht; eine Änderung dieses bestehenden Vertrags
 braucht eine eigene Produktentscheidung.
-Der API-Token bleibt nach dem bestehenden privilegierten Vertrag sichtbar;
-dieser Methodenfix führt keine neue Namens- oder Wert-Whitelist ein.
+API-Tokens, Passwörter, Schlüssel und andere Zugangsdaten sind in Collection-,
+Such-, Feld- und Detailantworten gesperrt. PUT auf einen solchen Namen wird
+ohne Mutation und ohne Echo abgewiesen. Eine Rotation solcher Werte braucht
+einen separaten Write-only-Endpunkt, der weder den alten noch den neuen Wert
+zurückgibt.
 Ein direkt erreichbarer `Settings_api_v1/update/:name`-Alias darf nur mit PUT
 schreiben. GET und POST werden vor der Auswertung von `value` mit 405 und
 `Allow: PUT` abgewiesen. Für Settings existiert kein DELETE-Endpunkt.

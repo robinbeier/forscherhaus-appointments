@@ -96,6 +96,131 @@ final class StaffSettingsApiHttpTest extends TestCase
         }
     }
 
+    public function testSettingsApiNeverReadsOrEchoesReusableSecretSettings(): void
+    {
+        $token = $this->credentials['token'];
+        $beforeTokenRow = get_instance()
+            ->db->get_where('settings', ['name' => 'api_token'])
+            ->row_array();
+        self::assertSame($token, $beforeTokenRow['value'] ?? null);
+        $admin = $this->basicClient($this->credentials['admin_username'], $this->credentials['password']);
+        $bearer = $this->bearerClient($token);
+
+        foreach ([$admin, $bearer] as $client) {
+            foreach (['api_token', 'ldap_password'] as $secretName) {
+                foreach (['api/v1/settings', 'api/v1/settings_api_v1/index'] as $indexPath) {
+                    foreach (['', 'name,value'] as $fields) {
+                        $query = ['q' => $secretName];
+                        if ($fields !== '') {
+                            $query['fields'] = $fields;
+                        }
+                        $response = $client->get($indexPath, $query);
+                        self::assertSame(200, $response->statusCode, $indexPath);
+                        self::assertSame([], $this->success($response));
+                        self::assertStringNotContainsString($token, $response->body);
+                    }
+                }
+            }
+
+            foreach (['api_token', 'ldap_password'] as $secretName) {
+                foreach (['api/v1/settings/', 'api/v1/settings_api_v1/show/'] as $showPrefix) {
+                    $showPath = $showPrefix . $secretName;
+                    $response = $client->get($showPath);
+                    self::assertSame(404, $response->statusCode, $showPath);
+                    self::assertStringNotContainsString($token, $response->body);
+                }
+            }
+
+            foreach (['api_token', 'ldap_password'] as $secretName) {
+                $update = $client->requestJsonApp('PUT', 'api/v1/settings/' . $secretName, [
+                    'value' => 'must-not-echo',
+                ]);
+                self::assertSame(404, $update->statusCode, $secretName);
+                self::assertStringNotContainsString($token, $update->body);
+                self::assertSame(
+                    $beforeTokenRow,
+                    get_instance()
+                        ->db->get_where('settings', ['name' => 'api_token'])
+                        ->row_array(),
+                );
+            }
+        }
+    }
+
+    public function testSettingsApiPaginatesAfterRemovingSecretRows(): void
+    {
+        $response = $this->basicClient($this->credentials['admin_username'], $this->credentials['password'])->get(
+            'api/v1/settings',
+            [
+                'length' => 1,
+                'offset' => 0,
+                'order_by' => 'name ASC',
+            ],
+        );
+
+        self::assertSame(200, $response->statusCode);
+        $rows = $this->success($response);
+        self::assertCount(1, $rows);
+        self::assertNotSame('api_token', $rows[0]['name'] ?? null);
+        self::assertNotSame('ldap_password', $rows[0]['name'] ?? null);
+    }
+
+    public function testSettingsApiLengthZeroPreservesUnboundedPublicCollection(): void
+    {
+        $ownedSetting = $this->fixture->ownedSetting('length-zero', '0');
+
+        foreach (
+            [
+                $this->basicClient($this->credentials['admin_username'], $this->credentials['password']),
+                $this->bearerClient($this->credentials['token']),
+            ]
+            as $client
+        ) {
+            $allRows = $this->success($client->get('api/v1/settings', ['length' => 0]));
+            self::assertNotEmpty($allRows);
+            self::assertContains(['name' => $ownedSetting['name'], 'value' => '0'], $allRows);
+            $this->assertNoSyntheticSecrets([], [], $allRows);
+
+            $searchRows = $this->success(
+                $client->get('api/v1/settings', ['q' => $ownedSetting['name'], 'length' => 0]),
+            );
+            self::assertSame([['name' => $ownedSetting['name'], 'value' => '0']], $searchRows);
+            $this->assertNoSyntheticSecrets([], [], $searchRows);
+        }
+    }
+
+    public function testSettingsApiKeepsGeneralAndCustomBookingSettingsWritable(): void
+    {
+        $db = get_instance()->db;
+        $admin = $this->basicClient($this->credentials['admin_username'], $this->credentials['password']);
+        $namesAndValues = [
+            'company_link' => 'https://example.test/security-sprint',
+            'label_custom_field_1' => 'Security sprint field',
+        ];
+        $before = [];
+
+        foreach ($namesAndValues as $name => $value) {
+            $before[$name] = $db->get_where('settings', ['name' => $name])->row_array();
+            self::assertNotEmpty($before[$name], $name . ' fixture setting must exist.');
+            $response = $admin->get('api/v1/settings/' . $name);
+            self::assertSame(200, $response->statusCode, $name);
+            self::assertSame(['name' => $name, 'value' => $before[$name]['value']], $this->success($response));
+        }
+
+        try {
+            foreach ($namesAndValues as $name => $value) {
+                $response = $admin->requestJsonApp('PUT', 'api/v1/settings/' . $name, ['value' => $value]);
+                self::assertSame(200, $response->statusCode, $name);
+                self::assertSame(['name' => $name, 'value' => $value], $this->success($response));
+                self::assertSame($value, $db->get_where('settings', ['name' => $name])->row_array()['value']);
+            }
+        } finally {
+            foreach ($before as $name => $row) {
+                self::assertTrue($db->update('settings', ['value' => $row['value']], ['name' => $name]));
+            }
+        }
+    }
+
     public function testSecretaryProviderRelationUsesTheProviderApiProjection(): void
     {
         $fixture = $this->fixture;
