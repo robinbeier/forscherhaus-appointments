@@ -57,7 +57,15 @@ final class CustomerPostGuardTest extends TestCase
         $expected = array_merge(
             $expected,
             $action === 'destroy'
-                ? ['find:41', 'delete:41', 'trans_status', 'trans_commit', 'json_response']
+                ? [
+                    'users:value:17:id_roles',
+                    'roles:value:3:slug',
+                    'find:41',
+                    'delete:41',
+                    'trans_status',
+                    'trans_commit',
+                    'json_response',
+                ]
                 : $this->saveEvents($action),
         );
         self::assertSame($expected, $result['events']);
