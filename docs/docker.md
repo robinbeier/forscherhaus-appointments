@@ -341,6 +341,20 @@ rm -rf /private/tmp/fh-php85-smoke-mysql
 
 The headless Chrome sidecar that renders PDFs is available only on host loopback via the `pdf-renderer` service (`http://127.0.0.1:3003`), not to other machines on the network. The renderer accepts trusted HTML and must not be exposed publicly; the isolated deployment replay publishes no renderer port. When you run the PHP stack outside of Docker, make sure the application can reach the sidecar by setting the runtime environment variable `PDF_RENDERER_URL=http://127.0.0.1:3003`; inside the Compose network the default `http://pdf-renderer:3000` endpoint is used automatically. If the request path runs through Apache `mod_php`, set `PDF_RENDERER_URL` in Apache as well, because PHP-FPM-only env wiring will not reach those requests. Dashboard PDF exports do not write persistent HTML debug dumps because their rendered content can include appointment and parent details. The provider PDFs follow the same rule.
 
+PDF requests require a shared non-empty `PDF_TOKEN`. The Compose file passes the
+same `PDF_TOKEN` environment value to both `php-fpm` and `pdf-renderer`; set it
+through the local environment or an untracked Compose environment file and keep
+it out of the repository. In production, inject the same root-controlled secret
+into the PHP and renderer runtimes before enabling or restarting the hardened
+renderer. A normal application deployment does not manage or restart the
+independently operated renderer, so changing this secret or rebuilding the
+renderer is a separate coordinated operation. The renderer fails closed when
+the token is missing. `/healthz` is only a liveness check; it cannot prove
+that PHP and the renderer share the token or that Chromium produces a PDF.
+After a coordinated renderer change, run the authenticated PDF checks in the
+[dashboard release gate](release-gate-dashboard.md) before declaring the
+service ready. A failed PDF check requires rollback of that renderer change.
+
 
 Bundled Nginx denies the two historical provider HTML dump URLs even if an old
 release left files in `storage/logs`. Production web-server access rules must

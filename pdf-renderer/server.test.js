@@ -37,13 +37,14 @@ async function waitForRenderer(child, rendererPort) {
     throw new Error('renderer did not become ready');
 }
 
-async function startRenderer() {
+async function startRenderer({token = 'synthetic-renderer-token'} = {}) {
     const port = await reservePort();
     const child = spawn(process.execPath, ['server.js'], {
         cwd: new URL('.', import.meta.url),
         env: {
             ...process.env,
             PORT: String(port),
+            PDF_TOKEN: token,
         },
         stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -62,6 +63,11 @@ async function startRenderer() {
         port,
     };
 }
+
+const pdfHeaders = {
+    'content-type': 'application/json',
+    'x-pdf-token': 'synthetic-renderer-token',
+};
 
 async function stopRenderer(child) {
     if (child.exitCode !== null || child.signalCode !== null) {
@@ -113,7 +119,7 @@ test('renders HTML when one asset request never becomes idle', {timeout: 45000},
         const startedAt = Date.now();
         const response = await fetch(`http://127.0.0.1:${renderer.port}/pdf`, {
             method: 'POST',
-            headers: {'content-type': 'application/json'},
+            headers: pdfHeaders,
             body: JSON.stringify({
                 html: `<html><body><h1>Ready</h1><img src="http://127.0.0.1:${stalledAssetPort}/never-finishes"></body></html>`,
             }),
@@ -128,6 +134,64 @@ test('renders HTML when one asset request never becomes idle', {timeout: 45000},
     } finally {
         await stopRenderer(renderer.child);
         await new Promise((resolve) => stalledAssetServer.close(resolve));
+    }
+});
+
+test('rejects PDF requests without a configured token or with an invalid token', {timeout: 30000}, async () => {
+    const renderer = await startRenderer({token: ''});
+
+    try {
+        const response = await fetch(`http://127.0.0.1:${renderer.port}/pdf`, {
+            method: 'POST',
+            headers: {'content-type': 'application/json'},
+            body: JSON.stringify({html: '<html><body><h1>Denied</h1></body></html>'}),
+        });
+
+        assert.equal(response.status, 503);
+        assert.deepEqual(await response.json(), {error: 'renderer_token_not_configured'});
+    } finally {
+        await stopRenderer(renderer.child);
+    }
+
+    const configured = await startRenderer();
+
+    try {
+        const response = await fetch(`http://127.0.0.1:${configured.port}/pdf`, {
+            method: 'POST',
+            headers: {'content-type': 'application/json', 'x-pdf-token': 'wrong-token'},
+            body: JSON.stringify({html: '<html><body><h1>Denied</h1></body></html>'}),
+        });
+
+        assert.equal(response.status, 401);
+        assert.deepEqual(await response.json(), {error: 'unauthorized'});
+
+        const malformed = await fetch(`http://127.0.0.1:${configured.port}/pdf`, {
+            method: 'POST',
+            headers: {'content-type': 'application/json', 'x-pdf-token': 'wrong-token'},
+            body: '{',
+        });
+
+        assert.equal(malformed.status, 401);
+        assert.deepEqual(await malformed.json(), {error: 'unauthorized'});
+    } finally {
+        await stopRenderer(configured.child);
+    }
+});
+
+test('rejects URL-only PDF requests', {timeout: 30000}, async () => {
+    const renderer = await startRenderer();
+
+    try {
+        const response = await fetch(`http://127.0.0.1:${renderer.port}/pdf`, {
+            method: 'POST',
+            headers: pdfHeaders,
+            body: JSON.stringify({url: 'http://127.0.0.1:9/internal'}),
+        });
+
+        assert.equal(response.status, 400);
+        assert.deepEqual(await response.json(), {error: 'Provide html'});
+    } finally {
+        await stopRenderer(renderer.child);
     }
 });
 
@@ -175,7 +239,7 @@ test('renders a 60-page combined report with one shared logo payload', {timeout:
         const startedAt = Date.now();
         const response = await fetch(`http://127.0.0.1:${renderer.port}/pdf`, {
             method: 'POST',
-            headers: {'content-type': 'application/json'},
+            headers: pdfHeaders,
             body: payload,
             signal: AbortSignal.timeout(40000),
         });
@@ -209,7 +273,7 @@ test('shares one cold browser launch across four concurrent renders', {timeout: 
         const requests = payloads.map((body) =>
             fetch(`http://127.0.0.1:${renderer.port}/pdf`, {
                 method: 'POST',
-                headers: {'content-type': 'application/json'},
+                headers: pdfHeaders,
                 body,
                 signal: AbortSignal.timeout(50000),
             }),
@@ -235,7 +299,7 @@ test('shares one cold browser launch across four concurrent renders', {timeout: 
         await new Promise((resolve) => setTimeout(resolve, 250));
         const retry = await fetch(`http://127.0.0.1:${renderer.port}/pdf`, {
             method: 'POST',
-            headers: {'content-type': 'application/json'},
+            headers: pdfHeaders,
             body: JSON.stringify({html: '<html><body><h1>Retry after browser disconnect</h1></body></html>'}),
             signal: AbortSignal.timeout(30000),
         });

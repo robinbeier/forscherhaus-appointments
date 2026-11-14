@@ -118,6 +118,20 @@ class PdfRendererTest extends TestCase
         $this->assertSame(5.0, $options['connect_timeout']);
     }
 
+    public function testBuildRendererRequestOptionsCarriesConfiguredRendererToken(): void
+    {
+        $renderer = $this->createRenderer(false, false);
+        $renderer->setRendererToken('synthetic-renderer-token');
+
+        $options = $renderer->callBuildRendererRequestOptions(
+            'http://127.0.0.1:3003',
+            ['html' => '<html></html>'],
+            true,
+        );
+
+        $this->assertSame('synthetic-renderer-token', $options['headers']['X-Pdf-Token']);
+    }
+
     public function testIsContainerRuntimeCachesDetectionResult(): void
     {
         $renderer = new class extends Pdf_renderer {
@@ -181,6 +195,7 @@ class PdfRendererTest extends TestCase
             {
                 $this->isLocalEnvironment = $isLocalEnvironment;
                 $this->isContainerRuntime = $isContainerRuntime;
+                $this->token = null;
             }
 
             protected function isLocalEnvironment(): bool
@@ -200,11 +215,15 @@ class PdfRendererTest extends TestCase
 
             public function callBuildRendererRequestOptions(string $endpoint, array $payload, bool $isPrimary): array
             {
-                $this->token = null;
                 $this->defaultTimeout = 30.0;
                 $this->defaultConnectTimeout = 5.0;
 
                 return $this->buildRendererRequestOptions($endpoint, $payload, $isPrimary);
+            }
+
+            public function setRendererToken(string $token): void
+            {
+                $this->token = $token;
             }
         };
     }

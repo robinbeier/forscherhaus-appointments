@@ -3,7 +3,6 @@ import fs from 'node:fs';
 import puppeteer from 'puppeteer';
 
 const app = express();
-app.use(express.json({limit: '20mb'}));
 
 let browser;
 let browserLaunch;
@@ -59,22 +58,28 @@ app.get('/healthz', (_req, res) => {
     res.json({ok: true});
 });
 
-app.post('/pdf', async (req, res) => {
-    const {html, url, waitFor = 'networkidle', format = 'A4', margin, orientation, landscape} = req.body || {};
+function requirePdfToken(req, res, next) {
+    const expectedToken = typeof process.env.PDF_TOKEN === 'string' ? process.env.PDF_TOKEN.trim() : '';
 
-    const expectedToken = process.env.PDF_TOKEN;
-
-    if (expectedToken) {
-        const provided = req.get('x-pdf-token') || req.get('authorization') || '';
-        const normalised = provided.startsWith('Bearer ') ? provided.slice(7) : provided;
-
-        if (normalised !== expectedToken) {
-            return res.status(401).json({error: 'unauthorized'});
-        }
+    if (!expectedToken) {
+        return res.status(503).json({error: 'renderer_token_not_configured'});
     }
 
-    if (!html && !url) {
-        return res.status(400).json({error: 'Provide html or url'});
+    const provided = req.get('x-pdf-token') || req.get('authorization') || '';
+    const normalised = provided.startsWith('Bearer ') ? provided.slice(7) : provided;
+
+    if (normalised !== expectedToken) {
+        return res.status(401).json({error: 'unauthorized'});
+    }
+
+    return next();
+}
+
+app.post('/pdf', requirePdfToken, express.json({limit: '20mb'}), async (req, res) => {
+    const {html, waitFor = 'networkidle', format = 'A4', margin, orientation, landscape} = req.body || {};
+
+    if (!html || typeof html !== 'string') {
+        return res.status(400).json({error: 'Provide html'});
     }
 
     let page;
@@ -86,11 +91,7 @@ app.post('/pdf', async (req, res) => {
 
         const landscapeFlag = typeof landscape === 'boolean' ? landscape : orientation === 'landscape';
 
-        if (url) {
-            await page.goto(url, {waitUntil: 'networkidle0', timeout: 30000});
-        } else {
-            await page.setContent(html, {waitUntil: 'networkidle2', timeout: 30000});
-        }
+        await page.setContent(html, {waitUntil: 'networkidle2', timeout: 30000});
 
         if (waitFor === 'chartsReady') {
             try {
