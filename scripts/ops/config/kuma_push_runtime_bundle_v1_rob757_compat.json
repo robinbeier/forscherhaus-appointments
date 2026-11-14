@@ -10,7 +10,7 @@
             "source": "scripts/ops/kuma_push_app_logs.sh",
             "install": "scripts/ops/kuma_push_app_logs.sh",
             "role": "entrypoint",
-            "sha256": "4a14f97a594e5930a816eaa4366d71764147f3decff816f4727f1de090361834"
+            "sha256": "97606f6d6e1db4b680fe2f7d8f30eb168dea91cff230b5755f612974739cee3e"
         },
         {
             "source": "scripts/ops/kuma_push_backup_creation.sh",

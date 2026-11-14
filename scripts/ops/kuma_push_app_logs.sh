@@ -65,14 +65,14 @@ if command -v flock >/dev/null 2>&1; then
   kuma_push_validate_private_file "$LOCK_FILE" || kuma_push_die "Unsafe private lock file"
   exec 9>>"$LOCK_FILE"
   if ! flock -n 9; then
-    msg="OK app log monitor already running: $(basename "$LOCK_FILE")"
+    msg="OK app_log_monitor=already_running class=application_log_lock"
     kuma_push_log "$msg"
     exit 0
   fi
 fi
 
 if [[ ! -f "$LOG_FILE" ]]; then
-  msg="OK app log not present yet: $(basename "$LOG_FILE")"
+  msg="OK app_log_source=missing class=application_log_source"
   kuma_push_send "$KUMA_PUSH_URL_APP_LOGS" "up" "$msg" "1"
   kuma_push_log "$msg"
   exit 0
@@ -164,7 +164,7 @@ else
 fi
 
 if [[ ! -f "$STATE_FILE" ]]; then
-  msg="OK primed app log monitor at $(basename "$LOG_FILE") size=${current_size}"
+  msg="OK app_log_source=priming class=application_log_source"
   kuma_push_send "$KUMA_PUSH_URL_APP_LOGS" "up" "$msg" "1"
   printf '%s|%s|%s\n%s\n' "$LOG_FILE" "$current_inode" "$current_size" "$prefix_sha256" > "$STATE_FILE"
   kuma_push_validate_private_file "$STATE_FILE" || kuma_push_die "Unsafe private state file"
