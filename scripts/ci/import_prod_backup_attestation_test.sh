@@ -107,9 +107,9 @@ if python3 "$VERIFY" --handoff "$workspace/last_backup_set.json" --manifest "$wo
     fail 'compressed size mismatch accepted'
 fi
 
-verify_line="$(rg -n '^    verify_downloaded_backup$' "$ROOT_DIR/scripts/import_prod_backup.sh" | cut -d: -f1)"
-backup_line="$(rg -n '^    backup_local_mysql_dir$' "$ROOT_DIR/scripts/import_prod_backup.sh" | cut -d: -f1)"
-reset_line="$(rg -n '^    reset_and_import_local_database$' "$ROOT_DIR/scripts/import_prod_backup.sh" | cut -d: -f1)"
+verify_line="$(grep -nE '^    verify_downloaded_backup$' "$ROOT_DIR/scripts/import_prod_backup.sh" | cut -d: -f1)"
+backup_line="$(grep -nE '^    backup_local_mysql_dir$' "$ROOT_DIR/scripts/import_prod_backup.sh" | cut -d: -f1)"
+reset_line="$(grep -nE '^    reset_and_import_local_database$' "$ROOT_DIR/scripts/import_prod_backup.sh" | cut -d: -f1)"
 (( verify_line < backup_line && verify_line < reset_line )) || fail 'verification is not ordered before destructive local steps'
 
 printf 'import_prod_backup_attestation=passed\n'

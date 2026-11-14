@@ -91,7 +91,7 @@ bash "$missing_python_runner" >"$missing_python_output" 2>&1
 missing_python_status=$?
 set -e
 [[ "$missing_python_status" -ne 0 ]] || fail 'missing host python was not rejected before remote contact'
-rg -q 'missing python3' "$missing_python_output" || fail 'missing host python did not identify python3 as the failing prerequisite'
+grep -qE 'missing python3' "$missing_python_output" || fail 'missing host python did not identify python3 as the failing prerequisite'
 [[ ! -e "$missing_python_ssh_marker" && ! -e "$missing_python_scp_marker" ]] || fail 'missing host python still reached SSH/SCP'
 
 # Exercise this regression against an isolated copy with the python3 check
@@ -107,22 +107,22 @@ if [[ "${IMPORT_PREFLIGHT_MUTATION_CHECK:-0}" == '0' ]]; then
     [[ "$mutation_status" -ne 0 ]] || fail 'regression test stayed green after removing the python3 prerequisite'
 fi
 
-preflight_line="$(rg -n '^    preflight_local_runtime$' "$IMPORT_SCRIPT" | cut -d: -f1)"
-required_line="$(rg -n '^    require_local_commands$' "$IMPORT_SCRIPT" | cut -d: -f1)"
-remote_line="$(rg -n '^    create_or_select_remote_backup$' "$IMPORT_SCRIPT" | cut -d: -f1)"
-up_line="$(rg -n 'compose up -d --pull never --no-build mysql php-fpm nginx' "$IMPORT_SCRIPT" | cut -d: -f1)"
+preflight_line="$(grep -nE '^    preflight_local_runtime$' "$IMPORT_SCRIPT" | cut -d: -f1)"
+required_line="$(grep -nE '^    require_local_commands$' "$IMPORT_SCRIPT" | cut -d: -f1)"
+remote_line="$(grep -nE '^    create_or_select_remote_backup$' "$IMPORT_SCRIPT" | cut -d: -f1)"
+up_line="$(grep -nE 'compose up -d --pull never --no-build mysql php-fpm nginx' "$IMPORT_SCRIPT" | cut -d: -f1)"
 [[ "$required_line" -lt "$remote_line" ]] || fail 'host prerequisites run after remote contact'
 [[ "$preflight_line" -lt "$remote_line" ]] || fail 'preflight runs after remote contact'
 [[ -n "$up_line" ]] || fail 'local startup does not disable pulling and rebuilding'
-rg -q 'compose build --pull=false php-fpm' "$IMPORT_SCRIPT" || fail 'preflight build uses invalid --pull syntax'
-rg -q 'compose create --pull never --no-build php-fpm' "$IMPORT_SCRIPT" || fail 'preflight create is not offline'
-rg -q 'compose ps --all -q php-fpm' "$IMPORT_SCRIPT" || fail 'preflight inspects only running containers'
-rg -q 'openldap_image=' "$IMPORT_SCRIPT" || fail 'full-stack OpenLDAP image is not preflight checked'
-rg -q 'php_cli_image=' "$IMPORT_SCRIPT" || fail 'full-stack LDAP initializer image is not preflight checked'
-if rg -n 'releases/latest|https?://[^ ]+\|[[:space:]]*(bash|sh|php)' "$ROOT_DIR/docker/php-fpm/Dockerfile" >/dev/null; then
+grep -qE 'compose build --pull=false php-fpm' "$IMPORT_SCRIPT" || fail 'preflight build uses invalid --pull syntax'
+grep -qE 'compose create --pull never --no-build php-fpm' "$IMPORT_SCRIPT" || fail 'preflight create is not offline'
+grep -qE 'compose ps --all -q php-fpm' "$IMPORT_SCRIPT" || fail 'preflight inspects only running containers'
+grep -qE 'openldap_image=' "$IMPORT_SCRIPT" || fail 'full-stack OpenLDAP image is not preflight checked'
+grep -qE 'php_cli_image=' "$IMPORT_SCRIPT" || fail 'full-stack LDAP initializer image is not preflight checked'
+if grep -nE 'releases/latest|https?://[^ ]+\|[[:space:]]*(bash|sh|php)' "$ROOT_DIR/docker/php-fpm/Dockerfile" >/dev/null; then
     fail 'php-fpm Dockerfile still contains mutable or piped installer input'
 fi
-rg -q 'sha256sum -c' "$ROOT_DIR/docker/php-fpm/Dockerfile" || fail 'php-fpm installer checksum verification missing'
+grep -qE 'sha256sum -c' "$ROOT_DIR/docker/php-fpm/Dockerfile" || fail 'php-fpm installer checksum verification missing'
 compose_config="$(docker compose -f "$ROOT_DIR/docker-compose.yml" config)"
 while IFS= read -r image; do
     [[ "$image" == *@sha256:* ]] || fail "runtime image is not digest pinned: $image"
