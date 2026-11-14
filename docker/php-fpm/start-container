@@ -30,8 +30,10 @@ for runtime_dir in storage/{backups,cache,logs,uploads}; do
         exit 1
     fi
 done
-# Existing nested entries are never traversed or widened during startup.
-chmod 0777 storage/{backups,cache,logs,uploads}
+# Backups are written by the operator's CLI process and must not be writable by
+# the web worker. Other runtime directories retain their existing permissions.
+chmod 0700 storage/backups
+chmod 0777 storage/{cache,logs,uploads}
 
 echo "➜ Prepare Private Session Volume"
 if [[ -L storage/sessions ]] || ! mountpoint -q storage/sessions; then
