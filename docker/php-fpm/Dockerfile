@@ -12,6 +12,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         git \
         procps \
+        python3 \
         zip \
         unzip \
     && curl -fsSL https://github.com/mlocati/docker-php-extension-installer/releases/download/2.13.1/install-php-extensions -o /tmp/install-php-extensions \
