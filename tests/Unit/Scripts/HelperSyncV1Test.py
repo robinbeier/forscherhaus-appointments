@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import os
 import tempfile
 import unittest
@@ -88,6 +89,188 @@ class HelperSyncV1Test(unittest.TestCase):
             self.assertTrue((self.tx / run_id / 'acknowledged.json').is_file())
             self.assertEqual(mod.inspect_ack(run_id)['status'], 'acknowledged')
             self.assertEqual(health.call_count, 2)
+
+    @unittest.skipUnless(os.geteuid() == 0, 'requires root-owned fixture')
+    def test_execute_then_explicit_rollback_is_run_bound_and_idempotent(self):
+        run_id = '8' * 32
+        with patch.object(mod, 'internal_postflight', return_value=None):
+            mod.execute(mod.sha256(self.candidate), self.candidate.stat().st_size, run_id)
+            result = mod.rollback_run(run_id)
+            self.assertEqual(result['status'], 'rolled_back')
+            self.assertEqual(self.target.read_text(), 'old\n')
+            self.assertFalse(mod.PENDING.exists())
+            self.assertTrue((self.tx / run_id / 'rolled-back.json').is_file())
+            self.assertEqual(mod.rollback_run(run_id)['status'], 'rolled_back')
+
+    @unittest.skipUnless(os.geteuid() == 0, 'requires root-owned fixture')
+    def test_rollback_retires_pending_after_terminal_receipt_publication(self):
+        run_id = '9' * 32
+        with patch.object(mod, 'internal_postflight', return_value=None):
+            mod.execute(mod.sha256(self.candidate), self.candidate.stat().st_size, run_id)
+            original_unlink = os.unlink
+            calls = {'count': 0}
+
+            def interrupt_pending(path, *args, **kwargs):
+                if Path(path) == mod.PENDING and calls['count'] == 0:
+                    calls['count'] += 1
+                    raise SystemExit(97)
+                return original_unlink(path, *args, **kwargs)
+
+            with patch.object(os, 'unlink', side_effect=interrupt_pending):
+                with self.assertRaises(SystemExit): mod.rollback_run(run_id)
+            self.assertTrue((self.tx / run_id / 'rolled-back.json').is_file())
+            self.assertTrue(mod.PENDING.exists())
+            self.assertEqual(mod.rollback_run(run_id)['status'], 'rolled_back')
+            self.assertFalse(mod.PENDING.exists())
+
+    @unittest.skipUnless(os.geteuid() == 0, 'requires root-owned fixture')
+    def test_rollback_rejects_cross_run_receipt_and_metadata_drift(self):
+        run_id = 'a' * 32
+        with patch.object(mod, 'internal_postflight', return_value=None):
+            mod.execute(mod.sha256(self.candidate), self.candidate.stat().st_size, run_id)
+        receipt = self.tx / run_id / 'committed.json'
+        receipt.write_text('{"schema":"helper_sync.receipt.v1","run_id":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","result":"committed","new_sha256":"wrong"}\n')
+        with self.assertRaisesRegex(mod.SyncError, 'commit_receipt_invalid'):
+            mod.rollback_run(run_id)
+
+    @unittest.skipUnless(os.geteuid() == 0, 'requires root-owned fixture')
+    def test_rollback_rejects_contradictory_terminal_phase(self):
+        run_id = 'd' * 32
+        with patch.object(mod, 'internal_postflight', return_value=None):
+            mod.execute(mod.sha256(self.candidate), self.candidate.stat().st_size, run_id)
+            tx = self.tx / run_id
+            mod.ensure_run_receipt(tx, run_id, 'rollback-started.json', 'rollback_started')
+            mod.ensure_run_receipt(tx, run_id, 'rolled-back.json', 'rolled_back')
+            mod.ensure_run_receipt(tx, run_id, 'aborted-before-replace.json', 'aborted_before_replace')
+        with self.assertRaisesRegex(mod.SyncError, 'rollback_receipt_conflict'):
+            mod.rollback_run(run_id)
+        self.assertTrue(mod.PENDING.exists())
+
+    @unittest.skipUnless(os.geteuid() == 0, 'requires root-owned fixture')
+    def test_rollback_rejects_acknowledged_before_pending_retirement(self):
+        run_id = 'e' * 32
+        with patch.object(mod, 'internal_postflight', return_value=None):
+            mod.execute(mod.sha256(self.candidate), self.candidate.stat().st_size, run_id)
+            tx = self.tx / run_id
+            mod.write_json(tx / 'acknowledged.json', {'schema':'helper_sync.ack.v1','run_id':run_id,'result':'acknowledged','new_sha256':mod.NEW_SHA256})
+        with self.assertRaisesRegex(mod.SyncError, 'rollback_receipt_conflict'):
+            mod.rollback_run(run_id)
+        self.assertTrue(mod.PENDING.exists())
+
+    @unittest.skipUnless(os.geteuid() == 0, 'requires root-owned fixture')
+    def test_terminal_rollback_requires_all_receipts_and_old_target(self):
+        run_id = 'f' * 32
+        with patch.object(mod, 'internal_postflight', return_value=None):
+            mod.execute(mod.sha256(self.candidate), self.candidate.stat().st_size, run_id)
+            self.assertEqual(mod.rollback_run(run_id)['status'], 'rolled_back')
+        (self.tx / run_id / 'rolled-back.json').unlink()
+        with self.assertRaisesRegex(mod.SyncError, 'rollback_receipt_missing'):
+            mod.rollback_run(run_id)
+        mod.write_json(self.tx / run_id / 'rolled-back.json', {'schema':'helper_sync.receipt.v1','run_id':run_id,'result':'rolled_back'})
+        self.target.write_text('new\n')
+        os.chmod(self.target, 0o700)
+        with self.assertRaisesRegex(mod.SyncError, 'rollback_target_identity_invalid'):
+            mod.rollback_run(run_id)
+
+    @unittest.skipUnless(os.geteuid() == 0, 'requires root-owned fixture')
+    def test_rollback_rejects_wrong_run_and_foreign_marker(self):
+        run_id = '0' * 32
+        with patch.object(mod, 'internal_postflight', return_value=None):
+            mod.execute(mod.sha256(self.candidate), self.candidate.stat().st_size, run_id)
+        with self.assertRaisesRegex(mod.SyncError, 'pending_state_invalid'):
+            mod.rollback_run('1' * 32)
+        marker = Path(self.tmp.name) / 'foreign-recovery'
+        marker.write_text('pending\n')
+        with patch.object(mod, 'FOREIGN_MARKERS', (marker,)):
+            with self.assertRaisesRegex(mod.SyncError, 'foreign_recovery_marker'):
+                mod.rollback_run(run_id)
+        self.assertEqual(self.target.read_text(), 'new\n')
+        self.assertTrue(mod.PENDING.exists())
+
+    @unittest.skipUnless(os.geteuid() == 0, 'requires root-owned fixture')
+    def test_rollback_rejects_pinned_state_and_metadata_drift(self):
+        run_id = 'a' * 32
+        with patch.object(mod, 'internal_postflight', return_value=None):
+            mod.execute(mod.sha256(self.candidate), self.candidate.stat().st_size, run_id)
+        state = json.loads(mod.PENDING.read_text())
+        state['old']['sha256'] = '0' * 64
+        mod.PENDING.write_text(json.dumps(state))
+        with self.assertRaisesRegex(mod.SyncError, 'pending_state_invalid'):
+            mod.rollback_run(run_id)
+        state['old']['sha256'] = mod.OLD_SHA256
+        mod.PENDING.write_text(json.dumps(state))
+        backup = self.tx / run_id / 'old-helper'
+        backup.chmod(0o644)
+        with self.assertRaisesRegex(mod.SyncError, 'rollback_source_mismatch'):
+            mod.rollback_run(run_id)
+        backup.chmod(0o700)
+        self.target.chmod(0o644)
+        with self.assertRaisesRegex(mod.SyncError, 'rollback_target_unknown'):
+            mod.rollback_run(run_id)
+        self.assertTrue(mod.PENDING.exists())
+
+    @unittest.skipUnless(os.geteuid() == 0, 'requires root-owned fixture')
+    def test_rollback_resumes_after_start_receipt(self):
+        run_id = 'b' * 32
+        with patch.object(mod, 'internal_postflight', return_value=None):
+            mod.execute(mod.sha256(self.candidate), self.candidate.stat().st_size, run_id)
+        with patch.object(mod, 'restore_copy', side_effect=SystemExit(95)):
+            with self.assertRaises(SystemExit):
+                mod.rollback_run(run_id)
+        self.assertTrue((self.tx / run_id / 'rollback-started.json').is_file())
+        self.assertTrue(mod.PENDING.exists())
+        self.assertEqual(self.target.read_text(), 'new\n')
+        with self.assertRaisesRegex(mod.SyncError, 'rollback_in_progress'):
+            mod.inspect_ack(run_id)
+        self.assertEqual(mod.rollback_run(run_id)['status'], 'rolled_back')
+        self.assertEqual(self.target.read_text(), 'old\n')
+
+    @unittest.skipUnless(os.geteuid() == 0, 'requires root-owned fixture')
+    def test_rollback_resumes_after_target_replace_before_parent_fsync(self):
+        run_id = 'c' * 32
+        with patch.object(mod, 'internal_postflight', return_value=None):
+            mod.execute(mod.sha256(self.candidate), self.candidate.stat().st_size, run_id)
+        real_fsync = mod.fsync_dir
+        interrupted = {'done': False}
+
+        def interrupt_parent(path):
+            if path == self.target.parent and not interrupted['done']:
+                interrupted['done'] = True
+                raise SystemExit(96)
+            return real_fsync(path)
+
+        with patch.object(mod, 'fsync_dir', side_effect=interrupt_parent):
+            with self.assertRaises(SystemExit):
+                mod.rollback_run(run_id)
+        self.assertEqual(self.target.read_text(), 'old\n')
+        self.assertTrue(mod.PENDING.exists())
+        self.assertFalse((self.tx / run_id / 'rolled-back.json').exists())
+        self.assertEqual(mod.rollback_run(run_id)['status'], 'rolled_back')
+        self.assertFalse(mod.PENDING.exists())
+
+    @unittest.skipUnless(os.geteuid() == 0, 'requires root-owned fixture')
+    def test_rollback_rejects_old_target_without_started_receipt(self):
+        run_id = '4' * 32
+        with patch.object(mod, 'internal_postflight', return_value=None):
+            mod.execute(mod.sha256(self.candidate), self.candidate.stat().st_size, run_id)
+        tx = self.tx / run_id
+        mod.restore_copy(tx / 'old-helper', tx / 'restore-helper', 0o700)
+        os.replace(tx / 'restore-helper', self.target)
+        with self.assertRaisesRegex(mod.SyncError, 'rollback_target_unknown'):
+            mod.rollback_run(run_id)
+        self.assertTrue(mod.PENDING.exists())
+        self.assertFalse((tx / 'rollback-started.json').exists())
+        self.assertFalse((tx / 'rolled-back.json').exists())
+
+    @unittest.skipUnless(os.geteuid() == 0, 'requires root-owned fixture')
+    def test_ack_refuses_dangling_rollback_marker(self):
+        run_id = 'd' * 32
+        with patch.object(mod, 'internal_postflight', return_value=None):
+            mod.execute(mod.sha256(self.candidate), self.candidate.stat().st_size, run_id)
+        (self.tx / run_id / 'rollback-started.json').symlink_to('missing')
+        with self.assertRaisesRegex(mod.SyncError, 'rollback_in_progress'):
+            mod.inspect_ack(run_id)
+        self.assertTrue(mod.PENDING.exists())
 
     @unittest.skipUnless(os.geteuid() == 0, 'requires root-owned fixture')
     def test_foreign_recovery_blocks_before_pending_rollback(self):

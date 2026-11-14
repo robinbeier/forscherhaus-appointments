@@ -132,6 +132,14 @@ def ensure_run_receipt(tx: Path, run_id: str, filename: str, result: str) -> Non
     else:
         write_json(path, {'schema': 'helper_sync.receipt.v1', 'run_id': run_id, 'result': result})
 
+def require_run_receipt(tx: Path, run_id: str, filename: str, result: str) -> None:
+    path = tx / filename
+    if path.is_symlink() or not path.is_file(): raise SyncError('rollback_receipt_missing')
+    try: receipt = json.loads(path.read_text(encoding='utf-8'))
+    except Exception as exc: raise SyncError('rollback_receipt_invalid') from exc
+    if receipt != {'schema': 'helper_sync.receipt.v1', 'run_id': run_id, 'result': result}:
+        raise SyncError('rollback_receipt_invalid')
+
 def internal_postflight() -> None:
     """Bound health invariants; no caller-supplied executable is trusted."""
     for unit in ('apache2', 'php8.5-fpm', 'mariadb', 'docker'):
@@ -257,6 +265,56 @@ def transaction_path(run_id: str) -> Path:
     if not re.fullmatch(r'[0-9a-f]{32}', run_id): raise SyncError('run_id_invalid')
     return TX_ROOT / run_id
 
+def validate_pending_state(state: dict, run_id: str) -> tuple[Path, Path, dict, dict]:
+    if state.get('schema') != 'helper_sync.v1' or state.get('target') != str(TARGET) or state.get('run_id') != run_id:
+        raise SyncError('pending_state_invalid')
+    tx = transaction_path(run_id)
+    if state.get('tx') != str(tx): raise SyncError('pending_state_invalid')
+    trusted_dir(tx)
+    backup = tx / 'old-helper'
+    if state.get('backup') != str(backup) or backup.is_symlink() or not backup.is_file():
+        raise SyncError('rollback_source_missing')
+    old, new = state.get('old'), state.get('new')
+    if not isinstance(old, dict) or not isinstance(new, dict): raise SyncError('pending_state_invalid')
+    for identity in (old, new):
+        if not all(key in identity for key in ('sha256', 'size', 'mode', 'uid', 'gid', 'nlink')):
+            raise SyncError('pending_state_invalid')
+    if (old['sha256'], old['size'], old['mode'], old['uid'], old['gid'], old['nlink']) != (OLD_SHA256, OLD_SIZE, 0o700, 0, 0, 1):
+        raise SyncError('pending_state_invalid')
+    if (new['sha256'], new['size'], new['mode'], new['uid'], new['gid'], new['nlink']) != (NEW_SHA256, NEW_SIZE, 0o700, 0, 0, 1):
+        raise SyncError('pending_state_invalid')
+    backup_identity = ident(backup)
+    if backup_identity['sha256'] != old['sha256'] or backup_identity['size'] != old['size'] or backup_identity['mode'] != old['mode'] or backup_identity['uid'] != old['uid'] or backup_identity['gid'] != old['gid'] or backup_identity['nlink'] != old['nlink']:
+        raise SyncError('rollback_source_mismatch')
+    return tx, backup, old, new
+
+def validate_committed_receipt(path: Path, run_id: str, new: dict) -> None:
+    if path.is_symlink() or not path.is_file(): raise SyncError('rollback_not_committed')
+    try: receipt = json.loads(path.read_text(encoding='utf-8'))
+    except Exception as exc: raise SyncError('commit_receipt_unreadable') from exc
+    if receipt != {'schema':'helper_sync.receipt.v1','run_id':run_id,'result':'committed','new_sha256':new['sha256']}:
+        raise SyncError('commit_receipt_invalid')
+
+def validate_old_target(old: dict) -> dict:
+    current = ident(TARGET)
+    if any(current[key] != old[key] for key in ('sha256','size','mode','uid','gid','nlink')):
+        raise SyncError('rollback_target_identity_invalid')
+    return current
+
+def validate_terminal_rollback(tx: Path, run_id: str) -> None:
+    if tx.is_symlink() or not tx.is_dir(): raise SyncError('rollback_transaction_missing')
+    trusted_dir(tx)
+    if any((tx / name).exists() or (tx / name).is_symlink() for name in ('acknowledged.json', 'aborted-before-replace.json')):
+        raise SyncError('rollback_receipt_conflict')
+    backup = tx / 'old-helper'
+    backup_identity = ident(backup)
+    if backup_identity['sha256'] != OLD_SHA256 or backup_identity['size'] != OLD_SIZE or backup_identity['uid'] != 0 or backup_identity['gid'] != 0 or backup_identity['mode'] != 0o700 or backup_identity['nlink'] != 1:
+        raise SyncError('rollback_source_mismatch')
+    validate_committed_receipt(tx / 'committed.json', run_id, {'sha256': NEW_SHA256})
+    require_run_receipt(tx, run_id, 'rollback-started.json', 'rollback_started')
+    require_run_receipt(tx, run_id, 'rolled-back.json', 'rolled_back')
+    validate_old_target({key: backup_identity[key] for key in ('sha256','size','mode','uid','gid','nlink')})
+
 def inspect_ack(run_id: str) -> dict:
     if not re.fullmatch(r'[0-9a-f]{32}', run_id): raise SyncError('run_id_invalid')
     trusted_dir(LOCK.parent); trusted_dir(TX_ROOT.parent)
@@ -278,6 +336,8 @@ def inspect_ack(run_id: str) -> dict:
         state = json.loads(PENDING.read_text(encoding='utf-8'))
         if state.get('run_id') != run_id: raise SyncError('run_id_mismatch')
         receipt_path = Path(state['tx']) / 'committed.json'
+        if (Path(state['tx']) / 'rollback-started.json').exists() or (Path(state['tx']) / 'rollback-started.json').is_symlink():
+            raise SyncError('rollback_in_progress')
         receipt = json.loads(receipt_path.read_text(encoding='utf-8'))
         if receipt.get('schema') != 'helper_sync.receipt.v1' or receipt.get('result') != 'committed' or receipt.get('run_id') != run_id or receipt.get('new_sha256') != NEW_SHA256:
             raise SyncError('commit_receipt_invalid')
@@ -288,6 +348,52 @@ def inspect_ack(run_id: str) -> dict:
         write_json(Path(state['tx']) / 'acknowledged.json', {'schema':'helper_sync.ack.v1','run_id':run_id,'result':'acknowledged','new_sha256':NEW_SHA256})
         PENDING.unlink(); fsync_dir(PENDING.parent)
         return {'status':'acknowledged','run_id':run_id,'sha256':NEW_SHA256}
+    finally: os.close(fd)
+
+def rollback_run(run_id: str) -> dict:
+    if not re.fullmatch(r'[0-9a-f]{32}', run_id): raise SyncError('run_id_invalid')
+    trusted_dir(LOCK.parent); trusted_dir(TX_ROOT.parent)
+    fd = open_lock()
+    try:
+        ensure_tx_root(TX_ROOT); check_foreign_markers()
+        if PENDING.is_symlink(): raise SyncError('pending_state_symlink')
+        if not PENDING.exists():
+            tx = transaction_path(run_id)
+            validate_terminal_rollback(tx, run_id)
+            return {'status':'rolled_back','run_id':run_id}
+        try: state = json.loads(PENDING.read_text(encoding='utf-8'))
+        except Exception as exc: raise SyncError('pending_state_unreadable') from exc
+        tx, backup, old, new = validate_pending_state(state, run_id)
+        receipt = tx / 'committed.json'; started = tx / 'rollback-started.json'; rolled = tx / 'rolled-back.json'
+        if any((tx / name).exists() or (tx / name).is_symlink() for name in ('acknowledged.json', 'aborted-before-replace.json')):
+            raise SyncError('rollback_receipt_conflict')
+        if started.is_symlink() or rolled.is_symlink(): raise SyncError('rollback_receipt_invalid')
+        validate_committed_receipt(receipt, run_id, new)
+        if rolled.exists():
+            if not started.exists() or (tx / 'aborted-before-replace.json').exists() or (tx / 'acknowledged.json').exists():
+                raise SyncError('rollback_receipt_conflict')
+            ensure_run_receipt(tx, run_id, 'rollback-started.json', 'rollback_started')
+            ensure_run_receipt(tx, run_id, 'rolled-back.json', 'rolled_back')
+            fsync_dir(TARGET.parent)
+            validate_old_target(old); PENDING.unlink(); fsync_dir(PENDING.parent)
+            return {'status':'rolled_back','run_id':run_id}
+        if started.exists(): ensure_run_receipt(tx, run_id, 'rollback-started.json', 'rollback_started')
+        current = ident(TARGET)
+        if all(current[key] == old[key] for key in ('sha256','size','mode','uid','gid','nlink')):
+            if not started.exists(): raise SyncError('rollback_target_unknown')
+            fsync_dir(TARGET.parent)
+            ensure_run_receipt(tx, run_id, 'rolled-back.json', 'rolled_back')
+            validate_old_target(old); PENDING.unlink(); fsync_dir(PENDING.parent)
+            return {'status':'rolled_back','run_id':run_id}
+        if any(current[key] != new[key] for key in ('sha256','size','mode','uid','gid','nlink')):
+            raise SyncError('rollback_target_unknown')
+        ensure_run_receipt(tx, run_id, 'rollback-started.json', 'rollback_started')
+        restore = tx / 'restore-helper'; restore_copy(backup, restore, old['mode'])
+        os.replace(restore, TARGET); os.chown(TARGET, 0, 0); os.chmod(TARGET, old['mode']); fsync_dir(TARGET.parent)
+        validate_old_target(old)
+        ensure_run_receipt(tx, run_id, 'rolled-back.json', 'rolled_back')
+        PENDING.unlink(); fsync_dir(PENDING.parent)
+        return {'status':'rolled_back','run_id':run_id}
     finally: os.close(fd)
 
 def execute(candidate_sha: str, candidate_size: int, run_id: str) -> dict:
@@ -339,9 +445,13 @@ def execute(candidate_sha: str, candidate_size: int, run_id: str) -> dict:
     finally: os.close(fd)
 
 def main(argv: list[str]) -> int:
-    p = argparse.ArgumentParser(); p.add_argument('--candidate-sha256'); p.add_argument('--candidate-size', type=int); p.add_argument('--run-id'); p.add_argument('--ack-run-id'); a = p.parse_args(argv)
+    p = argparse.ArgumentParser(); p.add_argument('--candidate-sha256'); p.add_argument('--candidate-size', type=int); p.add_argument('--run-id'); p.add_argument('--ack-run-id'); p.add_argument('--rollback-run-id'); a = p.parse_args(argv)
     try:
-        if bool(a.ack_run_id) == bool(a.run_id): raise SyncError('execute_or_ack_required')
+        modes = [bool(a.run_id), bool(a.ack_run_id), bool(a.rollback_run_id)]
+        if sum(modes) != 1: raise SyncError('execute_or_ack_required')
+        if a.rollback_run_id:
+            if a.candidate_sha256 is not None or a.candidate_size is not None: raise SyncError('rollback_arguments_invalid')
+            print(json.dumps(rollback_run(a.rollback_run_id))); return 0
         if a.ack_run_id:
             if a.candidate_sha256 is not None or a.candidate_size is not None: raise SyncError('ack_arguments_invalid')
             print(json.dumps(inspect_ack(a.ack_run_id)))
