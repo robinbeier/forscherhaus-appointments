@@ -20,9 +20,15 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   changes:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       request_contracts_required: ${{ steps.filter.outputs.request_contracts_required }}
       coverage_required: ${{ steps.filter.outputs.coverage_required }}
@@ -37,12 +43,12 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
       - name: Detect relevant file changes
         id: filter
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
         with:
           filters: |
             request_contracts_required:
@@ -344,7 +350,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Git clone
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
       - name: Verify routing guard behavior
@@ -362,7 +368,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Git clone
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Run worktree inventory tests
         run: |
           set -o pipefail
@@ -370,7 +376,7 @@ jobs:
           python3 -B -m unittest -v tests.Python.test_worktree_inventory 2>&1 | tee storage/logs/ci/python-worktree-inventory.log
       - name: Upload per-test receipt
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: python-worktree-inventory-receipt
           path: storage/logs/ci/python-worktree-inventory.log
@@ -389,9 +395,9 @@ jobs:
       EA_SKIP_ASSET_BUILD_BOOTSTRAP: '1'
     steps:
       - name: Git clone
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Set up PHP layer-cache builder
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
         with:
           cache-binary: false
           cleanup: true
@@ -404,7 +410,7 @@ jobs:
           echo "prefix=defense-php-oci-v1-${image##*:}-" >> "$GITHUB_OUTPUT"
       - name: Restore complete PHP layer archive
         id: php-cache-restore
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         continue-on-error: true
         timeout-minutes: 1
         with:
@@ -458,7 +464,7 @@ jobs:
           PY
       - name: Save complete PHP layer archive
         if: steps.php-cache-save-preparation.outputs.cache_export_ready == 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         continue-on-error: true
         timeout-minutes: 1
         with:
@@ -533,7 +539,7 @@ jobs:
             > storage/logs/ci/calendar-canary-regressions.cases.json
       - name: Upload per-test receipt
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: calendar-canary-regressions-receipt
           path: |
@@ -562,14 +568,14 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Start build-test database
         run: |
           python3 -B scripts/ci/run_gate_with_summary.py --label build-test-1 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           docker compose up -d mysql
           ROB557_GATE_COMMAND
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '24.22.3'
           check-latest: true
@@ -582,7 +588,7 @@ jobs:
           npm ci --omit=dev --ignore-scripts --no-audit --no-fund
           ROB557_GATE_COMMAND
       - name: Setup PHP
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
         with:
           php-version: "8.4.27"
           coverage: none
@@ -649,7 +655,7 @@ jobs:
             > storage/logs/ci/phpunit-general.cases.json
       - name: Upload general PHPUnit receipt
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: phpunit-general-receipt
           path: |
@@ -676,7 +682,7 @@ jobs:
         run: python3 -B scripts/ci/run_gate_with_summary.py --summarize --job-status '${{ job.status }}'
       - name: Upload gate diagnostic evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: gate-summary-${{ github.job }}
           path: storage/logs/ci/gate-summary/
@@ -690,9 +696,9 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Git clone
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Setup PHP
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
         with:
           php-version: "8.4.27"
           coverage: none
@@ -718,7 +724,7 @@ jobs:
             > storage/logs/ci/root-deployment.cases.json
       - name: Upload root deployment PHPUnit receipt
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: root-deployment-receipt
           path: |
@@ -731,7 +737,7 @@ jobs:
         run: python3 -B scripts/ci/run_gate_with_summary.py --summarize --job-status '${{ job.status }}'
       - name: Upload gate diagnostic evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: gate-summary-${{ github.job }}
           path: storage/logs/ci/gate-summary/
@@ -743,7 +749,7 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
       - name: Check frontend validation inputs
@@ -756,7 +762,7 @@ jobs:
           ROB557_GATE_COMMAND
       - name: Setup Node.js
         if: steps.js_changes.outputs.needs_node == 'true'
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '24.22.3'
           check-latest: true
@@ -795,7 +801,7 @@ jobs:
         run: python3 -B scripts/ci/run_gate_with_summary.py --summarize --job-status '${{ job.status }}'
       - name: Upload gate diagnostic evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: gate-summary-${{ github.job }}
           path: storage/logs/ci/gate-summary/
@@ -810,9 +816,9 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Setup PHP
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
         with:
           php-version: "8.4.27"
           coverage: none
@@ -836,7 +842,7 @@ jobs:
         run: python3 -B scripts/ci/run_gate_with_summary.py --summarize --job-status '${{ job.status }}'
       - name: Upload gate diagnostic evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: gate-summary-${{ github.job }}
           path: storage/logs/ci/gate-summary/
@@ -851,9 +857,9 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Setup PHP
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
         with:
           php-version: "8.4.27"
           coverage: none
@@ -887,7 +893,7 @@ jobs:
         run: python3 -B scripts/ci/run_gate_with_summary.py --summarize --job-status '${{ job.status }}'
       - name: Upload gate diagnostic evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: gate-summary-${{ github.job }}
           path: storage/logs/ci/gate-summary/
@@ -907,9 +913,9 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Setup PHP
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
         with:
           php-version: "8.4.27"
           coverage: none
@@ -946,7 +952,7 @@ jobs:
           ROB557_GATE_COMMAND
       - name: Upload request-contract artifacts
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: request-contracts-artifacts
           path: |
@@ -965,7 +971,7 @@ jobs:
         run: python3 -B scripts/ci/run_gate_with_summary.py --summarize --job-status '${{ job.status }}'
       - name: Upload gate diagnostic evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: gate-summary-${{ github.job }}
           path: storage/logs/ci/gate-summary/
@@ -994,7 +1000,7 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Resolve LDAP guardrail scope
         id: ldap_guardrail
         run: |
@@ -1024,7 +1030,7 @@ jobs:
           docker compose up -d "${services[@]}"
           ROB557_GATE_COMMAND
       - name: Setup PHP
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
         with:
           php-version: "8.4.27"
           coverage: none
@@ -1037,7 +1043,7 @@ jobs:
           ROB557_GATE_COMMAND
       - name: Setup Node.js
         if: needs.changes.outputs.integration_smoke == 'true'
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '24.22.3'
           check-latest: true
@@ -1183,7 +1189,7 @@ jobs:
           ROB557_GATE_COMMAND
       - name: Upload deep runtime suite artifacts
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: deep-runtime-suite-artifacts-${{ github.run_attempt }}
           path: storage/logs/ci/deep-runtime-suite
@@ -1211,7 +1217,7 @@ jobs:
         run: python3 -B scripts/ci/run_gate_with_summary.py --summarize --job-status '${{ job.status }}'
       - name: Upload gate diagnostic evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: gate-summary-${{ github.job }}
           path: storage/logs/ci/gate-summary/
@@ -1231,9 +1237,9 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Setup PHP
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
         with:
           php-version: "8.4.27"
           coverage: xdebug
@@ -1251,7 +1257,7 @@ jobs:
           ROB557_GATE_COMMAND
       - name: Upload coverage shard unit artifacts
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: coverage-shard-unit-artifacts
           path: |
@@ -1270,7 +1276,7 @@ jobs:
         run: python3 -B scripts/ci/run_gate_with_summary.py --summarize --job-status '${{ job.status }}'
       - name: Upload gate diagnostic evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: gate-summary-${{ github.job }}
           path: storage/logs/ci/gate-summary/
@@ -1290,14 +1296,14 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Start coverage shard services
         run: |
           python3 -B scripts/ci/run_gate_with_summary.py --label coverage-shard-integration-1 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           docker compose up -d mysql
           ROB557_GATE_COMMAND
       - name: Setup PHP
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
         with:
           php-version: "8.4.27"
           coverage: xdebug
@@ -1341,7 +1347,7 @@ jobs:
           ROB557_GATE_COMMAND
       - name: Upload coverage shard integration artifacts
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: coverage-shard-integration-artifacts
           path: |
@@ -1367,7 +1373,7 @@ jobs:
         run: python3 -B scripts/ci/run_gate_with_summary.py --summarize --job-status '${{ job.status }}'
       - name: Upload gate diagnostic evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: gate-summary-${{ github.job }}
           path: storage/logs/ci/gate-summary/
@@ -1390,22 +1396,22 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       # Report processing uses only PHP's XML extensions.
       - name: Setup PHP
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
         with:
           php-version: "8.4.27"
           coverage: none
           extensions: dom, simplexml
           tools: none
       - name: Download coverage shard unit artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: coverage-shard-unit-artifacts
           path: storage/logs/ci
       - name: Download coverage shard integration artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: coverage-shard-integration-artifacts
           path: storage/logs/ci
@@ -1427,7 +1433,7 @@ jobs:
           ROB557_GATE_COMMAND
       - name: Upload coverage delta artifacts
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: coverage-delta-artifacts
           path: |
@@ -1449,7 +1455,7 @@ jobs:
         run: python3 -B scripts/ci/run_gate_with_summary.py --summarize --job-status '${{ job.status }}'
       - name: Upload gate diagnostic evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: gate-summary-${{ github.job }}
           path: storage/logs/ci/gate-summary/
@@ -1470,7 +1476,7 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Verify PDF renderer host isolation
         run: |
           python3 -B scripts/ci/run_gate_with_summary.py --label pdf-renderer-tests-1 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
@@ -1527,7 +1533,7 @@ jobs:
         run: python3 -B scripts/ci/run_gate_with_summary.py --summarize --job-status '${{ job.status }}'
       - name: Upload gate diagnostic evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: gate-summary-${{ github.job }}
           path: storage/logs/ci/gate-summary/
@@ -1539,11 +1545,11 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
       - name: Setup Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
       - name: Check generated architecture/ownership docs
@@ -1563,7 +1569,7 @@ jobs:
         run: python3 -B scripts/ci/run_gate_with_summary.py --summarize --job-status '${{ job.status }}'
       - name: Upload gate diagnostic evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: gate-summary-${{ github.job }}
           path: storage/logs/ci/gate-summary/
@@ -1577,16 +1583,16 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
       - name: Setup Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
       - name: Setup PHP
         if: needs.changes.outputs.runtime_checks_required == 'true'
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
         with:
           php-version: "8.4.27"
           coverage: none
@@ -1622,7 +1628,7 @@ jobs:
           ROB557_GATE_COMMAND
       - name: Upload architecture boundary artifacts
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: architecture-boundaries-artifacts
           path: |
@@ -1641,7 +1647,7 @@ jobs:
         run: python3 -B scripts/ci/run_gate_with_summary.py --summarize --job-status '${{ job.status }}'
       - name: Upload gate diagnostic evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: gate-summary-${{ github.job }}
           path: storage/logs/ci/gate-summary/
@@ -1663,9 +1669,9 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Download deep runtime suite artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: ${{ needs.deep-runtime-suite.outputs.artifact-name || 'missing-deep-runtime-artifact' }}
           path: storage/logs/ci/deep-runtime-suite
@@ -1687,7 +1693,7 @@ jobs:
         run: python3 -B scripts/ci/run_gate_with_summary.py --summarize --job-status '${{ job.status }}'
       - name: Upload gate diagnostic evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: gate-summary-${{ github.job }}
           path: storage/logs/ci/gate-summary/
@@ -1710,9 +1716,9 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Download deep runtime suite artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: ${{ needs.deep-runtime-suite.outputs.artifact-name || 'missing-deep-runtime-artifact' }}
           path: storage/logs/ci/deep-runtime-suite
@@ -1742,9 +1748,9 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Download deep runtime suite artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: ${{ needs.deep-runtime-suite.outputs.artifact-name || 'missing-deep-runtime-artifact' }}
           path: storage/logs/ci/deep-runtime-suite
@@ -1773,9 +1779,9 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Download deep runtime suite artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: ${{ needs.deep-runtime-suite.outputs.artifact-name || 'missing-deep-runtime-artifact' }}
           path: storage/logs/ci/deep-runtime-suite
@@ -1796,7 +1802,7 @@ jobs:
         run: python3 -B scripts/ci/run_gate_with_summary.py --summarize --job-status '${{ job.status }}'
       - name: Upload gate diagnostic evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: gate-summary-${{ github.job }}
           path: storage/logs/ci/gate-summary/
@@ -1818,9 +1824,9 @@ jobs:
 
     steps:
       - name: Git clone
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Download deep runtime suite artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: ${{ needs.deep-runtime-suite.outputs.artifact-name || 'missing-deep-runtime-artifact' }}
           path: storage/logs/ci/deep-runtime-suite
@@ -1843,7 +1849,7 @@ jobs:
         run: python3 -B scripts/ci/run_gate_with_summary.py --summarize --job-status '${{ job.status }}'
       - name: Upload gate diagnostic evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: gate-summary-${{ github.job }}
           path: storage/logs/ci/gate-summary/
@@ -1859,9 +1865,9 @@ jobs:
       contents: read
     steps:
       - name: Git clone
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Set up PHP layer-cache builder
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
         with:
           cache-binary: false
           cleanup: true
@@ -1875,7 +1881,7 @@ jobs:
           echo "shard-prefix=defense-php-oci-v1-${image##*:}-shard-1-" >> "$GITHUB_OUTPUT"
       - name: Restore complete PHP layer archive
         id: php-cache-restore
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         continue-on-error: true
         timeout-minutes: 1
         with:
@@ -1920,14 +1926,14 @@ jobs:
           PY
       - name: Save complete PHP layer archive
         if: steps.php-cache-save-preparation.outputs.cache_export_ready == 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         continue-on-error: true
         timeout-minutes: 1
         with:
           path: ${{ runner.temp }}/defense-php-cache/import
           key: ${{ steps.php-cache-key.outputs.shard-prefix }}${{ github.run_id }}-${{ github.run_attempt }}
       - name: Setup PHP
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
         with:
           php-version: "8.4.27"
           coverage: none
@@ -1946,21 +1952,21 @@ jobs:
           python3 -B scripts/ci/run_gate_with_summary.py --label defense-cycle-shard-1 -- bash scripts/ci/run_defense_cycle.sh --shard 1
       - name: Upload Defense phase and testcase evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: defense-cycle-receipts-${{ github.job }}
           path: storage/logs/ci/defense-cycle/*.summary.json
           retention-days: 7
       - name: Upload PHP build timing evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: php-build-${{ github.job }}
           path: storage/logs/ci/php-build/
           retention-days: 7
       - name: Upload gate diagnostic evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: gate-summary-${{ github.job }}
           path: storage/logs/ci/gate-summary/
@@ -1976,9 +1982,9 @@ jobs:
       contents: read
     steps:
       - name: Git clone
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Set up PHP layer-cache builder
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
         with:
           cache-binary: false
           cleanup: true
@@ -1992,7 +1998,7 @@ jobs:
           echo "shard-prefix=defense-php-oci-v1-${image##*:}-shard-2-" >> "$GITHUB_OUTPUT"
       - name: Restore complete PHP layer archive
         id: php-cache-restore
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         continue-on-error: true
         timeout-minutes: 1
         with:
@@ -2037,14 +2043,14 @@ jobs:
           PY
       - name: Save complete PHP layer archive
         if: steps.php-cache-save-preparation.outputs.cache_export_ready == 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         continue-on-error: true
         timeout-minutes: 1
         with:
           path: ${{ runner.temp }}/defense-php-cache/import
           key: ${{ steps.php-cache-key.outputs.shard-prefix }}${{ github.run_id }}-${{ github.run_attempt }}
       - name: Setup PHP
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
         with:
           php-version: "8.4.27"
           coverage: none
@@ -2063,21 +2069,21 @@ jobs:
           python3 -B scripts/ci/run_gate_with_summary.py --label defense-cycle-shard-2 -- bash scripts/ci/run_defense_cycle.sh --shard 2
       - name: Upload Defense phase and testcase evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: defense-cycle-receipts-${{ github.job }}
           path: storage/logs/ci/defense-cycle/*.summary.json
           retention-days: 7
       - name: Upload PHP build timing evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: php-build-${{ github.job }}
           path: storage/logs/ci/php-build/
           retention-days: 7
       - name: Upload gate diagnostic evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: gate-summary-${{ github.job }}
           path: storage/logs/ci/gate-summary/
@@ -2095,7 +2101,7 @@ jobs:
       contents: read
     steps:
       - name: Git clone
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Assert Defense shard configs partition canonical suite
         run: |
           python3 - <<'PY'
@@ -2119,12 +2125,12 @@ jobs:
           print(f'Defense shard partition verified: {len(canonical)} files')
           PY
       - name: Download Defense shard 1 receipts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: defense-cycle-receipts-defense-cycle-ordinary-flows-shard-1
           path: storage/logs/ci/defense-cycle/shard-1
       - name: Download Defense shard 2 receipts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: defense-cycle-receipts-defense-cycle-ordinary-flows-shard-2
           path: storage/logs/ci/defense-cycle/shard-2
@@ -2154,7 +2160,7 @@ jobs:
           PY
       - name: Upload combined Defense receipts
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: defense-cycle-receipts-${{ github.job }}
           path: storage/logs/ci/defense-cycle/

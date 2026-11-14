@@ -604,7 +604,14 @@ function agentHarnessReadinessEvaluateBlockingJobFailureMasks(
                         true,
                     ) &&
                     ($step[$key] ?? null) === true &&
-                    in_array($step['uses'] ?? null, ['actions/cache/restore@v4', 'actions/cache/save@v4'], true) &&
+                    in_array(
+                        $step['uses'] ?? null,
+                        [
+                            'actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830',
+                            'actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830',
+                        ],
+                        true,
+                    ) &&
                     ($step['timeout-minutes'] ?? null) === 1 &&
                     !array_key_exists('run', $step)
                 ) {

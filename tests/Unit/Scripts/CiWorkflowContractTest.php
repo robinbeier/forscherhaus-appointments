@@ -48,7 +48,7 @@ class CiWorkflowContractTest extends TestCase
             $restoreKeys[] = $restore['with']['key'];
             $saveKeys[] = $this->stepRun($steps, 'Resolve PHP cache recipe');
             $builder = $steps['Set up PHP layer-cache builder'];
-            self::assertSame('docker/setup-buildx-action@v4', $builder['uses']);
+            self::assertSame('docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069', $builder['uses']);
             self::assertFalse($builder['with']['cache-binary']);
             self::assertTrue($builder['with']['cleanup']);
             $build = $steps['Build PHP with bounded layer cache'];
@@ -66,7 +66,10 @@ class CiWorkflowContractTest extends TestCase
             );
             foreach (['Upload PHP build timing evidence', 'Upload gate diagnostic evidence'] as $name) {
                 self::assertSame('always()', $steps[$name]['if']);
-                self::assertSame('actions/upload-artifact@v7', $steps[$name]['uses']);
+                self::assertSame(
+                    'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9',
+                    $steps[$name]['uses'],
+                );
             }
             $receipt = $steps['Upload Defense phase and testcase evidence'];
             self::assertSame('always()', $receipt['if']);
@@ -133,7 +136,7 @@ class CiWorkflowContractTest extends TestCase
         $steps = $this->namedSteps($changes);
         self::assertSame(0, $steps['Git clone']['with']['fetch-depth']);
         $filter = $steps['Detect relevant file changes'];
-        self::assertSame('dorny/paths-filter@v3', $filter['uses']);
+        self::assertSame('dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad', $filter['uses']);
         self::assertSame('filter', $filter['id']);
         // Preserve the action defaults: PR base diff, or previous push on main.
         foreach (['base', 'ref', 'predicate-quantifier'] as $input) {
@@ -358,7 +361,10 @@ class CiWorkflowContractTest extends TestCase
             $this->stepRun($steps, 'Summarize general PHPUnit cases'),
         );
         self::assertSame('always()', $steps['Upload general PHPUnit receipt']['if']);
-        self::assertSame('actions/upload-artifact@v7', $steps['Upload general PHPUnit receipt']['uses']);
+        self::assertSame(
+            'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9',
+            $steps['Upload general PHPUnit receipt']['uses'],
+        );
         self::assertSame('error', $steps['Upload general PHPUnit receipt']['with']['if-no-files-found']);
         $changesJob = $this->workflowJob('changes');
         self::assertSame(
@@ -428,7 +434,10 @@ class CiWorkflowContractTest extends TestCase
             $this->stepRun($rootSteps, 'Summarize root deployment PHPUnit cases'),
         );
         self::assertSame('always()', $rootSteps['Upload root deployment PHPUnit receipt']['if']);
-        self::assertSame('actions/upload-artifact@v7', $rootSteps['Upload root deployment PHPUnit receipt']['uses']);
+        self::assertSame(
+            'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9',
+            $rootSteps['Upload root deployment PHPUnit receipt']['uses'],
+        );
         self::assertSame('error', $rootSteps['Upload root deployment PHPUnit receipt']['with']['if-no-files-found']);
         self::assertStringContainsString('systemd-analyze verify', $rootDeploymentScript);
         self::assertStringContainsString('scripts/ops/systemd/fh-session-retention.service', $rootDeploymentScript);
@@ -530,7 +539,10 @@ class CiWorkflowContractTest extends TestCase
                 'fi',
             $build,
         );
-        self::assertSame('docker/setup-buildx-action@v4', $steps['Set up PHP layer-cache builder']['uses']);
+        self::assertSame(
+            'docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069',
+            $steps['Set up PHP layer-cache builder']['uses'],
+        );
         $restore = $steps['Restore complete PHP layer archive'];
         $save = $steps['Save complete PHP layer archive'];
         $defenseSteps = $this->namedSteps($this->workflowJob('defense-cycle-ordinary-flows-shard-1'));
@@ -605,7 +617,7 @@ class CiWorkflowContractTest extends TestCase
 
         $receipt = $steps['Upload per-test receipt'];
         self::assertSame('always()', $receipt['if']);
-        self::assertSame('actions/upload-artifact@v7', $receipt['uses']);
+        self::assertSame('actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9', $receipt['uses']);
         self::assertStringContainsString(
             'storage/logs/ci/customers-ui-smoke-fixture-lifecycle.junit.xml',
             $receipt['with']['path'],
@@ -693,7 +705,7 @@ class CiWorkflowContractTest extends TestCase
         ) {
             $consumerSteps = $this->namedSteps($this->workflowJob($jobName));
             self::assertSame(
-                'actions/download-artifact@v8',
+                'actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333',
                 $consumerSteps['Download deep runtime suite artifacts']['uses'],
             );
             self::assertSame(
@@ -715,7 +727,7 @@ class CiWorkflowContractTest extends TestCase
             self::assertArrayNotHasKey('continue-on-error', $step);
         }
         $setupPhp = $steps['Setup PHP'];
-        self::assertSame('shivammathur/setup-php@v2', $setupPhp['uses'] ?? null);
+        self::assertSame('shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962', $setupPhp['uses'] ?? null);
         self::assertSame('8.4.27', $setupPhp['with']['php-version'] ?? null);
         self::assertSame('xdebug', $setupPhp['with']['coverage'] ?? null);
         self::assertSame('gd', $setupPhp['with']['extensions'] ?? null);
