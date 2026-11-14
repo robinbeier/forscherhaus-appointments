@@ -875,7 +875,7 @@ class Providers_model extends EA_Model
             ->get()
             ->result_array();
 
-        return $this->hydrate_providers($providers);
+        return $this->hydrate_providers($providers, $without_private);
     }
 
     /**
@@ -930,7 +930,7 @@ class Providers_model extends EA_Model
         return $this->hydrate_providers($providers);
     }
 
-    protected function hydrate_providers(array $providers): array
+    protected function hydrate_providers(array $providers, bool $without_private = false): array
     {
         if (empty($providers)) {
             return [];
@@ -947,7 +947,7 @@ class Providers_model extends EA_Model
             array_unique(array_filter($provider_ids, static fn(int $provider_id): bool => $provider_id > 0)),
         );
         $settings_map = $this->get_settings_map($provider_ids);
-        $service_ids_map = $this->get_service_ids_map($provider_ids);
+        $service_ids_map = $this->get_service_ids_map($provider_ids, $without_private);
 
         foreach ($providers as &$provider) {
             $provider_id = (int) ($provider['id'] ?? 0);
@@ -981,18 +981,23 @@ class Providers_model extends EA_Model
         return $settings_map;
     }
 
-    protected function get_service_ids_map(array $provider_ids): array
+    protected function get_service_ids_map(array $provider_ids, bool $without_private = false): array
     {
         if (empty($provider_ids)) {
             return [];
         }
 
         $connections = $this->db
-            ->select('id_users, id_services')
+            ->select('services_providers.id_users, services_providers.id_services')
             ->from('services_providers')
-            ->where_in('id_users', $provider_ids)
-            ->get()
-            ->result_array();
+            ->join('services', 'services.id = services_providers.id_services', 'inner')
+            ->where_in('services_providers.id_users', $provider_ids);
+
+        if ($without_private) {
+            $this->db->where('services.is_private', false);
+        }
+
+        $connections = $this->db->get()->result_array();
 
         $service_ids_map = array_fill_keys($provider_ids, []);
 
