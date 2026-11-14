@@ -47,8 +47,6 @@ class Reschedule_authority
 
     private const LIFETIME_SECONDS = 600;
 
-    private const CREATION_IDENTITY_LOCK_PREFIX = 'ea:public-create:';
-
     private const CREATION_IDENTITY_LOCK_TIMEOUT_SECONDS = 10;
 
     /**
@@ -455,15 +453,9 @@ class Reschedule_authority
      */
     public static function creationIdentityLockName(?string $email, string $database_name): ?string
     {
-        $normalized_email = strtolower(trim((string) $email));
+        require_once APPPATH . 'core/Customer_creation_identity_lock.php';
 
-        if ($normalized_email === '') {
-            return null;
-        }
-
-        $identity_digest = hash('sha256', $database_name . "\0" . $normalized_email);
-
-        return self::CREATION_IDENTITY_LOCK_PREFIX . substr($identity_digest, 0, 40);
+        return Customer_creation_identity_lock::name($email, $database_name);
     }
 
     /**

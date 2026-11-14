@@ -93,13 +93,10 @@ class Customers_model extends EA_Model
         // followed by an insert. Serialize creates for the same normalized
         // email so two concurrent collection POSTs cannot both pass that
         // check and create duplicate customers.
-        require_once APPPATH . 'libraries/Reschedule_authority.php';
+        require_once APPPATH . 'core/Customer_creation_identity_lock.php';
         $lock_name =
             $held_creation_lock ??
-            Reschedule_authority::creationIdentityLockName(
-                $customer['email'] ?? null,
-                (string) ($this->db->database ?? ''),
-            );
+            Customer_creation_identity_lock::name($customer['email'] ?? null, (string) ($this->db->database ?? ''));
         $owns_lock = $held_creation_lock === null && $lock_name !== null;
 
         if ($owns_lock) {
