@@ -219,9 +219,16 @@ authorization and no mutation on the fresh synthetic stack only; they do not
 prove concurrent behavior, proxy/deployment behavior, or production state.
 
 These tests supplement model rollback tests; they do not inject HTTP failures,
-prove every concurrent schedule or verify production. Settings API token visibility
-retains its existing privileged contract; staff secret-projection assertions do
-not imply that every Settings value is public or that tokens are write-only.
+prove every concurrent schedule or verify production. Settings API tests also
+verify that the closed non-secret allowlist is applied consistently to
+collection, search, fields and detail routes for Basic and Bearer clients, and
+that secret writes are rejected without echoing or changing stored values.
+Secret rotation remains a separate write-only contract; this isolated evidence
+does not establish production behavior or prove that every stored setting is
+safe to expose.
+The isolated `ENVIRONMENT=testing` fixture namespace permits only
+`defense_<16 hex>_setting_*` synthetic names; production uses the explicit
+non-secret allowlist.
 
 ## Ordinary blocked-period controller regressions
 

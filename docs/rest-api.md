@@ -564,8 +564,11 @@ only Settings write operation.
 
 Legacy notification settings may remain in storage for rollback compatibility,
 but they have no application behavior and are not part of staff resource
-projections. The generic settings API continues to expose arbitrary stored
-settings according to its existing contract.
+projections. The Settings API exposes only the repository-defined allowlist of
+non-secret settings. Secret values such as API tokens, passwords, keys and
+credentials are denied by name in collection, search, detail and field
+projections, and PUT cannot echo or change them. Secret rotation requires a
+separate write-only operation that never returns the stored value.
 
 ## API Roadmap
 
