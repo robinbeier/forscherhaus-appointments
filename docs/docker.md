@@ -455,10 +455,13 @@ The script will:
 - start the remaining Docker services again without pulling new images
 
 The importer requires `--remote-backup-dir`; it intentionally never creates a
-production backup or runs a mutable remote backup command. Docker Compose is
-started with `--pull never` and `--no-build` after the preflight so a registry
-tag cannot change between verification and the local restore. The preflight
-may fetch a missing digest-pinned base image or checksum-verified build
+production backup or runs a mutable remote backup command. Only the backup set
+currently named by the production `last_backup_set.json` handoff can pass
+verification; retained older sets require a separate validated restore route.
+Docker Compose is started with `--pull never` and `--no-build` after the
+preflight so a registry tag cannot change between verification and the local
+restore. The preflight may fetch a missing digest-pinned base image or
+checksum-verified build
 artifact; it never resolves a mutable tag.
 
 The imported database remains a local copy. In the default Compose stack,

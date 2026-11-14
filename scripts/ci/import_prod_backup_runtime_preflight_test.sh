@@ -71,13 +71,14 @@ run_case approved_images '' 0
 missing_python_runner="$workspace/missing-python.sh"
 missing_python_ssh_marker="$workspace/missing-python.ssh"
 missing_python_scp_marker="$workspace/missing-python.scp"
+missing_python_output="$workspace/missing-python.output"
 for command_name in bash ssh scp tar gunzip curl; do
-    ln -s "$(command -v true)" "$workspace/$command_name"
+    ln -s "$(type -P true)" "$workspace/$command_name"
 done
 {
     printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail'
     printf 'PATH=%q\n' "$workspace"
-    printf '%s\n' 'die() { exit 1; }'
+    printf '%s\n' 'die() { printf "%s\\n" "$*" >&2; exit 1; }'
     printf '%s\n' 'require_cmd() { command -v "$1" >/dev/null 2>&1 || die "missing $1"; }'
     printf '%s\n' "$required_commands_body"
     printf 'ssh() { : > %q; }\n' "$missing_python_ssh_marker"
@@ -86,11 +87,25 @@ done
 } > "$missing_python_runner"
 chmod 0700 "$missing_python_runner"
 set +e
-bash "$missing_python_runner" >/dev/null 2>&1
+bash "$missing_python_runner" >"$missing_python_output" 2>&1
 missing_python_status=$?
 set -e
 [[ "$missing_python_status" -ne 0 ]] || fail 'missing host python was not rejected before remote contact'
+rg -q 'missing python3' "$missing_python_output" || fail 'missing host python did not identify python3 as the failing prerequisite'
 [[ ! -e "$missing_python_ssh_marker" && ! -e "$missing_python_scp_marker" ]] || fail 'missing host python still reached SSH/SCP'
+
+# Exercise this regression against an isolated copy with the python3 check
+# removed. The nested run must fail, proving the test detects that regression
+# without modifying the tracked importer.
+if [[ "${IMPORT_PREFLIGHT_MUTATION_CHECK:-0}" == '0' ]]; then
+    mutation_copy="$workspace/import-without-python.sh"
+    sed '/^[[:space:]]*require_cmd python3$/d' "$IMPORT_SCRIPT" > "$mutation_copy"
+    set +e
+    IMPORT_SCRIPT_OVERRIDE="$mutation_copy" IMPORT_PREFLIGHT_MUTATION_CHECK=1 bash "$0" >/dev/null 2>&1
+    mutation_status=$?
+    set -e
+    [[ "$mutation_status" -ne 0 ]] || fail 'regression test stayed green after removing the python3 prerequisite'
+fi
 
 preflight_line="$(rg -n '^    preflight_local_runtime$' "$IMPORT_SCRIPT" | cut -d: -f1)"
 required_line="$(rg -n '^    require_local_commands$' "$IMPORT_SCRIPT" | cut -d: -f1)"
