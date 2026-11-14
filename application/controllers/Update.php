@@ -77,7 +77,11 @@ class Update extends EA_Controller
                 return;
             }
         } catch (Throwable $e) {
-            $view = ['success' => false, 'exception' => $e->getMessage()];
+            if (function_exists('log_message')) {
+                log_message('error', 'Update migration failed: ' . get_class($e));
+            }
+
+            $view = ['success' => false];
         }
 
         html_vars($view);
