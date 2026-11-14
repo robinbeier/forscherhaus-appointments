@@ -71,6 +71,16 @@ the restored-database checks and passes that exact date to both the initial and
 hypothetical booking child. This prevents a midnight or daylight-saving
 boundary during a long restore from changing the tested window.
 
+Before starting services or streaming the restore dump, the replay renders the
+Compose image inventory and requires every pull image to include an immutable
+digest. It verifies those images locally, builds PHP-FPM and the PDF renderer
+without forcing a base-image refresh, and records their exact image IDs before
+the dump is involved. The subsequent start uses
+`--pull never --no-build`; the PHP-FPM and renderer IDs are checked again
+before the dump is imported. A missing digest or identity mismatch fails the
+replay before any dump bytes reach MySQL. The dump itself remains governed by
+the separate restore-dump evidence contract.
+
 Required keys:
 
 - `base_url`
