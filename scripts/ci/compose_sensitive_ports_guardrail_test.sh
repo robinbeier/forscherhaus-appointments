@@ -159,12 +159,12 @@ docker() {
             printf 'Docker Compose invocation did not pin the canonical compose file.\\n' >&2
             return 97
         fi
-        if [[ "\${4:-}" == down ]]; then
-            printf 'compose-down-called %s\\n' "\$*" >> "\$COMPOSE_CALLS"
-            return 42
-        fi
+        printf 'compose-called %s\\n' "\$*" >> "\$COMPOSE_CALLS"
         cat "\${FAKE_COMPOSE_JSON:-$compose_json}"
         return 0
+    fi
+    if [[ "\${1:-}" == image && "\${2:-}" == inspect ]]; then
+        return 1
     fi
     return 97
 }
@@ -208,48 +208,51 @@ import_output="$(
         LOCAL_DOWNLOAD_ROOT="$workspace/import-downloads" \
         bash "$import_repo/scripts/import_prod_backup.sh" \
             --remote-backup-dir /root/backups/easyappointments/20260313T074134Z \
-            --core-services-only
+            --core-services-only 2>&1
 )"
 import_status=$?
 set -e
-[[ "$import_status" -ne 0 ]] || { echo 'Import unexpectedly continued after synthetic compose down failure.' >&2; exit 1; }
-grep -Fqx '[import-prod-backup] Stopping local Docker stack' <<<"$import_output"
-grep -Fqx "compose-down-called compose -f $import_repo/docker-compose.yml down" "$compose_calls"
-[[ "$(wc -l < "$compose_calls" | tr -d ' ')" == 1 ]] || {
-    echo 'Import invoked more than the expected first compose command.' >&2
+[[ "$import_status" -ne 0 ]] || { echo 'Import unexpectedly continued after missing runtime image.' >&2; exit 1; }
+grep -Fq 'Missing or unapproved local image' <<<"$import_output"
+grep -Fq "compose-called compose -f $import_repo/docker-compose.yml config" "$compose_calls"
+if grep -Fq "$workspace/hostile-compose.yml" "$compose_calls"; then
+    echo 'Import honored hostile COMPOSE_FILE instead of its canonical compose file.' >&2
     exit 1
-}
-[[ ! -e "$import_find_calls" ]] || { echo 'Import reached filesystem cleanup after compose down.' >&2; exit 1; }
-[[ -s "$import_ssh_calls" && -s "$import_scp_calls" ]] || {
-    echo 'Synthetic import setup did not exercise SSH/SCP preparation.' >&2
+fi
+[[ ! -e "$import_find_calls" ]] || { echo 'Import reached filesystem cleanup after preflight failure.' >&2; exit 1; }
+[[ ! -e "$import_ssh_calls" && ! -e "$import_scp_calls" ]] || {
+    echo 'Import contacted SSH/SCP before runtime preflight failure.' >&2
     exit 1
 }
 
-ssh_calls="$workspace/ssh-calls"
-scp_calls="$workspace/scp-calls"
-cat > "$workspace/ssh" <<EOF
-#!/usr/bin/env bash
-printf 'ssh-called\\n' >> "$ssh_calls"
-exit 0
-EOF
-cat > "$workspace/scp" <<EOF
-#!/usr/bin/env bash
-printf 'scp-called\\n' >> "$scp_calls"
-exit 0
-EOF
-chmod 0700 "$workspace/ssh" "$workspace/scp"
-
-run_expect_failure 'compose_sensitive_ports=unsupported_docker_engine' \
-    env FAKE_DOCKER_VERSION=27.3.1 \
-        PATH="$workspace:$PATH" \
+# The importer must apply the sensitive-port guard before it can contact the
+# synthetic production target. Keep this separate from the standalone smoke
+# cases above so the ordering is exercised through the real importer entrypoint.
+set +e
+unsupported_output="$(
+    BASH_ENV="$guardrail_bash_env" \
+        FAKE_DOCKER_VERSION=27.3.1 \
+        COMPOSE_CALLS="$compose_calls" \
+        IMPORT_SSH_CALLS="$import_ssh_calls" \
+        IMPORT_SCP_CALLS="$import_scp_calls" \
+        IMPORT_FIND_CALLS="$import_find_calls" \
         PROD_SSH_TARGET='root@synthetic.invalid' \
-        LOCAL_DOWNLOAD_ROOT="$workspace/downloads" \
+        LOCAL_DOWNLOAD_ROOT="$workspace/unsupported-downloads" \
         bash "$import_repo/scripts/import_prod_backup.sh" \
             --remote-backup-dir /root/backups/easyappointments/20260313T074134Z \
-            --core-services-only
-
-[[ ! -e "$ssh_calls" ]] || { echo 'Import contacted ssh before the preflight.' >&2; exit 1; }
-[[ ! -e "$scp_calls" ]] || { echo 'Import contacted scp before the preflight.' >&2; exit 1; }
-[[ ! -e "$workspace/downloads" ]] || { echo 'Import created local download state before the preflight.' >&2; exit 1; }
+            --core-services-only 2>&1
+)"
+unsupported_status=$?
+set -e
+[[ "$unsupported_status" -ne 0 ]] || { echo 'Import continued on an unsupported Docker engine.' >&2; exit 1; }
+grep -Fqx 'compose_sensitive_ports=unsupported_docker_engine' <<<"$unsupported_output"
+[[ ! -e "$import_ssh_calls" && ! -e "$import_scp_calls" ]] || {
+    echo 'Import contacted SSH/SCP before the sensitive-port guard.' >&2
+    exit 1
+}
+[[ ! -e "$workspace/unsupported-downloads" ]] || {
+    echo 'Import created local download state before the sensitive-port guard.' >&2
+    exit 1
+}
 
 printf 'compose_sensitive_ports_guardrail=passed\n'

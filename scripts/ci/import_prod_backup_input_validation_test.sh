@@ -26,6 +26,7 @@ else
     [[ "$command_string" != *'test -d --'* && "$command_string" != *'test -f --'* ]] || exit 1
     fixture_root="${SSH_FIXTURE_ROOT:?}"
     mkdir -p "$fixture_root/20260313T074134Z/db" "$fixture_root/20260313T074134Z/meta"
+    printf '%s\n' '{"schema":"production_backup_set_handoff.v1","backup_set_id":"20260313T074134Z","dump_sha256":"0000000000000000000000000000000000000000000000000000000000000000","compressed_size_bytes":1,"uncompressed_size_bytes":1}' > "$fixture_root/last_backup_set.json"
     : > "$fixture_root/20260313T074134Z/db/easyappointments.sql.gz"
     : > "$fixture_root/20260313T074134Z/meta/backup.env"
     if [[ "${SSH_OUTPUT_MODE:-valid}" == symlink_db ]]; then

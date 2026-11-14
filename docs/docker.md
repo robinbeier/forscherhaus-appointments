@@ -443,6 +443,8 @@ bash ./scripts/import_prod_backup.sh \
 The script will:
 
 - use an existing canonical backup set on `root@booking-server` over Tailscale
+- verify the pinned local MySQL/nginx images and build the PHP-FPM image from
+  digest-pinned, checksum-verified inputs before contacting the production host
 - download the dump plus metadata into a new, private directory under `/tmp`
   (directory `0700`, files `0600`); the printed path remains available for
   inspection and must be handled as a production-data copy
@@ -451,6 +453,16 @@ The script will:
 - import the production dump into the local `easyappointments` database
 - run `php index.php console migrate`
 - start the remaining Docker services again without pulling new images
+
+The importer requires `--remote-backup-dir`; it intentionally never creates a
+production backup or runs a mutable remote backup command. Only the backup set
+currently named by the production `last_backup_set.json` handoff can pass
+verification; retained older sets require a separate validated restore route.
+Docker Compose is started with `--pull never` and `--no-build` after the
+preflight so a registry tag cannot change between verification and the local
+restore. The preflight may fetch a missing digest-pinned base image or
+checksum-verified build
+artifact; it never resolves a mutable tag.
 
 The imported database remains a local copy. In the default Compose stack,
 the app and database are published only on host loopback; phpMyAdmin, when
@@ -471,10 +483,14 @@ bash ./scripts/import_prod_backup.sh \
   --remote-backup-dir /root/backups/easyappointments/20260313T074134Z
 
 # leave only mysql/php-fpm/nginx running after the import
-bash ./scripts/import_prod_backup.sh --core-services-only
+bash ./scripts/import_prod_backup.sh \
+  --remote-backup-dir /root/backups/easyappointments/20260313T074134Z \
+  --core-services-only
 ```
 
-Manual fallback:
+Manual fallback (synthetic/local fixtures only; never use this path for a
+production-data dump because it bypasses the importer’s digest and installer
+preflight):
 
 ```bash
 cd /path/to/forscherhaus-appointments
