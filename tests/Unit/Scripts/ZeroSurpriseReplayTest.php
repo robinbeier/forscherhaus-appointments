@@ -12,6 +12,85 @@ require_once __DIR__ . '/../../../scripts/release-gate/zero_surprise_replay.php'
 
 class ZeroSurpriseReplayTest extends TestCase
 {
+    public function testReplayRuntimePreflightRequiresDigestPinnedImagesAndCapturesBuildIdentities(): void
+    {
+        $commands = [];
+        $runner = static function (array $command, string $workingDirectory, int $timeoutSeconds) use (
+            &$commands,
+        ): array {
+            $commands[] = $command;
+            $joined = implode(' ', $command);
+            if (str_ends_with($joined, 'config --format json')) {
+                return [
+                    'exit_code' => 0,
+                    'stdout' => json_encode([
+                        'services' => [
+                            'mysql' => ['image' => 'mysql@sha256:' . str_repeat('a', 64)],
+                            'nginx' => ['image' => 'nginx@sha256:' . str_repeat('b', 64)],
+                            'php-fpm' => ['build' => ['context' => '.']],
+                            'pdf-renderer' => ['build' => ['context' => '.']],
+                        ],
+                    ]),
+                    'stderr' => '',
+                ];
+            }
+            if (str_contains($joined, 'ps --all -q php-fpm')) {
+                return ['exit_code' => 0, 'stdout' => "php-container\n", 'stderr' => ''];
+            }
+            if (str_contains($joined, 'ps --all -q pdf-renderer')) {
+                return ['exit_code' => 0, 'stdout' => "pdf-container\n", 'stderr' => ''];
+            }
+            if (str_contains($joined, 'inspect --format')) {
+                return ['exit_code' => 0, 'stdout' => 'sha256:' . str_repeat('c', 64) . "\n", 'stderr' => ''];
+            }
+
+            return ['exit_code' => 0, 'stdout' => '', 'stderr' => ''];
+        };
+
+        $result = preflightReplayRuntime('/repo', ['docker', 'compose'], $runner);
+
+        self::assertSame('pass', $result['status']);
+        self::assertSame(['php-fpm', 'pdf-renderer'], array_keys($result['image_ids']));
+        self::assertStringContainsString(
+            '--pull=false',
+            implode("\n", array_map(static fn(array $command): string => implode(' ', $command), $commands)),
+        );
+        self::assertContains(
+            '--all',
+            array_merge(...array_map(static fn(array $command): array => $command, $commands)),
+        );
+    }
+
+    public function testReplayRuntimePreflightFailsClosedOnMutableImageBeforeBuild(): void
+    {
+        $commands = [];
+        $runner = static function (array $command, string $workingDirectory, int $timeoutSeconds) use (
+            &$commands,
+        ): array {
+            $commands[] = $command;
+
+            return [
+                'exit_code' => 0,
+                'stdout' => json_encode([
+                    'services' => [
+                        'mysql' => ['image' => 'mysql:8.4'],
+                        'nginx' => ['image' => 'nginx@sha256:' . str_repeat('b', 64)],
+                        'php-fpm' => ['build' => ['context' => '.']],
+                        'pdf-renderer' => ['build' => ['context' => '.']],
+                    ],
+                ]),
+                'stderr' => '',
+            ];
+        };
+
+        $result = preflightReplayRuntime('/repo', ['docker', 'compose'], $runner);
+
+        self::assertSame('fail', $result['status']);
+        self::assertSame('runtime_preflight_image_not_digest_pinned', $result['category']);
+        self::assertCount(1, $commands);
+        self::assertStringNotContainsString('build', implode(' ', $commands[0]));
+    }
+
     public function testExternalStepPassesPasswordOnlyThroughStdin(): void
     {
         $password = "synthetic quote' and newline\n";

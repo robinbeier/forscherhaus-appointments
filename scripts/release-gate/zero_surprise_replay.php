@@ -682,6 +682,108 @@ function composeCommand(array $prefix, array $arguments): array
 }
 
 /**
+ * Verify the replay runtime before any restored dump is sent to MySQL.
+ *
+ * @param array<int, string> $composePrefix
+ * @param callable(array<int, string>, string, int): array<string, mixed>|null $runner
+ * @return array{status:string,category:string,exit_code:int,duration_ms:float,image_ids:array<string,string>}
+ */
+function preflightReplayRuntime(string $repoRoot, array $composePrefix, ?callable $runner = null): array
+{
+    $runner ??= static fn(
+        array $command,
+        string $workingDirectory,
+        int $timeoutSeconds,
+    ): array => GateProcessRunner::run($command, $workingDirectory, null, $timeoutSeconds);
+    $startedAt = microtime(true);
+
+    $run = static function (array $command) use ($runner, $repoRoot): array {
+        try {
+            return $runner($command, $repoRoot, 300);
+        } catch (Throwable) {
+            return ['exit_code' => 70, 'stdout' => '', 'stderr' => ''];
+        }
+    };
+    $fail = static function (string $category) use ($startedAt): array {
+        return [
+            'status' => ZeroSurpriseReport::STATUS_FAIL,
+            'category' => $category,
+            'exit_code' => ZERO_SURPRISE_EXIT_RUNTIME_ERROR,
+            'duration_ms' => round((microtime(true) - $startedAt) * 1000, 2),
+            'image_ids' => [],
+        ];
+    };
+
+    $config = $run(composeCommand($composePrefix, ['config', '--format', 'json']));
+    if (
+        ($config['exit_code'] ?? 1) !== 0 ||
+        !is_array($configData = json_decode((string) ($config['stdout'] ?? ''), true))
+    ) {
+        return $fail('runtime_preflight_compose_config_failed');
+    }
+    $services = $configData['services'] ?? null;
+    if (!is_array($services) || $services === []) {
+        return $fail('runtime_preflight_compose_config_failed');
+    }
+    foreach (['mysql', 'nginx', 'php-fpm', 'pdf-renderer'] as $service) {
+        if (!array_key_exists($service, $services)) {
+            return $fail('runtime_preflight_required_service_missing');
+        }
+        $definition = $services[$service];
+        if (!is_array($definition)) {
+            return $fail('runtime_preflight_compose_config_failed');
+        }
+        if (array_key_exists('build', $definition)) {
+            if (!in_array($service, ['php-fpm', 'pdf-renderer'], true)) {
+                return $fail('runtime_preflight_unknown_build_service');
+            }
+            continue;
+        }
+        $image = $definition['image'] ?? null;
+        if (!is_string($image) || !str_contains($image, '@sha256:')) {
+            return $fail('runtime_preflight_image_not_digest_pinned');
+        }
+        $inspect = $run(['docker', 'image', 'inspect', $image]);
+        if (($inspect['exit_code'] ?? 1) !== 0) {
+            return $fail('runtime_preflight_image_missing');
+        }
+    }
+
+    $builtImages = [];
+    foreach (['php-fpm', 'pdf-renderer'] as $service) {
+        if (($run(composeCommand($composePrefix, ['build', '--pull=false', $service]))['exit_code'] ?? 1) !== 0) {
+            return $fail('runtime_preflight_build_failed');
+        }
+        if (
+            ($run(composeCommand($composePrefix, ['create', '--pull', 'never', '--no-build', $service]))['exit_code'] ??
+                1) !==
+            0
+        ) {
+            return $fail('runtime_preflight_create_failed');
+        }
+        $container = $run(composeCommand($composePrefix, ['ps', '--all', '-q', $service]));
+        $containerId = trim((string) ($container['stdout'] ?? ''));
+        if (($container['exit_code'] ?? 1) !== 0 || $containerId === '' || str_contains($containerId, "\n")) {
+            return $fail('runtime_preflight_container_missing');
+        }
+        $identity = $run(['docker', 'inspect', '--format', '{{.Image}}', $containerId]);
+        $imageId = trim((string) ($identity['stdout'] ?? ''));
+        if (($identity['exit_code'] ?? 1) !== 0 || !preg_match('/^sha256:[0-9a-f]{64}$/', $imageId)) {
+            return $fail('runtime_preflight_container_identity_unknown');
+        }
+        $builtImages[$service] = $imageId;
+    }
+
+    return [
+        'status' => ZeroSurpriseReport::STATUS_PASS,
+        'category' => 'runtime_preflight_verified',
+        'exit_code' => 0,
+        'duration_ms' => round((microtime(true) - $startedAt) * 1000, 2),
+        'image_ids' => $builtImages,
+    ];
+}
+
+/**
  * @param callable(array<int, string>, string, int): array<string, mixed>|null $runner
  * @return array{runtime_failed:bool}
  */
@@ -1242,8 +1344,35 @@ function runRestoreDumpStep(string $repoRoot, array $composePrefix, array $confi
     $substeps = [];
     $baselineBlockers = null;
 
+    $runtimePreflight = preflightReplayRuntime($repoRoot, $composePrefix);
+    $substeps[] = [
+        'name' => 'runtime_preflight',
+        'status' => $runtimePreflight['status'],
+        'category' => $runtimePreflight['category'],
+        'exit_code' => $runtimePreflight['exit_code'],
+        'duration_ms' => $runtimePreflight['duration_ms'],
+    ];
+    if ($runtimePreflight['status'] !== ZeroSurpriseReport::STATUS_PASS) {
+        return [
+            'status' => ZeroSurpriseReport::STATUS_FAIL,
+            'exit_code' => ZERO_SURPRISE_EXIT_RUNTIME_ERROR,
+            'duration_ms' => round((microtime(true) - $stepStartedAt) * 1000, 2),
+            'details' => ['failed_substep' => 'runtime_preflight', 'substeps' => $substeps],
+        ];
+    }
+
     $upResult = GateProcessRunner::run(
-        composeCommand($composePrefix, ['up', '-d', 'mysql', 'php-fpm', 'nginx', 'pdf-renderer']),
+        composeCommand($composePrefix, [
+            'up',
+            '-d',
+            '--pull',
+            'never',
+            '--no-build',
+            'mysql',
+            'php-fpm',
+            'nginx',
+            'pdf-renderer',
+        ]),
         $repoRoot,
         null,
         300,
@@ -1260,6 +1389,39 @@ function runRestoreDumpStep(string $repoRoot, array $composePrefix, array $confi
                 'substeps' => $substeps,
             ],
         ];
+    }
+
+    foreach (['php-fpm', 'pdf-renderer'] as $service) {
+        $container = GateProcessRunner::run(
+            composeCommand($composePrefix, ['ps', '-q', $service]),
+            $repoRoot,
+            null,
+            60,
+        );
+        $containerId = trim((string) ($container['stdout'] ?? ''));
+        if (($container['exit_code'] ?? 1) !== 0 || $containerId === '' || str_contains($containerId, "\n")) {
+            return [
+                'status' => ZeroSurpriseReport::STATUS_FAIL,
+                'exit_code' => ZERO_SURPRISE_EXIT_RUNTIME_ERROR,
+                'duration_ms' => round((microtime(true) - $stepStartedAt) * 1000, 2),
+                'details' => ['failed_substep' => 'runtime_identity_recheck', 'substeps' => $substeps],
+            ];
+        }
+        $identity = GateProcessRunner::run(
+            ['docker', 'inspect', '--format', '{{.Image}}', $containerId],
+            $repoRoot,
+            null,
+            60,
+        );
+        $imageId = trim((string) ($identity['stdout'] ?? ''));
+        if (($identity['exit_code'] ?? 1) !== 0 || $imageId !== ($runtimePreflight['image_ids'][$service] ?? null)) {
+            return [
+                'status' => ZeroSurpriseReport::STATUS_FAIL,
+                'exit_code' => ZERO_SURPRISE_EXIT_RUNTIME_ERROR,
+                'duration_ms' => round((microtime(true) - $stepStartedAt) * 1000, 2),
+                'details' => ['failed_substep' => 'runtime_identity_recheck', 'substeps' => $substeps],
+            ];
+        }
     }
 
     $rootReady = waitForMySqlReadiness(
