@@ -103,17 +103,29 @@ class ProbeDb
         }
         if (str_contains($sql, '`appointments`')) {
             $GLOBALS['events'][] = 'lock_appointments:' . implode(',', $params);
-            return new ProbeDbResult(1);
+            return new ProbeDbResult([
+                [
+                    'id' => 41,
+                    'id_users_provider' => 17,
+                ],
+            ]);
         }
         throw new RuntimeException('Unexpected query in customer guard probe.');
     }
 }
 class ProbeDbResult
 {
-    public function __construct(private int $rows) {}
+    /** @param int|array<int, array<string, mixed>> $rows */
+    public function __construct(private int|array $rows) {}
     public function num_rows(): int
     {
-        return $this->rows;
+        return is_int($this->rows) ? $this->rows : count($this->rows);
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    public function result_array(): array
+    {
+        return is_array($this->rows) ? $this->rows : [];
     }
 }
 class ProbeUsersModel
