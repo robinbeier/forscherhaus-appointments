@@ -204,11 +204,11 @@ import_output="$(
         IMPORT_SSH_CALLS="$import_ssh_calls" \
         IMPORT_SCP_CALLS="$import_scp_calls" \
         IMPORT_FIND_CALLS="$import_find_calls" \
-        PROD_SSH_TARGET='synthetic@invalid' \
-        REMOTE_BACKUP_DIR='/root/backups/easyappointments/synthetic' \
-        REMOTE_BACKUP_ROOT='/root/backups/easyappointments' \
+        PROD_SSH_TARGET='root@synthetic.invalid' \
         LOCAL_DOWNLOAD_ROOT="$workspace/import-downloads" \
-        bash "$import_repo/scripts/import_prod_backup.sh" --core-services-only
+        bash "$import_repo/scripts/import_prod_backup.sh" \
+            --remote-backup-dir /root/backups/easyappointments/20260313T074134Z \
+            --core-services-only
 )"
 import_status=$?
 set -e
@@ -242,9 +242,11 @@ chmod 0700 "$workspace/ssh" "$workspace/scp"
 run_expect_failure 'compose_sensitive_ports=unsupported_docker_engine' \
     env FAKE_DOCKER_VERSION=27.3.1 \
         PATH="$workspace:$PATH" \
-        PROD_SSH_TARGET='synthetic@invalid' \
+        PROD_SSH_TARGET='root@synthetic.invalid' \
         LOCAL_DOWNLOAD_ROOT="$workspace/downloads" \
-        bash "$import_repo/scripts/import_prod_backup.sh" --core-services-only
+        bash "$import_repo/scripts/import_prod_backup.sh" \
+            --remote-backup-dir /root/backups/easyappointments/20260313T074134Z \
+            --core-services-only
 
 [[ ! -e "$ssh_calls" ]] || { echo 'Import contacted ssh before the preflight.' >&2; exit 1; }
 [[ ! -e "$scp_calls" ]] || { echo 'Import contacted scp before the preflight.' >&2; exit 1; }

@@ -83,7 +83,7 @@ bash ./scripts/ci/pre_pr_quick.sh
 - `bash ./scripts/ci/pre_pr_full.sh` enables LDAP guardrails only when LDAP/runtime paths changed; override explicitly via `PRE_PR_INCLUDE_LDAP_GUARDRAIL=1` or `0`.
 - On cold local Docker stacks, `bash ./scripts/ci/pre_pr_full.sh` may need longer Playwright startup via `PRE_PR_INTEGRATION_SMOKE_BROWSER_BOOTSTRAP_TIMEOUT=600` and `PRE_PR_INTEGRATION_SMOKE_BROWSER_OPEN_TIMEOUT=60`.
 - For deterministic LDAP fixtures, run `bash ./scripts/ldap/reset_directory.sh` and `bash ./scripts/ldap/smoke.sh`.
-- For local production dump restore, run `bash ./scripts/import_prod_backup.sh` (or append `--core-services-only` to keep only mysql/php-fpm/nginx running).
+- For local production dump restore, pass an existing timestamped set with `--remote-backup-dir`; see `docs/docker.md`. The importer does not create a production backup.
 - For conservative local cleanup, run `bash ./scripts/cleanup_local_artifacts.sh`; append `--with-deps` only when you also want to remove reproducible dependency directories.
 
 ## Validation Expectations

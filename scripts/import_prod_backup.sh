@@ -10,10 +10,8 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SSH_OPTIONS=(-o StrictHostKeyChecking=accept-new)
 
 PROD_SSH_TARGET="${PROD_SSH_TARGET:-root@booking-server}"
-REMOTE_BACKUP_SCRIPT="${REMOTE_BACKUP_SCRIPT:-/root/backups/bin/backup_easyappointments.sh}"
-REMOTE_BACKUP_DIR="${REMOTE_BACKUP_DIR:-}"
-REMOTE_BACKUP_ROOT="${REMOTE_BACKUP_ROOT:-/root/backups/easyappointments}"
-REMOTE_BACKUP_RETENTION="${REMOTE_BACKUP_RETENTION:-30}"
+REMOTE_BACKUP_DIR=''
+REMOTE_BACKUP_ROOT='/root/backups/easyappointments'
 LOCAL_DOWNLOAD_ROOT="${LOCAL_DOWNLOAD_ROOT:-/tmp}"
 LOCAL_DB_NAME="${LOCAL_DB_NAME:-easyappointments}"
 START_FULL_STACK="${START_FULL_STACK:-1}"
@@ -26,13 +24,7 @@ Usage:
 Options:
   --prod-ssh-target TARGET         SSH target for production access.
                                    Default: root@booking-server (Tailscale)
-  --remote-backup-script PATH      Remote backup script to run when no backup dir is given.
-                                   Default: /root/backups/bin/backup_easyappointments.sh
   --remote-backup-dir PATH         Reuse an existing remote backup directory instead of creating a new one.
-  --remote-backup-root PATH        Expected remote backup root for validation.
-                                   Default: /root/backups/easyappointments
-  --remote-backup-retention N      Retention passed to the remote backup script.
-                                   Default: 30
   --local-download-root PATH       Local directory for the downloaded dump and metadata.
                                    Default: /tmp
   --local-db-name NAME             Local MySQL database name to recreate/import.
@@ -69,6 +61,26 @@ ensure_identifier() {
     [[ "$1" =~ ^[A-Za-z0-9_]+$ ]] || die "Invalid SQL identifier: $1"
 }
 
+ensure_ssh_target() {
+    [[ "$1" =~ ^root@[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "Production SSH target must be root@hostname or root@IPv4-style host."
+}
+
+ensure_remote_backup_dir() {
+    local backup_stamp suffix
+    [[ "$1" == "${REMOTE_BACKUP_ROOT}"/* ]] || die "Remote backup directory must be below the canonical backup root."
+    suffix="${1#"${REMOTE_BACKUP_ROOT}/"}"
+    [[ "$suffix" != */* ]] || die "Remote backup directory must be a direct child of the canonical backup root."
+    backup_stamp="${1##*/}"
+    [[ "$backup_stamp" =~ ^20[0-9]{2}(0[1-9]|1[0-2])(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3])[0-5][0-9][0-5][0-9]Z$ ]] || die "Remote backup directory must use a canonical UTC timestamp set ID."
+}
+
+validate_remote_backup_layout() {
+    local remote_dir_q
+    printf -v remote_dir_q '%q' "$REMOTE_BACKUP_DIR"
+    ssh "${SSH_OPTIONS[@]}" "${PROD_SSH_TARGET}" \
+        "test ! -L /root && test ! -L /root/backups && test ! -L /root/backups/easyappointments && test -d ${remote_dir_q} && test ! -L ${remote_dir_q} && test -d ${remote_dir_q}/db && test ! -L ${remote_dir_q}/db && test -d ${remote_dir_q}/meta && test ! -L ${remote_dir_q}/meta && test -f ${remote_dir_q}/db/easyappointments.sql.gz && test ! -L ${remote_dir_q}/db/easyappointments.sql.gz && test -f ${remote_dir_q}/meta/backup.env && test ! -L ${remote_dir_q}/meta/backup.env" >/dev/null
+}
+
 ensure_paths() {
     [[ -f "${REPO_ROOT}/config.php" ]] || die "Missing local config.php in ${REPO_ROOT}"
     mkdir -p "${REPO_ROOT}/docker/mysql"
@@ -82,20 +94,8 @@ parse_args() {
                 PROD_SSH_TARGET="$2"
                 shift 2
                 ;;
-            --remote-backup-script)
-                REMOTE_BACKUP_SCRIPT="$2"
-                shift 2
-                ;;
             --remote-backup-dir)
                 REMOTE_BACKUP_DIR="$2"
-                shift 2
-                ;;
-            --remote-backup-root)
-                REMOTE_BACKUP_ROOT="$2"
-                shift 2
-                ;;
-            --remote-backup-retention)
-                REMOTE_BACKUP_RETENTION="$2"
                 shift 2
                 ;;
             --local-download-root)
@@ -119,27 +119,15 @@ parse_args() {
                 ;;
         esac
     done
+    [[ "${REMOTE_BACKUP_ROOT}" == '/root/backups/easyappointments' ]] || die "Remote backup root is fixed to the canonical production path."
+    [[ -n "${REMOTE_BACKUP_DIR}" ]] || die "--remote-backup-dir is required; creating a production backup is disabled."
+    ensure_ssh_target "${PROD_SSH_TARGET}"
 }
 
 create_or_select_remote_backup() {
-    local remote_backup_output=""
-
-    if [[ -n "${REMOTE_BACKUP_DIR}" ]]; then
-        log "Using existing remote backup directory: ${REMOTE_BACKUP_DIR}"
-    else
-        log "Creating fresh backup on ${PROD_SSH_TARGET}"
-        remote_backup_output="$(
-            ssh "${SSH_OPTIONS[@]}" "${PROD_SSH_TARGET}" \
-                "${REMOTE_BACKUP_SCRIPT} --retention ${REMOTE_BACKUP_RETENTION}"
-        )"
-        printf '%s\n' "${remote_backup_output}"
-        REMOTE_BACKUP_DIR="$(printf '%s\n' "${remote_backup_output}" | tail -n1)"
-    fi
-
-    [[ -n "${REMOTE_BACKUP_DIR}" ]] || die "Remote backup directory could not be determined."
-    [[ "${REMOTE_BACKUP_DIR}" == "${REMOTE_BACKUP_ROOT}/"* ]] || die "Remote backup directory is outside ${REMOTE_BACKUP_ROOT}: ${REMOTE_BACKUP_DIR}"
-
-    ssh "${SSH_OPTIONS[@]}" "${PROD_SSH_TARGET}" "test -d '${REMOTE_BACKUP_DIR}'" >/dev/null
+    log "Using existing remote backup directory: ${REMOTE_BACKUP_DIR}"
+    ensure_remote_backup_dir "${REMOTE_BACKUP_DIR}"
+    validate_remote_backup_layout
 }
 
 download_remote_backup() {
@@ -156,7 +144,7 @@ download_remote_backup() {
     log "Downloading dump to ${LOCAL_IMPORT_DIR}"
     (
         umask 077
-        scp "${SSH_OPTIONS[@]}" "${PROD_SSH_TARGET}:${REMOTE_BACKUP_DIR}/db/${LOCAL_DB_NAME}.sql.gz" "${LOCAL_DUMP_PATH}"
+        scp "${SSH_OPTIONS[@]}" "${PROD_SSH_TARGET}:${REMOTE_BACKUP_DIR}/db/easyappointments.sql.gz" "${LOCAL_DUMP_PATH}"
         scp "${SSH_OPTIONS[@]}" "${PROD_SSH_TARGET}:${REMOTE_BACKUP_DIR}/meta/backup.env" "${LOCAL_META_PATH}"
     )
     chmod 0600 "${LOCAL_DUMP_PATH}" "${LOCAL_META_PATH}"
@@ -249,6 +237,7 @@ main() {
 
     parse_args "$@"
 
+    ensure_remote_backup_dir "${REMOTE_BACKUP_DIR}"
     require_cmd ssh
     require_cmd scp
     require_cmd docker

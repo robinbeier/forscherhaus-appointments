@@ -424,12 +424,13 @@ Use this workflow when you want your local setup to run with a database dump fro
 Recommended path for the current production host:
 
 ```bash
-bash ./scripts/import_prod_backup.sh
+bash ./scripts/import_prod_backup.sh \
+  --remote-backup-dir /root/backups/easyappointments/20260313T074134Z
 ```
 
 The script will:
 
-- create a fresh backup on `root@booking-server` over Tailscale
+- use an existing canonical backup set on `root@booking-server` over Tailscale
 - download the dump plus metadata into a new, private directory under `/tmp`
   (directory `0700`, files `0600`); the printed path remains available for
   inspection and must be handled as a production-data copy
@@ -443,6 +444,12 @@ The imported database remains a local copy. In the default Compose stack,
 the app and database are published only on host loopback; phpMyAdmin, when
 started, is loopback-only too. `--core-services-only` does not start
 phpMyAdmin.
+
+The importer never creates a production backup. The remote backup root is
+fixed to the approved production path, and the directory must be a direct
+child whose name is a UTC timestamp set ID such as `20260313T074134Z`. The
+importer checks the remote directory, dump, and metadata files before
+downloading them.
 
 Useful options:
 

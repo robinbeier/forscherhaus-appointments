@@ -53,7 +53,7 @@ run_download() {
         printf 'PATH=%q:$PATH\n' "$workspace"
         printf 'LOCAL_DOWNLOAD_ROOT=%q\n' "$download_root"
         printf '%s\n' 'LOCAL_DB_NAME=easyappointments' \
-            'REMOTE_BACKUP_DIR=/root/backups/easyappointments/known-stamp' \
+            'REMOTE_BACKUP_DIR=/root/backups/easyappointments/20260313T074134Z' \
             'PROD_SSH_TARGET=synthetic@invalid' \
             'SSH_OPTIONS=(-o synthetic)' \
             'log() { :; }' \
@@ -67,7 +67,7 @@ run_download() {
 
 # A predictable pre-existing path must remain untouched. The current importer
 # resolves this exact path from REMOTE_BACKUP_DIR and writes through it.
-known_path="$download_root/easyappointments-prod-known-stamp"
+known_path="$download_root/easyappointments-prod-20260313T074134Z"
 mkdir -p "$known_path"
 printf 'keep this dump\n' > "$known_path/easyappointments.sql.gz"
 printf 'keep this metadata\n' > "$known_path/backup.env"
@@ -100,7 +100,7 @@ assert_mode 600 "$second_dir/backup.env"
 # directory. This check is intentionally separate from the known-path check.
 symlink_target="$workspace/symlink-target"
 mkdir -p "$symlink_target"
-symlink_path="$download_root/easyappointments-prod-symlink-stamp"
+symlink_path="$download_root/easyappointments-prod-20260313T074135Z"
 ln -s "$symlink_target" "$symlink_path"
 
 symlink_script="$workspace/run-symlink-download.sh"
@@ -109,7 +109,7 @@ symlink_script="$workspace/run-symlink-download.sh"
     printf 'PATH=%q:$PATH\n' "$workspace"
     printf 'LOCAL_DOWNLOAD_ROOT=%q\n' "$download_root"
     printf '%s\n' 'LOCAL_DB_NAME=easyappointments' \
-        'REMOTE_BACKUP_DIR=/root/backups/easyappointments/symlink-stamp' \
+        'REMOTE_BACKUP_DIR=/root/backups/easyappointments/20260313T074135Z' \
         'PROD_SSH_TARGET=synthetic@invalid' \
         'SSH_OPTIONS=(-o synthetic)' \
         'log() { :; }' \
