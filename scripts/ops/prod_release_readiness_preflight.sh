@@ -9,6 +9,7 @@ LOCK_PATH='/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock'
 RECOVERY_MARKER='/var/lib/fh-defense-ordinary/request-unconfirmed'
 TIMER_TRANSITION_MARKER='/var/lib/fh-deploy-orchestrator/backup-timer-transition.v1.json'
 DEPLOY_RECOVERY_MARKER='/root/fh-deploy-recovery-pending.v1.json'
+HELPER_SYNC_PENDING='/var/lib/fh-deploy-orchestrator/helper-sync.v1/pending.json'
 CLEANUP_TIMER='fh-defense-ordinary-cleanup.timer'; RETENTION_TIMER='fh-release-archive-dump-retention.timer'
 BACKUP_TIMER='fh-backup-set-continuity.timer'; SESSION_TIMER='fh-session-retention.timer'
 CANARY_STATE_FILE='/var/lib/fh-zero-surprise-canary/active.json'
@@ -53,9 +54,9 @@ done
 prod_require_cmd ssh
 receipt_file="$(mktemp "${TMPDIR:-/tmp}/prod-release-readiness.XXXXXX")"
 trap 'rm -f -- "$receipt_file"' EXIT
-if ssh "${SSH_OPTIONS[@]}" "$PROD_SSH_TARGET" bash -s -- "$APP_ROOT" "$EXPECTED_RELEASE" "$LOCK_PATH" "$RECOVERY_MARKER" "$CLEANUP_TIMER" "$RETENTION_TIMER" "$BACKUP_TIMER" "$SESSION_TIMER" "$TIMER_TRANSITION_MARKER" "$DEPLOY_RECOVERY_MARKER" "$CANARY_STATE_FILE" "$CANARY_CLEANUP_TIMER" "$CANARY_CLEANUP_SERVICE" "${HELPERS[@]}" >"$receipt_file" 2>/dev/null <<'REMOTE'
+if ssh "${SSH_OPTIONS[@]}" "$PROD_SSH_TARGET" bash -s -- "$APP_ROOT" "$EXPECTED_RELEASE" "$LOCK_PATH" "$RECOVERY_MARKER" "$CLEANUP_TIMER" "$RETENTION_TIMER" "$BACKUP_TIMER" "$SESSION_TIMER" "$TIMER_TRANSITION_MARKER" "$DEPLOY_RECOVERY_MARKER" "$HELPER_SYNC_PENDING" "$CANARY_STATE_FILE" "$CANARY_CLEANUP_TIMER" "$CANARY_CLEANUP_SERVICE" "${HELPERS[@]}" >"$receipt_file" 2>/dev/null <<'REMOTE'
 set -u
-APP_ROOT="$1"; EXPECTED_RELEASE="$2"; LOCK_PATH="$3"; RECOVERY_MARKER="$4"; CLEANUP_TIMER="$5"; RETENTION_TIMER="$6"; BACKUP_TIMER="$7"; SESSION_TIMER="$8"; TIMER_TRANSITION_MARKER="$9"; DEPLOY_RECOVERY_MARKER="${10}"; CANARY_STATE_FILE="${11}"; CANARY_CLEANUP_TIMER="${12}"; CANARY_CLEANUP_SERVICE="${13}"; shift 13
+APP_ROOT="$1"; EXPECTED_RELEASE="$2"; LOCK_PATH="$3"; RECOVERY_MARKER="$4"; CLEANUP_TIMER="$5"; RETENTION_TIMER="$6"; BACKUP_TIMER="$7"; SESSION_TIMER="$8"; TIMER_TRANSITION_MARKER="$9"; DEPLOY_RECOVERY_MARKER="${10}"; HELPER_SYNC_PENDING="${11}"; CANARY_STATE_FILE="${12}"; CANARY_CLEANUP_TIMER="${13}"; CANARY_CLEANUP_SERVICE="${14}"; shift 14
 result() {
     printf 'schema=production_release_readiness.v1\nstatus=%s\nresult_class=%s\ncaptured_at_utc=%s\nsource_marker=app_root/_RELEASE\nsource_lock=shared_production_lock\nsource_timers=systemctl_show\nsource_tools=tracked_local_vs_installed_sha256\ninvalidation=first_mutation_or_identity_change\n' \
         "$1" "$2" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -106,6 +107,7 @@ csp_lease="$orchestrator_root/csp-report-only-pilot.state.json"
 if [[ -e "$RECOVERY_MARKER" || -L "$RECOVERY_MARKER" || -e "$csp_lease" || -L "$csp_lease" ]]; then fail recovery_pending; fi
 [[ ! -e "$TIMER_TRANSITION_MARKER" && ! -L "$TIMER_TRANSITION_MARKER" ]] || fail recovery_pending
 [[ ! -e "$DEPLOY_RECOVERY_MARKER" && ! -L "$DEPLOY_RECOVERY_MARKER" ]] || fail recovery_pending
+[[ ! -e "$HELPER_SYNC_PENDING" && ! -L "$HELPER_SYNC_PENDING" ]] || fail recovery_pending
 for artifact in run.pending request-unconfirmed state.json defense-verification.json defense-verification.json.tmp sessions.json sessions.json.tmp; do
     [[ ! -e "$recovery_root/$artifact" && ! -L "$recovery_root/$artifact" ]] || fail recovery_pending
 done

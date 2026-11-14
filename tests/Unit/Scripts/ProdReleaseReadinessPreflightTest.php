@@ -10,6 +10,7 @@ final class ProdReleaseReadinessPreflightTest extends TestCase
     private string $lockPath = '';
     private string $timerTransitionMarker = '';
     private string $deployRecoveryMarker = '';
+    private string $helperPending = '';
     private string $canaryState = '';
     /** @var list<string> */ private array $helpers = [];
 
@@ -22,6 +23,8 @@ final class ProdReleaseReadinessPreflightTest extends TestCase
         $this->app = $this->root . '/app';
         $this->timerTransitionMarker = $this->root . '/backup-timer-transition.v1.json';
         $this->deployRecoveryMarker = $this->root . '/fh-deploy-recovery-pending.v1.json';
+        $this->helperPending = $this->root . '/helper-sync/pending.json';
+        mkdir(dirname($this->helperPending), 0700, true);
         $this->canaryState = $this->root . '/canary/active.json';
         mkdir(dirname($this->canaryState), 0700, true);
         mkdir($this->app, 0755, true);
@@ -82,16 +85,17 @@ final class ProdReleaseReadinessPreflightTest extends TestCase
             while [[ $# -gt 0 && "$1" != bash ]]; do shift; done
             [[ "$1" == bash ]] || exit 97
             shift 3
-            base=("${@:1:13}")
+            base=("${@:1:14}")
             base[0]=%s
             base[2]=%s
             base[3]=%s
             base[8]=%s
             base[9]=%s
             base[10]=%s
-            base[11]=fh-zero-surprise-canary-cleanup.timer
-            base[12]=fh-zero-surprise-canary-cleanup.service
-            shift 13
+            base[11]=%s
+            base[12]=fh-zero-surprise-canary-cleanup.timer
+            base[13]=fh-zero-surprise-canary-cleanup.service
+            shift 14
             mapped=()
             for spec in "$@"; do
               case "$spec" in
@@ -110,6 +114,7 @@ final class ProdReleaseReadinessPreflightTest extends TestCase
             var_export($this->root . '/ordinary/request-unconfirmed', true),
             var_export($this->timerTransitionMarker, true),
             var_export($this->deployRecoveryMarker, true),
+            var_export($this->helperPending, true),
             var_export($this->canaryState, true),
             $helperFixtures[0],
             $helperFixtures[1],
@@ -196,6 +201,15 @@ final class ProdReleaseReadinessPreflightTest extends TestCase
         [$status, $out] = $this->executePreflight();
         self::assertSame(20, $status);
         self::assertStringContainsString('recovery_pending', $out);
+    }
+
+    public function testPendingHelperSyncBlocksReadiness(): void
+    {
+        file_put_contents($this->helperPending, "pending\n");
+        chmod($this->helperPending, 0600);
+        [$status, $out] = $this->executePreflight();
+        self::assertSame(20, $status);
+        self::assertStringContainsString('result_class=recovery_pending', $out);
     }
 
     public function testUnresolvedCanaryJournalBlocksReadinessWithoutReadingItsContents(): void

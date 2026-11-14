@@ -39,6 +39,7 @@ CONFIGS = (
 )
 RECOVERY = (
     '/var/lib/fh-deploy-orchestrator/active-run.json',
+    '/var/lib/fh-deploy-orchestrator/helper-sync.v1/pending.json',
     RECOVERY_GUARD,
     '/var/lib/fh-deploy-orchestrator/backup-timer-transition.v1.json',
     '/var/lib/fh-deploy-orchestrator/csp-report-only-pilot.state.json',
