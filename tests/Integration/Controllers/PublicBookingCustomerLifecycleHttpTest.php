@@ -113,7 +113,7 @@ final class PublicBookingCustomerLifecycleHttpTest extends TestCase
         $db->update('settings', ['value' => '0'], ['id' => (int) $this->settings['display_privacy_policy']['id']]);
         $response = $client->post('booking/register', [
             'post_data' => [
-                'appointment' => $this->appointmentPayload($fixture, $anchor->modify('+9 hours'), 'one-policy'),
+                'appointment' => $this->appointmentPayload($fixture, $anchor->modify('+2 hours'), 'one-policy'),
                 'customer' => [
                     'first_name' => 'One',
                     'last_name' => 'Policy',
