@@ -124,6 +124,7 @@ final class BookingMethodHttpTest extends TestCase
             'appointment' => $appointment,
             'customer' => $customer,
             'manage_mode' => false,
+            'consent' => ['terms_and_conditions' => false, 'privacy_policy' => true],
         ];
 
         $beforeAppointmentCount = get_instance()->db->count_all('appointments');
@@ -284,6 +285,7 @@ final class BookingMethodHttpTest extends TestCase
                 'notes' => $customer['notes'],
             ],
             'manage_mode' => true,
+            'consent' => ['terms_and_conditions' => false, 'privacy_policy' => true],
         ];
 
         $response = $client->get('booking/register', ['post_data' => $payload]);

@@ -355,6 +355,7 @@ final class BookingCaptchaHttpTest extends TestCase
                 'notes' => $fixture->run,
             ],
             'manage_mode' => false,
+            'consent' => ['terms_and_conditions' => false, 'privacy_policy' => true],
         ];
     }
 

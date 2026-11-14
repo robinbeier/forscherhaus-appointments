@@ -69,12 +69,14 @@ final class PublicBookingCustomerLifecycleHttpTest extends TestCase
         self::assertNotNull($fixture);
         self::assertNotNull($server);
         $db = get_instance()->db;
+        $client = $server->client();
+        self::assertSame(200, $client->get('booking')->statusCode);
+        $anchor = new DateTimeImmutable($fixture->appointment()['start_datetime']);
         $baseline = [
             'appointments' => $db->count_all('appointments'),
             'users' => $db->count_all('users'),
             'consents' => $db->count_all('consents'),
         ];
-        $anchor = new DateTimeImmutable($fixture->appointment()['start_datetime']);
 
         foreach (
             [
@@ -87,7 +89,7 @@ final class PublicBookingCustomerLifecycleHttpTest extends TestCase
             ]
             as $consent
         ) {
-            $response = $server->client()->post('booking/register', [
+            $response = $client->post('booking/register', [
                 'post_data' => [
                     'appointment' => $this->appointmentPayload($fixture, $anchor->modify('+8 hours'), 'consent-denied'),
                     'customer' => [
@@ -109,7 +111,7 @@ final class PublicBookingCustomerLifecycleHttpTest extends TestCase
         }
 
         $db->update('settings', ['value' => '0'], ['id' => (int) $this->settings['display_privacy_policy']['id']]);
-        $response = $server->client()->post('booking/register', [
+        $response = $client->post('booking/register', [
             'post_data' => [
                 'appointment' => $this->appointmentPayload($fixture, $anchor->modify('+9 hours'), 'one-policy'),
                 'customer' => [
