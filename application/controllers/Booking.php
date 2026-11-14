@@ -279,8 +279,11 @@ class Booking extends EA_Controller
             $this->providers_model->only($provider, $this->allowed_provider_fields);
             $this->customers_model->only($customer, $this->allowed_customer_fields);
 
-            $this->rescheduleAuthority()->issue((int) $appointment['id'], (string) $appointment['hash']);
-            $customer_token = $this->createCustomerToken((int) $customer['id']);
+            $customer_token = $this->rescheduleAuthority()->issueWithPrivacyToken(
+                (int) $appointment['id'],
+                (string) $appointment['hash'],
+                fn(int $lockedCustomerId): string|bool => $this->createCustomerToken($lockedCustomerId),
+            );
         } else {
             $manage_mode = false;
             $customer_token = false;

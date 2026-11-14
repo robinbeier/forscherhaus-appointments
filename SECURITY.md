@@ -643,6 +643,11 @@ path. It requires POST with CSRF, an enabled product setting, and a live
 customer token issued from the stored appointment-to-customer relationship.
 Tokens use cryptographically secure randomness and expire after ten minutes;
 the cache mapping alone does not authorize deletion of a non-customer record.
+During public reschedule GET, the cache token is created from the customer ID
+revalidated under the appointment row lock, before that authority transaction
+commits. This keeps a concurrent reassignment from minting a deletion token for
+the former customer; tokens already issued remain governed by the existing
+ten-minute expiry and deletion checks.
 Wrong methods, missing or invalid authority, and replay after a successful
 deletion must leave customer and dependent records unchanged. See the
 [privacy deletion contract](docs/ci-write-contracts.md#offentliche-datenschutz-loschung)

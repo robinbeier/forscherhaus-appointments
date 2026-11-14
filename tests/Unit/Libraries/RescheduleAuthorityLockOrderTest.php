@@ -77,6 +77,108 @@ final class RescheduleAuthorityLockOrderTest extends TestCase
         $this->assertSame([], $database->writes);
     }
 
+    public function testPrivacyTokenWriterRunsWithLockedCustomerBeforeAuthorityCommit(): void
+    {
+        $database = new RescheduleAuthorityCurrentReadFakeDatabase();
+        $authority = $this->createAuthority($database);
+        session([
+            'public_reschedule_authority_context' => str_repeat('c', 43),
+        ]);
+
+        try {
+            $token = $authority->issueWithPrivacyToken(99, 'current-hash', static function (int $customerId) use (
+                $database,
+            ): string {
+                self::assertTrue($database->transactionActive);
+                $database->events[] = 'token:' . $customerId;
+
+                return 'privacy-token';
+            });
+
+            $this->assertSame('privacy-token', $token);
+            $this->assertSame(['begin', 'insert', 'token:20', 'commit'], $database->events);
+        } finally {
+            session([
+                'public_reschedule_authority_context' => null,
+                'public_reschedule_authority' => null,
+            ]);
+        }
+    }
+
+    public function testStaleAppointmentCannotInvokePrivacyTokenWriter(): void
+    {
+        $database = new RescheduleAuthorityCurrentReadFakeDatabase();
+        $database->lockedAppointment['hash'] = 'rotated-hash';
+        $authority = $this->createAuthority($database);
+        session([
+            'public_reschedule_authority_context' => str_repeat('c', 43),
+        ]);
+
+        try {
+            $authority->issueWithPrivacyToken(99, 'current-hash', static function (): string {
+                throw new \LogicException('writer must not run for stale authority');
+            });
+            $this->fail('Expected a stale appointment capability to be rejected.');
+        } catch (\RescheduleAuthorityException $exception) {
+            $this->assertSame('stale-appointment-capability', $exception->getMessage());
+        } finally {
+            session([
+                'public_reschedule_authority_context' => null,
+                'public_reschedule_authority' => null,
+            ]);
+        }
+
+        $this->assertSame([], $database->writes);
+    }
+
+    public function testPrivacyTokenWriterFailureCommitsAuthorityButReturnsFalse(): void
+    {
+        $database = new RescheduleAuthorityCurrentReadFakeDatabase();
+        $authority = $this->createAuthority($database);
+        session([
+            'public_reschedule_authority_context' => str_repeat('c', 43),
+        ]);
+
+        try {
+            $token = $authority->issueWithPrivacyToken(99, 'current-hash', static fn(int $customerId): bool => false);
+
+            $this->assertFalse($token);
+            $this->assertSame(['begin', 'insert', 'commit'], $database->events);
+        } finally {
+            session([
+                'public_reschedule_authority_context' => null,
+                'public_reschedule_authority' => null,
+            ]);
+        }
+    }
+
+    public function testPrivacyTokenWriterExceptionRollsBackAuthority(): void
+    {
+        $database = new RescheduleAuthorityCurrentReadFakeDatabase();
+        $authority = $this->createAuthority($database);
+        session([
+            'public_reschedule_authority_context' => str_repeat('c', 43),
+        ]);
+
+        try {
+            try {
+                $authority->issueWithPrivacyToken(99, 'current-hash', static function (): string {
+                    throw new \RuntimeException('synthetic callback failure');
+                });
+                $this->fail('Expected the token writer failure to abort authority issuance.');
+            } catch (\RuntimeException $exception) {
+                $this->assertSame('synthetic callback failure', $exception->getMessage());
+            }
+
+            $this->assertSame(['begin', 'insert', 'rollback'], $database->events);
+        } finally {
+            session([
+                'public_reschedule_authority_context' => null,
+                'public_reschedule_authority' => null,
+            ]);
+        }
+    }
+
     public function testVerifyLockedStateLocksAllParentsBeforeAppointment(): void
     {
         $database = new RescheduleAuthorityLockOrderFakeDatabase();
@@ -312,6 +414,11 @@ final class RescheduleAuthorityCurrentReadFakeDatabase
     /** @var list<string> */
     public array $writes = [];
 
+    /** @var list<string> */
+    public array $events = [];
+
+    public bool $transactionActive = false;
+
     /** @var array<string, mixed> */
     public array $appointmentSnapshot = [
         'id' => 99,
@@ -401,16 +508,25 @@ final class RescheduleAuthorityCurrentReadFakeDatabase
 
     public function trans_begin(): bool
     {
+        $this->transactionActive = true;
+        $this->events[] = 'begin';
+
         return true;
     }
 
     public function trans_commit(): bool
     {
+        $this->transactionActive = false;
+        $this->events[] = 'commit';
+
         return true;
     }
 
     public function trans_rollback(): bool
     {
+        $this->transactionActive = false;
+        $this->events[] = 'rollback';
+
         return true;
     }
 
@@ -423,6 +539,7 @@ final class RescheduleAuthorityCurrentReadFakeDatabase
     public function insert(string $table, array $data): bool
     {
         $this->writes[] = 'insert';
+        $this->events[] = 'insert';
         return true;
     }
 

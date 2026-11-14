@@ -132,11 +132,36 @@ class Reschedule_authority
         $this->db = $CI->db;
     }
 
-    /**
-     * Issue one short-lived authority for the canonical appointment.
-     */
+    /** Issue one short-lived authority for the canonical appointment. */
     public function issue(int $appointment_id, string $presented_hash): void
     {
+        $this->issueInternal($appointment_id, $presented_hash, null);
+    }
+
+    /**
+     * Issue authority and create the privacy token while the appointment row is locked.
+     *
+     * @param callable(int): (string|bool) $token_writer
+     */
+    public function issueWithPrivacyToken(
+        int $appointment_id,
+        string $presented_hash,
+        callable $token_writer,
+    ): string|bool {
+        $result = $this->issueInternal($appointment_id, $presented_hash, $token_writer);
+
+        return is_string($result) || is_bool($result) ? $result : false;
+    }
+
+    /**
+     * @param (callable(int): (string|bool))|null $before_commit
+     * @return string|bool|null
+     */
+    private function issueInternal(
+        int $appointment_id,
+        string $presented_hash,
+        ?callable $before_commit,
+    ): string|bool|null {
         if (!$this->db->trans_begin()) {
             throw new RuntimeException('Could not start reschedule authority transaction.');
         }
@@ -164,11 +189,23 @@ class Reschedule_authority
                 'update_datetime' => $now,
             ]);
 
-            if (!$inserted || !$this->db->trans_commit()) {
+            if (!$inserted) {
+                throw new RuntimeException('Could not persist reschedule authority.');
+            }
+
+            $customer_token_result = null;
+            if ($before_commit !== null) {
+                // Keep capability issuance inside the appointment row lock.
+                $customer_token_result = $before_commit((int) $state->customerId);
+            }
+
+            if (!$this->db->trans_commit()) {
                 throw new RuntimeException('Could not persist reschedule authority.');
             }
 
             session([self::SESSION_TOKEN_KEY => $token]);
+
+            return $customer_token_result;
         } catch (Throwable $exception) {
             $this->db->trans_rollback();
             session([self::SESSION_TOKEN_KEY => null]);
