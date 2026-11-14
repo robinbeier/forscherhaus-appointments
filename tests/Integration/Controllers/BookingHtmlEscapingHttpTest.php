@@ -176,8 +176,12 @@ final class BookingHtmlEscapingHttpTest extends TestCase
 
         self::assertSame(200, $page->statusCode);
         self::assertStringContainsString('<strong>ROB694 allowed message</strong>', $page->body);
-        self::assertStringNotContainsString('<script', strtolower($page->body));
-        self::assertStringNotContainsString('onerror=', strtolower($page->body));
+        // The page legitimately contains application scripts, so scope the
+        // regression check to the hostile markup supplied in the message.
+        self::assertStringNotContainsString('<script>alert("xss")</script>', $page->body);
+        self::assertStringNotContainsString('onerror="alert(\'xss\')"', $page->body);
+        self::assertStringNotContainsString('alert("xss")', $page->body);
+        self::assertStringNotContainsString("alert('xss')", $page->body);
     }
 
     private function assertNoInjectedElements(string $body): void
