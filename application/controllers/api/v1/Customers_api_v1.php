@@ -146,7 +146,8 @@ class Customers_api_v1 extends EA_Controller
             // Collection POST is create-only. In particular, do not let the
             // model's upsert-oriented save() turn a matching email into an
             // update target.
-            $customer_id = $this->customers_model->insert_new($customer);
+            $held_creation_lock = $this->api->holdBasicCustomerCreationLock($customer['email'] ?? null);
+            $customer_id = $this->customers_model->insert_new($customer, $held_creation_lock);
 
             $created_customer = $this->customers_model->find($customer_id);
 

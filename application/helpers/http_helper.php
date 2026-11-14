@@ -67,6 +67,13 @@ if (!function_exists('response')) {
         }
 
         $CI->output->set_status_header($status)->set_output($content);
+        try {
+            $api = $CI->api;
+            if (is_object($api) && is_callable([$api, 'trackResponseStatus'])) {
+                $api->trackResponseStatus($status);
+            }
+        } catch (Throwable) {
+        }
     }
 }
 
@@ -97,6 +104,13 @@ if (!function_exists('json_response')) {
             ->set_status_header($status)
             ->set_content_type('application/json')
             ->set_output(json_encode($content));
+        try {
+            $api = $CI->api;
+            if (is_object($api) && is_callable([$api, 'trackResponseStatus'])) {
+                $api->trackResponseStatus($status);
+            }
+        } catch (Throwable) {
+        }
     }
 }
 

@@ -10,6 +10,7 @@ use Tests\Integration\Support\DefenseCycleHttpServer;
 
 require_once dirname(__DIR__) . '/Support/DefenseCycleFixtures.php';
 require_once dirname(__DIR__) . '/Support/DefenseCycleHttpServer.php';
+require_once APPPATH . 'libraries/Api.php';
 
 /** Bounded local HTTP coverage for the Customers API v1 write paths. */
 final class CustomersApiHttpWriteTest extends TestCase
@@ -73,6 +74,54 @@ final class CustomersApiHttpWriteTest extends TestCase
             $this->rowsByEmail($original['email']),
             'Duplicate POST must not create a second customer row.',
         );
+    }
+
+    public function testBasicCustomerIdentityLockRemainsHeldUntilOuterCommit(): void
+    {
+        $f = $this->fixture;
+        $db = get_instance()->db;
+        $observer = get_instance()->load->database(
+            [
+                'hostname' => 'mysql',
+                'username' => 'root',
+                'password' => 'secret',
+                'database' => 'easyappointments',
+                'dbdriver' => 'mysqli',
+                'dbprefix' => $db->dbprefix,
+                'pconnect' => false,
+                'db_debug' => false,
+                'char_set' => 'utf8mb4',
+                'dbcollat' => 'utf8mb4_general_ci',
+            ],
+            true,
+        );
+        $api = (new ReflectionClass(Api::class))->newInstanceWithoutConstructor();
+        (new ReflectionProperty(Api::class, 'CI'))->setValue($api, get_instance());
+        (new ReflectionProperty(Api::class, 'basicActorId'))->setValue($api, $f->actorId);
+        (new ReflectionProperty(Api::class, 'basicMutationTransaction'))->setValue($api, true);
+        $lockName = null;
+
+        try {
+            self::assertTrue($db->trans_begin());
+            $lockName = $api->holdBasicCustomerCreationLock($f->run . '_held-lock@example.invalid');
+            self::assertNotNull($lockName);
+            $blocked = $observer->query('SELECT GET_LOCK(?, 0) AS acquired', [$lockName])->row_array();
+            self::assertSame(0, (int) ($blocked['acquired'] ?? -1));
+
+            $api->trackResponseStatus(201);
+            $api->finalizeMutationTransaction();
+            $released = $observer->query('SELECT GET_LOCK(?, 0) AS acquired', [$lockName])->row_array();
+            self::assertSame(1, (int) ($released['acquired'] ?? -1));
+            $observer->query('SELECT RELEASE_LOCK(?)', [$lockName]);
+        } finally {
+            if ($db->trans_active()) {
+                $db->trans_rollback();
+            }
+            if ($lockName !== null) {
+                (new ReflectionMethod(Api::class, 'releaseHeldAdvisoryLocks'))->invoke($api);
+            }
+            $observer->close();
+        }
     }
 
     public function testMetadataSaveCannotOverwriteNewerCredentialVersion(): void
