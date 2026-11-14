@@ -156,6 +156,178 @@ final class SettingsApiBasicRevocationHttpTest extends TestCase
         self::assertSame($restoredAfter, $this->fixture->settingRow((int) $setting['id']));
     }
 
+    public function testBasicWriteWaitsForActorRowThenRejectsAfterDemotion(): void
+    {
+        self::assertNotNull($this->fixture);
+        self::assertNotNull($this->server);
+
+        $db = get_instance()->db;
+        $setting = $this->fixture->ownedSetting('actor-lock-race', 'before');
+        $before = $this->fixture->settingRow((int) $setting['id']);
+        $actorBefore = $this->fixture->row('users', $this->fixture->actorId);
+        $providerRole = $db->get_where('roles', ['slug' => DB_SLUG_PROVIDER])->row_array();
+        self::assertNotEmpty($providerRole);
+
+        $observer = $this->observer($db);
+        $multi = curl_multi_init();
+        $handle = null;
+        $transactionOpen = false;
+
+        try {
+            $ownerId = mysqli_thread_id($db->conn_id);
+            self::assertNotSame($ownerId, mysqli_thread_id($observer->conn_id));
+            self::assertTrue($db->trans_begin());
+            $transactionOpen = true;
+            self::assertNotFalse(
+                $db->query(
+                    'SELECT * FROM `' .
+                        $db->dbprefix('users') .
+                        '` WHERE `id` = ' .
+                        (int) $this->fixture->actorId .
+                        ' FOR UPDATE',
+                ),
+            );
+
+            $handle = $this->startBasicSettingsUpdate($setting['name'], $multi);
+            self::assertTrue($this->waitsForBasicActorLock($multi, $observer, $ownerId));
+
+            self::assertTrue(
+                (bool) $db->update(
+                    'users',
+                    ['id_roles' => (int) $providerRole['id']],
+                    ['id' => $this->fixture->actorId],
+                ),
+            );
+            self::assertTrue($db->trans_commit());
+            $transactionOpen = false;
+
+            self::assertTrue($this->drain($multi, $handle));
+            self::assertSame(401, (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE));
+            self::assertSame($before, $this->fixture->settingRow((int) $setting['id']));
+
+            $bearer = $this->bearerClient();
+            $bearerUpdate = $bearer->requestJsonApp('PUT', 'api/v1/settings_api_v1/update/' . $setting['name'], [
+                'value' => 'bearer-control',
+            ]);
+            self::assertSame(200, $bearerUpdate->statusCode);
+            self::assertSame('bearer-control', $this->fixture->settingRow((int) $setting['id'])['value']);
+        } finally {
+            if ($transactionOpen && $db->trans_active()) {
+                $db->trans_rollback();
+            }
+            if ($handle instanceof CurlHandle) {
+                $this->drain($multi, $handle);
+                curl_multi_remove_handle($multi, $handle);
+                curl_close($handle);
+            }
+            curl_multi_close($multi);
+            $observer->close();
+            self::assertTrue(
+                (bool) $db->update('users', ['id_roles' => $actorBefore['id_roles']], ['id' => $actorBefore['id']]),
+                'Could not restore the synthetic actor role.',
+            );
+            self::assertSame($actorBefore, $this->fixture->row('users', $this->fixture->actorId));
+            self::assertTrue(
+                (bool) $db->update('settings', ['value' => $before['value']], ['id' => $before['id']]),
+                'Could not restore the synthetic setting value.',
+            );
+        }
+    }
+
+    private function startBasicSettingsUpdate(string $settingName, CurlMultiHandle $multi): CurlHandle
+    {
+        $handle = curl_init($this->server->baseUrl . '/api/v1/settings_api_v1/update/' . $settingName);
+        self::assertInstanceOf(CurlHandle::class, $handle);
+        curl_setopt_array($handle, [
+            CURLOPT_CUSTOMREQUEST => 'PUT',
+            CURLOPT_POSTFIELDS => json_encode(['value' => 'must-not-persist'], JSON_THROW_ON_ERROR),
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => false,
+            CURLOPT_CONNECTTIMEOUT => 3,
+            CURLOPT_TIMEOUT => 15,
+            CURLOPT_HTTPHEADER => [
+                'Authorization: Basic ' .
+                base64_encode($this->credentials['admin_username'] . ':' . $this->credentials['password']),
+                'Content-Type: application/json',
+            ],
+        ]);
+        self::assertSame(CURLM_OK, curl_multi_add_handle($multi, $handle));
+        return $handle;
+    }
+
+    private function observer(object $db): object
+    {
+        $observer = get_instance()->load->database(
+            [
+                'hostname' => 'mysql',
+                'username' => 'root',
+                'password' => 'secret',
+                'database' => 'easyappointments',
+                'dbdriver' => 'mysqli',
+                'dbprefix' => $db->dbprefix,
+                'pconnect' => false,
+                'db_debug' => false,
+                'char_set' => 'utf8mb4',
+                'dbcollat' => 'utf8mb4_general_ci',
+            ],
+            true,
+        );
+        self::assertTrue($observer->query('SET SESSION TRANSACTION READ ONLY'));
+        return $observer;
+    }
+
+    private function waitsForBasicActorLock(CurlMultiHandle $multi, object $observer, int $ownerId): bool
+    {
+        $deadline = microtime(true) + 8;
+        do {
+            self::assertSame(CURLM_OK, curl_multi_exec($multi, $running));
+            self::assertNotFalse(
+                $result = $observer->query(
+                    'SELECT l.OBJECT_NAME, COALESCE(s.SQL_TEXT, r.PROCESSLIST_INFO) AS statement_text ' .
+                        'FROM performance_schema.data_lock_waits w ' .
+                        'JOIN performance_schema.data_locks l ON l.ENGINE_LOCK_ID = w.REQUESTING_ENGINE_LOCK_ID ' .
+                        'JOIN performance_schema.threads b ON b.THREAD_ID = w.BLOCKING_THREAD_ID ' .
+                        'JOIN performance_schema.threads r ON r.THREAD_ID = w.REQUESTING_THREAD_ID ' .
+                        'LEFT JOIN performance_schema.events_statements_current s ON s.THREAD_ID = r.THREAD_ID ' .
+                        'WHERE b.PROCESSLIST_ID = ' .
+                        $ownerId,
+                ),
+            );
+            foreach ($result->result_array() as $row) {
+                $sql = strtoupper(
+                    (string) preg_replace('/\s+/', ' ', str_replace('`', '', trim((string) $row['statement_text']))),
+                );
+                if (
+                    $row['OBJECT_NAME'] === $observer->dbprefix('users') &&
+                    str_contains($sql, 'FOR UPDATE') &&
+                    str_contains($sql, 'ID_ROLES')
+                ) {
+                    return true;
+                }
+            }
+            if ($running === 0) {
+                return false;
+            }
+            curl_multi_select($multi, 0.05);
+        } while (microtime(true) < $deadline);
+        return false;
+    }
+
+    private function drain(CurlMultiHandle $multi, CurlHandle $handle): bool
+    {
+        $deadline = microtime(true) + 8;
+        do {
+            if (curl_multi_exec($multi, $running) !== CURLM_OK) {
+                return false;
+            }
+            if ($running === 0) {
+                return curl_errno($handle) === CURLE_OK;
+            }
+            curl_multi_select($multi, 0.05);
+        } while (microtime(true) < $deadline);
+        return false;
+    }
+
     private function assertUnauthorizedObservation(GateHttpClient $client, string $path, ?string $keyword = null): void
     {
         $response = $client->get($path, $keyword === null ? [] : ['q' => $keyword]);

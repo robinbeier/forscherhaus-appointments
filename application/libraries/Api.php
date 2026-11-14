@@ -22,6 +22,15 @@ defined('BASEPATH') or exit('No direct script access allowed');
  */
 class Api
 {
+    private ?int $basicActorId = null;
+
+    private bool $basicMutationTransaction = false;
+
+    private ?int $responseStatus = null;
+
+    /** @var list<string> */
+    private array $heldAdvisoryLocks = [];
+
     private const MAX_WITH_TOKENS = 16;
 
     private const MAX_RAW_WITH_TOKENS = 64;
@@ -148,6 +157,8 @@ class Api
                         'Unauthorized',
                     );
                 }
+
+                $this->basicActorId = (int) ($user_data['user_id'] ?? 0);
             }
         } catch (Throwable) {
             $this->request_authentication();
@@ -156,6 +167,137 @@ class Api
         // Preserve the 401 contract for unauthenticated writes before checking
         // the body type of an authenticated mutation.
         $this->rejectNonJsonMutation();
+
+        if ($this->basicActorId !== null && $this->isMutationRequest()) {
+            $this->beginBasicMutationTransaction();
+        }
+    }
+
+    private function isMutationRequest(): bool
+    {
+        $method = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? ''));
+        $action = strtolower((string) ($this->CI->router->method ?? ''));
+        return $method === (['store' => 'POST', 'update' => 'PUT', 'destroy' => 'DELETE'][$action] ?? null);
+    }
+
+    private function beginBasicMutationTransaction(): void
+    {
+        if (!$this->CI->db->trans_begin()) {
+            throw new RuntimeException('Could not start API actor transaction.');
+        }
+
+        $this->basicMutationTransaction = true;
+        register_shutdown_function(function (): void {
+            if ($this->basicMutationTransaction && $this->CI->db->trans_active()) {
+                $this->CI->db->trans_rollback();
+            }
+            $this->releaseHeldAdvisoryLocks();
+        });
+    }
+
+    /** Reserve a Basic API customer identity until the outer transaction ends. */
+    public function holdBasicCustomerCreationLock(?string $email): ?string
+    {
+        if (!$this->basicMutationTransaction) {
+            return null;
+        }
+
+        require_once APPPATH . 'core/Customer_creation_identity_lock.php';
+        $lockName = Customer_creation_identity_lock::name($email, (string) ($this->CI->db->database ?? ''));
+        if ($lockName === null) {
+            return null;
+        }
+
+        $lock = $this->CI->db->query('SELECT GET_LOCK(?, 10) AS acquired', [$lockName]);
+        if ($lock === false || (int) $lock->row()->acquired !== 1) {
+            throw new RuntimeException('Could not reserve the customer email for creation.');
+        }
+
+        $this->heldAdvisoryLocks[] = $lockName;
+        return $lockName;
+    }
+
+    private function releaseHeldAdvisoryLocks(): void
+    {
+        foreach ($this->heldAdvisoryLocks as $lockName) {
+            try {
+                $this->CI->db->query('SELECT RELEASE_LOCK(?)', [$lockName]);
+            } catch (Throwable) {
+                log_message('error', 'Could not release a Basic API customer creation lock.');
+            }
+        }
+        $this->heldAdvisoryLocks = [];
+    }
+
+    private function recheckBasicActor(): bool
+    {
+        $users = $this->CI->db->dbprefix('users');
+        $actor = $this->CI->db
+            ->query("SELECT id, id_roles FROM {$users} WHERE id = ? FOR UPDATE", [$this->basicActorId])
+            ->row_array();
+        $roles = $this->CI->db->dbprefix('roles');
+        $role = empty($actor)
+            ? []
+            : $this->CI->db->query("SELECT slug FROM {$roles} WHERE id = ?", [$actor['id_roles']])->row_array();
+
+        if (empty($actor) || (string) ($role['slug'] ?? '') !== DB_SLUG_ADMIN) {
+            return false;
+        }
+
+        return true;
+    }
+
+    public function trackResponseStatus(int $status): void
+    {
+        $this->responseStatus = $status;
+    }
+
+    public function finalizeMutationTransaction(): void
+    {
+        if (!$this->basicMutationTransaction) {
+            return;
+        }
+
+        $status = $this->responseStatus;
+        if ($status !== null && $status >= 200 && $status < 300) {
+            if (!$this->CI->db->trans_status()) {
+                $this->CI->db->trans_rollback();
+                $this->basicMutationTransaction = false;
+                $this->releaseHeldAdvisoryLocks();
+                throw new RuntimeException('Could not commit API actor transaction.');
+            }
+            try {
+                $authorized = $this->recheckBasicActor();
+            } catch (Throwable $error) {
+                $this->CI->db->trans_rollback();
+                $this->basicMutationTransaction = false;
+                $this->releaseHeldAdvisoryLocks();
+                throw new RuntimeException('Could not recheck API actor authorization.', 0, $error);
+            }
+            if (!$authorized) {
+                $this->CI->db->trans_rollback();
+                $this->basicMutationTransaction = false;
+                $this->responseStatus = 401;
+                $this->releaseHeldAdvisoryLocks();
+                $this->CI->output
+                    ->set_status_header(401)
+                    ->set_header('WWW-Authenticate: Basic realm="Easy!Appointments"')
+                    ->set_content_type('application/json')
+                    ->set_output(json_encode(['success' => false, 'message' => 'Authentication required.']));
+                return;
+            }
+            if (!$this->CI->db->trans_commit()) {
+                $this->CI->db->trans_rollback();
+                $this->basicMutationTransaction = false;
+                $this->releaseHeldAdvisoryLocks();
+                throw new RuntimeException('Could not commit API actor transaction.');
+            }
+        } elseif ($this->CI->db->trans_active()) {
+            $this->CI->db->trans_rollback();
+        }
+
+        $this->releaseHeldAdvisoryLocks();
+        $this->basicMutationTransaction = false;
     }
 
     /**

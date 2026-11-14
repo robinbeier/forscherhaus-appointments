@@ -267,7 +267,8 @@ class Service_categories_api_v1 extends EA_Controller
     /** Keep the write and response projection atomic before reporting success. */
     private function saveAndEncode(array $service_category): array
     {
-        if ($this->db->trans_active() || !$this->db->trans_begin()) {
+        $owns_transaction = !$this->db->trans_active();
+        if ($owns_transaction && !$this->db->trans_begin()) {
             throw new RuntimeException('Could not start service-category write transaction.');
         }
 
@@ -279,13 +280,13 @@ class Service_categories_api_v1 extends EA_Controller
             // A response that cannot be represented as JSON must not commit a write.
             json_encode($saved_service_category, JSON_THROW_ON_ERROR);
 
-            if (!$this->db->trans_status() || !$this->db->trans_commit()) {
+            if (!$this->db->trans_status() || ($owns_transaction && !$this->db->trans_commit())) {
                 throw new RuntimeException('Could not commit service-category write transaction.');
             }
 
             return $saved_service_category;
         } catch (Throwable $error) {
-            if ($this->db->trans_active() && !$this->db->trans_rollback()) {
+            if ($owns_transaction && $this->db->trans_active() && !$this->db->trans_rollback()) {
                 throw new RuntimeException('Could not roll back service-category write transaction.', 0, $error);
             }
 
