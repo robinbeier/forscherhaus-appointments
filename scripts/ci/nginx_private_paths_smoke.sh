@@ -18,6 +18,7 @@ network="fh-nginx-smoke-$RANDOM-$$"
 nginx_container="fh-nginx-smoke-$RANDOM-$$"
 php_container="fh-php-smoke-$RANDOM-$$"
 body_file="$docroot/.response"
+payload_file="$docroot/.payload"
 
 cleanup() {
     set +e
@@ -183,5 +184,75 @@ assert_php_route() {
 assert_php_route '/index.php' '/index.php' '/index.php' ''
 assert_php_route '/index.php/login' '/index.php/login' '/index.php' '/login'
 assert_php_route '/frontcontroller' '/frontcontroller' '/index.php' ''
+assert_php_route '/booking/register' '/booking/register' '/index.php' '/booking/register'
+assert_php_route '/booking/register/' '/booking/register/' '/index.php' '/booking/register'
+assert_php_route '/index.php/booking/register' '/index.php/booking/register' '/index.php' '/booking/register'
+assert_php_route '/index.php/booking/register/' '/index.php/booking/register/' '/index.php' '/booking/register/'
+
+# Route-specific request-body protection: booking/register must reject a
+# form-encoded body above 1 MiB at Nginx, while the ordinary route still reaches
+# the front controller and unrelated static paths are not given this cap.
+dd if=/dev/zero of="$payload_file" bs=1024 count=1025 >/dev/null 2>&1
+booking_status="$(curl --noproxy '*' --silent --show-error --output "$body_file" \
+    --write-out '%{http_code}' --request POST \
+    --header 'Content-Type: application/x-www-form-urlencoded' \
+    --data-binary "@$payload_file" "$base_url/booking/register")"
+[[ "$booking_status" == '413' ]] || {
+    echo "Expected oversized booking/register body to return HTTP 413, got $booking_status." >&2
+    cat "$body_file" >&2
+    exit 1
+}
+
+for booking_path in '/booking/register/' '/index.php/booking/register' '/index.php/booking/register/'; do
+    alias_status="$(curl --noproxy '*' --silent --show-error --output "$body_file" \
+        --write-out '%{http_code}' --request POST \
+        --header 'Content-Type: application/x-www-form-urlencoded' \
+        --data-binary "@$payload_file" "$base_url$booking_path")"
+    [[ "$alias_status" == '413' ]] || {
+        echo "Expected oversized $booking_path body to return HTTP 413, got $alias_status." >&2
+        cat "$body_file" >&2
+        exit 1
+    }
+done
+
+chunked_status="$(cat "$payload_file" | curl --noproxy '*' --silent --show-error --output "$body_file" \
+    --write-out '%{http_code}' --request POST \
+    --header 'Content-Type: application/x-www-form-urlencoded' \
+    --header 'Transfer-Encoding: chunked' \
+    --data-binary @- "$base_url/booking/register")"
+[[ "$chunked_status" == '413' ]] || {
+    echo "Expected chunked oversized booking body to return HTTP 413, got $chunked_status." >&2
+    cat "$body_file" >&2
+    exit 1
+}
+
+small_booking_status="$(curl --noproxy '*' --silent --show-error --output "$body_file" \
+    --write-out '%{http_code}' --request POST \
+    --header 'Content-Type: application/x-www-form-urlencoded' \
+    --data 'fixture=small' "$base_url/booking/register")"
+[[ "$small_booking_status" == '200' ]] || {
+    echo "Expected ordinary booking/register body to reach the front controller, got HTTP $small_booking_status." >&2
+    cat "$body_file" >&2
+    exit 1
+}
+
+asset_status="$(curl --noproxy '*' --silent --show-error --output "$body_file" \
+    --write-out '%{http_code}' --request POST \
+    --header 'Content-Type: application/x-www-form-urlencoded' \
+    --data-binary "@$payload_file" "$base_url/assets/fixture.txt")"
+[[ "$asset_status" != '413' ]] || {
+    echo 'Expected unrelated asset path to retain the server-wide body limit.' >&2
+    exit 1
+}
+
+unrelated_php_status="$(curl --noproxy '*' --silent --show-error --output "$body_file" \
+    --write-out '%{http_code}' --request POST \
+    --header 'Content-Type: application/x-www-form-urlencoded' \
+    --data-binary "@$payload_file" "$base_url/index.php/login")"
+[[ "$unrelated_php_status" == '200' ]] || {
+    echo "Expected unrelated front-controller path to retain the server-wide body limit, got HTTP $unrelated_php_status." >&2
+    cat "$body_file" >&2
+    exit 1
+}
 
 printf 'nginx_private_paths_smoke=passed image=nginx:1.29.6-alpine host=127.0.0.1:%s\n' "$host_port"
