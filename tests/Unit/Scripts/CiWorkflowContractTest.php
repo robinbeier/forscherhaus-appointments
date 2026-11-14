@@ -254,7 +254,7 @@ class CiWorkflowContractTest extends TestCase
             $this->gateBody($steps, 'Resolve system Chrome for CSP probe', 'js-lint-changed-5'),
         );
         self::assertSame(
-            'node --test tests/JavaScript/gulp_build.test.js tests/JavaScript/dashboard_date_range.test.js tests/JavaScript/dashboard_zero_target.test.js tests/JavaScript/blocked_periods.test.js tests/JavaScript/csp_compatibility_probe.test.js tests/JavaScript/admins_secretaries_username_validation.test.js tests/JavaScript/calendar_unavailability_failed_write.test.js tests/JavaScript/unavailabilities_modal_save.test.js tests/JavaScript/general_settings.test.js',
+            'node --test tests/JavaScript/gulp_build.test.js tests/JavaScript/dashboard_date_range.test.js tests/JavaScript/dashboard_zero_target.test.js tests/JavaScript/blocked_periods.test.js tests/JavaScript/csp_compatibility_probe.test.js tests/JavaScript/admins_secretaries_username_validation.test.js tests/JavaScript/calendar_unavailability_failed_write.test.js tests/JavaScript/unavailabilities_modal_save.test.js tests/JavaScript/general_settings.test.js tests/JavaScript/booking_labels_security.test.js tests/JavaScript/booking_webmcp.test.js tests/JavaScript/booking_consent_submission.test.js',
             $this->gateBody($steps, 'Frontend compiler regression tests', 'js-lint-changed-4'),
         );
     }
