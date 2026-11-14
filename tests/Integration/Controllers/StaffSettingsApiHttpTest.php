@@ -165,6 +165,30 @@ final class StaffSettingsApiHttpTest extends TestCase
         self::assertNotSame('ldap_password', $rows[0]['name'] ?? null);
     }
 
+    public function testSettingsApiLengthZeroPreservesUnboundedPublicCollection(): void
+    {
+        $ownedSetting = $this->fixture->ownedSetting('length-zero', '0');
+
+        foreach (
+            [
+                $this->basicClient($this->credentials['admin_username'], $this->credentials['password']),
+                $this->bearerClient($this->credentials['token']),
+            ]
+            as $client
+        ) {
+            $allRows = $this->success($client->get('api/v1/settings', ['length' => 0]));
+            self::assertNotEmpty($allRows);
+            self::assertContains(['name' => $ownedSetting['name'], 'value' => '0'], $allRows);
+            $this->assertNoSyntheticSecrets([], [], $allRows);
+
+            $searchRows = $this->success(
+                $client->get('api/v1/settings', ['q' => $ownedSetting['name'], 'length' => 0]),
+            );
+            self::assertSame([['name' => $ownedSetting['name'], 'value' => '0']], $searchRows);
+            $this->assertNoSyntheticSecrets([], [], $searchRows);
+        }
+    }
+
     public function testSettingsApiKeepsGeneralAndCustomBookingSettingsWritable(): void
     {
         $db = get_instance()->db;

@@ -137,7 +137,14 @@ class Settings_api_v1 extends EA_Controller
                     fn(array $setting): bool => $this->isPublicSettingName((string) ($setting['name'] ?? '')),
                 ),
             );
-            $settings = array_slice($settings, $offset, $limit);
+            // A zero length has historically meant an unbounded collection in
+            // the underlying model query. Preserve that behavior after the
+            // allowlist filter while still applying positive pagination.
+            if ($limit > 0) {
+                $settings = array_slice($settings, $offset, $limit);
+            } elseif ($offset > 0) {
+                $settings = array_slice($settings, $offset);
+            }
 
             foreach ($settings as &$setting) {
                 $this->settings_model->api_encode($setting);
