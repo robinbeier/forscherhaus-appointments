@@ -31,11 +31,11 @@ Dashboard periods may cover up to 14 inclusive calendar days. The selected start
 ## Run
 
 ```bash
-composer release:gate:dashboard -- \
+printf %s "$EA_GATE_PASSWORD" | composer release:gate:dashboard -- \
   --base-url=http://localhost \
   --index-page=index.php \
   --username="$EA_GATE_USERNAME" \
-  --password="$EA_GATE_PASSWORD" \
+  --password-stdin \
   --start-date=2026-02-02 \
   --end-date=2026-02-13 \
   --statuses=Booked \
@@ -47,7 +47,8 @@ composer release:gate:dashboard -- \
 - `--base-url` (required): App base URL, e.g. `http://localhost`.
 - `--index-page` (optional): URL index segment. Default `index.php`. Use empty value in rewrite mode.
 - `--username` (required): Admin username.
-- `--password` (required): Admin password.
+- `--password-stdin` (recommended): Read the exact admin password from stdin so it is not exposed in process arguments. Use `printf %s` when piping an environment variable to avoid adding a newline.
+- `--password` (legacy): Admin password argument for disposable local callers only; it can be visible to same-host process observers.
 - `--start-date` (required): `YYYY-MM-DD`.
 - `--end-date` (required): `YYYY-MM-DD`.
 - `--statuses` (optional): Comma-separated list, default `Booked`.
