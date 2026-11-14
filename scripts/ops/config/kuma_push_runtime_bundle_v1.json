@@ -40,7 +40,7 @@
             "source": "scripts/ops/lib/kuma_push_common.sh",
             "install": "scripts/ops/lib/kuma_push_common.sh",
             "role": "shell_library",
-            "sha256": "f10665edccf5a28540f3cbf5cd90bb9000b7c052901574ecc68cb0e05bc7ee56"
+            "sha256": "e6b5358a7eaca07f4ef294ca6f52df6e6e0202263f5e0b6c14f115d2e23ac180"
         },
         {
             "source": "scripts/ops/lib/app_log_classification.sh",
