@@ -18,6 +18,7 @@ network="fh-nginx-smoke-$RANDOM-$$"
 nginx_container="fh-nginx-smoke-$RANDOM-$$"
 php_container="fh-php-smoke-$RANDOM-$$"
 body_file="$docroot/.response"
+payload_file="$docroot/.payload"
 
 cleanup() {
     set +e
@@ -183,5 +184,223 @@ assert_php_route() {
 assert_php_route '/index.php' '/index.php' '/index.php' ''
 assert_php_route '/index.php/login' '/index.php/login' '/index.php' '/login'
 assert_php_route '/frontcontroller' '/frontcontroller' '/index.php' ''
+assert_php_route '/booking/register' '/booking/register' '/index.php' '/booking/register'
+assert_php_route '/booking/register/' '/booking/register/' '/index.php' '/booking/register'
+assert_php_route '/index.php/booking/register' '/index.php/booking/register' '/index.php' '/booking/register'
+assert_php_route '/index.php/booking/register/' '/index.php/booking/register/' '/index.php' '/booking/register/'
+
+for booking_alias in \
+    '/booking/Register' '/index.php/booking/Register' \
+    '/book.ing/register' '/b.o.o.k.i.n.g/register' '/booking./register' \
+    '/index.php/book.ing/register' '/index.php/b.o.o.k.i.n.g/register' \
+    '/booking/register/extra' '/index.php/booking/register/extra' \
+    '/booking/Register/extra' '/index.php/booking/Register/extra' \
+    '/book.ing/register/extra' '/index.php/book.ing/register/extra'; do
+    alias_small_status="$(curl --noproxy '*' --silent --show-error --output "$body_file" \
+        --write-out '%{http_code}' --request POST \
+        --header 'Content-Type: application/x-www-form-urlencoded' \
+        --data 'fixture=small' "$base_url$booking_alias")"
+    [[ "$alias_small_status" == '200' ]] || {
+        echo "Expected small booking alias $booking_alias to reach the front controller, got HTTP $alias_small_status." >&2
+        cat "$body_file" >&2
+        exit 1
+    }
+    grep -Fqx 'synthetic-frontcontroller-ok' "$body_file"
+done
+
+for dotdot_alias in \
+    '/booking/../register' '/index.php/booking/../register' \
+    '/booking/register/..' '/index.php/booking/register/..' \
+    '/booking/%2e%2e/register' '/index.php/booking/%2e%2e/register' \
+    '/booking/register/%2e%2e' '/index.php/booking/register/%2e%2e' \
+    '/booking/.%2e/register' '/booking/register/%2e.' \
+    '/booking%2f..%2fregister' '/booking%2fregister%2f..'; do
+    dotdot_status="$(curl --path-as-is --noproxy '*' --silent --show-error --output "$body_file" \
+        --write-out '%{http_code}' --request POST \
+        --header 'Content-Type: application/x-www-form-urlencoded' \
+        --data 'fixture=small' "$base_url$dotdot_alias")"
+    [[ "$dotdot_status" == '404' ]] || {
+        echo "Expected dot-dot path $dotdot_alias to return HTTP 404, got $dotdot_status." >&2
+        cat "$body_file" >&2
+        exit 1
+    }
+done
+
+root_dotdot_status="$(curl --path-as-is --noproxy '*' --silent --show-error --output "$body_file" \
+    --write-out '%{http_code}' --request POST \
+    --header 'Content-Type: application/x-www-form-urlencoded' \
+    --data 'fixture=small' "$base_url/../booking/register")"
+[[ "$root_dotdot_status" == '400' || "$root_dotdot_status" == '404' ]] || {
+    echo "Expected raw root dot-dot path to be rejected with HTTP 400 or 404, got $root_dotdot_status." >&2
+    cat "$body_file" >&2
+    exit 1
+}
+
+root_encoded_dotdot_status="$(curl --path-as-is --noproxy '*' --silent --show-error --output "$body_file" \
+    --write-out '%{http_code}' --request POST \
+    --header 'Content-Type: application/x-www-form-urlencoded' \
+    --data 'fixture=small' "$base_url/%2e%2e/booking/register")"
+[[ "$root_encoded_dotdot_status" == '400' || "$root_encoded_dotdot_status" == '404' ]] || {
+    echo "Expected encoded root dot-dot path to be rejected with HTTP 400 or 404, got $root_encoded_dotdot_status." >&2
+    cat "$body_file" >&2
+    exit 1
+}
+
+# Query-routed paths are accepted by CodeIgniter but cannot be constrained by
+# an Nginx location match. They must be rejected at the edge so normalized
+# slash and dot-dot variants cannot bypass the booking body limit; ordinary
+# query parameters and canonical path forms remain available to browsers.
+for booking_query_alias in \
+    '/index.php?/booking/register' '/?/booking/register' \
+    '/index.php?/booking/register?foo=bar' '/?/booking/register?foo=bar' \
+    '/index.php?//booking///register' '/?//booking///register' \
+    '/index.php?/../booking/register' '/?/../booking/register'; do
+    alias_route_status="$(curl --noproxy '*' --silent --show-error --output "$body_file" \
+        --write-out '%{http_code}' --request POST \
+        --header 'Content-Type: application/x-www-form-urlencoded' \
+        --data 'fixture=small' "$base_url$booking_query_alias")"
+    [[ "$alias_route_status" == '404' ]] || {
+        echo "Expected query-string booking alias $booking_query_alias to return HTTP 404, got $alias_route_status." >&2
+        cat "$body_file" >&2
+        exit 1
+    }
+done
+
+for ordinary_query_path in '/?foo=bar' '/index.php?foo=bar' '/?next=/../foo'; do
+    ordinary_query_status="$(request_status "$ordinary_query_path")"
+    [[ "$ordinary_query_status" == '200' ]] || {
+        echo "Expected ordinary query path $ordinary_query_path to return HTTP 200, got $ordinary_query_status." >&2
+        cat "$body_file" >&2
+        exit 1
+    }
+    grep -Fqx 'synthetic-frontcontroller-ok' "$body_file"
+done
+
+# Route-specific request-body protection: booking/register must reject a
+# form-encoded body above 1 MiB at Nginx, while the ordinary route still reaches
+# the front controller and unrelated static paths are not given this cap.
+dd if=/dev/zero of="$payload_file" bs=1024 count=1025 >/dev/null 2>&1
+booking_status="$(curl --noproxy '*' --silent --show-error --output "$body_file" \
+    --write-out '%{http_code}' --request POST \
+    --header 'Content-Type: application/x-www-form-urlencoded' \
+    --data-binary "@$payload_file" "$base_url/booking/register")"
+[[ "$booking_status" == '413' ]] || {
+    echo "Expected oversized booking/register body to return HTTP 413, got $booking_status." >&2
+    cat "$body_file" >&2
+    exit 1
+}
+
+for booking_path in \
+    '/booking/register/' '/index.php/booking/register' '/index.php/booking/register/' \
+    '/booking/Register' '/index.php/booking/Register' \
+    '/book.ing/register' '/b.o.o.k.i.n.g/register' '/booking./register' \
+    '/index.php/book.ing/register' '/index.php/b.o.o.k.i.n.g/register' \
+    '/booking/register/extra' '/index.php/booking/register/extra' \
+    '/booking/Register/extra' '/index.php/booking/Register/extra' \
+    '/book.ing/register/extra' '/index.php/book.ing/register/extra'; do
+    alias_status="$(curl --noproxy '*' --silent --show-error --output "$body_file" \
+        --write-out '%{http_code}' --request POST \
+        --header 'Content-Type: application/x-www-form-urlencoded' \
+        --data-binary "@$payload_file" "$base_url$booking_path")"
+    [[ "$alias_status" == '413' ]] || {
+        echo "Expected oversized $booking_path body to return HTTP 413, got $alias_status." >&2
+        cat "$body_file" >&2
+        exit 1
+    }
+done
+
+for dotdot_alias in \
+    '/booking/../register' '/index.php/booking/../register' \
+    '/booking/register/..' '/index.php/booking/register/..' \
+    '/booking/%2e%2e/register' '/index.php/booking/%2e%2e/register' \
+    '/booking/register/%2e%2e' '/index.php/booking/register/%2e%2e' \
+    '/booking/.%2e/register' '/booking/register/%2e.' \
+    '/booking%2f..%2fregister' '/booking%2fregister%2f..'; do
+    oversized_dotdot_status="$(curl --path-as-is --noproxy '*' --silent --show-error --output "$body_file" \
+        --write-out '%{http_code}' --request POST \
+        --header 'Content-Type: application/x-www-form-urlencoded' \
+        --data-binary "@$payload_file" "$base_url$dotdot_alias")"
+    [[ "$oversized_dotdot_status" == '404' ]] || {
+        echo "Expected oversized dot-dot path $dotdot_alias to return HTTP 404, got $oversized_dotdot_status." >&2
+        cat "$body_file" >&2
+        exit 1
+    }
+done
+
+oversized_root_dotdot_status="$(curl --path-as-is --noproxy '*' --silent --show-error --output "$body_file" \
+    --write-out '%{http_code}' --request POST \
+    --header 'Content-Type: application/x-www-form-urlencoded' \
+    --data-binary "@$payload_file" "$base_url/../booking/register")"
+[[ "$oversized_root_dotdot_status" == '400' || "$oversized_root_dotdot_status" == '404' ]] || {
+    echo "Expected oversized raw root dot-dot path to be rejected with HTTP 400 or 404, got $oversized_root_dotdot_status." >&2
+    cat "$body_file" >&2
+    exit 1
+}
+
+oversized_root_encoded_dotdot_status="$(curl --path-as-is --noproxy '*' --silent --show-error --output "$body_file" \
+    --write-out '%{http_code}' --request POST \
+    --header 'Content-Type: application/x-www-form-urlencoded' \
+    --data-binary "@$payload_file" "$base_url/%2e%2e/booking/register")"
+[[ "$oversized_root_encoded_dotdot_status" == '400' || "$oversized_root_encoded_dotdot_status" == '404' ]] || {
+    echo "Expected oversized encoded root dot-dot path to be rejected with HTTP 400 or 404, got $oversized_root_encoded_dotdot_status." >&2
+    cat "$body_file" >&2
+    exit 1
+}
+
+for booking_query_alias in \
+    '/index.php?/booking/register' '/?/booking/register' \
+    '/index.php?/booking/register?foo=bar' '/?/booking/register?foo=bar' \
+    '/index.php?//booking///register' '/?//booking///register' \
+    '/index.php?/../booking/register' '/?/../booking/register'; do
+    oversized_alias_status="$(curl --noproxy '*' --silent --show-error --output "$body_file" \
+        --write-out '%{http_code}' --request POST \
+        --header 'Content-Type: application/x-www-form-urlencoded' \
+        --data-binary "@$payload_file" "$base_url$booking_query_alias")"
+    [[ "$oversized_alias_status" == '404' ]] || {
+        echo "Expected oversized query-string booking alias $booking_query_alias to return HTTP 404, got $oversized_alias_status." >&2
+        cat "$body_file" >&2
+        exit 1
+    }
+done
+
+chunked_status="$(cat "$payload_file" | curl --noproxy '*' --silent --show-error --output "$body_file" \
+    --write-out '%{http_code}' --request POST \
+    --header 'Content-Type: application/x-www-form-urlencoded' \
+    --header 'Transfer-Encoding: chunked' \
+    --data-binary @- "$base_url/booking/register")"
+[[ "$chunked_status" == '413' ]] || {
+    echo "Expected chunked oversized booking body to return HTTP 413, got $chunked_status." >&2
+    cat "$body_file" >&2
+    exit 1
+}
+
+small_booking_status="$(curl --noproxy '*' --silent --show-error --output "$body_file" \
+    --write-out '%{http_code}' --request POST \
+    --header 'Content-Type: application/x-www-form-urlencoded' \
+    --data 'fixture=small' "$base_url/booking/register")"
+[[ "$small_booking_status" == '200' ]] || {
+    echo "Expected ordinary booking/register body to reach the front controller, got HTTP $small_booking_status." >&2
+    cat "$body_file" >&2
+    exit 1
+}
+
+asset_status="$(curl --noproxy '*' --silent --show-error --output "$body_file" \
+    --write-out '%{http_code}' --request POST \
+    --header 'Content-Type: application/x-www-form-urlencoded' \
+    --data-binary "@$payload_file" "$base_url/assets/fixture.txt")"
+[[ "$asset_status" != '413' ]] || {
+    echo 'Expected unrelated asset path to retain the server-wide body limit.' >&2
+    exit 1
+}
+
+unrelated_php_status="$(curl --noproxy '*' --silent --show-error --output "$body_file" \
+    --write-out '%{http_code}' --request POST \
+    --header 'Content-Type: application/x-www-form-urlencoded' \
+    --data-binary "@$payload_file" "$base_url/index.php/login")"
+[[ "$unrelated_php_status" == '200' ]] || {
+    echo "Expected unrelated front-controller path to retain the server-wide body limit, got HTTP $unrelated_php_status." >&2
+    cat "$body_file" >&2
+    exit 1
+}
 
 printf 'nginx_private_paths_smoke=passed image=nginx:1.29.6-alpine host=127.0.0.1:%s\n' "$host_port"
