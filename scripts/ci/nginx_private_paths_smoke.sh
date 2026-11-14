@@ -190,11 +190,11 @@ assert_php_route '/index.php/booking/register' '/index.php/booking/register' '/i
 assert_php_route '/index.php/booking/register/' '/index.php/booking/register/' '/index.php' '/booking/register/'
 
 for booking_alias in \
-    '/booking/register/extra' '/index.php/booking/register/extra' \
     '/booking/Register' '/index.php/booking/Register' \
-    '/booking/Register/extra' '/index.php/booking/Register/extra' \
     '/book.ing/register' '/b.o.o.k.i.n.g/register' '/booking./register' \
     '/index.php/book.ing/register' '/index.php/b.o.o.k.i.n.g/register' \
+    '/booking/register/extra' '/index.php/booking/register/extra' \
+    '/booking/Register/extra' '/index.php/booking/Register/extra' \
     '/book.ing/register/extra' '/index.php/book.ing/register/extra'; do
     alias_small_status="$(curl --noproxy '*' --silent --show-error --output "$body_file" \
         --write-out '%{http_code}' --request POST \
@@ -207,6 +207,44 @@ for booking_alias in \
     }
     grep -Fqx 'synthetic-frontcontroller-ok' "$body_file"
 done
+
+for dotdot_alias in \
+    '/booking/../register' '/index.php/booking/../register' \
+    '/booking/register/..' '/index.php/booking/register/..' \
+    '/booking/%2e%2e/register' '/index.php/booking/%2e%2e/register' \
+    '/booking/register/%2e%2e' '/index.php/booking/register/%2e%2e' \
+    '/booking/.%2e/register' '/booking/register/%2e.' \
+    '/booking%2f..%2fregister' '/booking%2fregister%2f..'; do
+    dotdot_status="$(curl --path-as-is --noproxy '*' --silent --show-error --output "$body_file" \
+        --write-out '%{http_code}' --request POST \
+        --header 'Content-Type: application/x-www-form-urlencoded' \
+        --data 'fixture=small' "$base_url$dotdot_alias")"
+    [[ "$dotdot_status" == '404' ]] || {
+        echo "Expected dot-dot path $dotdot_alias to return HTTP 404, got $dotdot_status." >&2
+        cat "$body_file" >&2
+        exit 1
+    }
+done
+
+root_dotdot_status="$(curl --path-as-is --noproxy '*' --silent --show-error --output "$body_file" \
+    --write-out '%{http_code}' --request POST \
+    --header 'Content-Type: application/x-www-form-urlencoded' \
+    --data 'fixture=small' "$base_url/../booking/register")"
+[[ "$root_dotdot_status" == '400' || "$root_dotdot_status" == '404' ]] || {
+    echo "Expected raw root dot-dot path to be rejected with HTTP 400 or 404, got $root_dotdot_status." >&2
+    cat "$body_file" >&2
+    exit 1
+}
+
+root_encoded_dotdot_status="$(curl --path-as-is --noproxy '*' --silent --show-error --output "$body_file" \
+    --write-out '%{http_code}' --request POST \
+    --header 'Content-Type: application/x-www-form-urlencoded' \
+    --data 'fixture=small' "$base_url/%2e%2e/booking/register")"
+[[ "$root_encoded_dotdot_status" == '400' || "$root_encoded_dotdot_status" == '404' ]] || {
+    echo "Expected encoded root dot-dot path to be rejected with HTTP 400 or 404, got $root_encoded_dotdot_status." >&2
+    cat "$body_file" >&2
+    exit 1
+}
 
 # Query-routed paths are accepted by CodeIgniter but cannot be constrained by
 # an Nginx location match. They must be rejected at the edge so normalized
@@ -228,7 +266,7 @@ for booking_query_alias in \
     }
 done
 
-for ordinary_query_path in '/?foo=bar' '/index.php?foo=bar'; do
+for ordinary_query_path in '/?foo=bar' '/index.php?foo=bar' '/?next=/../foo'; do
     ordinary_query_status="$(request_status "$ordinary_query_path")"
     [[ "$ordinary_query_status" == '200' ]] || {
         echo "Expected ordinary query path $ordinary_query_path to return HTTP 200, got $ordinary_query_status." >&2
@@ -254,11 +292,11 @@ booking_status="$(curl --noproxy '*' --silent --show-error --output "$body_file"
 
 for booking_path in \
     '/booking/register/' '/index.php/booking/register' '/index.php/booking/register/' \
-    '/booking/register/extra' '/index.php/booking/register/extra' \
     '/booking/Register' '/index.php/booking/Register' \
-    '/booking/Register/extra' '/index.php/booking/Register/extra' \
     '/book.ing/register' '/b.o.o.k.i.n.g/register' '/booking./register' \
     '/index.php/book.ing/register' '/index.php/b.o.o.k.i.n.g/register' \
+    '/booking/register/extra' '/index.php/booking/register/extra' \
+    '/booking/Register/extra' '/index.php/booking/Register/extra' \
     '/book.ing/register/extra' '/index.php/book.ing/register/extra'; do
     alias_status="$(curl --noproxy '*' --silent --show-error --output "$body_file" \
         --write-out '%{http_code}' --request POST \
@@ -270,6 +308,44 @@ for booking_path in \
         exit 1
     }
 done
+
+for dotdot_alias in \
+    '/booking/../register' '/index.php/booking/../register' \
+    '/booking/register/..' '/index.php/booking/register/..' \
+    '/booking/%2e%2e/register' '/index.php/booking/%2e%2e/register' \
+    '/booking/register/%2e%2e' '/index.php/booking/register/%2e%2e' \
+    '/booking/.%2e/register' '/booking/register/%2e.' \
+    '/booking%2f..%2fregister' '/booking%2fregister%2f..'; do
+    oversized_dotdot_status="$(curl --path-as-is --noproxy '*' --silent --show-error --output "$body_file" \
+        --write-out '%{http_code}' --request POST \
+        --header 'Content-Type: application/x-www-form-urlencoded' \
+        --data-binary "@$payload_file" "$base_url$dotdot_alias")"
+    [[ "$oversized_dotdot_status" == '404' ]] || {
+        echo "Expected oversized dot-dot path $dotdot_alias to return HTTP 404, got $oversized_dotdot_status." >&2
+        cat "$body_file" >&2
+        exit 1
+    }
+done
+
+oversized_root_dotdot_status="$(curl --path-as-is --noproxy '*' --silent --show-error --output "$body_file" \
+    --write-out '%{http_code}' --request POST \
+    --header 'Content-Type: application/x-www-form-urlencoded' \
+    --data-binary "@$payload_file" "$base_url/../booking/register")"
+[[ "$oversized_root_dotdot_status" == '400' || "$oversized_root_dotdot_status" == '404' ]] || {
+    echo "Expected oversized raw root dot-dot path to be rejected with HTTP 400 or 404, got $oversized_root_dotdot_status." >&2
+    cat "$body_file" >&2
+    exit 1
+}
+
+oversized_root_encoded_dotdot_status="$(curl --path-as-is --noproxy '*' --silent --show-error --output "$body_file" \
+    --write-out '%{http_code}' --request POST \
+    --header 'Content-Type: application/x-www-form-urlencoded' \
+    --data-binary "@$payload_file" "$base_url/%2e%2e/booking/register")"
+[[ "$oversized_root_encoded_dotdot_status" == '400' || "$oversized_root_encoded_dotdot_status" == '404' ]] || {
+    echo "Expected oversized encoded root dot-dot path to be rejected with HTTP 400 or 404, got $oversized_root_encoded_dotdot_status." >&2
+    cat "$body_file" >&2
+    exit 1
+}
 
 for booking_query_alias in \
     '/index.php?/booking/register' '/?/booking/register' \
