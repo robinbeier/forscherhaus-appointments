@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Libraries;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use ReflectionClass;
 use ReflectionProperty;
@@ -279,6 +280,85 @@ final class RescheduleAuthorityLockOrderTest extends TestCase
         $this->assertStringContainsString('FOR UPDATE', $query['sql']);
     }
 
+    #[DataProvider('customerOverlapIntervals')]
+    public function testCustomerOverlapUsesStrictIntervalIntersection(
+        string $existing_start,
+        string $existing_end,
+        string $requested_start,
+        string $requested_end,
+        bool $expected,
+    ): void {
+        $database = new RescheduleAuthorityCustomerOverlapFakeDatabase([
+            [
+                'id' => 501,
+                'id_users_customer' => 20,
+                'start_datetime' => $existing_start,
+                'end_datetime' => $existing_end,
+            ],
+        ]);
+        $authority = $this->createAuthority($database);
+
+        $this->assertSame($expected, $authority->customerHasOverlap(20, $requested_start, $requested_end, 999));
+
+        $query = $database->queries[0] ?? null;
+        $this->assertIsArray($query);
+        $this->assertStringContainsString('`start_datetime` < ?', $query['sql']);
+        $this->assertStringContainsString('`end_datetime` > ?', $query['sql']);
+        $this->assertStringContainsString('FOR UPDATE', $query['sql']);
+        $this->assertSame([20, $requested_end, $requested_start, 999], $query['bindings']);
+    }
+
+    /**
+     * @return array<string, array{string, string, string, string, bool}>
+     */
+    public static function customerOverlapIntervals(): array
+    {
+        return [
+            'existing interval overlaps on the left' => [
+                '2035-01-01 09:00:00',
+                '2035-01-01 10:00:00',
+                '2035-01-01 09:30:00',
+                '2035-01-01 10:30:00',
+                true,
+            ],
+            'existing interval overlaps on the right' => [
+                '2035-01-01 10:00:00',
+                '2035-01-01 11:00:00',
+                '2035-01-01 09:30:00',
+                '2035-01-01 10:30:00',
+                true,
+            ],
+            'requested interval contains existing interval' => [
+                '2035-01-01 10:00:00',
+                '2035-01-01 11:00:00',
+                '2035-01-01 09:00:00',
+                '2035-01-01 12:00:00',
+                true,
+            ],
+            'existing interval contains requested interval' => [
+                '2035-01-01 09:00:00',
+                '2035-01-01 12:00:00',
+                '2035-01-01 10:00:00',
+                '2035-01-01 11:00:00',
+                true,
+            ],
+            'back to back interval before request is allowed' => [
+                '2035-01-01 08:00:00',
+                '2035-01-01 09:00:00',
+                '2035-01-01 09:00:00',
+                '2035-01-01 10:00:00',
+                false,
+            ],
+            'back to back interval after request is allowed' => [
+                '2035-01-01 10:00:00',
+                '2035-01-01 11:00:00',
+                '2035-01-01 09:00:00',
+                '2035-01-01 10:00:00',
+                false,
+            ],
+        ];
+    }
+
     public function testAdvanceCutoffUsesProviderTimezoneWhenPhpDefaultTimezoneDiffers(): void
     {
         $authority = $this->createAuthority(new RescheduleAuthorityLockOrderFakeDatabase());
@@ -554,6 +634,56 @@ final class RescheduleAuthorityCurrentReadFakeDatabase
 
         $row = $this->staleRows[$table][(int) array_values($where)[0]] ?? [];
         return new RescheduleAuthorityCurrentReadFakeQuery($row === [] ? 0 : 1, $row);
+    }
+}
+
+final class RescheduleAuthorityCustomerOverlapFakeDatabase
+{
+    public string $database = 'unit-test';
+
+    /** @var list<array{sql:string,bindings:array<int, mixed>}> */
+    public array $queries = [];
+
+    /**
+     * @param array<int, array{id:int, id_users_customer:int, start_datetime:string, end_datetime:string}> $rows
+     */
+    public function __construct(private readonly array $rows) {}
+
+    public function dbprefix(string $table): string
+    {
+        return 'ea_' . $table;
+    }
+
+    /**
+     * @param array<int, mixed> $bindings
+     */
+    public function query(string $sql, array $bindings = []): RescheduleAuthorityCustomerOverlapFakeQuery
+    {
+        $this->queries[] = ['sql' => $sql, 'bindings' => $bindings];
+
+        $customer_id = (int) ($bindings[0] ?? 0);
+        $requested_end = (string) ($bindings[1] ?? '');
+        $requested_start = (string) ($bindings[2] ?? '');
+        $exclude_id = isset($bindings[3]) ? (int) $bindings[3] : null;
+        $matches = array_filter(
+            $this->rows,
+            static fn(array $row): bool => (int) $row['id_users_customer'] === $customer_id &&
+                ($exclude_id === null || (int) $row['id'] !== $exclude_id) &&
+                $row['start_datetime'] < $requested_end &&
+                $row['end_datetime'] > $requested_start,
+        );
+
+        return new RescheduleAuthorityCustomerOverlapFakeQuery(count($matches));
+    }
+}
+
+final class RescheduleAuthorityCustomerOverlapFakeQuery
+{
+    public function __construct(private readonly int $rowCount) {}
+
+    public function num_rows(): int
+    {
+        return $this->rowCount;
     }
 }
 

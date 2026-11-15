@@ -469,7 +469,9 @@ class Providers_model extends EA_Model
         try {
             try {
                 $target = $this->db->query(
-                    'SELECT `id_roles` FROM `' . $this->db->dbprefix('users') . '` WHERE `id` = ? FOR UPDATE',
+                    'SELECT `id_roles`, `ldap_dn` FROM `' .
+                        $this->db->dbprefix('users') .
+                        '` WHERE `id` = ? FOR UPDATE',
                     [$provider['id']],
                 );
             } catch (Throwable $e) {
@@ -490,8 +492,14 @@ class Providers_model extends EA_Model
             $service_ids = $this->normalize_update_service_ids($provider['services']);
             $settings = $provider['settings'];
             unset($provider['services'], $provider['settings'], $provider['credential_version']);
-            // Credential versions are advanced only by the atomic password-change
-            // path. Never write a stale API snapshot back during metadata updates.
+            // Never write a caller-supplied credential version back during
+            // metadata updates; credential changes are advanced below.
+            $ldap_dn_changed =
+                array_key_exists('ldap_dn', $provider) &&
+                (string) ($provider['ldap_dn'] ?? '') !== (string) ($target_row['ldap_dn'] ?? '');
+            if (!array_key_exists('ldap_dn', $provider)) {
+                unset($provider['ldap_dn']);
+            }
 
             // Service deletion locks its parent before cascading to these associations.
             // Keep the same order before replacing the provider's connections.
@@ -519,7 +527,7 @@ class Providers_model extends EA_Model
             }
 
             $this->set_settings($provider['id'], $settings);
-            if ($password_changed) {
+            if ($password_changed || $ldap_dn_changed) {
                 $this->bump_credential_version((int) $provider['id']);
             }
             try {
@@ -1129,6 +1137,9 @@ class Providers_model extends EA_Model
     public function api_decode(array &$provider, ?array $base = null): void
     {
         $decoded_resource = $base ?: [];
+        if (!array_key_exists('ldapDn', $provider)) {
+            unset($decoded_resource['ldap_dn']);
+        }
 
         if (array_key_exists('id', $provider)) {
             $decoded_resource['id'] = $provider['id'];

@@ -204,6 +204,13 @@ class Admins_api_v1 extends EA_Controller
 
             $admin_id = $this->admins_model->save($admin);
 
+            // The model has completed the password update inside the outer
+            // API transaction. Mark only an authenticated actor's own change
+            // so Api can accept the single expected credential-version bump.
+            if (!empty($admin['settings']['password'])) {
+                $this->api->markBasicSelfCredentialChange($id);
+            }
+
             $updated_admin = $this->admins_model->find($admin_id);
 
             $this->admins_model->api_encode($updated_admin);

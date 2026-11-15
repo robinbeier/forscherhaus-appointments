@@ -513,9 +513,9 @@ class Reschedule_authority
     }
 
     /**
-     * Re-run the existing customer containment-overlap rule as a locking read
-     * after the customer row lock. This observes a preceding public write even
-     * when the outer transaction began before that write committed.
+     * Re-run the customer interval-overlap rule as a locking read after the
+     * customer row lock. This observes a preceding public write even when the
+     * outer transaction began before that write committed.
      */
     public function customerHasOverlap(
         int $customer_id,
@@ -527,8 +527,8 @@ class Reschedule_authority
         $sql =
             'SELECT `id` FROM `' .
             $table .
-            '` WHERE `id_users_customer` = ? AND `start_datetime` <= ? AND `end_datetime` >= ?';
-        $bindings = [$customer_id, $start_datetime, $end_datetime];
+            '` WHERE `id_users_customer` = ? AND `start_datetime` < ? AND `end_datetime` > ?';
+        $bindings = [$customer_id, $end_datetime, $start_datetime];
 
         if ($exclude_appointment_id !== null) {
             $sql .= ' AND `id` != ?';

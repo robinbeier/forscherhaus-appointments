@@ -361,7 +361,7 @@ class Admins_model extends EA_Model
     protected function update(array $admin): int
     {
         $current = $this->db->query(
-            'SELECT `id`, `id_roles` FROM `' . $this->db->dbprefix('users') . '` WHERE `id` = ? FOR UPDATE',
+            'SELECT `id`, `id_roles`, `ldap_dn` FROM `' . $this->db->dbprefix('users') . '` WHERE `id` = ? FOR UPDATE',
             [$admin['id']],
         );
         $current_admin = $current === false ? [] : $current->row_array();
@@ -382,9 +382,16 @@ class Admins_model extends EA_Model
         $settings['id_users'] = $admin['id'];
 
         unset($admin['settings']);
-        // Credential versions are advanced only by the atomic password-change
-        // path. Never write a stale API snapshot back during metadata updates.
+        // Never write a caller-supplied credential version back during metadata
+        // updates; credential changes are advanced from the locked row below.
         unset($admin['credential_version']);
+
+        $ldap_dn_changed =
+            array_key_exists('ldap_dn', $admin) &&
+            (string) ($admin['ldap_dn'] ?? '') !== (string) ($current_admin['ldap_dn'] ?? '');
+        if (!array_key_exists('ldap_dn', $admin)) {
+            unset($admin['ldap_dn']);
+        }
 
         $password_changed = !empty($settings['password']);
         if ($password_changed) {
@@ -408,7 +415,7 @@ class Admins_model extends EA_Model
         }
 
         $this->set_settings($admin['id'], $settings);
-        if ($password_changed) {
+        if ($password_changed || $ldap_dn_changed) {
             $this->bump_credential_version((int) $admin['id']);
         }
 
@@ -656,6 +663,9 @@ class Admins_model extends EA_Model
     public function api_decode(array &$admin, ?array $base = null): void
     {
         $decoded_resource = $base ?? [];
+        if (!array_key_exists('ldapDn', $admin)) {
+            unset($decoded_resource['ldap_dn']);
+        }
 
         if (array_key_exists('id', $admin)) {
             $decoded_resource['id'] = $admin['id'];
