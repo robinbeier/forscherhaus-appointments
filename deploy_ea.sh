@@ -40,6 +40,7 @@ ZERO_SURPRISE_CANARY_CREDENTIALS_FILE=""
 ZERO_SURPRISE_CANARY_REPORT=""
 ZERO_SURPRISE_INCIDENT_WEBHOOK_FILE=""
 ZERO_SURPRISE_INCIDENT_TIMEOUT=10
+PDF_RENDERER_TOKEN_FILE='/etc/fh/pdf-renderer-token.env'
 RECOVERY_GUARD='/root/fh-deploy-recovery-pending.v1.json'
 ZERO_SURPRISE_CANARY_ACTIVE_STATE_FILE='/var/lib/fh-zero-surprise-canary/active.json'
 ZERO_SURPRISE_CANARY_CLEANUP_TIMER='fh-zero-surprise-canary-cleanup.timer'
@@ -2092,8 +2093,43 @@ prepare_zero_surprise_stage_runtime() {
   return 0
 }
 
+read_pdf_renderer_token() {
+  local token_parent token_parent_identity token_parent_mode token_identity token
+
+  [[ -f "$PDF_RENDERER_TOKEN_FILE" && ! -L "$PDF_RENDERER_TOKEN_FILE" ]] || {
+    echo "[!] PDF renderer token file is missing or not a regular file: $PDF_RENDERER_TOKEN_FILE" >&2
+    return 1
+  }
+  token_parent="$(dirname -- "$PDF_RENDERER_TOKEN_FILE")"
+  [[ -d "$token_parent" && ! -L "$token_parent" ]] || {
+    echo "[!] PDF renderer token parent is unsafe: $token_parent" >&2
+    return 1
+  }
+  token_parent_identity="$(stat -c '%u:%g:%a' -- "$token_parent" 2>/dev/null)" || return 1
+  [[ "$token_parent_identity" == 0:0:* ]] || {
+    echo '[!] PDF renderer token parent ownership is unsafe.' >&2
+    return 1
+  }
+  token_parent_mode="${token_parent_identity##*:}"
+  (( (8#$token_parent_mode & 8#022) == 0 )) || {
+    echo '[!] PDF renderer token parent permissions are unsafe.' >&2
+    return 1
+  }
+  token_identity="$(stat -c '%u:%g:%a:%h' -- "$PDF_RENDERER_TOKEN_FILE" 2>/dev/null)" || return 1
+  [[ "$token_identity" == 0:0:600:1 ]] || {
+    echo '[!] PDF renderer token file ownership or permissions are unsafe.' >&2
+    return 1
+  }
+  token="$(awk 'NR == 1 { line = $0 } END { if (NR != 1 || line !~ /^PDF_TOKEN=[0-9a-f]+$/ || length(line) != 74) exit 1; sub(/^PDF_TOKEN=/, "", line); print line }' "$PDF_RENDERER_TOKEN_FILE")" || {
+    echo '[!] PDF renderer token file format is invalid.' >&2
+    return 1
+  }
+  [[ "$token" =~ ^[0-9a-f]{64}$ ]] || return 1
+  printf '%s\n' "$token"
+}
+
 run_zero_surprise_predeploy_replay() {
-  local replay_script
+  local replay_script pdf_renderer_token
 
   if [[ "$REQUIRE_ZERO_SURPRISE" -ne 1 ]]; then
     echo "[i] Zero-surprise predeploy replay disabled (--require-zero-surprise=0)."
@@ -2113,6 +2149,12 @@ run_zero_surprise_predeploy_replay() {
     return 1
   }
 
+  # The isolated Compose replay must use the same renderer credential as the
+  # live PHP-FPM and renderer services. Keep this file outside the release,
+  # validate it fail-closed, and pass the value only through the child
+  # environment; never print or persist the credential in release evidence.
+  pdf_renderer_token="$(read_pdf_renderer_token)" || return 1
+
   echo "[i] Running zero-surprise predeploy replay"
   echo "    Dump file         : $ZERO_SURPRISE_DUMP_FILE"
   echo "    Credentials file  : $ZERO_SURPRISE_PREDEPLOY_CREDENTIALS_FILE"
@@ -2120,6 +2162,7 @@ run_zero_surprise_predeploy_replay() {
   echo "    Report            : $ZERO_SURPRISE_REPORT"
 
   if ! (
+    export PDF_TOKEN="$pdf_renderer_token"
     cd "$STAGE_ROOT" && php scripts/release-gate/zero_surprise_replay.php \
       --release-id="$REL" \
       --dump-file="$ZERO_SURPRISE_DUMP_FILE" \
