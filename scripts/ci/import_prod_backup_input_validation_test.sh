@@ -6,7 +6,14 @@ ROOT_DIR="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 IMPORT_SCRIPT="${IMPORT_SCRIPT_OVERRIDE:-$ROOT_DIR/scripts/import_prod_backup.sh}"
 workspace="$(mktemp -d "${TMPDIR:-/tmp}/fh-import-input-test.XXXXXX")"
 workspace="$(realpath "$workspace")"
-trap 'rm -rf -- "$workspace"' EXIT
+# The importer deliberately rejects known-hosts files below a group/world
+# writable ancestor. Keep the valid fixture under the checked-out worktree;
+# the test workspace itself remains under the system temporary directory for
+# all other disposable state.
+known_hosts_root="$(mktemp -d "$ROOT_DIR/.fh-import-known-hosts.XXXXXX")"
+known_hosts_root="$(realpath "$known_hosts_root")"
+chmod 0700 "$known_hosts_root"
+trap 'rm -rf -- "$workspace" "$known_hosts_root"' EXIT
 
 fail() { printf 'import_prod_backup_input_validation=failed: %s\n' "$*" >&2; exit 1; }
 
@@ -52,7 +59,7 @@ run_case() {
         printf '%s\n' 'PROD_SSH_TARGET=root@synthetic.invalid' \
             'REMOTE_BACKUP_ROOT=/root/backups/easyappointments' \
             'REMOTE_BACKUP_DIR=' \
-            "SSH_KNOWN_HOSTS_FILE=$workspace/known_hosts" \
+            "SSH_KNOWN_HOSTS_FILE=$known_hosts_root/known_hosts" \
             'SSH_OPTIONS=(-o synthetic)' \
             'LOCAL_DB_NAME=easyappointments' \
             'log() { :; }' \
@@ -60,7 +67,7 @@ run_case() {
             "$parse_body" \
             "$create_body"
         printf 'export SSH_FIXTURE_ROOT=%q\n' "$workspace/remote"
-        printf 'printf synthetic-host-key > %q\n' "$workspace/known_hosts"
+        printf 'printf synthetic-host-key > %q\n' "$known_hosts_root/known_hosts"
         printf '%s\n' "$body"
     } > "$runner"
     chmod 0700 "$runner"
