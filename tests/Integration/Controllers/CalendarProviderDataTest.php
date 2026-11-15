@@ -21,6 +21,7 @@ final class CalendarProviderDataTest extends TestCase
     private int $appointmentId;
     private int $unavailabilityId;
     private array $providerSettings = [];
+    private array $providerProfile = [];
 
     protected function setUp(): void
     {
@@ -33,6 +34,20 @@ final class CalendarProviderDataTest extends TestCase
         $this->providerSettings = get_instance()
             ->db->get_where('user_settings', ['id_users' => $this->providerId])
             ->row_array();
+        $this->providerProfile = get_instance()
+            ->db->get_where('users', ['id' => $this->providerId])
+            ->row_array();
+
+        get_instance()->db->update(
+            'users',
+            [
+                'email' => 'synthetic-calendar-provider@example.org',
+                'phone_number' => '+49111111111',
+                'notes' => 'synthetic-provider-note',
+                'ldap_dn' => 'synthetic-provider-ldap-dn',
+            ],
+            ['id' => $this->providerId],
+        );
 
         get_instance()->db->update(
             'user_settings',
@@ -79,6 +94,7 @@ final class CalendarProviderDataTest extends TestCase
     protected function tearDown(): void
     {
         get_instance()->db->delete('appointments', ['id' => $this->unavailabilityId]);
+        get_instance()->db->update('users', $this->providerProfile, ['id' => $this->providerId]);
         get_instance()->db->update('user_settings', $this->providerSettings, ['id_users' => $this->providerId]);
         $this->fixtures->cleanup();
         config(['script_vars' => [], 'html_vars' => []]);
@@ -95,7 +111,7 @@ final class CalendarProviderDataTest extends TestCase
         $availableProviders = script_vars('available_providers');
         $this->assertIsArray($availableProviders);
         $initialProvider = $this->providerById($availableProviders);
-        $this->assertSafeProvider($initialProvider);
+        $this->assertInitialProvider($initialProvider);
 
         foreach (['table', 'filtered'] as $endpoint) {
             $response = $this->readCalendarEndpoint($endpoint);
@@ -143,6 +159,17 @@ final class CalendarProviderDataTest extends TestCase
         );
         $this->assertArrayNotHasKey('google_token', $provider['settings']);
         $this->assertArrayNotHasKey('caldav_password', $provider['settings']);
+    }
+
+    private function assertInitialProvider(array $provider): void
+    {
+        $this->assertSafeProvider($provider);
+        $this->assertArrayHasKey('timezone', $provider);
+        $this->assertArrayHasKey('services', $provider);
+        $this->assertArrayNotHasKey('email', $provider);
+        $this->assertArrayNotHasKey('phone_number', $provider);
+        $this->assertArrayNotHasKey('notes', $provider);
+        $this->assertArrayNotHasKey('ldap_dn', $provider);
     }
 
     private function providerFromEvent(array $response, string $key): array

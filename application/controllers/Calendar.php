@@ -93,6 +93,15 @@ class Calendar extends EA_Controller
         'settings',
     ];
 
+    private const CALENDAR_INITIAL_PROVIDER_READ_FIELDS = [
+        'id',
+        'first_name',
+        'last_name',
+        'timezone',
+        'settings',
+        'services',
+    ];
+
     private const CALENDAR_SERVICE_READ_FIELDS = ['id', 'name'];
 
     public array $allowed_customer_fields = [
@@ -301,7 +310,10 @@ class Calendar extends EA_Controller
             );
         }
 
-        $available_providers = array_map($this->calendarProviderData(...), $available_providers);
+        $available_providers = array_map(
+            fn(array $provider): array => $this->calendarProviderData($provider, true),
+            $available_providers,
+        );
 
         $available_services = $this->services_model->get_available_services();
 
@@ -1438,12 +1450,16 @@ class Calendar extends EA_Controller
     }
 
     /** Keep provider configuration sent to the calendar limited to its working-plan needs. */
-    private function calendarProviderData(array $provider): array
+    private function calendarProviderData(array $provider, bool $initial = false): array
     {
         $provider['settings'] = array_intersect_key(
             (array) ($provider['settings'] ?? []),
             array_flip(['working_plan', 'working_plan_exceptions']),
         );
+
+        if ($initial) {
+            $this->providers_model->only($provider, self::CALENDAR_INITIAL_PROVIDER_READ_FIELDS);
+        }
 
         return $provider;
     }
