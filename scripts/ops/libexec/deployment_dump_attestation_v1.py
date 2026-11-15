@@ -115,6 +115,10 @@ class DumpSqlInspector:
         self.autocommit_table = None
         self.statement_identifier = None
         self.statement_identifier_count = 0
+        self.identifier_contexts = []
+        self.insert_symbols_at_values = None
+        self.insert_identifiers_at_values = None
+        self.insert_prefix_words = None
         self.statement_symbols = bytearray()
         self.statement_symbol_count = 0
 
@@ -237,6 +241,14 @@ class DumpSqlInspector:
                     self.statement_identifier_count += 1
                     if self.statement_identifier_count == 1:
                         self.statement_identifier = hashlib.sha256(bytes(self.quote_value)).digest()
+                    # INSERT validation needs bounded context for the target and
+                    # optional column list.  Other statements (notably CREATE
+                    # TABLE with a wide schema) may legitimately contain many
+                    # quoted identifiers and are validated by their own grammar.
+                    if self.words[:2] == [b'INSERT', b'INTO']:
+                        self.identifier_contexts.append((tuple(self.words), self.statement_symbol_count))
+                        if len(self.identifier_contexts) > 64:
+                            reject()
                     self._record_word(b'IDENT')
                 else:
                     self._record_word(b'STR:OTHER' if self.quote_other else b'STR:' + bytes(self.quote_value).upper())
@@ -327,9 +339,28 @@ class DumpSqlInspector:
 
     def _record_word(self, word):
         self.word_count += 1
+        if self.word_count == 1 and word == b'INSERT':
+            self.insert_prefix_words = [word]
+        elif self.insert_prefix_words is not None:
+            if word == b'VALUES':
+                if b'VALUES' in self.insert_prefix_words:
+                    # A second VALUES keyword is outside the dump grammar. Do
+                    # not append repeated attacker-controlled tokens to the
+                    # bounded prefix buffer.
+                    reject()
+                self.insert_prefix_words.append(word)
+                if len(self.insert_prefix_words) > 67:
+                    reject()
+            elif b'VALUES' not in self.insert_prefix_words:
+                self.insert_prefix_words.append(word)
+                if len(self.insert_prefix_words) > 67:
+                    reject()
         if len(self.words) < 32:
             self.words.append(word)
         self.last_words = (self.last_words + [word])[-3:]
+        if word == b'VALUES' and self.insert_symbols_at_values is None:
+            self.insert_symbols_at_values = bytes(self.statement_symbols)
+            self.insert_identifiers_at_values = self.statement_identifier_count
         if word in {
             b'GLOBAL', b'PERSIST', b'TEMPORARY', b'PARTITION', b'TABLESPACE', b'DIRECTORY',
             b'SELECT', b'OUTFILE', b'DUMPFILE', b'DELIMITER', b'PREPARE', b'EXECUTE', b'CALL',
@@ -346,7 +377,7 @@ class DumpSqlInspector:
 
     def _record_symbol(self, value):
         self.statement_symbol_count += 1
-        if len(self.statement_symbols) < 8:
+        if len(self.statement_symbols) < 128:
             self.statement_symbols.append(value)
 
     def _finish_statement(self):
@@ -453,6 +484,20 @@ class DumpSqlInspector:
             )
         elif first == b'INSERT' and second == b'INTO':
             allowed = b'VALUES' in self.flags and not ({b'SELECT', b'OUTFILE', b'DUMPFILE', b'DUPLICATE'} & self.flags)
+            if allowed:
+                contexts = self.identifier_contexts
+                prefix = self.insert_prefix_words
+                if not prefix or prefix[-1] != b'VALUES':
+                    reject()
+                before_values = prefix[:-1]
+                if not contexts or contexts[0][0] != (b'INSERT', b'INTO'):
+                    allowed = False
+                elif len(contexts) > 1:
+                    allowed = (
+                        before_values[2:] == [b'IDENT'] * len(contexts)
+                        and self.insert_symbols_at_values == b'(' + b',' * (len(contexts) - 2) + b')'
+                        and self.insert_identifiers_at_values == len(contexts)
+                    )
         if not allowed or ({b'DELIMITER', b'PREPARE', b'EXECUTE', b'CALL', b'LOAD', b'PLUGIN',
                             b'GRANT', b'REVOKE', b'REPLACE'} & self.flags):
             reject()
@@ -482,7 +527,14 @@ class DumpSqlInspector:
             self.autocommit_wrapper = 'keys_disabled'
         elif self.autocommit_wrapper == 'keys_disabled':
             if first == b'INSERT' and second == b'INTO':
-                if (self.statement_identifier_count != 1 or
+                # MariaDB emits an explicit column list for tables that have
+                # generated/invisible columns.  The first quoted identifier
+                # is still the target table; subsequent identifiers belong
+                # to that statement's column list and must not be treated as
+                # a second table.  SELECT/other alternate insert forms are
+                # rejected by the grammar above, and the target table remains
+                # bound to the LOCK/ALTER wrapper here.
+                if (self.statement_identifier_count < 1 or
                         self.statement_identifier != self.autocommit_table):
                     reject()
             elif (first == b'ALTER' and second == b'TABLE' and
@@ -515,6 +567,10 @@ class DumpSqlInspector:
         self.expect_engine = False
         self.statement_identifier = None
         self.statement_identifier_count = 0
+        self.identifier_contexts = []
+        self.insert_symbols_at_values = None
+        self.insert_identifiers_at_values = None
+        self.insert_prefix_words = None
         self.statement_symbols.clear()
         self.statement_symbol_count = 0
 

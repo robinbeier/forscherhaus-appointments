@@ -249,6 +249,11 @@ final class DeploymentDumpAttestationProducerV1Test extends TestCase
             b' SET AUTOCOMMIT=@OLD_AUTOCOMMIT;',
             b'SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;'
             b' LOCK TABLES `x` WRITE; ALTER TABLE `x` DISABLE KEYS;'
+            b' INSERT INTO `x` (`id`, `username_unique`) VALUES (1, NULL);'
+            b' ALTER TABLE `x` ENABLE KEYS; UNLOCK TABLES; COMMIT;'
+            b' SET AUTOCOMMIT=@OLD_AUTOCOMMIT;',
+            b'SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;'
+            b' LOCK TABLES `x` WRITE; ALTER TABLE `x` DISABLE KEYS;'
             b' INSERT INTO `x` VALUES (1); ALTER TABLE `x` ENABLE KEYS;'
             b' UNLOCK TABLES; COMMIT; SET AUTOCOMMIT=@OLD_AUTOCOMMIT;'
             b' SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;'
@@ -337,6 +342,21 @@ final class DeploymentDumpAttestationProducerV1Test extends TestCase
             b' UNLOCK TABLES; COMMIT; SET AUTOCOMMIT=@OLD_AUTOCOMMIT;',
             b'SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;'
             b' LOCK TABLES `x` WRITE; ALTER TABLE `x` DISABLE KEYS;'
+            b' INSERT INTO `y` (`id`, `username_unique`) VALUES (1, NULL);'
+            b' ALTER TABLE `x` ENABLE KEYS; UNLOCK TABLES; COMMIT;'
+            b' SET AUTOCOMMIT=@OLD_AUTOCOMMIT;',
+            b'SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;'
+            b' LOCK TABLES `x` WRITE; ALTER TABLE `x` DISABLE KEYS;'
+            b' INSERT INTO `x` (`id`, `username_unique`) VALUES (`unexpected`);'
+            b' ALTER TABLE `x` ENABLE KEYS; UNLOCK TABLES; COMMIT;'
+            b' SET AUTOCOMMIT=@OLD_AUTOCOMMIT;',
+            b'SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;'
+            b' LOCK TABLES `x` WRITE; ALTER TABLE `x` DISABLE KEYS;'
+            b' INSERT INTO `x` (`id`, `username_unique` VALUES (1, NULL);'
+            b' ALTER TABLE `x` ENABLE KEYS; UNLOCK TABLES; COMMIT;'
+            b' SET AUTOCOMMIT=@OLD_AUTOCOMMIT;',
+            b'SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;'
+            b' LOCK TABLES `x` WRITE; ALTER TABLE `x` DISABLE KEYS;'
             b' INSERT INTO `x` VALUES (1); ALTER TABLE `y` ENABLE KEYS;'
             b' UNLOCK TABLES; COMMIT; SET AUTOCOMMIT=@OLD_AUTOCOMMIT;',
             b'SET @OLD_AUTOCOMMIT=@@AUTOCOMMIT, @@AUTOCOMMIT=0;'
@@ -393,6 +413,15 @@ final class DeploymentDumpAttestationProducerV1Test extends TestCase
                 assert error.code == 70
             else:
                 raise AssertionError(candidate)
+        repeated_values = module.DumpSqlInspector()
+        repeated_values.feed(module.SANDBOX_PREAMBLES[0] + b'INSERT INTO `x` VALUES ')
+        try:
+            repeated_values.feed(b'VALUES ' * 200_000)
+        except SystemExit as error:
+            assert error.code == 70
+            assert len(repeated_values.insert_prefix_words) <= 67
+        else:
+            raise AssertionError('repeated VALUES tokens must be rejected while bounded')
         boundary = module.DumpSqlInspector()
         boundary.feed(module.SANDBOX_PREAMBLES[0])
         for index in range(module.MAX_CREATE_TABLES):
