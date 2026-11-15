@@ -22,6 +22,11 @@ class LdapClientBindFailureTest extends TestCase
                 $this->assertConnectionReady($connection, $protocol_configured);
             }
 
+            public function assertIdentityMatches(array $before, ?array $after): bool
+            {
+                return $this->identityMatches($before, $after);
+            }
+
             public array $calls = [];
 
             public function assertSecureConnection(string $host, int $port): mixed
@@ -67,6 +72,25 @@ class LdapClientBindFailureTest extends TestCase
     {
         $this->client()->assertBindFailure(49);
         $this->addToAssertionCount(1);
+    }
+
+    public function testIdentityComparisonRejectsRebindingRoleAndCredentialChanges(): void
+    {
+        $client = $this->client();
+        $before = [
+            'id' => 7,
+            'ldap_dn' => 'uid=old,ou=people,dc=example,dc=org',
+            'id_roles' => 2,
+            'credential_version' => 4,
+        ];
+
+        self::assertTrue($client->assertIdentityMatches($before, $before));
+        foreach (['id', 'ldap_dn', 'id_roles', 'credential_version'] as $field) {
+            $changed = $before;
+            $changed[$field] = $field === 'ldap_dn' ? 'uid=new,ou=people,dc=example,dc=org' : 99;
+            self::assertFalse($client->assertIdentityMatches($before, $changed), $field);
+        }
+        self::assertFalse($client->assertIdentityMatches($before, null));
     }
 
     public function testOperationalBindFailureIsSurfaced(): void

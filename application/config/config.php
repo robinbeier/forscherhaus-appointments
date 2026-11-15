@@ -142,10 +142,6 @@ $config['language_codes'] = $languages;
 
 $config['language'] = Config::LANGUAGE;
 
-if (isset($_GET['language']) && in_array($_GET['language'], $config['available_languages'], true)) {
-    $config['language'] = $_GET['language'];
-}
-
 $config['language_code'] = array_search($config['language'], $languages, true) ?: 'de';
 
 /*

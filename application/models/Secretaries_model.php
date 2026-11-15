@@ -417,6 +417,15 @@ class Secretaries_model extends EA_Model
      */
     protected function update(array $secretary): int
     {
+        $current = $this->db->query(
+            'SELECT `id`, `id_roles`, `ldap_dn` FROM `' . $this->db->dbprefix('users') . '` WHERE `id` = ? FOR UPDATE',
+            [$secretary['id']],
+        );
+        $current_secretary = $current === false ? [] : $current->row_array();
+        if (empty($current_secretary)) {
+            throw new RuntimeException('Could not lock secretary before update.');
+        }
+
         $secretary['update_datetime'] = date('Y-m-d H:i:s');
 
         $provider_ids = $secretary['providers'] ?? [];
@@ -424,6 +433,13 @@ class Secretaries_model extends EA_Model
         $settings = $secretary['settings'];
 
         unset($secretary['providers'], $secretary['settings'], $secretary['credential_version']);
+
+        $ldap_dn_changed =
+            array_key_exists('ldap_dn', $secretary) &&
+            (string) ($secretary['ldap_dn'] ?? '') !== (string) ($current_secretary['ldap_dn'] ?? '');
+        if (!array_key_exists('ldap_dn', $secretary)) {
+            unset($secretary['ldap_dn']);
+        }
 
         $password_changed = isset($settings['password']);
         if ($password_changed) {
@@ -445,7 +461,7 @@ class Secretaries_model extends EA_Model
         }
 
         $this->set_settings($secretary['id'], $settings);
-        if ($password_changed) {
+        if ($password_changed || $ldap_dn_changed) {
             $this->bump_credential_version((int) $secretary['id']);
         }
         $this->set_provider_ids($secretary['id'], $provider_ids);
@@ -774,6 +790,9 @@ class Secretaries_model extends EA_Model
     public function api_decode(array &$secretary, ?array $base = null): void
     {
         $decoded_resource = $base ?: [];
+        if (!array_key_exists('ldapDn', $secretary)) {
+            unset($decoded_resource['ldap_dn']);
+        }
 
         if (array_key_exists('id', $secretary)) {
             $decoded_resource['id'] = $secretary['id'];

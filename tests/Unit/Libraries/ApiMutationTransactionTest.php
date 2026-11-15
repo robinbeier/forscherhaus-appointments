@@ -57,8 +57,9 @@ final class ApiMutationTransactionTest extends TestCase
         $controller->output = new ApiMutationTransactionOutputDouble();
         (new ReflectionProperty(Api::class, 'CI'))->setValue($api, $controller);
         (new ReflectionProperty(Api::class, 'basicActorId'))->setValue($api, 73);
+        (new ReflectionProperty(Api::class, 'basicCredentialVersion'))->setValue($api, 0);
 
-        $begin = new ReflectionMethod(Api::class, 'beginBasicMutationTransaction');
+        $begin = new ReflectionMethod(Api::class, 'beginMutationTransaction');
         $begin->invoke($api);
         self::assertSame([], $database->queries);
 
@@ -66,8 +67,8 @@ final class ApiMutationTransactionTest extends TestCase
         $api->finalizeMutationTransaction();
 
         self::assertSame(['begin', 'status', 'query', 'query', 'commit'], $database->events);
-        self::assertStringContainsString('FROM ea_users WHERE id = ? FOR UPDATE', $database->queries[0]['sql']);
-        self::assertStringNotContainsString('FOR UPDATE', $database->queries[1]['sql']);
+        self::assertStringContainsString('FROM ea_users', $database->queries[0]['sql']);
+        self::assertStringContainsString('FOR UPDATE', $database->queries[0]['sql']);
         self::assertSame([73], $database->queries[0]['bindings']);
     }
 
@@ -105,12 +106,65 @@ final class ApiMutationTransactionTest extends TestCase
         self::assertStringContainsString('WWW-Authenticate: Basic', $controller->output->headers[0]);
     }
 
+    public function testCredentialVersionChangeBeforeFinalCommitRollsBack(): void
+    {
+        $database = new ApiMutationTransactionDbDouble();
+        $database->actorRow['credential_version'] = 1;
+        $api = $this->apiWithTransaction($database);
+        $controller = (new ReflectionProperty(Api::class, 'CI'))->getValue($api);
+        $controller->output = new ApiMutationTransactionOutputDouble();
+
+        $api->trackResponseStatus(200);
+        $api->finalizeMutationTransaction();
+
+        self::assertSame(0, $database->commits);
+        self::assertSame(1, $database->rollbacks);
+        self::assertSame(401, $controller->output->status);
+    }
+
+    public function testSelfPasswordChangeWithExactlyOneCredentialVersionIncrementCommits(): void
+    {
+        $database = new ApiMutationTransactionDbDouble();
+        $database->actorRow['credential_version'] = 1;
+        $database->actorRow['password'] = hash_legacy_password('synthetic-salt', 'self-secret');
+        $database->actorRow['salt'] = 'synthetic-salt';
+        $api = $this->apiWithTransaction($database);
+        $controller = (new ReflectionProperty(Api::class, 'CI'))->getValue($api);
+        $controller->output = new ApiMutationTransactionOutputDouble();
+        $api->markBasicSelfCredentialChange(73);
+
+        $api->trackResponseStatus(200);
+        $api->finalizeMutationTransaction();
+
+        self::assertSame(1, $database->commits);
+        self::assertSame(0, $database->rollbacks);
+    }
+
+    public function testBearerTokenChangeBeforeFinalCommitRollsBack(): void
+    {
+        $database = new ApiMutationTransactionDbDouble();
+        $database->settingValue = 'rotated-token';
+        $api = (new ReflectionClass(Api::class))->newInstanceWithoutConstructor();
+        $controller = $this->controllerWithDb($database);
+        $controller->output = new ApiMutationTransactionOutputDouble();
+        (new ReflectionProperty(Api::class, 'CI'))->setValue($api, $controller);
+        (new ReflectionProperty(Api::class, 'mutationTransaction'))->setValue($api, true);
+        (new ReflectionProperty(Api::class, 'bearerToken'))->setValue($api, 'original-token');
+
+        $api->trackResponseStatus(200);
+        $api->finalizeMutationTransaction();
+
+        self::assertSame(0, $database->commits);
+        self::assertSame(1, $database->rollbacks);
+        self::assertSame(401, $controller->output->status);
+    }
+
     public function testBasicCustomerIdentityLockIsReleasedAfterOuterCommit(): void
     {
         $database = new ApiMutationTransactionDbDouble();
         $api = $this->apiWithTransaction($database);
 
-        self::assertNotNull($api->holdBasicCustomerCreationLock('held@example.invalid'));
+        self::assertNotNull($api->holdCustomerCreationLock('held@example.invalid'));
         $api->trackResponseStatus(201);
         $api->finalizeMutationTransaction();
 
@@ -127,9 +181,10 @@ final class ApiMutationTransactionTest extends TestCase
         $ciProperty = new ReflectionProperty(Api::class, 'CI');
         $ciProperty->setValue($api, $controller);
 
-        $transactionProperty = new ReflectionProperty(Api::class, 'basicMutationTransaction');
+        $transactionProperty = new ReflectionProperty(Api::class, 'mutationTransaction');
         $transactionProperty->setValue($api, true);
         (new ReflectionProperty(Api::class, 'basicActorId'))->setValue($api, 73);
+        (new ReflectionProperty(Api::class, 'basicCredentialVersion'))->setValue($api, 0);
 
         return $api;
     }
@@ -186,8 +241,9 @@ final class ApiMutationTransactionDbDouble
     public int $rollbacks = 0;
     /** @var list<array{sql:string,bindings:array<int,mixed>}> */
     public array $queries = [];
-    public array $actorRow = ['id' => 73, 'id_roles' => 1];
+    public array $actorRow = ['id' => 73, 'id_roles' => 1, 'credential_version' => 0, 'password' => '', 'salt' => ''];
     public string $roleSlug = DB_SLUG_ADMIN;
+    public string $settingValue = 'original-token';
 
     public function trans_begin(): bool
     {
@@ -210,7 +266,13 @@ final class ApiMutationTransactionDbDouble
         if (str_contains($sql, 'RELEASE_LOCK')) {
             return new ApiMutationTransactionQueryDouble(['released' => 1]);
         }
-        $row = str_contains($sql, 'FROM ea_users') ? $this->actorRow : ['slug' => $this->roleSlug];
+        if (str_contains($sql, 'FROM ea_users')) {
+            $row = $this->actorRow;
+        } elseif (str_contains($sql, 'FROM ea_settings')) {
+            $row = ['value' => $this->settingValue];
+        } else {
+            $row = ['slug' => $this->roleSlug];
+        }
         return new ApiMutationTransactionQueryDouble($row);
     }
 

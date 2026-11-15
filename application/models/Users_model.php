@@ -272,10 +272,26 @@ class Users_model extends EA_Model
      */
     protected function update(array $user): int
     {
+        $current = $this->db->query(
+            'SELECT `id`, `id_roles`, `ldap_dn` FROM `' . $this->db->dbprefix('users') . '` WHERE `id` = ? FOR UPDATE',
+            [$user['id']],
+        );
+        $current_user = $current === false ? [] : $current->row_array();
+        if (empty($current_user)) {
+            throw new RuntimeException('Could not lock user before update.');
+        }
+
         $user['update_datetime'] = date('Y-m-d H:i:s');
 
         $settings = $user['settings'];
         unset($user['settings'], $user['credential_version']);
+
+        $ldap_dn_changed =
+            array_key_exists('ldap_dn', $user) &&
+            (string) ($user['ldap_dn'] ?? '') !== (string) ($current_user['ldap_dn'] ?? '');
+        if (!array_key_exists('ldap_dn', $user)) {
+            unset($user['ldap_dn']);
+        }
 
         $password_changed = isset($settings['password']);
 
@@ -295,7 +311,7 @@ class Users_model extends EA_Model
 
         $this->set_settings($user['id'], $settings);
 
-        if ($password_changed) {
+        if ($password_changed || $ldap_dn_changed) {
             $this->bump_credential_version((int) $user['id']);
         }
 

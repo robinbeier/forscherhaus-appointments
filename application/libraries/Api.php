@@ -24,7 +24,13 @@ class Api
 {
     private ?int $basicActorId = null;
 
-    private bool $basicMutationTransaction = false;
+    private ?int $basicCredentialVersion = null;
+
+    private ?string $bearerToken = null;
+
+    private bool $basicSelfCredentialChange = false;
+
+    private bool $mutationTransaction = false;
 
     private ?int $responseStatus = null;
 
@@ -141,8 +147,9 @@ class Api
         try {
             // Bearer token.
             $api_token = setting('api_token');
+            $bearer_token = $this->get_bearer_token();
 
-            if (empty($api_token) || $api_token !== $this->get_bearer_token()) {
+            if (empty($api_token) || $api_token !== $bearer_token) {
                 // Basic auth.
                 $username = $_SERVER['PHP_AUTH_USER'] ?? null;
 
@@ -159,6 +166,9 @@ class Api
                 }
 
                 $this->basicActorId = (int) ($user_data['user_id'] ?? 0);
+                $this->basicCredentialVersion = max(0, (int) ($user_data['credential_version'] ?? 0));
+            } else {
+                $this->bearerToken = $bearer_token;
             }
         } catch (Throwable) {
             $this->request_authentication();
@@ -168,8 +178,8 @@ class Api
         // the body type of an authenticated mutation.
         $this->rejectNonJsonMutation();
 
-        if ($this->basicActorId !== null && $this->isMutationRequest()) {
-            $this->beginBasicMutationTransaction();
+        if ($this->isMutationRequest() && ($this->basicActorId !== null || $this->bearerToken !== null)) {
+            $this->beginMutationTransaction();
         }
     }
 
@@ -180,25 +190,26 @@ class Api
         return $method === (['store' => 'POST', 'update' => 'PUT', 'destroy' => 'DELETE'][$action] ?? null);
     }
 
-    private function beginBasicMutationTransaction(): void
+    private function beginMutationTransaction(): void
     {
         if (!$this->CI->db->trans_begin()) {
             throw new RuntimeException('Could not start API actor transaction.');
         }
 
-        $this->basicMutationTransaction = true;
+        $this->mutationTransaction = true;
+
         register_shutdown_function(function (): void {
-            if ($this->basicMutationTransaction && $this->CI->db->trans_active()) {
+            if ($this->mutationTransaction && $this->CI->db->trans_active()) {
                 $this->CI->db->trans_rollback();
             }
             $this->releaseHeldAdvisoryLocks();
         });
     }
 
-    /** Reserve a Basic API customer identity until the outer transaction ends. */
-    public function holdBasicCustomerCreationLock(?string $email): ?string
+    /** Reserve an API customer identity until the outer transaction ends. */
+    public function holdCustomerCreationLock(?string $email): ?string
     {
-        if (!$this->basicMutationTransaction) {
+        if (!$this->mutationTransaction) {
             return null;
         }
 
@@ -233,18 +244,46 @@ class Api
     {
         $users = $this->CI->db->dbprefix('users');
         $actor = $this->CI->db
-            ->query("SELECT id, id_roles FROM {$users} WHERE id = ? FOR UPDATE", [$this->basicActorId])
+            ->query("SELECT id, id_roles, credential_version FROM {$users} WHERE id = ? FOR UPDATE", [
+                $this->basicActorId,
+            ])
             ->row_array();
         $roles = $this->CI->db->dbprefix('roles');
         $role = empty($actor)
             ? []
             : $this->CI->db->query("SELECT slug FROM {$roles} WHERE id = ?", [$actor['id_roles']])->row_array();
 
-        if (empty($actor) || (string) ($role['slug'] ?? '') !== DB_SLUG_ADMIN) {
+        if (
+            empty($actor) ||
+            (string) ($role['slug'] ?? '') !== DB_SLUG_ADMIN ||
+            !(
+                (int) ($actor['credential_version'] ?? -1) === $this->basicCredentialVersion ||
+                ($this->basicSelfCredentialChange &&
+                    (int) ($actor['credential_version'] ?? -1) === $this->basicCredentialVersion + 1)
+            )
+        ) {
             return false;
         }
 
         return true;
+    }
+
+    public function markBasicSelfCredentialChange(int $targetId): void
+    {
+        if ($this->basicActorId !== null && $targetId === $this->basicActorId) {
+            $this->basicSelfCredentialChange = true;
+        }
+    }
+
+    private function recheckBearerToken(): bool
+    {
+        $settings = $this->CI->db->dbprefix('settings');
+        $setting = $this->CI->db
+            ->query("SELECT value FROM {$settings} WHERE name = ? FOR UPDATE", ['api_token'])
+            ->row_array();
+
+        $current = (string) ($setting['value'] ?? '');
+        return $current !== '' && $this->bearerToken !== null && hash_equals($current, $this->bearerToken);
     }
 
     public function trackResponseStatus(int $status): void
@@ -254,7 +293,7 @@ class Api
 
     public function finalizeMutationTransaction(): void
     {
-        if (!$this->basicMutationTransaction) {
+        if (!$this->mutationTransaction) {
             return;
         }
 
@@ -262,21 +301,21 @@ class Api
         if ($status !== null && $status >= 200 && $status < 300) {
             if (!$this->CI->db->trans_status()) {
                 $this->CI->db->trans_rollback();
-                $this->basicMutationTransaction = false;
+                $this->mutationTransaction = false;
                 $this->releaseHeldAdvisoryLocks();
                 throw new RuntimeException('Could not commit API actor transaction.');
             }
             try {
-                $authorized = $this->recheckBasicActor();
+                $authorized = $this->basicActorId !== null ? $this->recheckBasicActor() : $this->recheckBearerToken();
             } catch (Throwable $error) {
                 $this->CI->db->trans_rollback();
-                $this->basicMutationTransaction = false;
+                $this->mutationTransaction = false;
                 $this->releaseHeldAdvisoryLocks();
                 throw new RuntimeException('Could not recheck API actor authorization.', 0, $error);
             }
             if (!$authorized) {
                 $this->CI->db->trans_rollback();
-                $this->basicMutationTransaction = false;
+                $this->mutationTransaction = false;
                 $this->responseStatus = 401;
                 $this->releaseHeldAdvisoryLocks();
                 $this->CI->output
@@ -288,7 +327,7 @@ class Api
             }
             if (!$this->CI->db->trans_commit()) {
                 $this->CI->db->trans_rollback();
-                $this->basicMutationTransaction = false;
+                $this->mutationTransaction = false;
                 $this->releaseHeldAdvisoryLocks();
                 throw new RuntimeException('Could not commit API actor transaction.');
             }
@@ -297,7 +336,7 @@ class Api
         }
 
         $this->releaseHeldAdvisoryLocks();
-        $this->basicMutationTransaction = false;
+        $this->mutationTransaction = false;
     }
 
     /**

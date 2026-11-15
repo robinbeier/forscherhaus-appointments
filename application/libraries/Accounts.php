@@ -50,9 +50,14 @@ class Accounts
     public function check_login(string $username, string $password): ?array
     {
         $user_settings = $this->CI->db
-            ->select('user_settings.*, users.credential_version')
+            ->select(
+                'user_settings.id_users, user_settings.username, user_settings.password, user_settings.salt, ' .
+                    'users.id AS user_id, users.email AS user_email, users.timezone AS user_timezone, ' .
+                    'users.language AS user_language, users.credential_version, roles.slug AS role_slug',
+            )
             ->from('user_settings')
             ->join('users', 'users.id = user_settings.id_users', 'inner')
+            ->join('roles', 'roles.id = users.id_roles', 'inner')
             ->where('user_settings.username', $username)
             ->get()
             ->row_array();
@@ -91,9 +96,14 @@ class Accounts
         // reassignment committed during that work invalidates this login, even
         // when this verifier did not need an upgrade.
         $current = $this->CI->db
-            ->select('user_settings.*, users.credential_version')
+            ->select(
+                'user_settings.id_users, user_settings.username, user_settings.password, user_settings.salt, ' .
+                    'users.id AS user_id, users.email AS user_email, users.timezone AS user_timezone, ' .
+                    'users.language AS user_language, users.credential_version, roles.slug AS role_slug',
+            )
             ->from('user_settings')
             ->join('users', 'users.id = user_settings.id_users', 'inner')
+            ->join('roles', 'roles.id = users.id_roles', 'inner')
             ->where('user_settings.id_users', $user_settings['id_users'])
             ->get()
             ->row_array();
@@ -106,19 +116,15 @@ class Accounts
             return null;
         }
 
-        $user = $this->CI->users_model->find($user_settings['id_users']);
-
-        $role = $this->CI->roles_model->find($user['id_roles']);
-
         $default_timezone = $this->CI->timezones->get_default_timezone();
 
         return [
-            'user_id' => $user['id'],
-            'user_email' => $user['email'],
-            'username' => $user_settings['username'],
-            'timezone' => !empty($user['timezone']) ? $user['timezone'] : $default_timezone,
-            'language' => !empty($user['language']) ? $user['language'] : Config::LANGUAGE,
-            'role_slug' => $role['slug'],
+            'user_id' => $current['user_id'],
+            'user_email' => $current['user_email'],
+            'username' => $current['username'],
+            'timezone' => !empty($current['user_timezone']) ? $current['user_timezone'] : $default_timezone,
+            'language' => !empty($current['user_language']) ? $current['user_language'] : Config::LANGUAGE,
+            'role_slug' => $current['role_slug'],
             'credential_version' => max(0, (int) ($current['credential_version'] ?? 0)),
         ];
     }

@@ -98,12 +98,17 @@ final class CustomersApiHttpWriteTest extends TestCase
         $api = (new ReflectionClass(Api::class))->newInstanceWithoutConstructor();
         (new ReflectionProperty(Api::class, 'CI'))->setValue($api, get_instance());
         (new ReflectionProperty(Api::class, 'basicActorId'))->setValue($api, $f->actorId);
-        (new ReflectionProperty(Api::class, 'basicMutationTransaction'))->setValue($api, true);
+        $actor = $db->get_where('users', ['id' => $f->actorId])->row_array();
+        (new ReflectionProperty(Api::class, 'basicCredentialVersion'))->setValue(
+            $api,
+            (int) ($actor['credential_version'] ?? 0),
+        );
+        (new ReflectionProperty(Api::class, 'mutationTransaction'))->setValue($api, true);
         $lockName = null;
 
         try {
             self::assertTrue($db->trans_begin());
-            $lockName = $api->holdBasicCustomerCreationLock($f->run . '_held-lock@example.invalid');
+            $lockName = $api->holdCustomerCreationLock($f->run . '_held-lock@example.invalid');
             self::assertNotNull($lockName);
             $blocked = $observer->query('SELECT GET_LOCK(?, 0) AS acquired', [$lockName])->row_array();
             self::assertSame(0, (int) ($blocked['acquired'] ?? -1));

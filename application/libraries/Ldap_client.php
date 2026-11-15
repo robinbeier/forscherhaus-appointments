@@ -90,24 +90,42 @@ class Ldap_client
         $user_bind = @ldap_bind($connection, $user['ldap_dn'], $password);
 
         if ($user_bind) {
-            $role = $this->CI->roles_model->find($user['id_roles']);
+            // LDAP bind is a network operation. Re-read the identity after it
+            // completes so a concurrent ldap_dn, role, or credential-version
+            // change cannot establish a session from the stale pre-bind row.
+            $current_user = $this->CI->accounts->get_user_by_username($username);
+            if (!$this->identityMatches($user, $current_user)) {
+                return null;
+            }
+
+            $role = $this->CI->roles_model->find($current_user['id_roles']);
 
             $default_timezone = $this->CI->timezones->get_default_timezone();
 
             return [
-                'user_id' => $user['id'],
-                'user_email' => $user['email'],
+                'user_id' => $current_user['id'],
+                'user_email' => $current_user['email'],
                 'username' => $username,
-                'timezone' => !empty($user['timezone']) ? $user['timezone'] : $default_timezone,
-                'language' => !empty($user['language']) ? $user['language'] : Config::LANGUAGE,
+                'timezone' => !empty($current_user['timezone']) ? $current_user['timezone'] : $default_timezone,
+                'language' => !empty($current_user['language']) ? $current_user['language'] : Config::LANGUAGE,
                 'role_slug' => $role['slug'],
-                'credential_version' => max(0, (int) ($user['credential_version'] ?? 0)),
+                'credential_version' => max(0, (int) ($current_user['credential_version'] ?? 0)),
             ];
         }
 
         $this->handleBindFailure((int) @ldap_errno($connection));
 
         return null;
+    }
+
+    /** Reject a bind result if the account identity changed while LDAP ran. */
+    protected function identityMatches(array $before, ?array $after): bool
+    {
+        return !empty($after) &&
+            (int) ($after['id'] ?? 0) === (int) ($before['id'] ?? 0) &&
+            (string) ($after['ldap_dn'] ?? '') === (string) ($before['ldap_dn'] ?? '') &&
+            (int) ($after['id_roles'] ?? 0) === (int) ($before['id_roles'] ?? 0) &&
+            (int) ($after['credential_version'] ?? 0) === (int) ($before['credential_version'] ?? 0);
     }
 
     /**

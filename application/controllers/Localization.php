@@ -29,6 +29,11 @@ class Localization extends EA_Controller
      */
     public function change_language(): void
     {
+        if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+            json_response(['success' => false, 'message' => 'Method Not Allowed'], 405, ['Allow: POST']);
+            return;
+        }
+
         try {
             $request_dto = $this->authRequestDtoFactory()->buildLocalizationRequestDto();
             $language = $request_dto->language;

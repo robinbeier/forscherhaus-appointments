@@ -65,6 +65,12 @@ $ci->db = new class ($format, $rotate) {
     {
         $this->row = [
             'id_users' => 1,
+            'user_id' => 1,
+            'user_email' => 'synthetic.invalid',
+            'user_timezone' => 'UTC',
+            'user_language' => 'english',
+            'credential_version' => 0,
+            'role_slug' => 'admin',
             'username' => 'synthetic',
             'salt' => 'salt',
             'password' =>

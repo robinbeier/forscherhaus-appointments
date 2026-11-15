@@ -152,6 +152,29 @@ final class UsersModelAtomicWriteTest extends TestCase
         $this->assertSame($before['password'], $afterMissing['password']);
     }
 
+    public function test_ldap_identity_change_bumps_credential_version(): void
+    {
+        $user = $this->userData();
+        $user['ldap_dn'] = 'uid=before,ou=people,dc=example,dc=org';
+        $userId = $this->usersModel->save($user);
+        $this->createdUserIds[] = $userId;
+
+        $before = (int) get_instance()
+            ->db->get_where('users', ['id' => $userId])
+            ->row('credential_version');
+        $stored = $this->usersModel->find($userId);
+        $stored['ldap_dn'] = ' uid=before,ou=people,dc=example,dc=org ';
+        $stored['settings'] = ['username' => (string) $stored['settings']['username']];
+
+        $this->usersModel->save($stored);
+
+        $updated = get_instance()
+            ->db->get_where('users', ['id' => $userId])
+            ->row_array();
+        self::assertSame($stored['ldap_dn'], $updated['ldap_dn']);
+        self::assertSame($before + 1, (int) $updated['credential_version']);
+    }
+
     public function test_stale_credential_version_from_metadata_snapshot_cannot_overwrite_newer_value(): void
     {
         $userId = $this->usersModel->save($this->userData());

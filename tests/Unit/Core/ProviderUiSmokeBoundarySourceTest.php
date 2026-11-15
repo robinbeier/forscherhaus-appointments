@@ -105,7 +105,7 @@ class ProviderUiSmokeBoundarySourceTest extends TestCase
 
         $this->assertIsString($controller_source);
         $this->assertIsString($accounts_source);
-        $this->assertStringContainsString("'username' => \$user_settings['username']", $accounts_source);
+        $this->assertStringContainsString("'username' => \$current['username']", $accounts_source);
         $this->assertStringContainsString(
             '$principal = $this->load_provider_ui_smoke_principal((int) session(\'user_id\'));',
             $controller_source,
