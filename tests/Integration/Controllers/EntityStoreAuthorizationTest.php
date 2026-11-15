@@ -223,6 +223,50 @@ final class EntityStoreAuthorizationTest extends TestCase
         );
     }
 
+    public function testCustomerCreateRechecksCurrentRolePermissionBeforeInsert(): void
+    {
+        $pair = $this->fixtures->resolveProviderServicePair();
+        $this->authenticateAsProvider($pair['provider_id']);
+
+        self::assertTrue(
+            (bool) get_instance()->db->update(
+                'roles',
+                ['customers' => PRIV_VIEW],
+                ['id' => (int) $this->providerRole['id']],
+            ),
+        );
+
+        $email = 'store-revoked-' . bin2hex(random_bytes(4)) . '@example.org';
+        $_POST['customer'] = $this->customerPayload($email, 'Denied');
+        $this->customersController()->store();
+
+        $response = $this->decodeJsonOutput();
+        self::assertFalse($response['success'] ?? true);
+        self::assertSame(403, get_instance()->output->statusCode);
+        self::assertSame(0, (int) get_instance()->db->where('email', $email)->count_all_results('users'));
+    }
+
+    public function testCustomerCreatePreservesCallerOwnedTransaction(): void
+    {
+        $pair = $this->fixtures->resolveProviderServicePair();
+        $this->authenticateAsProvider($pair['provider_id']);
+        $email = 'store-outer-transaction-' . bin2hex(random_bytes(4)) . '@example.org';
+
+        self::assertTrue(get_instance()->db->trans_begin());
+        try {
+            $_POST['customer'] = $this->customerPayload($email, 'Outer');
+            $this->customersController()->store();
+
+            $response = $this->decodeJsonOutput();
+            self::assertTrue($response['success'] ?? false, json_encode($response, JSON_THROW_ON_ERROR));
+            self::assertTrue(get_instance()->db->trans_active());
+        } finally {
+            get_instance()->db->trans_rollback();
+        }
+
+        self::assertSame(0, (int) get_instance()->db->where('email', $email)->count_all_results('users'));
+    }
+
     public function testExistingCustomerEmailWithoutIdCannotChangeExistingRecord(): void
     {
         $pair = $this->fixtures->resolveProviderServicePair();

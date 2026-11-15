@@ -291,20 +291,16 @@ class Customers extends EA_Controller
      */
     public function store(): void
     {
+        $owns_transaction = false;
+
         try {
             $user_id = (int) session('user_id');
-            if (!$user_id || cannot('add', PRIV_CUSTOMERS, $user_id)) {
+            if (!$user_id) {
                 abort(403, 'Forbidden');
             }
             if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
                 abort(405, 'Method Not Allowed', ['Allow: POST']);
                 return;
-            }
-
-            $role_id = (int) $this->users_model->value($user_id, 'id_roles');
-            $role_slug = (string) $this->roles_model->value($role_id, 'slug');
-            if ($role_slug !== DB_SLUG_ADMIN && setting('limit_customer_visibility')) {
-                abort(403);
             }
 
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityPayloadRequestDto('customer');
@@ -323,15 +319,83 @@ class Customers extends EA_Controller
 
             $this->customers_model->optional($customer, $this->optional_customer_fields);
 
+            $owns_transaction = !$this->db->trans_active();
+            if ($owns_transaction && !$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start customer create transaction.');
+            }
+
+            // Bind the authorization decision to the insert transaction. The
+            // role row must stay locked through the write so a concurrent
+            // permission revocation cannot commit between the check and insert.
+            $locked_actor = $this->db->query(
+                'SELECT `id_roles` FROM `' . $this->db->dbprefix('users') . '` WHERE `id` = ? FOR UPDATE',
+                [$user_id],
+            );
+            if ($locked_actor === false) {
+                throw new RuntimeException('Could not lock customer create actor.');
+            }
+            $actor_row = $locked_actor->row_array();
+            $role_id = (int) ($actor_row['id_roles'] ?? 0);
+            $locked_role =
+                $role_id > 0
+                    ? $this->db->query(
+                        'SELECT `slug`, `customers` FROM `' .
+                            $this->db->dbprefix('roles') .
+                            '` WHERE `id` = ? FOR UPDATE',
+                        [$role_id],
+                    )
+                    : null;
+            if ($locked_role === false) {
+                throw new RuntimeException('Could not lock customer create role.');
+            }
+            $role_row = $locked_role?->row_array();
+            $role_mask = (int) ($role_row['customers'] ?? 0);
+            $known_mask = PRIV_VIEW | PRIV_ADD | PRIV_EDIT | PRIV_DELETE;
+            if (
+                !$actor_row ||
+                !$role_row ||
+                $role_mask < 0 ||
+                ($role_mask & ~$known_mask) !== 0 ||
+                ($role_mask & PRIV_ADD) !== PRIV_ADD
+            ) {
+                if ($owns_transaction) {
+                    $this->db->trans_rollback();
+                    $owns_transaction = false;
+                }
+                abort(403, 'Forbidden');
+                return;
+            }
+
+            $role_slug = (string) $role_row['slug'];
+            if ($role_slug !== DB_SLUG_ADMIN && setting('limit_customer_visibility')) {
+                if ($owns_transaction) {
+                    $this->db->trans_rollback();
+                    $owns_transaction = false;
+                }
+                abort(403);
+                return;
+            }
+
             $customer_id = $this->customers_model->insert_new($customer);
 
             $customer = $this->customers_model->find($customer_id);
+
+            if (!$this->db->trans_status()) {
+                throw new RuntimeException('Could not complete customer create transaction.');
+            }
+            if ($owns_transaction && !$this->db->trans_commit()) {
+                throw new RuntimeException('Could not commit customer create transaction.');
+            }
+            $owns_transaction = false;
 
             json_response([
                 'success' => true,
                 'id' => $customer_id,
             ]);
         } catch (Throwable $e) {
+            if ($owns_transaction) {
+                $this->db->trans_rollback();
+            }
             json_exception($e);
         }
     }
