@@ -78,11 +78,13 @@ global budgets. This is an accepted exception for the current sprint because a
 stronger identity requirement would change the family booking flow. No claim
 of capacity fairness or complete abuse prevention follows from this decision.
 
-The latest Daybreak review also reported a Low-risk email-membership oracle:
-the anonymous response can reveal whether a submitted email is already known as
-a customer. The existing flow is retained by explicit decision. Email
-confirmation or another identity check is deferred; the finding remains open
-and must not be reported as remediated or as a zero-finding scan result.
+The latest Daybreak review also reported a Low-risk, source-level conditional
+email-membership risk. In current production, `display_email=0` rejects a
+non-empty email before any membership lookup, so the risk is inactive there;
+re-evaluate it if email display or lookup is enabled. The existing anonymous
+flow is retained by explicit decision. Email confirmation or another identity
+check is deferred; the accepted exception remains open and must not be
+reported as remediated or as a zero-finding scan result.
 
 The provisional full-repository scan also reported a Low-risk login timing
 difference when LDAP authentication is enabled: failed guesses for locally
