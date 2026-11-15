@@ -69,7 +69,7 @@ staff updates followed by public rescheduling, eligible public rescheduling and
 a reached post-appointment-delete failure with complete rollback. These local
 synthetic proofs do not certify every production interleaving.
 
-## Security-sprint exception register (2026-11-15)
+## Security-sprint open risks and exceptions (2026-11-15)
 
 The anonymous family booking flow remains an intentional product boundary. The
 security sprint retains the documented distributed-abuse risk: independent
@@ -83,3 +83,17 @@ the anonymous response can reveal whether a submitted email is already known as
 a customer. The existing flow is retained by explicit decision. Email
 confirmation or another identity check is deferred; the finding remains open
 and must not be reported as remediated or as a zero-finding scan result.
+
+The provisional full-repository scan also reported a Low-risk login timing
+difference when LDAP authentication is enabled: failed guesses for locally
+mapped LDAP accounts perform directory network work, whereas unknown and local
+accounts return earlier. The current production setting disables LDAP, so this
+path is inactive there. The source-level risk remains open for any future LDAP
+activation. A real fix needs a bounded, tested directory-work policy and an
+operator review of its load and availability effects; generic error text alone
+does not remove the timing difference.
+
+Public cancellation currently treats possession of the unpredictable
+appointment-management link as authority. The product decision on retaining
+link-only cancellation is pending. Until then, this is an open risk, not an
+accepted exception or a completed remediation.
