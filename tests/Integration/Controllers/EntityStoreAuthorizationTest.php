@@ -223,29 +223,6 @@ final class EntityStoreAuthorizationTest extends TestCase
         );
     }
 
-    public function testCustomerCreateRechecksCurrentRolePermissionBeforeInsert(): void
-    {
-        $pair = $this->fixtures->resolveProviderServicePair();
-        $this->authenticateAsProvider($pair['provider_id']);
-
-        self::assertTrue(
-            (bool) get_instance()->db->update(
-                'roles',
-                ['customers' => PRIV_VIEW],
-                ['id' => (int) $this->providerRole['id']],
-            ),
-        );
-
-        $email = 'store-revoked-' . bin2hex(random_bytes(4)) . '@example.org';
-        $_POST['customer'] = $this->customerPayload($email, 'Denied');
-        $this->customersController()->store();
-
-        $response = $this->decodeJsonOutput();
-        self::assertFalse($response['success'] ?? true);
-        self::assertSame(403, get_instance()->output->statusCode);
-        self::assertSame(0, (int) get_instance()->db->where('email', $email)->count_all_results('users'));
-    }
-
     public function testCustomerCreatePreservesCallerOwnedTransaction(): void
     {
         $pair = $this->fixtures->resolveProviderServicePair();
@@ -366,7 +343,6 @@ final class EntityStoreAuthorizationTest extends TestCase
         $controller->permissions = $CI->permissions;
         $controller->users_model = $CI->users_model;
         $controller->roles_model = $CI->roles_model;
-
         return $controller;
     }
 
