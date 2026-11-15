@@ -223,7 +223,7 @@ final class EntityStoreAuthorizationTest extends TestCase
         );
     }
 
-    public function testCustomerCreatePreservesCallerOwnedTransaction(): void
+    public function testCustomerCreateRejectsCallerOwnedTransactionWithoutChangingIt(): void
     {
         $pair = $this->fixtures->resolveProviderServicePair();
         $this->authenticateAsProvider($pair['provider_id']);
@@ -235,7 +235,8 @@ final class EntityStoreAuthorizationTest extends TestCase
             $this->customersController()->store();
 
             $response = $this->decodeJsonOutput();
-            self::assertTrue($response['success'] ?? false, json_encode($response, JSON_THROW_ON_ERROR));
+            self::assertFalse($response['success'] ?? true, json_encode($response, JSON_THROW_ON_ERROR));
+            self::assertStringContainsString('cannot join an existing transaction', $response['message'] ?? '');
             self::assertTrue(get_instance()->db->trans_active());
         } finally {
             get_instance()->db->trans_rollback();
@@ -248,7 +249,10 @@ final class EntityStoreAuthorizationTest extends TestCase
     {
         $source = (string) file_get_contents(dirname(__DIR__, 3) . '/application/controllers/Customers.php');
         $setting_lock = strpos($source, 'WHERE `name` = ? FOR UPDATE');
-        $insert = strpos($source, '$customer_id = $this->customers_model->insert_new($customer);');
+        $insert = strpos(
+            $source,
+            '$customer_id = $this->customers_model->insert_new($customer, $creation_identity_lock);',
+        );
 
         self::assertNotFalse($setting_lock);
         self::assertNotFalse($insert);
