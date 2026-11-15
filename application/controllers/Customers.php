@@ -291,6 +291,9 @@ class Customers extends EA_Controller
      */
     public function store(): void
     {
+        $owns_transaction = false;
+        $creation_identity_lock = null;
+
         try {
             $user_id = (int) session('user_id');
             if (!$user_id || cannot('add', PRIV_CUSTOMERS, $user_id)) {
@@ -323,16 +326,129 @@ class Customers extends EA_Controller
 
             $this->customers_model->optional($customer, $this->optional_customer_fields);
 
-            $customer_id = $this->customers_model->insert_new($customer);
+            if ($this->db->trans_active()) {
+                throw new RuntimeException('Customer creation cannot join an existing transaction.');
+            }
+
+            $creation_identity_lock = $this->acquireCustomerCreationIdentityLock($customer['email'] ?? null);
+            if (!$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start customer create transaction.');
+            }
+            $owns_transaction = true;
+
+            // Bind the authorization decision to the insert transaction. The
+            // role row must stay locked through the write so a concurrent
+            // permission revocation cannot commit between the check and insert.
+            $locked_actor = $this->db->query(
+                'SELECT `id_roles` FROM `' . $this->db->dbprefix('users') . '` WHERE `id` = ? FOR UPDATE',
+                [$user_id],
+            );
+            if ($locked_actor === false) {
+                throw new RuntimeException('Could not lock customer create actor.');
+            }
+            $actor_row = $locked_actor->row_array();
+            $role_id = (int) ($actor_row['id_roles'] ?? 0);
+            $locked_role =
+                $role_id > 0
+                    ? $this->db->query(
+                        'SELECT `slug`, `customers` FROM `' .
+                            $this->db->dbprefix('roles') .
+                            '` WHERE `id` = ? FOR UPDATE',
+                        [$role_id],
+                    )
+                    : null;
+            if ($locked_role === false) {
+                throw new RuntimeException('Could not lock customer create role.');
+            }
+            $role_row = $locked_role?->row_array();
+            $role_mask = (int) ($role_row['customers'] ?? 0);
+            $known_mask = PRIV_VIEW | PRIV_ADD | PRIV_EDIT | PRIV_DELETE;
+            if (
+                !$actor_row ||
+                !$role_row ||
+                $role_mask < 0 ||
+                ($role_mask & ~$known_mask) !== 0 ||
+                ($role_mask & PRIV_ADD) !== PRIV_ADD
+            ) {
+                if ($owns_transaction) {
+                    $this->db->trans_rollback();
+                    $owns_transaction = false;
+                }
+                abort(403, 'Forbidden');
+                return;
+            }
+
+            $role_slug = (string) $role_row['slug'];
+            $visibility_setting = $this->db->query(
+                'SELECT `value` FROM `' . $this->db->dbprefix('settings') . '` WHERE `name` = ? FOR UPDATE',
+                ['limit_customer_visibility'],
+            );
+            if ($visibility_setting === false) {
+                throw new RuntimeException('Could not lock customer visibility setting.');
+            }
+            $limit_customer_visibility = (string) ($visibility_setting->row_array()['value'] ?? '');
+            if ($role_slug !== DB_SLUG_ADMIN && (bool) $limit_customer_visibility) {
+                if ($owns_transaction) {
+                    $this->db->trans_rollback();
+                    $owns_transaction = false;
+                }
+                abort(403);
+                return;
+            }
+
+            $customer_id = $this->customers_model->insert_new($customer, $creation_identity_lock);
 
             $customer = $this->customers_model->find($customer_id);
+
+            if (!$this->db->trans_status()) {
+                throw new RuntimeException('Could not complete customer create transaction.');
+            }
+            if ($owns_transaction && !$this->db->trans_commit()) {
+                throw new RuntimeException('Could not commit customer create transaction.');
+            }
+            $owns_transaction = false;
 
             json_response([
                 'success' => true,
                 'id' => $customer_id,
             ]);
         } catch (Throwable $e) {
+            if ($owns_transaction) {
+                $this->db->trans_rollback();
+            }
             json_exception($e);
+        } finally {
+            $this->releaseCustomerCreationIdentityLock($creation_identity_lock);
+        }
+    }
+
+    private function acquireCustomerCreationIdentityLock(?string $email): ?string
+    {
+        require_once APPPATH . 'core/Customer_creation_identity_lock.php';
+
+        $lock_name = Customer_creation_identity_lock::name($email, (string) ($this->db->database ?? ''));
+        if ($lock_name === null) {
+            return null;
+        }
+
+        $lock = $this->db->query('SELECT GET_LOCK(?, 10) AS acquired', [$lock_name]);
+        if ($lock === false || (int) $lock->row()->acquired !== 1) {
+            throw new RuntimeException('Could not reserve the customer email for creation.');
+        }
+
+        return $lock_name;
+    }
+
+    private function releaseCustomerCreationIdentityLock(?string $lock_name): void
+    {
+        if ($lock_name === null) {
+            return;
+        }
+
+        try {
+            $this->db->query('SELECT RELEASE_LOCK(?)', [$lock_name]);
+        } catch (Throwable) {
+            // The non-persistent connection closing also releases the lock.
         }
     }
 
