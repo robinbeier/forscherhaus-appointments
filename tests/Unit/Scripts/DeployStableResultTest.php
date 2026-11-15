@@ -1557,7 +1557,11 @@ final class DeployStableResultTest extends TestCase
 
         $script = <<<'BASH'
         set -eu
-        fixture="$(mktemp -d /root/deploy-pre-switch.XXXXXX)"
+        if [[ "$(id -u)" == "0" ]]; then
+          fixture="$(mktemp -d /root/deploy-pre-switch.XXXXXX)"
+        else
+          fixture="$(mktemp -d)"
+        fi
         trap 'rm -rf "$fixture"' EXIT
         mkdir -p "$fixture/missing/application" "$fixture/valid/application/config" "$fixture/live"
         printf 'placeholder\n' > "$fixture/missing/application/readme.txt"
